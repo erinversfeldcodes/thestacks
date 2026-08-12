@@ -1,14 +1,14 @@
 defmodule Stacks.GDPR.ImageRetention do
   @moduledoc """
-  Handles cleanup of uploaded images.
+      Handles cleanup of uploaded images.
 
-  - `cleanup_expired_images/0` — deletes images past their expires_at deadline (30 days)
-  - `cleanup_stuck_images/0` — safety net: cleans up images stuck in pending
-    for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
+      - `cleanup_expired_images/0` — deletes images past their expires_at deadline (30 days)
+      - `cleanup_stuck_images/0` — safety net: cleans up images stuck in pending
+        for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
 
-  Both functions delete the object from storage (R2/Local/Mock) when a
-  `storage_path` is present, then remove the DB record and emit an
-  `image.expired` event for each deleted record.
+      Both functions delete the object from storage (R2/Local/Mock) when a
+      `storage_path` is present, then remove the DB record and emit an
+      `image.expired` event for each deleted record.
   """
 
   require Logger
@@ -23,10 +23,10 @@ defmodule Stacks.GDPR.ImageRetention do
   @stuck_threshold_hours 2
 
   @doc """
-  Deletes all uploaded_images records where `expires_at < now()`.
-  Removes the corresponding object from storage, then the DB record.
-  Emits `image.expired` for each deleted record.
-  Returns `{:ok, count}` with the number of deleted records.
+      Deletes all uploaded_images records where `expires_at < now`.
+      Removes the corresponding object from storage, then the DB record.
+      Emits `image.expired` for each deleted record.
+      Returns `{:ok, count}` with the number of deleted records.
   """
   @spec cleanup_expired_images() :: {:ok, non_neg_integer()} | {:error, term()}
   def cleanup_expired_images do
@@ -40,7 +40,6 @@ defmodule Stacks.GDPR.ImageRetention do
 
     expired_ids = Enum.map(expired_rows, & &1.id)
 
-    # Delete objects from storage before removing DB records
     delete_storage_objects(expired_rows)
 
     {count, _} =
@@ -57,9 +56,6 @@ defmodule Stacks.GDPR.ImageRetention do
       })
     end)
 
-    # GDPR telemetry: how many images the natural-TTL sweep purged this run.
-    # `reason: "expired"` mirrors the image.expired domain event and gives the
-    # expired-by-reason breakdown alongside the stuck-sweep's `reason: "stuck"`.
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "expired"})
 
     {:ok, count}
@@ -68,12 +64,12 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
-  Deletes uploaded_images records stuck in `pending` status for longer than
-  #{@stuck_threshold_hours} hours. These are images whose IdentifyBookJob
-  failed silently or never ran.
-  Removes the corresponding object from storage, then the DB record.
-  Emits `image.expired` for each deleted record.
-  Returns `{:ok, count}`.
+      Deletes uploaded_images records stuck in `pending` status for longer than
+      #{@stuck_threshold_hours} hours. These are images whose IdentifyBookJob
+      failed silently or never ran.
+      Removes the corresponding object from storage, then the DB record.
+      Emits `image.expired` for each deleted record.
+      Returns `{:ok, count}`.
   """
   @spec cleanup_stuck_images() :: {:ok, non_neg_integer()} | {:error, term()}
   def cleanup_stuck_images do
@@ -87,7 +83,6 @@ defmodule Stacks.GDPR.ImageRetention do
 
     stuck_ids = Enum.map(stuck_rows, & &1.id)
 
-    # Delete objects from storage before removing DB records
     delete_storage_objects(stuck_rows)
 
     {count, _} =
@@ -104,19 +99,6 @@ defmodule Stacks.GDPR.ImageRetention do
       })
     end)
 
-    # GDPR telemetry: the stuck-safety-net count (its own signal so operators
-    # can alert on a rising stuck rate), plus an image.expired-by-reason event
-    # mirroring the emitted image.expired domain events (reason: "stuck").
-    #
-    # DOUBLE-COUNT WARNING: stuck images are counted in BOTH the `:stuck`
-    # metric AND the `:expired{reason:"stuck"}` metric (and `:expired` also
-    # carries the natural-TTL sweep under `reason:"expired"`). Therefore:
-    #   - NEVER sum `:stuck` + `:expired` — that counts stuck images twice.
-    #   - ALWAYS query `:expired` split BY `:reason`
-    #     (`reason="expired"` = real 30-day TTL purge,
-    #      `reason="stuck"`   = safety-net purge, mirrors `:stuck`).
-    # We keep the mirror (rather than dropping it) so the `image.expired`
-    # telemetry series stays 1:1 with the emitted `image.expired` domain events.
     :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: count}, %{reason: "stuck"})
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "stuck"})
 
@@ -126,14 +108,14 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
-  Returns image IDs that should have been purged but weren't.
+      Returns image IDs that should have been purged but weren't.
 
-  Finds images with `image.submitted`, `image.resolved`, or `image.rejected`
-  events whose `expires_at` has passed, but which have no corresponding
-  `image.expired` event. These are orphaned images that the retention job
-  missed.
+      Finds images with `image.submitted`, `image.resolved`, or `image.rejected`
+      events whose `expires_at` has passed, but which have no corresponding
+      `image.expired` event. These are orphaned images that the retention job
+      missed.
 
-  Run daily as a health check — a non-empty result indicates a retention gap.
+      Run daily as a health check — a non-empty result indicates a retention gap.
   """
   @spec missing_purge_check() :: [String.t()]
   def missing_purge_check do
@@ -154,15 +136,24 @@ defmodule Stacks.GDPR.ImageRetention do
       )
     end
 
-    # GDPR telemetry: the retention-gap size. A non-zero orphan count means the
-    # retention job missed images past their 30-day deadline. Registered in
-    # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_image_orphan_count_total`.
     :telemetry.execute([:stacks, :gdpr, :image, :orphan], %{count: count}, %{})
 
     Enum.map(orphaned, & &1.id)
   end
 
-  defp delete_storage_objects(rows) do
+  @doc """
+      Deletes the storage object for each row that carries a non-empty
+      `storage_path`. A storage-layer failure is logged and swallowed — it must
+      never block the DB-side removal (a leaked object is recoverable; a surviving
+      DB row that still points a user at their image is the erasure leak).
+
+      Shared by the retention sweeps AND by `Stacks.GDPR.Deletion.delete_user_data/1`,
+      which calls it while erasing a user so the R2 objects go BEFORE the FK cascade
+      removes the rows (the rows are the only pointer to the storage keys). Takes a
+      list of `%{storage_path: String.t | nil}` maps.
+  """
+  @spec delete_storage_objects([%{optional(any) => any}]) :: :ok
+  def delete_storage_objects(rows) do
     Enum.each(rows, fn
       %{storage_path: path} when is_binary(path) and path != "" ->
         case Storage.delete_image(path) do

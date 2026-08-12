@@ -57,8 +57,6 @@ defmodule StacksWeb.BookshelfController do
   defp render_bookshelf(conn, user, bookshelf_name, viewer) do
     case Shelving.get_bookshelf(user.id, bookshelf_name) do
       nil ->
-        # No bookshelf row exists yet → report the enum default ("owner"). A
-        # non-platform bookshelf keeps the RSS affordance hidden, which is correct.
         json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: [], visibility: "owner"})
 
       bookshelf ->
@@ -72,10 +70,6 @@ defmodule StacksWeb.BookshelfController do
     else
       shelves = Shelving.get_bookshelf_shelves(user.id, bookshelf_name)
 
-      # Which of this owner's placed books they have written about — one batched
-      # query for the whole bookshelf, so each spine's ribbon flag (#287) costs no
-      # per-book lookup. The shelf is always the authenticated owner's own, so the
-      # writing is looked up for `user.id`.
       writing_book_ids =
         shelves
         |> Enum.flat_map(& &1.placements)

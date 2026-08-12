@@ -1,7 +1,7 @@
 module RouteTest exposing (suite)
 
 import Expect
-import Navigation.Route as Route exposing (Route(..))
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
 import Test exposing (Test, describe, test)
 import Url
 
@@ -23,11 +23,220 @@ fromPath path =
             NotFound
 
 
+{-| Every `Route` constructor with a sample argument. `routeLabel` below is an
+exhaustive case (no wildcard), so adding a constructor to the `Route` union is
+a compile error here until it is added to this list and covered by the
+round-trip property.
+-}
+allRoutes : List Route
+allRoutes =
+    [ Home
+    , Login
+    , Library
+    , AntiLibrary
+    , WishList
+    , ReadingPile
+    , LookingForHome
+    , BookDetail "abc123"
+    , Upload
+    , Import
+    , Search
+    , SettingsProfile
+    , SettingsPassword
+    , SettingsNotifications
+    , SettingsAuditLog
+    , Insights
+    , CostTransparency
+    , Metrics
+    , About
+    , ListingRemoval
+    , Catalogue
+    , MarketplaceBrowse
+    , MarketplaceCreate
+    , MarketplaceMyListings
+    , MarketplaceDetail "listing-1"
+    , SettingsPrivacy
+    , BlogArchive
+    , BlogNew
+    , BlogEdit "post-1"
+    , BlogPost "post-1"
+    , AdminSourceApproval
+    , AdminScraperConfig
+    , AdminBookModeration
+    , AdminRemovalRequests
+    , Groups
+    , GroupDetail "group-1"
+    , Profile "handle"
+    , ProfileShelf "handle" "library"
+    , ConfirmEmail EmailConfirmed
+    , ConfirmEmail EmailConfirmFailed
+    , ForgotPassword
+    , ResetPassword "tok-abc123"
+    , NotFound
+    ]
+
+
+{-| Exhaustive on purpose — a new `Route` constructor fails to compile here,
+forcing it into `allRoutes` (and thus into the round-trip property).
+-}
+routeLabel : Route -> String
+routeLabel route =
+    case route of
+        Home ->
+            "Home"
+
+        Login ->
+            "Login"
+
+        Library ->
+            "Library"
+
+        AntiLibrary ->
+            "AntiLibrary"
+
+        WishList ->
+            "WishList"
+
+        ReadingPile ->
+            "ReadingPile"
+
+        LookingForHome ->
+            "LookingForHome"
+
+        BookDetail _ ->
+            "BookDetail"
+
+        Upload ->
+            "Upload"
+
+        Import ->
+            "Import"
+
+        Search ->
+            "Search"
+
+        SettingsProfile ->
+            "SettingsProfile"
+
+        SettingsPassword ->
+            "SettingsPassword"
+
+        SettingsNotifications ->
+            "SettingsNotifications"
+
+        SettingsAuditLog ->
+            "SettingsAuditLog"
+
+        Insights ->
+            "Insights"
+
+        CostTransparency ->
+            "CostTransparency"
+
+        Metrics ->
+            "Metrics"
+
+        About ->
+            "About"
+
+        ListingRemoval ->
+            "ListingRemoval"
+
+        Catalogue ->
+            "Catalogue"
+
+        MarketplaceBrowse ->
+            "MarketplaceBrowse"
+
+        MarketplaceCreate ->
+            "MarketplaceCreate"
+
+        MarketplaceMyListings ->
+            "MarketplaceMyListings"
+
+        MarketplaceDetail _ ->
+            "MarketplaceDetail"
+
+        SettingsPrivacy ->
+            "SettingsPrivacy"
+
+        BlogArchive ->
+            "BlogArchive"
+
+        BlogNew ->
+            "BlogNew"
+
+        BlogEdit _ ->
+            "BlogEdit"
+
+        BlogPost _ ->
+            "BlogPost"
+
+        AdminSourceApproval ->
+            "AdminSourceApproval"
+
+        AdminInvites ->
+            "AdminInvites"
+
+        AdminScraperConfig ->
+            "AdminScraperConfig"
+
+        AdminBookModeration ->
+            "AdminBookModeration"
+
+        AdminRemovalRequests ->
+            "AdminRemovalRequests"
+
+        Groups ->
+            "Groups"
+
+        GroupDetail _ ->
+            "GroupDetail"
+
+        Profile _ ->
+            "Profile"
+
+        ProfileShelf _ _ ->
+            "ProfileShelf"
+
+        ConfirmEmail EmailConfirmed ->
+            "ConfirmEmail EmailConfirmed"
+
+        ConfirmEmail EmailConfirmFailed ->
+            "ConfirmEmail EmailConfirmFailed"
+
+        ForgotPassword ->
+            "ForgotPassword"
+
+        ResendConfirmation ->
+            "ResendConfirmation"
+
+        ResetPassword _ ->
+            "ResetPassword"
+
+        NotFound ->
+            "NotFound"
+
+
+roundTripTest : Route -> Test
+roundTripTest route =
+    test (routeLabel route ++ " survives fromUrl (toPath r)") <|
+        \_ ->
+            fromPath (Route.toPath route)
+                |> Expect.equal route
+
+
 suite : Test
 suite =
     describe "Route"
-        [ describe "fromUrl / toPath round-trips"
-            [ test "Home" <|
+        [ describe "fromUrl (toPath r) == r for every Route constructor"
+            (List.map roundTripTest allRoutes)
+        , describe "fromUrl / toPath round-trips"
+            [ test "bare /settings parses to SettingsProfile" <|
+                \_ ->
+                    fromPath "/settings"
+                        |> Expect.equal SettingsProfile
+            , test "Home" <|
                 \_ ->
                     fromPath "/"
                         |> Expect.equal Home
@@ -63,10 +272,18 @@ suite =
                 \_ ->
                     fromPath "/reset-password/tok-abc123"
                         |> Expect.equal (ResetPassword "tok-abc123")
+            , test "ResendConfirmation" <|
+                \_ ->
+                    fromPath "/resend-confirmation"
+                        |> Expect.equal ResendConfirmation
             , test "ForgotPassword toPath round-trips" <|
                 \_ ->
                     Route.toPath ForgotPassword
                         |> Expect.equal "/forgot-password"
+            , test "ResendConfirmation toPath round-trips" <|
+                \_ ->
+                    Route.toPath ResendConfirmation
+                        |> Expect.equal "/resend-confirmation"
             , test "ResetPassword toPath round-trips" <|
                 \_ ->
                     Route.toPath (ResetPassword "tok-abc123")
@@ -79,10 +296,11 @@ suite =
                 \_ ->
                     fromPath "/search"
                         |> Expect.equal Search
-            , test "SettingsConsent" <|
+            , -- #318 TR-4: the consent page folded into Privacy. The legacy path
+              test "legacy /settings/consent resolves to Privacy" <|
                 \_ ->
                     fromPath "/settings/consent"
-                        |> Expect.equal SettingsConsent
+                        |> Expect.equal SettingsPrivacy
             , test "Catalogue" <|
                 \_ ->
                     fromPath "/catalogue"
@@ -145,10 +363,6 @@ suite =
                 \_ ->
                     Route.toPath Search
                         |> Expect.equal "/search"
-            , test "SettingsConsent path" <|
-                \_ ->
-                    Route.toPath SettingsConsent
-                        |> Expect.equal "/settings/consent"
             , test "Catalogue path" <|
                 \_ ->
                     Route.toPath Catalogue

@@ -1,19 +1,10 @@
 defmodule Stacks.DiscoveryTelemetryTest do
   @moduledoc """
-  Firing tests for the discovery / profiles / people-search observability
-  counters added in Issue #239 (Wave 2 of the #231 observability epic).
-
-  Verifies that telemetry events fire with the right measurements and
-  bounded-atom metadata for:
-  - people-search outcome (`:hit` / `:zero_result` on an empty result list)
-  - public-profile resolution outcome (`:ok` / `:not_found` on BOTH the absent
-    handle and the ghost/block 404 branch)
-  - public shelf browse-cap hits (ONLY when the #221 cap truncated rows)
-  - handle claims (ONLY when the profile update actually changed `:handle`)
-
-  Metadata tags are whitelisted atoms only — the search query string, handles,
-  user-ids and IPs are NEVER passed as a telemetry tag (unbounded cardinality +
-  PII; telemetry is warehouse-adjacent).
+      Firing tests for the 239 discovery/profiles counters: people-search
+      outcome (:hit/:zero_result), public-profile resolution (:ok/:not_found
+      on both the absent-handle and ghost/block branches), browse-cap hits
+      (only when the 221 cap truncated), and handle claims. Metadata is
+      bounded atoms only.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -44,8 +35,6 @@ defmodule Stacks.DiscoveryTelemetryTest do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
-
-  # ── People-search outcome ─────────────────────────────────────────────────
 
   describe "people-search telemetry" do
     test "emits :hit with results>0 when the search matches someone", %{conn: conn} do
@@ -87,8 +76,6 @@ defmodule Stacks.DiscoveryTelemetryTest do
       assert Map.keys(metadata) == [:outcome]
     end
   end
-
-  # ── Public-profile resolution outcome ─────────────────────────────────────
 
   describe "public-profile view telemetry" do
     test "emits :ok when a visible profile resolves", %{conn: conn} do
@@ -134,8 +121,6 @@ defmodule Stacks.DiscoveryTelemetryTest do
     end
   end
 
-  # ── Shelf browse-cap hits (ONLY on truncation) ────────────────────────────
-
   describe "shelf browse-cap telemetry" do
     setup do
       prev = Application.get_env(:core, :public_shelf_cap)
@@ -170,7 +155,6 @@ defmodule Stacks.DiscoveryTelemetryTest do
 
     test "emits browse_capped when the visible count EXCEEDS the cap", %{conn: conn} do
       attach_telemetry([[:stacks, :shelf, :browse_capped]])
-      # cap = 2, five visible placements → truncation drops rows.
       seed_shelf("capped_owner", 5)
       viewer = insert(:user)
 
@@ -184,7 +168,6 @@ defmodule Stacks.DiscoveryTelemetryTest do
 
     test "does NOT emit when the visible count is at or under the cap", %{conn: conn} do
       attach_telemetry([[:stacks, :shelf, :browse_capped]])
-      # cap = 2, exactly two visible placements → no truncation.
       seed_shelf("uncapped_owner", 2)
       viewer = insert(:user)
 
@@ -197,12 +180,9 @@ defmodule Stacks.DiscoveryTelemetryTest do
     end
   end
 
-  # ── Handle claims (ONLY on an actual handle change) ───────────────────────
-
   describe "handle-claimed telemetry" do
     test "emits when the profile update claims a new handle", %{conn: _conn} do
       attach_telemetry([[:stacks, :handle, :claimed]])
-      # handle is NOT NULL (every user has one), so a claim is always a change.
       user = insert(:user, handle: "starterhandle")
 
       {:ok, _} = Accounts.update_profile(user, %{"handle" => "freshhandle"})
@@ -223,7 +203,6 @@ defmodule Stacks.DiscoveryTelemetryTest do
       attach_telemetry([[:stacks, :handle, :claimed]])
       user = insert(:user, handle: "steadyhandle", display_name: "Before")
 
-      # Same handle, only display_name changes → no handle claim.
       {:ok, _} =
         Accounts.update_profile(user, %{"handle" => "steadyhandle", "display_name" => "After"})
 

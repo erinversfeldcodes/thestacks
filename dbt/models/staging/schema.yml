@@ -1,9 +1,6 @@
 version: 2
 
 models:
-  # -------------------------------------------------------------------------
-  # Core models
-  # -------------------------------------------------------------------------
 
   - name: stg_books
     description: >
@@ -103,6 +100,12 @@ models:
           - relationships:
               to: ref('stg_books')
               field: id
+      - name: verification_source
+        description: Verification source.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['open_library', 'google_books', 'barcode_unverified']
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -168,6 +171,10 @@ models:
         tests:
           - not_null
           - unique
+      - name: syndication_default
+        description: Syndication default.
+        tests:
+          - not_null
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -234,8 +241,6 @@ models:
         description: Formats.
       - name: personal_rating
         description: Personal rating.
-      - name: notes
-        description: Notes.
       - name: visibility
         description: Visibility.
       - name: listing_mode
@@ -260,6 +265,18 @@ models:
         description: Finished at.
       - name: shelf_id
         description: Shelf id.
+      - name: book_edition_id
+        description: Book edition id.
+        tests:
+          - relationships:
+              to: ref('stg_book_editions')
+              field: id
+      - name: source
+        description: Source.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['manual', 'upload', 'goodreads_import']
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -308,10 +325,6 @@ models:
         tests:
           - not_null
           - unique
-      - name: storage_path
-        description: Storage path.
-        tests:
-          - not_null
       - name: status
         description: Status.
         tests:
@@ -420,10 +433,6 @@ models:
           - not_null
       - name: published_at
         description: Published at.
-
-  # -------------------------------------------------------------------------
-  # Social models (Issue #043)
-  # -------------------------------------------------------------------------
 
   - name: stg_user_blocks
     description: >
@@ -537,10 +546,6 @@ models:
         tests:
           - not_null
 
-  # -------------------------------------------------------------------------
-  # Blog models (Issue #043)
-  # -------------------------------------------------------------------------
-
   - name: stg_blog_posts
     description: >
       Proto-synced staging model for blog_posts.
@@ -562,6 +567,10 @@ models:
         description: Published at.
       - name: visibility_group_id
         description: Visibility group id.
+      - name: syndicated
+        description: Syndicated.
+        tests:
+          - not_null
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -596,10 +605,6 @@ models:
         description: Timestamp when the record was created.
         tests:
           - not_null
-
-  # -------------------------------------------------------------------------
-  # Marketplace models (Issue #043)
-  # -------------------------------------------------------------------------
 
   - name: stg_offer_threads
     description: >
@@ -731,10 +736,6 @@ models:
         tests:
           - not_null
 
-  # -------------------------------------------------------------------------
-  # Monitoring models (Issue #043)
-  # -------------------------------------------------------------------------
-
   - name: stg_source_health_checks
     description: >
       Proto-synced staging model for source_health_checks.
@@ -830,6 +831,38 @@ models:
         description: Country code.
       - name: scraper_module
         description: Scraper module.
+      - name: price_source
+        description: Price source.
+      - name: isbn_location
+        description: Isbn location.
+      - name: lookup_mode
+        description: Lookup mode.
+      - name: capability_probed_at
+        description: Capability probed at.
+      - name: canary_isbn
+        description: Canary isbn.
+      - name: robots_blocked_path
+        description: Robots blocked path.
+      - name: robots_blocked_rule
+        description: Robots blocked rule.
+      - name: robots_blocked_at
+        description: Robots blocked at.
+      - name: unscrapable_reason
+        description: Unscrapable reason.
+      - name: latitude
+        description: Latitude.
+      - name: longitude
+        description: Longitude.
+      - name: events_path
+        description: Events path.
+      - name: events_path_checked_at
+        description: Events path checked at.
+      - name: events_unresolved_reason
+        description: Events unresolved reason.
+      - name: events_page_etag
+        description: Events page etag.
+      - name: events_page_last_modified
+        description: Events page last modified.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -868,6 +901,8 @@ models:
         description: Config generated.
       - name: excluded_at
         description: Excluded at.
+      - name: exclusion_requested_at
+        description: Exclusion requested at.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -932,6 +967,10 @@ models:
         description: Url.
       - name: scraped_at
         description: Scraped at.
+      - name: book_edition_id
+        description: Book edition id.
+        tests:
+          - not_null
 
   - name: stg_review_snapshots
     description: >
@@ -1022,6 +1061,16 @@ models:
         description: Opted out.
       - name: opted_out_at
         description: Opted out at.
+      - name: latitude
+        description: Latitude.
+      - name: longitude
+        description: Longitude.
+      - name: nearest_bookshop_km
+        description: Nearest bookshop km.
+      - name: curated
+        description: Curated.
+      - name: curated_note
+        description: Curated note.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -1251,6 +1300,144 @@ models:
         tests:
           - accepted_values:
               values: ['up', 'down']
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+
+  - name: stg_invite_codes
+    description: >
+      Proto-synced staging model for invite_codes.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: code_prefix
+        description: Code prefix.
+        tests:
+          - not_null
+      - name: issued_by_id
+        description: Issued by id.
+      - name: max_uses
+        description: Max uses.
+        tests:
+          - not_null
+      - name: use_count
+        description: Use count.
+        tests:
+          - not_null
+      - name: expires_at
+        description: Expires at.
+      - name: redeemed_by_id
+        description: Redeemed by id.
+      - name: redeemed_at
+        description: Redeemed at.
+      - name: revoked_at
+        description: Revoked at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_library_imports
+    description: >
+      Proto-synced staging model for library_imports.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: User id.
+        tests:
+          - not_null
+      - name: source
+        description: Source.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['goodreads']
+      - name: status
+        description: Status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['enqueued', 'running', 'complete', 'failed']
+      - name: row_count
+        description: Row count.
+        tests:
+          - not_null
+      - name: processed_count
+        description: Processed count.
+        tests:
+          - not_null
+      - name: shelved_count
+        description: Shelved count.
+        tests:
+          - not_null
+      - name: duplicate_count
+        description: Duplicate count.
+        tests:
+          - not_null
+      - name: unverified_count
+        description: Unverified count.
+        tests:
+          - not_null
+      - name: unreadable_count
+        description: Unreadable count.
+        tests:
+          - not_null
+      - name: started_at
+        description: Started at.
+      - name: finished_at
+        description: Finished at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_post_syndications
+    description: >
+      Proto-synced staging model for post_syndications.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: post_id
+        description: Post id.
+        tests:
+          - not_null
+      - name: target
+        description: Target.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['substack']
+      - name: method
+        description: Method.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['rss', 'export']
+      - name: canonical_url
+        description: Canonical url.
+        tests:
+          - not_null
+      - name: syndicated_url
+        description: Syndicated url.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

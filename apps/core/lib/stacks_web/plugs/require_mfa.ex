@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.RequireMFA do
   @moduledoc """
-  Plug that enforces MFA verification on admin sessions.
+      Plug that enforces MFA verification on admin sessions.
 
-  Reads `conn.assigns.admin_session` and checks that `mfa_verified_at` is set
-  and within the last 30 minutes. If MFA is not verified or the verification
-  has expired, halts with a 403 JSON response.
+      Reads `conn.assigns.admin_session` and checks that `mfa_verified_at` is set
+      and within the last 30 minutes. If MFA is not verified or the verification
+      has expired, halts with a 403 JSON response.
   """
 
   import Plug.Conn

@@ -182,10 +182,6 @@ moduleVisitor schema =
         |> Rule.withLetDeclarationExitVisitor letDeclarationExitVisitor
 
 
-
---- CONTEXT
-
-
 type alias ProjectContext =
     { exposedModules : Set ModuleName
     , toReport : Dict ModuleName { key : ModuleKey, args : List ArgumentToReport }
@@ -544,10 +540,6 @@ applyFixesAcrossModules arg callSitesPerFile fixesSoFar =
                 Nothing
 
 
-
--- MODULE DEFINITION
-
-
 collectExposedElements : List (Node Exposing.TopLevelExpose) -> Set String
 collectExposedElements exposed =
     List.foldl
@@ -561,10 +553,6 @@ collectExposedElements exposed =
         )
         Set.empty
         exposed
-
-
-
--- DECLARATION VISITOR
 
 
 declarationEnterVisitor : Node Declaration -> ModuleContext -> ModuleContext
@@ -828,10 +816,6 @@ isPatternWildCard (Node _ node) =
             False
 
 
-
--- EXPRESSION ENTER VISITOR
-
-
 expressionEnterVisitor : Node Expression -> ModuleContext -> ModuleContext
 expressionEnterVisitor (Node range node) context =
     case node of
@@ -882,10 +866,6 @@ expressionEnterVisitor (Node range node) context =
 
         _ ->
             context
-
-
-
--- EXPRESSION EXIT VISITOR
 
 
 expressionExitVisitor : Node Expression -> ModuleContext -> ( List (Rule.Error {}), ModuleContext )
@@ -1208,7 +1188,6 @@ addArgumentToRemove position nesting callSites acc =
                             Nothing
 
                 Nothing ->
-                    -- If an argument at that location could not be found, then we can't autofix the issue.
                     Nothing
 
 
@@ -1224,8 +1203,6 @@ prettyRemovalRange range position callSite =
                 Nothing ->
                     callSite.fnNameEnd
     in
-    -- If the call was made with |>, then the constructed range will be negative.
-    -- Therefore in that case, simply remove `range` which corresponds to `arg |> `
     case compare previousEnd.row range.end.row of
         LT ->
             { start = previousEnd, end = range.end }
@@ -1248,19 +1225,13 @@ findErrorsAndVariablesNotPartOfScope :
     -> { reportLater : List ArgumentToReport, reportNow : List (Rule.Error {}), remainingUsed : Set String }
 findErrorsAndVariablesNotPartOfScope scope declared ({ reportLater, reportNow, remainingUsed } as acc) =
     if Set.member declared.name scope.usedRecursively then
-        -- If variable was used as a recursive argument
         if Set.member declared.name remainingUsed then
-            -- If variable was used somewhere else as well
             { reportLater = reportLater
             , reportNow = reportNow
             , remainingUsed = Set.remove declared.name remainingUsed
             }
 
-        else
-        -- If variable was used ONLY as a recursive argument
-        if
-            declared.path.hasOnlyOneArgument
-        then
+        else if declared.path.hasOnlyOneArgument then
             acc
 
         else

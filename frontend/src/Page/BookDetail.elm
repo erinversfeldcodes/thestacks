@@ -3,11 +3,13 @@ module Page.BookDetail exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , availabilityDecoder
     , cardFocusId
     , firstFocusableId
     , init
     , lastFocusableId
     , overlayView
+    , pricesDecoder
     , update
     , view
     )
@@ -20,7 +22,6 @@ import Components.FormatPicker exposing (formatPicker)
 import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal as RemoveBookModal exposing (removeBookModal)
-import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
@@ -29,7 +30,7 @@ import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Task
-import Types.Book exposing (Book, Edition, authorName)
+import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isUnidentified)
 import Types.Placement exposing (Format, Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility exposing (Visibility)
@@ -48,6 +49,8 @@ type alias AvailabilityItem =
 type alias Model =
     { book : RemoteData Http.Error Book
     , placement : Maybe Placement
+    , placements : List Placement
+    , removingPlacementId : Maybe String
     , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
     , formatPickerOpen : Bool
@@ -58,25 +61,20 @@ type alias Model =
     , removeState : RemoteData Http.Error ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
-
-    -- Set True only on a backend 403 (age_verification_required). The server
-    -- issues that 403 ONLY when age-gating is enforced (ADR-020: dark in prod →
-    -- no 403 → the gate never shows), so this flag alone is the correct signal;
-    -- no separate client-side age-gating flag is needed here.
+    , authorEvents : RemoteData Http.Error (List Api.AuthorEvent)
     , showAgeGate : Bool
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
     , availability : RemoteData Http.Error (List AvailabilityItem)
+    , prices : RemoteData Http.Error PriceInfo.PriceData
     , placementVisibility : Visibility
     , previousVisibility : Visibility
     , shelfCeiling : Visibility
     , visibilityState : RemoteData Http.Error ()
-
-    -- Reading progress (US-1.6.6). The card is mounted only when the placement
-    -- sits on a readable bookshelf (reading_pile, library).
     , progressCard : Maybe Card.Model
     , progressSaveState : RemoteData Api.ProgressError ()
     , finishedReadPrompt : Bool
+    , undoableRemoval : Maybe { placementId : String, bookTitle : String }
     }
 
 
@@ -89,6 +87,7 @@ type OutMsg
 
 type Msg
     = BookLoaded (Result Http.Error Api.BookDetailResponse)
+    | GotAuthorEvents (Result Http.Error (List Api.AuthorEvent))
     | OpenBookshelfMover
     | CloseBookshelfMover
     | SelectBookshelf String
@@ -100,11 +99,14 @@ type Msg
     | CloseRemoveModal
     | ConfirmRemove
     | RemoveCompleted (Result Http.Error ())
+    | RemovePlacement String
+    | PlacementRemoved String (Result Http.Error ())
     | ToggleFormat Format
     | EditionSelected String
     | DismissAgeGate
     | CloseOverlay
     | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
+    | PricesLoaded (Result Http.Error PriceInfo.PriceData)
     | PlacementVisibilitySelected String
     | PlacementVisibilityUpdated (Result Http.Error String)
     | ProgressCardMsg Card.Msg
@@ -127,9 +129,14 @@ init bookId maybeToken maybePreviousRoute =
 
         availabilityCmd =
             fetchAvailability bookId maybeToken
+
+        pricesCmd =
+            fetchPrices bookId maybeToken
     in
     ( { book = Loading
       , placement = Nothing
+      , placements = []
+      , removingPlacementId = Nothing
       , bookshelfMoverOpen = False
       , removeModalOpen = False
       , formatPickerOpen = False
@@ -140,10 +147,12 @@ init bookId maybeToken maybePreviousRoute =
       , removeState = NotAsked
       , selectedEdition = Nothing
       , previousRoute = maybePreviousRoute
+      , authorEvents = NotAsked
       , showAgeGate = False
       , entryAnimationActive = True
       , isAuthenticated = maybeToken /= Nothing
       , availability = Loading
+      , prices = Loading
 
       -- Placement visibility defaults to "platform" (the DB default); the shelf
       -- ceiling defaults to the most permissive ("public") so nothing is greyed
@@ -155,8 +164,9 @@ init bookId maybeToken maybePreviousRoute =
       , progressCard = Nothing
       , progressSaveState = NotAsked
       , finishedReadPrompt = False
+      , undoableRemoval = Nothing
       }
-    , Cmd.batch [ bookCmd, availabilityCmd ]
+    , Cmd.batch [ bookCmd, availabilityCmd, pricesCmd ]
     )
 
 
@@ -177,7 +187,7 @@ fetchAvailability bookId maybeToken =
         , url = "/api/books/" ++ bookId ++ "/availability"
         , body = Http.emptyBody
         , expect = Http.expectJson AvailabilityLoaded availabilityDecoder
-        , timeout = Nothing
+        , timeout = Api.standardTimeout
         , tracker = Nothing
         }
 
@@ -194,6 +204,117 @@ availabilityDecoder =
                 (Decode.field "isbn" Decode.string)
             )
         )
+
+
+fetchPrices : String -> Maybe String -> Cmd Msg
+fetchPrices bookId maybeToken =
+    let
+        headers =
+            case maybeToken of
+                Just token ->
+                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+    in
+    Http.request
+        { method = "GET"
+        , headers = headers
+        , url = "/api/books/" ++ bookId ++ "/prices"
+        , body = Http.emptyBody
+        , expect = Http.expectJson PricesLoaded pricesDecoder
+        , timeout = Api.standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| One flat row per (edition, store), as the API returns it.
+
+Grouping into editions happens here rather than server-side: it is a presentation
+concern, and the flat shape is the honest wire format for what is stored.
+
+-}
+type alias PriceRow =
+    { isbn : String
+    , formatLabel : String
+    , storeName : String
+    , priceCents : Int
+    , buyUrl : String
+    , scrapedAt : String
+    }
+
+
+pricesDecoder : Decode.Decoder PriceInfo.PriceData
+pricesDecoder =
+    Decode.field "prices" (Decode.list priceRowDecoder)
+        |> Decode.map groupPricesByEdition
+
+
+priceRowDecoder : Decode.Decoder PriceRow
+priceRowDecoder =
+    Decode.map6 PriceRow
+        (Decode.field "isbn" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "format_label" Decode.string
+            , Decode.succeed "Edition"
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "store_name" Decode.string
+            , Decode.succeed "Unknown store"
+            ]
+        )
+        (Decode.field "price_cents" Decode.int)
+        (Decode.oneOf [ Decode.field "url" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "scraped_at" Decode.string, Decode.succeed "" ])
+
+
+groupPricesByEdition : List PriceRow -> PriceInfo.PriceData
+groupPricesByEdition rows =
+    { editions =
+        rows
+            |> List.map .isbn
+            |> uniqueStrings
+            |> List.map (editionPricesFor rows)
+    , lastUpdated =
+        rows |> List.map .scrapedAt |> List.maximum |> Maybe.withDefault ""
+    }
+
+
+editionPricesFor : List PriceRow -> String -> PriceInfo.EditionPrices
+editionPricesFor rows isbn =
+    let
+        matching =
+            List.filter (\row -> row.isbn == isbn) rows
+    in
+    { formatLabel =
+        matching |> List.head |> Maybe.map .formatLabel |> Maybe.withDefault "Edition"
+    , isbn = isbn
+    , stores = matching |> List.map toStoreListing |> List.sortBy .priceZar
+    }
+
+
+toStoreListing : PriceRow -> PriceInfo.StoreListing
+toStoreListing row =
+    { storeName = row.storeName
+    , priceZar = toFloat row.priceCents / 100
+    , buyUrl = row.buyUrl
+    , trend = ""
+    }
+
+
+uniqueStrings : List String -> List String
+uniqueStrings items =
+    List.foldr
+        (\item acc ->
+            if List.member item acc then
+                acc
+
+            else
+                item :: acc
+        )
+        []
+        items
 
 
 routeToBookshelf : Maybe Route -> String
@@ -249,7 +370,6 @@ update msg model maybeToken =
                         placementVisibility =
                             response.placement
                                 |> Maybe.andThen .visibility
-                                |> Maybe.andThen Visibility.fromString
                                 |> Maybe.withDefault Visibility.Platform
 
                         shelfCeiling =
@@ -260,15 +380,7 @@ update msg model maybeToken =
                         progressCard =
                             case response.placement of
                                 Just placement ->
-                                    -- Reading progress is a readable-bookshelf
-                                    -- affordance (Reading Pile, Library) only.
-                                    -- Embed the loaded book so the card's
-                                    -- progress line can show "/ {page count}"
-                                    -- (the book-detail placement payload does
-                                    -- not embed the book itself).
                                     if bookshelf == "reading_pile" || bookshelf == "library" then
-                                        -- Hide the card's own title: the book
-                                        -- identity is already the page context.
                                         Just (Card.hideTitle (Card.init { placement | book = Just response.book }))
 
                                     else
@@ -279,7 +391,16 @@ update msg model maybeToken =
                     in
                     ( { model
                         | book = Success response.book
+                        , authorEvents =
+                            case response.book.author of
+                                Just _ ->
+                                    Loading
+
+                                Nothing ->
+                                    NotAsked
                         , placement = response.placement
+                        , placements = response.placements
+                        , removingPlacementId = Nothing
                         , currentBookshelf = bookshelf
                         , selectedBookshelf = firstAvailableBookshelf bookshelf
                         , selectedFormats = formats
@@ -289,7 +410,12 @@ update msg model maybeToken =
                         , shelfCeiling = shelfCeiling
                         , progressCard = progressCard
                       }
-                    , Cmd.none
+                    , case response.book.author of
+                        Just author ->
+                            Api.getAuthorEvents author.id GotAuthorEvents
+
+                        Nothing ->
+                            Cmd.none
                     , NoOut
                     )
 
@@ -303,6 +429,14 @@ update msg model maybeToken =
                     else
                         ( { model | book = Failure err }, Cmd.none, NoOut )
 
+        GotAuthorEvents result ->
+            case result of
+                Ok events ->
+                    ( { model | authorEvents = Success events }, Cmd.none, NoOut )
+
+                Err err ->
+                    ( { model | authorEvents = Failure err }, Cmd.none, NoOut )
+
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
@@ -310,11 +444,6 @@ update msg model maybeToken =
             ( model, Cmd.none, RequestCloseOverlay )
 
         EscapePressed ->
-            -- Scoped Escape (US-1.4.1): dismiss the TOP-MOST surface first. Only
-            -- when no nested surface is open does Escape close the overlay (via
-            -- RequestCloseOverlay, which Main consumes to return focus to the
-            -- triggering spine). A consumed Escape returns NoOut so the overlay
-            -- stays open.
             if model.removeModalOpen then
                 ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
 
@@ -425,9 +554,6 @@ update msg model maybeToken =
                     )
 
                 Err Api.PlaceReadingPileFull ->
-                    -- #281: the place path can hit the same reading-pile cap the
-                    -- move path does. Reuse the move path's ReadingPileFull so
-                    -- viewMoveState renders the specific full-pile copy.
                     ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
 
                 Err (Api.PlaceHttpError err) ->
@@ -435,17 +561,12 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Wrap the transport error so the place path shares
-                        -- moveState (and its generic copy) with the move path.
                         ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
-            -- Move focus into the destructive dialog, defaulting to the safe
-            -- "Keep It" button.
             ( { model | removeModalOpen = True }, focusElement RemoveBookModal.cancelButtonId, NoOut )
 
         CloseRemoveModal ->
-            -- Return focus to the control that opened the dialog.
             ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
 
         ConfirmRemove ->
@@ -462,7 +583,10 @@ update msg model maybeToken =
         RemoveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | removeState = Success () }
+                    ( { model
+                        | removeState = Success ()
+                        , undoableRemoval = undoableRemovalFor model
+                      }
                     , Cmd.none
                     , NavigateTo (Maybe.withDefault Route.Library model.previousRoute)
                     )
@@ -474,11 +598,70 @@ update msg model maybeToken =
                     else
                         ( { model | removeState = Failure err }, Cmd.none, NoOut )
 
+        RemovePlacement placementId ->
+            case maybeToken of
+                Just token ->
+                    ( { model | removingPlacementId = Just placementId }
+                    , Api.removeBook placementId token (PlacementRemoved placementId)
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        PlacementRemoved placementId result ->
+            case result of
+                Ok _ ->
+                    let
+                        remaining =
+                            List.filter (\p -> p.id /= placementId) model.placements
+
+                        primary =
+                            case model.placement of
+                                Just current ->
+                                    if current.id == placementId then
+                                        List.head remaining
+
+                                    else
+                                        Just current
+
+                                Nothing ->
+                                    List.head remaining
+                    in
+                    ( { model
+                        | placements = remaining
+                        , placement = primary
+                        , removingPlacementId = Nothing
+                        , currentBookshelf =
+                            primary
+                                |> Maybe.andThen .bookshelfName
+                                |> Maybe.withDefault model.currentBookshelf
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | removingPlacementId = Nothing, removeState = Failure err }
+                        , Cmd.none
+                        , NoOut
+                        )
+
         AvailabilityLoaded (Ok items) ->
             ( { model | availability = Success items }, Cmd.none, NoOut )
 
         AvailabilityLoaded (Err err) ->
             ( { model | availability = Failure err }, Cmd.none, NoOut )
+
+        PricesLoaded (Ok priceData) ->
+            ( { model | prices = Success priceData }, Cmd.none, NoOut )
+
+        PricesLoaded (Err err) ->
+            ( { model | prices = Failure err }, Cmd.none, NoOut )
 
         ToggleFormat format ->
             let
@@ -494,21 +677,13 @@ update msg model maybeToken =
         PlacementVisibilitySelected raw ->
             case ( Visibility.fromString raw, model.placement, maybeToken ) of
                 ( Just vis, Just placement, Just token ) ->
-                    -- Ignore a new selection while a prior save is still in flight,
-                    -- so previousVisibility retains the last CONFIRMED value for
-                    -- rollback (a rapid double-change under latency would otherwise
-                    -- capture an unconfirmed optimistic value).
                     if model.visibilityState == Loading then
                         ( model, Cmd.none, NoOut )
-                        -- Guard client-side against the ceiling (mirrors the server
-                        -- 422): a disabled option should never reach the wire.
 
                     else if Visibility.exceedsCeiling model.shelfCeiling vis then
                         ( model, Cmd.none, NoOut )
 
                     else
-                        -- Optimistically show the new value, but remember the
-                        -- prior one so a failed save can roll the select back.
                         ( { model
                             | placementVisibility = vis
                             , previousVisibility = model.placementVisibility
@@ -543,8 +718,6 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Revert the optimistic change: the server rejected it,
-                        -- so don't leave the rejected value shown in the select.
                         ( { model
                             | visibilityState = Failure err
                             , placementVisibility = model.previousVisibility
@@ -573,7 +746,6 @@ update msg model maybeToken =
                             )
 
                         ( Card.EditClosed, _ ) ->
-                            -- Form closed by Cancel: return focus to the badge.
                             ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )
 
                         _ ->
@@ -587,16 +759,9 @@ update msg model maybeToken =
                 Ok progress ->
                     ( { model
                         | placement = Maybe.map (\p -> Api.foldProgress p progress) model.placement
-
-                        -- Fold from the CARD's placement (which carries the
-                        -- embedded book) so the "/ {page count}" total survives.
-                        -- Card.init closes the form on success.
                         , progressCard =
                             Maybe.map (\c -> Card.init (Api.foldProgress c.placement progress)) model.progressCard
                         , progressSaveState = Success ()
-
-                        -- The "record this read?" bridge is a Reading Pile
-                        -- affordance only — never offer a library→library move.
                         , finishedReadPrompt =
                             (progress.readingStatus == Just Completed && model.currentBookshelf == "reading_pile")
                                 || model.finishedReadPrompt
@@ -619,7 +784,6 @@ update msg model maybeToken =
                         )
 
                 Err other ->
-                    -- Keep the form open (draft preserved) so the reader can fix it.
                     ( { model
                         | progressCard = Maybe.map Card.stopSaving model.progressCard
                         , progressSaveState = Failure other
@@ -634,9 +798,6 @@ update msg model maybeToken =
         RecordReadRequested ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
-                    -- Reuse the existing move mechanism (US-1.6.3): send the
-                    -- finished book to the Library. MoveCompleted folds the new
-                    -- bookshelf name from selectedBookshelf, so pin it here.
                     ( { model | finishedReadPrompt = False, selectedBookshelf = "library", moveState = Loading }
                     , Api.moveBook placement.id "library" token MoveCompleted
                     , NoOut
@@ -678,7 +839,7 @@ focusProgressBadgeFromModel model =
 
 
 {-| The DOM id of the dialog card — the element focused when the overlay opens
-(#295 item a; see `Main.openOverlay`). The card carries `tabindex -1` and the
+(item a; see `Main.openOverlay`). The card carries `tabindex -1` and the
 `aria-label "Book details: {title}"`, so a screen reader announces the book on
 open, and the first forward Tab moves to the close button (the card is out of
 the tab order). It is deliberately NOT a focus-trap anchor: the trap still wraps
@@ -714,6 +875,26 @@ the remove-confirmation dialog, and where focus returns when it closes.
 removeTriggerId : String
 removeTriggerId =
     "book-detail-remove-trigger"
+
+
+{-| What `Main` needs to offer "Removed — Undo" on the shelf the reader is about
+to land on.
+
+`Nothing` when either half is missing, and both halves are load-bearing rather
+than cosmetic: without the placement id there is no row to restore, and without
+the title the toast would have to say "Removed a book", which is precisely the
+sentence a reader who mis-clicked cannot check. An absent offer is honest; an
+offer that cannot name what it would put back is not.
+
+-}
+undoableRemovalFor : Model -> Maybe { placementId : String, bookTitle : String }
+undoableRemovalFor model =
+    case ( model.placement, model.book ) of
+        ( Just placement, Success book ) ->
+            Just { placementId = placement.id, bookTitle = book.title }
+
+        _ ->
+            Nothing
 
 
 {-| Move DOM focus to the given element id, discarding the (ignorable) result.
@@ -817,15 +998,15 @@ viewBook model book =
     div [ class "book-detail" ]
         ([ viewHero model book
          , viewAboutSection book
-         , viewReviewsSection
-         , viewPricesSection
+         , viewPricesSection model
          , viewAvailabilitySection model
-         , viewAuthorSection book
+         , viewAuthorSection model book
          , viewWritingSection
          ]
             ++ (case ( model.placement, model.isAuthenticated ) of
                     ( Just _, _ ) ->
-                        [ viewProgressSection model
+                        [ viewMultiShelfNotice model
+                        , viewProgressSection model
                         , viewFormatsOnShelf model
                         , viewVisibilityControl model
                         , viewShelfActions model
@@ -881,13 +1062,41 @@ viewHero model book =
                 ]
             ]
         , div [ class "book-detail__meta" ]
-            [ h1 [ class "book-detail__title", testId "book-title", id "section-hero" ] [ text book.title ]
+            [ h1 [ class "book-detail__title", testId "book-title", id "section-hero" ]
+                [ text (displayTitle book) ]
+            , viewProvisionalNotice book
             , h2 [ class "book-detail__author", testId "book-author" ] [ text (authorName book) ]
             , viewEditionSelector book model.selectedEdition
             , viewEditionDetails edition
             , viewRating model
             ]
         ]
+
+
+{-| The provisional-book explainer: the reader lands here when the
+ISBN-shaped title on their shelf made no sense, so this page owes the
+explanation. Informational only, placed after the title — everything
+below stays available, because a provisional book is legitimately owned;
+only the lookup is pending.
+-}
+viewProvisionalNotice : Book -> Html Msg
+viewProvisionalNotice book =
+    if isUnidentified book then
+        p
+            [ class "book-detail__provisional"
+            , testId "book-provisional-notice"
+            , attribute "role" "status"
+            ]
+            [ text
+                ("We have this book's barcode ("
+                    ++ bookIsbn book
+                    ++ ") but haven't matched it to a catalogue record yet, "
+                    ++ "so we can't show its title or cover. It is still yours and still on your shelf."
+                )
+            ]
+
+    else
+        text ""
 
 
 viewRating : Model -> Html Msg
@@ -1049,6 +1258,111 @@ viewFinishedReadPrompt =
         ]
 
 
+{-| The four bookshelves that make a book "in your collection twice".
+
+Looking for a Home is deliberately absent: it is a marketplace state, not a
+place you keep a book, so a Library book you are also offering to rehome is one
+copy in one place — nothing to tidy up (owner ruling, 2026-07-30).
+
+-}
+collectionBookshelves : List String
+collectionBookshelves =
+    [ "library", "antilibrary", "reading_pile", "wishlist" ]
+
+
+{-| The placements that count toward the multi-shelf notice: active placements
+on the four collection bookshelves, in the order the server returned them
+(oldest first).
+-}
+collectionPlacements : Model -> List Placement
+collectionPlacements model =
+    List.filter
+        (\p ->
+            case p.bookshelfName of
+                Just name ->
+                    List.member name collectionBookshelves
+
+                Nothing ->
+                    False
+        )
+        model.placements
+
+
+{-| "This book is on two of your bookshelves" — the multi-shelf highlight.
+
+Shown only when the book sits on 2+ of Library / Antilibrary / Reading Pile /
+Wish List. The reader put it there, so the copy is a plain observation with a
+way to act on it, not a warning: multi-shelf is a legal state and nothing here
+blocks anything. Each shelf gets its OWN remove button, because "remove this
+book" is ambiguous the moment there is more than one placement — the reader has
+to be able to say _which_ copy goes.
+
+-}
+viewMultiShelfNotice : Model -> Html Msg
+viewMultiShelfNotice model =
+    let
+        placements =
+            collectionPlacements model
+    in
+    if List.length placements < 2 then
+        text ""
+
+    else
+        section
+            [ class "book-detail__multi-shelf"
+            , testId "multi-shelf-notice"
+            , attribute "role" "region"
+            , attribute "aria-labelledby" "section-multi-shelf"
+            ]
+            [ h3
+                [ class "book-detail__section-title"
+                , id "section-multi-shelf"
+                ]
+                [ text
+                    ("This one is on "
+                        ++ String.fromInt (List.length placements)
+                        ++ " of your bookshelves"
+                    )
+                ]
+            , p [ class "book-detail__multi-shelf-note" ]
+                [ text "Keep it that way if you meant to — or take it off the ones you didn't." ]
+            , ul [ class "book-detail__multi-shelf-list" ]
+                (List.map (viewMultiShelfRow model) placements)
+            ]
+
+
+viewMultiShelfRow : Model -> Placement -> Html Msg
+viewMultiShelfRow model placement =
+    let
+        name =
+            Maybe.withDefault "" placement.bookshelfName
+
+        removing =
+            model.removingPlacementId == Just placement.id
+    in
+    li
+        [ class "book-detail__multi-shelf-item"
+        , testId ("multi-shelf-item-" ++ name)
+        ]
+        [ span [ class "book-detail__multi-shelf-name" ] [ text (bookshelfLabel name) ]
+        , button
+            [ class "btn btn--ghost btn--sm book-detail__multi-shelf-remove"
+            , testId ("multi-shelf-remove-" ++ name)
+            , disabled removing
+            , attribute "aria-label" ("Remove from your " ++ bookshelfLabel name ++ " shelf")
+            , onClick (RemovePlacement placement.id)
+            ]
+            [ text
+                (if removing then
+                    "Removing…"
+
+                 else
+                    "Remove from here"
+                )
+            ]
+        ]
+
+
 {-| "Formats on my shelf" — only shown when the user has a placement.
 Lets them toggle which formats (Physical, eBook, Audiobook) they own.
 -}
@@ -1063,7 +1377,7 @@ viewFormatsOnShelf model =
         ]
 
 
-{-| "Who can see this book" — per-placement visibility override (US-10.2.2).
+{-| "Who can see this book" — per-placement visibility override.
 Only shown when the user owns a placement. Options that would make the placement
 more visible than its parent shelf are greyed out, with an always-visible line of
 helper text explaining the shelf ceiling, mirroring the server-side ceiling 422.
@@ -1153,20 +1467,12 @@ viewAboutSection book =
         ]
 
 
-{-| Review summary section — delegates to the ReviewSummary component.
-Currently passes NotAsked since the API does not yet provide per-book reviews.
--}
-viewReviewsSection : Html Msg
-viewReviewsSection =
-    ReviewSummary.view NotAsked
-
-
 {-| Price info section — delegates to the PriceInfo component.
 Currently passes NotAsked since the API does not yet provide per-book prices.
 -}
-viewPricesSection : Html Msg
-viewPricesSection =
-    PriceInfo.view NotAsked
+viewPricesSection : Model -> Html Msg
+viewPricesSection model =
+    PriceInfo.view model.prices
 
 
 viewAvailabilitySection : Model -> Html Msg
@@ -1212,11 +1518,21 @@ formatPrice cents =
 
 
 {-| Author card section — delegates to the AuthorCard component.
-Passes the author from the book; enrichment is Nothing until the API is extended.
+RSS enrichment stays Nothing (its API is future work); events are live
+(item 4), passed only once fetched so the card's "coming soon" stub
+remains the honest not-yet-asked state.
 -}
-viewAuthorSection : Book -> Html Msg
-viewAuthorSection book =
-    AuthorCard.view book.author Nothing
+viewAuthorSection : Model -> Book -> Html Msg
+viewAuthorSection model book =
+    AuthorCard.view book.author
+        Nothing
+        (case model.authorEvents of
+            Success events ->
+                Just events
+
+            _ ->
+                Nothing
+        )
 
 
 viewWritingSection : Html Msg
@@ -1319,8 +1635,6 @@ viewMoveState state =
                 [ text "Moved successfully." ]
 
         Failure Api.ReadingPileFull ->
-            -- #276: the write path rejected the move because the reading
-            -- pile is at its 50-book cap. Distinct from a transport failure.
             div
                 [ class "book-detail__status book-detail__status--error"
                 , testId "reading-pile-full-msg"
@@ -1429,9 +1743,6 @@ overlayView model =
             , attribute "aria-label" ariaLabel
             , attribute "aria-modal" "true"
             , tabindex -1
-
-            -- Focus trap (US-1.4.1): intercept Tab/Shift+Tab at the overlay
-            -- boundaries so keyboard focus never escapes to the shelf behind.
             , preventDefaultOn "keydown" trapKeydownDecoder
             , style "position" "relative"
             , style "z-index" "1001"

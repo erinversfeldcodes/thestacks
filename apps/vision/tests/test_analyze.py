@@ -1,23 +1,8 @@
-"""Tests for the /analyze endpoint — two-call classify-then-extract flow.
-
-The endpoint now orchestrates ``VisionClient.classify`` and
-``VisionClient.extract`` at the FastAPI layer (no single-pass
-``client.analyze``). These tests verify:
-
-- BOOK classification → ``extract`` is invoked and returned books surface
-  in the response.
-- NOT_BOOK classification → short-circuit; ``extract`` is NEVER called and
-  books is [].
-- AMBIGUOUS classification → short-circuit; ``extract`` is NEVER called
-  and books is []. (Different from the prior single-pass behaviour, which
-  preserved partial-signal books on AMBIGUOUS — see the docstring on the
-  ``/analyze`` handler for the rationale.)
-- BOOK + empty extract → response carries empty books, ``model_used``
-  is the VLM model name (not ``local_ocr``).
-- Local OCR short-circuit (barcode hit) → neither classify nor extract
-  is called; ``model_used`` is ``local_ocr``.
-- Input validation: missing image/image_url → 422; invalid base64 → 422.
-- HMAC auth is enforced (delegated to the same verify_hmac plug).
+"""/analyze two-call flow tests: BOOK -> extract invoked, books surface;
+NOT_BOOK and AMBIGUOUS -> short-circuit, extract NEVER called, books []
+(deliberately unlike the old single-pass behaviour, which preserved
+partial-signal books on ambiguity). Also covers the OCR pre-pass
+skipping classify on a clean barcode.
 """
 
 import base64
@@ -80,7 +65,6 @@ def test_analyze_returns_books_for_book_classification() -> None:
     assert data["confidence"] == 0.95
     assert len(data["books"]) == 1
     assert data["books"][0]["potential_isbns"] == ["9780743273565"]
-    # Two calls — one classify, one extract.
     assert mock_classify.await_count == 1
     assert mock_extract.await_count == 1
 
@@ -297,8 +281,6 @@ def test_analyze_with_excluded_books_appends_constraint() -> None:
 
     assert response.status_code == 200
     assert mock_extract.await_count == 1
-    # Positional arg 0 is the images list; the excluded_books kwarg carries
-    # the rejected identifications.
     call = mock_extract.await_args
     assert call is not None
     assert call.kwargs.get("excluded_books") == excluded

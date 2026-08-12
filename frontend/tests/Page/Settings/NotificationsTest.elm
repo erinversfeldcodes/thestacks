@@ -1,6 +1,6 @@
 module Page.Settings.NotificationsTest exposing (suite)
 
-{-| #126 CG-2 (US-17.3.1) — the Settings → Notifications toggles hydrate from the
+{-| CG-2 — the Settings → Notifications toggles hydrate from the
 server instead of rendering hardcoded defaults.
 
 Drives `Page.Settings.Notifications.update`/`view` through the load lifecycle:
@@ -38,6 +38,15 @@ allOff =
     }
 
 
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
+gained an `OutMsg` in so a mid-form 401 can reach the global session-expiry
+interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
+-}
+modelOf : ( Notifications.Model, Cmd Msg, Notifications.OutMsg ) -> Notifications.Model
+modelOf ( model, _, _ ) =
+    model
+
+
 {-| A model that has finished loading the given preferences from the server.
 -}
 loadedWith : Api.NotificationPreferences -> Notifications.Model
@@ -45,7 +54,7 @@ loadedWith prefs =
     Notifications.init (Just "test-token")
         |> Tuple.first
         |> (\model -> Notifications.update (Loaded (Ok prefs)) model (Just "test-token"))
-        |> Tuple.first
+        |> modelOf
 
 
 toggleButtons : Notifications.Model -> Query.Single Msg
@@ -56,17 +65,33 @@ toggleButtons model =
 
 suite : Test
 suite =
-    describe "Page.Settings.Notifications — hydration (#126 CG-2)"
+    describe "Page.Settings.Notifications — hydration"
         [ test "init starts in the Loading state (no toggles at silently-wrong defaults)" <|
             \_ ->
                 Notifications.init (Just "test-token")
                     |> Tuple.first
                     |> .prefs
                     |> Expect.equal Loading
+        , test "tokenless init yields NotAsked, not a Loading state nothing will resolve" <|
+            \_ ->
+                Notifications.init Nothing
+                    |> Tuple.first
+                    |> .prefs
+                    |> Expect.equal NotAsked
+        , test "tokenless init produces no effect" <|
+            \_ ->
+                Notifications.init Nothing
+                    |> Tuple.second
+                    |> Expect.equal Cmd.none
+        , test "tokenless init does not render the loading copy" <|
+            \_ ->
+                Notifications.init Nothing
+                    |> Tuple.first
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.text "Loading your preferences…" ]
         , test "a successful load renders toggles at the saved values, not defaults" <|
             \_ ->
-                -- Defaults would show every toggle Off; loading all-on proves the
-                -- rendered state comes from the server, not the hardcoded default.
                 loadedWith allOn
                     |> toggleButtons
                     |> Query.findAll [ Selector.class "toggle--on" ]
@@ -84,7 +109,7 @@ suite =
                         Notifications.init (Just "test-token")
                             |> Tuple.first
                             |> (\model -> Notifications.update (Loaded (Err (Http.BadStatus 500))) model (Just "test-token"))
-                            |> Tuple.first
+                            |> modelOf
                 in
                 Expect.all
                     [ \_ ->
@@ -101,37 +126,34 @@ suite =
         , test "toggling a loaded preference flips only that value" <|
             \_ ->
                 Notifications.update TogglePriceDrops (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | priceDrops = True })
         , test "ToggleNewReviews flips only new reviews" <|
             \_ ->
                 Notifications.update ToggleNewReviews (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | newReviews = True })
         , test "ToggleAuthorUpdates flips only author updates" <|
             \_ ->
                 Notifications.update ToggleAuthorUpdates (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | authorUpdates = True })
         , test "ToggleEventAlerts flips only event alerts" <|
             \_ ->
                 Notifications.update ToggleEventAlerts (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | eventAlerts = True })
         , test "toggling a loaded preference clears any prior save result" <|
             \_ ->
-                -- flipAndSave resets `saving` to NotAsked as it dispatches the
-                -- auto-save, so a stale "Preferences saved." banner cannot linger
-                -- over a freshly-flipped (not-yet-confirmed) value.
                 loadedWith allOff
                     |> (\model -> Notifications.update (SaveCompleted (Ok ())) model (Just "test-token"))
-                    |> Tuple.first
+                    |> modelOf
                     |> (\model -> Notifications.update ToggleNewReviews model (Just "test-token"))
-                    |> Tuple.first
+                    |> modelOf
                     |> .saving
                     |> Expect.equal NotAsked
         , test "a toggle before the preferences load is a no-op" <|
@@ -141,21 +163,43 @@ suite =
                         Notifications.init (Just "test-token") |> Tuple.first
                 in
                 Notifications.update TogglePriceDrops loadingModel (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal Loading
         , test "a completed save shows the saved confirmation" <|
             \_ ->
                 Notifications.update (SaveCompleted (Ok ())) (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Preferences saved." ]
-        , test "a failed save shows the save-error copy" <|
+        , test "a dropped connection says the connection dropped" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err Http.NetworkError)) (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Could not save notification preferences. Please try again." ]
+                    |> Query.has [ Selector.text "The library is unreachable, so your notification preferences were not saved." ]
+        , -- ⛔ #374. All three of these were "Could not save notification
+          test "a 422 sends the reader to a reload, not to a repeat" <|
+            \_ ->
+                Notifications.update (SaveCompleted (Err (Http.BadStatus 422))) (loadedWith allOff) (Just "test-token")
+                    |> modelOf
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "The library would not accept that change to your notification preferences. Reload the page and try again." ]
+        , test "a timeout does not claim the change was lost" <|
+            \_ ->
+                Notifications.update (SaveCompleted (Err Http.Timeout)) (loadedWith allOff) (Just "test-token")
+                    |> modelOf
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "we cannot say whether your notification preferences were saved" ]
+        , test "an unrecognised status admits it is unrecognised" <|
+            \_ ->
+                Notifications.update (SaveCompleted (Err (Http.BadStatus 502))) (loadedWith allOff) (Just "test-token")
+                    |> modelOf
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "and we cannot say why" ]
         ]

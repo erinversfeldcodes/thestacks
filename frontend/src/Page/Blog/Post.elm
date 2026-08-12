@@ -10,6 +10,7 @@ module Page.Blog.Post exposing
 import Api
 import Components.BlockUserModal as BlockModal
 import Components.BookAssociations as BookAssociations
+import Components.Syndication as Syndication
 import Components.WritingAssistant as WritingAssistant
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
 import Html.Attributes exposing (class, disabled, href, placeholder, value)
@@ -31,6 +32,8 @@ type alias Model =
     , replyDraft : Maybe { parentId : String, body : String }
     , commentSubmitting : Bool
     , blockModal : Maybe BlockModal.Model
+    , origin : String
+    , syndication : Maybe Syndication.Model
     }
 
 
@@ -49,15 +52,19 @@ type Msg
     | DeleteComment String
     | CommentDeleted (Result Http.Error ())
     | BlockModalMsg BlockModal.Msg
+    | SyndicationMsg Syndication.Msg
+    | EscapePressed
 
 
 type OutMsg
     = NoOut
     | SessionExpired
+    | EscapeUnhandled
+    | RequestCopy String
 
 
-init : String -> Maybe String -> Maybe String -> Bool -> ( Model, Cmd Msg )
-init postId maybeToken currentUserId writingAssistantConsent =
+init : String -> Maybe String -> Maybe String -> Bool -> String -> ( Model, Cmd Msg )
+init postId maybeToken currentUserId writingAssistantConsent origin =
     ( { postId = postId
       , post = Loading
       , currentUserId = currentUserId
@@ -68,6 +75,8 @@ init postId maybeToken currentUserId writingAssistantConsent =
       , replyDraft = Nothing
       , commentSubmitting = False
       , blockModal = Nothing
+      , origin = origin
+      , syndication = Nothing
       }
     , Cmd.batch
         [ Api.getBlogPost postId maybeToken PostLoaded
@@ -82,7 +91,16 @@ update msg model maybeToken =
         PostLoaded result ->
             case result of
                 Ok post ->
-                    ( { model | post = Success post, blockModal = blockModalFor model.currentUserId post }
+                    ( { model
+                        | post = Success post
+                        , blockModal = blockModalFor model.currentUserId post
+                        , syndication =
+                            if model.currentUserId == Just post.userId then
+                                Just (Syndication.init post.id model.origin post.syndicated)
+
+                            else
+                                Nothing
+                      }
                     , Cmd.none
                     , NoOut
                     )
@@ -242,8 +260,6 @@ update msg model maybeToken =
                             )
 
                         BlockModal.UserBlocked ->
-                            -- Content should vanish: re-fetch the post, which now
-                            -- resolves to :hidden server-side (bidirectional block).
                             ( { model | blockModal = Just newBlockModal }
                             , Cmd.batch
                                 [ Cmd.map BlockModalMsg subCmd
@@ -255,8 +271,71 @@ update msg model maybeToken =
                         BlockModal.SessionExpired ->
                             ( model, Cmd.none, SessionExpired )
 
+                        BlockModal.Dismissed ->
+                            ( { model | blockModal = Just newBlockModal }
+                            , Cmd.map BlockModalMsg subCmd
+                            , NoOut
+                            )
+
                 Nothing ->
                     ( model, Cmd.none, NoOut )
+
+        SyndicationMsg subMsg ->
+            case model.syndication of
+                Just syndicationModel ->
+                    let
+                        ( newSyndication, subCmd, outMsg ) =
+                            Syndication.update subMsg syndicationModel maybeToken
+
+                        baseModel =
+                            { model | syndication = Just newSyndication }
+                    in
+                    case outMsg of
+                        Syndication.NoOut ->
+                            ( baseModel, Cmd.map SyndicationMsg subCmd, NoOut )
+
+                        Syndication.RequestCopy payload ->
+                            ( baseModel, Cmd.map SyndicationMsg subCmd, RequestCopy payload )
+
+                        Syndication.SyndicatedChanged syndicated ->
+                            ( { baseModel
+                                | post =
+                                    case baseModel.post of
+                                        Success post ->
+                                            Success { post | syndicated = syndicated }
+
+                                        other ->
+                                            other
+                              }
+                            , Cmd.map SyndicationMsg subCmd
+                            , NoOut
+                            )
+
+                        Syndication.AuthLost ->
+                            ( baseModel, Cmd.none, SessionExpired )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        EscapePressed ->
+            case model.blockModal of
+                Just blockModal ->
+                    let
+                        ( newBlockModal, subCmd, outMsg ) =
+                            BlockModal.update BlockModal.EscapePressed blockModal maybeToken
+                    in
+                    case outMsg of
+                        BlockModal.Dismissed ->
+                            ( { model | blockModal = Just newBlockModal }
+                            , Cmd.map BlockModalMsg subCmd
+                            , NoOut
+                            )
+
+                        _ ->
+                            ( model, Cmd.none, EscapeUnhandled )
+
+                Nothing ->
+                    ( model, Cmd.none, EscapeUnhandled )
 
 
 {-| A block affordance is only offered to a signed-in reader who is not the
@@ -307,8 +386,6 @@ view model =
 
             Failure err ->
                 if Api.isNotFound err then
-                    -- The post resolved to :hidden (a 404) — e.g. after the
-                    -- reader blocked its author. A gentle dead-end, not an error.
                     div [ class "blog-post__unavailable" ]
                         [ p [ class "blog-post__unavailable-text" ]
                             [ text "This post is no longer available." ]
@@ -324,6 +401,17 @@ view model =
                 in
                 div []
                     [ viewPost post isOwner
+                    , case model.syndication of
+                        Just syndicationModel ->
+                            Html.map SyndicationMsg
+                                (Syndication.view
+                                    syndicationModel
+                                    post.authorHandle
+                                    (post.visibility == Types.BlogPost.Public && post.published)
+                                )
+
+                        Nothing ->
+                            text ""
                     , case model.blockModal of
                         Just blockModal ->
                             Html.map BlockModalMsg (BlockModal.view blockModal)
@@ -368,7 +456,7 @@ viewPost post isOwner =
         ]
 
 
-{-| Render the author's name as a link to their public profile (US-10.5.4).
+{-| Render the author's name as a link to their public profile.
 
 When the author handle is present the display name links to `/u/:handle`;
 following the link to a ghost/blocked author still resolves to the profile

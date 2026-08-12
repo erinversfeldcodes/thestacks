@@ -1,10 +1,10 @@
 defmodule StacksWeb.TransparencyControllerTest do
   @moduledoc """
-  Tests for the public transparency metrics endpoint (Issue #241).
+      Tests for the public transparency metrics endpoint.
 
-  `GET /api/transparency/metrics` is unauthenticated and curated: it returns
-  `{live, durable, generated_at, cache_ttl}` with teaching metadata per entry,
-  and never exposes PII or a de-anonymisable dimension.
+      `GET /api/transparency/metrics` is unauthenticated and curated: it returns
+      `{live, durable, generated_at, cache_ttl}` with teaching metadata per entry,
+      and never exposes PII or a de-anonymisable dimension.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -66,7 +66,6 @@ defmodule StacksWeb.TransparencyControllerTest do
         refute String.contains?(body, forbidden)
       end
 
-      # A per-user identifier field would leak as a JSON key; assert none exist.
       for forbidden_key <- ~w(handle user ip name) do
         refute String.contains?(body, "\"#{forbidden_key}\":")
       end

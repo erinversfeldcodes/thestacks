@@ -7,13 +7,11 @@
   },
   "scripts": {
     "build": "elm make src/Main.elm --output=elm.js",
-    "start": "elm make src/Main.elm --output=elm.js && open index.html",
     "test": "elm-test --compiler node_modules/.bin/elm"
   },
   "devDependencies": {
     "elm": "^0.19.1-6",
     "elm-format": "^0.8.8",
-    "elm-test": "^0.19.1-revision17",
-    "serve": "^14.2.6"
+    "elm-test": "^0.19.1-revision17"
   }
 }

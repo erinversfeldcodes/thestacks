@@ -26,6 +26,9 @@ import TestHelpers
         , bookDetailProgramWithOut
         , simulateBookDetailResponse
         , simulateBookDetailResponseWithPlacement
+        , simulateBookDetailResponseWithPlacements
+        , simulateBookPricesResponse
+        , simulateEmptyBookPricesResponse
         , testBook
         , testPlacement
         )
@@ -50,11 +53,14 @@ suite =
         , shelfMoverOpenSelectConfirmFlow
         , removeModalOpenConfirmFlow
         , sectionContentDetails
+        , pricesRenderPerEdition
         , placementLoadedShowsCurrentBookshelf
         , ariaRegionsPresent
         , ratingDisplayWithoutPlacement
         , moveConfirmHappyUpdatesBookshelf
         , removeConfirmNavigatesToPreviousRoute
+        , removeRecordsTheUndoableRemoval
+        , undoableRemovalIsUnsetBeforeRemoval
         , removeCompletedErrorShowsMessage
         , confirmMoveNoPlacementIsNoOp
         , confirmMoveNoTokenIsNoOp
@@ -79,7 +85,159 @@ suite =
         , removeModalTrapForwardWrap
         , removeModalTrapReverseWrap
         , removeModalTrapNaturalOrder
+        , multiShelfNoticeNamesEveryBookshelf
+        , multiShelfNoticeAbsentForASingleShelf
+        , multiShelfNoticeIgnoresLookingForAHome
+        , multiShelfRemoveTargetsThatPlacementOnly
+        , multiShelfRemoveKeepsTheReaderOnThePage
         ]
+
+
+{-| multi-shelf highlight: a book on two collection bookshelves is a legal
+state, and the overlay must SAY SO. Before this the page rendered no indication
+at all — and the request behind it 500ed.
+-}
+multiShelfNoticeNamesEveryBookshelf : Test
+multiShelfNoticeNamesEveryBookshelf =
+    test "multi_shelf_notice: a book on Library and Wish List names both, with a remove for each" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice")
+                    , Selector.text "This one is on 2 of your bookshelves"
+                    , Selector.text "Library"
+                    , Selector.text "Wish List"
+                    , Selector.attribute
+                        (Html.Attributes.attribute "data-testid" "multi-shelf-remove-library")
+                    , Selector.attribute
+                        (Html.Attributes.attribute "data-testid" "multi-shelf-remove-wishlist")
+                    ]
+
+
+{-| The notice is for tidying up duplicates, so one placement must not raise it
+— otherwise every shelved book carries a "you have this twice" aside.
+-}
+multiShelfNoticeAbsentForASingleShelf : Test
+multiShelfNoticeAbsentForASingleShelf =
+    test "multi_shelf_notice_single: one placement renders no multi-shelf notice" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" } ]
+                    )
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice") ]
+
+
+{-| Looking for a Home is a MARKETPLACE state, not a place you keep a book
+(owner ruling, 2026-07-30). A Library book also offered for rehoming is one
+copy in one place — there is nothing to tidy up, so no notice.
+-}
+multiShelfNoticeIgnoresLookingForAHome : Test
+multiShelfNoticeIgnoresLookingForAHome =
+    test "multi_shelf_notice_lfh: library + looking_for_home is not a duplicate" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-lfh", bookshelfName = "looking_for_home" }
+                        ]
+                    )
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice") ]
+
+
+{-| Per-placement remove: "remove this book" is ambiguous once there are two, so
+each row must DELETE its own placement id and no other.
+-}
+multiShelfRemoveTargetsThatPlacementOnly : Test
+multiShelfRemoveTargetsThatPlacementOnly =
+    test "multi_shelf_remove: removing the Wish List row DELETEs that placement id" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.within
+                    (Query.find
+                        [ Selector.attribute
+                            (Html.Attributes.attribute "data-testid" "multi-shelf-item-wishlist")
+                        ]
+                    )
+                    (ProgramTest.clickButton "Remove from here")
+                |> ProgramTest.ensureHttpRequests "DELETE"
+                    "/api/placements/pl-wish"
+                    (List.length >> Expect.equal 1)
+                |> ProgramTest.expectHttpRequests "DELETE"
+                    "/api/placements/pl-lib"
+                    (List.length >> Expect.equal 0)
+
+
+{-| Unlike the danger-zone remove, tidying one extra shelf must NOT navigate the
+reader out of the book — they still have the book, just in one fewer place. The
+notice disappears because only one placement is left.
+-}
+multiShelfRemoveKeepsTheReaderOnThePage : Test
+multiShelfRemoveKeepsTheReaderOnThePage =
+    test "multi_shelf_remove_stays: after removing one of two, the page stays and the notice goes" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.within
+                    (Query.find
+                        [ Selector.attribute
+                            (Html.Attributes.attribute "data-testid" "multi-shelf-item-wishlist")
+                        ]
+                    )
+                    (ProgramTest.clickButton "Remove from here")
+                |> ProgramTest.simulateHttpResponse "DELETE"
+                    "/api/placements/pl-wish"
+                    (Http.GoodStatus_
+                        { url = "/api/placements/pl-wish"
+                        , statusCode = 200
+                        , statusText = "OK"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                |> ProgramTest.ensureViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice") ]
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.all
+                            [ \m -> Expect.equal BookDetail.NoOut m.lastOut
+                            , \m -> Expect.equal [ "pl-lib" ] (List.map .id m.page.placements)
+                            , \m -> Expect.equal (Just "pl-lib") (Maybe.map .id m.page.placement)
+                            ]
+                            model
+                    )
 
 
 {-| Simulate a `keydown` on the remove modal's dialog element and return the
@@ -92,10 +250,6 @@ simulateModalKeydown eventValue =
         |> Query.find [ Selector.class "modal" ]
         |> Event.simulate ( "keydown", eventValue )
         |> Event.toResult
-
-
-
--- SCOPED ESCAPE (ux fix 1): dismiss the top-most surface first
 
 
 escapeClosesRemoveModalFirst : Test
@@ -144,10 +298,6 @@ escapeWithNoNestedSurfaceRequestsClose =
                     BookDetail.update BookDetail.EscapePressed loadedOverlayModel (Just "test-token")
             in
             Expect.equal BookDetail.RequestCloseOverlay out
-
-
-
--- REMOVE-MODAL FOCUS TRAP (ux fix 2)
 
 
 removeModalTrapForwardWrap : Test
@@ -235,7 +385,7 @@ loadedOverlayModel =
         ( m1, _, _ ) =
             BookDetail.update
                 (BookDetail.BookLoaded
-                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
                 )
                 m0
                 (Just "test-token")
@@ -276,10 +426,6 @@ simulateCardKeydown eventValue =
         |> Event.toResult
 
 
-
--- B4 (punch #10): move-failure copy
-
-
 {-| A failed move (`ConfirmMove` → `MoveCompleted (Err (MoveHttpError _))`)
 renders the generic move-failure copy. A 500 maps via `Api.moveResponseToResult`
 to `MoveHttpError` (not the `ReadingPileFull` 422 special-case).
@@ -307,10 +453,6 @@ moveCompletedErrorShowsMessage =
                     )
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Failed to move book. Please try again." ]
-
-
-
--- B5 (punch #10): CloseOverlay → RequestCloseOverlay OutMsg (X + backdrop)
 
 
 startOverlayWithOut : ProgramTest.ProgramTest TestHelpers.BookDetailTestModel BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
@@ -352,10 +494,6 @@ closeOverlayBackdropEmitsRequestClose =
                     (\model -> Expect.equal BookDetail.RequestCloseOverlay model.lastOut)
 
 
-
--- FOCUS TRAP (US-1.4.1 a11y contract; kickoff-approved in-scope build)
-
-
 {-| The overlay's two focus-trap anchors are present in the DOM: the close
 button (first focusable / focus-on-open target) and the trailing sentinel
 (the last tab stop). The update's wrap commands focus these exact ids, so their
@@ -373,7 +511,7 @@ overlayHasFocusBoundaries =
                     ]
 
 
-{-| The dialog card is the focus-on-open target (#295 item a): it carries the
+{-| The dialog card is the focus-on-open target (item a): it carries the
 stable id `Main.openOverlay` focuses, `tabindex -1` (focusable but out of the
 tab order, so the first forward Tab lands on the close button), and the labelled
 `aria-label` that becomes the first utterance for a screen reader. Asserting the
@@ -462,7 +600,7 @@ loadingState =
 
 successRendersAllSections : Test
 successRendersAllSections =
-    test "success_renders_all_sections: successful response renders hero, about, reviews, prices, author, writing, shelf actions" <|
+    test "success_renders_all_sections: successful response renders hero, about, prices, author, writing, shelf actions" <|
         \() ->
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
@@ -472,8 +610,6 @@ successRendersAllSections =
                     [ Selector.class "book-detail__hero" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "book-detail__about" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.class "book-detail__reviews" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "book-detail__prices" ]
                 |> ProgramTest.ensureViewHas
@@ -576,24 +712,42 @@ removeModalOpenConfirmFlow =
 
 sectionContentDetails : Test
 sectionContentDetails =
-    test "section_content: reviews show source names, prices show empty message, author name visible" <|
+    test "section_content: prices show empty message, author name visible" <|
         \() ->
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponse "book-test-001" testBook)
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "GoodReads" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "Storygraph" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "Reddit" ]
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001/prices"
+                    (simulateEmptyBookPricesResponse "book-test-001")
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "No price data yet" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Charles Duhigg" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Not yet rated" ]
+
+
+pricesRenderPerEdition : Test
+pricesRenderPerEdition =
+    test "prices_loaded: a price renders per edition, cheapest store first" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponse "book-test-001" testBook)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001/prices"
+                    (simulateBookPricesResponse "book-test-001")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Paperback (9780749397050)" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Paperback (9788497592581)" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Exclusive Books" ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "No price data yet" ]
 
 
 placementLoadedShowsCurrentBookshelf : Test
@@ -623,7 +777,7 @@ ariaRegionsPresent =
                     ]
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.attribute "role" "region")
-                    , Selector.id "section-reviews"
+                    , Selector.id "section-writing"
                     ]
 
 
@@ -639,10 +793,6 @@ ratingDisplayWithoutPlacement =
                     [ Selector.class "book-detail__rating--empty" ]
 
 
-
--- MOVE / REMOVE CONFIRM STATE-MACHINE COVERAGE (Issue #116 punch #15/#16)
-
-
 moveEndpoint : String
 moveEndpoint =
     "/api/placements/placement-test-001/move"
@@ -653,7 +803,7 @@ removeEndpoint =
     "/api/placements/placement-test-001"
 
 
-{-| A successful move: `Api.moveResponseToResult` maps any 2xx to `Ok ()`.
+{-| A successful move: `Api.moveResponseToResult` maps any 2xx to `Ok`.
 -}
 moveSuccessResponse : Http.Response String
 moveSuccessResponse =
@@ -666,7 +816,7 @@ moveSuccessResponse =
         "{}"
 
 
-{-| A successful remove: `expectWhatever` maps any 2xx to `Ok ()`.
+{-| A successful remove: `expectWhatever` maps any 2xx to `Ok`.
 -}
 removeSuccessResponse : Http.Response String
 removeSuccessResponse =
@@ -679,7 +829,7 @@ removeSuccessResponse =
         ""
 
 
-{-| #15 move-happy: `OpenBookshelfMover → SelectBookshelf → ConfirmMove →
+{-| move-happy: `OpenBookshelfMover → SelectBookshelf → ConfirmMove →
 MoveCompleted (Ok _)` updates `currentBookshelf` (rendered in the shelf-actions
 title), closes the mover, and renders the success message.
 -}
@@ -703,7 +853,7 @@ moveConfirmHappyUpdatesBookshelf =
                     [ Selector.class "shelf-mover" ]
 
 
-{-| #15 remove-happy: `OpenRemoveModal → ConfirmRemove → RemoveCompleted (Ok _)`
+{-| remove-happy: `OpenRemoveModal → ConfirmRemove → RemoveCompleted (Ok _)`
 emits the OutMsg `NavigateTo previousRoute`. The page cannot observe its own
 OutMsg, so this uses the `bookDetailProgramWithOut` harness (which records it)
 with a concrete previous route to assert the navigation target.
@@ -725,7 +875,63 @@ removeConfirmNavigatesToPreviousRoute =
                     (\model -> Expect.equal (BookDetail.NavigateTo Route.AntiLibrary) model.lastOut)
 
 
-{-| #16 remove-sad: `RemoveCompleted (Err _)` renders the remove failure copy.
+{-| The producer end of the undo wire.
+
+`Main` reads `undoableRemoval` off this model at the instant it acts on the
+`NavigateTo` above — the overlay is about to be torn down, taking the only
+record of what was removed with it. If this field is not set here, the toast on
+the shelf can never appear, and nothing else in the app would notice: the
+removal still works, the navigation still happens, and the offer silently never
+arrives. That is the "built but not wired" shape, so it is pinned at the
+producing end as well as the consuming one
+(`BookshelfUndoRemoveTest.main_hands_the_removal_to_the_shelf`).
+
+-}
+removeRecordsTheUndoableRemoval : Test
+removeRecordsTheUndoableRemoval =
+    test "remove_records_the_undoable_removal: a successful DELETE records the placement id and title for Undo" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Remove from collection"
+                |> ProgramTest.within (Query.find [ Selector.class "modal-overlay" ])
+                    (ProgramTest.clickButton "Remove")
+                |> ProgramTest.simulateHttpResponse "DELETE" removeEndpoint removeSuccessResponse
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.equal
+                            (Just
+                                { placementId = testPlacement.id
+                                , bookTitle = testBook.title
+                                }
+                            )
+                            model.page.undoableRemoval
+                    )
+
+
+{-| The pre-condition for the test above, as its own test because `ProgramTest`
+has no `ensureModel`: a page that merely LOADED a placement offers nothing.
+Without this, "the field equals Just …" would also pass against a page that set
+it at init and never cleared it — the offer would then appear on a shelf after a
+visit that removed nothing.
+-}
+undoableRemovalIsUnsetBeforeRemoval : Test
+undoableRemovalIsUnsetBeforeRemoval =
+    test "undoable_removal_unset_before_removal: loading a book records no undoable removal" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal Nothing model.page.undoableRemoval)
+
+
+{-| remove-sad: `RemoveCompleted (Err _)` renders the remove failure copy.
 -}
 removeCompletedErrorShowsMessage : Test
 removeCompletedErrorShowsMessage =
@@ -752,7 +958,7 @@ removeCompletedErrorShowsMessage =
                     [ Selector.text "Failed to remove book. Please try again." ]
 
 
-{-| #16 no-op guard: `ConfirmMove` with `placement == Nothing` fires no request
+{-| no-op guard: `ConfirmMove` with `placement == Nothing` fires no request
 (the simulated-effect layer's `(Just placement, Just token)` guard fails) and
 leaves `moveState` untouched.
 -}
@@ -763,14 +969,14 @@ confirmMoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
                 |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.moveState)
 
 
-{-| #16 no-op guard: `ConfirmMove` with a placement but `maybeToken == Nothing`
+{-| no-op guard: `ConfirmMove` with a placement but `maybeToken == Nothing`
 fires no request and leaves `moveState` untouched. The placement is injected via
 `BookLoaded` because the no-token init makes no GET.
 -}
@@ -781,14 +987,14 @@ confirmMoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
                 |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.moveState)
 
 
-{-| #16 no-op guard: `ConfirmRemove` with `placement == Nothing` fires no request
+{-| no-op guard: `ConfirmRemove` with `placement == Nothing` fires no request
 and leaves `removeState` untouched.
 -}
 confirmRemoveNoPlacementIsNoOp : Test
@@ -798,14 +1004,14 @@ confirmRemoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)
                 |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.removeState)
 
 
-{-| #16 no-op guard: `ConfirmRemove` with a placement but `maybeToken == Nothing`
+{-| no-op guard: `ConfirmRemove` with a placement but `maybeToken == Nothing`
 fires no request and leaves `removeState` untouched.
 -}
 confirmRemoveNoTokenIsNoOp : Test
@@ -815,7 +1021,7 @@ confirmRemoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)

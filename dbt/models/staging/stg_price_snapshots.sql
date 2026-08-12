@@ -10,5 +10,6 @@ select
     currency,
     in_stock,
     url,
-    scraped_at
+    scraped_at,
+    book_edition_id
 from {{ source('op', 'price_snapshots') }}

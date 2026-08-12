@@ -10,7 +10,10 @@ defmodule Core.Repo.Migrations.CreateReviewSnapshots do
 
     create table(:review_snapshots, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :book_id, references(:books, type: :binary_id, prefix: "op", on_delete: :nothing), null: false
+
+      add :book_id, references(:books, type: :binary_id, prefix: "op", on_delete: :nothing),
+        null: false
+
       add :source, :review_source, null: false
       add :source_url, :text, null: false
       add :sentiment_score, :float

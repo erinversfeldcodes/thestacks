@@ -65,6 +65,8 @@ suite =
         , collectionAndPlatformSectionsRender
         , collectionAbovePlatform
         , collectionShelfLabel
+        , collectionShelfLabelNamesEveryShelf
+        , collectionShelfLabelJoinsThreeAsProse
         , platformLookingForHomeLabel
         , platformListedLabel
         , platformPlainHitHasNoLabel
@@ -78,12 +80,29 @@ suite =
         , snippetAndLabelRenderWhenSnippetPresent
         , highlightRendersAsMarkElement
         , noSnippetNoLabelWhenSnippetEmpty
+        , searchInputHasAccessibleName
         ]
+
+
+{-| The search field's only visible cue is its placeholder, which is not an
+accessible name — it disappears the moment the reader types and several screen
+readers ignore it entirely. So the input carries an explicit `aria-label`, and
+this asserts it is present and matches the placeholder copy (TR-6).
+-}
+searchInputHasAccessibleName : Test
+searchInputHasAccessibleName =
+    test "search_input_has_accessible_name: the search field carries an aria-label" <|
+        \() ->
+            startSearch
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute
+                        (Html.Attributes.attribute "aria-label" "Search by title, author, or ISBN...")
+                    ]
 
 
 {-| The book-search request must target `GET /api/search` — the route the
 backend actually serves (`router.ex`, alongside `/api/search/users`). Before
-the #115 fix the client built `/api/books/search`, which 404s live; this asserts
+the fix the client built `/api/books/search`, which 404s live; this asserts
 the requested URL so the mismatch can never silently return.
 -}
 searchUrlIsApiSearch : Test
@@ -293,15 +312,6 @@ searchNoTokenFiresNoBookRequest =
                     [ Selector.text "Type a title, author, or ISBN to search the stacks." ]
 
 
-
--- SORT / FILTER (view-level) --------------------------------------------------
---
--- These assert the RENDERED order and membership of `.search-results`, not just
--- model state: sort and year-filter are applied by `Page.Search.view` to the
--- Success books list before rendering. Fixtures are chosen so every SortOrder
--- and the year filter produce a distinct visible order from the server order.
-
-
 {-| Three books whose server (insertion) order is Zebra, Middle, Alpha, chosen
 so each sort produces a different visible order:
 
@@ -477,16 +487,6 @@ yearFilterAndClear =
                     [ "Zebra Tales", "Middle Ground", "Alpha Dawn" ]
 
 
-
--- RESULT CLICK-THROUGH (#289) -------------------------------------------------
---
--- Clicking a search result opens the book detail overlay for that book. The
--- OutMsg (`OpenOverlay bookId`) is swallowed by the ProgramTest harness — like
--- readers401RaisesSessionExpired — so the emit contract is asserted directly
--- against `Search.update`; the render test proves the click surface is a real,
--- keyboard-operable <button> carrying the stable focus-return id.
-
-
 {-| Activating a result must emit `OpenOverlay <bookId>` — the OutMsg Main turns
 into an overlay-open with a `search-result-<bookId>` focus-return trigger. The
 harness swallows the OutMsg, so assert the update contract directly.
@@ -507,7 +507,7 @@ resultClickEmitsOpenOverlay =
 
 {-| Each result renders as a real `<button>` (natively keyboard-focusable and
 Enter/Space-activatable) carrying `id="search-result-<bookId>"` — the stable
-element id Main hands the overlay as the focus-return trigger (#114 / #289). A
+element id Main hands the overlay as the focus-return trigger. A
 plain div with an onClick would fail both the tag and the id assertion.
 -}
 resultRendersAsButtonWithStableId : Test
@@ -527,17 +527,6 @@ resultRendersAsButtonWithStableId =
                                 , Query.index 0 >> Query.has [ Selector.text "Zebra Tales" ]
                                 ]
                     )
-
-
-
--- SECTIONING (#285) -----------------------------------------------------------
---
--- Search results split into "Your Collection" (the viewer's own matching books,
--- each tagged with its shelf) above "On the Platform" (platform-visible books,
--- some carrying a discoverable-by-design label). These drive the full HTTP ->
--- decode -> render path with the REAL sectioned wire shape (collection /
--- platform_hits), so they also prove `Api.searchResponseDecoder` maps both
--- sections and the label metadata.
 
 
 {-| A collection hit and a platform hit both present: both section headings
@@ -588,6 +577,40 @@ collectionShelfLabel =
                 [ collectionHit "reading_pile" (fixtureBook "Mine Own" "Anna Blake" 2001) ]
                 []
                 |> ProgramTest.expectViewHas [ Selector.text "On your Reading Pile shelf" ]
+
+
+{-| — the annotation must name EVERY bookshelf a book sits on. It used to
+name one and silently drop the rest, which looked exactly like the whole truth:
+a book on the Wish List and the Reading Pile was reported as "On your Wish List
+shelf" and the reader had no way to know otherwise.
+-}
+collectionShelfLabelNamesEveryShelf : Test
+collectionShelfLabelNamesEveryShelf =
+    test "collection_shelf_label_multi: a two-shelf hit names both, not just the first" <|
+        \() ->
+            loadedSections
+                [ multiShelfCollectionHit [ "library", "wishlist" ]
+                    (fixtureBook "Mine Own" "Anna Blake" 2001)
+                ]
+                []
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "On your Library and Wish List shelves" ]
+
+
+{-| Three shelves join as prose ("A, B and C") rather than as a comma soup, and
+the noun stays plural.
+-}
+collectionShelfLabelJoinsThreeAsProse : Test
+collectionShelfLabelJoinsThreeAsProse =
+    test "collection_shelf_label_three: three shelves read as 'A, B and C shelves'" <|
+        \() ->
+            loadedSections
+                [ multiShelfCollectionHit [ "antilibrary", "library", "reading_pile" ]
+                    (fixtureBook "Mine Own" "Anna Blake" 2001)
+                ]
+                []
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "On your Antilibrary, Library and Reading Pile shelves" ]
 
 
 {-| An always-visible looking-for-home platform hit is labelled with the owner's
@@ -695,7 +718,7 @@ sortWithinEachSection =
 
 
 {-| A collection result is the same keyboard-operable `<button>` carrying the
-stable `search-result-<bookId>` focus-return id as a platform result (#289) —
+stable `search-result-<bookId>` focus-return id as a platform result —
 proving the click surface is shared across both sections.
 -}
 collectionResultRendersAsButton : Test
@@ -717,17 +740,6 @@ collectionResultRendersAsButton =
                                 , Query.index 0 >> Query.has [ Selector.text "Mine Own" ]
                                 ]
                     )
-
-
-
--- DEEP SEARCH (#284) ----------------------------------------------------------
---
--- The "Deep search" toggle opts the query into matching book descriptions and
--- reviews (not just titles) via the `scope=deep` API param. Flipping it re-fires
--- the current query with the new scope; a deep-matched result renders a
--- highlighted `ts_headline` snippet excerpt plus a "via deep search" label. These
--- drive the toggle → re-fire → render path, and assert the URL param exactly so
--- the scope wiring can never silently regress.
 
 
 {-| Toggling deep search ON with a non-empty query re-fires the book search with
@@ -820,7 +832,7 @@ highlightRendersAsMarkElement =
 
 {-| A title match (empty snippet) renders NEITHER the snippet block NOR the "via
 deep search" label — the excerpt is shown only when the match was on description
-/review text (#284).
+/review text.
 -}
 noSnippetNoLabelWhenSnippetEmpty : Test
 noSnippetNoLabelWhenSnippetEmpty =
@@ -834,10 +846,6 @@ noSnippetNoLabelWhenSnippetEmpty =
                 |> ProgramTest.expectViewHasNot [ Selector.class "search-result__snippet" ]
 
 
-
--- JSON ENCODING HELPERS
-
-
 {-| A test-side search hit mirroring the proto `SearchHit` wire shape
 (`book`, `source`, `owner_handle`, `price`, `bookshelf_name`, `snippet`). The
 constructors below build the shapes the backend emits; `snippet` defaults to ""
@@ -849,6 +857,7 @@ type alias TestHit =
     , ownerHandle : String
     , price : String
     , bookshelfName : String
+    , bookshelfNames : List String
     , snippet : String
     }
 
@@ -858,32 +867,48 @@ no label fields.
 -}
 collectionHit : String -> Book -> TestHit
 collectionHit bookshelfName book =
-    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName, snippet = "" }
+    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName, bookshelfNames = [ bookshelfName ], snippet = "" }
+
+
+{-| A collection hit sitting on SEVERAL of the viewer's bookshelves — a
+legal state. `bookshelf_name` carries the first, exactly as the backend emits it
+for wire compatibility; `bookshelf_names` carries them all.
+-}
+multiShelfCollectionHit : List String -> Book -> TestHit
+multiShelfCollectionHit names book =
+    { book = book
+    , source = ""
+    , ownerHandle = ""
+    , price = ""
+    , bookshelfName = Maybe.withDefault "" (List.head names)
+    , bookshelfNames = names
+    , snippet = ""
+    }
 
 
 {-| A plain platform hit: a platform-visible book with no discoverable label.
 -}
 plainPlatformHit : Book -> TestHit
 plainPlatformHit book =
-    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = "", snippet = "" }
+    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = "", bookshelfNames = [], snippet = "" }
 
 
 {-| An always-visible looking-for-home platform hit, carrying the owner handle.
 -}
 lookingForHomeHit : String -> Book -> TestHit
 lookingForHomeHit ownerHandle book =
-    { book = book, source = "looking_for_home", ownerHandle = ownerHandle, price = "", bookshelfName = "", snippet = "" }
+    { book = book, source = "looking_for_home", ownerHandle = ownerHandle, price = "", bookshelfName = "", bookshelfNames = [], snippet = "" }
 
 
 {-| An active-listing platform hit, carrying the seller handle and formatted price.
 -}
 listedHit : String -> String -> Book -> TestHit
 listedHit ownerHandle price book =
-    { book = book, source = "listed", ownerHandle = ownerHandle, price = price, bookshelfName = "", snippet = "" }
+    { book = book, source = "listed", ownerHandle = ownerHandle, price = price, bookshelfName = "", bookshelfNames = [], snippet = "" }
 
 
 {-| Attach a deep-search snippet (a `ts_headline` `<mark>` excerpt) to any hit —
-the wire signal that the match was on the description/review, not the title (#284).
+the wire signal that the match was on the description/review, not the title.
 -}
 withSnippet : String -> TestHit -> TestHit
 withSnippet snippet hit =
@@ -913,6 +938,7 @@ encodeSearchHit hit =
         , ( "owner_handle", Encode.string hit.ownerHandle )
         , ( "price", Encode.string hit.price )
         , ( "bookshelf_name", Encode.string hit.bookshelfName )
+        , ( "bookshelf_names", Encode.list Encode.string hit.bookshelfNames )
         , ( "snippet", Encode.string hit.snippet )
         ]
 
@@ -943,8 +969,7 @@ sectionedResponseJson collection platform =
 The generic fixtures aren't tied to the viewer, so they land in the PLATFORM
 section as plain (source "") hits — rendered as bare rows, the pre-sectioning
 behaviour these existing tests assert. Every simulated book-search response goes
-through the sectioned builder so the mirror can't drift from the real wire shape
-(#285/#292).
+through the sectioned builder so the mirror can't drift from the real wire shape.
 
 -}
 searchResponseJson : List Book -> String

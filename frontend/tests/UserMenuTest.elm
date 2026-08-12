@@ -3,10 +3,11 @@ module UserMenuTest exposing (suite)
 {-| Unit tests for Components.UserMenu — the authenticated account dropdown.
 
 Covers Toggle (open/close), Close, SignOutClicked → SignOut OutMsg,
-SettingsClicked → NavigateToSettings, and the rendered dropdown contents.
-The Main.elm SignOut wiring (auth cleared, clearAuth port, navigate to /login)
-and the non-blocking LogoutCompleted no-op are exercised at the Main level,
-which cannot be unit-tested here because it owns a Browser.Navigation.Key.
+NavigateClicked → NavigateTo OutMsg, and the rendered dropdown contents (the
+settings family + Sign Out, TR-1). The Main.elm SignOut wiring (auth
+cleared, clearAuth port, navigate to /login) and the non-blocking logout result
+no-op (FocusResult) are exercised at the Main level, which cannot be
+unit-tested here because it owns a Browser.Navigation.Key.
 
 -}
 
@@ -30,6 +31,16 @@ testUser =
     , consentAnalytics = False
     , consentWritingAssistant = False
     }
+
+
+{-| A representative settings family, the way Main passes it in.
+-}
+sampleLinks : List UserMenu.SettingsLink
+sampleLinks =
+    [ { label = "Profile", path = "/settings/profile" }
+    , { label = "Privacy", path = "/settings/privacy" }
+    , { label = "Notifications", path = "/settings/notifications" }
+    ]
 
 
 openMenu : UserMenu.Model
@@ -78,34 +89,43 @@ suite =
                     in
                     model.open |> Expect.equal False
             ]
-        , describe "SettingsClicked"
-            [ test "SettingsClicked emits NavigateToSettings" <|
+        , describe "NavigateClicked (settings family, TR-1)"
+            [ test "NavigateClicked emits NavigateTo carrying the clicked path" <|
                 \() ->
-                    Tuple.second (UserMenu.update SettingsClicked UserMenu.init)
-                        |> Expect.equal NavigateToSettings
+                    Tuple.second (UserMenu.update (NavigateClicked "/settings/privacy") UserMenu.init)
+                        |> Expect.equal (NavigateTo "/settings/privacy")
+            , test "NavigateClicked closes the menu" <|
+                \() ->
+                    let
+                        ( model, _ ) =
+                            UserMenu.update (NavigateClicked "/settings/privacy") openMenu
+                    in
+                    model.open |> Expect.equal False
             ]
         , describe "view"
             [ test "closed menu shows the display name trigger" <|
                 \() ->
-                    UserMenu.view testUser UserMenu.init
+                    UserMenu.view testUser sampleLinks UserMenu.init
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "A Reader" ]
             , test "closed menu does not render the dropdown items" <|
                 \() ->
-                    UserMenu.view testUser UserMenu.init
+                    UserMenu.view testUser sampleLinks UserMenu.init
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.text "Sign Out" ]
-            , test "open menu renders Settings and Sign Out" <|
+            , test "open menu renders the settings family and Sign Out" <|
                 \() ->
-                    UserMenu.view testUser openMenu
+                    UserMenu.view testUser sampleLinks openMenu
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Settings" ]
+                            [ Query.has [ Selector.text "Profile" ]
+                            , Query.has [ Selector.text "Privacy" ]
+                            , Query.has [ Selector.text "Notifications" ]
                             , Query.has [ Selector.text "Sign Out" ]
                             ]
             , test "open menu renders a click-outside backdrop" <|
                 \() ->
-                    UserMenu.view testUser openMenu
+                    UserMenu.view testUser sampleLinks openMenu
                         |> Query.fromHtml
                         |> Query.has [ Selector.class "user-menu__backdrop" ]
             ]

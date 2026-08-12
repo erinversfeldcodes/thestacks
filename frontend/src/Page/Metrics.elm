@@ -6,13 +6,12 @@ module Page.Metrics exposing
     , view
     )
 
-{-| The public, unauthenticated transparency page (`/metrics`, Issue #235).
+{-| The public, unauthenticated transparency page (`/metrics`,).
 
-Renders the curated #241 payload — live ops signals and durable anonymised
+Renders the curated payload — live ops signals and durable anonymised
 aggregates — each panel showing its value plus a teaching expander with the
-plain-language _what / how / why_ (the public analogue of the #233
-self-explanatory-dashboard standard). A featured costs widget makes the
-platform-cost figure the flagship example (ADR-019), and the "what we observe"
+plain-language _what / how / why_ (the public analogue of the self-explanatory-dashboard standard). A featured costs widget makes the
+platform-cost figure the flagship example, and the "what we observe"
 area links one hop to the GDPR data-rights surfaces.
 
 No new backend: this consumes `Api.getTransparencyMetrics` only. It renders
@@ -29,10 +28,6 @@ import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
 
-
--- MODEL
-
-
 type alias Model =
     { metrics : RemoteData Http.Error TransparencyMetrics
     }
@@ -43,10 +38,6 @@ init =
     ( { metrics = Loading }
     , Api.getTransparencyMetrics MetricsReceived
     )
-
-
-
--- UPDATE
 
 
 type Msg
@@ -60,10 +51,6 @@ update msg model =
             ( { model | metrics = Types.RemoteData.fromResult result }
             , Cmd.none
             )
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg
@@ -99,10 +86,6 @@ viewMetrics metrics =
         ]
 
 
-
--- COSTS WIDGET (ADR-019 flagship)
-
-
 viewCostsWidget : List TransparencyEntry -> Html Msg
 viewCostsWidget durable =
     let
@@ -128,10 +111,6 @@ viewCostsWidget durable =
             text ""
 
 
-
--- LIVE SIGNALS
-
-
 viewLiveSection : LiveSignals -> Html Msg
 viewLiveSection live =
     section [ class "metrics__section metrics__section--live", testId "metrics-live-section" ]
@@ -148,10 +127,6 @@ viewLiveSection live =
         ]
 
 
-
--- DURABLE AGGREGATES
-
-
 viewDurableSection : List TransparencyEntry -> Html Msg
 viewDurableSection durable =
     section [ class "metrics__section metrics__section--durable", testId "metrics-durable-section" ]
@@ -160,10 +135,6 @@ viewDurableSection durable =
             [ text "Anonymised corpus and cost totals — always aggregates, never a single reader." ]
         , div [ class "metrics__grid" ] (List.map viewPanel durable)
         ]
-
-
-
--- ONE PANEL + ITS TEACHING TOOLTIP/EXPANDER
 
 
 viewPanel : TransparencyEntry -> Html Msg
@@ -192,10 +163,6 @@ viewTeaching entry =
         , p [ class "metrics__teaching-why" ]
             [ span [ class "metrics__teaching-label" ] [ text "Why: " ], text entry.why ]
         ]
-
-
-
--- WHAT WE OBSERVE / DATA RIGHTS
 
 
 viewObserveSection : Html Msg
@@ -227,17 +194,13 @@ viewObserveSection =
         ]
 
 
-{-| The public, read-only Grafana instance (ADR-021 / #254) — a single fixed
+{-| The public, read-only Grafana instance — a single fixed
 public URL, so it is a constant rather than server-config. Anonymous access; the
 metrics store behind it is never exposed (Grafana proxies queries server-side).
 -}
 grafanaUrl : String
 grafanaUrl =
     "https://thestacks-grafana.fly.dev"
-
-
-
--- VALUE FORMATTING
 
 
 formatValue : TransparencyEntry -> String

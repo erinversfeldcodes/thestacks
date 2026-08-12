@@ -1,35 +1,3 @@
-# Offline eval corpus for `mix eval.resolver`.
-#
-# Each entry replays ONE recorded production resolution through the real
-# pick logic (`Stacks.Books.CandidateScorer.pick_best/3` — the same seam
-# `ISBNResolver.pick_best_candidate/3` calls). No network: `signals` are
-# verbatim VLM outputs from production logs (chore/enable-pipelines
-# preview sessions, June–July 2026) and `candidates` are the upstream
-# OL/GB docs AS OUR PARSERS SEE THEM POST-PARSE (the metadata maps built
-# by `build_ol_metadata/3` / `parse_google_books_search_item/3`:
-# `:title`, `:subtitle`, `:author`, `:subjects`, `:source`).
-#
-# Format — a plain Elixir list of maps (.exs rather than JSON so
-# `:not_found` / `nil` / atom keys round-trip without a decoder shim):
-#
-#   %{
-#     id: "unique_string",
-#     description: "what production failure this pins",
-#     signals: %{title: ..., author: ..., raw_text: ...},
-#     candidates: [%{isbn: "...", meta: %{...}}, ...],
-#     expected: "isbn13" | :not_found,
-#     known_failure: true | false   # xfail: documented-open, does not fail the run
-#   }
-#
-# `known_failure: true` marks entries the CURRENT default configuration
-# is known to get wrong — they print as XFAIL and don't fail the exit
-# code, so the harness stays usable as a regression gate while the open
-# tuning questions remain visible. An entry that STARTS passing prints
-# XPASS as a prompt to drop the flag.
-
-# The four real Open Library docs returned for title="The Crystal City"
-# (verified against the live API 2026-06-10; OL search docs carry
-# subtitle: nil throughout — disambiguation must come from subjects).
 crystal_city_ol_docs = [
   %{
     isbn: "9781429964500",
@@ -85,9 +53,6 @@ crystal_city_ol_docs = [
   }
 ]
 
-# Junk OL record observed in the July "Tramp's Crystal City" sessions:
-# no author, no subjects, garbage title suffix — its ISBN-10 was picked
-# and poisoned the 24h TitleSearchCache.
 crystal_city_junk_doc = %{
   isbn: "0812444647",
   meta: %{

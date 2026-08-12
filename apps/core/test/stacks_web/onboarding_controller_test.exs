@@ -1,9 +1,9 @@
 defmodule StacksWeb.OnboardingControllerTest do
   @moduledoc """
-  Tests for:
-  - GET  /api/onboarding/status
-  - PUT  /api/onboarding/step/:step
-  - POST /api/onboarding/reset
+      Tests for:
+      - GET  /api/onboarding/status
+      - PUT  /api/onboarding/step/:step
+      - POST /api/onboarding/reset
   """
 
   use CoreWeb.ConnCase, async: true
@@ -16,10 +16,6 @@ defmodule StacksWeb.OnboardingControllerTest do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/onboarding/status
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/onboarding/status — status" do
     test "returns all steps false for a fresh user", %{conn: conn} do
@@ -68,10 +64,6 @@ defmodule StacksWeb.OnboardingControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/onboarding/step/:step
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/onboarding/step/:step — complete_step" do
     test "marks profile step as complete", %{conn: conn} do
       user = insert(:user)
@@ -82,7 +74,6 @@ defmodule StacksWeb.OnboardingControllerTest do
       assert body["next_step"] == "privacy"
     end
 
-    # The self-declared age step was removed (ADR-020) — it is now rejected.
     test "age_verification step is rejected as invalid", %{conn: conn} do
       user = insert(:user, onboarding_steps: %{"profile" => true})
       conn = conn |> auth_conn(user) |> put("/api/onboarding/step/age_verification")
@@ -129,10 +120,6 @@ defmodule StacksWeb.OnboardingControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/onboarding/reset
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/onboarding/reset — reset" do
     test "resets all steps to false", %{conn: conn} do
       user =
@@ -157,10 +144,6 @@ defmodule StacksWeb.OnboardingControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/auth/me — onboarding fields
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/auth/me — onboarding fields" do
     test "includes onboarding_completed and next_onboarding_step", %{conn: conn} do

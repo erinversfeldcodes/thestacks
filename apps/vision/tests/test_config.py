@@ -41,11 +41,6 @@ def test_test_environment_skips_validation() -> None:
 
 def test_effective_core_api_url_falls_back_to_core_url_in_dev() -> None:
     """In non-production environments the fallback property still works."""
-    # `validate_secrets` only short-circuits insecure-default checks when
-    # environment == "test". In "development" mode it still rejects
-    # empty/placeholder secrets — pass a real-looking value so the
-    # validator's actual interest (the URL-fallback property below) is
-    # what gets exercised.
     s = Settings.model_validate(
         {
             "environment": "development",

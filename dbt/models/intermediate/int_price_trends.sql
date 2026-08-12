@@ -3,6 +3,8 @@
 select
     ps.id,
     ps.book_id,
+    ps.book_edition_id,
+    be.isbn,
     ps.store_id,
     bs.name as store_name,
     bs.country_code as store_country_code,
@@ -12,9 +14,11 @@ select
     ps.url,
     ps.scraped_at,
     row_number() over (
-        partition by ps.book_id, ps.store_id
+        partition by ps.book_edition_id, ps.store_id
         order by ps.scraped_at desc
     ) as recency_rank
 from {{ source('op', 'price_snapshots') }} as ps
 left join {{ source('op', 'bookstores') }} as bs
     on ps.store_id = bs.id
+left join {{ source('op', 'book_editions') }} as be
+    on ps.book_edition_id = be.id

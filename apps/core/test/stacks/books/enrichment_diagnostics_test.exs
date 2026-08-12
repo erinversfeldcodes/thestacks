@@ -1,24 +1,10 @@
 defmodule Stacks.Books.EnrichmentDiagnosticsTest do
   @moduledoc """
-  Diagnostic tests for the EnrichBookJob / ISBNResolver path.
-
-  Each test reproduces one of four failure modes that have been
-  observed (or hypothesised) for the
-  `upload.spec.ts:12 — identifies The Name of the Rose from barcode_isbn_clean.jpg`
-  E2E test, and asserts the Tier-2 telemetry events fire so the
-  signature of any future failure is in the logs.
-
-  | # | Scenario                         | Fingerprint                                                                 |
-  |---|----------------------------------|-----------------------------------------------------------------------------|
-  | 1 | Negative cache poison            | `[:stacks, :isbn_resolver_cache, :negative_stored]` → repeated `:not_found` |
-  | 2 | OL + GB fuses both blown         | `[:stacks, :enrichment, :resolver, :outcome]` outcome=`:circuit_open`       |
-  | 3 | Transport storm exhausts retries | `[:stacks, :enrichment, :resolver, :outcome]` outcome=`:transport_error` ×5 |
-  | 4 | apply_metadata edge cases        | Worker never raises — graceful `:ok` / `{:error, _}` on every input         |
-
-  `async: false` because each test mutates global Application env
-  (cache toggle, HTTP client) and global fuse / ETS state. Setup/
-  teardown in each describe block keeps them isolated; running them
-  in parallel would race on the cache toggle.
+      Diagnostics for the EnrichBookJob/ISBNResolver path: reproduces four
+      observed/hypothesised failure modes of the barcode-upload E2E and
+      asserts the Tier-2 telemetry fires for each, so any future failure
+      leaves its fingerprint in the logs (cache-poisoned negative, provider
+      outage, fuse open, placeholder-never-enriched).
   """
 
   use Core.DataCase, async: false
@@ -31,10 +17,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
   alias Stacks.Books.MockHttpClient
   alias Stacks.CircuitBreakers
   alias Stacks.Workers.EnrichBookJob
-
-  # ---------------------------------------------------------------------------
-  # Telemetry helpers (mirror the pattern in circuit_breakers_test.exs)
-  # ---------------------------------------------------------------------------
 
   defp attach_telemetry(events) do
     test_pid = self()
@@ -53,8 +35,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     handler_id
   end
 
-  # Drain any events still buffered in the test process mailbox. Returns
-  # the list in arrival order (FIFO).
   defp drain_telemetry, do: drain_telemetry([])
 
   defp drain_telemetry(acc) do
@@ -65,13 +45,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       0 -> Enum.reverse(acc)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Counting HTTP client — wraps MockHttpClient but bumps a per-test
-  # counter stored under the test process. Used in Scenario 1 to prove
-  # the resolver short-circuits at the cache layer without hitting the
-  # network.
-  # ---------------------------------------------------------------------------
 
   defmodule CountingMockHttpClient do
     @moduledoc false
@@ -86,8 +59,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     end
 
     def bump_count do
-      # Walk $callers so the bump is visible to the test process even
-      # when the resolver spawns parallel tasks (race_resolve).
       pid = find_test_owner(Process.get(:"$callers", [self()]))
       :counters.add(counter_for(pid), 1, 1)
     end
@@ -114,23 +85,12 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       end
     end
 
-    # The counter lives under the topmost ancestor that owns the test
-    # — that way Task.async children share the same counter via $callers.
     defp find_test_owner([]), do: self()
     defp find_test_owner([pid | _]), do: pid
   end
 
-  # ---------------------------------------------------------------------------
-  # Tier 2 telemetry — direct assertions on the new events
-  # ---------------------------------------------------------------------------
-
   describe "Tier 2 telemetry — [:stacks, :enrichment, :resolver, :outcome]" do
     setup do
-      # Other diagnostic scenarios in this file blow the OL/GB fuses on
-      # purpose; if their cleanup doesn't run first (test ordering is
-      # arbitrary), the resolver short-circuits to `:circuit_open` here.
-      # Reset both fuses defensively so the closed-set atom under test
-      # is what actually reaches `outcome_tag/1`.
       :fuse.reset(:open_library_fuse)
       :fuse.reset(:google_books_fuse)
       attach_telemetry([[:stacks, :enrichment, :resolver, :outcome]])
@@ -184,13 +144,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
                       %{isbn: ^isbn, outcome: :not_found, source: nil}}
     end
 
-    # One test per HttpClientBehaviour.error_reason() atom. Each one
-    # arranges both upstreams to return the same closed-set error so
-    # `await_first_success/2` propagates that exact atom — the worker
-    # then tags it through `outcome_tag/1`. We also assert the cache is
-    # not poisoned: only `:not_found` is allowed to memoise into the
-    # negative cache; transient transport-class errors must remain
-    # retryable.
     test "emits outcome=:unexpected_status when both upstreams return 5xx" do
       isbn = "9780000000026"
 
@@ -292,7 +245,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       assert_receive {:telemetry, [:stacks, :isbn_resolver_cache, :negative_stored],
                       %{count: 1, ttl_ms: ttl_ms}, %{isbn: ^isbn}}
 
-      # Cross-check with the documented TTL (1 h = 3_600_000 ms).
       assert ttl_ms == 60 * 60 * 1000
     end
 
@@ -313,25 +265,14 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Scenario 1 — Negative cache poisons subsequent legitimate calls
-  # ---------------------------------------------------------------------------
-
   describe "Scenario 1 — negative cache poison" do
     setup do
-      # Cache is normally disabled in test.exs; flip it on for this scope
-      # so we exercise the same code path as production. Use the counting
-      # HTTP client to prove the cache hit short-circuits before any
-      # network call would be made.
       original_cache = Application.get_env(:core, :isbn_resolver_cache_enabled)
       original_client = Application.get_env(:core, :isbn_http_client)
 
       Application.put_env(:core, :isbn_resolver_cache_enabled, true)
       Application.put_env(:core, :isbn_http_client, CountingMockHttpClient)
 
-      # Defensive fuse reset — other diagnostic scenarios blow these on
-      # purpose; if their cleanup didn't run first, this test would see
-      # `:circuit_open` instead of the cached `:not_found` it expects.
       :fuse.reset(:open_library_fuse)
       :fuse.reset(:google_books_fuse)
 
@@ -356,14 +297,11 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     test "negative cache hit blocks subsequent legitimate calls within TTL" do
       isbn = "9780156001311"
 
-      # Plant the poison.
       assert :ok = ISBNResolverCache.put(isbn, {:error, :not_found})
 
       assert_receive {:telemetry, [:stacks, :isbn_resolver_cache, :negative_stored], %{count: 1},
                       %{isbn: ^isbn}}
 
-      # Configure the mock to return a real book — if the resolver
-      # bypassed the cache and made a network call, it would succeed.
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -378,11 +316,8 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
 
       CountingMockHttpClient.reset()
 
-      # Cached negative wins.
       assert {:error, :not_found} = ISBNResolver.resolve(isbn)
 
-      # Critical: the cache short-circuited *before* the network layer.
-      # If this assertion ever fails, the cache contract has changed.
       assert CountingMockHttpClient.count() == 0,
              "resolver hit the network despite a cached negative entry"
     end
@@ -391,15 +326,9 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     test "negative cache entry expires after the 1h TTL" do
       isbn = "9780156001311"
 
-      # Plant a poison entry with a back-dated expires_at — past the
-      # current monotonic clock so the next read treats it as expired.
-      # We reach into ETS directly because the cache GenServer has no
-      # public "insert with custom TTL" surface (intentionally — that'd
-      # be a footgun in production).
       expired_at = System.monotonic_time(:millisecond) - 1
       :ets.insert(:isbn_resolver_cache, {isbn, {:error, :not_found}, expired_at})
 
-      # Mock returns a real book.
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -415,29 +344,18 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       CountingMockHttpClient.reset()
 
       assert {:ok, %{title: "The Name of the Rose"}} = ISBNResolver.resolve(isbn)
-      # Expired entry → resolver had to fetch.
       assert CountingMockHttpClient.count() >= 1
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Scenario 2 — OL + GB fuses both blown
-  # ---------------------------------------------------------------------------
-
   describe "Scenario 2 — circuit breaker open" do
     setup do
-      # Pre-emptively reset & remove production fuses, then re-install
-      # under our local threshold so we don't need to fire 5 melts per
-      # fuse just to set up. After teardown CircuitBreakers.install_all()
-      # restores the prod specs.
       :fuse.remove(:open_library_fuse)
       :fuse.remove(:google_books_fuse)
 
-      # threshold=1: blows on the 2nd melt (melt_count > 1)
       :fuse.install(:open_library_fuse, {{:standard, 1, 60_000}, {:reset, 60_000}})
       :fuse.install(:google_books_fuse, {{:standard, 1, 60_000}, {:reset, 60_000}})
 
-      # Pop them both straight to :blown.
       :fuse.melt(:open_library_fuse)
       :fuse.melt(:open_library_fuse)
       :fuse.melt(:google_books_fuse)
@@ -453,7 +371,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
         :fuse.reset(:open_library_fuse)
         :fuse.reset(:google_books_fuse)
         ISBNResolverCache.invalidate_all()
-        # Restore the production fuse specs for subsequent test modules.
         CircuitBreakers.install_all()
       end)
 
@@ -471,9 +388,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
           "visibility_tier" => "public"
         })
 
-      # Enable the cache for THIS test so we can assert on `get/1` after
-      # the resolver returns. Disable again in on_exit to avoid leaking
-      # into Scenarios 3/4.
       original = Application.get_env(:core, :isbn_resolver_cache_enabled)
       Application.put_env(:core, :isbn_resolver_cache_enabled, true)
       on_exit(fn -> Application.put_env(:core, :isbn_resolver_cache_enabled, original) end)
@@ -481,9 +395,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       result = perform_job(EnrichBookJob, %{"isbn" => isbn})
       assert {:error, :circuit_open} = result
 
-      # Critical: a circuit-open result must NOT be memoised. The fuse
-      # itself is the retry signal — caching :circuit_open would stall
-      # recovery long after the fuse resets.
       assert :miss = ISBNResolverCache.get(isbn)
 
       assert_receive {:telemetry, [:stacks, :enrichment, :resolver, :outcome], %{count: 1},
@@ -491,29 +402,13 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Scenario 3 — 5xx storm exhausts retries
-  # ---------------------------------------------------------------------------
-
   describe "Scenario 3 — 5xx storm" do
     setup do
       original_client = Application.get_env(:core, :isbn_http_client)
-      # FailingHttpClient returns {:error, :transport_error} for every
-      # URL — the resolver melts both fuses on the transport error and
-      # propagates the last error (`:transport_error`) once both races
-      # fail. This models the Fly.io regional outage that motivated the
-      # diagnostic suite: every upstream lookup transport-fails, but the
-      # closed-set surface now distinguishes the three failure flavours
-      # the operator cares about (`:transport_error` vs `:timeout` vs
-      # `:unexpected_status`) instead of collapsing them to
-      # `:other_error`.
       Application.put_env(:core, :isbn_http_client, Stacks.Testing.FailingHttpClient)
 
       ISBNResolverCache.invalidate_all()
 
-      # Make sure the fuses start closed for this scope so the resolver
-      # actually attempts the (failing) HTTP call — we want the
-      # transport error path, not the circuit-open path.
       :fuse.reset(:open_library_fuse)
       :fuse.reset(:google_books_fuse)
 
@@ -541,27 +436,12 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
           "visibility_tier" => "public"
         })
 
-      # Simulate Oban's max_attempts loop: invoke the worker 5 times,
-      # asserting each attempt fails. With FailingHttpClient returning
-      # `:transport_error` on every URL, `await_first_success/2`
-      # propagates that closed-set atom as the last error seen — but
-      # the cache is NOT poisoned because the cache layer is disabled
-      # in test.exs, AND because in production a true storm typically
-      # melts the fuses long before any single attempt reaches a
-      # terminal `:not_found`.
       for _ <- 1..5 do
-        # Reset fuses each iteration so we keep observing
-        # `:transport_error` rather than slipping into `:circuit_open`.
-        # In production each Oban retry is a fresh process with the
-        # fuse state shared globally — this loop models the "retry
-        # while the storm is ongoing" half of the bug.
         :fuse.reset(:open_library_fuse)
         :fuse.reset(:google_books_fuse)
         assert {:error, _} = perform_job(EnrichBookJob, %{"isbn" => isbn})
       end
 
-      # Cache must remain clean — we never want a transport error
-      # masquerading as a permanent :not_found via the cache layer.
       assert :miss = ISBNResolverCache.get(isbn)
 
       events = drain_telemetry()
@@ -569,11 +449,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       outcomes =
         for {[:stacks, :enrichment, :resolver, :outcome], _, %{outcome: o}} <- events, do: o
 
-      # Every attempt should be a non-`:circuit_open`, non-`:ok` error.
-      # The exact tag depends on whether the in-band melt tips the fuse
-      # mid-attempt: either way we want one of the closed-set transport
-      # tags or `:not_found` — never `:ok` (the smoking-gun positive
-      # case) and never the long-gone `:other_error`.
       assert length(outcomes) == 5
 
       assert Enum.all?(
@@ -595,15 +470,12 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
           "visibility_tier" => "public"
         })
 
-      # Exhaust the retries during the storm.
       for _ <- 1..5 do
         :fuse.reset(:open_library_fuse)
         :fuse.reset(:google_books_fuse)
         assert {:error, _} = perform_job(EnrichBookJob, %{"isbn" => isbn})
       end
 
-      # Storm clears: swap the HTTP client back to the mock, then
-      # serve a real OL response.
       Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
       :fuse.reset(:open_library_fuse)
       :fuse.reset(:google_books_fuse)
@@ -620,8 +492,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
          }}
       )
 
-      # Drop events buffered from the storm half so the assert_receive
-      # below targets the recovering call only.
       _ = drain_telemetry()
 
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
@@ -634,21 +504,7 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Scenario 4 — apply_metadata edge cases. We exercise the public
-  # `perform/1` path with mocked OL responses carrying each weird
-  # payload. The contract is: NEVER raise. The result may be `:ok`
-  # (changeset accepted, even if partially) or `{:error, _}` (graceful
-  # failure) — but a raise is a process-leaking bug.
-  # ---------------------------------------------------------------------------
-
   describe "Scenario 4 — apply_metadata edge cases" do
-    # Each fixture is `{label, ol_response_overrides}`. We merge against
-    # a baseline so the response always parses as an Open Library hit.
-    # The baseline plus each override is what `parse_open_library/2`
-    # turns into the metadata map that flows into `apply_metadata/2`.
-    #
-    # Cases that PASS today (worker is graceful for these inputs):
     @edge_cases_passing [
       {"very long title (>1000 chars)", %{"title" => String.duplicate("a", 1100)}},
       {"unicode + emoji", %{"title" => "Le Café 📚 — Eco's Library"}},
@@ -658,16 +514,7 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       {"future publication_year", %{"publish_date" => "99999"}}
     ]
 
-    # Cases that EXPOSE pre-existing bugs in the resolver/worker. We
-    # keep the fixtures here as documentation + as a regression hook —
-    # mark `@tag :pending_apply_metadata_hardening` so they're excluded
-    # from default `mix test` but visible via `mix test --include
-    # pending_apply_metadata_hardening`. The Pre-Implementation Flags
-    # in the completion report enumerate the underlying bugs.
     @edge_cases_pending [
-      # ISBNResolver.parse_open_library/2 calls Enum.map_join on
-      # `book_data["authors"]` without nil-guarding — raises
-      # Protocol.UndefinedError when OL returns `"authors": null`.
       {"missing optional keys",
        %{
          "title" => "Bare Minimum",
@@ -677,25 +524,12 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
          "cover" => nil,
          "publishers" => nil
        }},
-      # apply_metadata uses Repo.update! — a non-integer page_count
-      # turns the edition changeset invalid, and the bang variant
-      # raises Ecto.InvalidChangesetError instead of returning :error.
       {"non-integer page_count (binary)", %{"number_of_pages" => "lots"}},
-      # title=nil falls back to existing placeholder ("ISBN ...") so
-      # no raise — but title="" passes through, fails validate_required
-      # on book_changeset, and update! raises.
       {"empty title", %{"title" => ""}},
-      # title=nil is the easy path (existing title is preserved by the
-      # `||` fallback in update_book/2) so this one actually PASSES.
-      # We list it under pending only for symmetry with the brief —
-      # keep it in passing if it works in practice; flip if it ever
-      # regresses.
       {"nil title", %{"title" => nil}}
     ]
 
     setup do
-      # Tier-2 telemetry should still fire on these — we check it as a
-      # secondary signal, but the primary assertion is "did not raise".
       attach_telemetry([[:stacks, :enrichment, :resolver, :outcome]])
       :ok
     end
@@ -746,15 +580,9 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
           )
       end
 
-    # Either tidy success or tidy failure is acceptable. A bare
-    # `:ok` atom and `{:ok, _}` and `{:error, _}` all count.
     assert match?(:ok, result) or match?({:ok, _}, result) or match?({:error, _}, result),
            "unexpected return for #{label}: #{inspect(result)}"
   end
-
-  # ---------------------------------------------------------------------------
-  # Fixture helpers
-  # ---------------------------------------------------------------------------
 
   defp base_ol_payload do
     %{
@@ -768,11 +596,6 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
     }
   end
 
-  # Generate a unique, checksum-valid ISBN-13 starting with 97801560
-  # (Harcourt — Name of the Rose's publisher, mirrors the E2E ISBN
-  # 9780156001311). 12 payload digits + 1 checksum = 13 total. We use
-  # an 8-char prefix + 4-digit unique-integer suffix = 12 payload
-  # digits.
   defp unique_isbn do
     n = System.unique_integer([:positive])
     suffix = String.pad_leading(Integer.to_string(rem(n, 10_000)), 4, "0")

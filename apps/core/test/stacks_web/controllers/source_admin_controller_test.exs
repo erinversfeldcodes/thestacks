@@ -1,6 +1,6 @@
 defmodule StacksWeb.SourceAdminControllerTest do
   @moduledoc """
-  Tests for the source approval admin API endpoints.
+      Tests for the source approval admin API endpoints.
   """
 
   use CoreWeb.ConnCase, async: false

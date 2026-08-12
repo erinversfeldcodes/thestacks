@@ -1,24 +1,10 @@
 defmodule Core.PromEx.DashboardDriftTest do
   @moduledoc """
-  Drift guard for the moderation + age-gate dashboard-as-code (Issue #230).
-
-  The dashboard JSON checked into `apps/core/priv/grafana/` visualises the
-  #228 moderation-funnel and age-gate counters. This test proves the
-  dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **no longer registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a #228 moderation/age-gate metric family with **no panel** (an
-      invisible metric).
-
-  The registered names are read from the plugin at runtime (never
-  hard-coded) so this test cannot itself drift: the exported Prometheus
-  family name for a `Telemetry.Metrics` metric is its `name` list joined by
-  `_` (see TelemetryMetricsPrometheus.Core.Exporter.format_name/1), which
-  is exactly how the plugin's `[:stacks, :moderation, :classification,
-  :count, :total]` becomes `stacks_moderation_classification_count_total`.
+      Drift guard for the moderation + age-gate dashboard-as-code (230; priv/grafana):
+      panels may only query metric families registered by
+      `Core.PromEx.Plugins.Stacks`, and every registered 228 moderation/age-gate family must have
+      a panel. Either direction of drift — a renamed metric silently blanking
+      a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true
@@ -27,14 +13,11 @@ defmodule Core.PromEx.DashboardDriftTest do
 
   @dashboard_relative_path "grafana/moderation_agegate.json"
 
-  # #228 families live under these Prometheus name prefixes.
   @issue_228_prefixes ["stacks_moderation_", "stacks_age_gate_", "stacks_age_verification_"]
 
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -42,8 +25,6 @@ defmodule Core.PromEx.DashboardDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel ->
       [panel | all_panels(panel)]
@@ -52,7 +33,6 @@ defmodule Core.PromEx.DashboardDriftTest do
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -63,7 +43,6 @@ defmodule Core.PromEx.DashboardDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],
@@ -109,7 +88,7 @@ defmodule Core.PromEx.DashboardDriftTest do
     end
   end
 
-  describe "drift: every #228 moderation/age-gate metric has a panel" do
+  describe "drift: every moderation/age-gate metric has a panel" do
     test "each registered moderation/age-gate family is queried by at least one panel" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())
@@ -121,8 +100,6 @@ defmodule Core.PromEx.DashboardDriftTest do
         end)
         |> MapSet.new()
 
-      # Sanity: the six #228 families are actually registered (guards against
-      # the plugin being gutted without this test noticing).
       assert MapSet.size(issue_228) == 6,
              "expected 6 registered #228 moderation/age-gate families, found: " <>
                inspect(MapSet.to_list(issue_228))

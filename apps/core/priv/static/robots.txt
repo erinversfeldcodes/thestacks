@@ -1,6 +1,82 @@
+# robots.txt — the served policy for the public site.
+#
+# NOTE: this is NOT the same document as the `robots.txt` and `ai.txt` at the
+# repository root. Those declare that the *source code* is not licensed for AI
+# training (see LICENSE). This file is the *website's* crawl policy, and it is
+# the only one Plug.Static serves — see `only:` in CoreWeb.Endpoint.
+#
+# Covered by `robots_txt_test.exs`, which asserts against the served response
+# rather than this file, because "wrong file served" is invisible from here.
+
+# ── Search engines: index public pages, never user-scoped ones ───────────────
+# `/u/`, `/shelf/` and `/post/` are user-authored and user-identifying. Keeping
+# them out of search results is a privacy commitment (US-10.4.1), not SEO.
 User-agent: *
 Disallow: /api/
 Disallow: /u/
 Disallow: /shelf/
 Disallow: /post/
 Disallow: /listing/
+
+# ── AI training crawlers: not welcome anywhere on the site ───────────────────
+# The repository-root files opt the source out of AI training. The same applies
+# to the site, and more so: readers write shelf descriptions, reading notes and
+# public profiles here, and they did not publish that to become training data.
+#
+# A `Disallow: /` in its own group fully replaces the `*` group for that agent
+# (RFC 9309 §2.2.1 — the most specific matching group wins outright), so these
+# do not need the path list repeated.
+
+# OpenAI
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ChatGPT-User
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+# Google — note this is Google-Extended (training), NOT Googlebot (search).
+# Blocking Googlebot here would deindex the site.
+User-agent: Google-Extended
+Disallow: /
+
+# Anthropic
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+# Cohere
+User-agent: cohere-ai
+Disallow: /
+
+# Common Crawl — used as a training corpus by many pipelines
+User-agent: CCBot
+Disallow: /
+
+# Meta
+User-agent: FacebookBot
+Disallow: /
+
+# Diffbot
+User-agent: Diffbot
+Disallow: /
+
+# ByteDance
+User-agent: Bytespider
+Disallow: /
+
+# Perplexity
+User-agent: PerplexityBot
+Disallow: /
+
+# Imagesift
+User-agent: ImagesiftBot
+Disallow: /
+
+# Omgilibot
+User-agent: Omgilibot
+Disallow: /

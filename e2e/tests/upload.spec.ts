@@ -2,8 +2,6 @@ import path from "path";
 import { test, expect, Page } from "@playwright/test";
 import { suiteAuthFile } from "./helpers";
 
-// The vision pipeline runs classify + extract on VisionModel (H100 GPU) then
-// resolves an ISBN via Open Library. Allow 5 minutes for cold-start + inference.
 const PIPELINE_TIMEOUT = 300_000;
 
 test.use({ storageState: suiteAuthFile("upload") });
@@ -17,7 +15,6 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
   test(
     "identifies The Name of the Rose from barcode_isbn_clean.jpg via local OCR",
     async ({ page }) => {
-      // Extra headroom beyond 240 s SSE wait + 120 s enrichment poll.
       test.setTimeout(390_000);
 
       await page.goto("/upload");
@@ -29,21 +26,17 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
         path.join(__dirname, "../../images/barcode_isbn_clean.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 30_000 }
       );
 
-      // Capture the GET /api/books/:id call Elm makes after SSE resolves so we
-      // can retrieve the book ID and the initial title for fast-path detection.
       const bookResponsePromise = page.waitForResponse(
         (resp) =>
           /\/api\/books\/[^/?]+$/.test(resp.url()) && resp.status() === 200,
         { timeout: 240_000 }
       );
 
-      // Pipeline result: either fresh verify view or "Already in Your Library"
-      // (if the book was placed in a prior run). Both prove the barcode was read.
       const verify = page.getByTestId('upload-verify');
       const duplicate = page.getByText('Already in Your Library');
       await expect(verify.or(duplicate)).toBeVisible({ timeout: 240_000 });
@@ -55,15 +48,10 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
           bookJson.book?.title ?? bookJson.title ?? "";
 
         if (/^ISBN \d{13}$/.test(initialTitle)) {
-          // Barcode OCR fast path: IdentifyBookJob resolves immediately with a
-          // placeholder title while EnrichBookJob fetches real metadata async.
-          // Assert the partial data appears in the verify view first…
           await expect(page.locator(".upload-verify__title")).toContainText(
             initialTitle
           );
 
-          // …then confirm EnrichBookJob updated the record (the verify view
-          // won't re-render once Elm is in Verifying state, so we poll the API).
           await expect
             .poll(
               () =>
@@ -82,20 +70,14 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
             )
             .toMatch(/Name of the Rose/i);
         } else {
-          // Book already existed in DB with enriched title (repeat run).
           expect(initialTitle).toMatch(/Name of the Rose/i);
         }
       } else {
-        // Duplicate path: book was placed in a prior run — title already enriched.
         await expect(page.getByText(/Name of the Rose/i)).toBeVisible();
       }
     }
   );
 });
-
-// ---------------------------------------------------------------------------
-// Non-book rejection (real pipeline)
-// ---------------------------------------------------------------------------
 
 test.describe("Upload pipeline — non-book rejection", () => {
   test(
@@ -112,8 +94,8 @@ test.describe("Upload pipeline — non-book rejection", () => {
         path.join(__dirname, "../../images/not_a_book.jpg")
       );
 
-      await expect(page.getByTestId("upload-loading").locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 30_000 }
       );
 
@@ -131,16 +113,10 @@ test.describe("Upload pipeline — non-book rejection", () => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// ISBN not found via manual entry (real pipeline)
-// ---------------------------------------------------------------------------
-
 test.describe("Upload pipeline — ISBN not found", () => {
   test(
-    "nonexistent ISBN-13 with valid checksum returns Book not found",
+    "nonexistent ISBN-13 with valid checksum is refused by the ISBN hard gate",
     async ({ page }) => {
-      // 9780000000019 has a valid ISBN-13 checksum but does not exist in any
-      // catalogue, so the backend hard gate returns 404 and the UI rejects it.
       test.setTimeout(30_000);
 
       await page.goto("/upload");
@@ -150,22 +126,17 @@ test.describe("Upload pipeline — ISBN not found", () => {
       const isbnInput = page.getByTestId("upload-manual-isbn-input");
       await expect(isbnInput).toBeVisible();
 
-      await isbnInput.fill("9780000000019");
+      await isbnInput.fill("9789991234564");
       await page.getByTestId("upload-manual-isbn-submit").click();
 
-      await expect(page.getByText("Book not found")).toBeVisible({
+      await expect(
+        page.getByText("We couldn't find a book with that ISBN")
+      ).toBeVisible({
         timeout: 15_000,
       });
     }
   );
 });
-
-// ---------------------------------------------------------------------------
-// Duplicate detection (real pipeline)
-// Re-uploads barcode_isbn_clean.jpg after the book has been placed on Library.
-// beforeAll is idempotent: if the book is already placed (duplicate heading
-// appears), setup is skipped.
-// ---------------------------------------------------------------------------
 
 test.describe("Upload pipeline — duplicate detection", () => {
   /** Upload barcode_isbn_clean.jpg and return once "Already in Your Library" is visible. */
@@ -185,8 +156,6 @@ test.describe("Upload pipeline — duplicate detection", () => {
   }
 
   test.beforeAll(async ({ browser }) => {
-    // Place "The Name of the Rose" on the upload user's Library so subsequent
-    // uploads of the same image trigger duplicate detection.
     const context = await browser.newContext({
       storageState: suiteAuthFile("upload"),
     });
@@ -220,7 +189,6 @@ test.describe("Upload pipeline — duplicate detection", () => {
         return; // Already placed from a previous run — setup is done.
       }
 
-      // First run: confirm the book and place it on Library.
       await page.getByTestId("upload-confirm-btn").click();
       await page.getByTestId("upload-shelf-picker").waitFor({ timeout: 10_000 });
       await page.getByRole("button", { name: "Library", exact: true }).click();
@@ -252,7 +220,6 @@ test.describe("Upload pipeline — duplicate detection", () => {
 
       const viewBookLink = page.getByRole("link", { name: "View Book" });
       await expect(viewBookLink).toBeVisible();
-      // Href should be a real /books/:uuid route, not a fake placeholder ID.
       await expect(viewBookLink).toHaveAttribute("href", /\/books\/.+/);
     }
   );
@@ -279,11 +246,6 @@ test.describe("Upload pipeline — duplicate detection", () => {
       const verify = page.getByTestId("upload-verify");
       await expect(verify).toBeVisible({ timeout: 10_000 });
 
-      // The verify view must show the same book. Title enrichment runs
-      // asynchronously via EnrichBookJob; if external APIs (Google Books, OL)
-      // return errors, the book may still have its placeholder title on the
-      // dev/preview stack. Accept either the real title or the ISBN placeholder
-      // — both prove the pipeline routed to the correct book record.
       const verifyText = await verify.textContent();
       const hasRealTitle = /name of the rose/i.test(verifyText ?? "");
       const hasIsbnPlaceholder = /ISBN 978\d{10}/.test(verifyText ?? "");
@@ -295,8 +257,6 @@ test.describe("Upload pipeline — duplicate detection", () => {
     }
   );
 });
-
-// ---------------------------------------------------------------------------
 
 test.describe("Upload pipeline", () => {
   test(
@@ -313,33 +273,23 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mixed_text.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
-      // Wait for any terminal state: multi-book identified, single-book verify,
-      // or error (so we fail fast instead of hanging for 5 minutes on queue issues).
       const identified = page.getByTestId("upload-identified");
       const verify = page.getByTestId("upload-verify");
       const error = page.getByTestId("upload-error");
-      // The real vision pipeline reaches exactly ONE of three mutually-exclusive
-      // terminal states — multi-book identified, single-book verify, or error.
-      // This first assertion always fires (some terminal state must appear); the
-      // conditionals below then branch on which one, and EVERY branch asserts:
-      // error → throw, identified → the five-book checks, else → verify content.
-      // So the conditionality is a genuine either/or, never a silent pass.
       await expect(identified.or(verify).or(error)).toBeVisible({
         timeout: PIPELINE_TIMEOUT,
       });
-      // If error appeared, fail with a useful message.
       // vacuous-guard-check: allow — fail-fast branch of the always-asserted either/or above; absence is handled by the identified/verify branches.
       if ((await error.count()) > 0) {
         const errorText = await error.textContent();
         throw new Error(`Upload pipeline failed: ${errorText}`);
       }
 
-      // If the multi-book identified view rendered, verify all five books.
       // vacuous-guard-check: allow — genuine either/or; the else branch asserts the single-book verify view, so a state is always asserted.
       if ((await identified.count()) > 0) {
         await expect(identified).toContainText("Kite Runner");
@@ -352,11 +302,9 @@ test.describe("Upload pipeline", () => {
         await expect(identified).toContainText("Levy");
         await expect(identified).toContainText("Cost of Living", { ignoreCase: true });
 
-        // Each identified book should have a "View Book" link.
         const viewBookLinks = identified.locator('a[href^="/books/"]');
         await expect(viewBookLinks).toHaveCount(5);
       } else {
-        // Single-book verify view — at least one book was identified.
         await expect(verify).toContainText("We think this is");
       }
     }
@@ -365,12 +313,6 @@ test.describe("Upload pipeline", () => {
   test(
     "identifies Train to Crystal City from screenshot_image_reversed_and_cut_off.jpg",
     async ({ page }) => {
-      // 3 rounds of retry × ~PIPELINE_TIMEOUT each. The retry mirrors the user
-      // clicking "No, try again" — frontend POSTs the cumulative rejected
-      // book_ids to /api/upload/:image_id/reject-identification, which enqueues
-      // a fresh IdentifyBookJob with excluded_books appended to the vision
-      // /analyze prompt. We give up after 3 attempts; the model has had real
-      // user feedback on what *isn't* the book and still can't find it.
       const MAX_ROUNDS = 3;
       test.setTimeout(PIPELINE_TIMEOUT * (MAX_ROUNDS + 1));
 
@@ -383,8 +325,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_image_reversed_and_cut_off.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -406,7 +348,6 @@ test.describe("Upload pipeline", () => {
 
         const text = (await verify.textContent()) ?? "";
         if (matches(text)) {
-          // Success: assert the verify-view content the original test asserted.
           await expect(verify).toContainText("We think this is");
           await expect(verify).toContainText("Crystal City");
           await expect(verify).toContainText("Russell");
@@ -423,13 +364,9 @@ test.describe("Upload pipeline", () => {
 
         wrongIdentifications.push(text.replace(/\s+/g, " ").trim());
 
-        // Click "No, try again" — the frontend POSTs the cumulative rejected
-        // book_ids to /api/upload/:image_id/reject-identification and re-opens
-        // the SSE stream. Wait for the page to leave the verify view (back to
-        // the processing spinner) before looping.
         await page.getByRole("button", { name: /no, try again/i }).click();
-        await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-          "Processing image...",
+        await expect(page.getByTestId("upload-loading")).toContainText(
+          "Reading your photo...",
           { timeout: 30_000 }
         );
       }
@@ -450,8 +387,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_image_reversed.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -484,8 +421,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mildly_obscured.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -505,12 +442,7 @@ test.describe("Upload pipeline", () => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Manual ISBN entry (real service — no mocks)
-// ---------------------------------------------------------------------------
-
-test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, () => {
-  // Client-side checksum validation — no network call needed.
+test.describe("Upload pipeline — manual ISBN entry", () => {
   test("invalid ISBN shows checksum error", async ({ page }) => {
     test.setTimeout(15_000);
 
@@ -526,9 +458,7 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
     await expect(page.getByText("Invalid ISBN checksum")).toBeVisible();
   });
 
-  // Real internal DB lookup — uses a seeded book so no external API dependency.
-  // 0061470767 = The Dispossessed by Ursula K. Le Guin (seeded in all environments).
-  test("valid ISBN-10 resolves to real book in verify view", async ({ page }) => {
+  test("valid ISBN-10 is added to the chosen bookshelf", async ({ page }) => {
     test.setTimeout(15_000);
 
     await page.goto("/upload");
@@ -536,17 +466,17 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
 
     const isbnInput = page.getByTestId("upload-manual-isbn-input");
     await isbnInput.fill("0061470767");
+    await page.getByRole("button", { name: "Antilibrary" }).click();
     await page.getByTestId("upload-manual-isbn-submit").click();
 
-    await expect(page.getByTestId("upload-verify")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("upload-verify")).toContainText(/Dispossessed|Le Guin/i);
-    await expect(page.getByTestId("upload-confirm-btn")).toBeVisible();
-    await expect(page.getByTestId("upload-reject-btn")).toBeVisible();
+    const complete = page.getByTestId("upload-complete");
+    await expect(complete).toBeVisible({ timeout: 10_000 });
+    await expect(complete).toContainText(/Dispossessed/i);
+    await expect(complete).toContainText(/Antilibrary/i);
+    await expect(page.getByRole("button", { name: "View on shelf" })).toBeVisible();
   });
 
-  // Same book, ISBN-13 format — verifies both input formats are accepted end-to-end.
-  // 9780061470769 = The Dispossessed ISBN-13 (seeded).
-  test("valid ISBN-13 resolves to real book in verify view", async ({ page }) => {
+  test("valid ISBN-13 is added to the chosen bookshelf", async ({ page }) => {
     test.setTimeout(15_000);
 
     await page.goto("/upload");
@@ -556,17 +486,13 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
     await isbnInput.fill("9780061470769");
     await page.getByTestId("upload-manual-isbn-submit").click();
 
-    await expect(page.getByTestId("upload-verify")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("upload-verify")).toContainText(/Dispossessed|Le Guin/i);
+    await expect(page.getByTestId("upload-complete")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("upload-complete")).toContainText(/Dispossessed/i);
   });
 
-  // Full recovery flow: real non-book image triggers rejection, then the user
-  // switches to manual ISBN entry and completes a real book lookup.
-  // Tests the Elm UploadError → ManualEntry state transition against live services.
   test(
     "recovery: rejected upload → Enter ISBN Manually → real book found",
     async ({ page }) => {
-      // Extra 30s buffer beyond pipeline timeout for the manual ISBN steps after rejection.
       test.setTimeout(PIPELINE_TIMEOUT + 30_000);
 
       await page.goto("/upload");
@@ -578,8 +504,8 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
         path.join(__dirname, "../../images/not_a_book.jpg")
       );
 
-      await expect(page.getByTestId("upload-loading").locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 30_000 }
       );
 
@@ -593,12 +519,76 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
       await page.getByTestId("upload-manual-isbn-input").fill("9780061470769");
       await page.getByTestId("upload-manual-isbn-submit").click();
 
-      await expect(page.getByTestId("upload-verify")).toBeVisible({
+      await expect(page.getByTestId("upload-complete")).toBeVisible({
         timeout: 10_000,
       });
-      await expect(page.getByTestId("upload-verify")).toContainText(
-        /Dispossessed|Le Guin/i
+      await expect(page.getByTestId("upload-complete")).toContainText(
+        /Dispossessed/i
       );
     }
   );
 });
+
+// The duplicate notice — the last moment before a reader files a
+// second copy. It has Elm program-test coverage on both paths, and had NO
+// end-to-end coverage until this block: nothing drove it through a browser
+// against a real server, which is exactly how three surfaces in this project
+// once shipped fully unstyled.
+//
+// The governing rule is the owner's standing ruling: the notice INFORMS, it
+// never BLOCKS. So each test asserts both halves — the notice is there, and the
+// reader can still complete the add. A test that only checked for the text
+// would pass just as happily against a flow that had been wedged shut.
+test.describe(
+  "Upload pipeline — duplicate awareness",
+  () => {
+    test("manual entry of a book already shelved informs, and still lets the reader add it", async ({
+      page,
+    }) => {
+      test.setTimeout(60_000);
+
+      const isbn = "9780061470769";
+
+      const addOnce = async (shelf: RegExp) => {
+        await page.goto("/upload");
+        await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+        await page.getByTestId("upload-manual-isbn-input").fill(isbn);
+        const choice = page.getByRole("button", { name: shelf });
+        if (await choice.isVisible().catch(() => false)) await choice.click();
+        await page.getByTestId("upload-manual-isbn-submit").click();
+        await expect(page.getByTestId("upload-complete")).toBeVisible({
+          timeout: 20_000,
+        });
+      };
+
+      await addOnce(/Wish List/i);
+
+      await page.goto("/upload");
+      await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+      await page.getByTestId("upload-manual-isbn-input").fill(isbn);
+
+      // ⚠️ Deliberately NO pre-submit notice assertion. The manual path is one
+      // hop: the client holds only a typed string until the confirm
+      // response — which is the FIRST moment the server can name the reader's
+      // other bookshelves. `viewCompleteExistingShelvesNotice`'s own doc says
+      // exactly this. This spec originally asserted a pre-commit notice that
+      // has never existed on this path, and the assertion sat unexecuted
+      // behind the Modal project gating.
+      const submit = page.getByTestId("upload-manual-isbn-submit");
+      await expect(submit).toBeEnabled();
+
+      const antilibrary = page.getByRole("button", { name: /Antilibrary/i });
+      if (await antilibrary.isVisible().catch(() => false)) {
+        await antilibrary.click();
+      }
+      await submit.click();
+
+      await expect(page.getByTestId("upload-complete")).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId("upload-already-yours")).toContainText(
+        /already have this on your/i
+      );
+    });
+  }
+);

@@ -1,21 +1,10 @@
 defmodule Stacks.AuthSecurityTelemetryTest do
   @moduledoc """
-  Firing tests for the auth/session-security counters added in Issue #237
-  (epic #231):
-
-    * refresh-token REUSE detected — `[:stacks, :auth, :refresh, :reuse_detected]`
-      on the family-burn branch of `Accounts.check_token_family/3`
-    * MFA verify outcome — `[:stacks, :auth, :mfa, :verify]` with
-      `outcome: :success | :failure` from both `MFA.verify_totp/2` and
-      `MFA.verify_recovery_code/2`
-
-  The session absolute-cap emit (`[:stacks, :auth, :session, :expired]`) fires
-  from the AuthController and is covered by a firing test in
-  `auth_controller_test.exs` (it needs the controller/conn path).
-
-  Metadata tags are whitelisted atoms only — never a token, jti, user-id, code,
-  or secret (GDPR: telemetry is a warehouse-adjacent sink). Follows the
-  attach → exercise → assert_receive pattern of `moderation_telemetry_test.exs`.
+      Firing tests for the 237 auth-security counters: refresh-token reuse
+      (`[:stacks,:auth,:refresh,:reuse_detected]` on the family-burn
+      branch) and MFA verify outcome (`[:stacks,:auth,:mfa,:verify]` from
+      both TOTP and recovery-code paths). The session absolute-cap emit is
+      covered in the AuthController's own tests.
   """
 
   use Core.DataCase, async: false
@@ -42,15 +31,13 @@ defmodule Stacks.AuthSecurityTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  # ── Refresh-token reuse detection ──────────────────────────────────────
-
   describe "refresh-token reuse telemetry" do
     setup do
       user = insert(:user)
       fid = Ecto.UUID.generate()
 
       {:ok, _family} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: fid,
           user_id: user.id,
           current_jti: "jti-current",
@@ -66,7 +53,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
       assert {:error, :token_reuse_detected} =
                Accounts.check_token_family(fid, "jti-superseded", sub)
 
-      # The family is burned AND the counter fires — no PII in the metadata.
       assert Repo.get(AuthTokenFamily, fid).revoked_at
 
       assert_receive {:telemetry_event, [:stacks, :auth, :refresh, :reuse_detected], %{count: 1},
@@ -85,8 +71,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
          %{fid: fid} do
       attach_telemetry([[:stacks, :auth, :refresh, :reuse_detected]])
 
-      # A cross-user token is rejected as session_revoked and the innocent
-      # owner's family is NOT burned — so no reuse counter should fire.
       assert {:error, :session_revoked} =
                Accounts.check_token_family(fid, "jti-current", Ecto.UUID.generate())
 
@@ -95,8 +79,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
       refute_receive {:telemetry_event, [:stacks, :auth, :refresh, :reuse_detected], _, _}, 100
     end
   end
-
-  # ── MFA verify outcome ─────────────────────────────────────────────────
 
   describe "MFA verify telemetry" do
     setup do

@@ -1,7 +1,7 @@
 module Page.PrivacyBlockedUsersTest exposing (suite)
 
 {-| State-machine tests for the "Blocked Users" section added to
-Page.Settings.Privacy (Issue #193, US-10.1.2 frontend). Covers loading the
+Page.Settings.Privacy. Covers loading the
 list on entry, rendering each blocked reader with an Unblock control, the
 happy unblock path (row removed), a not\_found unblock, and the 401 escalation.
 -}
@@ -23,9 +23,14 @@ blocked =
     ]
 
 
+noConsent : { analytics : Bool, writingAssistant : Bool }
+noConsent =
+    { analytics = False, writingAssistant = False }
+
+
 baseModel : Privacy.Model
 baseModel =
-    Tuple.first (Privacy.initWithToken (Just "tok"))
+    Tuple.first (Privacy.initWithToken (Just "tok") noConsent)
 
 
 suite : Test
@@ -36,7 +41,7 @@ suite =
                 baseModel.blockedUsers |> Expect.equal Loading
         , test "initWithToken without a token does not fetch (NotAsked)" <|
             \_ ->
-                Tuple.first (Privacy.initWithToken Nothing)
+                Tuple.first (Privacy.initWithToken Nothing noConsent)
                     |> .blockedUsers
                     |> Expect.equal NotAsked
         , test "GotBlockedUsers Ok stores the returned list" <|

@@ -111,8 +111,7 @@ defmodule StacksWeb.ShelfController do
       id: shelf.id,
       bookshelf_id: shelf.bookshelf_id,
       position: shelf.position,
-      created_at: shelf.created_at,
-      placements: []
+      created_at: shelf.created_at
     }
   end
 end

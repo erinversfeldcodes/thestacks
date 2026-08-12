@@ -10,8 +10,6 @@ elmPrelude :
         , alias : Maybe (List String)
         }
 elmPrelude =
-    -- These are the default imports implicitly added by the Elm compiler
-    -- https://package.elm-lang.org/packages/elm/core/latest
     Dict.fromList
         [ ( [ "Basics" ], { exposes = [], alias = Nothing } )
         , ( [ "List" ], { exposes = [ "List", "::" ], alias = Nothing } )

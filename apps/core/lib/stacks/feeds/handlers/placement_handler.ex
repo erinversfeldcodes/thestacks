@@ -1,9 +1,10 @@
 defmodule Stacks.Feeds.Handlers.PlacementHandler do
   @moduledoc """
-  Event handler that enqueues feed regeneration when shelf placements change.
+      Event handler that enqueues feed regeneration when shelf placements change.
 
-  Listens for `placement.created`, `placement.moved`, and `placement.removed`
-  events and enqueues a `RegenerateFeedJob` for the affected bookshelf.
+      Listens for `placement.created`, `placement.moved`, `placement.removed` and
+      `placement.restored` events and enqueues a `RegenerateFeedJob` for the
+      affected bookshelf.
   """
 
   @behaviour Stacks.Events.Handler
@@ -16,14 +17,29 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   alias Stacks.Shelving.Placement
   alias Stacks.Workers.RegenerateFeedJob
 
-  @placement_events ~w(placement.created placement.moved placement.removed)
+  @placement_events ~w(placement.created placement.moved placement.removed placement.restored)
 
   @impl true
   def handle_event(%{event_type: event_type, aggregate_id: aggregate_id, payload: payload})
       when event_type in @placement_events do
+    if import_sourced?(event_type, payload) do
+      :ok
+    else
+      regenerate_for(event_type, aggregate_id, payload)
+    end
+  end
+
+  def handle_event(_event), do: :ok
+
+  defp import_sourced?("placement.created", payload) do
+    (Map.get(payload, "source") || Map.get(payload, :source)) == "goodreads_import"
+  end
+
+  defp import_sourced?(_event_type, _payload), do: false
+
+  defp regenerate_for(event_type, aggregate_id, payload) do
     bookshelf_name = extract_bookshelf_name(event_type, payload)
 
-    # For moved events, regenerate both source and destination feeds
     bookshelf_names =
       case event_type do
         "placement.moved" ->
@@ -42,9 +58,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
 
     :ok
   end
-
-  # Catch-all clause — ignore unrecognized events
-  def handle_event(_event), do: :ok
 
   defp enqueue_feed_regeneration(_user_id, nil), do: :ok
 
@@ -71,6 +84,10 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   end
 
   defp extract_bookshelf_name("placement.removed", _payload), do: nil
+
+  defp extract_bookshelf_name("placement.restored", payload) do
+    Map.get(payload, "bookshelf") || Map.get(payload, :bookshelf)
+  end
 
   defp extract_bookshelf_name(_, _), do: nil
 

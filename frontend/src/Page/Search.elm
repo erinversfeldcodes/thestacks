@@ -55,10 +55,6 @@ type Msg
 type OutMsg
     = NoOut
     | SessionExpired
-      -- A search result was activated: open the book detail overlay for this
-      -- book id. Main handles this by opening the overlay over /search (URL
-      -- unchanged, per the overlay convention / ADR-005), with the clicked row
-      -- as the focus-return trigger (see #114, #289).
     | OpenOverlay String
 
 
@@ -91,10 +87,6 @@ update msg model maybeToken =
                 | query = query
                 , debounceCount = newCount
                 , results =
-                    -- Book search is authenticated-only; with no token it never
-                    -- fires, so stay on the hint rather than a spinner that would
-                    -- never resolve for an anonymous visitor. People search below
-                    -- still runs (optional-auth).
                     if String.isEmpty query || maybeToken == Nothing then
                         NotAsked
 
@@ -117,9 +109,6 @@ update msg model maybeToken =
         DebounceExpired count ->
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
-                    -- Book search is authenticated; people search is optional-auth
-                    -- so it fires with or without a token. The scope (title-only vs
-                    -- deep) follows the current toggle state (#284).
                     bookCmd =
                         case maybeToken of
                             Just token ->
@@ -209,10 +198,6 @@ update msg model maybeToken =
                 newModel =
                     { model | deepSearch = deep }
             in
-            -- Re-fire the current query under the new scope so the results
-            -- update immediately (no re-typing). Only the book search re-runs —
-            -- deep scope affects books, not people — and only when there is a
-            -- token and a non-empty query; otherwise just flip the flag (#284).
             case ( maybeToken, String.isEmpty model.query ) of
                 ( Just token, False ) ->
                     ( { newModel | results = Loading }
@@ -262,11 +247,6 @@ view model =
 
             Success sections ->
                 let
-                    -- Sort and the year filter apply WITHIN each section: the same
-                    -- `applyYearFilter`/`sortBooks` are run independently over the
-                    -- collection hits and the platform hits (they are generic over
-                    -- any `{ a | book : Book }`), so a section's ordering never
-                    -- bleeds across the boundary.
                     visibleCollection =
                         sections.collection
                             |> applyYearFilter model.filters
@@ -284,9 +264,6 @@ view model =
                         List.isEmpty visibleCollection && List.isEmpty visiblePlatform
                 in
                 if visibleEmpty then
-                    -- Distinguish "the query found nothing" from "the query found
-                    -- books but the year filter hid them all" — the latter is
-                    -- fixable by widening/clearing the filter, so say so.
                     if not rawEmpty && yearFilterActive model.filters then
                         p [ class "search-empty" ] [ text "No books in that year range — widen it or clear filters" ]
 
@@ -303,7 +280,7 @@ view model =
 
 
 {-| The "Deep search" toggle: off by default, it opts the query into matching
-book descriptions/reviews (not just titles) via `scope=deep` (#284). Flipping it
+book descriptions/reviews (not just titles) via `scope=deep`. Flipping it
 re-fires the current query with the new scope (see `update`, `DeepSearchToggled`).
 -}
 viewDeepSearchToggle : Bool -> Html Msg
@@ -387,7 +364,7 @@ viewReaderLocation person =
 
 {-| Keep only hits whose book's publication year falls within the (optional)
 range. When neither bound is set the list is returned unchanged. Generic over any
-`{ a | book : Book }`, so it applies uniformly to collection and platform hits
+`{ a | book: Book }`, so it applies uniformly to collection and platform hits
 without discarding their per-hit metadata (shelf / source).
 
 A book with no known publication year is KEPT once a bound is active, rather than
@@ -440,7 +417,7 @@ bookWithinYearRange filters book =
 {-| Order the rendered hits by the selected sort. `ByRelevance` (the default) is a
 passthrough: the backend already returns rows in `plainto_tsquery` rank order, so
 keeping that order IS relevance ranking — there is nothing to sort on client-side.
-The other orders re-sort the list. Generic over any `{ a | book : Book }` so the
+The other orders re-sort the list. Generic over any `{ a | book: Book }` so the
 same ordering runs over each section independently, preserving per-hit metadata.
 -}
 sortBooks : SortOrder -> List { a | book : Book } -> List { a | book : Book }
@@ -461,7 +438,7 @@ sortBooks sort hits =
 
 {-| "Your Collection": the viewer's own matching books, each tagged with the
 shelf it sits on. Hidden entirely when empty so an empty-collection viewer sees
-the platform-only view (#285).
+the platform-only view.
 -}
 viewCollectionSection : List Api.CollectionHit -> Html Msg
 viewCollectionSection hits =
@@ -476,7 +453,7 @@ viewCollectionSection hits =
 
 
 {-| "On the Platform": platform-visible books, some carrying a discoverable label.
-Hidden entirely when empty (collection-only view) (#285).
+Hidden entirely when empty (collection-only view).
 -}
 viewPlatformSection : List Api.PlatformHit -> Html Msg
 viewPlatformSection hits =
@@ -491,18 +468,56 @@ viewPlatformSection hits =
 
 
 {-| A collection hit renders the book row with a "On your <Shelf> shelf" line —
-the "where in your collection" answer US-1.5.1 always promised. Its deep-search
+the "where in your collection" answer always promised. Its deep-search
 snippet (non-empty only when the match was on the description/review, not the
-title) is carried through so the excerpt + "via deep search" label render (#284).
+title) is carried through so the excerpt + "via deep search" label render.
 -}
 viewCollectionHit : Api.CollectionHit -> Html Msg
 viewCollectionHit hit =
-    viewResultButton hit.book (Just ("On your " ++ bookshelfLabel hit.bookshelfName ++ " shelf")) hit.snippet
+    viewResultButton hit.book (collectionLabel hit.bookshelfNames) hit.snippet
+
+
+{-| "On your Library shelf" / "On your Library and Wish List shelves" / "On your
+Library, Reading Pile and Wish List shelves".
+
+A book may sit on several bookshelves at once. This used to name one and
+drop the rest silently, so the answer to "where in my collection is it?" was
+sometimes only part of the truth — and looked exactly like the whole truth. An
+empty list yields no label at all rather than a dangling "On your shelf".
+
+-}
+collectionLabel : List String -> Maybe String
+collectionLabel names =
+    case List.map bookshelfLabel names of
+        [] ->
+            Nothing
+
+        [ only ] ->
+            Just ("On your " ++ only ++ " shelf")
+
+        labels ->
+            Just ("On your " ++ joinWithAnd labels ++ " shelves")
+
+
+{-| Joins a list into prose: "A and B", "A, B and C". Only ever called with two
+or more entries.
+-}
+joinWithAnd : List String -> String
+joinWithAnd labels =
+    case List.reverse labels of
+        [] ->
+            ""
+
+        [ only ] ->
+            only
+
+        last :: rest ->
+            String.join ", " (List.reverse rest) ++ " and " ++ last
 
 
 {-| A platform hit renders the book row with its discoverable-by-design label
 (only when `source` is non-empty — a plain result carries no label), plus its
-deep-search snippet when the match was on description/review text (#284).
+deep-search snippet when the match was on description/review text.
 -}
 viewPlatformHit : Api.PlatformHit -> Html Msg
 viewPlatformHit hit =
@@ -512,7 +527,7 @@ viewPlatformHit hit =
 {-| The label for a platform hit, or `Nothing` for a plain result. Labels are
 only ever emitted by the backend for always-visible provenance (an active
 `looking_for_home` advert or an active marketplace listing), so rendering them
-here never leaks private shelf provenance (#285).
+here never leaks private shelf provenance.
 -}
 platformLabel : Api.PlatformHit -> Maybe String
 platformLabel hit =
@@ -557,10 +572,10 @@ bookshelfLabel name =
 Enter/Space-activatable — the accessible interactive element, mirroring the
 shelf-spine pattern in `Page.Bookshelf.Helpers.viewClickableSpine`). Its stable
 id `search-result-<bookId>` is the focus-return target Main hands to the overlay
-so focus comes back to the clicked row on close (#114 / #289). The optional label
+so focus comes back to the clicked row on close. The optional label
 line carries the section's provenance (collection shelf / platform source); a
 non-empty `snippet` (a deep-search description/review excerpt) renders the
-highlighted excerpt and a "via deep search" line beneath it (#284).
+highlighted excerpt and a "via deep search" line beneath it.
 -}
 viewResultButton : Book -> Maybe String -> String -> Html Msg
 viewResultButton book maybeLabel snippet =
@@ -591,7 +606,7 @@ viewResultButton book maybeLabel snippet =
 
 {-| Render a deep-search snippet excerpt and its "via deep search" provenance
 line, but ONLY when the snippet is non-empty — a title match carries no snippet,
-so it renders neither (#284). The `<mark>` runs in the excerpt are parsed into
+so it renders neither. The `<mark>` runs in the excerpt are parsed into
 styled `<mark>` elements (never injected as HTML — see `parseSnippet`).
 -}
 viewSnippet : String -> List (Html Msg)
@@ -664,8 +679,6 @@ parseSnippet input =
             in
             case List.head (String.indexes markClose afterOpen) of
                 Nothing ->
-                    -- Unbalanced: an open with no close. Emit the whole remaining
-                    -- input verbatim as plain text — no false highlight.
                     plainSegment input
 
                 Just closeIdx ->

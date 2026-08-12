@@ -169,15 +169,55 @@ defmodule Stacks.DiscoveryTest do
   end
 
   describe "opt_out/2" do
-    test "marks source as excluded with email" do
+    test "removes the listing when the requester's domain matches it" do
       _source = insert(:discovered_source, url: "https://optout.com", status: "pending_review")
 
-      assert {:ok, updated} =
+      assert {:ok, :excluded, updated} =
                Discovery.opt_out("https://optout.com", %{email: "owner@optout.com"})
 
       assert updated.status == "excluded"
       assert updated.exclusion_email == "owner@optout.com"
       assert updated.excluded_at != nil
+      assert updated.exclusion_requested_at != nil
+    end
+
+    test "does NOT remove the listing when the domain does not match" do
+      insert(:discovered_source, url: "https://booklounge.co.za", status: "approved")
+
+      assert {:ok, :pending_review, updated} =
+               Discovery.opt_out("https://booklounge.co.za", %{email: "randomer@gmail.com"})
+
+      assert updated.status == "approved", "the listing must stay live until reviewed"
+      assert updated.excluded_at == nil
+      assert updated.exclusion_requested_at != nil, "but the request must be visible"
+      assert updated.exclusion_email == "randomer@gmail.com"
+    end
+
+    test "a www prefix or a deep path does not defeat a legitimate request" do
+      insert(:discovered_source, url: "https://www.booklounge.co.za/about-us", status: "approved")
+
+      assert {:ok, :excluded, _} =
+               Discovery.opt_out("https://www.booklounge.co.za/about-us", %{
+                 email: "hello@booklounge.co.za"
+               })
+    end
+
+    test "handles multi-part public suffixes" do
+      insert(:discovered_source, url: "https://clarkesbooks.co.za", status: "approved")
+
+      assert {:ok, :pending_review, _} =
+               Discovery.opt_out("https://clarkesbooks.co.za", %{
+                 email: "someone@wordsworth.co.za"
+               })
+    end
+
+    test "a subdomain of the listed domain still counts as the business" do
+      insert(:discovered_source, url: "https://shop.bridgebooks.co.za", status: "approved")
+
+      assert {:ok, :excluded, _} =
+               Discovery.opt_out("https://shop.bridgebooks.co.za", %{
+                 email: "owner@bridgebooks.co.za"
+               })
     end
 
     test "returns not_found for unknown URL" do

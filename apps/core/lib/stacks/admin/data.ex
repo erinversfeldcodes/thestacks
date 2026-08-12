@@ -1,10 +1,10 @@
 defmodule Stacks.Admin.Data do
   @moduledoc """
-  Admin data access context.
+      Admin data access context.
 
-  Provides safe, auditable read access to user data and platform statistics
-  for the break-glass admin interface. All returned user maps deliberately
-  omit sensitive credential fields (password_hash, reset tokens, etc.).
+      Provides safe, auditable read access to user data and platform statistics
+      for the break-glass admin interface. All returned user maps deliberately
+      omit sensitive credential fields (password_hash, reset tokens, etc.).
   """
 
   alias Core.Repo
@@ -27,9 +27,9 @@ defmodule Stacks.Admin.Data do
   ]
 
   @doc """
-  Look up a user by email address (case-insensitive).
+      Look up a user by email address (case-insensitive).
 
-  Returns a safe map of user fields — never includes credential or token fields.
+      Returns a safe map of user fields — never includes credential or token fields.
   """
   @spec get_user_by_email(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_user_by_email(email) do
@@ -40,9 +40,9 @@ defmodule Stacks.Admin.Data do
   end
 
   @doc """
-  Look up a user by UUID.
+      Look up a user by UUID.
 
-  Returns a safe map of user fields — never includes credential or token fields.
+      Returns a safe map of user fields — never includes credential or token fields.
   """
   @spec get_user_by_id(binary()) :: {:ok, map()} | {:error, :not_found}
   def get_user_by_id(id) do
@@ -53,14 +53,14 @@ defmodule Stacks.Admin.Data do
   end
 
   @doc """
-  Query the audit log for a user within a date range.
+      Query the audit log for a user within a date range.
 
-  Returns up to 200 entries ordered by `occurred_at DESC`. The `metadata`
-  column is excluded because it is Cloak-encrypted bytea and cannot be safely
-  returned as-is to callers.
+      Returns up to 200 entries ordered by `occurred_at DESC`. The `metadata`
+      column is excluded because it is Cloak-encrypted bytea and cannot be safely
+      returned as-is to callers.
 
-  `user_id` values in the result are formatted UUID strings.
-  `occurred_at` values are `%DateTime{}` structs in UTC.
+      `user_id` values in the result are formatted UUID strings.
+      `occurred_at` values are `%DateTime{}` structs in UTC.
   """
   @spec list_audit_log(binary(), DateTime.t(), DateTime.t()) ::
           {:ok, [map()]} | {:error, :invalid_params}
@@ -89,7 +89,7 @@ defmodule Stacks.Admin.Data do
   end
 
   @doc """
-  Returns aggregate platform statistics (record counts per major entity).
+      Returns aggregate platform statistics (record counts per major entity).
   """
   @spec platform_stats() :: {:ok, map()}
   def platform_stats do
@@ -103,8 +103,6 @@ defmodule Stacks.Admin.Data do
 
     {:ok, stats}
   end
-
-  # Private helpers
 
   defp decode_audit_row(columns, row) do
     columns

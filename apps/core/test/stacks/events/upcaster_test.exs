@@ -41,7 +41,6 @@ defmodule Stacks.Events.UpcasterTest do
 
         assert upcast.schema_version == 2
         refute Map.has_key?(upcast.payload, "title")
-        # non-title keys are preserved (the UUID + enum stay).
         assert upcast.payload["user_id"] == "u-1"
         assert upcast.payload["visibility"] == "platform"
       end

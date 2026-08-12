@@ -14,7 +14,7 @@ defmodule StacksWeb.BookController do
 
   import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
 
-  @doc "POST /api/books — resolve an ISBN and create the book (manual entry, US-1.1.5)."
+  @doc "POST /api/books — resolve an ISBN and create the book (manual entry)."
   def create(conn, %{"isbn" => isbn}) do
     case Books.create_from_isbn(isbn) do
       {:ok, book} ->
@@ -27,6 +27,9 @@ defmodule StacksWeb.BookController do
         |> put_status(422)
         |> json(%{error: "validation_failed", details: format_errors(changeset)})
 
+      {:error, :resolver_unavailable} ->
+        resolver_unavailable(conn)
+
       {:error, _} ->
         conn
         |> put_status(422)
@@ -34,17 +37,24 @@ defmodule StacksWeb.BookController do
     end
   end
 
+  defp resolver_unavailable(conn) do
+    conn
+    |> put_resp_header("retry-after", "30")
+    |> put_status(503)
+    |> json(%{error: "resolver_unavailable"})
+  end
+
   @doc """
-  POST /api/books/confirm — second step of the interactive two-step upload flow.
+      POST /api/books/confirm — second step of the interactive two-step upload flow.
 
-  Accepts `{"isbn": "...", "shelf_name": "..."}` (shelf_name is optional).
-  Looks up or creates the book (work + edition) for the given ISBN.
+      Accepts `{"isbn": "...", "shelf_name": "..."}` (shelf_name is optional).
+      Looks up or creates the book (work + edition) for the given ISBN.
 
-  Returns:
-  - 200 `{book: ...}` when the book is found or created successfully.
-  - 409 `{error: "merge_required", work_id: "..."}` when the ISBN metadata matches
-    an existing work that does not yet have this edition.
-  - 422 on validation errors or missing `isbn` param.
+      Returns:
+      - 200 `{book:...}` when the book is found or created successfully.
+      - 409 `{error: "merge_required", work_id: "..."}` when the ISBN metadata matches
+        an existing work that does not yet have this edition.
+      - 422 on validation errors or missing `isbn` param.
   """
   @spec confirm(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def confirm(conn, params) do
@@ -53,25 +63,17 @@ defmodule StacksWeb.BookController do
     case Books.confirm(user.id, params) do
       {:ok, :created, book} ->
         book = Books.get_book_detail(book.id)
-        placement = Shelving.get_placement_for_book(user.id, book.id)
+        placements = Shelving.get_placements_for_book(user.id, book.id)
 
         conn
         |> put_status(201)
-        |> json(%{book: ProtoJSON.book(book), placement: ProtoJSON.book_placement(placement)})
+        |> json(confirm_payload(book, placements, List.first(placements), nil))
 
-      {:ok, :existing, book, placement} ->
-        json(conn, %{
-          book: ProtoJSON.book(book),
-          placement: ProtoJSON.book_placement(placement),
-          source: "catalogue"
-        })
+      {:ok, :existing, book, placement, placements} ->
+        json(conn, confirm_payload(book, placements, placement, "catalogue"))
 
-      {:ok, :already_placed, book, placement} ->
-        json(conn, %{
-          book: ProtoJSON.book(book),
-          placement: ProtoJSON.book_placement(placement),
-          source: "collection"
-        })
+      {:ok, :already_placed, book, placement, placements} ->
+        json(conn, confirm_payload(book, placements, placement, "collection"))
 
       {:error, {:merge_required, work_id}} ->
         conn
@@ -88,6 +90,9 @@ defmodule StacksWeb.BookController do
         |> put_status(422)
         |> json(%{error: "validation_failed", details: format_errors(changeset)})
 
+      {:error, :resolver_unavailable} ->
+        resolver_unavailable(conn)
+
       {:error, _reason} ->
         conn
         |> put_status(422)
@@ -95,17 +100,27 @@ defmodule StacksWeb.BookController do
     end
   end
 
+  defp confirm_payload(book, placements, placement, source) do
+    payload = %{
+      book: ProtoJSON.book(book),
+      placement: ProtoJSON.book_placement(placement),
+      placements: Enum.map(placements, &ProtoJSON.book_placement/1)
+    }
+
+    if source, do: Map.put(payload, :source, source), else: payload
+  end
+
   @doc """
-  POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book (work).
+      POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book (work).
 
-  Accepts `{"isbn": "...", "format_label": "..."}` (format_label is optional).
-  Merges the given edition into the book identified by `:id`.
+      Accepts `{"isbn": "...", "format_label": "..."}` (format_label is optional).
+      Merges the given edition into the book identified by `:id`.
 
-  Returns:
-  - 200 `{edition: ...}` on success.
-  - 404 when the book `:id` does not exist.
-  - 422 `{error: "duplicate_isbn"}` when the ISBN is already registered to any edition.
-  - 422 on other validation failures.
+      Returns:
+      - 200 `{edition:...}` on success.
+      - 404 when the book `:id` does not exist.
+      - 422 `{error: "duplicate_isbn"}` when the ISBN is already registered to any edition.
+      - 422 on other validation failures.
   """
   @spec merge_format(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def merge_format(conn, %{"id" => book_id} = params) do
@@ -128,6 +143,9 @@ defmodule StacksWeb.BookController do
         |> put_status(422)
         |> json(%{error: "isbn_not_found"})
 
+      {:error, :resolver_unavailable} ->
+        resolver_unavailable(conn)
+
       {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(422)
@@ -136,17 +154,17 @@ defmodule StacksWeb.BookController do
   end
 
   @doc """
-  PUT /api/books/:id/age-gate — the person who added a book raises its age
-  gate (marks it "adults only"). Body: `{"adults_only": true}` (also accepts
-  `{"age_gated": true}`).
+      PUT /api/books/:id/age-gate — the person who added a book raises its age
+      gate (marks it "adults only"). Body: `{"adults_only": true}` (also accepts
+      `{"age_gated": true}`).
 
-  Raise-only (user path): a user may only RAISE the gate (`public →
-  age_gated`); attempting to lower it (`age_gated → public`) returns 403 —
-  only the platform owner may un-gate. `visibility_tier` is not PII; no new
-  personal data is introduced.
+      Raise-only (user path): a user may only RAISE the gate (`public →
+      age_gated`); attempting to lower it (`age_gated → public`) returns 403 —
+      only the platform owner may un-gate. `visibility_tier` is not PII; no new
+      personal data is introduced.
 
-  Returns 200 with the updated book JSON, 403 on a raise-only violation,
-  404 when the book is missing.
+      Returns 200 with the updated book JSON, 403 on a raise-only violation,
+      404 when the book is missing.
   """
   @spec set_age_gate(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def set_age_gate(conn, %{"id" => id} = params) do
@@ -169,9 +187,6 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  # The endpoint's purpose is marking a book adults-only, so a missing flag
-  # defaults to raising the gate. An explicit falsey flag on an age-gated
-  # book is a lower attempt, which the raise-only guard rejects with 403.
   defp age_gate_requested?(%{"adults_only" => value}), do: truthy?(value)
   defp age_gate_requested?(%{"age_gated" => value}), do: truthy?(value)
   defp age_gate_requested?(_params), do: true
@@ -208,18 +223,18 @@ defmodule StacksWeb.BookController do
       conn.halted ->
         conn
 
-      # Defense-in-depth (#295 d): upstream filter/age-gate should keep :hidden unreachable here; 404 rather than leak.
       Visibility.resolve_visibility(book, viewer) == :hidden ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 
       true ->
-        placement = lookup_placement(conn, id)
+        placements = lookup_placements(conn, id)
         count = Books.community_read_count(book.id)
         my_writing = my_writing_for(conn, id)
 
         json(conn, %{
           book: ProtoJSON.book(book, community_read_count: count),
-          placement: ProtoJSON.book_placement(placement),
+          placement: ProtoJSON.book_placement(List.first(placements)),
+          placements: Enum.map(placements, &ProtoJSON.book_placement/1),
           my_writing:
             Enum.map(my_writing, &%{id: &1.id, title: &1.title, published_at: &1.published_at})
         })
@@ -244,7 +259,16 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  @doc "GET /api/books/isbn/:isbn — retrieve a book by ISBN."
+  @doc """
+      GET /api/books/isbn/:isbn — retrieve a book by ISBN.
+
+      This is the manual-ISBN entry path. It carries the viewer's existing
+      placements so the client can tell them the book is already in their
+      collection, and on which bookshelves, *before* they place it again. The
+      photo path has had that awareness since the SSE payload's `is_duplicate`;
+      this is its manual-path equivalent. It is purely informational — nothing
+      here refuses the lookup or the placement that follows.
+  """
   def show_by_isbn(conn, %{"isbn" => isbn}) do
     case Books.find_existing(isbn) do
       nil ->
@@ -258,7 +282,13 @@ defmodule StacksWeb.BookController do
         if conn.halted do
           conn
         else
-          json(conn, %{book: ProtoJSON.book(book)})
+          placements = lookup_placements(conn, book.id)
+
+          json(conn, %{
+            book: ProtoJSON.book(book),
+            placement: ProtoJSON.book_placement(List.first(placements)),
+            placements: Enum.map(placements, &ProtoJSON.book_placement/1)
+          })
         end
     end
   end
@@ -270,10 +300,10 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  defp lookup_placement(conn, book_id) do
+  defp lookup_placements(conn, book_id) do
     case Guardian.Plug.current_resource(conn) do
-      nil -> nil
-      user -> Shelving.get_placement_for_book(user.id, book_id)
+      nil -> []
+      user -> Shelving.get_placements_for_book(user.id, book_id)
     end
   end
 end

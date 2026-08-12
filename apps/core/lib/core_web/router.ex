@@ -6,11 +6,6 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.SecurityHeaders
   end
 
-  # Browser pipeline for the Elm SPA's HTML response. Only sets security
-  # headers — the SPA route below is the catch-all that serves index.html
-  # for client-side routing, so every page load runs through here and
-  # picks up CSP, X-Frame-Options, HSTS, etc. Without this pipeline the
-  # SPA's HTML response carries no security headers at all.
   pipeline :spa do
     plug StacksWeb.Plugs.SecurityHeaders
   end
@@ -23,9 +18,6 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.OptionalAuthPipeline
   end
 
-  # Gates a route behind writing-assistant consent (Issue #184). Halts with 403
-  # when the current user has not granted `consent_writing_assistant`. Runs after
-  # :authenticated so a current resource is present.
   pipeline :writing_assistant_consent do
     plug StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"
   end
@@ -54,10 +46,6 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.SSEAuthPipeline
   end
 
-  # SSE endpoints must NOT use plug :accepts — EventSource sends
-  # "Accept: text/event-stream" which Phoenix's MIME registry doesn't map
-  # to the "event-stream" format name, causing spurious 406s.
-  # The endpoint always returns text/event-stream so no negotiation is needed.
   pipeline :sse_api do
     plug StacksWeb.Plugs.SecurityHeaders
   end
@@ -93,38 +81,37 @@ defmodule CoreWeb.Router do
     get "/health", HealthController, :index
   end
 
-  # Public endpoints — no authentication required
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_public]
-    # Frontend runtime feature-flag config (ADR-020). Unauthenticated; the
-    # payload is a flat map of booleans only (no user/partner data).
     get "/config", ConfigController, :show
     get "/costs", CostController, :index
-    # Public transparency metrics (#241 / ADR-019) — curated, anonymised subset
-    # of observability. No auth; the whitelist + mart columns ARE the privacy
-    # boundary. Rate-limited via :rate_limit_public.
     get "/transparency/metrics", TransparencyController, :index
+    get "/authors/:id/events", AuthorEventsController, :index
     post "/opt-out", OptOutController, :create
     post "/partners/register", PartnerRegistrationController, :create
   end
 
-  # Authenticated listing routes — must be before optional_auth `:id` catch-all
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated]
     get "/listings/mine", ListingController, :mine
   end
 
-  # Public feeds — no auth required (Atom XML)
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_public]
+    get "/feeds/u/:handle/blog", BlogFeedController, :show
+  end
+
+  scope "/api", StacksWeb do
+    pipe_through [:api, :optional_auth, :rate_limit_public]
+    get "/feeds/u/:handle/:bookshelf_name", FeedController, :show
     get "/feeds/:user_id/:bookshelf_name", FeedController, :show
   end
 
-  # Public with optional auth — returns extra data when authenticated
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth]
     get "/third-spaces", ThirdSpaceController, :index
     get "/books/:id/availability", BookAvailabilityController, :show
+    get "/books/:id/prices", BookPriceController, :show
     get "/books/:id", BookController, :show
     get "/catalogue", CatalogueController, :index
     get "/listings", ListingController, :index
@@ -133,10 +120,6 @@ defmodule CoreWeb.Router do
     get "/blog/posts/:id", BlogController, :show
   end
 
-  # Public profile + people-search reads (#210). Same optional-auth model as the
-  # scope above, but additionally rate-limited (:rate_limit_public): these are the
-  # highest-value unauthenticated enumeration surfaces — /search/users is a
-  # directory-scraper vector and /u/:handle a handle-existence oracle.
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth, :rate_limit_public]
     get "/search/users", UserSearchController, :index
@@ -150,6 +133,7 @@ defmodule CoreWeb.Router do
     post "/auth/login", AuthController, :login
     post "/auth/forgot-password", AuthController, :forgot_password
     post "/auth/reset-password", AuthController, :reset_password
+    post "/auth/resend-confirmation", AuthController, :resend_confirmation
   end
 
   scope "/api", StacksWeb do
@@ -159,27 +143,14 @@ defmodule CoreWeb.Router do
 
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :rate_limit_upload]
-    post "/upload", UploadController, :create
-    post "/upload/identify", UploadController, :identify
-    # Presigned-URL upload flow — init issues the signed PUT, commit
-    # verifies the client's direct-to-R2 upload + enqueues the job.
     post "/upload/init", UploadController, :init
     post "/upload/:image_id/commit", UploadController, :commit
-    # Rejection-retry — user clicks "No, try again" on an identified
-    # book. Backend stays stateless w.r.t. the rejection list: the
-    # frontend supplies the cumulative list of rejected book IDs and
-    # we enqueue a fresh IdentifyBookJob with the list forwarded to
-    # the vision model as exclusions.
+
     post "/upload/:image_id/reject-identification",
          UploadController,
          :reject_identification
   end
 
-  # Upload data PUT — no user auth. The image_id UUID (128-bit random) is the
-  # effective auth token: anyone who can guess it can PUT data, but commit_upload
-  # verifies ownership before enqueuing vision work. Proxying through Phoenix
-  # (same origin as the SPA) avoids R2 CORS preflight failures when the browser
-  # origin (*.fly.dev, localhost) is not in the R2 bucket's CORS allowlist.
   scope "/api", StacksWeb do
     pipe_through :api
     put "/upload/:image_id/data", UploadController, :upload_data
@@ -193,6 +164,8 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated]
 
+    get "/uploads/inbox", UploadController, :inbox
+
     delete "/auth/logout", AuthController, :logout
     post "/auth/refresh", AuthController, :refresh
     get "/auth/me", AuthController, :me
@@ -200,12 +173,15 @@ defmodule CoreWeb.Router do
     get "/books/isbn/:isbn", BookController, :show_by_isbn
     post "/books/confirm", BookController, :confirm
     post "/books/:id/merge-format", BookController, :merge_format
-    # User-side age gate: the person who added a book marks it "adults only".
-    # Raise-only (public → age_gated); lowering is owner-only (403). #118.
     put "/books/:id/age-gate", BookController, :set_age_gate
     resources "/books", BookController, only: [:create]
 
     get "/search", SearchController, :index
+
+    post "/imports/goodreads", ImportController, :create
+    get "/imports", ImportController, :index
+    get "/imports/:id", ImportController, :show
+    get "/imports/:id/rows", ImportController, :rows
 
     post "/listings", ListingController, :create
     put "/listings/:id/activate", ListingController, :activate
@@ -219,6 +195,7 @@ defmodule CoreWeb.Router do
     put "/placements/:id/progress", BookshelfPlacementController, :update_progress
     put "/placements/:id/shelf", BookshelfPlacementController, :move_to_shelf
     delete "/placements/:id", BookshelfPlacementController, :delete
+    post "/placements/:id/restore", BookshelfPlacementController, :restore
 
     get "/bookshelves/:bookshelf_name/shelves", ShelfController, :index
     post "/bookshelves/:bookshelf_name/shelves", ShelfController, :create
@@ -265,6 +242,9 @@ defmodule CoreWeb.Router do
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
+    get "/blog/posts/:id/syndication", BlogController, :syndication
+    post "/blog/posts/:id/syndications", BlogController, :create_syndication
+    put "/blog/posts/:id/syndications/:sid", BlogController, :update_syndication
     put "/blog/posts/:post_id/associations/:id/confirm", BlogController, :confirm_association
     put "/blog/posts/:post_id/associations/:id/dismiss", BlogController, :dismiss_association
 
@@ -273,43 +253,37 @@ defmodule CoreWeb.Router do
     post "/gdpr/consent", GDPRController, :update_consent
   end
 
-  # Writing-assistant chat (Issue #184) — authenticated + gated by
-  # writing_assistant consent. A user without consent gets 403 at the pipeline;
-  # with consent, the action returns an honest "under construction" response.
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :writing_assistant_consent]
     post "/blog/posts/:id/chat", BlogController, :chat
   end
 
-  # Content display routes — support ?view_as=<perspective> for preview
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :view_as]
     get "/bookshelves/:bookshelf_name", BookshelfController, :show
   end
 
-  # Password change — authenticated + stricter rate limit (3/min)
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :rate_limit_password_change]
     put "/settings/password", UserSettingsController, :update_password
   end
 
-  # Social actions — authenticated + per-user rate limit (20/min)
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :rate_limit_social]
     post "/users/:id/block", SocialController, :block
     delete "/users/:id/block", SocialController, :unblock
   end
 
-  # Source and partner admin — MFA-verified admin session required
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :admin, :rate_limit_admin]
     get "/sources", SourceAdminController, :index
     put "/sources/:id/approve", SourceAdminController, :approve
     put "/sources/:id/reject", SourceAdminController, :reject
+    get "/removal-requests", SourceAdminController, :removal_requests
+    put "/removal-requests/:id/honour", SourceAdminController, :honour_removal
+    put "/removal-requests/:id/decline", SourceAdminController, :decline_removal
     get "/source-health", SourceAdminController, :source_health
 
-    # Owner age-gate moderation (#118): list all books (incl. age-gated) and
-    # override a book's visibility tier in EITHER direction.
     get "/books", BookModerationController, :index
     put "/books/:id/age-gate", BookModerationController, :set_age_gate
 
@@ -318,7 +292,6 @@ defmodule CoreWeb.Router do
     put "/partners/:id/reject", PartnerController, :reject
   end
 
-  # Partner API — authenticated via API key, no user auth
   scope "/api/partner", StacksWeb do
     pipe_through [:api, :partner_auth]
 
@@ -331,27 +304,35 @@ defmodule CoreWeb.Router do
     delete "/events/:id", PartnerEventController, :delete
   end
 
-  # Admin auth — public (no admin token needed)
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :rate_limit_auth]
     post "/auth/login", AdminAuthController, :login
     post "/auth/verify_mfa", AdminAuthController, :verify_mfa
   end
 
-  # Admin auth — requires valid admin session with MFA verified
+  scope "/api/auth", StacksWeb do
+    pipe_through [:api, :rate_limit_auth]
+    get "/invite/:code", InviteController, :show
+  end
+
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    get "/invites", InviteAdminController, :index
+    post "/invites", InviteAdminController, :create
+    delete "/invites/:id", InviteAdminController, :delete
+  end
+
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :admin]
     delete "/auth/logout", AdminAuthController, :logout
   end
 
-  # MFA enrollment — requires regular owner auth (no MFA yet)
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :authenticated, :require_owner, :rate_limit_auth]
     post "/auth/mfa/setup", AdminAuthController, :mfa_setup
     post "/auth/mfa/confirm", AdminAuthController, :mfa_confirm
   end
 
-  # Admin data endpoints — requires valid admin session with MFA verified + audit logging
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :admin, :rate_limit_admin]
     get "/users/by_email", AdminController, :by_email
@@ -362,47 +343,34 @@ defmodule CoreWeb.Router do
     post "/gdpr_erase", AdminController, :gdpr_erase
   end
 
-  # Internal service-to-service callbacks — HMAC authenticated, no user auth
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    get "/data_corrections", DataCorrectionController, :index
+    post "/data_corrections/:name/apply", DataCorrectionController, :apply
+    post "/data_corrections/:name/target", DataCorrectionController, :target
+  end
+
   scope "/api/internal", StacksWeb do
     pipe_through :api
     post "/vision/associate", InternalController, :vision_associate
     post "/smoke/circuit_breakers", InternalController, :smoke_circuit_breakers
   end
 
-  # Test-only helper endpoints (Issue #124). Unauthenticated by design — the
-  # E2E suite calls these before it has a session. The E2ETestHelper plug is
-  # the sole gate: it returns 404 for every request unless the server flag
-  # STACKS_E2E_TEST_HELPERS=1 is set, which production never sets. This is why
-  # the guard lives in the router pipeline (fails closed) rather than in the
-  # controller. The endpoint leaks an account-activation token, so a real 404
-  # (not the SPA catch-all's index.html) is returned when the flag is off.
-  #
-  # PE-gate hardening (Issue #124): on public preview apps the flag IS on, so
-  # (1) the controller scopes lookups to `@thestacks.test` accounts only — a
-  # real user's token can never resolve — and (2) the `:e2e_helper` rate-limit
-  # bucket (10/min per IP) bounds brute-force enumeration / token harvesting.
   scope "/api/test", StacksWeb do
     pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
     get "/confirmation-token", TestHelperController, :confirmation_token
     get "/sent-emails", TestHelperController, :sent_emails
     put "/age-verification", TestHelperController, :set_age_verification
-    # Mints a confirmed `.test`-domain user + session token in one call so E2E
-    # specs skip the :auth-bucket register/login dance (Issue #192). Hard
-    # `.test`-domain allowlist in the controller — never mints a real account.
     post "/session", TestHelperController, :mint_session
-    # Seeds a visible blog-post→book association for a `.test`-domain user so the
-    # spine bookmark-ribbon spec (#287) is deterministic (prod associates via an
-    # async LLM worker). Same hard `.test`-domain allowlist in the controller.
     post "/book-writing", TestHelperController, :seed_book_writing
-    # Inserts a fresh public book carrying a description so the #284 deep-search
-    # spec can drive a live description match + snippet (the seed has 0
-    # description-bearing books). Catalogue metadata only — no user data/PII.
     post "/book-description", TestHelperController, :seed_book_description
   end
 
-  # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
   scope "/", CoreWeb do
     pipe_through :spa
+
+    get "/settings/consent", PageController, :redirect_consent
+
     get "/*path", PageController, :index
   end
 end

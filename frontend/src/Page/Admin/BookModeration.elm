@@ -7,7 +7,7 @@ module Page.Admin.BookModeration exposing
     , view
     )
 
-{-| Admin Book Moderation page (#118).
+{-| Admin Book Moderation page.
 
 Displays books in a filterable, paginated list. The platform owner can
 raise or lower a book's age gate in EITHER direction — the human-set
@@ -196,10 +196,6 @@ searchToMaybe s =
 
     else
         Just (String.trim s)
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg

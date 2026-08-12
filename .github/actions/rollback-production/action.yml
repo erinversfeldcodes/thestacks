@@ -130,13 +130,6 @@ runs:
     - id: validate-inputs
       name: Validate inputs
       shell: bash
-      # Inputs flow through env: rather than inline ${{...}} interpolation so a
-      # malicious value (e.g. shell metacharacters) cannot escape the bash
-      # context. Defense in depth — these specific inputs aren't directly
-      # attacker-controlled (image SHAs from `fly image show`, secrets, LSN
-      # from `psql`), but semgrep flags inline `${{ inputs.* }}` in run: as
-      # injection-prone regardless. Same env-indirection pattern as the
-      # `run-rollback` and `log-audit` steps below.
       env:
         CORE_PREV_IMAGE: ${{ inputs.core-prev-image }}
         MODAL_PREV_COMMIT: ${{ inputs.modal-prev-commit }}
@@ -189,13 +182,6 @@ runs:
         GH_TOKEN_FOR_CLONE: ${{ inputs.github-token }}
       run: |
         set -o pipefail
-        # Configure git so the script's clone of the prev Modal commit
-        # authenticates against private origin repos. `actions/checkout@v4`
-        # only sets up auth in the workspace's .git/config — a fresh
-        # `git clone` to a tmpdir doesn't inherit that. Setting
-        # `url.insteadOf` globally makes any github.com clone use the
-        # token. No-op if no token was provided (public-repo case or
-        # tests with INVOCATION_LOG set).
         if [[ -n "${GH_TOKEN_FOR_CLONE:-}" ]]; then
           git config --global "url.https://x-access-token:${GH_TOKEN_FOR_CLONE}@github.com/.insteadOf" "https://github.com/"
         fi
@@ -205,25 +191,10 @@ runs:
     - id: log-audit
       name: Write audit row + emit telemetry (best-effort)
       if: steps.run-rollback.outcome == 'success'
-      # BEST-EFFORT BY DESIGN (Issue #170 F). When the rollback rewound the
-      # DB to the pre-migrate LSN, the schema is back at N-1 while this
-      # checkout's code is at N — the INSERT can reference audit_log columns
-      # that do not exist yet (observed: `column "success" of relation
-      # "audit_log" does not exist`, run 28924423704). No ordering fixes it:
-      # a row written before the LSN restore is erased by the restore. The
-      # DB row is operator colour only; the DURABLE rollback record is the
-      # rollback-record.json artifact uploaded by deploy-production.yml.
-      # Two layers of protection so this step can never fail a completed
-      # rollback: try/rescue inside the Elixir (graceful warning + exit 0)
-      # and continue-on-error as belt-and-braces for failures outside the
-      # rescue (compile/boot/connection errors).
       continue-on-error: true
       shell: bash
       env:
         MIX_ENV: prod
-        # The audit step only needs Repo + Vault — keep CoreWeb.Endpoint
-        # out of the supervision tree so its missing-cache_manifest warning
-        # doesn't surface as a red error annotation in the workflow run.
         STACKS_SKIP_ENDPOINT: "1"
         DATABASE_URL: ${{ inputs.database-url }}
         CLOAK_KEY: ${{ inputs.cloak-key }}

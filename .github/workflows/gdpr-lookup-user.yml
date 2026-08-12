@@ -1,18 +1,5 @@
 name: Look up user id
 
-# READ-ONLY lookup: resolves an email or handle to its user_id(s) by running
-# `Stacks.Release.gdpr_lookup_user/1` inside the LIVE core node via
-# `fly ssh console ... rpc`. It mutates NOTHING — it just prints the user_id so
-# you can find a specific account (e.g. to feed a later admin action).
-#
-# An email is matched case-insensitively and MAY return several user_ids (email
-# is not a unique key); a handle is unique and returns at most one.
-#
-# Restricted to the authorised operator (the "Restrict operators" step) because
-# resolving an email to a user_id exposes account-linkage. It is NOT gated by
-# the erase-approval environment — it deletes nothing. Params are Base64(JSON)
-# → no injection surface.
-
 on:
   workflow_dispatch:
     inputs:

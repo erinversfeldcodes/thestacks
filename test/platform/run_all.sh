@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# test/platform/run_all.sh — top-level runner for Phase 2 platform tests.
-#
-# Each child test script prints TAP-ish output and exits 0 if all its
-# assertions passed. This runner invokes them in sequence and aggregates
-# exit codes so a single failing assertion anywhere fails the whole suite.
 
 set -uo pipefail
 
@@ -13,6 +8,7 @@ SUITES=(
     "$HERE/squawk_destructive_test.sh"
     "$HERE/lint_migrations_test.sh"
     "$HERE/migration_gate_syntax_test.sh"
+    "$HERE/squawk_worktree_selection_test.sh"
     "$HERE/schema_diff_test.sh"
     "$HERE/ci_migration_safety_job_test.sh"
     "$HERE/probe_production_test.sh"
@@ -28,10 +24,20 @@ SUITES=(
     "$HERE/e2e_global_setup_behavior_test.sh"
 )
 
+SUITE_TIMEOUT="${SUITE_TIMEOUT:-300}"
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+
 OVERALL=0
 for s in "${SUITES[@]}"; do
     printf '\n######## %s ########\n' "$(basename "$s")"
-    if ! bash "$s"; then
+    if [[ -n "$TIMEOUT_BIN" ]]; then
+        rc=0
+        "$TIMEOUT_BIN" "$SUITE_TIMEOUT" bash "$s" || rc=$?
+        if [[ $rc -eq 124 ]]; then
+            printf '# TIMED OUT after %ss — %s\n' "$SUITE_TIMEOUT" "$(basename "$s")"
+        fi
+        [[ $rc -eq 0 ]] || OVERALL=1
+    elif ! bash "$s"; then
         OVERALL=1
     fi
 done

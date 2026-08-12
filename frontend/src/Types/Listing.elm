@@ -57,10 +57,6 @@ type alias ListingsResponse =
     }
 
 
-
--- HELPERS
-
-
 conditionLabel : Condition -> String
 conditionLabel condition =
     case condition of
@@ -118,10 +114,6 @@ statusLabel status =
             "Removed"
 
 
-
--- MAPPING
-
-
 {-| Parse a condition string from the API.
 
 Defaults to Good on unknown values for proto3 forward-compatibility:
@@ -148,7 +140,6 @@ parseCondition s =
             Poor
 
         _ ->
-            -- Proto3 resilience: unknown values default to Good (safe mid-range)
             Good
 
 
@@ -169,7 +160,6 @@ parsePricingMode s =
             Offer
 
         _ ->
-            -- Proto3 resilience: unknown values default to Fixed (conservative)
             Fixed
 
 
@@ -199,7 +189,6 @@ parseStatus s =
             Removed
 
         _ ->
-            -- Proto3 resilience: unknown values default to Draft (least visible)
             Draft
 
 
@@ -223,10 +212,6 @@ fromProtoListing pl =
     , status = parseStatus pl.status
     , createdAt = emptyToNothing pl.createdAt
     }
-
-
-
--- DECODERS
 
 
 listingDecoder : Decoder Listing

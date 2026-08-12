@@ -1,10 +1,10 @@
 defmodule StacksWeb.OptOutController do
   @moduledoc """
-  Handles unauthenticated opt-out requests from businesses that have been
-  discovered as sources.
+      Handles unauthenticated opt-out requests from businesses that have been
+      discovered as sources.
 
-  Businesses do not need a platform account to opt out — they provide
-  their URL and a contact email, and the matching source is marked as excluded.
+      Businesses do not need a platform account to opt out — they provide
+      their URL and a contact email, and the matching source is marked as excluded.
   """
 
   use CoreWeb, :controller
@@ -12,16 +12,28 @@ defmodule StacksWeb.OptOutController do
   alias Stacks.Discovery
 
   @doc """
-  POST /api/opt-out — opt a discovered source out of the platform.
+      POST /api/opt-out — opt a discovered source out of the platform.
 
-  Expects `%{"url" => url, "email" => email}`. Optionally accepts `"reason"`.
-  Returns 200 on success, 404 if the URL is not found, 422 on validation error.
+      Expects `%{"url" => url, "email" => email}`. Optionally accepts `"reason"`.
+      Returns 200 on success, 404 if the URL is not found, 422 on validation error.
   """
   @spec create(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def create(conn, %{"url" => url, "email" => email} = _params) do
     case Discovery.opt_out(url, %{email: email}) do
-      {:ok, _source} ->
-        json(conn, %{message: "Source has been opted out successfully."})
+      {:ok, :excluded, _source} ->
+        json(conn, %{
+          status: "removed",
+          message: "Your listing has been removed and will not be re-added."
+        })
+
+      {:ok, :pending_review, _source} ->
+        json(conn, %{
+          status: "pending_review",
+          message:
+            "Your request has been received and will be reviewed. Because the contact " <>
+              "address does not belong to the listed website's domain, we verify these " <>
+              "by hand before removing a listing."
+        })
 
       {:error, :not_found} ->
         conn

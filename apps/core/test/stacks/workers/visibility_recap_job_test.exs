@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.VisibilityRecapJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.VisibilityRecapJob.
+      Tests for Stacks.Workers.VisibilityRecapJob.
 
-  The worker batches-updates bookshelves and placements whose stored visibility
-  violates the user's new (more restrictive) profile_visibility ceiling, then
-  emits a user.visibility_recap_completed event with the counts.
+      The worker batches-updates bookshelves and placements whose stored visibility
+      violates the user's new (more restrictive) profile_visibility ceiling, then
+      emits a user.visibility_recap_completed event with the counts.
   """
 
   use Core.DataCase, async: true
@@ -114,7 +114,6 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
       reloaded = Repo.get!(Bookshelf, bs.id)
       assert reloaded.visibility == "owner"
-      # updated_at should NOT change since no update was applied
       assert reloaded.updated_at == bs.updated_at
     end
 
@@ -172,9 +171,7 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
 
-      # The platform post is tightened down to the owner ceiling…
       assert Repo.get!(Post, platform_post.id).visibility == "owner"
-      # …while the already-at-ceiling owner post is untouched.
       assert Repo.get!(Post, owner_post.id).visibility == "owner"
 
       payload = recap_payload(user.id)
@@ -184,7 +181,6 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
     test "reports posts_capped: 0 when no posts violate the ceiling" do
       user = insert(:user, profile_visibility: "platform")
       _owner_post = insert(:post, user: user, visibility: "owner")
-      # A bookshelf is capped so the recap event is still emitted for ceiling "owner".
       _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})

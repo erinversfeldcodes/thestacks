@@ -1,0 +1,22 @@
+[source]
+name = "Wordsworth Books"
+type = "bookshop"
+country = "ZA"
+url = "https://www.wordsworth.co.za"
+has_physical_location = true
+currency = "ZAR"
+
+[search]
+method = "GET"
+path = "/search"
+query_param = "q"
+query_template = "{isbn}"
+
+[selectors]
+price = ".product-price, .price"
+title = ".product-name, .product-title"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 10
+retry_after_seconds = 60

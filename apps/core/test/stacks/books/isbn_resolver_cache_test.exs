@@ -4,7 +4,6 @@ defmodule Stacks.Books.ISBNResolverCacheTest do
   alias Stacks.Books.ISBNResolverCache
 
   setup do
-    # ETS is global — isolate per test by flushing before each.
     ISBNResolverCache.invalidate_all()
     :ok
   end
@@ -31,8 +30,6 @@ defmodule Stacks.Books.ISBNResolverCacheTest do
     end
 
     test "transient resolver errors are NOT cached and emit :put_skipped" do
-      # Subscribe to the put_skipped telemetry event so we can assert the
-      # cache emitted the observability signal alongside the no-op.
       handler_id = "test-#{System.unique_integer([:positive])}"
       test_pid = self()
 

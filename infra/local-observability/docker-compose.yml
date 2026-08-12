@@ -1,28 +1,3 @@
-# Local observability stack for The Stacks (ADR-021 / Epic #249).
-#
-# Mirrors the production render pipeline on your laptop so you can SEE the public
-# dashboards populate with REAL metrics before anything deploys to Fly:
-#
-#     emit (PromEx /internal/metrics) → VictoriaMetrics → Grafana dashboards
-#
-# The public surface is proven by Grafana's ANONYMOUS viewer access (no login) —
-# exactly what an unauthenticated visitor sees.
-#
-# Run:
-#   1. Start the app with metrics auth enabled (same token as scrape.yml):
-#        METRICS_SCRAPE_TOKEN=local-dev-metrics-token just run mix phx.server
-#   2. docker compose -f infra/local-observability/docker-compose.yml up
-#   3. Open http://localhost:3010  (no login — anonymous Viewer = the public view)
-#
-# Ingestion note: locally VictoriaMetrics *scrapes* the app for simplicity. In
-# production (Epic #249 #252/#253) the app instead PUSHES via remote_write (a
-# vmagent co-located with the app scrapes localhost and remote_writes to the
-# always-on VM), which is what makes it work with the scale-to-zero core app.
-# Either way the store→Grafana render path proven here is identical.
-#
-# Explicit project name — WITHOUT this, Compose derives the project from the dir
-# basename ("local-observability"), colliding with any other repo that has an
-# infra/local-observability/ stack (shared containers → they clobber each other).
 name: stacks-observability
 services:
   victoriametrics:
@@ -44,13 +19,11 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
-      # Anonymous, read-only Viewer — this is the PUBLIC dashboard surface.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_USERS_DEFAULT_THEME: dark
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      # The dashboards-as-code the app already ships (Core.PromEx.dashboards/0).
       - ../../apps/core/priv/grafana:/var/lib/grafana/dashboards:ro
     ports:
       - "3010:3000"

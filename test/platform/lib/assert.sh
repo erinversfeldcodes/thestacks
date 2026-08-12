@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# test/platform/lib/assert.sh — tiny test harness used by platform shell tests.
-#
-# Plain bash (no bats available on the dev host). Usage pattern:
-#
-#   source "$(dirname "$0")/lib/assert.sh"
-#
-#   test_case "my-case" "this is what it does"
-#   assert_exit_nonzero  <actual_exit_code>  "reason"
-#   assert_exit_zero     <actual_exit_code>  "reason"
-#   assert_contains      "$output" "needle"  "reason"
-#   assert_not_contains  "$output" "needle"  "reason"
-#
-#   summarise   # prints tally, exits 0 if all passed else 1
-#
-# Assertions record pass/fail into TESTS_PASSED / TESTS_FAILED. A failing
-# assertion does NOT terminate the current test script — later assertions still
-# run so we get a full picture of what's broken. `summarise` returns the
-# appropriate exit code.
 
 set -u
 

@@ -5,12 +5,13 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
   import Ecto.Query
   import Stacks.Factory
 
+  alias Stacks.Enrichment.MockRssFetcher
   alias Stacks.Monitoring
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Workers.RSSLivenessJob
 
   describe "perform/1" do
-    test "records failure for unreachable RSS feeds" do
+    test "records failure when the probe finds no live feed" do
       author = insert(:author, rss_feed_url: "https://unreachable.invalid/feed.xml")
 
       assert :ok = perform_job(RSSLivenessJob, %{})
@@ -24,7 +25,6 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
           )
         )
 
-      # Should have recorded a failure since the URL is unreachable
       assert check
       assert check.consecutive_failures >= 1
       assert check.last_failure_reason
@@ -49,9 +49,7 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
       assert check2.source_name == "author_rss:#{author2.id}"
     end
 
-    test "records failure with HTTP status message for non-2xx responses" do
-      # Using an unreachable host exercises the error/rescue path.
-      # The check_feed/1 function handles both {:ok, status} and {:error, reason}.
+    test "records the probe's failure reason" do
       author = insert(:author, rss_feed_url: "https://unreachable.invalid/feed.xml")
 
       assert :ok = perform_job(RSSLivenessJob, %{})
@@ -66,26 +64,46 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
         )
 
       assert check
-      assert check.last_failure_reason != nil
+      assert check.last_failure_reason == ":not_found"
       assert check.source_type == "rss_feed"
     end
 
+    test "records success when the probe finds a live feed" do
+      author = insert(:author, rss_feed_url: "https://alive.test/feed.xml")
+
+      MockRssFetcher.put_probe_response({:ok, "https://alive.test/feed.xml"})
+      on_exit(fn -> MockRssFetcher.clear() end)
+
+      assert :ok = perform_job(RSSLivenessJob, %{})
+
+      source_name = "author_rss:#{author.id}"
+
+      check =
+        Core.Repo.one(
+          from(s in SourceHealthCheck,
+            where: s.source_name == ^source_name
+          )
+        )
+
+      assert check
+      assert check.status == "healthy"
+      assert check.consecutive_failures == 0
+      assert check.last_success_at
+    end
+
     test "handles multiple authors with mixed results in a single run" do
-      # All will fail since hosts are unreachable, but the job should not abort
       _author1 = insert(:author, rss_feed_url: "https://feed1.invalid/rss")
       _author2 = insert(:author, rss_feed_url: nil)
       _author3 = insert(:author, rss_feed_url: "https://feed3.invalid/rss")
 
       assert :ok = perform_job(RSSLivenessJob, %{})
 
-      # Only authors with rss_feed_url should have checks
       count =
         Core.Repo.aggregate(
           from(s in SourceHealthCheck, where: s.source_type == "rss_feed"),
           :count
         )
 
-      # At least the two authors with RSS URLs should have records
       assert count >= 2
     end
 

@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+// A reader's one-shot library import. Goodreads shut its public
+// API in 2020, so the reader exports goodreads_library_export.csv themselves
+// and hands it over: one direction, one time, no sync. The CSV itself is
+// never stored — only the parsed rows, and those expire after 30 days.
+message LibraryImport {
+  // Row id.
+  string id = 1 [json_name = "id"];
+  // The importing reader. Erasure deletes the import and its rows.
+  string user_id = 2 [json_name = "user_id"];
+  // Where the export came from. Only "goodreads" today.
+  string source = 3 [json_name = "source"];
+  // The uploaded file's name — often carries the reader's own name, so it is
+  // personal data: exported, erased, never in event_log.
+  string filename = 4 [json_name = "filename"];
+  // enqueued | running | complete | failed.
+  string status = 5 [json_name = "status"];
+  // Total rows read from the file.
+  int32 row_count = 6 [json_name = "row_count"];
+  // Rows whose outcome has been decided so far (real progress for the poll).
+  int32 processed_count = 7 [json_name = "processed_count"];
+  // Rows placed on a shelf.
+  int32 shelved_count = 8 [json_name = "shelved_count"];
+  // Rows the reader already had (by ISBN-13, any bookshelf).
+  int32 duplicate_count = 9 [json_name = "duplicate_count"];
+  // Rows no provider could verify. NEVER written as books — the ISBN hard
+  // gate applies to imports without exception.
+  int32 unverified_count = 10 [json_name = "unverified_count"];
+  // Rows the parser could not read (wrong column count, broken quoting).
+  int32 unreadable_count = 11 [json_name = "unreadable_count"];
+  // When processing began.
+  google.protobuf.Timestamp started_at = 12 [json_name = "started_at"];
+  // When processing finished (complete or failed).
+  google.protobuf.Timestamp finished_at = 13 [json_name = "finished_at"];
+  // When the import was created.
+  google.protobuf.Timestamp created_at = 14 [json_name = "created_at"];
+  // When the row last changed.
+  google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
+}
+
+// One CSV row and what became of it. Holds the reader's own
+// writing (raw_review, raw_notes) — free-text personal data: erased with the
+// import, NEVER copied to the warehouse, purged after 30 days.
+message LibraryImportRow {
+  // Row id.
+  string id = 1 [json_name = "id"];
+  // The import this row belongs to. Cascades on delete.
+  string import_id = 2 [json_name = "import_id"];
+  // 1-based position in the reader's own file, so they can find it there.
+  int32 row_number = 3 [json_name = "row_number"];
+  // Title exactly as Goodreads wrote it.
+  string raw_title = 4 [json_name = "raw_title"];
+  // Author exactly as Goodreads wrote it.
+  string raw_author = 5 [json_name = "raw_author"];
+  // The ISBN column, unwrapped from Goodreads' ="…" Excel escape.
+  string raw_isbn = 6 [json_name = "raw_isbn"];
+  // The ISBN13 column, unwrapped likewise.
+  string raw_isbn13 = 7 [json_name = "raw_isbn13"];
+  // Goodreads' Exclusive Shelf value (read / currently-reading / to-read).
+  string goodreads_shelf = 8 [json_name = "goodreads_shelf"];
+  // My Rating, 0-5; 0 means unrated.
+  int32 raw_rating = 9 [json_name = "raw_rating"];
+  // My Review — the reader's own writing.
+  string raw_review = 10 [json_name = "raw_review"];
+  // Private Notes — the reader's own writing.
+  string raw_notes = 11 [json_name = "raw_notes"];
+  // Binding (Paperback, Hardcover, …).
+  string raw_binding = 12 [json_name = "raw_binding"];
+  // Date Read, as Goodreads wrote it.
+  string raw_date_read = 13 [json_name = "raw_date_read"];
+  // Date Added, as Goodreads wrote it.
+  string raw_date_added = 14 [json_name = "raw_date_added"];
+  // Read Count.
+  int32 raw_read_count = 15 [json_name = "raw_read_count"];
+  // Owned Copies — with Exclusive Shelf, decides the destination bookshelf.
+  int32 raw_owned_copies = 16 [json_name = "raw_owned_copies"];
+  // shelved | duplicate | unverified | unreadable. Empty until processed —
+  // an already-set outcome is what makes an Oban retry skip the row.
+  string outcome = 17 [json_name = "outcome"];
+  // Why, in the report's own words.
+  string reason = 18 [json_name = "reason"];
+  // The work the row resolved to, when it did.
+  string book_id = 19 [json_name = "book_id"];
+  // The placement the row created, when it did.
+  string placement_id = 20 [json_name = "placement_id"];
+  // When the row was parsed.
+  google.protobuf.Timestamp created_at = 21 [json_name = "created_at"];
+}

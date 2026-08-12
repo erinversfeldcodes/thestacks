@@ -1,13 +1,13 @@
 defmodule Core.Repo.Migrations.FixMarketplaceMonitoringConstraints do
   @moduledoc """
-  Applies three corrections to migrations 000005:
+      Applies three corrections to migrations 000005:
 
-  1. Creates op.monitored_source_type enum (renamed from the incorrect op.source_type
-     which was silently a no-op due to name collision with op.discovered_sources source_type).
-  2. Alters transactions.buyer_id and transactions.seller_id FK constraints from
-     ON DELETE RESTRICT to ON DELETE SET NULL (GDPR erasure pattern — retain financial
-     records but null out user references on account deletion).
-  3. Adds unique index on source_health_checks.source_name (required for upsert pattern).
+      1. Creates op.monitored_source_type enum (renamed from the incorrect op.source_type
+         which was silently a no-op due to name collision with op.discovered_sources source_type).
+      2. Alters transactions.buyer_id and transactions.seller_id FK constraints from
+         ON DELETE RESTRICT to ON DELETE SET NULL (GDPR erasure pattern — retain financial
+         records but null out user references on account deletion).
+      3. Adds unique index on source_health_checks.source_name (required for upsert pattern).
   """
 
   use Ecto.Migration
@@ -19,7 +19,6 @@ defmodule Core.Repo.Migrations.FixMarketplaceMonitoringConstraints do
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;
     """)
 
-    # Drop the incorrect ON DELETE RESTRICT constraints and re-add as SET NULL
     execute("ALTER TABLE op.transactions DROP CONSTRAINT IF EXISTS transactions_buyer_id_fkey")
     execute("ALTER TABLE op.transactions DROP CONSTRAINT IF EXISTS transactions_seller_id_fkey")
 

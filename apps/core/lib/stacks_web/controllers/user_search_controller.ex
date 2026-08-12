@@ -1,14 +1,14 @@
 defmodule StacksWeb.UserSearchController do
   @moduledoc """
-  People search for the discovery surface (US-10.5.4, #217).
+      People search for the discovery surface.
 
-  `GET /api/search/users?q=<term>` runs under `:optional_auth`. Results are the
-  redacted `public_profile_summary` shape (handle + display_name + location) —
-  never email, consent, or role.
+      `GET /api/search/users?q=<term>` runs under `:optional_auth`. Results are the
+      redacted `public_profile_summary` shape (handle + display_name + location) —
+      never email, consent, or role.
 
-  The discoverability privacy rule (platform-only, block-excluded in both
-  directions) is enforced **in SQL** by `Accounts.search_users/2`, never by
-  redacting here — a ghost or blocked user never enters the result set.
+      The discoverability privacy rule (platform-only, block-excluded in both
+      directions) is enforced **in SQL** by `Accounts.search_users/2`, never by
+      redacting here — a ghost or blocked user never enters the result set.
   """
   use CoreWeb, :controller
 
@@ -24,9 +24,6 @@ defmodule StacksWeb.UserSearchController do
 
     matches = Accounts.search_users(term, viewer_id)
 
-    # NO-PII: tag only the bounded `outcome` atom (hit|zero_result). NEVER the
-    # query string (unbounded cardinality) or any handle/user-id (PII) —
-    # telemetry is warehouse-adjacent. `results` is a plain numeric measurement.
     outcome = if matches == [], do: :zero_result, else: :hit
 
     :telemetry.execute(

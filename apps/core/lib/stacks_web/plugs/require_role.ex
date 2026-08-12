@@ -1,14 +1,13 @@
 defmodule StacksWeb.Plugs.RequireRole do
   @moduledoc """
-  Plug that restricts access to users with a specific role.
-
-  ## Usage in router
-
-      pipeline :require_owner do
-        plug StacksWeb.Plugs.RequireRole, role: "owner"
-      end
-
-  Returns 403 if the authenticated user does not have the required role.
+      Restricts a route to users with a given role
+      (`plug StacksWeb.Plugs.RequireRole, role: "owner"`); 403 otherwise.
+      Accepts the user from EITHER upstream pipeline — Guardian's resource
+      (`:authenticated`) or `conn.assigns[:current_user]` (`:admin`) — so
+      `:require_owner` composes after both. That composition matters: an admin
+      token outlives the role it was minted under, so a demoted account keeps
+      authenticating for the token's remaining ttl; this plug is what stops it
+      mutating owner-only surfaces.
   """
 
   import Plug.Conn
@@ -20,7 +19,7 @@ defmodule StacksWeb.Plugs.RequireRole do
 
   def call(conn, opts) do
     required_role = Keyword.fetch!(opts, :role)
-    user = Guardian.Plug.current_resource(conn)
+    user = Guardian.Plug.current_resource(conn) || conn.assigns[:current_user]
 
     case user do
       %{role: ^required_role} ->

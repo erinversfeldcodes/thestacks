@@ -1,5 +1,3 @@
-# .gitleaks.toml — gitleaks configuration for The Stacks
-# All findings below are false positives in vendored/generated code.
 
 [extend]
 useDefault = true

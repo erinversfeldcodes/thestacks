@@ -1,13 +1,13 @@
 defmodule StacksWeb.AdminAuthController do
   @moduledoc """
-  Controller for break-glass admin authentication.
+      Controller for break-glass admin authentication.
 
-  Provides endpoints for:
-  - `login/2` — authenticate with email/password, returns session_id
-  - `verify_mfa/2` — verify TOTP or recovery code, returns admin JWT
-  - `logout/2` — revoke the current admin session
-  - `mfa_setup/2` — begin MFA enrollment (returns provisioning URI + codes)
-  - `mfa_confirm/2` — confirm MFA enrollment with a TOTP code
+      Provides endpoints for:
+      - `login/2` — authenticate with email/password, returns session_id
+      - `verify_mfa/2` — verify TOTP or recovery code, returns admin JWT
+      - `logout/2` — revoke the current admin session
+      - `mfa_setup/2` — begin MFA enrollment (returns provisioning URI + codes)
+      - `mfa_confirm/2` — confirm MFA enrollment with a TOTP code
   """
 
   use CoreWeb, :controller
@@ -113,7 +113,7 @@ defmodule StacksWeb.AdminAuthController do
     user = Guardian.Plug.current_resource(conn)
     recovery_codes = Map.get(params, "recovery_codes", [])
 
-    case Base.decode64(encoded_secret) do
+    case Base.decode32(encoded_secret, padding: false) do
       {:ok, secret} ->
         case MFA.confirm_enrollment(user, totp_code, secret, recovery_codes) do
           {:ok, _mfa} ->
@@ -127,10 +127,6 @@ defmodule StacksWeb.AdminAuthController do
         conn |> put_status(422) |> json(%{error: "invalid_secret"})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
 
   defp authenticate(email, password) do
     case Accounts.authenticate(email, password) do

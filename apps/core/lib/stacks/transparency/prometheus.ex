@@ -1,24 +1,11 @@
 defmodule Stacks.Transparency.Prometheus do
   @moduledoc """
-  Read-only client for the self-hosted VictoriaMetrics store (ADR-021 / #241 / #255).
-
-  Runs a single instant query against `<base>/api/v1/query` — VictoriaMetrics
-  speaks the Prometheus query API — and extracts a single scalar from the result.
-  `<base>` is the 6PN-internal VM URL (e.g.
-  `http://thestacks-victoriametrics.internal:8428`), so **no auth/token** is
-  needed: the endpoint is unreachable from the public internet. This replaces the
-  Fly managed-Prometheus client, whose scrape never ingested a sample (#248).
-
-  ## Config guard
-
-  The base URL comes from `config :core, :metrics_query_url` (runtime.exs defaults
-  it to the metrics push target — the same VM). When unset — local/test — this
-  client returns `{:error, :not_configured}` and `Stacks.Transparency` degrades
-  the live section to `:unavailable`. It must never break boot or raise.
-
-  Only queries drawn from `Stacks.Transparency`'s fixed allowlist ever reach this
-  client — there is no code path that forwards a user-supplied query — and the
-  allowlist is proven a subset of `Core.PromEx.MetricAudience` `:public` metrics.
+      Read-only client for self-hosted VictoriaMetrics: one instant query
+      against `<base>/api/v1/query` (VM speaks the Prometheus API), returning
+      one scalar. `<base>` is the 6PN-internal URL, unreachable publicly, so
+      no token. Configured via `:metrics_query_url`; when unset (local/test)
+      returns `{:error,:not_configured}` and Transparency degrades to
+      `:unavailable` — never breaks boot. Only allowlist queries reach here.
   """
 
   @behaviour Stacks.Transparency.PrometheusClient
@@ -40,7 +27,10 @@ defmodule Stacks.Transparency.Prometheus do
 
     req = Finch.build(:get, url, [{"Accept", "application/json"}])
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout) do
+    case Finch.request(req, Stacks.Finch,
+           receive_timeout: @receive_timeout,
+           request_timeout: @receive_timeout
+         ) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         parse_scalar(body)
 
@@ -54,10 +44,6 @@ defmodule Stacks.Transparency.Prometheus do
     end
   end
 
-  # Prometheus instant-query response:
-  #   {"status":"success","data":{"resultType":"vector",
-  #     "result":[{"metric":{...},"value":[<ts>,"<scalar>"]}]}}
-  # A scalar result type is {"resultType":"scalar","result":[<ts>,"<scalar>"]}.
   defp parse_scalar(body) do
     case Jason.decode(body) do
       {:ok, %{"status" => "success", "data" => %{"result" => result}}} ->
@@ -71,9 +57,7 @@ defmodule Stacks.Transparency.Prometheus do
     end
   end
 
-  # Vector: take the first series' sample value.
   defp extract_value([%{"value" => [_ts, raw]} | _]), do: cast_number(raw)
-  # Scalar: [ts, "value"].
   defp extract_value([_ts, raw]) when is_binary(raw), do: cast_number(raw)
   defp extract_value(_), do: {:error, :no_data}
 

@@ -1,6 +1,6 @@
 module Animation.TransitionTest exposing (suite)
 
-{-| US-1.2.5 — bookshelf navigation transitions (issue #277, punch #9).
+{-| — bookshelf navigation transitions (issue,).
 
 The three bookcase bookshelves are ordered as the nav renders them
 (`Main.elm:2594-2598`): Library, AntiLibrary, WishList. Navigating _along_ that
@@ -45,8 +45,6 @@ clearOnAnimationEndSuite =
                     |> clearOnAnimationEnd RoomTransition.fadeThroughDarkIn
                     |> Expect.equal Nothing
         , test "ignores a bubbled animationend from a descendant" <|
-            -- animationend bubbles up to main.app__main from book hovers and
-            -- spine effects. Clearing on those would cut the transition short.
             \_ ->
                 Just SlideTransition.slideInRight
                     |> clearOnAnimationEnd "book-hover-lift"
@@ -62,9 +60,6 @@ clearOnAnimationEndSuite =
                     |> clearOnAnimationEnd SlideTransition.slideInRight
                     |> Expect.equal Nothing
         , test "a repeat navigation re-triggers because the class is cleared in between" <|
-            -- The Defect 3 regression: without this clear, the second
-            -- navigation re-renders an identical class string and the browser
-            -- never restarts the animation.
             \_ ->
                 let
                     firstNavigation =
@@ -138,8 +133,6 @@ transitionClassSuite =
                         |> Expect.equal RoomTransition.fadeThroughDarkIn
             ]
         , describe "a slide and a fade are distinguishable"
-            -- The defect #270 caught: every pair returned the same class, so an
-            -- adjacent move and a room move were indistinguishable on the DOM.
             [ test "an adjacent move and a room move do not yield the same class" <|
                 \_ ->
                     transitionClass Library AntiLibrary
@@ -158,7 +151,7 @@ transitionClassSuite =
                 \_ ->
                     transitionClass Library Search
                         |> Expect.equal RoomTransition.fadeThroughDarkIn
-            , test "BookDetail is an overlay (ADR-005), never a UrlChanged route, so it fades" <|
+            , test "BookDetail is an overlay, never a UrlChanged route, so it fades" <|
                 \_ ->
                     transitionClass Library (BookDetail "book-1")
                         |> Expect.equal RoomTransition.fadeThroughDarkIn

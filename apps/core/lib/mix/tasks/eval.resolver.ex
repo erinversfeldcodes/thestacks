@@ -2,45 +2,18 @@ defmodule Mix.Tasks.Eval.Resolver do
   @shortdoc "Offline eval of the title-search scorer against recorded production cases"
 
   @moduledoc """
-  Replays recorded VLM signals + upstream OL/GB docs through the REAL
-  production pick logic (`Stacks.Books.CandidateScorer.pick_best/3` —
-  the exact seam `ISBNResolver.pick_best_candidate/3` calls) and checks
-  each pick against the expected ISBN. Zero network: what used to be a
-  30-minute deploy cycle polluted by external-API weather is a
-  sub-second offline run.
+      Replays recorded VLM signals + OL/GB docs through the REAL production
+      pick logic (`CandidateScorer.pick_best/3`, the exact resolver seam) and
+      scores each pick against the expected ISBN. Zero network — a sub-second
+      offline run instead of a 30-minute deploy cycle.
 
-  ## Usage (from `apps/core/`)
+          mix eval.resolver                    # production defaults
+          mix eval.resolver --floor 3.25       # floor experiment
+          mix eval.resolver --w-<component> N  # any scorer weight
+          mix eval.resolver --corpus path.exs  # alternative corpus
 
-      mix eval.resolver                          # current production defaults
-      mix eval.resolver --floor 3.25             # plausibility-floor experiment
-      mix eval.resolver --w-derivative-penalty 0 # disable the derivative penalty
-      mix eval.resolver --w-subject-hit 1.5      # any component weight
-      mix eval.resolver --corpus path/to.exs     # alternative corpus
-
-  ## Options
-
-    * `--floor FLOAT` — plausibility floor (default:
-      `CandidateScorer.default_floor/0`)
-    * `--w-title-overlap`, `--w-subtitle`, `--w-subject-hit`,
-      `--w-raw-text`, `--w-author`, `--w-exact-title`,
-      `--w-derivative-penalty` — component weight overrides (defaults:
-      `CandidateScorer.default_weights/0`)
-    * `--corpus PATH` — corpus file (default: `priv/eval/corpus.exs`)
-
-  ## Corpus
-
-  `priv/eval/corpus.exs` — a plain Elixir list of entries; format is
-  documented at the top of that file. Entries flagged
-  `known_failure: true` are xfail: printed as XFAIL but excluded from
-  the exit-code decision, so documented-open tuning questions don't
-  block CI-style usage.
-
-  ## Output & exit code
-
-  Per entry: PASS/FAIL/XFAIL/XPASS with picked-vs-expected and the full
-  per-candidate score table. Summary: win-rate over the whole corpus.
-  Exits non-zero when any non-`known_failure` entry fails (a regression
-  against pinned expectations).
+      Corpus: `priv/eval/resolver_corpus.exs`. Exit 0 always — it reports, it
+      does not gate.
   """
 
   use Mix.Task
@@ -62,7 +35,6 @@ defmodule Mix.Tasks.Eval.Resolver do
 
   @impl Mix.Task
   def run(argv) do
-    # Pure module usage only — no repo, no HTTP clients, no app boot.
     Mix.Task.run("compile")
     _ = Application.load(:core)
 
@@ -79,8 +51,6 @@ defmodule Mix.Tasks.Eval.Resolver do
     results = Enum.map(corpus, &evaluate(&1, opts))
     print_summary(results)
   end
-
-  # --- configuration -------------------------------------------------------
 
   defp scorer_opts(cli) do
     weights =
@@ -115,8 +85,6 @@ defmodule Mix.Tasks.Eval.Resolver do
     Application.app_dir(:core, "priv/eval/corpus.exs")
   end
 
-  # --- evaluation ----------------------------------------------------------
-
   defp evaluate(entry, opts) do
     pairs = Enum.map(entry.candidates, &{&1.isbn, &1.meta})
     picked = pick(pairs, entry.signals, opts)
@@ -127,9 +95,6 @@ defmodule Mix.Tasks.Eval.Resolver do
     outcome
   end
 
-  # The production code path: identical call the resolver makes in
-  # `pick_best_candidate/3` (opts default to the same production
-  # defaults there).
   defp pick(pairs, signals, opts) do
     case CandidateScorer.pick_best(pairs, signals, opts) do
       :empty -> :not_found
@@ -154,8 +119,6 @@ defmodule Mix.Tasks.Eval.Resolver do
       {false, true} -> :xfail
     end
   end
-
-  # --- output --------------------------------------------------------------
 
   defp print_header(opts, cli) do
     weights = Map.merge(CandidateScorer.default_weights(), Map.new(opts[:weights]))

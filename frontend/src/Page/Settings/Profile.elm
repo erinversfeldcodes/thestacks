@@ -1,15 +1,17 @@
 module Page.Settings.Profile exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
     )
 
 import Api
-import Html exposing (Html, button, div, h1, h2, input, label, p, text)
-import Html.Attributes exposing (class, disabled, placeholder, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Components.SaveButton as SaveButton
+import Html exposing (Html, div, h1, h2, input, label, p, text)
+import Html.Attributes exposing (class, placeholder, type_, value)
+import Html.Events exposing (onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (User)
@@ -43,6 +45,20 @@ type Msg
     | SaveProfileCompleted (Result Api.ProfileError String)
     | SaveLocation
     | SaveLocationCompleted (Result Http.Error ())
+    | SessionExpiryDetected
+
+
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry`.
+
+Until this page had no `OutMsg`, so an expired session came back as
+`ProfileRequestFailed (BadStatus 401)` and rendered "Could not save profile.
+Please try again." — over a form still holding the reader's current password,
+typed in to authorise an email change that can no longer happen.
+
+-}
+type OutMsg
+    = NoOut
+    | SessionExpired
 
 
 init : User -> Model
@@ -86,37 +102,35 @@ handleChanged model =
     model.handle /= model.initialHandle
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetDisplayName val ->
-            ( { model | displayName = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | displayName = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetHandle val ->
-            ( { model | handle = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | handle = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetEmail val ->
-            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none )
+            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none )
+            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetWebsiteUrl val ->
-            ( { model | websiteUrl = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | websiteUrl = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetCountryCode val ->
-            ( { model | countryCode = val, savingLocation = NotAsked }, Cmd.none )
+            ( { model | countryCode = val, savingLocation = NotAsked }, Cmd.none, NoOut )
 
         SetCity val ->
-            ( { model | city = val, savingLocation = NotAsked }, Cmd.none )
+            ( { model | city = val, savingLocation = NotAsked }, Cmd.none, NoOut )
 
         SaveProfile ->
             if emailChanged model && String.isEmpty (String.trim model.currentPassword) then
-                -- Changing the email requires the current password; block the
-                -- save and surface an inline message rather than sending a
-                -- request the server would reject.
                 ( { model | currentPasswordError = Just "Please enter your current password to change your email." }
                 , Cmd.none
+                , NoOut
                 )
 
             else
@@ -132,21 +146,21 @@ update msg model maybeToken =
                             , emailChanged = emailChanged model
                             , handleChanged = handleChanged model
                             }
-                            token
-                            SaveProfileCompleted
+                            (Api.authed token
+                                { onExpired = SessionExpiryDetected
+                                , onResult = SaveProfileCompleted
+                                }
+                            )
+                        , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none )
+                        ( model, Cmd.none, NoOut )
 
         SaveProfileCompleted result ->
             case result of
                 Ok normalisedHandle ->
                     let
-                        -- The 200 body echoes the server-normalised (lowercased)
-                        -- handle. An omitted-handle save (unchanged field) still
-                        -- echoes the real stored handle, so a session that
-                        -- rendered an empty field now settles on the true value.
                         settledHandle =
                             if normalisedHandle == "" then
                                 model.handle
@@ -154,9 +168,6 @@ update msg model maybeToken =
                             else
                                 normalisedHandle
                     in
-                    -- Reflect the settled handle in the field and rebaseline both
-                    -- the handle and email so a following untouched save omits
-                    -- them. Also clear the (now consumed) password field.
                     ( { model
                         | savingProfile = Success ()
                         , initialEmail = model.email
@@ -166,10 +177,11 @@ update msg model maybeToken =
                         , initialHandle = settledHandle
                       }
                     , Cmd.none
+                    , NoOut
                     )
 
                 Err err ->
-                    ( { model | savingProfile = Failure err }, Cmd.none )
+                    ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
 
         SaveLocation ->
             case maybeToken of
@@ -177,20 +189,27 @@ update msg model maybeToken =
                     ( { model | savingLocation = Loading }
                     , Api.updateLocation
                         { countryCode = model.countryCode, city = model.city }
-                        token
-                        SaveLocationCompleted
+                        (Api.authed token
+                            { onExpired = SessionExpiryDetected
+                            , onResult = SaveLocationCompleted
+                            }
+                        )
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SaveLocationCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | savingLocation = Success () }, Cmd.none )
+                    ( { model | savingLocation = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | savingLocation = Failure err }, Cmd.none )
+                    ( { model | savingLocation = Failure err }, Cmd.none, NoOut )
+
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
 
 
 view : Model -> Html Msg
@@ -248,7 +267,7 @@ view model =
                     []
                 ]
             , div [ class "settings-actions" ]
-                [ viewSaveButton model.savingProfile SaveProfile "Save Profile"
+                [ SaveButton.primary model.savingProfile SaveProfile "Save Profile"
                 ]
             , viewProfileFeedback model.savingProfile
             ]
@@ -277,7 +296,7 @@ view model =
                     []
                 ]
             , div [ class "settings-actions" ]
-                [ viewSaveButton model.savingLocation SaveLocation "Save Location"
+                [ SaveButton.primary model.savingLocation SaveLocation "Save Location"
                 ]
             , viewFeedback model.savingLocation "Location saved." "Could not save location. Please try again."
             ]
@@ -313,22 +332,6 @@ viewCurrentPasswordField model =
 
     else
         text ""
-
-
-viewSaveButton : RemoteData e () -> Msg -> String -> Html Msg
-viewSaveButton saving onClickMsg label =
-    case saving of
-        Loading ->
-            button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Saving..." ]
-
-        Success _ ->
-            button [ class "btn btn--primary" ]
-                [ text "Saved!" ]
-
-        _ ->
-            button [ class "btn btn--primary", onClick onClickMsg ]
-                [ text label ]
 
 
 viewFeedback : RemoteData Http.Error () -> String -> String -> Html Msg
@@ -386,7 +389,7 @@ profileRequestErrorText err =
 
 
 {-| Surface a handle-specific 422 error under the handle input, mapped to the
-user-facing copy from US-10.5.1.
+user-facing copy from
 -}
 viewHandleError : RemoteData Api.ProfileError () -> Html Msg
 viewHandleError saving =

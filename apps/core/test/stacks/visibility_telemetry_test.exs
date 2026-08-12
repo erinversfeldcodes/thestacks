@@ -1,21 +1,9 @@
 defmodule Stacks.VisibilityTelemetryTest do
   @moduledoc """
-  Firing tests for the visibility/social observability counters added in
-  Issue #197 (punch #20 of the #122 privacy/visibility epic).
-
-  Verifies that telemetry events fire with the right measurements and
-  metadata for:
-  - profile-visibility change by direction (tighten / loosen / same)
-  - visibility recap outcome + cap counts (bookshelves / placements / posts)
-  - block / unblock counts
-  - block error rates (cannot_block_self, already_blocked)
-  - `:rate_limit_social` (generic rate-limit) hit counts by bucket
-  - ViewAs usage + error counts by perspective
-  - visibility ceiling-rejection counts by resource_type
-  - robots.txt / crawler fetch counts
-
-  Metadata tags are whitelisted atoms only — no raw user input (uuids,
-  perspective strings) is ever passed as a telemetry tag.
+      Firing tests for the 197 visibility/social counters:
+      profile-visibility change by direction, recap outcome + cap counts,
+      block/unblock, block error rates, social rate-limit hits by bucket, and
+      ViewAs usage/errors. Bounded-atom metadata throughout.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -33,8 +21,6 @@ defmodule Stacks.VisibilityTelemetryTest do
   alias StacksWeb.Plugs.ViewAsPlug
   alias StacksWeb.SocialController
 
-  # ── Helpers ──────────────────────────────────────────────────────────────
-
   defp attach_telemetry(events) do
     test_pid = self()
     ref = make_ref()
@@ -51,8 +37,6 @@ defmodule Stacks.VisibilityTelemetryTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
-
-  # ── Profile-visibility change direction ──────────────────────────────────
 
   describe "profile visibility change telemetry" do
     test "emits tighten when moving platform -> owner" do
@@ -82,17 +66,12 @@ defmodule Stacks.VisibilityTelemetryTest do
     end
 
     test "classify direction ranks a legacy 'group' profile between platform and owner" do
-      # "group" is a valid stored profile value (allowed at registration) even
-      # though updates only set platform/owner. It must rank between them so a
-      # change out of "group" is labelled precisely, not collapsed to rank 0.
       assert Visibility.classify_visibility_direction("group", "owner") == :tighten
       assert Visibility.classify_visibility_direction("group", "platform") == :loosen
       assert Visibility.classify_visibility_direction("platform", "group") == :tighten
       assert Visibility.classify_visibility_direction("group", "group") == :same
     end
   end
-
-  # ── Visibility recap outcome + cap counts ────────────────────────────────
 
   describe "visibility recap telemetry" do
     test "emits recap with :capped outcome and cap counts" do
@@ -132,8 +111,6 @@ defmodule Stacks.VisibilityTelemetryTest do
     end
   end
 
-  # ── Block / unblock counts ───────────────────────────────────────────────
-
   describe "block / unblock telemetry" do
     test "emits block on successful block_user" do
       attach_telemetry([[:stacks, :social, :block]])
@@ -156,8 +133,6 @@ defmodule Stacks.VisibilityTelemetryTest do
       assert_receive {:telemetry_event, [:stacks, :social, :unblock], %{count: 1}, %{}}
     end
   end
-
-  # ── Block error rates ────────────────────────────────────────────────────
 
   describe "block error telemetry" do
     test "emits block_error :already_blocked on duplicate block" do
@@ -204,16 +179,12 @@ defmodule Stacks.VisibilityTelemetryTest do
       attach_telemetry([[:stacks, :social, :block_error]])
       blocked = insert(:user)
 
-      # A nil blocker_id fails validate_required, NOT the unique constraint — it
-      # must be tagged :invalid rather than mislabelled :already_blocked.
       {:error, _} = Social.block_user(nil, blocked.id)
 
       assert_receive {:telemetry_event, [:stacks, :social, :block_error], %{count: 1},
                       %{reason: :invalid}}
     end
   end
-
-  # ── Rate-limit hit counts (generic, tagged by bucket) ────────────────────
 
   describe "rate limit telemetry" do
     setup do
@@ -238,15 +209,12 @@ defmodule Stacks.VisibilityTelemetryTest do
       user = insert(:user)
       conn = assign(conn, :guardian_default_resource, user)
 
-      # Social bucket limit is 20/min; the 21st call within the window trips it.
       Enum.each(1..21, fn _ -> RateLimiter.call(conn, bucket: :social) end)
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :rejected], %{count: 1},
                       %{bucket: :social}}
     end
   end
-
-  # ── ViewAs usage + error counts ──────────────────────────────────────────
 
   describe "view_as usage telemetry" do
     defp view_as_conn(conn, params) do
@@ -312,8 +280,6 @@ defmodule Stacks.VisibilityTelemetryTest do
     end
   end
 
-  # ── Ceiling-rejection counts ─────────────────────────────────────────────
-
   describe "ceiling rejection telemetry" do
     test "emits ceiling_rejection helper with whitelisted resource_type" do
       attach_telemetry([[:stacks, :visibility, :ceiling_rejection]])
@@ -367,8 +333,6 @@ defmodule Stacks.VisibilityTelemetryTest do
                       %{resource_type: :bookshelf}}
     end
   end
-
-  # ── Crawler / robots.txt fetch counts ────────────────────────────────────
 
   describe "crawler telemetry" do
     test "emits robots_fetch when /robots.txt is requested", %{conn: conn} do

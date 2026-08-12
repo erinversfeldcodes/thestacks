@@ -119,7 +119,6 @@ defmodule StacksWeb.Plugs.AdminAuthPipelineTest do
     test "halts with 401 when IP does not match session", %{conn: conn} do
       user = insert(:owner_user)
 
-      # Create session for a different IP
       boot_id = Core.Application.boot_id()
       {:ok, session} = SessionContext.create(user, "10.0.0.1", boot_id)
       {:ok, session} = SessionContext.mark_mfa_verified(session)
@@ -132,7 +131,6 @@ defmodule StacksWeb.Plugs.AdminAuthPipelineTest do
           ttl: {30, :minute}
         )
 
-      # conn.remote_ip defaults to 127.0.0.1 in tests
       conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")

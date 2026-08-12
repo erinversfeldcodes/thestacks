@@ -3,13 +3,13 @@ import type { Browser, Page } from "@playwright/test";
 import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
 /**
- * Browser + API E2E for per-shelf Atom RSS feeds (US-6.1, Issue #119 §1/§3).
+ * Browser + API E2E for per-shelf Atom RSS feeds.
  *
  * Covers the two halves of the feature that landed on feat/119-e2e:
- *   - #263: the RSS affordance is driven from the shelf's REAL visibility
+ *   - the RSS affordance is driven from the shelf's REAL visibility
  *     (previously hardcoded "platform"), so the icon appears only for a
  *     platform-visible bookshelf and is hidden otherwise.
- *   - #264: the feed is served from op.feed_cache with event-driven regen; the
+ *   - the feed is served from op.feed_cache with event-driven regen; the
  *     public FeedController returns Atom 1.0 with ETag / 304 / Cache-Control.
  *
  * These drive REAL API responses — no page.route() mocking (project E2E rule).
@@ -31,7 +31,7 @@ test.describe.configure({ mode: "serial" });
  * Raise/lower the suite user's PROFILE visibility.
  *
  * The `bookshelf` suite user is seeded with `profile_visibility = "owner"`,
- * which is a HARD ceiling (#195, `validate_bookshelf_profile_ceiling/3`): a
+ * which is a HARD ceiling: a
  * shelf may not be more visible than the profile, so an "owner" profile forces
  * every shelf to "owner" and a `PUT …/visibility -> platform` is rejected 422
  * ("less restrictive than the profile visibility ceiling"). These specs flip
@@ -64,11 +64,6 @@ async function setProfileVisibility(
   }
 }
 
-// Raise the profile ceiling before any test flips a shelf to "platform", and
-// restore it after the whole file — afterAll always runs, including on failure,
-// so the shared suite user is left as seeded ("owner") for other suites.
-// bookshelf.spec.ts is the only other spec on this suite user and never asserts
-// on profile/shelf visibility, so the brief raise cannot interfere with it.
 test.beforeAll(async ({ browser }) => {
   await setProfileVisibility(browser, "platform");
 });
@@ -94,6 +89,24 @@ async function setVisibility(
   ).toBe(200);
 }
 
+/**
+ * The suite user's bearer token, for API calls that must be made AS the reader.
+ *
+ * A `platform` bookshelf is "any signed-in platform user, NOT logged-out" on the Audience
+ * ladder, so its feed requires a viewer (`Stacks.Feeds.feed_requires_auth?/1`, owner
+ * decision 2026-07-29). The `request` fixture carries no Authorization header — auth lives
+ * in localStorage, not a cookie — so a platform feed read through it is ANONYMOUS and 404s
+ * by design. Tests that mean "as a signed-in reader" must say so.
+ */
+async function authHeader(page: Page): Promise<{ Authorization: string }> {
+  const token = await page.evaluate(() => {
+    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+    return auth.token as string;
+  });
+  expect(token, "suite user has a token in localStorage").toBeTruthy();
+  return { Authorization: `Bearer ${token}` };
+}
+
 async function currentUserId(page: Page): Promise<string> {
   const userId = await page.evaluate(() => {
     const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
@@ -103,10 +116,8 @@ async function currentUserId(page: Page): Promise<string> {
   return userId;
 }
 
-test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
+test.describe("RSS affordance on a bookshelf", () => {
   test.afterAll(async ({ browser }) => {
-    // Reset shelves this suite user touched back to the "owner" default so we
-    // do not leave a platform-visible shelf that could surprise other specs.
     const context = await browser.newContext({
       storageState: suiteAuthFile("bookshelf"),
     });
@@ -137,7 +148,6 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
     await page.goto("/wishlist");
     await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
 
-    // #263: the RSS affordance is now gated on the shelf's real visibility.
     const rssButton = page.locator(".rss-link__button");
     await expect(rssButton).toBeVisible({ timeout: 10000 });
 
@@ -151,7 +161,6 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
     await expect(popover.locator(".rss-link__help")).toContainText(
       "Subscribe in your RSS reader:",
     );
-    // The feed URL input carries the exact public feed path for this shelf.
     await expect(popover.locator(".rss-link__url")).toHaveValue(
       `/api/feeds/${userId}/wishlist`,
     );
@@ -166,14 +175,11 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".shelf-antilibrary", { timeout: 10000 });
 
-    // The owner is on their own shelf (so the RSS control WOULD render if the
-    // shelf were platform-visible), but visibility is "owner" -> RSSLink.view
-    // returns `text ""`, so no button exists.
     await expect(page.locator(".rss-link__button")).toHaveCount(0);
   });
 });
 
-test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)", () => {
+test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name", () => {
   test.afterAll(async ({ browser }) => {
     const context = await browser.newContext({
       storageState: suiteAuthFile("bookshelf"),
@@ -194,34 +200,44 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)
     await setVisibility(page, "library", "platform");
     const userId = await currentUserId(page);
     const feedUrl = `/api/feeds/${userId}/library`;
+    const asReader = await authHeader(page);
 
-    // The feed endpoint is PUBLIC — no auth header required.
-    const resp = await request.get(feedUrl);
+    const resp = await request.get(feedUrl, { headers: asReader });
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("application/atom+xml");
 
-    // Cache-Control: public, max-age=300 (Issue #119 §9 — previously unasserted).
     expect(resp.headers()["cache-control"]).toBe("public, max-age=300");
 
-    // ETag present.
     const etag = resp.headers()["etag"];
     expect(etag, "feed response carries an ETag").toBeTruthy();
 
-    // Valid Atom 1.0: XML prolog + feed element in the Atom namespace.
     const body = await resp.text();
     expect(body).toContain("<?xml");
     expect(body).toContain('<feed xmlns="http://www.w3.org/2005/Atom"');
     expect(body).toContain("<id>urn:stacks:feed:");
 
-    // 304 Not Modified when the client echoes the ETag back.
     const notModified = await request.get(feedUrl, {
-      headers: { "If-None-Match": etag },
+      headers: { ...asReader, "If-None-Match": etag },
     });
     expect(notModified.status()).toBe(304);
   });
 
+  test("404 — not 403 — for an ANONYMOUS read of a platform shelf's feed", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/library");
+    await setVisibility(page, "library", "platform");
+    const userId = await currentUserId(page);
+
+    const anon = await request.get(`/api/feeds/${userId}/library`);
+    expect(
+      anon.status(),
+      "a platform feed must be indistinguishable from absent to a logged-out client",
+    ).toBe(404);
+  });
+
   test("404 for a non-existent user/bookshelf", async ({ request }) => {
-    // A well-formed but non-existent user id -> get_bookshelf returns nil -> 404.
     const resp = await request.get(
       "/api/feeds/00000000-0000-0000-0000-000000000000/library",
     );

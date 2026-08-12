@@ -9,8 +9,6 @@ on:
     - cron: "0 4 * * 1" # Weekly on Monday at 04:00 UTC
   workflow_dispatch:
 
-# Least-privilege default for the whole workflow (Scorecard Token-Permissions).
-# The analyze job re-grants exactly what CodeQL needs at the job level.
 permissions:
   contents: read
 
@@ -27,9 +25,9 @@ jobs:
       matrix:
         language: [python]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
-      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+      - uses: github/codeql-action/autobuild@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
+      - uses: github/codeql-action/analyze@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5

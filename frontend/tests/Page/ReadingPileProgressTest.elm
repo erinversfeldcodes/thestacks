@@ -1,7 +1,7 @@
 module Page.ReadingPileProgressTest exposing (suite)
 
 {-| Program tests for the reading-progress UI mounted on the Reading Pile
-(US-1.6.6, Issue #116 Phase 2).
+(, Phase 2).
 
 Covers: the PlacementCard renders progress for a book on the pile; opening the
 card and saving drives PUT /api/placements/:id/progress and folds the returned
@@ -96,7 +96,7 @@ badProgress status body =
 
 suite : Test
 suite =
-    describe "Reading Pile reading progress (US-1.6.6)"
+    describe "Reading Pile reading progress"
         [ progressRendersOnCard
         , editAndSaveFoldsResult
         , finishedTransitionSurfacesBridge
@@ -156,7 +156,5 @@ errorResponseSurfacesMessage =
                     )
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "That page is past the end of the book." ]
-                -- The form stays open so the reader can correct it...
                 |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
-                -- ...with the draft page (seeded from the current page, 40) preserved.
                 |> ProgramTest.expectViewHas [ Selector.attribute (Html.Attributes.value "40") ]

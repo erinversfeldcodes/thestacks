@@ -1,14 +1,14 @@
 defmodule Stacks.Events.SubscriberWorker do
   @moduledoc """
-  Oban worker that dispatches a persisted event to all registered handlers.
+      Oban worker that dispatches a persisted event to all registered handlers.
 
-  Enqueued by `Stacks.Events.emit/1` after writing to `op.event_log`. The job
-  args contain only `%{"event_id" => uuid}` — the full event is fetched from
-  the database at execution time. This avoids storing PII in the Oban jobs
-  table.
+      Enqueued by `Stacks.Events.emit/1` after writing to `op.event_log`. The job
+      args contain only `%{"event_id" => uuid}` — the full event is fetched from
+      the database at execution time. This avoids storing PII in the Oban jobs
+      table.
 
-  Each handler call is isolated with `try/rescue` so that one failing handler
-  does not prevent other handlers from receiving the event.
+      Each handler call is isolated with `try/rescue` so that one failing handler
+      does not prevent other handlers from receiving the event.
   """
 
   use Oban.Worker, queue: :events, max_attempts: 3
@@ -74,27 +74,10 @@ defmodule Stacks.Events.SubscriberWorker do
     end)
   end
 
-  # Wrap each handler call in a stopwatch + telemetry emission so
-  # operators can identify slow or broken handlers by event_type.
-  # Distinct events:
-  #   - `:dispatch.duration` (distribution): wall-clock ms spent in
-  #     `handler.handle_event/1`. Tagged by handler module + event_type.
-  #     Answers "which handlers are holding Oban worker slots longest?"
-  #   - `:handler_invoked.count.total` (counter): every invocation,
-  #     regardless of outcome. Answers "which handlers fire most
-  #     often?" — divides execution time fairly across traffic shape.
-  #   - `:handler_error.count.total` (counter): retains the existing
-  #     error-rate signal, just renamed to fit the PromEx
-  #     `[...].count.total` convention so the exported metric ends in
-  #     `_total` cleanly.
   defp invoke_handler_with_telemetry(handler, event) do
     start = System.monotonic_time()
     tags = %{handler: inspect(handler), event_type: event.event_type}
 
-    # Event path matches the `event_name:` key on the PromEx
-    # Counter — NOT the full metric path. Telemetry.Metrics appends
-    # `:count, :total` to form the Prometheus name; callers emit on
-    # the shorter event path.
     :telemetry.execute(
       [:stacks, :events, :handler_invoked],
       %{count: 1},
@@ -141,9 +124,6 @@ defmodule Stacks.Events.SubscriberWorker do
   defp emit_dispatch_duration(start, tags) do
     duration = System.monotonic_time() - start
 
-    # `event_name:` on the PromEx distribution is
-    # `[:stacks, :events, :dispatch]`; the unit suffix
-    # `:duration, :milliseconds` is part of the METRIC name only.
     :telemetry.execute(
       [:stacks, :events, :dispatch],
       %{duration: duration},

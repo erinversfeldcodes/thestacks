@@ -1,10 +1,10 @@
 defmodule Stacks.Email do
   @moduledoc """
-  Email context — handles transactional email flows for registration confirmation,
-  password reset, and other notification types.
+      Email context — handles transactional email flows for registration confirmation,
+      password reset, and other notification types.
 
-  Emails are never sent synchronously; they are enqueued as Oban jobs in the
-  `notifications` queue and delivered by `Stacks.Workers.EmailDeliveryJob`.
+      Emails are never sent synchronously; they are enqueued as Oban jobs in the
+      `notifications` queue and delivered by `Stacks.Workers.EmailDeliveryJob`.
   """
 
   import Ecto.Query, warn: false
@@ -18,21 +18,16 @@ defmodule Stacks.Email do
   @global_hourly_limit 100
 
   @doc """
-  Generates a signed email confirmation token, stores it on the user, and
-  enqueues a registration confirmation email.
+      Generates a signed email confirmation token, stores it on the user, and
+      enqueues a registration confirmation email.
 
-  Rate limit is checked before any DB writes. Token storage and job enqueue
-  are wrapped in a single transaction — if the job insert fails, the token
-  write is rolled back too.
+      Rate limit is checked before any DB writes. Token storage and job enqueue
+      are wrapped in a single transaction — if the job insert fails, the token
+      write is rolled back too.
   """
   @spec send_registration_confirmation(User.t()) :: {:ok, User.t()} | {:error, term()}
   def send_registration_confirmation(user) do
     with :ok <- check_rate_limit(user.id) do
-      # The confirmation token is generated + persisted synchronously by
-      # Accounts.register/1 (a signed Phoenix.Token). This handler runs
-      # asynchronously (Oban), so it must NOT regenerate/overwrite the token:
-      # overwriting would invalidate a token already read for this user and
-      # reintroduce the register↔handler race. We only DELIVER the persisted token.
       case user.email_confirmation_token do
         token when is_binary(token) ->
           EmailDeliveryJob.new(%{
@@ -51,8 +46,8 @@ defmodule Stacks.Email do
   end
 
   @doc """
-  Looks up a user by email and enqueues a password reset email.
-  Always returns `:ok` — no enumeration of registered email addresses.
+      Looks up a user by email and enqueues a password reset email.
+      Always returns `:ok` — no enumeration of registered email addresses.
   """
   @spec send_password_reset(String.t()) :: :ok
   def send_password_reset(email) do
@@ -62,28 +57,42 @@ defmodule Stacks.Email do
   end
 
   @doc """
-  Verifies the email confirmation token and marks the user as confirmed.
-  Returns `{:ok, user}` or `{:error, :invalid}`.
+      Verifies the email confirmation token and marks the user as confirmed.
+      Returns `{:ok, user}` or `{:error,:invalid}`.
   """
   @spec confirm_email(String.t()) :: {:ok, User.t()} | {:error, :invalid}
   def confirm_email(token) do
-    # 24h link lifetime — kept in lock-step with the expired-unverified reaper
-    # (single source of truth in Accounts).
-    max_age = Accounts.unverified_account_ttl_seconds()
-
-    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_confirm", token, max_age: max_age) do
+    case Accounts.verify_confirmation_token(token) do
       {:ok, user_id} ->
         user = Repo.get_by(User, id: user_id, email_confirmation_token: token)
         do_confirm_email(user)
 
-      {:error, _reason} ->
+      :error ->
         {:error, :invalid}
     end
   end
 
   @doc """
-  Verifies the password reset token and updates the user's password.
-  Returns `{:ok, user}`, `{:error, :invalid}`, or `{:error, :expired}`.
+      Issues a FRESH confirmation link and enqueues the email. Always returns
+      `:ok` (anti-enumeration — see `AuthController.resend_confirmation/2`).
+      Nothing happens when: no such account, already confirmed, or past
+      `unverified_account_max_lifetime_seconds/0` (renewal has a ceiling; see
+      `confirmation_resendable?/1`). Otherwise a NEW token is signed and
+      stored — re-signing is what makes the affordance safe: the fresh
+      `signed_at` buys a full TTL, and the reaper honours it.
+  """
+  @spec send_confirmation_resend(String.t()) :: :ok
+  def send_confirmation_resend(email) do
+    email
+    |> Accounts.get_user_by_email()
+    |> do_send_confirmation_resend()
+
+    :ok
+  end
+
+  @doc """
+      Verifies the password reset token and updates the user's password.
+      Returns `{:ok, user}`, `{:error,:invalid}`, or `{:error,:expired}`.
   """
   @spec reset_password(String.t(), String.t()) ::
           {:ok, User.t()} | {:error, :invalid | :expired | Ecto.Changeset.t()}
@@ -101,14 +110,9 @@ defmodule Stacks.Email do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
-
   defp do_send_password_reset(nil), do: :ok
 
   defp do_send_password_reset(user) do
-    # Rate limit checked before any DB writes; token write + job enqueue are atomic.
     with :ok <- check_rate_limit(user.id) do
       token = Phoenix.Token.sign(CoreWeb.Endpoint, "password_reset", user.id)
       now = DateTime.utc_now()
@@ -123,6 +127,42 @@ defmodule Stacks.Email do
 
         EmailDeliveryJob.new(%{
           "template" => "password_reset",
+          "user_id" => user.id,
+          "params" => %{"token" => token}
+        })
+        |> Oban.insert!()
+      end)
+    end
+
+    :ok
+  end
+
+  defp do_send_confirmation_resend(nil), do: :ok
+
+  defp do_send_confirmation_resend(%User{email_confirmed: true}), do: :ok
+
+  defp do_send_confirmation_resend(%User{} = user) do
+    if Accounts.confirmation_resendable?(user) do
+      issue_confirmation_link(user)
+    end
+
+    :ok
+  end
+
+  defp issue_confirmation_link(%User{} = user) do
+    with :ok <- check_rate_limit(user.id) do
+      token = Accounts.sign_confirmation_token(user.id)
+
+      Repo.transaction(fn ->
+        user
+        |> Accounts.email_confirmation_changeset(%{
+          email_confirmed: false,
+          email_confirmation_token: token
+        })
+        |> Repo.update!()
+
+        EmailDeliveryJob.new(%{
+          "template" => "registration_confirmation",
           "user_id" => user.id,
           "params" => %{"token" => token}
         })
@@ -157,8 +197,12 @@ defmodule Stacks.Email do
            password_reset_sent_at: nil
          })
          |> Repo.update() do
-      {:ok, updated} -> {:ok, updated}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, updated} ->
+        Accounts.revoke_all_user_sessions(updated.id)
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 

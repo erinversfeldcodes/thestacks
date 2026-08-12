@@ -65,10 +65,6 @@ update msg model =
                         ( { model | sourceHealth = Failure err }, Cmd.none, NoOut )
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--admin" ]

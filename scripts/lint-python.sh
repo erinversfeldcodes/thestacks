@@ -4,14 +4,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="$REPO_ROOT/apps/vision/.venv/bin"
 
-# Unset PYTHONPATH — see scripts/test-python.sh for the rationale.
 unset PYTHONPATH
 
-# Local dev runs out of apps/vision/.venv (created by setup.sh, owns
-# ruff + mypy + the runtime deps for the vision sidecar). CI runners
-# don't run setup.sh; the workflow `pip install`s ruff/mypy directly
-# into the actions/setup-python runtime, so they land on PATH. Pick
-# whichever exists — fail loudly only if neither resolves.
 RUFF=""
 MYPY=""
 if [[ -x "$VENV/ruff" ]]; then

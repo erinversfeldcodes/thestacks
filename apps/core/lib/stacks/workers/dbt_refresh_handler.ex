@@ -18,7 +18,7 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     "blog.post_deleted" => ["int_blog_engagement", "mart_blog_activity"],
     "placement.created" => ["mart_community_read_count", "mart_platform_searchable"],
     "placement.moved" => ["mart_community_read_count"],
-    # Issue #116 punch #14b: a removal (Shelving.remove_book/2 soft-deletes by
+    # a removal (Shelving.remove_book/2 soft-deletes by
     # stamping removed_at) decrements a book's community read count.
     # mart_community_read_count is an INCREMENTAL table (not a view) whose body
     # filters `where removed_at is null`, so without a trigger the count stays
@@ -35,7 +35,8 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     # (remove_book bumps updated_at) and recomputes to a read_count = 0 row,
     # which delete+insert uses to replace the stale non-zero row — drop-to-zero
     # no longer requires a --full-refresh.
-    "placement.removed" => ["mart_community_read_count"]
+    "placement.removed" => ["mart_community_read_count"],
+    "placement.restored" => ["mart_community_read_count"]
   }
 
   @impl true

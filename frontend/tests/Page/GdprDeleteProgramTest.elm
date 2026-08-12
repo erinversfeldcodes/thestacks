@@ -1,20 +1,9 @@
 module Page.GdprDeleteProgramTest exposing (suite)
 
-{-| Program tests for the "Delete My Data" (account deletion) flow in the
-Danger Zone of Page.Settings.Privacy, using elm-program-test.
-
-Exercises the type-to-confirm guard (the submit button is enabled only when the
-confirmation text is EXACTLY "DELETE"), the request lifecycle (Loading →
-queued / error), the single-flight invariant (a mid-flight edit or re-click must
-not fire a second DELETE), and the farewell OutMsg emitted on success so Main
-can log the user out.
-
-The program wraps Privacy's model with a record of every OutMsg emitted, so the
-success test can assert that `AccountDeleted` was raised. Its effect mapping
-mirrors the real `Api.deleteAccount` Cmd faithfully: the DELETE effect is issued
-only when `Privacy.update` actually transitions into `Loading` (i.e. the handler
-guard passed), so the single-flight test is meaningful.
-
+{-| Program tests for the "Delete My Data" flow in Privacy's Danger Zone:
+the type-to-confirm guard (submit enabled only on exactly "DELETE"),
+the request lifecycle, the single-flight invariant (mid-flight edits
+neither cancel nor re-enable), and the queued acknowledgement copy.
 -}
 
 import Expect
@@ -245,10 +234,6 @@ singleFlightBlocksSecondRequest =
     test "single_flight: editing the field and re-clicking mid-flight fires no second DELETE" <|
         \() ->
             submitted
-                -- The attack: a keystroke that keeps the confirmation valid
-                -- ("DELETE"). In the pre-fix code this reset `deleting` to
-                -- NotAsked, re-enabling the still-confirmed submit, so a second
-                -- click fired a second DELETE. The handler guard must block it.
                 |> ProgramTest.update (UserTypesDeleteConfirmation "DELETE")
                 |> ProgramTest.update UserClicksDeleteAccount
                 |> ProgramTest.expectHttpRequests "DELETE"

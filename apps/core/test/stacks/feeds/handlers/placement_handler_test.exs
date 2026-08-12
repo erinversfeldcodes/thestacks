@@ -16,10 +16,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
     Repo.one(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf_id, select: fc.etag)
   end
 
-  # ---------------------------------------------------------------------------
-  # placement.created
-  # ---------------------------------------------------------------------------
-
   describe "handle_event/1 — placement.created" do
     test "extracts bookshelf name and enqueues RegenerateFeedJob (string keys)" do
       user = insert(:user)
@@ -39,6 +35,39 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
         worker: RegenerateFeedJob,
         args: %{user_id: user.id, bookshelf_name: "library"}
       )
+    end
+
+    test "stands down for goodreads_import-sourced placements" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      event = %{
+        event_type: "placement.created",
+        aggregate_id: placement.id,
+        payload: %{"bookshelf" => "library", "source" => "goodreads_import"}
+      }
+
+      assert :ok = PlacementHandler.handle_event(event)
+
+      refute_enqueued(worker: RegenerateFeedJob)
+    end
+
+    test "a manual source still regenerates" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      event = %{
+        event_type: "placement.created",
+        aggregate_id: placement.id,
+        payload: %{"bookshelf" => "library", "source" => "manual"}
+      }
+
+      assert :ok = PlacementHandler.handle_event(event)
+      assert_enqueued(worker: RegenerateFeedJob)
     end
 
     test "extracts bookshelf name with atom keys in payload" do
@@ -61,10 +90,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
       )
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # placement.moved
-  # ---------------------------------------------------------------------------
 
   describe "handle_event/1 — placement.moved" do
     test "enqueues jobs for both source and destination bookshelves (string keys)" do
@@ -131,7 +156,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
 
       assert :ok = PlacementHandler.handle_event(event)
 
-      # Only one job should be enqueued, not two
       jobs =
         all_enqueued(worker: RegenerateFeedJob)
         |> Enum.filter(&(&1.args["bookshelf_name"] == "library"))
@@ -139,10 +163,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
       assert length(jobs) == 1
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # placement.removed
-  # ---------------------------------------------------------------------------
 
   describe "handle_event/1 — placement.removed" do
     test "handles nil bookshelf name gracefully (no job enqueued)" do
@@ -162,10 +182,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # catch-all
-  # ---------------------------------------------------------------------------
-
   describe "handle_event/1 — catch-all" do
     test "returns :ok for unrelated events" do
       event = %{
@@ -183,10 +199,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # lookup_user_id edge case
-  # ---------------------------------------------------------------------------
-
   describe "handle_event/1 — missing placement" do
     test "returns :ok when aggregate_id does not match a placement" do
       event = %{
@@ -199,10 +211,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
       refute_enqueued(worker: RegenerateFeedJob)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # End-to-end: event → enqueued job → drained → feed_cache written (Issue #264)
-  # ---------------------------------------------------------------------------
 
   describe "handle_event/1 → drain → feed_cache written" do
     test "a placement.created on a platform shelf leaves the cache row written" do

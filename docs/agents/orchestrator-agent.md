@@ -832,6 +832,34 @@ After the reviewer approves the **final phase** of the plan (or after every phas
 - Optionally: after any phase that touches security, data models, event schemas, or partner integration
 - Skip: for single-phase documentation-only changes
 
+### Staff Engineer Shadow Review (mandatory invocation, advisory verdict)
+
+Alongside (not instead of) the PE gate, invoke the **`staff-review` skill** —
+`docs/agents/staff-engineer-agent.md`, Mode B. It is the **design conscience** to the PE's
+compliance conscience: it judges design depth, legibility, taste against a verified exemplar
+corpus, and **test truthfulness** (mutation-probing new tests to check that passing means
+something), rather than DoD coverage or standards adherence.
+
+⛔ **Run it once per issue — every issue and every epic, as it is implemented.** Not once per epic
+and not only at the PR. When you complete a child issue, review that child's diff and **record the
+verdict in that issue's Progress Notes**, so "was this reviewed?" is answerable from disk rather
+than from anyone's memory of the run.
+
+- **Mandatory to invoke; advisory in verdict.** Its worst verdict, DESIGN CONCERNS, is presented to
+  the human, who decides: fix now, file and ship, or override. Do **not** treat it as a mechanical
+  gate or add it to the 2B checklist.
+
+  The two halves are a deliberate pair. A gate would put a taste judgement in the critical path of
+  every child issue, which is how design review becomes a formality people route around. Optional
+  invocation is worse in the other direction: it gets skipped exactly on the diffs that most need a
+  second pair of eyes, because those are the ones under time pressure. Mandatory *invocation* with an
+  advisory *verdict* is the combination that survives both failure modes.
+- **Per-issue and branch-level reviews are both wanted, and they are not duplicates.** `finalize-pr`
+  runs one over the cumulative branch. A per-issue review catches a design problem while the diff is
+  small enough to change cheaply; the branch-level one catches what only appears once the pieces sit
+  together. Run both.
+- Findings become tracked issues via `create-issue`, never inline scope creep on the current phase.
+
 ---
 
 ## Phase 3: Completion

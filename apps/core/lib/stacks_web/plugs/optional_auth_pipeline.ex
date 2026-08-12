@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.OptionalAuthPipeline do
   @moduledoc """
-  Optional Guardian JWT authentication pipeline.
+      Optional Guardian JWT authentication pipeline.
 
-  Verifies Bearer tokens in the Authorization header when present,
-  but does not require authentication. Unauthenticated requests
-  proceed with `Guardian.Plug.current_resource/1` returning `nil`.
+      Verifies Bearer tokens in the Authorization header when present,
+      but does not require authentication. Unauthenticated requests
+      proceed with `Guardian.Plug.current_resource/1` returning `nil`.
   """
 
   use Guardian.Plug.Pipeline,

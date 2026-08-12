@@ -34,7 +34,6 @@ defmodule Stacks.EventsTest do
     end
 
     test "returns {:error, _} when aggregate_id is not a valid UUID" do
-      # encode_uuid/1 returns nil for non-UUID strings; the NOT NULL constraint fires.
       assert {:error, _reason} =
                Events.emit(%{
                  event_type: "test.bad_id",
@@ -51,8 +50,6 @@ defmodule Stacks.EventsTest do
                  aggregate_id: Ecto.UUID.generate()
                })
 
-      # With Oban testing: :manual, jobs are inserted but not executed.
-      # Verify a job was enqueued with the correct event_id.
       event_id = Ecto.UUID.cast!(params.id)
       assert_enqueued(worker: Stacks.Events.SubscriberWorker, args: %{event_id: event_id})
     end
@@ -122,7 +119,6 @@ defmodule Stacks.EventsTest do
         aggregate_id: "not-a-uuid"
       }
 
-      # emit would return {:error, _}; emit_safe swallows it
       assert {:ok, ^event} = Events.emit_safe(event)
     end
   end
@@ -150,7 +146,6 @@ defmodule Stacks.EventsTest do
         })
       end
 
-      # Emit a different event type that should NOT be replayed
       Events.emit(%{
         event_type: "replay.other",
         aggregate_type: "test",
@@ -160,7 +155,6 @@ defmodule Stacks.EventsTest do
       from = DateTime.add(DateTime.utc_now(), -60, :second)
       assert {:ok, 3} = Events.replay("replay.target", from, TestHandler)
 
-      # Verify each event was dispatched
       assert_received {:replayed, "replay.target"}
       assert_received {:replayed, "replay.target"}
       assert_received {:replayed, "replay.target"}

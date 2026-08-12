@@ -39,6 +39,8 @@ testModel =
     , replyDraft = Nothing
     , commentSubmitting = False
     , blockModal = Nothing
+    , origin = "https://thestacks.test"
+    , syndication = Nothing
     }
 
 
@@ -272,6 +274,7 @@ suite =
                             , associations = []
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
+                            , syndicated = True
                             }
 
                         model =
@@ -309,6 +312,7 @@ suite =
                             , associations = []
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
+                            , syndicated = True
                             }
 
                         model =
@@ -331,7 +335,7 @@ suite =
                     blockMenuView { authorName = "" }
                         |> Query.has [ Selector.text "Block the author" ]
             ]
-        , describe "author byline links to the profile (US-10.5.4)"
+        , describe "author byline links to the profile"
             [ test "renders the author name as a link to /u/:handle when a handle is present" <|
                 \_ ->
                     postView { displayName = "Fable Quill", handle = "fable_quill" }
@@ -364,6 +368,7 @@ postView { displayName, handle } =
             , associations = []
             , authorDisplayName = displayName
             , authorHandle = handle
+            , syndicated = True
             }
 
         model =
@@ -390,6 +395,7 @@ blockMenuView { authorName } =
             , associations = []
             , authorDisplayName = authorName
             , authorHandle = "fable_quill"
+            , syndicated = True
             }
 
         viewerModel =

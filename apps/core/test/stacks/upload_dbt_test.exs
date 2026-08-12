@@ -1,38 +1,18 @@
 defmodule Stacks.UploadDbtTest do
   @moduledoc """
-  Suite 9: Verifies that upload-pipeline events trigger the correct dbt
-  refresh jobs via DbtRefreshHandler, AND verifies that the underlying
-  database records (which dbt staging views expose) are correct after
-  each upload-flow scenario.
-
-  Covers all 8 user stories from Issue #111:
-    US-1.1.1  Upload photo -> book created -> placed on shelf
-    US-1.1.2  ISBN hard gate — book rejected, no ISBN found
-    US-1.1.3  Non-book rejection
-    US-1.1.4  Age-gated content flagging
-    US-1.1.5  Manual ISBN entry
-    US-1.1.6  Duplicate book detection
-    US-1.1.7  Bulk upload (multi-book from single image)
-    US-1.1.8  Multi-format book merging
-
-  ## Untestable paths (require `dbt run` against a live warehouse)
-
-  - mart_community_read_count aggregation: requires `dbt run` after data
-    insertion to materialise the mart view; only testable in deployed
-    environment with `TEST_TARGET=deployed`.
-  - mart_platform_searchable refresh: same — the mart is a dbt model, not
-    a raw Postgres view.
-  - stg_* view queries (e.g. `SELECT * FROM wh.stg_books`): require the
-    `wh` schema and dbt source configuration present only after `dbt run`.
-  - int_book_engagement placement_count: intermediate model materialised
-    by dbt, not queryable from raw op tables.
-  - mart_cost_tracking: requires dbt role grant and platform_costs table.
+      Suite 9: upload-pipeline events trigger the right dbt refresh jobs via
+      `DbtRefreshHandler`, and the underlying records the staging views
+      expose are correct after each upload-flow scenario — all 8 user stories
+      of 111 (upload/hard-gate/non-book/age-gate/manual-ISBN/duplicate/
+      multi-book/SSE), each asserting both the enqueued refresh and the row
+      state dbt would read.
   """
 
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Core.Repo
@@ -43,10 +23,6 @@ defmodule Stacks.UploadDbtTest do
   alias Stacks.Workers.DbtRefreshHandler
   alias Stacks.Workers.DbtRefreshJob
   alias Stacks.Workers.IdentifyBookJob
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp build_event(event_type) do
     %{event_type: event_type, aggregate_id: Ecto.UUID.generate(), payload: %{}}
@@ -59,50 +35,23 @@ defmodule Stacks.UploadDbtTest do
     user = insert(:user)
     author = insert(:author)
 
+    edition_attrs = if isbn, do: [isbn: isbn], else: []
+
     book =
       insert(:book,
         author: author,
         title: Keyword.get(opts, :title, "Test Book"),
-        visibility_tier: visibility
+        visibility_tier: visibility,
+        editions: [build(:primary_book_edition, edition_attrs)]
       )
 
-    edition =
-      insert(:book_edition,
-        book: book,
-        isbn: isbn || sequence_isbn(),
-        is_primary: true
-      )
-
-    {user, book, edition, author}
+    {user, book, hd(book.editions), author}
   end
 
-  defp sequence_isbn do
-    # Generate a valid ISBN-13 with correct checksum.
-    # Use 12-digit prefix, compute check digit to make it valid.
-    prefix =
-      "978074327" <>
-        (:rand.uniform(999) |> Integer.to_string() |> String.pad_leading(3, "0"))
-
-    digits = String.graphemes(prefix) |> Enum.map(&String.to_integer/1)
-
-    sum =
-      digits
-      |> Enum.with_index()
-      |> Enum.reduce(0, fn {d, i}, acc ->
-        weight = if rem(i, 2) == 0, do: 1, else: 3
-        acc + d * weight
-      end)
-
-    check = rem(10 - rem(sum, 10), 10)
-    prefix <> Integer.to_string(check)
-  end
-
-  # =========================================================================
-  # A. Existing DbtRefreshHandler event-mapping tests (preserved from original)
-  # =========================================================================
+  defp sequence_isbn, do: build(:primary_book_edition).isbn
 
   describe "upload-pipeline events: book.created" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "does not enqueue a dbt refresh job" do
       event = build_event("book.created")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -112,7 +61,7 @@ defmodule Stacks.UploadDbtTest do
   end
 
   describe "upload-pipeline events: placement.created" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "enqueues dbt refresh with community and searchable models" do
       event = build_event("placement.created")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -125,7 +74,7 @@ defmodule Stacks.UploadDbtTest do
   end
 
   describe "upload-pipeline events: image.submitted" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "does not enqueue a dbt refresh job" do
       event = build_event("image.submitted")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -135,7 +84,7 @@ defmodule Stacks.UploadDbtTest do
   end
 
   describe "full upload flow integration" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "book.created + placement.created sequence enqueues exactly one dbt job" do
       book_event = build_event("book.created")
       placement_event = build_event("placement.created")
@@ -151,7 +100,7 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "image.submitted + book.created + placement.created enqueues only placement dbt job" do
       for event_type <- ["image.submitted", "book.created"] do
         assert :ok = DbtRefreshHandler.handle_event(build_event(event_type))
@@ -169,29 +118,25 @@ defmodule Stacks.UploadDbtTest do
   end
 
   describe "handler return values" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "returns :ok for mapped upload-pipeline events" do
       assert :ok = DbtRefreshHandler.handle_event(build_event("placement.created"))
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "returns :ok for unmapped upload-pipeline events" do
       assert :ok = DbtRefreshHandler.handle_event(build_event("book.created"))
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.submitted"))
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "returns :ok for events without event_type key" do
       assert :ok = DbtRefreshHandler.handle_event(%{some_other: "structure"})
     end
   end
 
-  # =========================================================================
-  # B. DbtRefreshHandler coverage for all upload-related events
-  # =========================================================================
-
   describe "DbtRefreshHandler: enrichment events in upload flow" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "enrichment.prices_scraped enqueues price model refresh" do
       event = build_event("enrichment.prices_scraped")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -202,7 +147,7 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "placement.moved enqueues community read count refresh" do
       event = build_event("placement.moved")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -213,10 +158,7 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    # Issue #116 punch #14b: a placement removal decrements the community read
-    # count (mart_community_read_count filters removed_at is null), so it must
-    # trigger the same refresh as created/moved. Mirrors the moved test above.
-    @tag stories: ["US-1.6.4"], suite: :dbt
+    @tag suite: :dbt
     test "placement.removed enqueues community read count refresh" do
       event = build_event("placement.removed")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -227,7 +169,7 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "image.resolved does not enqueue a dbt refresh job" do
       event = build_event("image.resolved")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -235,7 +177,7 @@ defmodule Stacks.UploadDbtTest do
       refute_enqueued(worker: DbtRefreshJob)
     end
 
-    @tag stories: ["US-1.1.2"], suite: :dbt
+    @tag suite: :dbt
     test "image.rejected does not enqueue a dbt refresh job" do
       event = build_event("image.rejected")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -243,7 +185,7 @@ defmodule Stacks.UploadDbtTest do
       refute_enqueued(worker: DbtRefreshJob)
     end
 
-    @tag stories: ["US-1.1.6"], suite: :dbt
+    @tag suite: :dbt
     test "books.confirmed does not enqueue a dbt refresh job" do
       event = build_event("books.confirmed")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -251,7 +193,7 @@ defmodule Stacks.UploadDbtTest do
       refute_enqueued(worker: DbtRefreshJob)
     end
 
-    @tag stories: ["US-1.1.8"], suite: :dbt
+    @tag suite: :dbt
     test "books.edition_merged does not enqueue a dbt refresh job" do
       event = build_event("books.edition_merged")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -260,12 +202,8 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # C. Staging model content verification — US-1.1.1: successful upload flow
-  # =========================================================================
-
-  describe "US-1.1.1: successful upload -> book + edition + placement records" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+  describe "successful upload -> book + edition + placement records" do
+    @tag suite: :dbt
     test "uploaded_images record has correct status and storage_path after upload" do
       image = insert(:uploaded_image, storage_path: "uploads/test-image-id", status: "pending")
 
@@ -275,12 +213,11 @@ defmodule Stacks.UploadDbtTest do
       assert db_image.uploaded_at != nil
       assert db_image.expires_at != nil
 
-      # Verify 30-day retention window
       diff = DateTime.diff(db_image.expires_at, db_image.uploaded_at, :day)
       assert diff >= 29 and diff <= 31
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "books and book_editions records exist after book creation" do
       {_user, book, edition, author} = create_user_with_book()
 
@@ -297,7 +234,7 @@ defmodule Stacks.UploadDbtTest do
       assert db_edition.is_primary == true
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "bookshelf_placements record exists with correct IDs after placement" do
       {user, book, _edition, _author} = create_user_with_book()
 
@@ -313,14 +250,12 @@ defmodule Stacks.UploadDbtTest do
       assert bookshelf.name == "library"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "placement.created event triggers dbt refresh after real placement" do
       {user, book, _edition, _author} = create_user_with_book()
 
       {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
 
-      # The placement emits placement.created internally;
-      # verify handler would enqueue the right models
       event = build_event("placement.created")
       assert :ok = DbtRefreshHandler.handle_event(event)
 
@@ -330,12 +265,11 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "uploaded_images record updated to resolved with book_id" do
       {_user, book, _edition, _author} = create_user_with_book()
       image = insert(:uploaded_image, status: "pending")
 
-      # Simulate IdentifyBookJob.mark_resolved by updating directly
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
 
@@ -362,12 +296,8 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # US-1.1.2: ISBN hard gate — book rejected, no ISBN found
-  # =========================================================================
-
-  describe "US-1.1.2: ISBN hard gate rejection records" do
-    @tag stories: ["US-1.1.2"], suite: :dbt
+  describe "ISBN hard gate rejection records" do
+    @tag suite: :dbt
     test "uploaded_images marked rejected with isbn_not_found reason" do
       image = insert(:uploaded_image, status: "pending")
 
@@ -392,31 +322,25 @@ defmodule Stacks.UploadDbtTest do
       assert db_image.rejection_reason == "isbn_not_found"
     end
 
-    @tag stories: ["US-1.1.2"], suite: :dbt
+    @tag suite: :dbt
     test "no books or editions created on ISBN rejection" do
       book_count_before = Repo.aggregate(Book, :count, :id)
 
       user = insert(:user)
       image = insert(:uploaded_image, status: "pending")
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
-
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
           "image_b64" => Base.encode64("fake image bytes for testing")
         })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       assert Repo.aggregate(Book, :count, :id) == book_count_before
     end
 
-    @tag stories: ["US-1.1.2"], suite: :dbt
+    @tag suite: :dbt
     test "no placements created on ISBN rejection" do
       placement_count_before = Repo.aggregate(Placement, :count)
 
@@ -425,19 +349,15 @@ defmodule Stacks.UploadDbtTest do
       assert Repo.aggregate(Placement, :count) == placement_count_before
     end
 
-    @tag stories: ["US-1.1.2"], suite: :dbt
+    @tag suite: :dbt
     test "no dbt refresh enqueued for image.rejected event" do
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.rejected"))
       refute_enqueued(worker: DbtRefreshJob)
     end
   end
 
-  # =========================================================================
-  # US-1.1.3: Non-book rejection
-  # =========================================================================
-
-  describe "US-1.1.3: non-book rejection records" do
-    @tag stories: ["US-1.1.3"], suite: :dbt
+  describe "non-book rejection records" do
+    @tag suite: :dbt
     test "uploaded_images marked rejected with not_a_book reason" do
       image = insert(:uploaded_image, status: "pending")
 
@@ -462,7 +382,7 @@ defmodule Stacks.UploadDbtTest do
       assert db_image.rejection_reason == "not_a_book"
     end
 
-    @tag stories: ["US-1.1.3"], suite: :dbt
+    @tag suite: :dbt
     test "no books, editions, or placements created on non-book rejection" do
       book_count = Repo.aggregate(Book, :count)
       edition_count = Repo.aggregate(BookEdition, :count)
@@ -476,12 +396,8 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # US-1.1.4: Age-gated content flagging
-  # =========================================================================
-
-  describe "US-1.1.4: age-gated book records" do
-    @tag stories: ["US-1.1.4"], suite: :dbt
+  describe "age-gated book records" do
+    @tag suite: :dbt
     test "book with age_gated visibility_tier persists correctly" do
       {_user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
@@ -489,7 +405,7 @@ defmodule Stacks.UploadDbtTest do
       assert db_book.visibility_tier == "age_gated"
     end
 
-    @tag stories: ["US-1.1.4"], suite: :dbt
+    @tag suite: :dbt
     test "age_gated book is excluded from unauthenticated catalogue listing" do
       {_user, _book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
@@ -497,27 +413,23 @@ defmodule Stacks.UploadDbtTest do
       refute Enum.any?(books, fn b -> b.visibility_tier == "age_gated" end)
     end
 
-    @tag stories: ["US-1.1.4"], suite: :dbt
+    @tag suite: :dbt
     test "age_gated book is included for an age-verified authenticated viewer" do
       {user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
-      # #229: age-gated books are visible only to an age-VERIFIED viewer — the
-      # `{:platform_user, id, true}` shape the catalogue controller builds.
       {books, _total} = Books.list_catalogue(viewer: {:platform_user, user.id, true})
       assert Enum.any?(books, fn b -> b.id == book.id end)
     end
 
-    @tag stories: ["US-1.1.4"], suite: :dbt
+    @tag suite: :dbt
     test "age_gated book is excluded for an authenticated-but-unverified viewer" do
       {user, _book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
-      # #229: an authenticated viewer who is NOT age-verified must not see
-      # age-gated books in listings — same as anonymous (the fail-closed rule).
       {books, _total} = Books.list_catalogue(viewer: {:platform_user, user.id, false})
       refute Enum.any?(books, fn b -> b.visibility_tier == "age_gated" end)
     end
 
-    @tag stories: ["US-1.1.4"], suite: :dbt
+    @tag suite: :dbt
     test "placement on age-gated book still triggers dbt refresh" do
       event = build_event("placement.created")
       assert :ok = DbtRefreshHandler.handle_event(event)
@@ -529,12 +441,8 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # US-1.1.5: Manual ISBN entry
-  # =========================================================================
-
-  describe "US-1.1.5: manual ISBN entry records" do
-    @tag stories: ["US-1.1.5"], suite: :dbt
+  describe "manual ISBN entry records" do
+    @tag suite: :dbt
     test "book created via manual ISBN has correct edition data" do
       isbn = sequence_isbn()
       {_user, book, edition, _author} = create_user_with_book(isbn: isbn)
@@ -549,30 +457,27 @@ defmodule Stacks.UploadDbtTest do
       assert String.match?(db_edition.isbn, ~r/^\d{13}$/)
     end
 
-    @tag stories: ["US-1.1.5"], suite: :dbt
+    @tag suite: :dbt
     test "manual ISBN entry does not create duplicate editions for same ISBN" do
       isbn = sequence_isbn()
       {_user, book, _edition, _author} = create_user_with_book(isbn: isbn)
 
-      # Attempting to insert a duplicate ISBN should fail with unique constraint
       duplicate =
         Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => isbn,
           "book_id" => book.id,
-          "is_primary" => false
+          "is_primary" => false,
+          "verification_source" => "open_library"
         })
 
+      assert duplicate.valid?, inspect(duplicate.errors)
       assert {:error, changeset} = Repo.insert(duplicate)
       assert {"has already been taken", _} = changeset.errors[:isbn]
     end
   end
 
-  # =========================================================================
-  # US-1.1.6: Duplicate book detection
-  # =========================================================================
-
-  describe "US-1.1.6: duplicate book detection records" do
-    @tag stories: ["US-1.1.6"], suite: :dbt
+  describe "duplicate book detection records" do
+    @tag suite: :dbt
     test "find_existing returns book when ISBN already exists" do
       {_user, book, edition, _author} = create_user_with_book()
 
@@ -581,12 +486,12 @@ defmodule Stacks.UploadDbtTest do
       assert found.id == book.id
     end
 
-    @tag stories: ["US-1.1.6"], suite: :dbt
+    @tag suite: :dbt
     test "find_existing returns nil for unknown ISBN" do
       assert Books.find_existing("9780000000000") == nil
     end
 
-    @tag stories: ["US-1.1.6"], suite: :dbt
+    @tag suite: :dbt
     test "book_on_any_shelf? returns true for placed book" do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, _placement} = Shelving.place_book(user.id, book.id, "library")
@@ -594,31 +499,26 @@ defmodule Stacks.UploadDbtTest do
       assert Shelving.book_on_any_shelf?(user.id, book.id)
     end
 
-    @tag stories: ["US-1.1.6"], suite: :dbt
+    @tag suite: :dbt
     test "book_on_any_shelf? returns false for unplaced book" do
       {user, book, _edition, _author} = create_user_with_book()
 
       refute Shelving.book_on_any_shelf?(user.id, book.id)
     end
 
-    @tag stories: ["US-1.1.6"], suite: :dbt
+    @tag suite: :dbt
     test "no new book created when duplicate detected" do
       {_user, book, edition, _author} = create_user_with_book()
       book_count = Repo.aggregate(Book, :count)
 
-      # Finding existing book should not create a new one
       found = Books.find_existing(edition.isbn)
       assert found.id == book.id
       assert Repo.aggregate(Book, :count) == book_count
     end
   end
 
-  # =========================================================================
-  # US-1.1.7: Bulk upload (multi-book from single image)
-  # =========================================================================
-
-  describe "US-1.1.7: bulk upload records (multi-book from single image)" do
-    @tag stories: ["US-1.1.7"], suite: :dbt
+  describe "bulk upload records (multi-book from single image)" do
+    @tag suite: :dbt
     test "uploaded_images stores multiple book_ids for multi-book resolution" do
       {_user, book1, _ed1, _author1} = create_user_with_book(title: "Book One")
       {_user2, book2, _ed2, _author2} = create_user_with_book(title: "Book Two")
@@ -652,7 +552,7 @@ defmodule Stacks.UploadDbtTest do
       assert book2.id in db_image.book_ids
     end
 
-    @tag stories: ["US-1.1.7"], suite: :dbt
+    @tag suite: :dbt
     test "each book from bulk upload can be placed independently" do
       user = insert(:user)
       {_u1, book1, _ed1, _a1} = create_user_with_book(title: "Bulk Book A")
@@ -668,12 +568,8 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # US-1.1.8: Multi-format book merging
-  # =========================================================================
-
-  describe "US-1.1.8: multi-format merge records" do
-    @tag stories: ["US-1.1.8"], suite: :dbt
+  describe "multi-format merge records" do
+    @tag suite: :dbt
     test "merging adds a new non-primary edition to existing work" do
       {_user, book, _edition, _author} = create_user_with_book()
 
@@ -705,7 +601,7 @@ defmodule Stacks.UploadDbtTest do
       assert db_new.book_id == book.id
     end
 
-    @tag stories: ["US-1.1.8"], suite: :dbt
+    @tag suite: :dbt
     test "original primary edition unchanged after merge" do
       {_user, book, edition, _author} = create_user_with_book()
       _new_edition = insert(:book_edition, book: book, isbn: sequence_isbn(), is_primary: false)
@@ -714,7 +610,7 @@ defmodule Stacks.UploadDbtTest do
       assert db_original.is_primary == true
     end
 
-    @tag stories: ["US-1.1.8"], suite: :dbt
+    @tag suite: :dbt
     test "no new book created when edition merged to existing work" do
       {_user, book, _edition, _author} = create_user_with_book()
       book_count = Repo.aggregate(Book, :count)
@@ -726,27 +622,18 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # D. Full event sequence integration (all user stories combined)
-  # =========================================================================
-
   describe "full event sequence: upload -> identify -> place" do
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "complete happy-path event sequence enqueues correct dbt jobs" do
-      # Simulate the complete upload pipeline event sequence
-      # 1. image.submitted — no dbt job
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.submitted"))
       refute_enqueued(worker: DbtRefreshJob)
 
-      # 2. image.resolved — no dbt job
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.resolved"))
       refute_enqueued(worker: DbtRefreshJob)
 
-      # 3. book.created — no dbt job
       assert :ok = DbtRefreshHandler.handle_event(build_event("book.created"))
       refute_enqueued(worker: DbtRefreshJob)
 
-      # 4. placement.created — triggers mart refresh
       assert :ok = DbtRefreshHandler.handle_event(build_event("placement.created"))
 
       assert_enqueued(
@@ -755,7 +642,7 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    @tag stories: ["US-1.1.2", "US-1.1.3"], suite: :dbt
+    @tag suite: :dbt
     test "rejection event sequence does not enqueue any dbt jobs" do
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.submitted"))
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.rejected"))
@@ -763,9 +650,8 @@ defmodule Stacks.UploadDbtTest do
       refute_enqueued(worker: DbtRefreshJob)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "placement.moved enqueues community read count refresh (standalone)" do
-      # Test placement.moved independently — placement.created is covered above
       assert :ok = DbtRefreshHandler.handle_event(build_event("placement.moved"))
 
       assert_enqueued(
@@ -775,21 +661,10 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # E. Deployed-only tests: dbt staging view verification
-  # =========================================================================
-
   describe "deployed-only: dbt staging views reflect op table data" do
-    # These tests require `dbt run` to have been executed against a live
-    # warehouse database that has the `wh` schema materialised. They verify
-    # that the staging views (which are simple SELECT * views over op tables)
-    # expose the correct columns and data.
-    #
-    # Excluded from local test runs. To run:
-    #   TEST_TARGET=deployed mix test --only deployed_only
     @moduletag :deployed_only
 
-    @tag stories: ["US-1.1.4"], suite: :dbt
+    @tag suite: :dbt
     test "stg_books view exposes book with correct visibility_tier" do
       {_user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
@@ -805,12 +680,11 @@ defmodule Stacks.UploadDbtTest do
           assert tier == "age_gated"
 
         {:error, _} ->
-          # wh schema not available — expected in non-deployed environments
           :ok
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "stg_book_editions view exposes edition with ISBN" do
       {_user, _book, edition, _author} = create_user_with_book()
 
@@ -830,7 +704,7 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.2"], suite: :dbt
+    @tag suite: :dbt
     test "stg_uploaded_images view exposes rejected image with reason" do
       image =
         insert(:uploaded_image, status: "rejected", rejection_reason: "isbn_not_found")
@@ -851,7 +725,7 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "stg_bookshelf_placements view exposes placement with bookshelf_id" do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, placement} = Shelving.place_book(user.id, book.id, "antilibrary")
@@ -871,36 +745,14 @@ defmodule Stacks.UploadDbtTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :dbt
+    @tag suite: :dbt
     test "mart_community_read_count reflects placement after dbt refresh" do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, _placement} = Shelving.place_book(user.id, book.id, "library")
 
-      # This requires dbt run to have materialised the mart
       count = Books.community_read_count(book.id)
 
-      # In deployed environment with dbt, count should be >= 1
-      # In non-deployed, community_read_count returns 0 (graceful fallback)
       assert is_integer(count)
     end
-  end
-
-  defmodule NoIsbnClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    # Consolidated /analyze shape — BOOK classification + empty books
-    # triggers :isbn_not_found in Moderation.
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end

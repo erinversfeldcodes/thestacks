@@ -1,9 +1,9 @@
 defmodule StacksWeb.Plugs.ViewAsPlugTest do
   @moduledoc """
-  Tests for StacksWeb.Plugs.ViewAsPlug — two-phase ViewAs support.
+      Tests for StacksWeb.Plugs.ViewAsPlug — two-phase ViewAs support.
 
-  Phase 1 (plug): parses `?view_as=` and stores `requested_perspective`.
-  Phase 2 (authorize_view_as/2): checks ownership and sets `view_as_context`.
+      Phase 1 (plug): parses `?view_as=` and stores `requested_perspective`.
+      Phase 2 (authorize_view_as/2): checks ownership and sets `view_as_context`.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -22,10 +22,6 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
     |> Map.put(:query_params, params)
     |> ViewAsPlug.call(ViewAsPlug.init([]))
   end
-
-  # ---------------------------------------------------------------------------
-  # Phase 1: Parse perspective (plug)
-  # ---------------------------------------------------------------------------
 
   describe "Phase 1 — no ?view_as param" do
     test "is a no-op when no view_as param is present", %{conn: conn} do
@@ -90,10 +86,6 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Phase 2: authorize_view_as/2
-  # ---------------------------------------------------------------------------
-
   describe "Phase 2 — no requested perspective" do
     test "is a no-op when no perspective was requested", %{conn: conn} do
       user = insert(:user)
@@ -131,7 +123,6 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
         |> ViewAsPlug.authorize_view_as(Ecto.UUID.generate())
 
       refute result.halted
-      # SEC-1: platform preview uses an identity-less viewer, not the owner's id.
       assert result.assigns[:view_as_context] == :platform_preview
     end
 
@@ -146,8 +137,6 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
         |> ViewAsPlug.authorize_view_as(Ecto.UUID.generate())
 
       refute result.halted
-      # SEC-4: specific_user resolves as that user (mapped to :platform_user id),
-      # not the dead-end {:specific_user, _} that fell through to hidden.
       assert result.assigns[:view_as_context] == {:platform_user, target.id}
     end
   end
@@ -176,8 +165,6 @@ defmodule StacksWeb.Plugs.ViewAsPlugTest do
         |> ViewAsPlug.authorize_view_as(user.id)
 
       refute result.halted
-      # SEC-1: previewing "as platform" must NOT reuse the owner's id (which would
-      # show owner-only content); it uses the identity-less preview viewer.
       assert result.assigns[:view_as_context] == :platform_preview
     end
 

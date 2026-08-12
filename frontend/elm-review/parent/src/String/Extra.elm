@@ -14,9 +14,7 @@ isCapitalized : String -> Bool
 isCapitalized string =
     case String.uncons string of
         Just ( char, _ ) ->
-            -- 1. The character is its own upper variant.
             (char == Char.toUpper char)
-                -- 2. The character is not its own lower variant.
                 && (char /= Char.toLower char)
 
         Nothing ->

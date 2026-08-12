@@ -12,10 +12,6 @@ import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility
 
 
-
--- Helpers
-
-
 libraryInit : Bookshelf.Model
 libraryInit =
     { shelves = Loading
@@ -27,13 +23,21 @@ libraryInit =
     , viewMode = SpineView
     , sortState = { column = BookList.Title, direction = BookList.Asc }
     , token = Nothing
+    , organiser = { dragging = Nothing }
+    , organiserBusy = False
+    , organiserError = Nothing
+    , undoToast = Bookshelf.ToastHidden
+    , focusedSpine = Nothing
     }
 
 
 bookDetailInit : BookDetail.Model
 bookDetailInit =
     { book = Loading
+    , prices = NotAsked
     , placement = Nothing
+    , placements = []
+    , removingPlacementId = Nothing
     , bookshelfMoverOpen = False
     , removeModalOpen = False
     , formatPickerOpen = False
@@ -44,6 +48,7 @@ bookDetailInit =
     , removeState = NotAsked
     , selectedEdition = Nothing
     , previousRoute = Nothing
+    , authorEvents = NotAsked
     , showAgeGate = False
     , entryAnimationActive = False
     , isAuthenticated = True
@@ -55,6 +60,7 @@ bookDetailInit =
     , progressCard = Nothing
     , progressSaveState = NotAsked
     , finishedReadPrompt = False
+    , undoableRemoval = Nothing
     }
 
 
@@ -79,10 +85,6 @@ sampleBook =
     , subjects = []
     , visibilityTier = Public
     }
-
-
-
--- Library update tests
 
 
 suite : Test
@@ -173,7 +175,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             BookDetail.update
-                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing }))
+                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }))
                                 bookDetailInit
                                 Nothing
                     in

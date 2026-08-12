@@ -8,8 +8,8 @@ import {
 } from "./helpers";
 
 /**
- * Issue #113 Phase 3 — the spine-rendering flagship Playwright suite (US-1.3.1
- * spine thickness, US-1.3.2 spine wear at the aria level), driven in a real
+ * Phase 3 — the spine-rendering flagship Playwright suite (
+ * spine thickness, spine wear at the aria level), driven in a real
  * browser against a live stack.
  *
  * Each test mints its OWN isolated, confirmed user via POST /api/test/session
@@ -28,7 +28,7 @@ import {
  * mirrored here (`expectedSpineWidth`) is Components.Spine.spineWidth:57-59.
  *
  * WEAR reaches only the aria-label suffix (", well-loved" for Softened; nothing
- * for Pristine — Spine.elm:264-270); visual wear CSS is de-scoped to #288. A
+ * for Pristine — Spine.elm:264-270); visual wear CSS is de-scoped to. A
  * minted user's placements are owner-private by default, so the spine also
  * appends ", hidden (only visible to you)" (Spine.elm:272-277) AFTER the wear
  * suffix. We therefore assert wear by robust substring (`toContain(", well-loved")`
@@ -159,10 +159,6 @@ async function ariaLabelOf(el: Locator): Promise<string> {
 
 const WEAR_SUFFIX = ", well-loved";
 
-// Books chosen for known, distinct spine widths (primary-edition page_count →
-// expectedSpineWidth): Dreamtigers 95→35 (clamped min), Queen Loana 480→40,
-// Name of the Rose 536→45, Selected Non-Fictions 576→48, Brothers Karamazov
-// 796→55 (clamped max). All public (no age gate).
 const WIDTH_TITLES = [
   "Dreamtigers",
   "The Mysterious Flame of Queen Loana",
@@ -171,7 +167,7 @@ const WIDTH_TITLES = [
   "The Brothers Karamazov",
 ];
 
-test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
+test.describe("Spine rendering", () => {
   test("spine width is computed from page count across the clamp range", async ({
     page,
     request,
@@ -204,8 +200,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       );
     }
 
-    // Explicit bucket coverage required by the plan: a clamped-to-35, a
-    // mid-range exact value, and a clamped-to-55.
     expect(measured["Dreamtigers"], "95pp clamps to the 35px minimum").toBe(35);
     expect(
       measured["The Name of the Rose"],
@@ -215,7 +209,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       measured["The Brothers Karamazov"],
       "796pp clamps to the 55px maximum",
     ).toBe(55);
-    // Prove the mid value is a genuine interior point, not a clamp coincidence.
     expect(measured["The Name of the Rose"]).toBeGreaterThan(35);
     expect(measured["The Name of the Rose"]).toBeLessThan(55);
   });
@@ -245,8 +238,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
 
     const wThin = await spineWidthPx(page, thin!.id);
     const wThick = await spineWidthPx(page, thick!.id);
-    // Both are interior (un-clamped), so the comparison reflects the formula
-    // rather than a shared clamp ceiling/floor.
     for (const w of [wThin, wThick]) {
       expect(w).toBeGreaterThan(35);
       expect(w).toBeLessThan(55);
@@ -263,13 +254,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
   }) => {
     const all = await fetchAllCatalogue(request);
     const nullBook = all.find((b) => b.pageCount === null) ?? null;
-    // The dev-fixture seed populates page_count on every edition, so there is no
-    // catalogue book to drive the null→default→35px path at the E2E layer, and
-    // the placement API cannot construct one. This fallback IS proven at the
-    // unit layer (BookcaseHelpersTest.elm renders a page_count-less book at the
-    // 35px floor, punch #5). We skip loudly here rather than fake it; if a
-    // page_count-less book is ever seeded, this test activates automatically.
-    // FLAGGED in the Phase-3 report.
     test.skip(
       nullBook === null,
       "no seeded catalogue book has a null page_count — the null→35px default is covered at the Elm unit layer (BookcaseHelpersTest.elm); E2E cannot construct one without a seed/helper change (FLAGGED)",
@@ -288,8 +272,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
 
     expect(await spineWidthPx(page, nullBook!.id)).toBe(35);
     const aria = await ariaLabelOf(spineEl(page, nullBook!.id));
-    // Missing page_count renders via Maybe.withDefault 200 (Helpers.elm), so the
-    // spine reports "200 pages" even though the edition carries none.
     expect(aria).toContain("200 pages");
   });
 
@@ -340,14 +322,11 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     );
     await injectSession(page, session);
 
-    // Library — Softened → wear suffix present.
     await gotoShelf(page, "library");
     const aLib = await ariaLabelOf(spineEl(page, libBook!.id));
     expect(aLib, "reading the real Library spine").toContain(libBook!.title);
     expect(aLib).toContain(WEAR_SUFFIX);
 
-    // Wish List — Pristine → no wear suffix (the title anchor makes the negative
-    // assertion non-vacuous even though owner-privacy appends ", hidden …").
     await gotoShelf(page, "wishlist");
     const aWish = await ariaLabelOf(spineEl(page, wishBook!.id));
     expect(aWish, "reading the real Wish List spine").toContain(
@@ -355,7 +334,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     );
     expect(aWish).not.toContain(WEAR_SUFFIX);
 
-    // AntiLibrary — Pristine → no wear suffix.
     await gotoShelf(page, "antilibrary");
     const aAnti = await ariaLabelOf(spineEl(page, antiBook!.id));
     expect(aAnti, "reading the real AntiLibrary spine").toContain(
@@ -363,8 +341,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     );
     expect(aAnti).not.toContain(WEAR_SUFFIX);
 
-    // Reading Pile — Softened → wear suffix present. The pile uses a different
-    // DOM (.book-pile, no #spine-<id>), so match the spine by its accessible name.
     await gotoShelf(page, "reading_pile");
     const pileSpine = page
       .locator(".book-pile")
@@ -380,11 +356,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     page,
     request,
   }) => {
-    // Issue #288: wear is visible, not just audible. A Library (Softened) spine
-    // gets the .book--softened treatment — a `filter` on its .book__spine face
-    // (saturate/brightness) plus a corner-wear vignette — while a Wish List
-    // (Pristine) spine gets none. We read the computed `filter` on the spine
-    // face: Softened resolves to a non-"none" filter string, Pristine to "none".
     const all = await fetchAllCatalogue(request);
     const [libBook, wishBook] = lookup(all, [
       "The Name of the Rose", // Library — Softened
@@ -412,7 +383,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     );
     await injectSession(page, session);
 
-    // Softened (Library): the spine face carries a real, non-"none" filter.
     await gotoShelf(page, "library");
     const libSpineFace = page.locator(
       `#spine-${libBook!.id} [data-testid="book-spine"] .book__spine`,
@@ -427,7 +397,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     ).not.toBe("none");
     expect(libFilter).toContain("saturate");
 
-    // Pristine (Wish List): the same spine face carries no filter.
     await gotoShelf(page, "wishlist");
     const wishSpineFace = page.locator(
       `#spine-${wishBook!.id} [data-testid="book-spine"] .book__spine`,
@@ -440,7 +409,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       "none",
     );
 
-    // The distinction is real, not a coincidence of equal values.
     expect(libFilter).not.toBe(wishFilter);
   });
 
@@ -465,9 +433,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     expect(aria).toContain(b!.title);
     expect(aria).toContain(`${b!.pageCount} pages`);
 
-    // role="listitem" on the spine button; role="list" on the shelf-row
-    // container that holds it (extends bookshelf.spec.ts, which asserts the
-    // roles on the shared suite user, by tying them to a specific known book).
     const button = page.locator(`#spine-${b!.id}`);
     await expect(button).toHaveAttribute("role", "listitem");
     const container = page.locator(".shelf-row__books", {
@@ -495,7 +460,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     await injectSession(page, session);
     await gotoShelf(page, "library");
 
-    // Wait for our specific books (not a global count) before reading textures.
     for (const b of books) {
       await expect(spineEl(page, b.id)).toBeAttached({ timeout: 10000 });
     }
@@ -515,15 +479,10 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  test("a book the owner has written about shows a bookmark ribbon; one without does not (US-1.3.2, #287)", async ({
+  test("a book the owner has written about shows a bookmark ribbon; one without does not", async ({
     page,
     request,
   }) => {
-    // Two public books placed on the SAME Library shelf by one minted user, only
-    // the first given a visible blog-post association. The ribbon (a `.book__ribbon`
-    // child) and the ", with your notes" aria suffix must appear on the first and
-    // NOT the second — proving the has_user_writing flag flows through the payload
-    // and Components.Spine into the DOM per placement, not per shelf.
     const all = await fetchAllCatalogue(request);
     const [written, plain] = lookup(all, ["The Name of the Rose", "The Idiot"]);
     assertSeedOrSkip(
@@ -540,15 +499,11 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       written!.title,
     );
     await apiPlace(request, session.token, "library", plain!.id, plain!.title);
-    // Only the first book gets a visible writing association.
     await seedBookWriting(request, session.email, written!.id);
 
     await injectSession(page, session);
     await gotoShelf(page, "library");
 
-    // Written-about book: the accessible name carries ", with your notes"
-    // (anchored by the title so the substring assertion can't pass against a
-    // wrong/empty label), and a `.book__ribbon` child is present.
     const writtenAria = await ariaLabelOf(spineEl(page, written!.id));
     expect(writtenAria, "reading the written-about spine").toContain(
       written!.title,
@@ -559,10 +514,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       ribbon,
       "written-about spine renders a bookmark ribbon",
     ).toHaveCount(1);
-    // Not a phantom node: the `.book__ribbon` rule actually matched (its
-    // signature `position: absolute` overrides the default `static`) and the
-    // element is laid out (non-zero box), so the ribbon is genuinely visible —
-    // the same computed-style proof #288 uses for the wear filter.
     const ribbonStyle = await ribbon.evaluate((e) => {
       const cs = getComputedStyle(e as HTMLElement);
       const r = (e as HTMLElement).getBoundingClientRect();
@@ -578,9 +529,6 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     expect(ribbonStyle.w, "ribbon has a rendered width").toBeGreaterThan(0);
     expect(ribbonStyle.h, "ribbon has a rendered height").toBeGreaterThan(0);
 
-    // Plain book on the SAME shelf: no ribbon and no notes suffix. The positive
-    // title read first makes both negatives non-vacuous — a wrong selector would
-    // fail the title assertion loudly rather than let the negatives pass empty.
     const plainAria = await ariaLabelOf(spineEl(page, plain!.id));
     expect(plainAria, "reading the un-written spine").toContain(plain!.title);
     expect(plainAria).not.toContain(", with your notes");

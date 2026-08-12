@@ -1,13 +1,12 @@
 defmodule Stacks.BooksAgeGateTest do
   @moduledoc """
-  Tests for `Stacks.Books.set_visibility_tier/3` — the user/owner-set age-gate
-  model that replaced the removed automatic subject→BISAC classifier (#118).
+      Tests for `Stacks.Books.set_visibility_tier/3` — the user/owner-set age-gate
+      model that replaced the removed automatic subject→BISAC classifier.
 
-  A book is age-gated because a PERSON marked it, not because code guessed.
-  The user path is raise-only (public → age_gated); only the owner may un-gate.
+      A book is age-gated because a PERSON marked it, not because code guessed.
+      The user path is raise-only (public → age_gated); only the owner may un-gate.
   """
 
-  # async: false — attaches global telemetry handlers.
   use Core.DataCase, async: false
 
   import Stacks.Factory

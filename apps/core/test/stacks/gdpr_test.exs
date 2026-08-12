@@ -11,23 +11,15 @@ defmodule Stacks.GDPRTest do
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Workers.ImageRetentionJob
 
-  # op.users columns deliberately NOT in the GDPR export (mirrors the
-  # exclusion rationale in Stacks.GDPR.Export's user map). Secrets, account-
-  # security mechanics, and internal UX progress flags — none are user-provided
-  # personal data the subject is entitled to receive. Every OTHER real schema
-  # field MUST appear in the export or this guard fails.
   @export_excluded_fields [
-    # Secrets — exporting would leak credentials / defeat their purpose.
     :password_hash,
     :email_confirmation_token,
     :password_reset_token,
-    # Account-security mechanics — internal auth state, not personal data.
     :email_confirmed,
     :password_reset_sent_at,
     :failed_login_count,
     :failed_login_first_at,
     :locked_until,
-    # Internal UX progress flags — app state, not personal data.
     :onboarding_completed,
     :onboarding_steps
   ]
@@ -38,12 +30,28 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert export.user.id == user.id
       assert export.user.email == user.email
-      # Both consent flags are portable (writing-assistant added alongside analytics).
       assert Map.has_key?(export.user, :consent_analytics)
       assert Map.has_key?(export.user, :consent_writing_assistant)
       assert Map.has_key?(export.user, :consent_writing_assistant_at)
       assert is_list(export.bookshelves)
       assert is_list(export.placements)
+    end
+
+    test "includes the user's own blog posts and comments" do
+      author = insert(:user)
+      post = insert(:post, user: author, title: "My Post", body: "My own words.")
+      insert(:post_comment, author: author, post: post, body: "My comment.")
+
+      other = insert(:user)
+      insert(:post_comment, author: other, post: post, body: "Not mine.")
+
+      assert {:ok, export} = Export.export_user_data(author.id)
+
+      assert [%{title: "My Post", body: "My own words."}] = export.blog_posts
+
+      comment_bodies = Enum.map(export.blog_comments, & &1.body)
+      assert "My comment." in comment_bodies
+      refute "Not mine." in comment_bodies
     end
 
     test "includes bookshelves and placements" do
@@ -57,11 +65,45 @@ defmodule Stacks.GDPRTest do
       assert length(export.placements) == 1
     end
 
+    test "includes SOFT-DELETED placements — a removal does not put data beyond export" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, notes: "a margin note")
+
+      {:ok, _} = Stacks.Shelving.remove_book(placement.id, user.id)
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [exported] = export.placements
+      assert exported.id == placement.id
+      assert exported.removed_at != nil
+      assert exported.notes == "a margin note"
+    end
+
     test "returns error for unknown user" do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
 
-    test "payload contains all 8 documented keys" do
+    test "includes library imports with their raw rows while in retention" do
+      user = insert(:user)
+
+      csv =
+        "Title,Author,ISBN13,Exclusive Shelf,My Review,Private Notes\n" <>
+          "1984,George Orwell,\"=\"\"9780141036144\"\"\",read,my honest review,my private note\n"
+
+      {:ok, _} = Stacks.Imports.create_import(user.id, "export.csv", csv)
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [import_export] = export.library_imports
+      assert import_export.filename == "export.csv"
+      assert import_export.row_count == 1
+
+      assert [row] = import_export.rows
+      assert row.review == "my honest review"
+      assert row.private_notes == "my private note"
+    end
+
+    test "payload contains all 14 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -74,8 +116,51 @@ defmodule Stacks.GDPRTest do
                  :placement_history,
                  :writing_assistant_sessions,
                  :writing_assistant_feedback,
-                 :embeddings_summary
+                 :embeddings_summary,
+                 :uploaded_images,
+                 :blog_posts,
+                 :blog_comments,
+                 :invitations,
+                 :library_imports,
+                 :blog_syndications
                ])
+    end
+
+    test "includes the user's uploaded images as metadata only — never storage_path or a URL" do
+      user = insert(:user)
+
+      image =
+        Repo.insert!(%Stacks.Books.UploadedImage{
+          user_id: user.id,
+          storage_path: "uploads/secret-key-#{user.id}",
+          status: "resolved",
+          uploaded_at: ~U[2026-01-02 03:04:05.000000Z],
+          expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+        })
+
+      other = insert(:user)
+
+      Repo.insert!(%Stacks.Books.UploadedImage{
+        user_id: other.id,
+        storage_path: "uploads/theirs",
+        status: "pending",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [entry] = export.uploaded_images
+
+      assert MapSet.new(Map.keys(entry)) == MapSet.new([:id, :uploaded_at, :status])
+      assert entry.id == image.id
+      assert entry.status == "resolved"
+      assert entry.uploaded_at == ~U[2026-01-02 03:04:05.000000Z]
+
+      refute Map.has_key?(entry, :storage_path)
+
+      assert {:ok, json} = Jason.encode(export)
+      refute json =~ "secret-key"
+      refute json =~ "uploads/"
     end
 
     test "includes only the user's writing-assistant sessions and feedback" do
@@ -83,7 +168,6 @@ defmodule Stacks.GDPRTest do
       session = insert(:blog_assistant_session, user: user, topic: "My draft post")
       insert(:turn_feedback, session: session, rating: "up", comment: "Great help.")
 
-      # Another user's data must NOT leak in.
       other = insert(:user)
       other_session = insert(:blog_assistant_session, user: other)
       insert(:turn_feedback, session: other_session)
@@ -102,7 +186,6 @@ defmodule Stacks.GDPRTest do
 
     test "embeddings_summary lists metadata but NEVER the raw vector" do
       user = insert(:user)
-      # Seed a real, distinctive vector so the no-leak assertion is non-vacuous.
       sentinel = 0.4242
       vector = List.duplicate(sentinel, 1024)
 
@@ -118,7 +201,6 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert [entry] = export.embeddings_summary
 
-      # Only the four documented, human-readable fields — nothing else.
       assert MapSet.new(Map.keys(entry)) ==
                MapSet.new([:source_type, :source_title, :shelf, :date_embedded])
 
@@ -127,14 +209,12 @@ defmodule Stacks.GDPRTest do
       assert entry.shelf == "library"
       assert entry.date_embedded == ~U[2026-01-02 03:04:05.000000Z]
 
-      # The raw vector must not appear under any key…
       refute Map.has_key?(entry, :embedding)
 
       refute Enum.any?(Map.values(entry), fn v ->
                match?(%Pgvector{}, v) or (is_list(v) and sentinel in v)
              end)
 
-      # …nor anywhere in the JSON-serialised export the user downloads.
       assert {:ok, json} = Jason.encode(export)
       refute json =~ "0.4242"
     end
@@ -147,11 +227,7 @@ defmodule Stacks.GDPRTest do
       assert export.embeddings_summary == []
     end
 
-    test "exports the settings personal-data fields verbatim (#299)" do
-      # The four notify_* prefs, website_url, country_code, city and handle are
-      # all written by the settings screens; a data export must return them.
-      # Each value below is NON-DEFAULT (flips the schema default) so the
-      # assertion fails against a map that omits the field OR hardcodes a default.
+    test "exports the settings personal-data fields verbatim" do
       user =
         insert(:user,
           handle: "night_reader",
@@ -176,8 +252,8 @@ defmodule Stacks.GDPRTest do
       assert export.user.notify_event_matches == true
     end
 
-    test "every personal user-schema field appears in the export (schema-sweep guard, #299)" do
-      # Mirrors the erasure schema-level guard (#185): a future column added to
+    test "every personal user-schema field appears in the export (schema-sweep guard, )" do
+      # Mirrors the erasure schema-level guard: a future column added to
       # op.users fails this test until it is either exported by
       # Export.export_user_data/2 or added to @export_excluded_fields WITH a
       # written rationale. Prevents a new personal field silently escaping export.
@@ -210,6 +286,20 @@ defmodule Stacks.GDPRTest do
       assert nil == Repo.get(User, user.id)
     end
 
+    test "erases SOFT-DELETED placements too — a removal does not hide a row from erasure" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, notes: "a margin note")
+
+      {:ok, _} = Stacks.Shelving.remove_book(placement.id, user.id)
+      assert Repo.get(Stacks.Shelving.Placement, placement.id) != nil
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      assert nil == Repo.get(Stacks.Shelving.Placement, placement.id)
+    end
+
     test "removes placement history for user's bookshelves" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -237,6 +327,29 @@ defmodule Stacks.GDPRTest do
       )
 
       assert {:ok, _} = Deletion.delete_user_data(user.id)
+    end
+
+    test "erases library imports AND their raw rows — the reader's Goodreads free text" do
+      user = insert(:user)
+
+      csv =
+        "Title,Author,ISBN13,Exclusive Shelf,My Review,Private Notes\n" <>
+          "1984,George Orwell,\"=\"\"9780141036144\"\"\",read,my honest review,my private note\n"
+
+      {:ok, import} = Stacks.Imports.create_import(user.id, "export.csv", csv)
+
+      assert {:ok, preview} = Deletion.preview_user_data(user.id)
+      assert preview.library_imports == 1
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+      assert result.delete_library_imports == 1
+
+      assert nil == Repo.get(Stacks.Imports.LibraryImport, import.id)
+
+      assert [] ==
+               Repo.all(
+                 from(r in Stacks.Imports.LibraryImportRow, where: r.import_id == ^import.id)
+               )
     end
   end
 
@@ -354,7 +467,6 @@ defmodule Stacks.GDPRTest do
 
   describe "ImageRetentionJob" do
     test "perform/1 calls cleanup_stuck_images and cleanup_expired_images" do
-      # No images to clean up — should return :ok without error
       assert :ok = ImageRetentionJob.perform(%Oban.Job{args: %{}})
     end
   end

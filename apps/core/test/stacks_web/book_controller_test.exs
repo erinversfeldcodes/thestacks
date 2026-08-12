@@ -1,10 +1,9 @@
 defmodule StacksWeb.BookControllerTest do
   @moduledoc """
-  Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
-  POST /api/books/confirm, and POST /api/books/:id/merge-format.
+      Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
+      POST /api/books/confirm, and POST /api/books/:id/merge-format.
   """
 
-  # async: false because confirm/merge tests swap Application env for mock HTTP client.
   use CoreWeb.ConnCase, async: false
 
   import Ecto.Query
@@ -13,11 +12,8 @@ defmodule StacksWeb.BookControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.MockHttpClient
+  alias Stacks.Workers.EnrichBookJob
 
-  # Reset the resolver's circuit breakers before each test. :fuse state is
-  # global, so a fuse blown by an earlier suite test can leak in and turn a
-  # mocked ISBN resolve into :circuit_open → isbn_not_found (an order-dependent
-  # flake observed in the full-suite run but not in isolation).
   setup do
     :fuse.reset(:open_library_fuse)
     :fuse.reset(:google_books_fuse)
@@ -30,16 +26,14 @@ defmodule StacksWeb.BookControllerTest do
   end
 
   defp insert_book_with_edition(attrs \\ []) do
-    book = insert(:book, Keyword.take(attrs, [:title, :visibility_tier, :author]))
+    book =
+      insert(
+        :book,
+        Keyword.take(attrs, [:title, :visibility_tier, :author]) ++
+          [editions: [build(:primary_book_edition, Keyword.take(attrs, [:isbn]))]]
+      )
 
-    edition_attrs =
-      attrs
-      |> Keyword.take([:isbn])
-      |> Keyword.put(:book, book)
-      |> Keyword.put_new(:is_primary, true)
-
-    edition = insert(:book_edition, edition_attrs)
-    {book, edition}
+    {book, hd(book.editions)}
   end
 
   describe "GET /api/books/:id" do
@@ -79,21 +73,12 @@ defmodule StacksWeb.BookControllerTest do
       assert is_list(placement["formats"])
     end
 
-    # Regression for the #122 live-E2E placement-greying bug: the shelf-visibility
-    # update endpoint was keyed by UUID `:id`, but every other bookshelf route
-    # (and both the Elm client and the E2E) address shelves by NAME. Setting the
-    # ceiling by name therefore never persisted, so the book-detail placement
-    # payload carried the default "owner" ceiling and the dropdown greyed the
-    # (equal-rank) "platform" option. After the fix the ceiling the client set is
-    # exactly what the greying sees.
     test "shelf ceiling set by name reaches the book-detail placement payload", %{conn: conn} do
       user = insert(:user, profile_visibility: "platform")
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
       insert(:placement, bookshelf: bookshelf, book: book)
 
-      # Exactly what the client (Api.updateShelfVisibility) and the E2E do: PUT
-      # the visibility route with the shelf NAME in the path.
       put_conn =
         conn
         |> auth_conn(user)
@@ -104,6 +89,63 @@ defmodule StacksWeb.BookControllerTest do
       get_conn = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert %{"placement" => placement} = json_response(get_conn, 200)
       assert placement["bookshelf_visibility"] == "platform"
+    end
+
+    test "returns 200 carrying BOTH placements when the book sits on two bookshelves",
+         %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(title: "Middlemarch")
+      library = insert(:bookshelf, user: user, name: "library")
+      wishlist = insert(:bookshelf, user: user, name: "wishlist")
+      insert(:placement, book: book, bookshelf: library)
+      insert(:placement, book: book, bookshelf: wishlist)
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placements" => placements} = json_response(conn, 200)
+      assert length(placements) == 2
+
+      assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
+
+      assert Enum.map(placements, & &1["id"]) |> Enum.uniq() |> length() == 2
+    end
+
+    test "the legacy singular placement key still names one of the two", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition()
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "wishlist"))
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placement" => placement, "placements" => [first | _]} = json_response(conn, 200)
+      assert placement["id"] == first["id"]
+    end
+
+    test "another user's second placement of the same book does not leak in", %{conn: conn} do
+      user = insert(:user)
+      stranger = insert(:user)
+      {book, _edition} = insert_book_with_edition()
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+
+      insert(:placement,
+        book: book,
+        bookshelf: insert(:bookshelf, user: stranger, name: "wishlist")
+      )
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placements" => [only]} = json_response(conn, 200)
+      assert only["bookshelf_name"] == "library"
+    end
+
+    test "returns an empty placements list for a book the viewer has not placed", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition()
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placement" => nil, "placements" => []} = json_response(conn, 200)
     end
 
     test "returns 404 when book does not exist", %{conn: conn} do
@@ -197,7 +239,6 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 201 with book when ISBN resolves (mocked)", %{conn: conn} do
       user = insert(:user)
 
-      # Pre-insert the book+edition and test the duplicate-detection path
       {_book, _edition} =
         insert_book_with_edition(isbn: "9780743273565", title: "The Great Gatsby")
 
@@ -206,7 +247,6 @@ defmodule StacksWeb.BookControllerTest do
         |> auth_conn(user)
         |> post("/api/books", %{"isbn" => "9780743273565"})
 
-      # Accept either outcome so the test is not fragile on network availability.
       assert conn.status in [201, 422]
     end
 
@@ -227,11 +267,7 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Gap 2 — POST /api/books HTTP layer with mocked ISBN resolver (US-1.1.5)
-  # ---------------------------------------------------------------------------
-
-  describe "POST /api/books — mocked ISBN resolver (US-1.1.5)" do
+  describe "POST /api/books — mocked ISBN resolver" do
     setup do
       original = Application.get_env(:core, :isbn_http_client)
       Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
@@ -272,8 +308,6 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 422 when both Open Library and Google Books return no results", %{conn: conn} do
       user = insert(:user)
 
-      # MockHttpClient returns {:ok, %{}} for unregistered patterns — empty body
-      # is treated as not found by ISBNResolver for both Open Library and Google Books.
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
 
@@ -283,6 +317,86 @@ defmodule StacksWeb.BookControllerTest do
         |> post("/api/books", %{"isbn" => "9780743273565"})
 
       assert %{"error" => _} = json_response(conn, 422)
+    end
+  end
+
+  describe "a resolver outage is a 503, not 'isbn_not_found'" do
+    setup do
+      MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+      :ok
+    end
+
+    test "POST /api/books answers 503 resolver_unavailable", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books", %{"isbn" => "9780743273565"})
+
+      body = json_response(conn, 503)
+
+      refute body["error"] == "isbn_not_found",
+             "a 5xx from Open Library says nothing about whether 9780743273565 is a book"
+
+      assert body["error"] == "resolver_unavailable"
+      assert get_resp_header(conn, "retry-after") == ["30"]
+    end
+
+    test "POST /api/books/confirm answers 503 resolver_unavailable", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
+
+      assert %{"error" => "resolver_unavailable"} = json_response(conn, 503)
+    end
+
+    test "POST /api/books/:id/merge-format answers 503 resolver_unavailable", %{conn: conn} do
+      user = insert(:user)
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/#{book.id}/merge-format", %{"isbn" => "9780141036144"})
+
+      assert %{"error" => "resolver_unavailable"} = json_response(conn, 503)
+    end
+
+    test "nothing is written when the resolver could not be reached", %{conn: conn} do
+      user = insert(:user)
+      before = Core.Repo.aggregate(Stacks.Books.Book, :count)
+
+      conn
+      |> auth_conn(user)
+      |> post("/api/books", %{"isbn" => "9780743273565"})
+      |> json_response(503)
+
+      assert Core.Repo.aggregate(Stacks.Books.Book, :count) == before
+    end
+  end
+
+  describe "an ISBN the catalogues denied is still 422 isbn_not_found" do
+    setup do
+      MockHttpClient.put_response("openlibrary.org", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+      :ok
+    end
+
+    test "POST /api/books/confirm still answers 422", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
+
+      assert %{"error" => "isbn_not_found"} = json_response(conn, 422)
     end
   end
 
@@ -301,25 +415,47 @@ defmodule StacksWeb.BookControllerTest do
       assert placement["book_id"] == book.id
     end
 
-    test "returns 200 with source=collection when user already owns the book", %{conn: conn} do
+    test "already owning the book elsewhere does not block the requested shelf", %{conn: conn} do
       user = insert(:user)
       {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
-      bookshelf = insert(:bookshelf, user: user, name: "library")
-      insert(:placement, book: book, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
 
       conn =
         conn
         |> auth_conn(user)
-        |> post("/api/books/confirm", %{"isbn" => "9780743273565"})
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
 
-      assert %{"book" => returned, "placement" => placement, "source" => "collection"} =
+      assert %{"book" => returned, "placement" => placement, "placements" => placements} =
                json_response(conn, 200)
 
       assert returned["id"] == book.id
-      assert placement["bookshelf_name"] == "library"
+      assert placement["bookshelf_name"] == "wishlist"
+      assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
     end
 
-    test "returns 200 with book data when ISBN resolves via metadata (mocked)", %{conn: conn} do
+    test "confirming onto a bookshelf the book is already on is a no-op, not a duplicate", %{
+      conn: conn
+    } do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
+      shelf = insert(:bookshelf, user: user, name: "library")
+      existing = insert(:placement, book: book, bookshelf: shelf)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "library"})
+
+      assert %{"placement" => placement, "placements" => placements, "source" => "collection"} =
+               json_response(conn, 200)
+
+      assert placement["id"] == existing.id
+      assert length(placements) == 1
+    end
+
+    test "returns 201 with the resolved book when a new ISBN resolves via metadata (mocked)", %{
+      conn: conn
+    } do
       user = insert(:user)
       original = Application.get_env(:core, :isbn_http_client)
 
@@ -347,10 +483,18 @@ defmodule StacksWeb.BookControllerTest do
         conn =
           conn
           |> auth_conn(user)
-          |> post("/api/books/confirm", %{"isbn" => "9780451524935"})
+          |> post("/api/books/confirm", %{"isbn" => "9780451524935", "shelf_name" => "library"})
 
-        # Accept 201 (new book created) or 409 (merge required — unlikely with new ISBN)
-        assert conn.status in [201, 409]
+        assert conn.status == 201
+
+        assert %{"book" => book, "placement" => placement, "placements" => placements} =
+                 json_response(conn, 201)
+
+        assert book["title"] == "Confirm Test Book"
+
+        assert placement["bookshelf_name"] == "library"
+        assert Enum.map(placements, & &1["bookshelf_name"]) == ["library"]
+        assert book["primary_edition"]["isbn"] == "9780451524935"
       after
         Application.put_env(:core, :isbn_http_client, original)
       end
@@ -359,7 +503,6 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 409 with merge_required when vision finds a matching work", %{conn: conn} do
       user = insert(:user)
 
-      # Insert a book with a known title/author that find_similar_work will find
       author = insert(:author, name: "George Orwell")
       book = insert(:book, title: "Nineteen Eighty-Four", author: author)
       insert(:book_edition, book: book, isbn: "9780141036144")
@@ -369,7 +512,6 @@ defmodule StacksWeb.BookControllerTest do
       try do
         Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
 
-        # Return metadata matching the existing book's title+author but different ISBN
         MockHttpClient.put_response("googleapis.com", {
           :ok,
           %{
@@ -388,6 +530,8 @@ defmodule StacksWeb.BookControllerTest do
           }
         })
 
+        works_before = Core.Repo.aggregate(Stacks.Books.Book, :count)
+
         conn =
           conn
           |> auth_conn(user)
@@ -395,6 +539,12 @@ defmodule StacksWeb.BookControllerTest do
 
         assert %{"error" => "merge_required", "work_id" => work_id} = json_response(conn, 409)
         assert work_id == book.id
+
+        assert Core.Repo.aggregate(Stacks.Books.Book, :count) == works_before
+
+        refute Core.Repo.exists?(
+                 from(e in Stacks.Books.BookEdition, where: e.isbn == "9780451524935")
+               )
       after
         Application.put_env(:core, :isbn_http_client, original)
       end
@@ -516,6 +666,31 @@ defmodule StacksWeb.BookControllerTest do
       assert returned["id"] == book.id
     end
 
+    test "carries the viewer's existing placements so the client can say 'already yours'",
+         %{conn: conn} do
+      user = insert(:user)
+
+      {book, _edition} =
+        insert_book_with_edition(isbn: "9780451524935", visibility_tier: "public")
+
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "wishlist"))
+
+      conn = conn |> auth_conn(user) |> get("/api/books/isbn/9780451524935")
+
+      assert %{"book" => _, "placements" => placements} = json_response(conn, 200)
+      assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
+    end
+
+    test "reports no placements for a book the viewer has never shelved", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(isbn: "9780451524935", visibility_tier: "public")
+
+      conn = conn |> auth_conn(user) |> get("/api/books/isbn/9780451524935")
+
+      assert %{"placement" => nil, "placements" => []} = json_response(conn, 200)
+    end
+
     test "returns 404 when ISBN is not found", %{conn: conn} do
       user = insert(:user)
 
@@ -534,12 +709,12 @@ defmodule StacksWeb.BookControllerTest do
 
     test "returns 403 for age_gated book when user is not age_verified", %{conn: conn} do
       user = insert(:user, age_verified: false)
-      insert_book_with_edition(isbn: "9780000000001", visibility_tier: "age_gated")
+      insert_book_with_edition(isbn: "9781600000126", visibility_tier: "age_gated")
 
       conn =
         conn
         |> auth_conn(user)
-        |> get("/api/books/isbn/9780000000001")
+        |> get("/api/books/isbn/9781600000126")
 
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end
@@ -613,19 +788,6 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/books/:id — hidden book is not served (Issue #114, punch #3)
-  #
-  # A book's ONLY server-side hidden state is the age gate (a book has no owner,
-  # no block relationship, and its `visibility_tier` always resolves as "public"
-  # for resource visibility — see Stacks.Visibility). `AgeGate.enforce/2`
-  # intercepts an age-gated book for an unverified viewer with a 403 BEFORE the
-  # controller's `resolve_visibility == :hidden -> 404` branch is reached, so the
-  # reachable "hidden book" outcome is a 403 that leaks no book payload.
-  # (The literal :hidden -> 404 branch is defensive/unreachable for books; flagged
-  # in the Phase 2 report.)
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/books/:id — hidden book is not served" do
     test "age-gated book (hidden to an unverified viewer) is refused and leaks no payload", %{
       conn: conn
@@ -642,7 +804,6 @@ defmodule StacksWeb.BookControllerTest do
 
       body = json_response(conn, 403)
       assert body == %{"error" => "age_verification_required"}
-      # The hidden book's detail payload must not appear in a refusal response.
       refute Map.has_key?(body, "book")
       refute conn.resp_body =~ "Restricted"
     end
@@ -655,10 +816,6 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/books/:id — read is side-effect free (Issue #114, punch #4 variant)
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/books/:id — no events on read" do
     test "a successful read emits no event_log rows", %{conn: conn} do
@@ -688,15 +845,6 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/books/:id — controller<->cache integration (Issue #114, punch #6)
-  #
-  # First read is a cache miss that populates BookDetailCache; the second read is
-  # a hit served from cache. Proven via the [:stacks, :book_detail_cache, :*]
-  # telemetry the cache emits (Phase 2 instrumentation), not by inspecting
-  # internal cache state.
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/books/:id — cache miss then hit" do
     setup do
       test_pid = self()
@@ -723,7 +871,6 @@ defmodule StacksWeb.BookControllerTest do
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       BookDetailCache.invalidate(book.id)
 
-      # First request: cold cache -> miss, then populated.
       conn1 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn1, 200)["book"]["id"] == book.id
 
@@ -735,7 +882,6 @@ defmodule StacksWeb.BookControllerTest do
 
       assert book_id == book.id
 
-      # Second request: warm cache -> hit.
       conn2 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn2, 200)["book"]["id"] == book.id
 
@@ -745,8 +891,168 @@ defmodule StacksWeb.BookControllerTest do
                       }},
                      1_000
 
-      # The warm read must NOT re-query/re-cache: no second miss is emitted.
       refute_receive {:telemetry, [:stacks, :book_detail_cache, :miss], _, _}, 200
+    end
+  end
+
+  describe "POST /api/books/:id/merge-format then GET /api/books/:id" do
+    test "the merged edition is visible on the next read of the book" do
+      user = insert(:user)
+
+      book =
+        insert(:book,
+          title: "The Name of the Rose",
+          author: insert(:author, name: "Umberto Eco"),
+          editions: [build(:primary_book_edition, isbn: "9780156030410")]
+        )
+
+      BookDetailCache.invalidate(book.id)
+
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, MockHttpClient)
+
+        MockHttpClient.put_response("googleapis.com", {
+          :ok,
+          %{
+            "items" => [
+              %{
+                "id" => "mock-rose-vintage",
+                "volumeInfo" => %{
+                  "title" => "The Name of the Rose",
+                  "authors" => ["Umberto Eco"],
+                  "industryIdentifiers" => [
+                    %{"type" => "ISBN_13", "identifier" => "9780099466031"}
+                  ]
+                }
+              }
+            ]
+          }
+        })
+
+        before_body =
+          build_conn()
+          |> auth_conn(user)
+          |> get("/api/books/#{book.id}")
+          |> json_response(200)
+
+        assert before_body["book"]["edition_count"] == 1
+
+        merge_body =
+          build_conn()
+          |> auth_conn(user)
+          |> post("/api/books/#{book.id}/merge-format", %{
+            "isbn" => "9780099466031",
+            "format_label" => "Paperback"
+          })
+          |> json_response(200)
+
+        assert merge_body["edition"]["isbn"] == "9780099466031"
+
+        assert Core.Repo.aggregate(
+                 from(e in Stacks.Books.BookEdition, where: e.book_id == ^book.id),
+                 :count
+               ) == 2
+
+        Oban.drain_queue(queue: :events)
+
+        after_body =
+          build_conn()
+          |> auth_conn(user)
+          |> get("/api/books/#{book.id}")
+          |> json_response(200)
+
+        assert after_body["book"]["edition_count"] == 2,
+               "GET /api/books/:id served a stale work after a 200 merge — " <>
+                 "the reader is shown a book without the edition they just added"
+
+        assert "9780099466031" in Enum.map(after_body["book"]["editions"], & &1["isbn"])
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
+    end
+  end
+
+  describe "PUT /api/books/:id/age-gate then GET /api/books/:id" do
+    test "the raised gate is enforced on the very next read, not when the TTL expires" do
+      reader = insert(:user, age_verified: false)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      BookDetailCache.invalidate(book.id)
+
+      before_body =
+        build_conn()
+        |> auth_conn(reader)
+        |> get("/api/books/#{book.id}")
+        |> json_response(200)
+
+      assert before_body["book"]["visibility_tier"] == "public"
+
+      marked =
+        build_conn()
+        |> auth_conn(insert(:user))
+        |> put("/api/books/#{book.id}/age-gate", %{"adults_only" => true})
+        |> json_response(200)
+
+      assert marked["book"]["visibility_tier"] == "age_gated"
+
+      assert %{"error" => "age_verification_required"} =
+               build_conn()
+               |> auth_conn(reader)
+               |> get("/api/books/#{book.id}")
+               |> json_response(403),
+             "a book raised to age_gated was still served to a non-verified reader — " <>
+               "the age gate is being enforced against the cached pre-gate copy"
+    end
+  end
+
+  describe "EnrichBookJob then GET /api/books/:id" do
+    test "the enriched title is visible on the next read, not after the TTL" do
+      user = insert(:user)
+      isbn = "9780451524935"
+
+      {book, _edition} =
+        insert_book_with_edition(title: "ISBN #{isbn}", isbn: isbn, visibility_tier: "public")
+
+      BookDetailCache.invalidate(book.id)
+
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, MockHttpClient)
+
+        MockHttpClient.put_response(
+          "openlibrary.org/api/books",
+          {:ok,
+           %{
+             "ISBN:#{isbn}" => %{
+               "title" => "Nineteen Eighty-Four",
+               "authors" => [%{"name" => "George Orwell"}],
+               "publishers" => [%{"name" => "Signet Classics"}]
+             }
+           }}
+        )
+
+        assert build_conn()
+               |> auth_conn(user)
+               |> get("/api/books/#{book.id}")
+               |> json_response(200)
+               |> get_in(["book", "title"]) == "ISBN #{isbn}"
+
+        assert :ok = EnrichBookJob.perform(%Oban.Job{args: %{"isbn" => isbn}})
+
+        Oban.drain_queue(queue: :events)
+
+        assert build_conn()
+               |> auth_conn(user)
+               |> get("/api/books/#{book.id}")
+               |> json_response(200)
+               |> get_in(["book", "title"]) == "Nineteen Eighty-Four",
+               "GET /api/books/:id still served the placeholder title after enrichment — " <>
+                 "BookDetailCache was never evicted"
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
     end
   end
 

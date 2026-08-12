@@ -92,8 +92,6 @@ defmodule StacksWeb.PartnerInventoryController do
     })
   end
 
-  # ── Private helpers ──────────────────────────────────────────────────────
-
   defp strip_bom(<<0xEF, 0xBB, 0xBF, rest::binary>>), do: rest
   defp strip_bom(data), do: data
 

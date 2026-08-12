@@ -21,7 +21,7 @@ import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers exposing (pickTexture)
 import Task
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
-import Types.Placement exposing (Placement, ReadingStatus(..), readingStatusToString)
+import Types.Placement as Placement exposing (Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Shelf exposing (Shelf)
 import Util.TestId exposing (testId)
@@ -64,8 +64,6 @@ init maybeToken =
         cmd =
             case maybeToken of
                 Just token ->
-                    -- This page only needs the shelves; drop the response's
-                    -- visibility (added for the RSS gate on Page.Bookshelf).
                     Api.getBookshelf "reading_pile" token (BooksLoaded << Result.map .shelves)
 
                 Nothing ->
@@ -157,7 +155,6 @@ update msg model =
                         ( { model | cards = updatedCards }, Cmd.none, NoOut )
 
             else if List.member Card.EditClosed outMsgs then
-                -- Form closed by Cancel: return focus to the card's status badge.
                 ( { model | cards = updatedCards }, focusBadge placementId, NoOut )
 
             else
@@ -185,7 +182,6 @@ update msg model =
                             else
                                 model.finishedPrompt
                     in
-                    -- Success closes the form (card re-init); return focus to the badge.
                     ( { model | cards = newCards, saveState = Success (), finishedPrompt = prompt }
                     , focusBadge placementId
                     , NoOut
@@ -199,7 +195,6 @@ update msg model =
                         ( { model | cards = clearSaving placementId model.cards, saveState = Failure (Api.ProgressRequestFailed err) }, Cmd.none, NoOut )
 
                 Err other ->
-                    -- Keep the form open (draft preserved) so the reader can fix it.
                     ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Cmd.none, NoOut )
 
         RecordReadRequested placementId ->
@@ -320,8 +315,12 @@ view model =
                             , div [ class "armchair__leg armchair__leg--br" ] []
                             ]
                         ]
-                    , viewProgressPanel model
                     ]
+            , if model.showAgeGate then
+                text ""
+
+              else
+                viewProgressPanel model
             ]
         ]
 
@@ -390,11 +389,6 @@ viewFinishedPrompt maybeId =
 
 viewBookPile : Maybe String -> List Placement -> Html Msg
 viewBookPile selectedBookId placements =
-    -- #276: no `List.take 50` here — deliberately removed. The 50-book cap is
-    -- enforced at the write path (Stacks.Shelving.reading_pile_limit/0), and
-    -- piles that already exceeded it are grandfathered: every book they hold
-    -- must render. A view-layer truncation would silently hide those books,
-    -- which was the original defect.
     div [ class "book-pile", attribute "role" "list" ]
         (List.indexedMap (viewPiledBook selectedBookId) placements)
 
@@ -462,7 +456,7 @@ viewPiledBook selectedBookId index placement =
                 , title = bookData.title
                 , author = Types.Book.authorName bookData
                 , coverImageUrl = bookCoverImageUrl bookData
-                , hidden = placement.visibility == Just "owner"
+                , hidden = Placement.isHidden placement
                 , hasWriting = placement.hasUserWriting
                 }
             ]

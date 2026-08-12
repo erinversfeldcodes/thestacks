@@ -35,7 +35,6 @@ defmodule Stacks.Workers.FetchAuthorRSSJobTest do
 
       assert :ok = perform_job(FetchAuthorRSSJob, %{})
 
-      # Verify the event was emitted
       assert Core.Repo.aggregate(
                from(e in "event_log",
                  prefix: "op",
@@ -66,7 +65,6 @@ defmodule Stacks.Workers.FetchAuthorRSSJobTest do
 
       assert :ok = perform_job(FetchAuthorRSSJob, %{})
 
-      # No event should be emitted since all entries are older than 24h
       assert Core.Repo.aggregate(
                from(e in "event_log",
                  prefix: "op",
@@ -103,7 +101,6 @@ defmodule Stacks.Workers.FetchAuthorRSSJobTest do
     test "parses RFC 2822 date with timezone offset" do
       result = FetchAuthorRSSJob.try_rfc2822("Thu, 20 Mar 2026 10:00:00 -0500")
       assert %DateTime{} = result
-      # Converted to UTC: 10:00 -0500 = 15:00 UTC
       assert result.hour == 15
       assert result.time_zone == "Etc/UTC"
     end

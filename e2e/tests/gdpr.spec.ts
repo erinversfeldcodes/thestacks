@@ -10,8 +10,8 @@ import {
 
 /**
  * Browser E2E for the GDPR self-service journeys on Settings → Privacy:
- *   - Export My Data  (US-8.1, issue #187)
- *   - Delete My Data  (US-8.2, issue #188)
+ *   - Export My Data
+ *   - Delete My Data
  *
  * Previously only covered by elm-program-test, which stubs the HTTP boundary —
  * the real UI → deployed backend → session-teardown path was never observed
@@ -26,7 +26,7 @@ import {
  * clicks everywhere, incl. settings); placing a book satisfies the onboarding
  * check before we drive the UI.
  *
- * Users are minted via POST /api/test/session (Issue #192) — one call that
+ * Users are minted via POST /api/test/session — one call that
  * creates a confirmed user AND returns its session token, outside the `:auth`
  * rate bucket. This replaces the register→confirmation-token→confirm→login
  * dance (and its 429-backoff retry): the whole parallel suite shares the
@@ -58,9 +58,7 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
 
     await exportBtn.click();
 
-    // POST /api/gdpr/export returns 202; Privacy.elm swaps to the queued state.
     await expect(page.getByText("Export queued")).toBeVisible({ timeout: 10000 });
-    // The error paragraph must not appear on success.
     await expect(page.locator(".error")).toHaveCount(0);
   });
 
@@ -79,26 +77,18 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
 
     await landAuthenticated(page, session);
 
-    // Capture the live session token BEFORE deletion so we can prove the session
-    // is actually invalidated afterwards (localStorage is cleared on logout).
-    // Read it back from localStorage (rather than trusting session.token) to
-    // prove the page really carries the injected session.
     const authToken = await page.evaluate(
       () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
     );
     expect(authToken).toBeTruthy();
 
     await page.goto("/settings/privacy");
-    // Guard: the onboarding overlay must be gone, or it will silently eat clicks.
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
-    // Reveal the type-to-confirm dialog.
     await page.getByRole("button", { name: "Delete My Data" }).click();
     const confirmInput = page.locator("#delete-confirmation");
     await expect(confirmInput).toBeVisible();
 
-    // The destructive submit lives inside the confirm block; scope to it so the
-    // reveal button (same label) can't be matched.
     const submit = page
       .locator(".privacy__delete-confirm")
       .getByRole("button", { name: "Delete My Data" });
@@ -112,12 +102,10 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
 
     await submit.click();
 
-    // DELETE /api/gdpr/account returns 202 and enqueues the erasure job.
     await expect(
       page.getByText("Account deletion has been queued")
     ).toBeVisible({ timeout: 10000 });
 
-    // On success the client logs the user out and redirects to /login.
     await page.waitForURL("**/login", { timeout: 15000 });
 
     // End-to-end erasure proof: the deletion job runs async, so the session

@@ -4,7 +4,6 @@
 
 select
     id,
-    storage_path,
     status,
     rejection_reason,
     uploaded_at,

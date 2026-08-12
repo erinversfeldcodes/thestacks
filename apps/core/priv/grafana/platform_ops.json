@@ -51,7 +51,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Rate limiting & client-IP trust (Issue #240)",
+      "title": "Rate limiting & client-IP trust",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "panels": []
@@ -60,7 +60,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Rate-limit rejections by bucket",
-      "description": "WHAT: rate of requests refused with HTTP 429 by the RateLimiter plug, split by bucket (auth / upload / social / password_change / public / admin / e2e_helper / global). HOW: rate() over stacks_rate_limit_rejected_count_total, emitted at the plug call site with a bounded bucket atom (never request input). MEANS: near-zero in normal operation — most traffic sits well under its per-bucket window. WATCH: a spike on the auth bucket is a credential-stuffing / brute-force signal (cross-check login-failure panels); a spike on public/global is scraping or DoS; a bucket that is throttling legitimate users points to a too-tight limit or a shared-NAT hotspot worth re-sizing.",
+      "description": "WHAT: rate of requests refused with HTTP 429 by the RateLimiter plug, split by bucket (auth / upload / social / password_change / public / admin / e2e_helper / global). HOW: rate over stacks_rate_limit_rejected_count_total, emitted at the plug call site with a bounded bucket atom (never request input). MEANS: near-zero in normal operation — most traffic sits well under its per-bucket window. WATCH: a spike on the auth bucket is a credential-stuffing / brute-force signal (cross-check login-failure panels); a spike on public/global is scraping or DoS; a bucket that is throttling legitimate users points to a too-tight limit or a shared-NAT hotspot worth re-sizing.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "fieldConfig": {
@@ -84,7 +84,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Client-IP resolution by source",
-      "description": "WHAT: rate at which the rate-limiter resolved the per-IP key from each source (trusted_proxy = Fly edge `fly-client-ip` header / remote_ip = socket peer). HOW: rate() over stacks_rate_limit_client_ip_count_total, emitted by RateLimiter.get_ip/1 with a bounded source atom — the IP value is NEVER tagged (GDPR + cardinality). MEANS: on a Fly deploy this should be dominated by trusted_proxy; remote_ip is expected only for local/dev/ExUnit traffic. WATCH: unexpected remote_ip on a Fly deploy means the fly-client-ip edge header isn't arriving and requests are bypassing the trusted-proxy keying — a rate-limit bypass / mis-attribution risk (Issue #176).",
+      "description": "WHAT: rate at which the rate-limiter resolved the per-IP key from each source (trusted_proxy = Fly edge `fly-client-ip` header / remote_ip = socket peer). HOW: rate over stacks_rate_limit_client_ip_count_total, emitted by RateLimiter.get_ip/1 with a bounded source atom — the IP value is NEVER tagged (GDPR + cardinality). MEANS: on a Fly deploy this should be dominated by trusted_proxy; remote_ip is expected only for local/dev/ExUnit traffic. WATCH: unexpected remote_ip on a Fly deploy means the fly-client-ip edge header isn't arriving and requests are bypassing the trusted-proxy keying — a rate-limit bypass / mis-attribution risk.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
       "fieldConfig": {
@@ -116,7 +116,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Event pipeline throughput (emitted · invoked · errors)",
-      "description": "WHAT: the three flow rates of the Oban-backed event bus — events appended to op.event_log (emitted), handler invocations (invoked), and handler errors (errors). HOW: rate() over stacks_events_emitted_count_total, stacks_events_handler_invoked_count_total and stacks_events_handler_error_count_total (the last fires on a returned {:error, _} OR a raise). MEANS: emitted and invoked track together (fan-out to subscribers); errors should sit at or near ZERO. WATCH: handler_error climbing is the failure signal — a subscriber is failing (enrichment / cache / dbt-refresh not running); invoked collapsing to zero while emitted continues means dispatch is stalled (SubscriberWorker backed up or the :events queue paused).",
+      "description": "WHAT: the three flow rates of the Oban-backed event bus — events appended to op.event_log (emitted), handler invocations (invoked), and handler errors (errors). HOW: rate over stacks_events_emitted_count_total, stacks_events_handler_invoked_count_total and stacks_events_handler_error_count_total (the last fires on a returned {:error, _} OR a raise). MEANS: emitted and invoked track together (fan-out to subscribers); errors should sit at or near ZERO. WATCH: handler_error climbing is the failure signal — a subscriber is failing (enrichment / cache / dbt-refresh not running); invoked collapsing to zero while emitted continues means dispatch is stalled (SubscriberWorker backed up or the:events queue paused).",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
       "fieldConfig": {
@@ -157,7 +157,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Handler dispatch duration p95",
-      "description": "WHAT: 95th-percentile wall-clock time for one SubscriberWorker handle_event/1 call. HOW: histogram_quantile(0.95) over the rate of stacks_events_dispatch_duration_milliseconds_bucket (the _bucket series of the dispatch distribution). MEANS: most handlers are DB-only and finish in tens of ms, so a healthy p95 sits low; the value is in milliseconds. WATCH: a rising p95 flags a slow handler (typically one making an external HTTP call — enrichment/scraper/vision) that is holding the :events queue; correlate with the handler-error panel and the repo-query p95 to tell a slow subscriber apart from slow DB.",
+      "description": "WHAT: 95th-percentile wall-clock time for one SubscriberWorker handle_event/1 call. HOW: histogram_quantile(0.95) over the rate of stacks_events_dispatch_duration_milliseconds_bucket (the _bucket series of the dispatch distribution). MEANS: most handlers are DB-only and finish in tens of ms, so a healthy p95 sits low; the value is in milliseconds. WATCH: a rising p95 flags a slow handler (typically one making an external HTTP call — enrichment/scraper/vision) that is holding the:events queue; correlate with the handler-error panel and the repo-query p95 to tell a slow subscriber apart from slow DB.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
       "fieldConfig": {
@@ -189,7 +189,7 @@
       "id": 8,
       "type": "state-timeline",
       "title": "Circuit-breaker state by fuse",
-      "description": "WHAT: the current up/down state of each Fuse circuit breaker (vision / scraper / Brave etc.), one lane per fuse_name. HOW: the last_value gauge stacks_fuse_state_state, where 1 = healthy (closed, calls flowing) and 0 = blown (open, calls short-circuited). This is a GAUGE — read the raw value, do NOT rate() it. MEANS: all lanes should read 1 in steady state; a lane dropping to 0 shows exactly which external dependency is currently tripped and being bypassed. WATCH: a fuse stuck at 0 means that dependency is failing enough to keep the breaker open (investigate that upstream); flapping 0/1 means it is recovering intermittently and the melt threshold or timeout may need tuning.",
+      "description": "WHAT: the current up/down state of each Fuse circuit breaker (vision / scraper / Brave etc.), one lane per fuse_name. HOW: the last_value gauge stacks_fuse_state_state, where 1 = healthy (closed, calls flowing) and 0 = blown (open, calls short-circuited). This is a GAUGE — read the raw value, do NOT rate it. MEANS: all lanes should read 1 in steady state; a lane dropping to 0 shows exactly which external dependency is currently tripped and being bypassed. WATCH: a fuse stuck at 0 means that dependency is failing enough to keep the breaker open (investigate that upstream); flapping 0/1 means it is recovering intermittently and the melt threshold or timeout may need tuning.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
       "fieldConfig": {
@@ -273,7 +273,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Upload terminal outcomes",
-      "description": "WHAT: rate of upload-pipeline jobs reaching a terminal state, split by outcome (resolved / rejected / timeout). HOW: rate() over stacks_upload_terminal_count_total, emitted once per job when the vision→ISBN pipeline finishes. MEANS: a healthy pipeline is dominated by resolved with a modest rejected background (not-a-book / no-ISBN uploads); the value is jobs-per-second by outcome. WATCH: a rejected surge means users are uploading non-book / unresolvable images (or the vision/ISBN resolver regressed); a timeout surge means the Modal vision calls or the resolver are stalling — cross-check the fuse-state panel for a tripped vision/scraper breaker.",
+      "description": "WHAT: rate of upload-pipeline jobs reaching a terminal state, split by outcome (resolved / rejected / timeout). HOW: rate over stacks_upload_terminal_count_total, emitted once per job when the vision→ISBN pipeline finishes. MEANS: a healthy pipeline is dominated by resolved with a modest rejected background (not-a-book / no-ISBN uploads); the value is jobs-per-second by outcome. WATCH: a rejected surge means users are uploading non-book / unresolvable images (or the vision/ISBN resolver regressed); a timeout surge means the Modal vision calls or the resolver are stalling — cross-check the fuse-state panel for a tripped vision/scraper breaker.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
       "fieldConfig": {
@@ -290,6 +290,66 @@
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum by (outcome) (rate(stacks_upload_terminal_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Vision call latency p50 / p95 / p99",
+      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call (classify / extract / analyze / associate), at the 50th, 95th and 99th percentile. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response — success or not. MEANS: the value is milliseconds per call, and an upload makes up to two of these back to back, so the upload's own latency floor is roughly twice p50; the long-standing '~3–8s per upload' figure was an estimate in a comment, and the first real measurement put p50 at 8.4s with warm calls under 30s and cold starts under 60s. READ IT WITH THE PANEL BESIDE IT: these quantiles only count calls that got a response, so a call that hits the client's 330s deadline is absent from this panel entirely and appears only as a vision give-up. WATCH: p99 climbing past the 60s (cold-start) edge means something other than a cold start is slow — most likely uploads queuing on a single A10G, the term Modal's own 300s timeout was sized for; a p50 that jumps while p99 is flat is a container-warmth shift, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0 },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "vision p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "vision p95"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "vision p99"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Vision give-ups by failure class",
+      "description": "WHAT: rate of Modal vision calls that produced no HTTP response at all, split by the bounded reason the socket layer gave. HOW: rate over stacks_vision_request_exception_count_total, emitted by Stacks.AI.Client whenever Finch returns an error instead of a response. MEANS: these calls are INVISIBLE on the latency panel beside this one — a call that never answers emits no duration — so this is the only place the client's own deadline shows up, and the GPU work behind a give-up keeps running and keeps billing while nobody reads the result. WATCH: reason_class=timeout going non-zero is the important one: the client waits 330s and Modal's own function timeout is 300s, so a timeout here means Modal exceeded its own deadline and the derived Stacks.AI.Client.receive_timeout_ms/0 needs revisiting — note these are classified transient and therefore RETRIED, so each one costs three cold starts on a contended GPU. reason_class=pool_timeout is the opposite problem and is local: Finch ran out of connections and never reached Modal. unreachable/closed point at the sidecar being down or redeploying — cross-check the fuse-state panel for a blown vision breaker.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (reason_class) (rate(stacks_vision_request_exception_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{reason_class}}"
         }
       ]
     }

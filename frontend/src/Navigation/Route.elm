@@ -25,17 +25,17 @@ type Route
     | LookingForHome
     | BookDetail String
     | Upload
+    | Import
     | Search
-    | Settings
     | SettingsProfile
     | SettingsPassword
     | SettingsNotifications
-    | SettingsConsent
     | SettingsAuditLog
     | Insights
     | CostTransparency
     | Metrics
     | About
+    | ListingRemoval
     | Catalogue
     | MarketplaceBrowse
     | MarketplaceCreate
@@ -47,14 +47,17 @@ type Route
     | BlogEdit String
     | BlogPost String
     | AdminSourceApproval
+    | AdminInvites
     | AdminScraperConfig
     | AdminBookModeration
+    | AdminRemovalRequests
     | Groups
     | GroupDetail String
     | Profile String
     | ProfileShelf String String
     | ConfirmEmail ConfirmStatus
     | ForgotPassword
+    | ResendConfirmation
     | ResetPassword String
     | NotFound
 
@@ -71,17 +74,20 @@ parser =
         , Parser.map LookingForHome (s "looking-for-home")
         , Parser.map BookDetail (s "books" </> string)
         , Parser.map Upload (s "upload")
+        , Parser.map Import (s "import")
         , Parser.map Search (s "search")
         , Parser.map SettingsProfile (s "settings" </> s "profile")
         , Parser.map SettingsPassword (s "settings" </> s "password")
         , Parser.map SettingsNotifications (s "settings" </> s "notifications")
-        , Parser.map SettingsConsent (s "settings" </> s "consent")
+        , -- Consent folded into Privacy (#318 TR-4): the legacy path resolves
+          Parser.map SettingsPrivacy (s "settings" </> s "consent")
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Insights (s "me" </> s "insights")
-        , Parser.map Settings (s "settings")
+        , Parser.map SettingsProfile (s "settings")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Metrics (s "metrics")
         , Parser.map About (s "about")
+        , Parser.map ListingRemoval (s "listing-removal")
         , Parser.map Catalogue (s "catalogue")
         , Parser.map MarketplaceCreate (s "marketplace" </> s "create")
         , Parser.map MarketplaceMyListings (s "marketplace" </> s "mine")
@@ -93,8 +99,10 @@ parser =
         , Parser.map BlogPost (s "blog" </> string)
         , Parser.map BlogArchive (s "blog")
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
+        , Parser.map AdminInvites (s "admin" </> s "invites")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
+        , Parser.map AdminRemovalRequests (s "admin" </> s "removal-requests")
         , Parser.map GroupDetail (s "groups" </> string)
         , Parser.map Groups (s "groups")
         , Parser.map ProfileShelf (s "u" </> string </> string)
@@ -102,6 +110,7 @@ parser =
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
         , Parser.map ForgotPassword (s "forgot-password")
+        , Parser.map ResendConfirmation (s "resend-confirmation")
         , Parser.map ResetPassword (s "reset-password" </> string)
         ]
 
@@ -142,11 +151,11 @@ toPath route =
         Upload ->
             "/upload"
 
+        Import ->
+            "/import"
+
         Search ->
             "/search"
-
-        Settings ->
-            "/settings/profile"
 
         SettingsProfile ->
             "/settings/profile"
@@ -156,9 +165,6 @@ toPath route =
 
         SettingsNotifications ->
             "/settings/notifications"
-
-        SettingsConsent ->
-            "/settings/consent"
 
         SettingsAuditLog ->
             "/settings/audit-log"
@@ -174,6 +180,9 @@ toPath route =
 
         About ->
             "/about"
+
+        ListingRemoval ->
+            "/listing-removal"
 
         Catalogue ->
             "/catalogue"
@@ -208,11 +217,17 @@ toPath route =
         AdminSourceApproval ->
             "/admin/sources"
 
+        AdminInvites ->
+            "/admin/invites"
+
         AdminScraperConfig ->
             "/admin/scrapers"
 
         AdminBookModeration ->
             "/admin/book-moderation"
+
+        AdminRemovalRequests ->
+            "/admin/removal-requests"
 
         Groups ->
             "/groups"
@@ -235,6 +250,9 @@ toPath route =
         ForgotPassword ->
             "/forgot-password"
 
+        ResendConfirmation ->
+            "/resend-confirmation"
+
         ResetPassword token ->
             "/reset-password/" ++ token
 
@@ -245,9 +263,6 @@ toPath route =
 isSettingsRoute : Route -> Bool
 isSettingsRoute route =
     case route of
-        Settings ->
-            True
-
         SettingsProfile ->
             True
 
@@ -255,9 +270,6 @@ isSettingsRoute route =
             True
 
         SettingsNotifications ->
-            True
-
-        SettingsConsent ->
             True
 
         SettingsAuditLog ->

@@ -32,21 +32,18 @@ defmodule Core.Repo.Migrations.CreateShelves do
       """
     )
 
-    # Back-fill: create one shelf (position 0) per existing bookshelf
     execute("""
     INSERT INTO op.shelves (id, bookshelf_id, position, created_at)
     SELECT gen_random_uuid(), id, 0, now()
     FROM op.bookshelves
     """)
 
-    # Add shelf_id to placements (nullable first for back-fill)
     alter table(:bookshelf_placements, prefix: "op") do
       add :shelf_id,
           references(:shelves, type: :binary_id, on_delete: :nilify_all, prefix: "op"),
           null: true
     end
 
-    # Back-fill: assign all placements to the shelf for their bookshelf
     execute("""
     UPDATE op.bookshelf_placements p
     SET shelf_id = s.id
@@ -54,7 +51,6 @@ defmodule Core.Repo.Migrations.CreateShelves do
     WHERE s.bookshelf_id = p.bookshelf_id
     """)
 
-    # Now enforce NOT NULL
     execute("ALTER TABLE op.bookshelf_placements ALTER COLUMN shelf_id SET NOT NULL")
   end
 

@@ -1,4 +1,4 @@
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS runtime
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS runtime
 
 # pyzbar requires libzbar at runtime for barcode decoding.
 # hadolint ignore=DL3008,DL3009
@@ -14,12 +14,12 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY apps/vision/app app/
 
-RUN useradd --create-home --shell /bin/bash appuser
-USER appuser
+RUN useradd --uid 10001 --create-home --shell /bin/bash appuser
+USER 10001:10001
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

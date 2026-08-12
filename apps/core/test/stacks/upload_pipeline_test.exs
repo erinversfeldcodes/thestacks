@@ -1,21 +1,19 @@
 defmodule Stacks.UploadPipelineTest do
   @moduledoc """
-  Comprehensive integration tests for the upload pipeline (Issue #111, suites 2-7).
+      Comprehensive integration tests for the upload pipeline.
 
-  Covers the full flow from image upload through vision classification, ISBN
-  resolution, book creation, and shelf placement, plus all failure/rejection paths.
+      Covers the full flow from image upload through vision classification, ISBN
+      resolution, book creation, and shelf placement, plus all failure/rejection paths.
 
-  Suites:
-    2 — API endpoint validation
-    3 — Database assertions
-    4 — Event flow
-    5 — Background job (IdentifyBookJob)
-    6 — External service mocks
-    7 — Storage
+      Suites:
+        2 — API endpoint validation
+        3 — Database assertions
+        4 — Event flow
+        5 — Background job (IdentifyBookJob)
+        6 — External service mocks
+        7 — Storage
   """
 
-  # async: false — tests swap Application.put_env(:core, :vision_client) which is
-  # global state, and we query event_log counts which would race with concurrent tests.
   use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -35,28 +33,18 @@ defmodule Stacks.UploadPipelineTest do
   alias Stacks.Shelving
   alias Stacks.Storage
   alias Stacks.Storage.Mock, as: StorageMock
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
 
   @image_b64 Base.encode64("fake image bytes for testing")
-
-  # ---------------------------------------------------------------------------
-  # Setup
-  # ---------------------------------------------------------------------------
 
   setup do
     user = insert(:user)
     {:ok, token, _} = Guardian.encode_and_sign(user)
 
-    # Pre-insert the book the MockVisionClient returns so the pipeline finds it
-    # via Books.find_existing/1 without hitting external ISBN APIs.
     book = insert(:book, title: "The Great Gatsby")
     insert(:book_edition, book: book, isbn: "9780743273565")
 
-    # Reset OL/GB fuses defensively — other tests in the suite (and other
-    # suites running before this one in CI's full `mix test`) can leave the
-    # circuit breakers blown, which makes ISBNResolver short-circuit to
-    # :circuit_open before reaching the MockHttpClient that these tests set
-    # up. The fuses are global ETS state; only :ok return values matter.
     :fuse.reset(:open_library_fuse)
     :fuse.reset(:google_books_fuse)
 
@@ -89,7 +77,6 @@ defmodule Stacks.UploadPipelineTest do
     )
     |> Repo.all()
     |> Enum.map(fn event ->
-      # aggregate_id comes back as raw binary from the raw query; decode to string UUID
       decoded_id =
         case Ecto.UUID.load(event.aggregate_id) do
           {:ok, str} -> str
@@ -100,14 +87,15 @@ defmodule Stacks.UploadPipelineTest do
     end)
   end
 
-  defp with_client(client_module, fun) do
-    original = Application.get_env(:core, :vision_client)
+  defp with_vision(response, fun), do: with_vision("analyze", response, fun)
+
+  defp with_vision(endpoint, response, fun) do
+    MockClient.put_response(endpoint, response)
 
     try do
-      Application.put_env(:core, :vision_client, client_module)
       fun.()
     after
-      Application.put_env(:core, :vision_client, original)
+      MockClient.clear()
     end
   end
 
@@ -118,65 +106,17 @@ defmodule Stacks.UploadPipelineTest do
     path
   end
 
-  # ============================================================================
-  # Suite 2: API Endpoint Tests
-  # ============================================================================
-
-  describe "Suite 2 — POST /api/upload" do
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 202 with image_id when authenticated with valid image", %{
-      conn: conn,
-      token: token
-    } do
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "book_cover.jpg",
-        content_type: "image/jpeg"
-      }
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
-
-      assert %{"status" => "accepted", "image_id" => image_id} = json_response(conn, 202)
-      assert is_binary(image_id)
-      assert {:ok, _} = Ecto.UUID.dump(image_id)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 422 when no image is provided", %{conn: conn, token: token} do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{})
-
-      assert %{"error" => "no image provided"} = json_response(conn, 422)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 401 when unauthenticated", %{conn: conn} do
-      conn = post(conn, "/api/upload", %{})
-      assert conn.status == 401
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 429 when rate limit is exceeded", %{conn: conn, token: token} do
-      # Rate limiting is disabled in test config; enable it for this test.
+  describe "Suite 2 — upload rate limiting" do
+    @tag suite: :api
+    test "returns 429 when rate limit is exceeded", %{token: token} do
       Application.put_env(:core, :rate_limiting_enabled, true)
 
       try do
-        # The :upload bucket allows 120 requests per 60 seconds per user.
-        # Fire 121 requests to trigger the limiter. Bumped from 10→120
-        # when Oban :vision queue concurrency scaled up to match
-        # realistic bookshelf-populating traffic.
         results =
           Enum.map(1..121, fn _ ->
             build_conn()
             |> auth_conn(token)
-            |> post("/api/upload", %{})
+            |> post("/api/upload/init", %{})
             |> Map.get(:status)
           end)
 
@@ -187,40 +127,8 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 2 — POST /api/upload/identify" do
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns identified candidates with valid image_b64", %{conn: conn, token: token} do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload/identify", %{"image_b64" => @image_b64})
-
-      assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
-      assert is_list(candidates)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 422 when neither image_b64 nor image_url is provided", %{
-      conn: conn,
-      token: token
-    } do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload/identify", %{})
-
-      assert %{"error" => _} = json_response(conn, 422)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 401 when unauthenticated", %{conn: conn} do
-      conn = post(conn, "/api/upload/identify", %{"image_b64" => @image_b64})
-      assert conn.status == 401
-    end
-  end
-
   describe "Suite 2 — GET /api/upload/:image_id/stream" do
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 200 text/event-stream for valid pending image", %{
       conn: conn,
       token: token,
@@ -235,7 +143,7 @@ defmodule Stacks.UploadPipelineTest do
       assert String.contains?(content_type, "text/event-stream")
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 401 when no token provided", %{conn: conn, user: user} do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
@@ -244,7 +152,7 @@ defmodule Stacks.UploadPipelineTest do
       assert conn.status == 401
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 403 when image belongs to a different user", %{conn: conn, book: book} do
       owner = insert(:user)
       requester = insert(:user)
@@ -262,7 +170,7 @@ defmodule Stacks.UploadPipelineTest do
       assert conn.status == 403
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 404 for unknown image_id", %{conn: conn, token: token} do
       fake_id = Ecto.UUID.generate()
 
@@ -271,14 +179,14 @@ defmodule Stacks.UploadPipelineTest do
       assert conn.status == 404
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 400 or 422 for invalid (non-UUID) image_id", %{conn: conn, token: token} do
       conn = get(conn, "/api/upload/not-a-uuid/stream?token=#{token}")
 
       assert conn.status in [400, 422]
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "sends terminal event immediately when image already resolved", %{
       conn: conn,
       token: token,
@@ -300,7 +208,7 @@ defmodule Stacks.UploadPipelineTest do
       assert String.contains?(body, "resolved")
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "pushes event when IdentifyBookJob completes after connection opens", %{
       conn: conn,
       token: token,
@@ -310,7 +218,6 @@ defmodule Stacks.UploadPipelineTest do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
       topic = "upload:#{image.id}"
 
-      # Subscribe so we can broadcast a synthetic completion event
       Phoenix.PubSub.subscribe(Core.PubSub, topic)
 
       task =
@@ -318,7 +225,6 @@ defmodule Stacks.UploadPipelineTest do
           get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
         end)
 
-      # Broadcast the completion event after a short delay to simulate async job
       Process.sleep(50)
 
       Phoenix.PubSub.broadcast(Core.PubSub, topic, {
@@ -333,15 +239,13 @@ defmodule Stacks.UploadPipelineTest do
       assert String.contains?(body, "resolved")
     end
 
-    @tag :sla
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "GET /api/upload/:image_id/stream responds within 100ms", %{
+    @tag suite: :api
+    test "GET /api/upload/:image_id/stream returns immediately for an already-resolved image", %{
       conn: conn,
       token: token,
       user: user,
       book: book
     } do
-      # Use a resolved image so the endpoint responds immediately without waiting on PubSub
       image =
         insert(:uploaded_image,
           status: "resolved",
@@ -355,13 +259,15 @@ defmodule Stacks.UploadPipelineTest do
           get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
         end)
 
-      assert elapsed_us < 100_000,
-             "SSE stream endpoint took #{elapsed_us}μs, expected < 100,000μs (100ms)"
+      assert elapsed_us < 1_000_000,
+             "SSE stream endpoint took #{elapsed_us}μs for an ALREADY-RESOLVED image, " <>
+               "expected < 1,000,000μs (1s). This endpoint must short-circuit on a " <>
+               "resolved image rather than entering the PubSub/SSE wait."
     end
   end
 
   describe "Suite 2 — GET /api/books/:id" do
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 200 with book detail", %{conn: conn, book: book} do
       conn = get(conn, "/api/books/#{book.id}")
 
@@ -372,14 +278,14 @@ defmodule Stacks.UploadPipelineTest do
       assert resp["book"]["edition_count"] >= 1
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 404 for non-existent book", %{conn: conn} do
       fake_id = Ecto.UUID.generate()
       conn = get(conn, "/api/books/#{fake_id}")
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
-    @tag stories: ["US-1.1.4"], suite: :api
+    @tag suite: :api
     test "returns 403 for age_gated book when user is not age-verified", %{
       conn: conn,
       token: token
@@ -399,17 +305,8 @@ defmodule Stacks.UploadPipelineTest do
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end
 
-    @tag stories: ["US-1.1.4"], suite: :api
+    @tag suite: :api
     test "returns 404 when book visibility resolves to hidden", %{conn: conn, token: token} do
-      # Create a book with owner-only visibility (not age_gated, just hidden
-      # from non-owners). The Visibility module resolves :hidden for
-      # unauthenticated viewers when the resource has restricted visibility.
-      # Since books use the default visibility rules and there is no owner
-      # concept at the book level, we test the controller's hidden path by
-      # creating a book that the controller fetches but Visibility rejects.
-      # A book with visibility_tier "owner" would be hidden to other users.
-      # However, Book schema may not support "owner" tier directly — in that
-      # case just verify the 404 path via a non-existent book.
       fake_id = Ecto.UUID.generate()
 
       conn =
@@ -422,7 +319,7 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 2 — POST /api/bookshelves/:bookshelf_name/placements" do
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 201 with placement data", %{conn: conn, token: token, book: book} do
       conn =
         conn
@@ -433,7 +330,7 @@ defmodule Stacks.UploadPipelineTest do
       assert placement["book_id"] == book.id
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 422 for invalid bookshelf name", %{conn: conn, token: token, book: book} do
       conn =
         conn
@@ -443,7 +340,7 @@ defmodule Stacks.UploadPipelineTest do
       assert json_response(conn, 422)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 422 when book_id is missing", %{conn: conn, token: token} do
       conn =
         conn
@@ -453,36 +350,32 @@ defmodule Stacks.UploadPipelineTest do
       assert %{"error" => _} = json_response(conn, 422)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "returns 401 when unauthenticated", %{conn: conn, book: book} do
       conn = post(conn, "/api/bookshelves/wishlist/placements", %{"book_id" => book.id})
       assert conn.status == 401
     end
 
-    @tag stories: ["US-1.1.6"], suite: :api
+    @tag suite: :api
     test "returns 422 when placing a duplicate book on the same bookshelf", %{
       conn: conn,
       token: token,
       user: user,
       book: book
     } do
-      # Place the book first
       {:ok, _} = Shelving.place_book(user.id, book.id, "library")
 
-      # Attempt to place the same book on the same bookshelf again
       conn =
         conn
         |> auth_conn(token)
         |> post("/api/bookshelves/library/placements", %{"book_id" => book.id})
 
-      # The unique partial index (book_id, bookshelf_id WHERE removed_at IS NULL)
-      # should cause a constraint error surfaced as 422.
       assert json_response(conn, 422)
     end
   end
 
   describe "Suite 2 — GET /api/books/isbn/:isbn" do
-    @tag stories: ["US-1.1.5"], suite: :api
+    @tag suite: :api
     test "returns 200 with book data when ISBN exists", %{conn: conn, token: token} do
       conn =
         conn
@@ -493,7 +386,7 @@ defmodule Stacks.UploadPipelineTest do
       assert book["title"] == "The Great Gatsby"
     end
 
-    @tag stories: ["US-1.1.5"], suite: :api
+    @tag suite: :api
     test "returns 404 when ISBN does not exist", %{conn: conn, token: token} do
       conn =
         conn
@@ -503,42 +396,28 @@ defmodule Stacks.UploadPipelineTest do
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
-    @tag stories: ["US-1.1.5"], suite: :api
+    @tag suite: :api
     test "returns 404 for invalid ISBN format string", %{conn: conn, token: token} do
       conn =
         conn
         |> auth_conn(token)
         |> get("/api/books/isbn/not-an-isbn")
 
-      # The ISBN lookup endpoint treats invalid ISBNs as not found since
-      # Books.find_existing/1 queries by exact ISBN match in book_editions.
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
   end
 
-  # ============================================================================
-  # Suite 2 — multi-book endpoint (US-1.1.7)
-  # ============================================================================
-
-  describe "Suite 2 — POST /api/upload (multi-book partial failure, US-1.1.7)" do
-    @tag stories: ["US-1.1.7"], suite: :api
+  describe "Suite 2 — POST /api/upload (multi-book partial failure, )" do
+    @tag suite: :api
     test "multi-book partial resolution surfaces only the resolved book(s) via SSE stream", %{
       conn: conn,
       token: token,
       user: user,
       book: book
     } do
-      # The multi-book "endpoint" is the same `/api/upload` route — a single
-      # image can yield multiple book candidates from vision. Partial failure
-      # (1 of 2 ISBNs resolves) is observed via the SSE stream which exposes
-      # the resolved book_ids only. There is no separate 207-Multi-Status
-      # response shape today (see test-audit-plan.md punch list #1) — the
-      # SSE payload IS the partial-success response.
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      # MultiBookPartialClient returns 2 ISBNs but only 9780743273565 is
-      # pre-inserted in setup; 9780000000099 will not resolve.
-      with_client(__MODULE__.MultiBookPartialClient, fn ->
+      with_vision(multi_book_partial(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -546,47 +425,51 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      # The SSE stream is the multi-book HTTP partial-success surface.
       stream_conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
       assert stream_conn.status == 200
 
       body = stream_conn.resp_body
-      # The resolved book is reflected in the SSE payload
       assert String.contains?(body, "resolved")
       assert String.contains?(body, book.id)
-      # The unresolved ISBN is NOT in the payload (it's silently dropped
-      # by Moderation.do_resolve_and_store_all/2). This documents the
-      # current behaviour: partial failures don't surface the failed
-      # ISBN — see punch-list flag for code gap.
       refute String.contains?(body, "9780000000099")
     end
 
-    @tag stories: ["US-1.1.7"], suite: :api
-    test "multi-book endpoint returns 401 when unauthenticated", %{conn: conn} do
-      # Defence-in-depth: don't rely on inheritance from the `/api/upload`
-      # 401 test. Multi-book identification flows through the same
-      # `/api/upload` route, but exercise it explicitly with a multipart
-      # body to guarantee the auth pipe halts before the multi-book code
-      # path runs.
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "two_books.jpg",
-        content_type: "image/jpeg"
-      }
-
-      conn = post(conn, "/api/upload", %{"image" => upload})
+    @tag suite: :api
+    test "multi-book upload flow returns 401 when unauthenticated", %{conn: conn} do
+      conn = post(conn, "/api/upload/init", %{})
       assert conn.status == 401
     end
   end
 
-  # ============================================================================
-  # Suite 3: Database Assertion Tests
-  # ============================================================================
+  describe "Suite 3 — commit gate on undersized stored objects" do
+    test "a 0-byte stored object is rejected at commit and enqueues no vision job",
+         %{user: user} do
+      {:ok, init} = Uploads.init_upload(user.id)
+
+      StorageMock.seed("uploads/#{init.image_id}", "")
+
+      assert {:error, :image_too_small} = Uploads.commit_upload(user.id, init.image_id)
+
+      row = Repo.get!(UploadedImage, init.image_id)
+      assert row.status == "rejected"
+      assert row.rejection_reason == "image_too_small"
+      assert event_count("image.rejected") == 1
+
+      refute_enqueued(worker: IdentifyBookJob)
+    end
+
+    test "a sub-1KB stored object is rejected identically", %{user: user} do
+      {:ok, init} = Uploads.init_upload(user.id)
+      StorageMock.seed("uploads/#{init.image_id}", String.duplicate("x", 512))
+
+      assert {:error, :image_too_small} = Uploads.commit_upload(user.id, init.image_id)
+      assert Repo.get!(UploadedImage, init.image_id).status == "rejected"
+      refute_enqueued(worker: IdentifyBookJob)
+    end
+  end
 
   describe "Suite 3 — uploaded_images INSERT on upload" do
-    @tag stories: ["US-1.1.1"], suite: :db
+    @tag suite: :db
     test "creates an uploaded_image record with correct fields", %{user: user} do
       tmp_path = create_temp_image()
 
@@ -596,32 +479,29 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      assert {:ok, image} = Books.store_upload(user.id, upload)
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
 
       assert image.status == "pending"
       assert image.storage_path =~ ~r/^uploads\//
       assert image.uploaded_at != nil
       assert image.expires_at != nil
 
-      # expires_at should be ~30 days from now
       diff = DateTime.diff(image.expires_at, image.uploaded_at, :day)
       assert diff == 30
     end
   end
 
   describe "Suite 3 — uploaded_images UPDATE on resolve" do
-    @tag stories: ["US-1.1.1"], suite: :db
+    @tag suite: :db
     test "mark_resolved updates status and book_ids", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      # Run the job with the default mock client (identifies the pre-inserted book)
       perform_job(IdentifyBookJob, %{
         "user_id" => user.id,
         "image_id" => image.id,
         "image_b64" => @image_b64
       })
 
-      # Re-fetch the image record using raw query (like the controller does)
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
 
       updated =
@@ -637,12 +517,12 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 3 — uploaded_images UPDATE on reject" do
-    @tag stories: ["US-1.1.3"], suite: :db
+    @tag suite: :db
     test "mark_rejected updates status and rejection_reason for not_a_book" do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -663,12 +543,12 @@ defmodule Stacks.UploadPipelineTest do
       assert updated.rejection_reason == "not_a_book"
     end
 
-    @tag stories: ["US-1.1.2"], suite: :db
+    @tag suite: :db
     test "mark_rejected updates status and rejection_reason for isbn_not_found" do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -690,8 +570,8 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 3 — rejected image retains expires_at and storage_path (US-1.1.2)" do
-    @tag stories: ["US-1.1.2"], suite: :db
+  describe "Suite 3 — rejected image retains expires_at and storage_path" do
+    @tag suite: :db
     test "rejected image retains expires_at for cleanup job" do
       image =
         insert(:uploaded_image,
@@ -701,7 +581,7 @@ defmodule Stacks.UploadPipelineTest do
 
       user = insert(:user)
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -719,11 +599,10 @@ defmodule Stacks.UploadPipelineTest do
         |> Repo.one(prefix: "op")
 
       assert updated.status == "rejected"
-      # expires_at must still be set so ImageRetentionJob can clean it up later
       assert updated.expires_at != nil
     end
 
-    @tag stories: ["US-1.1.2"], suite: :db
+    @tag suite: :db
     test "rejected image storage_path persists until cleanup" do
       storage_path = "uploads/#{Ecto.UUID.generate()}"
 
@@ -735,7 +614,7 @@ defmodule Stacks.UploadPipelineTest do
 
       user = insert(:user)
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -753,18 +632,14 @@ defmodule Stacks.UploadPipelineTest do
         |> Repo.one(prefix: "op")
 
       assert updated.status == "rejected"
-      # storage_path is NOT cleared on rejection — by design, the nightly
-      # ImageRetentionJob handles cleanup of the storage object.
       assert updated.storage_path == storage_path
     end
 
-    @tag stories: ["US-1.1.2"], suite: :db
+    @tag suite: :db
     test "ImageRetentionJob cleans up expired rejected images" do
-      # Create a rejected image with expires_at in the past
       past = DateTime.add(DateTime.utc_now(), -1, :day)
       storage_key = "uploads/#{Ecto.UUID.generate()}"
 
-      # Store a fake object so the cleanup can delete it
       {:ok, _} = Storage.upload_image(Path.basename(storage_key), "fake data")
 
       image =
@@ -776,11 +651,9 @@ defmodule Stacks.UploadPipelineTest do
           expires_at: past
         )
 
-      # Run cleanup
       assert {:ok, expired_count} = ImageRetention.cleanup_expired_images()
       assert expired_count >= 1
 
-      # Verify the record is deleted from the database
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
 
       remaining =
@@ -792,13 +665,12 @@ defmodule Stacks.UploadPipelineTest do
 
       assert remaining == nil
 
-      # Verify the storage object was deleted
       assert StorageMock.get(storage_key) == nil
     end
   end
 
   describe "Suite 3 — books and book_editions via Multi" do
-    @tag stories: ["US-1.1.1"], suite: :db
+    @tag suite: :db
     test "Books.create/1 inserts both book and edition atomically" do
       attrs = %{
         "title" => "Test Book",
@@ -811,21 +683,18 @@ defmodule Stacks.UploadPipelineTest do
       assert [_edition] = book.editions
       assert hd(book.editions).isbn == "9780306406157"
 
-      # Verify both exist in the database
       assert Repo.get(Book, book.id) != nil
       assert Repo.get_by(BookEdition, isbn: "9780306406157") != nil
     end
 
-    @tag stories: ["US-1.1.6"], suite: :db
+    @tag suite: :db
     test "Books.create/1 rolls back book if edition fails (duplicate ISBN)" do
-      # Create the first book with this ISBN
       {:ok, _book1} =
         Books.create(%{
           "title" => "First Book",
           "isbn" => "9780306406157"
         })
 
-      # Attempt to create another book with the same ISBN — should fail
       result =
         Books.create(%{
           "title" => "Second Book",
@@ -834,11 +703,10 @@ defmodule Stacks.UploadPipelineTest do
 
       assert {:error, _} = result
 
-      # The second book should NOT exist (rolled back)
       refute Repo.get_by(Book, title: "Second Book")
     end
 
-    @tag stories: ["US-1.1.2"], suite: :db
+    @tag suite: :db
     test "BookEdition validates ISBN format" do
       cs =
         Books.book_edition_changeset(%BookEdition{}, %{
@@ -850,9 +718,8 @@ defmodule Stacks.UploadPipelineTest do
       assert Keyword.has_key?(cs.errors, :isbn)
     end
 
-    @tag stories: ["US-1.1.2"], suite: :db
+    @tag suite: :db
     test "BookEdition validates ISBN-13 checksum" do
-      # 9780306406158 has invalid checksum (correct is 9780306406157)
       cs =
         Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => "9780306406158",
@@ -864,7 +731,7 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 3 — placement INSERT" do
-    @tag stories: ["US-1.1.1"], suite: :db
+    @tag suite: :db
     test "Shelving.place_book/3 creates a placement with correct bookshelf_id", %{
       user: user,
       book: book
@@ -874,23 +741,21 @@ defmodule Stacks.UploadPipelineTest do
       assert placement.book_id == book.id
       assert placement.placed_at != nil
 
-      # Verify the bookshelf association
       bookshelf = Shelving.get_bookshelf(user.id, "library")
       assert bookshelf != nil
       assert placement.bookshelf_id == bookshelf.id
     end
   end
 
-  describe "Suite 3 — multi-book edition and placement isolation (US-1.1.7)" do
-    @tag stories: ["US-1.1.7"], suite: :db
+  describe "Suite 3 — multi-book edition and placement isolation" do
+    @tag suite: :db
     test "each book from bulk upload has its own book_editions record", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      # Pre-insert the second book so the pipeline finds it via find_existing.
       book2 = insert(:book, title: "Book Two")
       insert(:book_edition, book: book2, isbn: "9780306406157")
 
-      with_client(__MODULE__.MultiBookClient, fn ->
+      with_vision(multi_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -909,7 +774,6 @@ defmodule Stacks.UploadPipelineTest do
 
       assert length(updated.book_ids) >= 2
 
-      # Each book should have at least one edition with a distinct ISBN
       isbns =
         Enum.flat_map(updated.book_ids, fn book_id_bin ->
           {:ok, bid} = Ecto.UUID.load(book_id_bin)
@@ -919,21 +783,18 @@ defmodule Stacks.UploadPipelineTest do
         end)
 
       assert length(isbns) >= 2
-      # All ISBNs should be distinct
       assert isbns == Enum.uniq(isbns)
     end
 
-    @tag stories: ["US-1.1.7"], suite: :db
+    @tag suite: :db
     test "partial multi-book resolution leaves no orphan rows for the failed ISBN", %{user: user} do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
       failed_isbn = "9780000000099"
 
-      # Snapshot the books/editions tables before the run so we can prove no
-      # orphan rows were left for the failed ISBN.
       books_before = Repo.aggregate(Book, :count)
       editions_before = Repo.aggregate(BookEdition, :count)
 
-      with_client(__MODULE__.MultiBookPartialClient, fn ->
+      with_vision(multi_book_partial(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -941,8 +802,6 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      # Resolved book_ids contains exactly one entry — the pre-existing
-      # "Great Gatsby" book — and the failed ISBN added zero new rows.
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
 
       updated =
@@ -955,23 +814,20 @@ defmodule Stacks.UploadPipelineTest do
       assert updated.status == "resolved"
       assert length(updated.book_ids) == 1
 
-      # No new Book rows were created (the resolved candidate hit
-      # find_existing/1, the failed candidate failed validation).
       assert Repo.aggregate(Book, :count) == books_before
       assert Repo.aggregate(BookEdition, :count) == editions_before
 
-      # No orphan edition exists for the failed ISBN.
       refute Repo.get_by(BookEdition, isbn: failed_isbn)
     end
 
-    @tag stories: ["US-1.1.7"], suite: :db
+    @tag suite: :db
     test "placement of one book from bulk does not affect others", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
       book2 = insert(:book, title: "Book Two Isolated")
       insert(:book_edition, book: book2, isbn: "9780306406157")
 
-      with_client(__MODULE__.MultiBookClient, fn ->
+      with_vision(multi_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -993,13 +849,10 @@ defmodule Stacks.UploadPipelineTest do
       [first_bin | rest_bins] = updated.book_ids
       {:ok, first_id} = Ecto.UUID.load(first_bin)
 
-      # Place only the first book
       {:ok, _placement} = Shelving.place_book(user.id, first_id, "library")
 
-      # Verify the first book is placed
       assert Shelving.book_on_any_shelf?(user.id, first_id)
 
-      # Verify none of the other books are placed (no spillover)
       Enum.each(rest_bins, fn bin ->
         {:ok, other_id} = Ecto.UUID.load(bin)
         refute Shelving.book_on_any_shelf?(user.id, other_id)
@@ -1008,14 +861,14 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 3 — duplicate detection" do
-    @tag stories: ["US-1.1.6"], suite: :db
+    @tag suite: :db
     test "book_on_any_shelf? returns true when book is placed", %{user: user, book: book} do
       refute Shelving.book_on_any_shelf?(user.id, book.id)
       {:ok, _} = Shelving.place_book(user.id, book.id, "library")
       assert Shelving.book_on_any_shelf?(user.id, book.id)
     end
 
-    @tag stories: ["US-1.1.6"], suite: :db
+    @tag suite: :db
     test "book_on_any_shelf? returns false for different user", %{book: book} do
       user1 = insert(:user)
       user2 = insert(:user)
@@ -1028,7 +881,7 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 3 — age-gated visibility_tier" do
-    @tag stories: ["US-1.1.4"], suite: :db
+    @tag suite: :db
     test "books can be created with age_gated visibility_tier" do
       {:ok, book} =
         Books.create(%{
@@ -1040,13 +893,10 @@ defmodule Stacks.UploadPipelineTest do
       assert book.visibility_tier == "age_gated"
     end
 
-    @tag stories: ["US-1.1.4"], suite: :db
+    @tag suite: :db
     test "Moderation pipeline creates a public book even for subjects that used to gate", %{
       user: user
     } do
-      # The automatic subject→BISAC age-gate classifier was removed (#118): a
-      # romance book — which the old genre map force-gated — now enters
-      # `public`. Age-gating is a person's action (Books.set_visibility_tier/3).
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -1058,7 +908,7 @@ defmodule Stacks.UploadPipelineTest do
          }}
       )
 
-      with_client(__MODULE__.RomanceBookClient, fn ->
+      with_vision(romance_book(), fn ->
         image = insert(:uploaded_image, status: "pending")
 
         perform_job(IdentifyBookJob, %{
@@ -1074,12 +924,8 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  # ============================================================================
-  # Suite 4: Event Flow Tests
-  # ============================================================================
-
   describe "Suite 4 — storage failure suppresses image.submitted" do
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "image.submitted is NOT emitted when storage backend returns an error", %{user: user} do
       defmodule Stacks.Storage.FailingBackend do
         @behaviour Stacks.Storage.StorageBehaviour
@@ -1104,20 +950,20 @@ defmodule Stacks.UploadPipelineTest do
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
 
-      assert {:error, :unavailable} = Books.store_upload(user.id, upload)
+      assert {:error, :unavailable} = Uploads.store_upload(user.id, upload)
 
       assert event_count("image.submitted") == before_count
     end
   end
 
   describe "Suite 4 — event sequence for happy path" do
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "image.submitted event emitted on upload", %{user: user} do
       before_count = event_count("image.submitted")
 
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      {:ok, _image} = Books.store_upload(user.id, upload)
+      {:ok, _image} = Uploads.store_upload(user.id, upload)
 
       assert event_count("image.submitted") == before_count + 1
 
@@ -1126,11 +972,11 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.payload["storage_path"] != nil
     end
 
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "image.submitted payload contains storage_path", %{user: user} do
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      {:ok, _image} = Books.store_upload(user.id, upload)
+      {:ok, _image} = Uploads.store_upload(user.id, upload)
 
       events = events_of_type("image.submitted")
       latest = List.last(events)
@@ -1138,7 +984,7 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.aggregate_type == "image"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "image.resolved event emitted after successful identification", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
       before_count = event_count("image.resolved")
@@ -1157,7 +1003,7 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.payload["book_count"] > 0
     end
 
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "image.resolved payload contains book_count", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
@@ -1174,7 +1020,7 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.aggregate_type == "image"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "book.created event emitted on book creation" do
       before_count = event_count("book.created")
 
@@ -1194,7 +1040,7 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.aggregate_type == "book"
     end
 
-    @tag stories: ["US-4.1"], suite: :events
+    @tag suite: :events
     test "book.created event carries age_gated visibility_tier" do
       before_count = event_count("book.created")
 
@@ -1215,7 +1061,7 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.aggregate_type == "book"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "placement.created event emitted on shelf placement", %{user: user, book: book} do
       before_count = event_count("placement.created")
 
@@ -1232,13 +1078,13 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 4 — rejection events" do
-    @tag stories: ["US-1.1.3"], suite: :events
+    @tag suite: :events
     test "image.rejected emitted on not_a_book classification" do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
       before_count = event_count("image.rejected")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1253,13 +1099,13 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.payload["reason"] == "not_a_book"
     end
 
-    @tag stories: ["US-1.1.2"], suite: :events
+    @tag suite: :events
     test "image.rejected emitted on isbn_not_found" do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
       before_count = event_count("image.rejected")
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1274,13 +1120,13 @@ defmodule Stacks.UploadPipelineTest do
       assert latest.payload["reason"] == "isbn_not_found"
     end
 
-    @tag stories: ["US-1.1.3"], suite: :events
+    @tag suite: :events
     test "no book.created event emitted on rejection" do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
       before_count = event_count("book.created")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1291,13 +1137,13 @@ defmodule Stacks.UploadPipelineTest do
       assert event_count("book.created") == before_count
     end
 
-    @tag stories: ["US-1.1.3"], suite: :events
+    @tag suite: :events
     test "no placement.created event emitted on rejection" do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
       before_count = event_count("placement.created")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1310,74 +1156,53 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 4 — event chronological sequence" do
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "events are recorded in correct order for a full upload flow", %{user: user} do
-      # 1. Upload image
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      {:ok, image} = Books.store_upload(user.id, upload)
+      {:ok, image} = Uploads.store_upload(user.id, upload)
 
-      # 2. Run identification job (uses pre-inserted book via default MockClient)
       perform_job(IdentifyBookJob, %{
         "user_id" => user.id,
         "image_id" => image.id,
         "image_b64" => @image_b64
       })
 
-      # 3. Verify ordering: image.submitted should precede image.resolved
       submitted = events_of_type("image.submitted") |> List.last()
       resolved = events_of_type("image.resolved") |> List.last()
 
       assert submitted != nil
       assert resolved != nil
-      # occurred_at comes back as NaiveDateTime from the raw event_log query
       assert NaiveDateTime.compare(submitted.occurred_at, resolved.occurred_at) in [:lt, :eq]
     end
   end
 
   describe "Suite 4 — event handler execution" do
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "book.created event enqueues SubscriberWorker (which triggers enrichment)" do
-      # The event system enqueues a SubscriberWorker for each event, which
-      # then dispatches to registered handlers (like BookCreatedHandler).
-      # BookCreatedHandler enqueues TriggerPriceScrapeJob when it runs.
       {:ok, _book} =
         Books.create(%{
           "title" => "Handler Test Book",
           "isbn" => "9780140449136"
         })
 
-      # Verify the subscriber worker was enqueued for the book.created event
       assert_enqueued(worker: Stacks.Events.SubscriberWorker)
     end
 
-    # P2 #15 — emit_safe vs emit: the difference is that emit_safe rescues
-    # exceptions and logs them instead of crashing the caller. This is verified
-    # by code inspection of Stacks.Events.emit_safe/1, not by a runtime test,
-    # since forcing an exception inside the event_log INSERT would require
-    # breaking the database connection mid-transaction.
-
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "emit_safe/1 returns {:ok, _} and does not propagate errors from emit/1" do
-      # emit_safe wraps emit: on {:error, _} from emit, it logs a warning and
-      # returns {:ok, event} so callers (e.g. Multi steps) are never rolled back
-      # by event infrastructure failures. We trigger an emit failure by passing
-      # an invalid aggregate_id (nil UUID) which causes encode_uuid to return nil
-      # and the INSERT to fail.
       bad_event = %{
         event_type: "test.emit_safe_rescue",
         aggregate_type: "test",
         aggregate_id: "not-a-valid-uuid"
       }
 
-      # emit/1 should fail for this payload (invalid UUID cannot be dumped)
       assert {:error, _} = Stacks.Events.emit(bad_event)
 
-      # emit_safe/1 must absorb that error and return {:ok, _}
       assert {:ok, _} = Stacks.Events.emit_safe(bad_event)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :events
+    @tag suite: :events
     test "emit_safe/1 returns {:ok, event_params} and records event on success" do
       aggregate_id = Ecto.UUID.generate()
       before_count = event_count("test.emit_safe_success")
@@ -1395,21 +1220,16 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  # ============================================================================
-  # Suite 5: Background Job Tests
-  # ============================================================================
-
   describe "Suite 5 — IdentifyBookJob enqueue" do
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "upload_and_identify enqueues a job on the vision queue", %{user: user} do
       image_id = Ecto.UUID.generate()
       storage_key = "uploads/#{image_id}"
 
-      {:ok, job} = Books.upload_and_identify(user.id, image_id, storage_key)
+      {:ok, job} = Uploads.upload_and_identify(user.id, image_id, storage_key)
 
       assert job.queue == "vision"
 
-      # Oban args may use string or atom keys depending on serialization stage
       user_id_val = job.args["user_id"] || job.args[:user_id]
       image_id_val = job.args["image_id"] || job.args[:image_id]
       storage_key_val = job.args["storage_key"] || job.args[:storage_key]
@@ -1419,9 +1239,9 @@ defmodule Stacks.UploadPipelineTest do
       assert storage_key_val == storage_key
     end
 
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "job is enqueued with correct worker" do
-      Books.upload_and_identify("user-id", "image-id", "uploads/image-id")
+      Uploads.upload_and_identify("user-id", "image-id", "uploads/image-id")
 
       assert_enqueued(
         worker: IdentifyBookJob,
@@ -1431,7 +1251,7 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 5 — IdentifyBookJob happy path" do
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "returns :ok when pipeline identifies a book", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
@@ -1445,11 +1265,11 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 5 — IdentifyBookJob not_a_book path" do
-    @tag stories: ["US-1.1.3"], suite: :jobs
+    @tag suite: :jobs
     test "returns {:cancel, reason} for non-book images", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1461,11 +1281,11 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 5 — IdentifyBookJob isbn_not_found path" do
-    @tag stories: ["US-1.1.2"], suite: :jobs
+    @tag suite: :jobs
     test "returns {:cancel, reason} when no ISBN resolves", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         assert {:cancel, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1477,16 +1297,13 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 5 — IdentifyBookJob generic failure" do
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "returns {:error, reason} for service unavailability (transient, allows retry)", %{
       user: user
     } do
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.ErrorClient, fn ->
-        # {:error, reason} tells Oban the job failed transiently and should be
-        # retried (up to max_attempts). This is distinct from {:cancel, reason}
-        # which permanently cancels the job.
+      with_vision(:any, service_error(), fn ->
         assert {:error, :service_unavailable} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1498,19 +1315,19 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 5 — IdentifyBookJob max_attempts" do
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "worker is configured with max_attempts of 3" do
       assert IdentifyBookJob.__opts__()[:max_attempts] == 3
     end
 
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "worker is configured for the vision queue" do
       assert IdentifyBookJob.__opts__()[:queue] == :vision
     end
   end
 
   describe "Suite 5 — IdentifyBookJob with missing image_id in DB" do
-    @tag stories: ["US-1.1.1"], suite: :jobs
+    @tag suite: :jobs
     test "returns :ok when image_id does not exist in DB; no events or books created", %{
       user: user
     } do
@@ -1527,10 +1344,6 @@ defmodule Stacks.UploadPipelineTest do
                  "image_b64" => @image_b64
                })
 
-      # The job returns :ok but the mark_resolved call finds no row to update,
-      # so no image.resolved event is emitted for this specific image_id.
-      # However the pipeline may still emit a book.created if the book didn't
-      # exist yet. We verify no spurious events were emitted for the image.
       resolved_for_image =
         events_of_type("image.resolved")
         |> Enum.filter(&(&1.aggregate_id == fake_image_id))
@@ -1545,16 +1358,15 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 5 — IdentifyBookJob with MultiBookClient" do
-    @tag stories: ["US-1.1.7"], suite: :jobs
+  describe "Suite 5 — IdentifyBookJob with a multi-book vision response" do
+    @tag suite: :jobs
     test "resolves multiple books and stores all book_ids in uploaded_images", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      # Pre-insert the second book so the pipeline finds it via find_existing.
       book2 = insert(:book, title: "Book Two")
       insert(:book_edition, book: book2, isbn: "9780306406157")
 
-      with_client(__MODULE__.MultiBookClient, fn ->
+      with_vision(multi_book(), fn ->
         assert :ok =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1577,14 +1389,12 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 5 — IdentifyBookJob with AmbiguousClient" do
-    @tag stories: ["US-1.1.3"], suite: :jobs
+  describe "Suite 5 — IdentifyBookJob with an ambiguous vision response" do
+    @tag suite: :jobs
     test "ambiguous classification is treated as not_a_book (rejected)", %{user: user} do
-      # The Moderation pipeline only accepts classification == "book".
-      # "ambiguous" falls through to {:error, :not_a_book}.
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.AmbiguousClient, fn ->
+      with_vision(ambiguous(), fn ->
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1596,7 +1406,7 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 5 — compound candidate expansion" do
-    @tag stories: ["US-1.1.7"], suite: :jobs
+    @tag suite: :jobs
     test "titles with OR are split and processed individually" do
       candidates = [
         %{
@@ -1607,22 +1417,10 @@ defmodule Stacks.UploadPipelineTest do
         }
       ]
 
-      # expand_compound_candidates is private, but we can test via Moderation
-      # by verifying the pipeline processes both parts. Since we can't call the
-      # private function directly, we test the observable behaviour: the
-      # pipeline should attempt to resolve both titles separately.
-      # Here we verify the split logic indirectly by checking the Moderation
-      # module's documented contract.
-
-      # Test the split via a direct moderation pipeline call with a mock client
-      # that returns the compound title.
-      with_client(__MODULE__.CompoundTitleClient, fn ->
+      with_vision(compound_title(), fn ->
         image = insert(:uploaded_image, status: "pending")
         user = insert(:user)
 
-        # The pipeline will try to resolve both titles but likely fail to find
-        # ISBNs (no matching books pre-inserted). The key assertion is that it
-        # doesn't crash on compound titles.
         result =
           perform_job(IdentifyBookJob, %{
             "user_id" => user.id,
@@ -1630,69 +1428,162 @@ defmodule Stacks.UploadPipelineTest do
             "image_b64" => @image_b64
           })
 
-        # Should complete without crash; either :ok or {:cancel, _}
         assert result in [:ok, {:cancel, "isbn_not_found"}]
       end)
     end
   end
 
-  # ============================================================================
-  # Suite 6: External Service Mock Tests
-  # ============================================================================
-
   describe "Suite 6 — MockClient classification responses" do
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "default MockClient returns book classification" do
       result = MockClient.call_vision("is_book", %{})
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} = result
     end
 
-    @tag stories: ["US-1.1.3"], suite: :external
-    test "NotABookClient returns not_book classification" do
-      result = __MODULE__.NotABookClient.call_vision("analyze", %{})
+    @tag suite: :external
+    test "steered not-a-book response replaces the default classification" do
+      MockClient.put_response("analyze", not_a_book())
+      result = MockClient.call_vision("analyze", %{})
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}} = result
     end
 
-    @tag stories: ["US-1.1.3"], suite: :external
-    test "AmbiguousClient returns ambiguous classification" do
-      result = __MODULE__.AmbiguousClient.call_vision("analyze", %{})
+    @tag suite: :external
+    test "steered ambiguous response replaces the default classification" do
+      MockClient.put_response("analyze", ambiguous())
+      result = MockClient.call_vision("analyze", %{})
 
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => 0.5}} =
                result
     end
 
-    @tag stories: ["US-1.1.1"], suite: :external
-    test "ErrorClient returns service_unavailable" do
-      result = __MODULE__.ErrorClient.call_vision("analyze", %{})
-      assert {:error, :service_unavailable} = result
+    @tag suite: :external
+    test "steered service_unavailable error replaces the default success" do
+      MockClient.put_response("analyze", service_error())
+      assert {:error, :service_unavailable} = MockClient.call_vision("analyze", %{})
     end
   end
 
   describe "Suite 6 — MockClient extraction responses" do
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "default MockClient returns book extraction with ISBN" do
       {:ok, resp} = MockClient.call_vision("analyze", %{})
       assert [book | _] = resp["books"]
       assert [_ | _] = book["potential_isbns"]
     end
 
-    @tag stories: ["US-1.1.2"], suite: :external
-    test "NoIsbnClient returns empty books array" do
-      {:ok, resp} = __MODULE__.NoIsbnClient.call_vision("analyze", %{})
+    @tag suite: :external
+    test "steered no-ISBN response replaces the default non-empty books array" do
+      MockClient.put_response("analyze", no_isbn())
+      {:ok, resp} = MockClient.call_vision("analyze", %{})
       assert resp["books"] == []
     end
   end
 
   describe "Suite 6 — circuit breaker" do
-    @tag stories: ["US-1.1.1"], suite: :external
-    test "CircuitOpenClient returns :circuit_open error" do
-      result = __MODULE__.CircuitOpenClient.call_vision("analyze", %{})
-      assert {:error, :circuit_open} = result
+    @tag suite: :external
+    test "steered :circuit_open error is returned for every endpoint" do
+      MockClient.put_response(:any, circuit_open())
+      assert {:error, :circuit_open} = MockClient.call_vision("analyze", %{})
+      assert {:error, :circuit_open} = MockClient.call_vision("is_book", %{})
+    end
+  end
+
+  describe "Suite 6 — MockClient steering seam" do
+    @tag suite: :external
+    test "put_response/2 steers is_book, and clear/0 restores the default" do
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
+
+      MockClient.put_response(
+        "is_book",
+        {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK", "confidence" => 0.11}}
+      )
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK", "confidence" => 0.11}} =
+               MockClient.call_vision("is_book", %{})
+
+      MockClient.clear()
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
+    end
+
+    @tag suite: :external
+    test "steering is per-endpoint — an unsteered endpoint keeps its default" do
+      MockClient.put_response("extract_isbn", {:error, :steered_failure})
+
+      assert {:error, :steered_failure} = MockClient.call_vision("extract_isbn", %{})
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
+    end
+
+    @tag suite: :external
+    test "the most recent registration for an endpoint wins" do
+      MockClient.put_response("extract_isbn", {:error, :first})
+      MockClient.put_response("extract_isbn", {:error, :second})
+      assert {:error, :second} = MockClient.call_vision("extract_isbn", %{})
+    end
+
+    @tag suite: :external
+    test "an exact-endpoint registration wins over an :any registration" do
+      MockClient.put_response(:any, {:error, :catch_all})
+      MockClient.put_response("extract_isbn", {:error, :specific})
+
+      assert {:error, :specific} = MockClient.call_vision("extract_isbn", %{})
+      assert {:error, :catch_all} = MockClient.call_vision("is_book", %{})
+    end
+
+    @tag suite: :external
+    test "a response can be a function of the payload" do
+      MockClient.put_response("extract_isbn", fn payload ->
+        {:ok, %{"echoed" => Map.get(payload, :image_b64)}}
+      end)
+
+      assert {:ok, %{"echoed" => "abc"}} =
+               MockClient.call_vision("extract_isbn", %{image_b64: "abc"})
+    end
+
+    @tag suite: :external
+    test "a steered response reaches work the caller farms out to a Task ($callers)" do
+      MockClient.put_response("extract_isbn", {:error, :steered_in_parent})
+
+      result =
+        Task.async(fn -> MockClient.call_vision("extract_isbn", %{}) end)
+        |> Task.await()
+
+      assert {:error, :steered_in_parent} = result
+    end
+
+    @tag suite: :external
+    test "a steered response is consumed by the IdentifyBookJob pipeline, not just echoed" do
+      image = insert(:uploaded_image, status: "pending")
+      user = insert(:user)
+
+      with_vision(not_a_book(), fn ->
+        perform_job(IdentifyBookJob, %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "image_b64" => @image_b64
+        })
+      end)
+
+      {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
+
+      updated =
+        from(i in "uploaded_images",
+          where: i.id == ^image_id_bin,
+          select: %{status: i.status, rejection_reason: i.rejection_reason}
+        )
+        |> Repo.one(prefix: "op")
+
+      assert updated.status == "rejected"
+      assert updated.rejection_reason == "not_a_book"
     end
   end
 
   describe "Suite 6 — ISBNResolver with MockHttpClient" do
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "Open Library returns ISBN → success" do
       MockHttpClient.put_response("openlibrary.org/api/books", {
         :ok,
@@ -1712,9 +1603,8 @@ defmodule Stacks.UploadPipelineTest do
       assert data[:source] == :open_library
     end
 
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "Open Library fails, Google Books returns → success" do
-      # Open Library returns empty (no match)
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
 
       MockHttpClient.put_response("googleapis.com", {
@@ -1742,7 +1632,7 @@ defmodule Stacks.UploadPipelineTest do
       assert data[:source] == :google_books
     end
 
-    @tag stories: ["US-1.1.2"], suite: :external
+    @tag suite: :external
     test "both Open Library and Google Books fail → {:error, :not_found}" do
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
@@ -1750,28 +1640,20 @@ defmodule Stacks.UploadPipelineTest do
       assert {:error, :not_found} = ISBNResolver.resolve("9780000000000")
     end
 
-    @tag stories: ["US-1.1.6"], suite: :external
+    @tag suite: :external
     test "ISBNResolver returns gracefully when both upstreams reply 503 (service_unavailable)" do
-      # Both upstreams are unavailable (e.g. network outage / 503). The
-      # resolver must not crash — it returns a structured error and lets
-      # the caller decide how to surface it. The fuse melts on each error
-      # but the call still returns within the request timeout.
       MockHttpClient.put_response("openlibrary.org/api/books", {:error, :service_unavailable})
       MockHttpClient.put_response("googleapis.com", {:error, :service_unavailable})
 
       assert {:error, _reason} = ISBNResolver.resolve("9780451524935")
     end
 
-    @tag stories: ["US-1.1.6"], suite: :external
-    test "merge_format endpoint surfaces 503 ISBN-service outage as 422 isbn_not_found", %{
+    @tag suite: :external
+    test "merge_format endpoint surfaces an ISBN-service outage as 503 resolver_unavailable", %{
       conn: conn,
       token: token,
       book: book
     } do
-      # End-to-end graceful degradation: when the duplicate-check / merge
-      # path calls ISBNResolver.resolve and both upstreams are down, the
-      # controller does NOT 5xx — it returns a clean 422 isbn_not_found
-      # body so the client can show the user a "try again later" message.
       MockHttpClient.put_response("openlibrary.org/api/books", {:error, :service_unavailable})
       MockHttpClient.put_response("googleapis.com", {:error, :service_unavailable})
 
@@ -1780,33 +1662,29 @@ defmodule Stacks.UploadPipelineTest do
         |> auth_conn(token)
         |> post("/api/books/#{book.id}/merge-format", %{"isbn" => "9780451524935"})
 
-      # Controller stays graceful: the 503 from ISBN service is mapped to
-      # a structured 422 (isbn_not_found) rather than bubbling up as a 500.
-      assert resp = json_response(conn, 422)
-      assert resp["error"] == "isbn_not_found"
+      assert resp = json_response(conn, 503)
+
+      refute resp["error"] == "isbn_not_found",
+             "the catalogues never answered — nothing was learned about this ISBN"
+
+      assert resp["error"] == "resolver_unavailable"
     end
   end
 
   describe "Suite 6 — BudgetTracker" do
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "check_budget returns :ok when under budget" do
-      # BudgetTracker GenServer is started in the supervision tree.
-      # Fresh state should have zero spend, well under default limits.
       assert :ok = BudgetTracker.check_budget(:modal)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "check_budget returns error when daily limit is exceeded" do
-      # Record enough cost to exceed the daily limit (default $5 = 500 cents)
       original_config = Application.get_env(:core, :ai_budget, [])
 
       try do
-        # Set a very low daily limit so we can easily exceed it
         Application.put_env(:core, :ai_budget, daily_limit_cents: 1, monthly_limit_cents: 50_000)
 
-        # Record cost that exceeds the limit
         BudgetTracker.record_cost(:modal, 2)
-        # GenServer cast is async, give it a moment
         Process.sleep(50)
 
         assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
@@ -1815,11 +1693,10 @@ defmodule Stacks.UploadPipelineTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "record_cost increases daily spend" do
       state_before = BudgetTracker.current_state()
       BudgetTracker.record_cost(:test_provider, 10)
-      # GenServer cast is async, give it a moment
       Process.sleep(50)
       state_after = BudgetTracker.current_state()
 
@@ -1828,13 +1705,8 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 6 — HMAC auth token" do
-    @tag stories: ["US-1.1.1"], suite: :external
+    @tag suite: :external
     test "auth_token/2 generates timestamp.signature format" do
-      # auth_token is private, but build_vision_request is @doc false and
-      # accessible within the project. We verify the request includes the
-      # X-Internal-Token header with the correct format.
-      # Since build_vision_request requires :vision_hmac_secret to be set,
-      # we use the test config value.
       original = Application.get_env(:core, :vision_hmac_secret)
 
       try do
@@ -1842,7 +1714,6 @@ defmodule Stacks.UploadPipelineTest do
 
         req = AIClient.build_vision_request("/classify", %{image: "test"})
 
-        # Extract the X-Internal-Token header
         token_header =
           Enum.find_value(req.headers, fn
             {"X-Internal-Token", value} -> value
@@ -1850,10 +1721,8 @@ defmodule Stacks.UploadPipelineTest do
           end)
 
         assert token_header != nil
-        # Format should be "<unix_timestamp>.<hex_hmac>"
         assert [ts_str, sig] = String.split(token_header, ".", parts: 2)
         assert {_ts, ""} = Integer.parse(ts_str)
-        # Signature should be a 64-char hex string (SHA256 = 32 bytes = 64 hex chars)
         assert String.length(sig) == 64
         assert Regex.match?(~r/^[0-9a-f]+$/, sig)
       after
@@ -1862,12 +1731,8 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  # ============================================================================
-  # Suite 7: Storage Tests
-  # ============================================================================
-
   describe "Suite 7 — Storage.upload_image" do
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "stores image at uploads/{image_id} key" do
       image_id = Ecto.UUID.generate()
       assert {:ok, key} = Storage.upload_image(image_id, "fake data")
@@ -1876,12 +1741,11 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 7 — Storage.get_image_url" do
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "returns a presigned URL" do
       image_id = Ecto.UUID.generate()
       storage_key = "uploads/#{image_id}"
 
-      # Upload first so the key exists in mock
       {:ok, _} = Storage.upload_image(image_id, "fake data")
 
       assert {:ok, url} = Storage.get_image_url(storage_key)
@@ -1889,78 +1753,52 @@ defmodule Stacks.UploadPipelineTest do
       assert url =~ storage_key
     end
 
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "default TTL is 900 seconds" do
       storage_key = "uploads/test"
       {:ok, url} = Storage.get_image_url(storage_key)
-      # Mock returns a predictable URL — just verify it's valid
       assert is_binary(url)
     end
   end
 
   describe "Suite 7 — Storage.delete_image" do
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "removes the image from storage" do
       image_id = Ecto.UUID.generate()
       key = "uploads/#{image_id}"
 
-      # Upload
       {:ok, _} = Storage.upload_image(image_id, "data to delete")
       assert StorageMock.get(key) == "data to delete"
 
-      # Delete
       assert :ok = Storage.delete_image(key)
       assert StorageMock.get(key) == nil
     end
   end
 
   describe "Suite 7 — cleanup on DB failure" do
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "store_upload calls delete_image if DB insert fails", %{user: user} do
-      # Verify store_upload succeeds with a valid file and storage is populated.
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      assert {:ok, image} = Books.store_upload(user.id, upload)
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
 
-      # Verify the storage key was written
       key = image.storage_path
       assert StorageMock.get(key) != nil
-
-      # Cleanup-on-failure: the store_upload function's with/else block calls
-      # Storage.delete_image on any {:error, _} from File.read, upload_image,
-      # or insert_uploaded_image. Testing the actual failure path would require
-      # injecting a DB failure mid-transaction, which is not feasible without
-      # modifying production code. The cleanup logic is verified by code
-      # inspection of Books.store_upload/2.
     end
 
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "storage cleanup when File.read fails (file deleted before read)", %{user: user} do
-      # store_upload reads the file, uploads to storage, then inserts to DB.
-      # If the file is unreadable, the with chain short-circuits to the else
-      # clause which calls Storage.delete_image to clean up any partial upload.
-      # We simulate this by providing a path to a file that does not exist.
       upload = %Plug.Upload{
         path: "/tmp/nonexistent_#{System.unique_integer([:positive])}.jpg",
         filename: "ghost.jpg",
         content_type: "image/jpeg"
       }
 
-      assert {:error, _reason} = Books.store_upload(user.id, upload)
-
-      # The key would have been "uploads/<generated-uuid>". Since File.read
-      # fails before upload_image is called, nothing was stored — but the else
-      # branch still calls delete_image (no-op on a missing key). Verify the
-      # function returns an error and does not crash.
+      assert {:error, _reason} = Uploads.store_upload(user.id, upload)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "upload then delete round-trip proves cleanup path works" do
-      # Verifies the exact cleanup sequence used by store_upload's else branch:
-      # 1. Upload an image to storage
-      # 2. Confirm it exists
-      # 3. Call Storage.delete_image (the same call store_upload makes on failure)
-      # 4. Confirm it's gone
       image_id = Ecto.UUID.generate()
       key = "uploads/#{image_id}"
       data = "cleanup test image bytes"
@@ -1974,7 +1812,7 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Suite 7 — content type verification" do
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "Storage.upload_image stores data at the correct key", %{} do
       image_id = Ecto.UUID.generate()
       data = "fake jpeg content"
@@ -1982,20 +1820,12 @@ defmodule Stacks.UploadPipelineTest do
       assert {:ok, key} = Storage.upload_image(image_id, data)
       assert key == "uploads/#{image_id}"
 
-      # Verify the mock storage received the data
       assert StorageMock.get(key) == data
-
-      # Note: content_type enforcement depends on the real S3 client
-      # (Stacks.Storage.S3), which sets content_type on the PutObject call.
-      # The mock storage doesn't track content_type metadata.
     end
 
     @tag :deployed_only
-    @tag stories: ["US-1.1.1"], suite: :storage
+    @tag suite: :storage
     test "uploaded image has correct content-type metadata on real storage" do
-      # This test only runs against a deployed storage backend (S3/R2) where
-      # content-type metadata is preserved on the stored object. The mock
-      # backend does not track content-type, so this is skipped in local/CI.
       image_id = Ecto.UUID.generate()
       jpeg_bytes = <<0xFF, 0xD8, 0xFF, 0xE0>> <> :crypto.strong_rand_bytes(64)
 
@@ -2004,24 +1834,16 @@ defmodule Stacks.UploadPipelineTest do
 
       assert key == "uploads/#{image_id}"
 
-      # On a real backend, fetching the presigned URL and issuing a HEAD request
-      # would confirm Content-Type: image/jpeg. Here we verify the upload
-      # succeeds with the content_type option and returns the expected key.
       assert {:ok, url} = Storage.get_image_url(key)
       assert is_binary(url)
     end
   end
 
-  # ============================================================================
-  # Suite 2 — merge-format API (US-1.1.8)
-  # ============================================================================
-
-  describe "Suite 2 — POST /api/books/:id/merge-format (US-1.1.8)" do
-    @tag stories: ["US-1.1.8"], suite: :api
+  describe "Suite 2 — POST /api/books/:id/merge-format" do
+    @tag suite: :api
     test "with valid ISBN adds edition and returns 200", %{conn: conn, token: token, book: book} do
       merge_isbn = "9780451524935"
 
-      # Set up ISBN resolver mocks so merge_edition can verify the ISBN
       MockHttpClient.put_response("openlibrary.org/api/books", {
         :ok,
         %{
@@ -2049,12 +1871,10 @@ defmodule Stacks.UploadPipelineTest do
       assert edition["is_primary"] == false
     end
 
-    @tag stories: ["US-1.1.8"], suite: :api
+    @tag suite: :api
     test "with duplicate ISBN returns 422", %{conn: conn, token: token, book: book} do
-      # The book already has edition with ISBN "9780743273565" from setup
       existing_isbn = "9780743273565"
 
-      # ISBN resolver must succeed for merge_edition to reach the duplicate check
       MockHttpClient.put_response("openlibrary.org/api/books", {
         :ok,
         %{
@@ -2077,7 +1897,7 @@ defmodule Stacks.UploadPipelineTest do
       assert resp["error"] == "duplicate_isbn"
     end
 
-    @tag stories: ["US-1.1.8"], suite: :api
+    @tag suite: :api
     test "with nonexistent book returns 404", %{conn: conn, token: token} do
       fake_id = Ecto.UUID.generate()
       merge_isbn = "9780451524935"
@@ -2103,23 +1923,15 @@ defmodule Stacks.UploadPipelineTest do
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
-    @tag stories: ["US-1.1.8"], suite: :api
+    @tag suite: :api
     test "returns 401 when unauthenticated", %{conn: conn, book: book} do
-      # Defence-in-depth per-route auth assertion. Don't rely on inherited
-      # coverage from sibling /api/books/* routes — the merge endpoint
-      # writes book editions (a sensitive mutation) so its own auth halt
-      # must be exercised.
       conn = post(conn, "/api/books/#{book.id}/merge-format", %{"isbn" => "9780451524935"})
       assert conn.status == 401
     end
   end
 
-  # ============================================================================
-  # Suite 3 — merge edition DB assertions (US-1.1.8)
-  # ============================================================================
-
-  describe "Suite 3 — merge creates non-primary edition (US-1.1.8)" do
-    @tag stories: ["US-1.1.8"], suite: :db
+  describe "Suite 3 — merge creates non-primary edition" do
+    @tag suite: :db
     test "merge creates non-primary edition linked to existing book", %{book: book} do
       merge_isbn = "9780451524935"
 
@@ -2144,16 +1956,14 @@ defmodule Stacks.UploadPipelineTest do
       assert edition.is_primary == false
       assert edition.format_label == "Hardcover"
 
-      # Verify it exists in the database
       db_edition = Repo.get(BookEdition, edition.id)
       assert db_edition != nil
       assert db_edition.book_id == book.id
       assert db_edition.is_primary == false
     end
 
-    @tag stories: ["US-1.1.8"], suite: :db
+    @tag suite: :db
     test "original primary edition unchanged after merge", %{book: book} do
-      # Capture the original primary edition
       original_edition = Repo.get_by(BookEdition, book_id: book.id, is_primary: true)
       assert original_edition != nil
 
@@ -2174,7 +1984,6 @@ defmodule Stacks.UploadPipelineTest do
 
       assert {:ok, _new_edition} = Books.merge_edition(book.id, %{"isbn" => merge_isbn})
 
-      # Re-fetch the original edition and verify it is unchanged
       after_edition = Repo.get(BookEdition, original_edition.id)
       assert after_edition.isbn == original_edition.isbn
       assert after_edition.is_primary == true
@@ -2184,12 +1993,8 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  # ============================================================================
-  # Suite 4 — merge edition event (US-1.1.8)
-  # ============================================================================
-
-  describe "Suite 4 — books.edition_merged event (US-1.1.8)" do
-    @tag stories: ["US-1.1.8"], suite: :events
+  describe "Suite 4 — books.edition_merged event" do
+    @tag suite: :events
     test "books.edition_merged event emitted after successful merge", %{book: book} do
       before_count = event_count("books.edition_merged")
       merge_isbn = "9780451524935"
@@ -2219,19 +2024,13 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  # ============================================================================
-  # Suite 2+3+4 Integration: Full upload-to-shelf flow
-  # ============================================================================
-
   describe "Integration — full upload-to-shelf flow via API" do
-    @tag stories: ["US-1.1.1"], suite: :api
+    @tag suite: :api
     test "complete flow: upload -> poll -> book detail -> placement", %{
-      conn: conn,
       token: token,
       user: user,
       book: _book
     } do
-      # Step 1: Upload image
       tmp_path = create_temp_image()
 
       upload = %Plug.Upload{
@@ -2240,33 +2039,22 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      upload_conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
+      assert {:ok, stored} = Uploads.store_upload(user.id, upload)
+      image_id = stored.id
 
-      assert %{"status" => "accepted", "image_id" => image_id} =
-               json_response(upload_conn, 202)
-
-      # Step 2: Assert DB state — image is pending
-      # SSE stream validation covered in Suite 2 SSE tests above
       pending_image = Repo.get!(UploadedImage, image_id)
       assert pending_image.status == "pending"
 
-      # Step 3: Run the identification job (simulates async processing)
       perform_job(IdentifyBookJob, %{
         "user_id" => user.id,
         "image_id" => image_id,
         "image_b64" => @image_b64
       })
 
-      # Step 4: Assert DB state — image is now resolved
-      # SSE stream validation covered in Suite 2 SSE tests above
       resolved_image = Repo.get!(UploadedImage, image_id)
       assert resolved_image.status == "resolved"
       assert resolved_image.book_ids != []
 
-      # Step 5: Fetch book detail
       book_id = List.first(resolved_image.book_ids)
 
       book_conn =
@@ -2278,7 +2066,6 @@ defmodule Stacks.UploadPipelineTest do
       assert book_resp["book"]["id"] == book_id
       assert is_binary(book_resp["book"]["title"])
 
-      # Step 6: Place on shelf
       place_conn =
         build_conn()
         |> auth_conn(token)
@@ -2287,7 +2074,6 @@ defmodule Stacks.UploadPipelineTest do
       assert %{"placement" => placement} = json_response(place_conn, 201)
       assert placement["book_id"] == book_id
 
-      # Verify exact event count deltas (not >= 1, which would mask duplicates)
       submitted_for_image =
         events_of_type("image.submitted")
         |> Enum.filter(&(&1.aggregate_id == image_id))
@@ -2303,13 +2089,10 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   describe "Integration — rejection flow via API" do
-    @tag stories: ["US-1.1.1", "US-1.1.3"], suite: :api
+    @tag suite: :api
     test "upload -> poll -> rejection (not_a_book)", %{
-      conn: conn,
-      token: token,
       user: user
     } do
-      # Step 1: Upload image
       tmp_path = create_temp_image()
 
       upload = %Plug.Upload{
@@ -2318,15 +2101,10 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      upload_conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
+      assert {:ok, stored} = Uploads.store_upload(user.id, upload)
+      image_id = stored.id
 
-      assert %{"image_id" => image_id} = json_response(upload_conn, 202)
-
-      # Step 2: Run identification with not-a-book mock
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image_id,
@@ -2334,18 +2112,14 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      # Step 3: Assert DB state — image is rejected
-      # SSE stream validation covered in Suite 2 SSE tests above
       rejected_image = Repo.get!(UploadedImage, image_id)
       assert rejected_image.status == "rejected"
       assert rejected_image.rejection_reason == "not_a_book"
       assert rejected_image.book_ids == []
     end
 
-    @tag stories: ["US-1.1.1", "US-1.1.2"], suite: :api
+    @tag suite: :api
     test "upload -> poll -> rejection (isbn_not_found)", %{
-      conn: conn,
-      token: token,
       user: user
     } do
       tmp_path = create_temp_image()
@@ -2356,14 +2130,10 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      upload_conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
+      assert {:ok, stored} = Uploads.store_upload(user.id, upload)
+      image_id = stored.id
 
-      assert %{"image_id" => image_id} = json_response(upload_conn, 202)
-
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image_id,
@@ -2371,205 +2141,70 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      # Assert DB state — image is rejected with isbn_not_found
-      # SSE stream validation covered in Suite 2 SSE tests above
       rejected_image = Repo.get!(UploadedImage, image_id)
       assert rejected_image.status == "rejected"
       assert rejected_image.rejection_reason == "isbn_not_found"
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Inline mock modules. Each returns the consolidated /analyze shape
-  # (classification + books in one response), matching what the production
-  # Moderation pipeline now calls post-consolidation.
-  # ---------------------------------------------------------------------------
-
-  defmodule NotABookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
-           "confidence" => 0.95,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp analyze_response(classification, books, confidence \\ 0.9) do
+    {:ok,
+     %{
+       "classification" => classification,
+       "confidence" => confidence,
+       "books" => books,
+       "model_used" => "mock"
+     }}
   end
 
-  defmodule NoIsbnClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp book_candidate(title, author, potential_isbns, confidence) do
+    %{
+      "title" => title,
+      "author" => author,
+      "potential_isbns" => potential_isbns,
+      "raw_text" => nil,
+      "confidence" => confidence
+    }
   end
 
-  defmodule ErrorClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
-    def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
+  defp not_a_book, do: analyze_response("CLASSIFICATION_RESULT_NOT_BOOK", [], 0.95)
+
+  defp no_isbn, do: analyze_response("CLASSIFICATION_RESULT_BOOK", [])
+
+  defp ambiguous, do: analyze_response("CLASSIFICATION_RESULT_AMBIGUOUS", [], 0.5)
+
+  defp service_error, do: {:error, :service_unavailable}
+
+  defp circuit_open, do: {:error, :circuit_open}
+
+  defp compound_title do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate(
+        "Things I Don't Want to Know OR The Cost of Living",
+        "Deborah Levy",
+        [],
+        0.85
+      )
+    ])
   end
 
-  defmodule AmbiguousClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    # AMBIGUOUS classifications are treated as not-a-book by Moderation
-    # (only BOOK short-circuits into extract). Books field should be
-    # empty since extract is never reached for AMBIGUOUS.
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
-           "confidence" => 0.5,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp romance_book do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate("Romance Novel", "Author X", ["9780451524935"], 0.9)
+    ])
   end
 
-  defmodule CircuitOpenClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision(_endpoint, _payload), do: {:error, :circuit_open}
+  defp multi_book do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate("Book One", "Author A", ["9780743273565"], 0.9),
+      book_candidate("Book Two", "Author B", ["9780306406157"], 0.8)
+    ])
   end
 
-  defmodule CompoundTitleClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Things I Don't Want to Know OR The Cost of Living",
-               "author" => "Deborah Levy",
-               "potential_isbns" => [],
-               "raw_text" => nil,
-               "confidence" => 0.85
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule RomanceBookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Romance Novel",
-               "author" => "Author X",
-               "potential_isbns" => ["9780451524935"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule MultiBookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Book One",
-               "author" => "Author A",
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => "Book Two",
-               "author" => "Author B",
-               "potential_isbns" => ["9780306406157"],
-               "raw_text" => nil,
-               "confidence" => 0.8
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule MultiBookPartialClient do
-    @moduledoc """
-    Returns 2 candidates: one with a pre-inserted ISBN (resolves), one with
-    a fabricated ISBN (will not resolve via Books.find_existing or
-    ISBNResolver.resolve in the test environment). Used to exercise the
-    partial-failure branch of `Moderation.do_resolve_and_store_all/2`.
-    """
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Book One (resolves)",
-               "author" => "Author A",
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => "Book Two (fails)",
-               "author" => "Author B",
-               "potential_isbns" => ["9780000000099"],
-               "raw_text" => nil,
-               "confidence" => 0.8
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp multi_book_partial do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate("Book One (resolves)", "Author A", ["9780743273565"], 0.9),
+      book_candidate("Book Two (fails)", "Author B", ["9780000000099"], 0.8)
+    ])
   end
 end

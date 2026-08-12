@@ -2,6 +2,8 @@
 
 select
     book_id,
+    book_edition_id,
+    isbn,
     store_name,
     price_cents,
     currency,

@@ -1,11 +1,8 @@
 defmodule Stacks.FeedsTest do
   @moduledoc """
-  Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
+      Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
   """
 
-  # async: false — these tests swap the GLOBAL :feed_cache_writer application-env
-  # seam (Application.put_env); running async lets the override leak into (and be
-  # reset under) concurrent tests that exercise the cache write path.
   use Core.DataCase, async: false
 
   import Ecto.Query
@@ -15,9 +12,6 @@ defmodule Stacks.FeedsTest do
   alias Stacks.Feeds
   alias Stacks.Feeds.FeedCacheEntry
 
-  # A cache writer that always fails, mirroring the `{:error, changeset}` shape
-  # `put_cache/3` returns on a real FK/constraint violation. Injected via the
-  # `:feed_cache_writer` application env seam.
   defp failing_writer do
     changeset =
       %FeedCacheEntry{}
@@ -37,11 +31,17 @@ defmodule Stacks.FeedsTest do
       user = insert(:user, display_name: "Erin")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       author = insert(:author, name: "Donna Tartt")
-      book = insert(:book, title: "The Secret History", author: author)
-      _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "The Secret History",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780140167771")]
+        )
+
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user)
 
       assert is_binary(xml)
       assert is_binary(etag)
@@ -62,21 +62,71 @@ defmodule Stacks.FeedsTest do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
-      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
+      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library", user)
     end
 
     test "returns {:error, :not_public} for group-visibility bookshelf" do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
 
-      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
+      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library", user)
+    end
+
+    test "serves a feed for a public-visibility bookshelf" do
+      user = insert(:user, display_name: "Ada")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
+      author = insert(:author, name: "Donna Tartt")
+
+      book =
+        insert(:book,
+          title: "The Secret History",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780140167771")]
+        )
+
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user),
+             "a bookshelf the reader marked public is refused the feed a platform one gets"
+
+      assert is_binary(etag)
+      assert String.contains?(xml, "The Secret History")
+    end
+
+    test "a PLATFORM bookshelf's feed is not served to an anonymous reader" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
+
+      assert {:error, :not_found} = Feeds.fetch_feed(user.id, "library", nil)
+    end
+
+    test "a PUBLIC bookshelf's feed IS served to an anonymous reader" do
+      user = insert(:user, display_name: "Ada")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", nil),
+             "a public bookshelf must be readable by an unauthenticated feed reader"
+
+      assert String.contains?(xml, "The Secret History")
+    end
+
+    test "a signed-in reader may read a PLATFORM bookshelf's feed" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
+      viewer = insert(:user)
+
+      assert {:ok, _xml, _etag} = Feeds.fetch_feed(user.id, "library", viewer)
     end
 
     test "returns valid XML with empty bookshelf" do
       user = insert(:user, display_name: "Test User")
       _bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "platform")
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "wishlist")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "wishlist", user)
       assert String.contains?(xml, "<feed xmlns=")
       assert String.contains?(xml, "Test User")
       refute String.contains?(xml, "<entry>")
@@ -88,18 +138,12 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "Tom & Jerry <Adventures>")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
       assert String.contains?(xml, "&amp;")
       assert String.contains?(xml, "&lt;")
     end
 
-    # A public Atom document is crawled and cached by RSS readers, so the owner's
-    # email must never appear anywhere in it (title/author/entries). These three
-    # tests pin the fallback ladder: display_name → handle → neutral label.
-    test "never leaks the owner email in feed XML when display_name and handle are blank (#283)" do
-      # op.users.handle is NOT NULL (backfilled + app-assigned on every insert),
-      # so the only reachable "no name" shape is a blank handle — the defensive
-      # backstop the neutral label exists for.
+    test "never leaks the owner email in feed XML when display_name and handle are blank" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -111,14 +155,14 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
 
       refute String.contains?(xml, "owner-secret@example.com")
       refute String.contains?(xml, "@")
       assert String.contains?(xml, "A Stacks reader")
     end
 
-    test "falls back to the claimed handle when display_name is nil (#283)" do
+    test "falls back to the claimed handle when display_name is nil" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -130,14 +174,14 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
 
       assert String.contains?(xml, "shadow_reader")
       refute String.contains?(xml, "owner-secret@example.com")
       refute String.contains?(xml, "@")
     end
 
-    test "uses display_name when present and never the email (#283)" do
+    test "uses display_name when present and never the email" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -149,7 +193,7 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
 
       assert String.contains?(xml, "Erin")
       refute String.contains?(xml, "owner-secret@example.com")
@@ -164,12 +208,10 @@ defmodule Stacks.FeedsTest do
 
       inject_failing_writer()
 
-      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user)
       assert String.contains?(xml, "The Secret History")
       assert is_binary(etag)
 
-      # The write failed, so no row was persisted — proving the render was
-      # served despite the cache miss-fill failing.
       assert [] = Repo.all(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf.id)
     end
   end
@@ -190,9 +232,7 @@ defmodule Stacks.FeedsTest do
       assert row.etag == etag
     end
 
-    test "persists email-free cache XML for a nil-display-name user (#283 self-heal)" do
-      # The migration busts pre-fix rows; regeneration must then refill the cache
-      # with email-free XML so a subsequent hit never re-serves the email.
+    test "persists email-free cache XML for a nil-display-name user" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -237,8 +277,6 @@ defmodule Stacks.FeedsTest do
 
   describe "put_cache/3" do
     test "returns {:error, %Ecto.Changeset{}} on an FK violation rather than raising" do
-      # A bookshelf_id with no matching op.bookshelves row violates the FK.
-      # The changeset must translate that into an error tuple, not a raise.
       assert {:error, %Ecto.Changeset{} = changeset} =
                Feeds.put_cache(Ecto.UUID.generate(), "<feed/>", "etag")
 
@@ -279,6 +317,95 @@ defmodule Stacks.FeedsTest do
 
       names = List.flatten(rows)
       assert names == ["feed_cache_bookshelf_id_unique_index"]
+    end
+  end
+
+  describe "entry content" do
+    setup do
+      user = insert(:user)
+      library = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      %{user: user, library: library}
+    end
+
+    defp place(bookshelf, book, opts \\ []) do
+      insert(:placement, Keyword.merge([bookshelf: bookshelf, book: book], opts))
+    end
+
+    test "carries the cover as an enclosure", %{user: user, library: library} do
+      book =
+        insert(:book,
+          editions: [
+            build(:primary_book_edition,
+              cover_image_url: "https://covers.openlibrary.org/b/id/99-M.jpg"
+            )
+          ]
+        )
+
+      place(library, book)
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ ~s(rel="enclosure")
+      assert xml =~ "covers.openlibrary.org/b/id/99-M.jpg"
+    end
+
+    test "omits the enclosure rather than emitting an empty one", %{user: user, library: library} do
+      book = insert(:book, editions: [build(:primary_book_edition, cover_image_url: nil)])
+      place(library, book)
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      refute xml =~ ~s(rel="enclosure")
+    end
+
+    test "says 'moved' for a book that arrived from another shelf", %{
+      user: user,
+      library: library
+    } do
+      antilibrary = insert(:bookshelf, user: user, name: "antilibrary", visibility: "owner")
+      book = insert(:book, title: "The Secret History")
+      place(library, book)
+
+      insert(:placement_history,
+        book_id: book.id,
+        from_bookshelf: antilibrary.id,
+        to_bookshelf: library.id
+      )
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ "The Secret History"
+      assert xml =~ "moved to Library"
+      refute xml =~ "added to Library"
+    end
+
+    test "says 'added' for a book with no move history", %{user: user, library: library} do
+      book = insert(:book, title: "Piranesi")
+      place(library, book)
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ "added to Library"
+      refute xml =~ "moved to Library"
+    end
+
+    test "a move onto a *different* shelf does not make this one say moved",
+         %{user: user, library: library} do
+      other = insert(:bookshelf, user: user, name: "reading_pile", visibility: "owner")
+      third = insert(:bookshelf, user: user, name: "wishlist", visibility: "owner")
+      book = insert(:book)
+      place(library, book)
+
+      insert(:placement_history,
+        book_id: book.id,
+        from_bookshelf: third.id,
+        to_bookshelf: other.id
+      )
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ "added to Library"
+      refute xml =~ "moved to Library"
     end
   end
 end

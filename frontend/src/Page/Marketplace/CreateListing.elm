@@ -42,9 +42,6 @@ type alias Model =
     , description : String
     , submitState : RemoteData Http.Error Listing
     , createdListing : Maybe Listing
-
-    -- True once a draft persisted at session-expiry (Issue #182) has been
-    -- restored into the form, so the view can offer a Discard affordance.
     , draftRestored : Bool
     }
 
@@ -69,11 +66,7 @@ type OutMsg
     = NoOut
     | NavigateTo Route.Route
     | SessionExpired
-      -- Session expired mid-compose (Issue #182): carries the encoded draft so
-      -- `Main` persists it to localStorage before redirecting to `/login`.
     | SessionExpiredWithDraft Json.Encode.Value
-      -- Remove any persisted draft from localStorage (success / discard / a
-      -- draft that failed the userId guard).
     | ClearDraft
 
 
@@ -185,7 +178,6 @@ update msg model maybeToken maybeUserId =
         ListingCreated result ->
             case result of
                 Ok listing ->
-                    -- Success: the draft is no longer needed — clear it.
                     ( { model | submitState = Success listing, createdListing = Just listing }
                     , Cmd.none
                     , ClearDraft
@@ -193,8 +185,6 @@ update msg model maybeToken maybeUserId =
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        -- Session revoked mid-compose: hand the encoded draft up
-                        -- to Main so the user's work survives the /login redirect.
                         ( model
                         , Cmd.none
                         , SessionExpiredWithDraft (encodeDraft (toDraft model maybeUserId))
@@ -232,8 +222,6 @@ update msg model maybeToken maybeUserId =
         DraftLoaded value ->
             case Decode.decodeValue decodeDraft value of
                 Ok draft ->
-                    -- userId stamp guard: only hydrate a draft belonging to the
-                    -- current user. A mismatched draft is discarded, never shown.
                     if Just draft.userId == maybeUserId then
                         ( hydrateFromDraft draft model, Cmd.none, NoOut )
 
@@ -241,15 +229,10 @@ update msg model maybeToken maybeUserId =
                         ( model, Cmd.none, ClearDraft )
 
                 Err _ ->
-                    -- Absent or corrupt draft: nothing to restore, clear the key.
                     ( model, Cmd.none, ClearDraft )
 
         DiscardDraft ->
             ( resetForm model, Cmd.none, ClearDraft )
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg
@@ -527,10 +510,6 @@ viewListingPrice listing =
             p [] [ text "Price: Open to offers" ]
 
 
-
--- HELPERS
-
-
 parseCondition : String -> Condition
 parseCondition str =
     case str of
@@ -574,10 +553,6 @@ pricingModeToString mode =
 
         Offer ->
             "offer"
-
-
-
--- DRAFT PERSISTENCE (Issue #182)
 
 
 {-| Build a persistable draft from the current form state, stamped with the

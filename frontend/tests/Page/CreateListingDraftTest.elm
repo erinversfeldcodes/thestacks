@@ -1,22 +1,10 @@
 module Page.CreateListingDraftTest exposing (suite)
 
-{-| Tests for Issue #182 — preserve an in-progress marketplace listing when the
-session expires mid-compose.
-
-Seam contract:
-
-  - A 401 on `ListingCreated` must bubble `SessionExpiredWithDraft` carrying the
-    encoded draft (the six persisted fields + the composing user's `userId`), so
-    `Main` can persist it to localStorage before redirecting to `/login`.
-  - A NON-401 `ListingCreated` error must stay LOCAL (`NoOut`) and must NOT
-    persist a draft (non-vacuity guard).
-  - `DraftLoaded` hydrates the form only when the stamped `userId` matches the
-    current user; a mismatched or undecodable draft is discarded (`ClearDraft`),
-    never shown (cross-user leak guard).
-  - A successful `ListingCreated` clears the draft (`ClearDraft`).
-  - `DiscardDraft` clears the draft and resets the form.
-  - `encodeDraft`/`decodeDraft` round-trip is identity.
-
+{-| Preserve an in-progress marketplace listing when the session expires
+mid-compose. Seam contract: a 401 on `ListingCreated` bubbles
+`SessionExpiredWithDraft` carrying the encoded draft (six fields +
+`userId`) so Main persists it before the login redirect; on return, the
+saved draft repopulates the form for the SAME user only.
 -}
 
 import Expect
@@ -89,7 +77,7 @@ sampleListing =
 
 suite : Test
 suite =
-    describe "Issue #182 — preserve CreateListing draft on session expiry"
+    describe "— preserve CreateListing draft on session expiry"
         [ describe "(a) 401 on ListingCreated → SessionExpiredWithDraft carrying the draft"
             [ test "encoded value round-trips to the six fields + current userId" <|
                 \() ->

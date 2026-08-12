@@ -1,16 +1,16 @@
 module Page.LoginRedesignTest exposing (suite)
 
-{-| Tests for Issue #028: Login Page Aesthetic Redesign.
+{-| Tests for: Login Page Aesthetic Redesign.
 
 These tests assert on the new bookshelf-wall / parchment-card / dolly-shot
 design. Tests verify the layer structure, parchment card classes, form
-validation, ARIA attributes, and transition state using TransitionState.
+validation, ARIA attributes, and what a successful auth leaves on the card.
 
 -}
 
 import Html.Attributes
 import Http
-import Page.Login as Login exposing (FieldValidation(..), Mode(..), SubmitError(..), TransitionState(..))
+import Page.Login as Login exposing (FieldValidation(..), Mode(..), SubmitError(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -26,17 +26,13 @@ startLogin =
 
 suite : Test
 suite =
-    describe "Page.Login — Redesign (Issue #028)"
+    describe "Page.Login — Redesign"
         [ layerStructureTests
         , parchmentCardTests
         , formValidationTests
         , transitionStateTests
         , ariaTests
         ]
-
-
-
--- 1. LOGIN PAGE LAYER STRUCTURE
 
 
 layerStructureTests : Test
@@ -83,10 +79,6 @@ layerStructureTests =
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-overlay" ]
         ]
-
-
-
--- 2. PARCHMENT LOGIN CARD
 
 
 parchmentCardTests : Test
@@ -142,10 +134,6 @@ parchmentCardTests =
         ]
 
 
-
--- 3. FORM VALIDATION AND ERROR STATES
-
-
 formValidationTests : Test
 formValidationTests =
     describe "Form validation and error states"
@@ -170,15 +158,16 @@ formValidationTests =
                         , displayName = "Reader"
                         , mode = RegisterMode
                         , submitState = Failure (SubmitHttpError (Http.BadStatus 409))
-                        , transitionState = Idle
                         , emailValidation = Pristine
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
-                        , sessionExpired = False
-                        , draftSaved = False
-                        , accountDeleted = False
+                        , arrival = Login.Fresh
                         , forgotState = NotAsked
+                        , resendState = NotAsked
+                        , inviteCode = ""
+                        , inviteCheck = NotAsked
+                        , inviteOnly = False
                         }
 
                     html =
@@ -207,15 +196,16 @@ formValidationTests =
                         , displayName = ""
                         , mode = LoginMode
                         , submitState = Failure (SubmitHttpError (Http.BadStatus 401))
-                        , transitionState = Idle
                         , emailValidation = Pristine
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
-                        , sessionExpired = False
-                        , draftSaved = False
-                        , accountDeleted = False
+                        , arrival = Login.Fresh
                         , forgotState = NotAsked
+                        , resendState = NotAsked
+                        , inviteCode = ""
+                        , inviteCheck = NotAsked
+                        , inviteOnly = False
                         }
 
                     html =
@@ -228,10 +218,6 @@ formValidationTests =
                             (Html.Attributes.attribute "aria-live" "polite")
                         ]
         ]
-
-
-
--- 4. AUTH SUCCESS TRANSITION STATE
 
 
 transitionStateTests : Test
@@ -266,10 +252,6 @@ transitionStateTests =
         ]
 
 
-
--- 5. ARIA ATTRIBUTES
-
-
 ariaTests : Test
 ariaTests =
     describe "ARIA attributes"
@@ -300,7 +282,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init
+                        Login.init Login.Fresh
 
                     html =
                         Login.view model
@@ -317,7 +299,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init
+                        Login.init Login.Fresh
 
                     html =
                         Login.view model

@@ -1,11 +1,11 @@
 defmodule StacksWeb.ShelfControllerTest do
   @moduledoc """
-  Tests for the shelf management endpoints:
-  - GET    /api/bookshelves/:name/shelves
-  - POST   /api/bookshelves/:name/shelves
-  - DELETE /api/shelves/:id
-  - PUT    /api/bookshelves/:name/shelves/reorder
-  - PUT    /api/placements/:id/shelf  (new action on BookshelfPlacementController)
+      Tests for the shelf management endpoints:
+      - GET    /api/bookshelves/:name/shelves
+      - POST   /api/bookshelves/:name/shelves
+      - DELETE /api/shelves/:id
+      - PUT    /api/bookshelves/:name/shelves/reorder
+      - PUT    /api/placements/:id/shelf  (new action on BookshelfPlacementController)
   """
 
   use CoreWeb.ConnCase, async: true
@@ -27,10 +27,6 @@ defmodule StacksWeb.ShelfControllerTest do
 
     %{user: user, bookshelf: bookshelf, shelf_a: shelf_a, shelf_b: shelf_b}
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/bookshelves/:name/shelves
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/bookshelves/:name/shelves — index" do
     setup :setup_bookshelf_with_shelves
@@ -73,11 +69,31 @@ defmodule StacksWeb.ShelfControllerTest do
       conn = get(conn, "/api/bookshelves/library/shelves")
       assert json_response(conn, 401)
     end
-  end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/bookshelves/:name/shelves
-  # ---------------------------------------------------------------------------
+    test "does not claim to carry placements, even for a shelf holding books", %{
+      conn: conn,
+      user: user,
+      bookshelf: bookshelf,
+      shelf_a: shelf_a
+    } do
+      book = insert(:book)
+      insert(:placement, bookshelf: bookshelf, book: book, shelf: shelf_a)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library/shelves")
+
+      %{"shelves" => shelves} = json_response(conn, 200)
+      loaded = Enum.find(shelves, &(&1["id"] == shelf_a.id))
+
+      assert loaded, "the shelf holding the book was not returned at all"
+
+      refute Map.has_key?(loaded, "placements"),
+             "the shelf payload carries a `placements` key again — if it is empty it is a " <>
+               "lie, and the SPA will paint an empty bookcase over a full one"
+    end
+  end
 
   describe "POST /api/bookshelves/:name/shelves — create" do
     setup :setup_bookshelf_with_shelves
@@ -105,21 +121,10 @@ defmodule StacksWeb.ShelfControllerTest do
         |> auth_conn(other_user)
         |> post("/api/bookshelves/library/shelves")
 
-      # The bookshelf "library" belongs to the original user; other_user either
-      # gets 403 or their own empty bookshelf is created. The expected behavior
-      # is 403 since the route scopes to the authenticated user's bookshelf.
-      # If scoped by user, other_user would get their own — but since they have
-      # no "library" bookshelf, this should return 404 or create one.
-      # The exact response depends on implementation, but it should NOT create
-      # a shelf on the original user's bookshelf.
       status = conn.status
       assert status in [403, 404]
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/shelves/:id
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/shelves/:id — delete" do
     setup :setup_bookshelf_with_shelves
@@ -165,10 +170,6 @@ defmodule StacksWeb.ShelfControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/bookshelves/:name/shelves/reorder
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/bookshelves/:name/shelves/reorder — reorder" do
     setup :setup_bookshelf_with_shelves
 
@@ -212,10 +213,6 @@ defmodule StacksWeb.ShelfControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # PUT /api/placements/:id/shelf  (new action on BookshelfPlacementController)
-  # ---------------------------------------------------------------------------
 
   describe "PUT /api/placements/:id/shelf — move placement to shelf" do
     setup :setup_bookshelf_with_shelves

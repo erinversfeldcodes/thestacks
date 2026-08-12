@@ -1,8 +1,8 @@
 defmodule StacksWeb.UserSettingsPrivacyReadControllerTest do
   @moduledoc """
-  Tests for the privacy-settings read endpoint (`GET /api/settings/privacy`),
-  which seeds the privacy screen with the user's saved profile visibility and
-  per-shelf visibilities so a returning user sees stored values, not defaults.
+      Tests for the privacy-settings read endpoint (`GET /api/settings/privacy`),
+      which seeds the privacy screen with the user's saved profile visibility and
+      per-shelf visibilities so a returning user sees stored values, not defaults.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -44,6 +44,21 @@ defmodule StacksWeb.UserSettingsPrivacyReadControllerTest do
 
       assert shelves["library"] == "platform"
       assert shelves["wishlist"] == "owner"
+    end
+
+    test "includes the user's consent flags so the privacy page hydrates them", %{
+      conn: conn
+    } do
+      user = insert(:user, consent_analytics: true, consent_writing_assistant: false)
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/settings/privacy")
+        |> json_response(200)
+
+      assert body["consent_analytics"] == true
+      assert body["consent_writing_assistant"] == false
     end
 
     test "returns an empty shelf list when the user has no bookshelves", %{conn: conn} do

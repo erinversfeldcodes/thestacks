@@ -1,23 +1,21 @@
 defmodule Core.Repo.Migrations.DropAgeVerificationOnboardingStep do
   @moduledoc """
-  ADR-020: the self-declared "verify your age" onboarding step is removed.
+      the self-declared "verify your age" onboarding step is removed.
 
-  The `onboarding_completed` GENERATED ALWAYS AS column previously required all
-  three steps (profile, age_verification, privacy). With the age-verification
-  step dropped from the application step list, that column would become
-  permanently unsatisfiable (the `age_verification` key is never written), so it
-  is redefined here to require only the two surviving steps: profile + privacy.
+      The `onboarding_completed` GENERATED ALWAYS AS column previously required all
+      three steps (profile, age_verification, privacy). With the age-verification
+      step dropped from the application step list, that column would become
+      permanently unsatisfiable (the `age_verification` key is never written), so it
+      is redefined here to require only the two surviving steps: profile + privacy.
 
-  A generated column's expression cannot be `ALTER`ed in place, so the column is
-  dropped and re-added. The staging.stg_users view depends on it, so it is
-  dropped and recreated around the swap (guarded on schema existence — a no-op in
-  the test DB, which has no staging schema).
+      A generated column's expression cannot be `ALTER`ed in place, so the column is
+      dropped and re-added. The staging.stg_users view depends on it, so it is
+      dropped and recreated around the swap (guarded on schema existence — a no-op in
+      the test DB, which has no staging schema).
   """
 
   use Ecto.Migration
 
-  # Recreated after the column swap. Mirrors the column list from the original
-  # onboarding migration (20260322000002) so the staging view is unchanged.
   @recreate_stg_users_view """
   DO $body$
   BEGIN

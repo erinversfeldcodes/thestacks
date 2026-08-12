@@ -1,10 +1,10 @@
 defmodule StacksWeb.CatalogueController do
   @moduledoc """
-  Public catalogue controller for browsing all books in the system.
+      Public catalogue controller for browsing all books in the system.
 
-  Returns paginated book metadata without any ownership information.
-  No user IDs, shelf names, placement data, or aggregate ownership
-  counts are ever included in the response.
+      Returns paginated book metadata without any ownership information.
+      No user IDs, shelf names, placement data, or aggregate ownership
+      counts are ever included in the response.
   """
 
   use CoreWeb, :controller
@@ -14,14 +14,14 @@ defmodule StacksWeb.CatalogueController do
   alias StacksWeb.ProtoJSON
 
   @doc """
-  GET /api/catalogue — returns a paginated list of books.
+      GET /api/catalogue — returns a paginated list of books.
 
-  Query parameters:
-    * `search` — free-text search (title/author)
-    * `subject` — filter by subject/genre
-    * `sort` — one of "title", "author", "recent" (default "title")
-    * `page` — 1-based page number (default 1)
-    * `per_page` — items per page (default 24, max 100)
+      Query parameters:
+        * `search` — free-text search (title/author)
+        * `subject` — filter by subject/genre
+        * `sort` — one of "title", "author", "recent" (default "title")
+        * `page` — 1-based page number (default 1)
+        * `per_page` — items per page (default 24, max 100)
   """
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, params) do
@@ -33,9 +33,6 @@ defmodule StacksWeb.CatalogueController do
       per_page: parse_int(params["per_page"], 24)
     ]
 
-    # #229: forward the viewer's age-verified status so age-gated books are hidden
-    # from an authenticated-but-unverified viewer (as they already are anonymously),
-    # while remaining visible to a verified viewer. Normalise nil → false.
     viewer =
       case Guardian.Plug.current_resource(conn) do
         nil -> :unauthenticated

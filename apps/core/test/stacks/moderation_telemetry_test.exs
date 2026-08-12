@@ -1,29 +1,16 @@
 defmodule Stacks.ModerationTelemetryTest do
   @moduledoc """
-  Firing tests for the moderation-funnel operational counters added in
-  Issue #228 (US-4.1 §13, epic #118).
-
-  Verifies each step of the moderation pipeline emits a `[:stacks,
-  :moderation, …]` telemetry event with the right measurements and
-  metadata:
-
-  - step 1 classification outcome — `:book` / `:not_a_book` / `:ambiguous`
-  - step 2 ISBN resolution outcome — `:resolved` / `:isbn_not_found`
-  - step 3 age-gate tiering — `:public` / `:age_gated`
-  - compound-title expansion — split frequency + parts
-
-  Metadata tags are whitelisted atoms only — never a raw ISBN, title, or
-  any other user input (GDPR: telemetry is a warehouse-adjacent sink).
-
-  Follows the attach → exercise → assert_receive pattern of
-  `upload_telemetry_test.exs` / `visibility_telemetry_test.exs`.
+      Firing tests for the 228 moderation-funnel counters: classification
+      outcome (:book/:not_a_book/:ambiguous), ISBN resolution
+      (:resolved/:isbn_not_found), age-gate tiering (:public/:age_gated),
+      and compound-title expansion. Metadata tags are whitelisted atoms —
+      Prometheus label cardinality depends on it.
   """
 
-  # async: false — swaps the vision client via Application.put_env (global
-  # process state) and attaches global telemetry handlers.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Stacks.Books
@@ -47,18 +34,11 @@ defmodule Stacks.ModerationTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  defp with_vision_client(module, fun) do
-    original = Application.get_env(:core, :vision_client)
-    Application.put_env(:core, :vision_client, module)
-
-    try do
-      fun.()
-    after
-      Application.put_env(:core, :vision_client, original)
-    end
+  defp compound_title_text do
+    book_response([book_candidate(title: "First Book OR Second Book", confidence: 0.9)])
   end
 
-  # ── Step 1: classification outcome ─────────────────────────────────────
+  defp no_resolvable, do: book_response([book_candidate()])
 
   describe "classification telemetry" do
     test "emits :book when the image is classified as a book (happy)" do
@@ -74,7 +54,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits :not_a_book when the image is not a book (sad)" do
       attach_telemetry([[:stacks, :moderation, :classification]])
 
-      with_vision_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         assert {:error, :not_a_book} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -85,7 +65,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits :ambiguous when the classification is ambiguous (sad)" do
       attach_telemetry([[:stacks, :moderation, :classification]])
 
-      with_vision_client(__MODULE__.AmbiguousClient, fn ->
+      with_vision(ambiguous(), fn ->
         assert {:error, :not_a_book} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -93,8 +73,6 @@ defmodule Stacks.ModerationTelemetryTest do
                       %{outcome: :ambiguous}}
     end
   end
-
-  # ── Step 2: ISBN resolution outcome ────────────────────────────────────
 
   describe "ISBN resolution telemetry" do
     test "emits :resolved when a candidate resolves to a book (happy)" do
@@ -110,7 +88,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits :isbn_not_found when a candidate cannot be resolved (sad)" do
       attach_telemetry([[:stacks, :moderation, :isbn_resolution]])
 
-      with_vision_client(__MODULE__.NoResolvableClient, fn ->
+      with_vision(no_resolvable(), fn ->
         assert {:error, :isbn_not_found} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -118,13 +96,6 @@ defmodule Stacks.ModerationTelemetryTest do
                       %{outcome: :isbn_not_found}}
     end
   end
-
-  # ── Age-gate tiering (repointed to the user/owner set path) ────────────
-  #
-  # The automatic subject→BISAC classifier was removed (Issue #118), so the
-  # pipeline no longer emits [:stacks, :moderation, :tiering]. The metric is
-  # repointed onto Books.set_visibility_tier/3, which fires it when a PERSON
-  # sets the tier. These tests keep the metric covered on both sides.
 
   describe "tiering telemetry" do
     test "the pipeline no longer emits tiering — books default to public (happy)" do
@@ -149,15 +120,11 @@ defmodule Stacks.ModerationTelemetryTest do
     end
   end
 
-  # ── Compound-title expansion ───────────────────────────────────────────
-
   describe "compound expansion telemetry" do
     test "emits a split measurement when a ' OR '-joined title is expanded" do
       attach_telemetry([[:stacks, :moderation, :compound_expansion]])
 
-      with_vision_client(__MODULE__.CompoundTitleTextClient, fn ->
-        # Neither part resolves (no HTTP responses registered) so the pipeline
-        # ends in :isbn_not_found — but the expansion event fires regardless.
+      with_vision(compound_title_text(), fn ->
         assert {:error, :isbn_not_found} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -173,93 +140,5 @@ defmodule Stacks.ModerationTelemetryTest do
 
       refute_receive {:telemetry_event, [:stacks, :moderation, :compound_expansion], _, _}, 100
     end
-  end
-
-  # ── Inline mock vision clients ─────────────────────────────────────────
-
-  defmodule NotABookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
-           "confidence" => 0.95,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule AmbiguousClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
-           "confidence" => 0.5,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule NoResolvableClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    # BOOK classification with a candidate that has no ISBN and a nil title —
-    # title_fallback returns :isbn_not_found for it.
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{"title" => nil, "author" => nil, "potential_isbns" => [], "raw_text" => nil}
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule CompoundTitleTextClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    # A single candidate whose title is two book titles joined with " OR " —
-    # exercises expand_compound_candidates/1.
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "First Book OR Second Book",
-               "author" => nil,
-               "potential_isbns" => [],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end

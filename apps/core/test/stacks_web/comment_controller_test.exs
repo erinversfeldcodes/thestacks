@@ -16,10 +16,6 @@ defmodule StacksWeb.CommentControllerTest do
     insert(:post, user: user, published_at: DateTime.utc_now())
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/posts/:post_id/comments
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/posts/:post_id/comments" do
     test "creates a comment (201)", %{conn: conn} do
       user = insert(:user)
@@ -56,10 +52,6 @@ defmodule StacksWeb.CommentControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/comments/:id
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/comments/:id" do
     test "comment owner can delete", %{conn: conn} do

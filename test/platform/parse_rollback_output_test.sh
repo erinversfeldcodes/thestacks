@@ -39,8 +39,6 @@ SCRIPT="$REPO_ROOT/scripts/rollback-production.sh"
 OUT=""
 RC=0
 
-# Helper: write fixture content to a temp file, invoke the parser, capture
-# stdout into OUT and exit code into RC.
 run_parser_with_fixture() {
     local fixture_content="$1"
     local fixture_file
@@ -51,59 +49,50 @@ run_parser_with_fixture() {
     rm -f "$fixture_file"
 }
 
-# ── Case 1: core leg → true ─────────────────────────────────────────────────
 test_case "core_rolled_back_true" "PASS rollback: core rolled back → core-rolled-back=true"
 run_parser_with_fixture "==> Rolling core back to image registry.fly.io/stacks-core:deployment-01abc...
 PASS rollback: core rolled back"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "core-rolled-back=true" "core-rolled-back=true emitted"
 
-# ── Case 2: core leg → false (skip) ─────────────────────────────────────────
 test_case "core_rolled_back_false" "==> core rollback skipped … → core-rolled-back=false"
 run_parser_with_fixture "==> core rollback skipped — currently-serving image already matches abc123
     (migration-failure path: image was never cut over; DB + vision legs still run)"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "core-rolled-back=false" "core-rolled-back=false emitted"
 
-# ── Case 3: core leg → error ────────────────────────────────────────────────
 test_case "core_rolled_back_error" "FAIL rollback: fly deploy (core) failed → core-rolled-back=error"
 run_parser_with_fixture "==> Rolling core back to image registry.fly.io/stacks-core:deployment-01abc...
 FAIL rollback: fly deploy (core) failed — NOT attempting modal rollback"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "core-rolled-back=error" "core-rolled-back=error emitted"
 
-# ── Case 4: db leg → true ───────────────────────────────────────────────────
 test_case "db_rolled_back_true" "PASS rollback: Neon prod branch restored … → db-rolled-back=true"
 run_parser_with_fixture "PASS rollback: Neon prod branch restored to LSN 0/16E8090
   pre-rollback state preserved as branch: pre-rollback-deadbee-20260429T000000Z"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "db-rolled-back=true" "db-rolled-back=true emitted"
 
-# ── Case 5: db leg → false (skip) ───────────────────────────────────────────
 test_case "db_rolled_back_false_skip" "WARN rollback: PRE_MIGRATE_LSN unset → db-rolled-back=false"
 run_parser_with_fixture "WARN rollback: PRE_MIGRATE_LSN unset — skipping Neon DB rollback (image-only)"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "db-rolled-back=false" "db-rolled-back=false emitted"
 
-# ── Case 6: db leg → error (HTTP) ───────────────────────────────────────────
 test_case "db_rolled_back_error_http" "FAIL rollback: Neon restore returned HTTP 500 → db-rolled-back=error"
 run_parser_with_fixture "FAIL rollback: Neon restore returned HTTP 500"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "db-rolled-back=error" "db-rolled-back=error emitted"
 
-# ── Case 7: db leg → error (transport) ──────────────────────────────────────
 test_case "db_rolled_back_error_transport" "FAIL rollback: Neon restore curl call failed → db-rolled-back=error"
 run_parser_with_fixture "FAIL rollback: Neon restore curl call failed (transport-level)"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "db-rolled-back=error" "db-rolled-back=error emitted (transport-level FAIL form)"
 
-# ── Case 8: modal leg → true ────────────────────────────────────────────────
 test_case "modal_rolled_back_true" "PASS rollback: vision rolled back → modal-rolled-back=true"
 run_parser_with_fixture "PASS rollback: vision rolled back to deadbeef"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "modal-rolled-back=true" "modal-rolled-back=true emitted"
 
-# ── Case 9: modal leg → false (skip) ────────────────────────────────────────
 test_case "modal_rolled_back_false_skip" "WARN rollback: MODAL_PREV_COMMIT is unset → modal-rolled-back=false"
 run_parser_with_fixture "WARN rollback: MODAL_PREV_COMMIT is unset — skipping modal vision rollback.
   Core is the critical path; vision rollback is partial-success here.
@@ -111,19 +100,16 @@ PASS rollback: core-only rollback complete (modal skipped)"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "modal-rolled-back=false" "modal-rolled-back=false emitted"
 
-# ── Case 10: modal leg → error (deploy) ─────────────────────────────────────
 test_case "modal_rolled_back_error_deploy" "FAIL rollback: modal deploy (vision rollback) failed → modal-rolled-back=error"
 run_parser_with_fixture "FAIL rollback: modal deploy (vision rollback) failed at deadbeef"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "modal-rolled-back=error" "modal-rolled-back=error emitted (deploy failure)"
 
-# ── Case 11: modal leg → error (clone) ──────────────────────────────────────
 test_case "modal_rolled_back_error_clone" "FAIL rollback: could not check out … → modal-rolled-back=error"
 run_parser_with_fixture "FAIL rollback: could not check out deadbeef from origin"
 assert_exit_zero "$RC" "parser exits 0"
 assert_contains "$OUT" "modal-rolled-back=error" "modal-rolled-back=error emitted (clone failure)"
 
-# ── Case 12: combined / happy path ──────────────────────────────────────────
 test_case "happy_path_full" "all three PASS markers present → all three outputs =true"
 run_parser_with_fixture "==> Rolling back production core + vision
 PASS rollback: core rolled back
@@ -135,7 +121,6 @@ assert_contains "$OUT" "core-rolled-back=true" "core-rolled-back=true on happy p
 assert_contains "$OUT" "db-rolled-back=true" "db-rolled-back=true on happy path"
 assert_contains "$OUT" "modal-rolled-back=true" "modal-rolled-back=true on happy path"
 
-# ── Case 13: migration-failure path ─────────────────────────────────────────
 test_case "migration_failure_path" "core skipped, db+modal succeed → core=false, db=true, modal=true"
 run_parser_with_fixture "==> core rollback skipped — currently-serving image already matches abc123
 PASS rollback: Neon prod branch restored to LSN 0/16E8090
@@ -146,12 +131,8 @@ assert_contains "$OUT" "core-rolled-back=false" "core-rolled-back=false on migra
 assert_contains "$OUT" "db-rolled-back=true" "db-rolled-back=true on migration-failure path"
 assert_contains "$OUT" "modal-rolled-back=true" "modal-rolled-back=true on migration-failure path"
 
-# ── Case 14: missing log file → all error, exit 0 ──────────────────────────
 test_case "missing_log_file" "non-existent log path → all three legs =error, parser exits 0"
 MISSING_LOG="/tmp/no-such-file-$$.log"
-# Belt-and-braces: ensure the path really doesn't exist before invoking the
-# parser. If a previous test happened to leave a file at this path, remove
-# it so the test is deterministic.
 rm -f "$MISSING_LOG"
 OUT="$(bash "$PARSER" "$MISSING_LOG" 2>&1)"
 RC=$?
@@ -160,12 +141,6 @@ assert_contains "$OUT" "core-rolled-back=error" "core-rolled-back=error on missi
 assert_contains "$OUT" "modal-rolled-back=error" "modal-rolled-back=error on missing log"
 assert_contains "$OUT" "db-rolled-back=error" "db-rolled-back=error on missing log"
 
-# ── Case 15: live marker check ──────────────────────────────────────────────
-# Iterate the parser's marker substrings and assert each one appears
-# verbatim in scripts/rollback-production.sh. If a future script edit
-# drops or reworks one of these strings, this test fails immediately with
-# "marker '<X>' not found …" — telling the maintainer to update the parser
-# in lockstep with the script.
 test_case "live_marker_check" "every parser marker substring still appears verbatim in scripts/rollback-production.sh"
 LIVE_MARKERS=(
     "PASS rollback: core rolled back"

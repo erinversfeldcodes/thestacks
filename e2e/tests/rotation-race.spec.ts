@@ -4,7 +4,7 @@ const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
 
 /**
- * Issue #180 Phase 2 — cross-tab token-rotation race.
+ * Phase 2 — cross-tab token-rotation race.
  *
  * Two tabs (pages) in ONE browser context share the same localStorage, so a
  * `stacks-auth` write in one tab fires a `storage` event in the other. This
@@ -24,7 +24,7 @@ const DEV_PASSWORD = "dev-password-123";
  * via an authed request here — we assert the observable outcome (no spurious
  * logout on rotation; propagated logout on clear).
  */
-test.describe("Cross-tab token rotation race (Issue #180 Phase 2)", () => {
+test.describe("Cross-tab token rotation race", () => {
   async function signIn(page: import("@playwright/test").Page) {
     await page.goto("/login");
     await page.fill('input[id="email"]', DEV_EMAIL);
@@ -40,12 +40,10 @@ test.describe("Cross-tab token rotation race (Issue #180 Phase 2)", () => {
     const pageA = await context.newPage();
     await signIn(pageA);
 
-    // Tab B joins the same context and is authed from the shared localStorage.
     const pageB = await context.newPage();
     await pageB.goto("/antilibrary");
     await expect(pageB.getByTestId("user-menu")).toBeVisible();
 
-    // Tab A rotates its token: rewrite stacks-auth with a fresh token value.
     const rotated = await pageA.evaluate(() => {
       const raw = localStorage.getItem("stacks-auth");
       const parsed = JSON.parse(raw as string);
@@ -55,14 +53,12 @@ test.describe("Cross-tab token rotation race (Issue #180 Phase 2)", () => {
       return next;
     });
 
-    // Deliver that write to tab B as the browser would (same-origin storage event).
     await pageB.evaluate((newValue) => {
       window.dispatchEvent(
         new StorageEvent("storage", { key: "stacks-auth", newValue })
       );
     }, rotated);
 
-    // Tab B adopts the rotated token and stays signed in — NOT redirected.
     await expect(pageB.getByTestId("user-menu")).toBeVisible();
     await expect(pageB).not.toHaveURL(/\/login$/);
     await expect(pageB.locator('input[id="email"]')).not.toBeVisible();
@@ -81,7 +77,6 @@ test.describe("Cross-tab token rotation race (Issue #180 Phase 2)", () => {
     await pageB.goto("/antilibrary");
     await expect(pageB.getByTestId("user-menu")).toBeVisible();
 
-    // Tab A logs out: clearAuth removes stacks-auth (storage event newValue=null).
     await pageA.evaluate(() => localStorage.removeItem("stacks-auth"));
     await pageB.evaluate(() => {
       window.dispatchEvent(
@@ -89,7 +84,6 @@ test.describe("Cross-tab token rotation race (Issue #180 Phase 2)", () => {
       );
     });
 
-    // Tab B follows the sibling logout → redirected to the login form.
     await expect(pageB.locator('input[id="email"]')).toBeVisible({
       timeout: 10000,
     });

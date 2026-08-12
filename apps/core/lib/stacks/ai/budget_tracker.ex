@@ -1,12 +1,12 @@
 defmodule Stacks.AI.BudgetTracker do
   @moduledoc """
-  GenServer that tracks daily and monthly AI API spend per provider.
-  Resets the daily counter at midnight UTC. Monthly limit is also enforced.
+      GenServer that tracks daily and monthly AI API spend per provider.
+      Resets the daily counter at midnight UTC. Monthly limit is also enforced.
 
-  Budget limits are read from application config:
-    config :core, :ai_budget,
-      daily_limit_cents: 5_00,    # $5/day
-      monthly_limit_cents: 50_00  # $50/month
+      Budget limits are read from application config:
+        config:core,:ai_budget,
+          daily_limit_cents: 5_00,    # $5/day
+          monthly_limit_cents: 50_00  # $50/month
   """
 
   use GenServer
@@ -17,8 +17,6 @@ defmodule Stacks.AI.BudgetTracker do
   @default_monthly_limit_cents 5_000
 
   defstruct providers: %{}, daily_total_cents: 0, monthly_total_cents: 0
-
-  # Client API
 
   @doc "Starts the BudgetTracker GenServer."
   def start_link(opts \\ []) do
@@ -32,8 +30,8 @@ defmodule Stacks.AI.BudgetTracker do
   end
 
   @doc """
-  Checks whether spending is within budget.
-  Returns `:ok` or `{:error, :daily_limit_exceeded | :monthly_limit_exceeded}`.
+      Checks whether spending is within budget.
+      Returns `:ok` or `{:error,:daily_limit_exceeded |:monthly_limit_exceeded}`.
   """
   @spec check_budget(atom() | String.t()) :: :ok | {:error, atom()}
   def check_budget(provider) do
@@ -45,8 +43,6 @@ defmodule Stacks.AI.BudgetTracker do
   def current_state do
     GenServer.call(__MODULE__, :current_state)
   end
-
-  # Server callbacks
 
   @impl true
   def init(:ok) do

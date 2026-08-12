@@ -20,7 +20,7 @@ newModel =
 
 suite : Test
 suite =
-    describe "Page.Blog.Editor (US-10.2.3)"
+    describe "Page.Blog.Editor"
         [ describe "init"
             [ test "New mode defaults visibility to Owner" <|
                 \_ ->

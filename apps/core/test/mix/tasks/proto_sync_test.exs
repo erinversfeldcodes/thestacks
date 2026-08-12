@@ -219,7 +219,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      # Non-WKT message types fall back to :map (JSONB) instead of raising
       assert TypeMapper.ecto_type(field) == :map
     end
 
@@ -333,7 +332,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      # Non-WKT message types fall back to :map instead of raising
       assert TypeMapper.migration_type(field) == :map
     end
 
@@ -520,6 +518,110 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       assert msg =~ "file not found"
     end
+
+    test "regenerates a stale GITIGNORED generated file instead of failing" do
+      path =
+        Path.join(
+          @repo_root,
+          "apps/core/lib/stacks/gen/proto/drift_probe_#{:erlang.phash2(self())}.ex"
+        )
+
+      File.write!(path, "# stale\n")
+
+      try do
+        assert {:regenerated, ^path} = DriftChecker.check("# fresh\n", path, @repo_root)
+        assert File.read!(path) == "# fresh\n"
+      after
+        File.rm(path)
+      end
+    end
+
+    test "still fails for a TRACKED generated file that has drifted" do
+      path = Path.join(@repo_root, "drift_probe_tracked_#{:erlang.phash2(self())}.tmp")
+      File.write!(path, "committed\n")
+      {_, 0} = System.cmd("git", ["-C", @repo_root, "add", "-f", "--", path])
+
+      try do
+        assert {:drift, ^path, _diff} =
+                 DriftChecker.check("deliberately wrong\n", path, @repo_root)
+
+        assert File.read!(path) == "committed\n"
+      after
+        System.cmd("git", ["-C", @repo_root, "rm", "--cached", "-f", "--quiet", "--", path])
+        File.rm(path)
+      end
+    end
+
+    test "fails closed when no repo root is given" do
+      path =
+        Path.join(
+          @repo_root,
+          "apps/core/lib/stacks/gen/proto/drift_probe_norepo_#{:erlang.phash2(self())}.ex"
+        )
+
+      File.write!(path, "# stale\n")
+
+      try do
+        assert {:drift, ^path, _diff} = DriftChecker.check("# fresh\n", path)
+        assert File.read!(path) == "# stale\n"
+      after
+        File.rm(path)
+      end
+    end
+  end
+
+  describe "MigrationGenerator.add_columns_slug" do
+    defp fields_named(names), do: Enum.map(names, &%{name: &1})
+
+    test "leaves a short column list fully descriptive" do
+      slug =
+        MigrationGenerator.add_columns_slug(fields_named(~w(book_edition_id)), "price_snapshots")
+
+      assert slug == "add_book_edition_id_to_price_snapshots"
+    end
+
+    test "names every column while it fits" do
+      slug = MigrationGenerator.add_columns_slug(fields_named(~w(a b c)), "t")
+      assert slug == "add_a_b_c_to_t"
+    end
+
+    test "caps a wide column list instead of raising" do
+      names =
+        ~w(email display_name role country_code city consent_analytics age_verified
+           profile_visibility password_hash website_url consent_analytics_at
+           onboarding_completed notify_wishlist_availability notify_marketplace
+           notify_group_invitations notify_event_matches email_confirmed
+           email_confirmation_token password_reset_token password_reset_sent_at
+           age_verified_at age_verification_provider onboarding_steps
+           failed_login_count failed_login_first_at locked_until
+           consent_writing_assistant consent_writing_assistant_at handle)
+
+      slug = MigrationGenerator.add_columns_slug(fields_named(names), "users")
+
+      filename = "20260728000000_#{slug}.exs"
+      assert byte_size(filename) < 255
+      assert byte_size("Elixir.Core.Repo.Migrations." <> Macro.camelize(slug)) < 255
+
+      assert String.starts_with?(slug, "add_email_")
+      assert slug =~ ~r/_and_\d+_more_to_users$/
+    end
+
+    test "is deterministic for the same field set" do
+      names = Enum.map(1..40, &"some_reasonably_long_column_name_#{&1}")
+      fields = fields_named(names)
+
+      assert MigrationGenerator.add_columns_slug(fields, "wide") ==
+               MigrationGenerator.add_columns_slug(fields, "wide")
+    end
+
+    test "keeps at least one column name even when the first alone exceeds the budget" do
+      long = String.duplicate("x", 200)
+      slug = MigrationGenerator.add_columns_slug(fields_named([long, "b", "c"]), "t")
+
+      assert slug =~ "add_#{long}"
+      assert slug =~ "_and_2_more_to_t"
+      refute slug =~ "add__and_"
+    end
   end
 
   describe "MigrationGenerator" do
@@ -552,19 +654,10 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :published_at, :utc_datetime_usec"
       refute output =~ "timestamps("
       assert output =~ "idx_event_log_type_agg"
-      # Every generated index uses CONCURRENTLY so squawk stays clean in CI.
       assert output =~ "concurrently: true"
-      # DESC columns render as Ecto's `desc: :col` keyword form, not raw SQL.
       assert output =~ "desc: :occurred_at"
-      # CONCURRENTLY requires running outside a transaction.
       assert output =~ "@disable_ddl_transaction true"
-      # Ecto holds its migration lock on its own connection, but in the
-      # non-disabled path that lock lives long enough during a
-      # CONCURRENTLY build that Neon's TCP idle-keepalive drops the
-      # socket (observed: 300s hang + `ssl send: closed`). Disable the
-      # lock for CONCURRENTLY-bearing migrations.
       assert output =~ "@disable_migration_lock true"
-      # The raw-SQL index escape hatch is gone — use Ecto's `create index`.
       refute output =~ "CREATE INDEX idx_event_log"
       assert output =~ "DO NOT EDIT MANUALLY"
       assert output =~ "def down"
@@ -600,17 +693,11 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = MigrationGenerator.generate_create_table(feed_cache, fields, "20260320000004")
 
-      # The explicit unique index (upsert conflict target) is kept.
       assert output =~ "feed_cache_bookshelf_id_unique_index"
-      # The redundant auto FK index on the same single column is suppressed —
-      # a unique index on `[:bookshelf_id]` already covers FK lookups.
       refute output =~ ~s|create index(:feed_cache, [:bookshelf_id]|
     end
 
     test "still emits the auto FK index when no single-column index covers the column" do
-      # post_comments has references_table overrides for post_id + author_id and
-      # no explicit index, so the auto FK indexes must still be emitted — the
-      # suppression is scoped to columns an explicit single-column index covers.
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
       post_comments = Enum.find(manifest.tables, &(&1.table_name == "post_comments"))
@@ -671,7 +758,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert "source_name" in existing
       assert "source_type" in existing
       assert "status" in existing
-      # These belong to other tables in the same migration file
       refute "buyer_id" in existing
       refute "amount_cents" in existing
       refute "placement_id" in existing
@@ -696,7 +782,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         }
       ]
 
-      # Create a temp migrations dir with a migration that has "name" but not "created_at"
       tmp_dir = Path.join(System.tmp_dir!(), "test_migrations_ts_#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
 
@@ -715,7 +800,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       existing = MigrationGenerator.existing_columns(tmp_dir, "test_timestamps")
       assert "name" in existing
 
-      # The delta logic filters out timestamp columns when timestamps: :standard
       new_fields = Enum.filter(fields, fn field -> field.name not in existing end)
 
       new_fields =
@@ -727,89 +811,98 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
   end
 
-  describe "run/1 generate mode" do
+  describe "generate mode writes into the root it is given" do
     @tag :tmp_dir
-    test "run([]) generates ecto schemas, dbt models, and migrations", %{tmp_dir: tmp_dir} do
-      # Set up a minimal repo structure in tmp_dir
-      proto_dir = Path.join(tmp_dir, "proto")
-      File.mkdir_p!(proto_dir)
+    test "generates ecto schemas, dbt models, schema.yml and migrations", %{tmp_dir: tmp_dir} do
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
 
-      # Copy the real persisted.exs and proto files so buf build works
-      # Instead, we'll test by calling run from the real repo root
-      # by temporarily changing CWD
-      original_cwd = File.cwd!()
+      core_root = Path.join(tmp_dir, "apps/core")
+      dbt_root = Path.join(tmp_dir, "dbt/models/staging")
+      migrations_dir = Path.join(core_root, "priv/repo/migrations")
 
-      try do
-        File.cd!(@repo_root)
-        ProtoSync.run([])
+      File.mkdir_p!(migrations_dir)
 
-        # Verify ecto schemas were generated
-        manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      Path.join(@repo_root, "apps/core/priv/repo/migrations")
+      |> File.cp_r!(migrations_dir)
 
-        Enum.each(manifest.tables, fn table ->
-          ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
-          assert File.exists?(ecto_path), "Expected #{ecto_path} to exist"
+      File.mkdir_p!(dbt_root)
 
-          # Tables with `skip_dbt: true` are infra plumbing (e.g. cache.*)
-          # and do not have a dbt staging model.
-          if Map.get(table, :skip_dbt, false) do
-            dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
+      File.cp!(
+        Path.join(@repo_root, "dbt/models/staging/schema.yml"),
+        Path.join(dbt_root, "schema.yml")
+      )
 
-            refute File.exists?(dbt_path),
-                   "Expected #{dbt_path} NOT to exist (skip_dbt: true)"
-          else
-            dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
-            assert File.exists?(dbt_path), "Expected #{dbt_path} to exist"
+      ProtoSync.run_generate(manifest, descriptor, tmp_dir)
+
+      Enum.each(manifest.tables, fn table ->
+        unless Map.get(table, :skip_ecto, false) do
+          ecto_path = Path.join(core_root, table.ecto_path)
+
+          assert File.exists?(ecto_path),
+                 "expected #{table.table_name} ecto schema at #{ecto_path}"
+        end
+
+        dbt_path = Path.join(dbt_root, table.dbt_path)
+
+        if Map.get(table, :skip_dbt, false) do
+          refute File.exists?(dbt_path),
+                 "#{table.table_name} sets skip_dbt: true but a staging model was written"
+        else
+          assert File.exists?(dbt_path),
+                 "expected #{table.table_name} staging model at #{dbt_path}"
+        end
+      end)
+
+      schema_yml = Path.join(dbt_root, "schema.yml") |> File.read!()
+      assert schema_yml =~ "stg_price_snapshots"
+      assert schema_yml =~ "book_edition_id"
+
+      assert File.exists?(Path.join(core_root, "lib/stacks/gen/proto_json.ex"))
+
+      seeded =
+        Path.join(@repo_root, "apps/core/priv/repo/migrations") |> File.ls!() |> Enum.sort()
+
+      assert File.ls!(migrations_dir) |> Enum.sort() == seeded,
+             "generate mode invented a migration when the manifest and migrations already agree"
+    end
+
+    @tag :tmp_dir
+    test "every write lands under the given root, never in the working tree", %{tmp_dir: tmp_dir} do
+      real_migrations = Path.join(@repo_root, "apps/core/priv/repo/migrations")
+      File.mkdir_p!(Path.join(tmp_dir, "apps/core/priv/repo/migrations"))
+      File.cp_r!(real_migrations, Path.join(tmp_dir, "apps/core/priv/repo/migrations"))
+      File.mkdir_p!(Path.join(tmp_dir, "dbt/models/staging"))
+
+      File.cp!(
+        Path.join(@repo_root, "dbt/models/staging/schema.yml"),
+        Path.join(tmp_dir, "dbt/models/staging/schema.yml")
+      )
+
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          ProtoSync.run_generate(manifest, descriptor, tmp_dir)
+        end)
+
+      reported =
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.flat_map(fn line ->
+          case Regex.run(~r/^(?:Generated|Updated)(?: migration)? (\/.+)$/, line) do
+            [_, path] -> [path]
+            _ -> []
           end
         end)
 
-        # The cache tables are the only current `skip_dbt: true` users.
-        # Sanity-check the manifest shape hasn't drifted.
-        cache_entries =
-          Enum.filter(manifest.tables, &Map.get(&1, :skip_dbt, false))
+      refute reported == [], "generate mode reported no writes at all"
 
-        assert Enum.any?(cache_entries, &(&1.table_name == "isbn_resolver_cache"))
-        assert Enum.any?(cache_entries, &(&1.table_name == "title_search_cache"))
-      after
-        File.cd!(original_cwd)
+      escaped = Enum.reject(reported, &String.starts_with?(&1, tmp_dir))
 
-        # Clean up untracked ADD COLUMN migrations generated during this test run.
-        # Note: gen/ is NOT cleaned up — it is the canonical schema location now.
-        # We use `git status` to exclude committed migrations from cleanup so that
-        # legitimately-added ADD COLUMN migrations in the same branch are preserved.
-        today = Date.utc_today() |> Date.to_iso8601() |> String.replace("-", "")
-
-        {git_status, _} =
-          System.cmd("git", ["status", "--porcelain", "apps/core/priv/repo/migrations/"],
-            cd: @repo_root
-          )
-
-        untracked_migrations =
-          git_status
-          |> String.split("\n", trim: true)
-          |> Enum.filter(&String.starts_with?(&1, "??"))
-          |> Enum.map(fn line -> Path.basename(String.trim(String.slice(line, 3, 9999))) end)
-
-        Path.join([@repo_root, "apps/core/priv/repo/migrations"])
-        |> File.ls!()
-        |> Enum.filter(fn file ->
-          # Remove untracked ADD COLUMN drift migrations generated today.
-          # Match ONLY the proto.sync ADD COLUMN naming pattern
-          # (`add_<fields>_to_<table>`) so hand-written migrations with
-          # other shapes (e.g. `move_cache_tables_to_cache_schema`) are
-          # preserved. Previously this matched everything-not-_create_,
-          # which silently deleted unstaged move/alter migrations
-          # authored by the developer in the same day.
-          String.starts_with?(file, today) and
-            String.contains?(file, "_add_") and
-            String.contains?(file, "_to_") and
-            file in untracked_migrations
-        end)
-        |> Enum.each(fn file ->
-          Path.join([@repo_root, "apps/core/priv/repo/migrations", file])
-          |> File.rm!()
-        end)
-      end
+      assert escaped == [],
+             "generate mode wrote outside the root it was given: #{inspect(escaped)}"
     end
   end
 
@@ -819,7 +912,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       try do
         File.cd!(@repo_root)
-        # Should not raise when files are up to date
         ProtoSync.run(["--check"])
       after
         File.cd!(original_cwd)
@@ -827,9 +919,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
 
     test "DriftChecker detects when ecto schema has drifted" do
-      # Instead of corrupting the real generated file (which causes CI race
-      # conditions), we test the DriftChecker module directly by writing a
-      # drifted file to a temp directory and comparing against expected content.
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       [table | _] = manifest.tables
       ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
@@ -882,8 +971,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         %{name: "name", number: 1, type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}
       ]
 
-      # Call the private generate_migration through run_generate indirectly
-      # by using the MigrationGenerator directly (it's what generate_migration delegates to)
       timestamp = MigrationGenerator.generate_timestamp()
       content = MigrationGenerator.generate_create_table(table, fields, timestamp)
       filename = "#{timestamp}_create_#{table.table_name}.exs"
@@ -901,7 +988,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       tmp_dir = Path.join(System.tmp_dir!(), "test_mig_delta_#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
 
-      # Create an existing migration
       File.write!(Path.join(tmp_dir, "20260101000001_create_delta_test.exs"), """
       defmodule Test do
         use Ecto.Migration
@@ -959,8 +1045,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       existing = MigrationGenerator.existing_columns(tmp_dir, "warn_test")
       assert "old_field" in existing
 
-      # Proto only has "name", not "old_field" — per additive-only convention, no DROP
-      # The main task's generate_delta_migration handles this, we just verify existing_columns works
       proto_field_names = ["name"]
       removed = Enum.reject(MapSet.to_list(existing), fn col -> col in proto_field_names end)
       assert "old_field" in removed
@@ -985,12 +1069,10 @@ defmodule Mix.Tasks.Proto.SyncTest do
       end
       """)
 
-      # The table has migration_exists: true but proto has a field not in the migration
       existing = MigrationGenerator.existing_columns(tmp_dir, "drift_table")
       assert "name" in existing
       refute "email" in existing
 
-      # Simulate check_migration_drift logic for existing table
       fields = [
         %{name: "name", number: 1, type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"},
         %{name: "email", number: 2, type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}
@@ -1007,7 +1089,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       tmp_dir = Path.join(System.tmp_dir!(), "test_drift_new_#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
 
-      # No migration file exists for "brand_new_table"
       files = if File.dir?(tmp_dir), do: File.ls!(tmp_dir), else: []
 
       has_migration =
@@ -1054,8 +1135,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       try do
         File.cd!(@repo_root)
-        # run/1 calls find_repo_root internally, and it works from repo root
-        # We verify by calling run successfully (which depends on find_repo_root)
         ProtoSync.run(["--check"])
       after
         File.cd!(original_cwd)
@@ -1155,7 +1234,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "      - name: payload"
       assert output =~ "      - name: occurred_at"
       assert output =~ "      - name: published_at"
-      # event_log has no timestamps
       refute output =~ "      - name: created_at"
       refute output =~ "      - name: updated_at"
     end
@@ -1175,8 +1253,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "      - name: created_at"
       assert output =~ "      - name: updated_at"
 
-      # accepted_values no longer auto-generated for enum fields — proto enums
-      # can be a superset of DB enums, causing false failures.
       refute output =~ "accepted_values"
     end
 
@@ -1193,15 +1269,12 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
 
-      # event_type has null: false in overrides
-      # Extract the event_type column block
       lines = String.split(output, "\n")
 
       event_type_idx =
         Enum.find_index(lines, fn l -> String.contains?(l, "- name: event_type") end)
 
       assert event_type_idx != nil
-      # The tests section should follow with not_null
       assert Enum.at(lines, event_type_idx + 2) =~ "tests:"
       assert Enum.at(lines, event_type_idx + 3) =~ "- not_null"
     end
@@ -1221,7 +1294,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
 
-      # relationships tests are no longer auto-generated
       refute output =~ "relationships:"
     end
   end
@@ -1255,11 +1327,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       merged = SchemaYmlGenerator.merge(existing, %{"stg_event_log" => new_block})
 
-      # stg_books is preserved
       assert merged =~ "stg_books"
       assert merged =~ "Hand-written books model."
 
-      # stg_event_log is replaced
       assert merged =~ "Proto-synced staging model for event_log."
       refute merged =~ "Old description."
     end
@@ -1344,7 +1414,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       File.write!(tmp_path, content)
 
-      # No proto models -> merge is a no-op
       assert :ok == SchemaYmlGenerator.check_drift(tmp_path, %{})
 
       File.rm!(tmp_path)
@@ -1401,9 +1470,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
           fields =
             Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-          # `skip_ecto: true` tables have a hand-written schema (e.g. a pgvector
-          # column proto cannot express) — don't drift-check a file the codegen
-          # does not own. Mirrors Mix.Tasks.Proto.Sync's run_check.
           ecto_results =
             if Map.get(table, :skip_ecto, false) do
               []
@@ -1416,8 +1482,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
               ]
             end
 
-          # `skip_dbt: true` tables intentionally have no staging model —
-          # don't drift-check a file that by design doesn't exist.
           if Map.get(table, :skip_dbt, false) do
             ecto_results
           else
@@ -1456,11 +1520,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
           {model_name, block}
         end)
 
-      # After merge, check_drift should return :ok
       existing = File.read!(schema_yml_path)
       merged = SchemaYmlGenerator.merge(existing, generated_blocks)
 
-      # Write merged content to a temp file and check drift
       tmp_path = Path.join(System.tmp_dir!(), "schema_roundtrip_#{System.unique_integer()}.yml")
       File.write!(tmp_path, merged)
 
@@ -1485,7 +1547,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       assert output =~ "defmodule StacksWeb.ProtoJSON.Gen do"
 
-      # One function per config entry
       for config <- manifest.proto_json do
         assert output =~ "def #{config.function_name}(struct) do"
         assert output =~ "def #{config.function_name}(nil), do: nil"
@@ -1499,11 +1560,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
     } do
       output = ProtoJsonGenerator.generate(manifest, descriptor)
 
-      # Proto field is website_url with json_name="website" — Author uses the json_name
       assert output =~ "website: struct.website_url"
 
-      # The Author function should NOT have "website_url:" as a map key (only "website:")
-      # Split output by function boundaries and check the author section
       author_section =
         output
         |> String.split("@doc")
@@ -1519,11 +1577,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
     } do
       output = ProtoJsonGenerator.generate(manifest, descriptor)
 
-      # Book skips author, editions, edition_count, primary_edition, community_read_count
       refute output =~ "author: struct.author"
       refute output =~ "edition_count: struct.edition_count"
 
-      # User skips password_hash
       refute output =~ "password_hash: struct.password_hash"
     end
   end

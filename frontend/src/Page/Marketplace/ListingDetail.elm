@@ -14,6 +14,7 @@ only on active listings).
 
 -}
 
+import Api
 import Html exposing (Html, a, div, h1, h2, img, p, span, text)
 import Html.Attributes exposing (class, href, src)
 import Http
@@ -57,7 +58,7 @@ fetchListing listingId maybeToken =
         , url = "/api/listings/" ++ listingId
         , body = Http.emptyBody
         , expect = Http.expectJson ListingReceived (Json.Decode.field "listing" Types.Listing.listingDecoder)
-        , timeout = Nothing
+        , timeout = Api.standardTimeout
         , tracker = Nothing
         }
 
@@ -72,10 +73,6 @@ update msg model =
 
                 Err err ->
                     ( { model | listing = Failure err }, Cmd.none )
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg
@@ -238,10 +235,6 @@ viewContact listing =
 
         _ ->
             text ""
-
-
-
--- HELPERS
 
 
 statusCssClass : Types.Listing.ListingStatus -> String

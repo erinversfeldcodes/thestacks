@@ -1,7 +1,7 @@
 defmodule CoreWeb.FallbackController do
   @moduledoc """
-  Translates common `{:error, reason}` tuples from controller actions into
-  appropriate HTTP responses.  Controllers opt in with `action_fallback/1`.
+      Translates common `{:error, reason}` tuples from controller actions into
+      appropriate HTTP responses.  Controllers opt in with `action_fallback/1`.
   """
 
   use CoreWeb, :controller
@@ -48,5 +48,17 @@ defmodule CoreWeb.FallbackController do
     conn
     |> put_status(422)
     |> json(%{error: "placement not found"})
+  end
+
+  def call(conn, {:error, :not_public}) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "not_public"})
+  end
+
+  def call(conn, {:error, :bad_format}) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "format must be html or markdown"})
   end
 end

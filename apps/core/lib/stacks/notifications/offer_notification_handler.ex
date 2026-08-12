@@ -1,10 +1,10 @@
 defmodule Stacks.Notifications.OfferNotificationHandler do
   @moduledoc """
-  Event handler that enqueues a new-offer email to the seller when an offer
-  is opened on their listing.
+      Event handler that enqueues a new-offer email to the seller when an offer
+      is opened on their listing.
 
-  Implements `Stacks.Events.Handler` and is registered in
-  `Stacks.Events.Registry` for the `"offer.opened"` event type.
+      Implements `Stacks.Events.Handler` and is registered in
+      `Stacks.Events.Registry` for the `"offer.opened"` event type.
   """
 
   @behaviour Stacks.Events.Handler

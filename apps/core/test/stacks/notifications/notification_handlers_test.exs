@@ -1,7 +1,7 @@
 defmodule Stacks.Notifications.NotificationHandlersTest do
   @moduledoc """
-  Tests for GroupInvitationHandler, OfferNotificationHandler, and
-  WishlistAvailabilityHandler.
+      Tests for GroupInvitationHandler, OfferNotificationHandler, and
+      WishlistAvailabilityHandler.
   """
 
   use Core.DataCase, async: false
@@ -13,10 +13,6 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
   alias Stacks.Notifications.OfferNotificationHandler
   alias Stacks.Notifications.WishlistAvailabilityHandler
   alias Stacks.Workers.EmailDeliveryJob
-
-  # ---------------------------------------------------------------------------
-  # GroupInvitationHandler
-  # ---------------------------------------------------------------------------
 
   describe "GroupInvitationHandler.handle_event/1" do
     test "enqueues group_invitation email when notify_group_invitations is true" do
@@ -77,10 +73,6 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       refute_enqueued(worker: EmailDeliveryJob)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # OfferNotificationHandler
-  # ---------------------------------------------------------------------------
 
   describe "OfferNotificationHandler.handle_event/1" do
     test "enqueues new_offer email to seller when notify_marketplace is true" do
@@ -144,10 +136,6 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       refute_enqueued(worker: EmailDeliveryJob)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # WishlistAvailabilityHandler
-  # ---------------------------------------------------------------------------
 
   describe "WishlistAvailabilityHandler.handle_event/1" do
     test "enqueues wishlist_available email for each user with book wishlisted" do
@@ -213,7 +201,6 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       assert :ok = WishlistAvailabilityHandler.handle_event(event)
       assert :ok = WishlistAvailabilityHandler.handle_event(event)
 
-      # Only one job should exist due to unique constraint on book_id + user_id
       assert [_single_job] =
                all_enqueued(
                  worker: EmailDeliveryJob,

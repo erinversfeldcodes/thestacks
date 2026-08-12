@@ -4,8 +4,6 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.Handlers.CacheInvalidationHandler
 
-  # Use per-test unique keys to avoid races with BookDetailCacheTest's
-  # invalidate_all() setup that runs concurrently (both modules are async: true).
   setup do
     n = System.unique_integer([:positive])
     id1 = "book-#{n}-1"
@@ -24,31 +22,125 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:ok, _} = BookDetailCache.get(id2)
   end
 
-  @tag stories: ["US-1.1.7"], suite: :cache
+  @tag suite: :cache
   test "two book.created events each invalidate their own cache entry", %{id1: id1, id2: id2} do
-    # Both primed in setup already
     assert {:ok, _} = BookDetailCache.get(id1)
     assert {:ok, _} = BookDetailCache.get(id2)
 
-    # Invalidate id1 only
     event1 = %{event_type: "book.created", aggregate_id: id1, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event1)
 
-    # id1 gone, id2 still present
     assert {:miss, ^id1} = BookDetailCache.get(id1)
     assert {:ok, _} = BookDetailCache.get(id2)
 
-    # Now invalidate id2
     event2 = %{event_type: "book.created", aggregate_id: id2, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event2)
 
     assert {:miss, ^id2} = BookDetailCache.get(id2)
   end
 
-  test "invalidates cache on book.cover_confirmed", %{id1: _id1, id2: id2} do
-    event = %{event_type: "book.cover_confirmed", aggregate_id: id2, payload: %{}}
+  test "invalidates the WORK on book.cover_confirmed, not the edition the event aggregates",
+       %{id1: id1, id2: id2} do
+    event = %{
+      event_type: "book.cover_confirmed",
+      aggregate_type: "book_edition",
+      aggregate_id: "edition-that-is-not-a-cache-key",
+      payload: %{"book_id" => id2, "cover_image_url" => "https://example.test/c.jpg"}
+    }
+
     assert :ok = CacheInvalidationHandler.handle_event(event)
     assert {:miss, ^id2} = BookDetailCache.get(id2)
+    assert {:ok, _} = BookDetailCache.get(id1)
+  end
+
+  test "invalidates on book.cover_confirmed with atom payload keys", %{id1: id1} do
+    event = %{
+      event_type: "book.cover_confirmed",
+      aggregate_id: "edition-1",
+      payload: %{book_id: id1, cover_image_url: "https://example.test/c.jpg"}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+  end
+
+  test "invalidates the merged-into work on books.edition_merged", %{id1: id1, id2: id2} do
+    event = %{
+      event_type: "books.edition_merged",
+      aggregate_type: "book_edition",
+      aggregate_id: "edition-new-1",
+      payload: %{"isbn" => "9780099466031", "work_id" => id1}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
+  end
+
+  test "invalidates on books.edition_merged with atom payload keys", %{id2: id2} do
+    event = %{
+      event_type: "books.edition_merged",
+      aggregate_id: "edition-new-2",
+      payload: %{isbn: "9780099466031", work_id: id2}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
+  end
+
+  test "a payload with no work id degrades to the TTL rather than raising", %{id1: id1} do
+    event = %{
+      event_type: "books.edition_merged",
+      aggregate_id: "edition-new-3",
+      payload: %{"isbn" => "9780099466031"}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:ok, _} = BookDetailCache.get(id1)
+  end
+
+  test "invalidates the work on book.visibility_tier_changed", %{id1: id1, id2: id2} do
+    event = %{
+      event_type: "book.visibility_tier_changed",
+      aggregate_type: "book",
+      aggregate_id: id1,
+      payload: %{"book_id" => id1, "visibility_tier" => "age_gated"}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
+  end
+
+  test "invalidates on book.visibility_tier_changed with atom payload keys", %{id2: id2} do
+    event = %{
+      event_type: "book.visibility_tier_changed",
+      aggregate_id: id2,
+      payload: %{book_id: id2, visibility_tier: "age_gated"}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
+  end
+
+  test "invalidates the enriched work on book.enriched", %{id1: id1, id2: id2} do
+    event = %{
+      event_type: "book.enriched",
+      aggregate_type: "book",
+      aggregate_id: id2,
+      payload: %{"book_id" => id2}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
+    assert {:ok, _} = BookDetailCache.get(id1)
+  end
+
+  test "invalidates on book.enriched with atom payload keys", %{id1: id1} do
+    event = %{event_type: "book.enriched", aggregate_id: id1, payload: %{book_id: id1}}
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
   end
 
   test "invalidates multiple books on blog.associations_suggested with string keys",

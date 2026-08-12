@@ -5,10 +5,6 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
-# Blocked hostname strings (matched before DNS resolution).
-# These are hostname-level string matches, not IP checks.
-# IP-based blocking (including 0.0.0.0, loopback, CGN, etc.) is handled by
-# _is_globally_routable() after DNS resolution or IP-literal fast-path.
 _BLOCKED_HOSTS = {
     "localhost",
     "0.0.0.0",  # kept for defence-in-depth before IP fast-path; harmless if redundant
@@ -43,7 +39,6 @@ async def validate_image_url(url: str) -> None:
     """
     parsed = urlparse(url)
 
-    # Must be HTTP or HTTPS
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(
             status_code=422,
@@ -54,7 +49,6 @@ async def validate_image_url(url: str) -> None:
     if not hostname:
         raise HTTPException(status_code=422, detail="URL has no hostname")
 
-    # Block known dangerous hostnames
     hostname_lower = hostname.lower()
     if hostname_lower in _BLOCKED_HOSTS:
         raise HTTPException(status_code=422, detail="URL hostname is blocked")
@@ -63,20 +57,16 @@ async def validate_image_url(url: str) -> None:
         if hostname_lower.endswith(suffix):
             raise HTTPException(status_code=422, detail="URL hostname is blocked")
 
-    # Fast path: if hostname is already an IP literal, validate it directly
-    # without a DNS round-trip (avoids TOCTOU window for IP-literal URLs).
     try:
         ip_literal = ipaddress.ip_address(hostname_lower)
         if not _is_globally_routable(ip_literal):
             raise HTTPException(
                 status_code=422, detail="URL resolves to a private/reserved IP address"
             )
-        # Valid public IP literal — skip DNS resolution.
         return
     except ValueError:
         pass  # Not an IP literal; proceed to DNS resolution below.
 
-    # Resolve hostname and check for private IPs (offloaded to thread pool to avoid blocking).
     loop = asyncio.get_running_loop()
     try:
         resolved = await loop.run_in_executor(None, socket.getaddrinfo, hostname_lower, None)
@@ -85,8 +75,6 @@ async def validate_image_url(url: str) -> None:
             if af not in (socket.AF_INET, socket.AF_INET6):
                 continue
             ip = ipaddress.ip_address(addr[0])
-            # Explicitly unpack IPv4-mapped IPv6 (::ffff:10.x.x.x) to get the IPv4 address.
-            # is_private for IPv4-mapped IPv6 was unreliable before Python 3.11.
             if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
                 ip = ip.ipv4_mapped
             if not _is_globally_routable(ip):
@@ -96,7 +84,6 @@ async def validate_image_url(url: str) -> None:
                 )
             validated_count += 1
         if validated_count == 0:
-            # getaddrinfo returned results but none were AF_INET/AF_INET6 — treat as unresolvable.
             raise HTTPException(status_code=422, detail="URL hostname could not be resolved")
     except socket.gaierror as exc:
         raise HTTPException(status_code=422, detail="URL hostname could not be resolved") from exc

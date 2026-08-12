@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
   @moduledoc """
-  Oban worker that discovers author websites and RSS feeds via Brave Search.
+      Oban worker that discovers author websites and RSS feeds via Brave Search.
 
-  Accepts `%{"author_id" => id}` for a single author, or `%{"batch" => true}`
-  to process all authors missing sources.
+      Accepts `%{"author_id" => id}` for a single author, or `%{"batch" => true}`
+      to process all authors missing sources.
 
-  For each author, searches Brave for their official website or blog,
-  then attempts to discover an RSS feed at the discovered URL.
+      For each author, searches Brave for their official website or blog,
+      then attempts to discover an RSS feed at the discovered URL.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -117,37 +117,21 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
     Enum.any?(@social_domains, fn domain -> String.contains?(host, domain) end)
   end
 
-  defp discover_rss_feed(website_url) do
-    # Try common RSS feed paths
-    feed_paths = ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/blog/feed"]
+  @feed_paths ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/blog/feed"]
 
+  defp discover_rss_feed(website_url) do
     uri = URI.parse(website_url)
     base = "#{uri.scheme}://#{uri.host}"
+    fetcher = rss_fetcher()
 
-    Enum.find_value(feed_paths, fn path ->
+    Enum.find_value(@feed_paths, fn path ->
       feed_url = base <> path
 
-      case try_fetch_feed(feed_url) do
+      case fetcher.probe(feed_url) do
         {:ok, _} -> feed_url
         _ -> nil
       end
     end)
-  end
-
-  defp try_fetch_feed(url) do
-    req = Finch.build(:head, url)
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
-      {:ok, %Finch.Response{status: status}} when status in 200..299 ->
-        {:ok, url}
-
-      _ ->
-        {:error, :not_found}
-    end
-  rescue
-    e ->
-      Logger.warning("DiscoverAuthorSourcesJob: RSS feed check failed: #{Exception.message(e)}")
-      {:error, :request_failed}
   end
 
   defp maybe_put(attrs, key, value, existing) do
@@ -160,5 +144,9 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
 
   defp brave_client do
     Application.get_env(:core, :brave_client, Stacks.Discovery.BraveClient)
+  end
+
+  defp rss_fetcher do
+    Application.get_env(:core, :rss_fetcher, Stacks.Enrichment.RssFetcher)
   end
 end

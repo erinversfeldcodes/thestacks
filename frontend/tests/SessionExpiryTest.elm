@@ -1,42 +1,18 @@
 module SessionExpiryTest exposing (suite)
 
-{-| Tests for Issue #173 Phase 2 — global session-expiry interceptor + proactive
-silent renewal.
-
-
-## Seam note (read before extending)
-
-`Main.elm` is a `Browser.application` with a real `Nav.Key` and real ports plus
-real `Api.*` `Cmd`s. As documented in `MainNavTest`, its full update loop cannot
-be driven by `elm-program-test` (effects are opaque `Cmd Msg`), and any function
-taking `Main.Model` cannot be unit-tested because `Model` embeds an
-unconstructable `Nav.Key`. So the interceptor is tested at the seams that ARE
-reachable:
-
-  - **Page precondition (Scenario 1):** an authenticated 401 must stop being
-    swallowed as `NoOut` and bubble a distinct `OutMsg` to `Main`. Asserted as
-    `OutMsg /= NoOut` on the two representative authed pages.
-  - **Exclusion (Scenario 2):** a login 401 stays local (invalid-credentials, no
-    global notice / redirect).
-  - **Renewal (Scenarios 3 & 4):** driven through a `POST /api/auth/refresh`
-    `SimulatedEffect` harness whose success path calls the real key-free
-    `Main.renewAuthToken`; success adopts the new token (no logout), failure
-    clears auth (the `sessionExpired` fall-through).
-  - **Notice + scheduling:** `Login.expiredInit` renders the distinct notice
-    (the visible outcome of `Main.sessionExpired`'s flag), and `Main.loginEffects`
-    includes `ScheduleRenewal` (renewal is armed on login).
-
-`Main.sessionExpired`'s full redirect + `clearAuth` port (needs `Nav.Key`) is
-covered by the deployed E2E gate (`e2e/tests/auth.spec.ts`).
-
+{-| Global session-expiry interceptor + proactive silent renewal. Main's
+full update loop cannot be program-tested (real Nav.Key, opaque Cmds),
+so the seam is tested pure: the interceptor claims authed 401s, expiry
+stashes the current route for the post-login return, and renewal fires
+ahead of the deadline without user-visible state changes.
 -}
 
 import Api
 import Expect
 import Html
 import Http
-import Json.Decode as Decode
 import Main
+import Navigation.Route as Route
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Login as Login
@@ -51,7 +27,7 @@ import Types.User exposing (User)
 
 suite : Test
 suite =
-    describe "Session expiry interceptor + renewal (Issue #173 Phase 2)"
+    describe "Session expiry interceptor + renewal"
         [ describe "Scenario 1 — 401 on an authed page bubbles to the global interceptor"
             [ bookshelf401BubblesOutMsg
             , bookDetail401BubblesOutMsg
@@ -74,11 +50,14 @@ suite =
             [ expiredInitRendersDistinctNotice
             , freshInitHasNoNotice
             ]
+        , describe "— an expiry bounce remembers the page it bounced off"
+            [ expiryCapturesThePageTheReaderWasOn
+            , expiryCaptureSurvivesTheRedirectToLogin
+            , ordinaryNavigationToLoginCapturesNothing
+            , expiryOffAPublicPageCapturesNothing
+            , routeGuardBounceStillCaptures
+            ]
         ]
-
-
-
--- SCENARIO 1
 
 
 {-| RED: an authenticated 401 from the bookshelf load must NOT be swallowed as
@@ -167,10 +146,6 @@ bookshelf403StaysLocal =
             outMsg |> Expect.equal Bookshelf.NoOut
 
 
-
--- SCENARIO 2 (exclusion)
-
-
 {-| Exclusion guard: a 401 from `/api/auth/login` is invalid-credentials, NOT a
 session expiry. It must be handled LOCALLY by `Page.Login` — the login form
 stays put, shows its themed invalid-credentials copy, and never surfaces the
@@ -194,10 +169,6 @@ loginPage401StaysLocalInvalidCredentials =
                     [ Selector.text "Present your credentials to enter" ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "closed your session" ]
-
-
-
--- SCENARIO 3 & 4 — SILENT RENEWAL (via a POST /api/auth/refresh harness)
 
 
 {-| A user whose token is nearing expiry. The renewal harness starts here.
@@ -228,41 +199,13 @@ type RenewMsg
     | RefreshResult (Result Http.Error Api.AuthResponse)
 
 
-{-| Decoder mirroring `Api.authResponseDecoder` — refresh's 200 body is
-byte-identical to login's (contract confirmed), so the same shape decodes it.
--}
-authResponseDecoder : Decode.Decoder Api.AuthResponse
-authResponseDecoder =
-    Decode.map8 Api.AuthResponse
-        (Decode.field "token" Decode.string)
-        (Decode.at [ "user", "id" ] Decode.string)
-        (Decode.at [ "user", "email" ] Decode.string)
-        (Decode.at [ "user", "display_name" ] Decode.string)
-        (Decode.oneOf
-            [ Decode.at [ "user", "handle" ] Decode.string
-            , Decode.succeed ""
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "role" ] Decode.string
-            , Decode.succeed "user"
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_analytics" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_writing_assistant" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-
-
 {-| Effect translation for the harness: `TriggerRenewal` issues the real
-`POST /api/auth/refresh` (Bearer token) that `Api.refresh` builds; results feed
-back as `RefreshResult`.
+`POST /api/auth/refresh` (Bearer token) that `Api.refresh` builds, decoded with
+the REAL `Api.authResponseDecoder` — refresh's 200 body is byte-identical to
+login's (contract confirmed), so the same decoder reads it. A hand-mirrored
+copy used to live here; it is exactly the second-source-of-truth that let the
+upload wire format drift unnoticed. Results feed back as
+`RefreshResult`.
 -}
 renewEffects : RenewMsg -> Maybe Main.Auth -> SimulatedEffect RenewMsg
 renewEffects msg model =
@@ -273,7 +216,7 @@ renewEffects msg model =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ auth.token) ]
                 , url = "/api/auth/refresh"
                 , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson RefreshResult authResponseDecoder
+                , expect = SimulatedEffect.Http.expectJson RefreshResult Api.authResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
@@ -340,7 +283,7 @@ renewalSuccessKeepsUserLoggedIn =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
                     (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.expectViewHasNot [ Selector.text "signed-out" ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "closed your session" ]
 
 
 renewalFailureClearsAuth : Test
@@ -394,18 +337,14 @@ loginArmsRenewal =
                 |> Expect.equal True
 
 
-
--- NOTICE — the distinct session-expired message on the redirect target
-
-
-{-| The redirect target of `Main.sessionExpired` (`Login.expiredInit`) renders a
-notice distinct from invalid-credentials.
+{-| The redirect target of the expiry path — a login card built with the
+`SessionExpired` arrival — renders a notice distinct from invalid-credentials.
 -}
 expiredInitRendersDistinctNotice : Test
 expiredInitRendersDistinctNotice =
     test "expired_init_renders_distinct_notice: the expired-notice login state shows the session-expired message" <|
         \() ->
-            ProgramTest.start () (loginModelProgram Login.expiredInit)
+            ProgramTest.start () (loginModelProgram (Login.init (Login.SessionExpired { draftSaved = False })))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 
@@ -416,13 +355,13 @@ freshInitHasNoNotice : Test
 freshInitHasNoNotice =
     test "fresh_init_has_no_notice: an ordinary login has no session-expired notice" <|
         \() ->
-            ProgramTest.start () (loginModelProgram Login.init)
+            ProgramTest.start () (loginModelProgram (Login.init Login.Fresh))
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 
 
 {-| A minimal Login ProgramTest seeded with a specific starting model, so the
-view of `Login.expiredInit` vs `Login.init` can be asserted directly.
+view of a `SessionExpired` arrival vs a `Fresh` one can be asserted directly.
 -}
 loginModelProgram : Login.Model -> ProgramTest.ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginModelProgram startModel =
@@ -437,3 +376,81 @@ loginModelProgram startModel =
 sansEffect : ( Login.Model, cmd, out ) -> Login.Model
 sansEffect ( model, _, _ ) =
     model
+
+
+{-| The reader was on `/settings/password` when the session died.
+-}
+expiryCapturesThePageTheReaderWasOn : Test
+expiryCapturesThePageTheReaderWasOn =
+    test "expiry_captures_the_page_the_reader_was_on: an expiry bounce off a settings form remembers the form" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.SettingsPassword
+                , sessionExpiring = True
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Route.SettingsPassword)
+
+
+{-| The same for a half-finished upload — the journey named.
+-}
+expiryCaptureSurvivesTheRedirectToLogin : Test
+expiryCaptureSurvivesTheRedirectToLogin =
+    test "expiry_capture_survives_the_redirect_to_login: /upload is remembered across the push to /login" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.Upload
+                , sessionExpiring = True
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Route.Upload)
+
+
+{-| Control: someone who clicks "Sign in" of their own accord is not being
+bounced off anything, and must not be sent somewhere they did not ask for.
+-}
+ordinaryNavigationToLoginCapturesNothing : Test
+ordinaryNavigationToLoginCapturesNothing =
+    test "ordinary_navigation_to_login_captures_nothing: a deliberate visit to /login remembers nothing" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.SettingsPassword
+                , sessionExpiring = False
+                , auth = Nothing
+                }
+                |> Expect.equal Nothing
+
+
+{-| Control: an expiry while reading a PUBLIC page captures nothing. There is
+nothing to return them to that they cannot reach signed out.
+-}
+expiryOffAPublicPageCapturesNothing : Test
+expiryOffAPublicPageCapturesNothing =
+    test "expiry_off_a_public_page_captures_nothing: expiry on /about remembers nothing" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.About
+                , sessionExpiring = True
+                , auth = Nothing
+                }
+                |> Expect.equal Nothing
+
+
+{-| Control: the ORIGINAL route-guard bounce still works. This is the
+behaviour the expiry branch must not have broken.
+-}
+routeGuardBounceStillCaptures : Test
+routeGuardBounceStillCaptures =
+    test "route_guard_bounce_still_captures: an anonymous visit to /upload is still remembered" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Upload
+                , leaving = Route.Home
+                , sessionExpiring = False
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Route.Upload)

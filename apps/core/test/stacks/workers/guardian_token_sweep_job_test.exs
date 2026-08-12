@@ -1,26 +1,24 @@
 defmodule Stacks.Workers.GuardianTokenSweepJobTest do
   @moduledoc """
-  Reaper for the server-side JWT store (Issue #124, A2 — P1 companion).
+      Reaper for the server-side JWT store.
 
-  `Guardian.revoke/1` deletes a token row on logout, but an access token that
-  simply *expires* (its 8h ttl elapses without an explicit logout) leaves a dead
-  row behind in `op.guardian_tokens`. Without a periodic sweep the table grows
-  unbounded — every session ever issued becomes a permanent tombstone. This job
-  runs `Guardian.DB.Token.purge_expired_tokens/0` (a single indexed range delete
-  on `exp`) to reclaim them.
+      `Guardian.revoke/1` deletes a token row on logout, but an access token that
+      simply *expires* (its 8h ttl elapses without an explicit logout) leaves a dead
+      row behind in `op.guardian_tokens`. Without a periodic sweep the table grows
+      unbounded — every session ever issued becomes a permanent tombstone. This job
+      runs `Guardian.DB.Token.purge_expired_tokens/0` (a single indexed range delete
+      on `exp`) to reclaim them.
   """
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
+  import Stacks.Factory
 
   alias Core.Repo
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Workers.GuardianTokenSweepJob
 
-  # Inserts a raw row into op.guardian_tokens. exp is a unix timestamp (bigint),
-  # matching Guardian.DB.Token's schema. We insert schemalessly because the
-  # project has no app-owned Ecto schema for this Guardian.DB-backed table.
   defp insert_token(jti, exp_unix) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 
@@ -56,7 +54,6 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
 
       assert :ok = perform_job(GuardianTokenSweepJob, %{})
 
-      # The live token survives; only the expired row is reaped.
       assert remaining_jtis() == ["live-token"]
     end
 
@@ -69,13 +66,9 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
       assert remaining_jtis() == ["live-token"]
     end
 
-    # Issue #179, Phase 2b: the sweep also prunes dead auth_token_families so the
-    # session table does not grow unbounded. "Dead" = long-revoked, or so far
-    # past the absolute session cap that no live token can exist. A live family
-    # (unrevoked, session within the cap) must NEVER be deleted.
     test "prunes long-revoked and past-cap families but keeps live ones" do
       now = DateTime.utc_now()
-      user_id = Ecto.UUID.generate()
+      user_id = insert(:user).id
 
       live = insert_family(user_id, session_started_at: now, revoked_at: nil)
 
@@ -99,8 +92,6 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
 
       assert :ok = perform_job(GuardianTokenSweepJob, %{})
 
-      # Live and just-revoked (still within retention) survive; the long-dead
-      # rows are reaped.
       assert Repo.get(AuthTokenFamily, live)
       assert Repo.get(AuthTokenFamily, just_revoked)
       refute Repo.get(AuthTokenFamily, long_revoked)
@@ -108,7 +99,6 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
     end
   end
 
-  # Inserts an auth_token_families row and returns its family_id.
   defp insert_family(user_id, opts) do
     {:ok, family} =
       %AuthTokenFamily{}

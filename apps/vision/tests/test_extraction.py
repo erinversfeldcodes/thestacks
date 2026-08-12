@@ -235,11 +235,6 @@ def test_extract_model_returns_non_list_books_field_gives_empty() -> None:
     assert data["books"] == []
 
 
-# ---------------------------------------------------------------------------
-# Integration tests: local OCR pre-pass in /extract endpoint
-# ---------------------------------------------------------------------------
-
-
 class TestExtractLocalOCRPrePass:
     """Integration tests for the local OCR pre-pass that short-circuits VLM.
 
@@ -368,11 +363,6 @@ class TestExtractLocalOCRPrePass:
         assert data["model_used"] == settings.model_name
         mock_scan.assert_not_called()
         mock_vlm.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# image_url path
-# ---------------------------------------------------------------------------
 
 
 def test_extract_image_url_happy_path() -> None:

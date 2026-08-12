@@ -15,7 +15,6 @@ test.describe("Reading Pile page", () => {
     await page.goto("/reading-pile");
     await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
 
-    // Selector is `.armchair`, not `.reading-pile__armchair` (ReadingPile.elm:137).
     const armchair = page.locator(".armchair");
     await expect(armchair).toHaveAttribute("aria-hidden", "true");
   });
@@ -24,7 +23,6 @@ test.describe("Reading Pile page", () => {
     await page.goto("/reading-pile");
     await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
 
-    // The `reading-pile` suite user is seeded with 2 reading_pile placements.
     const pile = page.locator('.book-pile[role="list"]');
     await expect(pile).toBeVisible({ timeout: 10000 });
     expect(await pile.locator('[role="listitem"]').count()).toBeGreaterThan(0);
@@ -45,9 +43,6 @@ test.describe("Reading Pile page", () => {
   test("populated reading pile shows the scene, not the hint text", async ({
     page,
   }) => {
-    // The empty-state wording itself is asserted in bookshelf.spec.ts against
-    // the zero-placement `empty-shelves` user. Here the suite user HAS books,
-    // so the scene must render and the hint must be absent.
     await page.goto("/reading-pile");
     await page.getByTestId('reading-pile-page').waitFor({ timeout: 10000 });
 

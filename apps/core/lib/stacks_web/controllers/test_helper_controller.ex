@@ -1,13 +1,9 @@
 defmodule StacksWeb.TestHelperController do
   @moduledoc """
-  Test-only endpoints used by the E2E suite (Issue #124).
-
-  These endpoints are UNAUTHENTICATED by design — the E2E suite calls them
-  before it has a session (e.g. to drive the confirm-email flow without real
-  email delivery). The sole gate is `StacksWeb.Plugs.E2ETestHelper`, which
-  requires the `STACKS_E2E_TEST_HELPERS=1` server flag and returns 404
-  otherwise. This controller therefore assumes the flag is on; it must never
-  be routed without that plug in front of it.
+      Test-only E2E endpoints. Deliberately UNAUTHENTICATED — the suite calls
+      them before it has a session. The sole gate is `Plugs.E2ETestHelper`
+      (404 unless `STACKS_E2E_TEST_HELPERS=1`); user-scoped helpers are further
+      restricted to `.test`-domain emails, which no real account can hold.
   """
 
   use CoreWeb, :controller
@@ -23,37 +19,16 @@ defmodule StacksWeb.TestHelperController do
 
   require Logger
 
-  # Reserved test TLD (RFC 6761) used for ALL E2E/test accounts:
-  #   - suite users:       e2e-<slug>@thestacks.test   (seeds.exs / helpers.ts suiteEmail)
-  #   - registration users: <prefix>-<ts>-<rand>@thestacks.test (helpers.ts uniqueEmail)
-  # A real, deliverable email address can NEVER be in the `.test` TLD, so scoping
-  # the lookup to this domain guarantees a real user's activation token can never
-  # be leaked — even when the flag is on for a public preview carrying real users.
   @e2e_email_domain "@thestacks.test"
 
-  # Reserved synthetic ISBN-13 block that marks a book as E2E-seeded (Issue #297).
-  # Every book created by POST /api/test/book-description WITHOUT an explicit ISBN
-  # carries this 8-digit prefix, so an auto-seeded catalogue row is identifiable at
-  # a glance and can never be confused with a verified, upstream-sourced ISBN. The
-  # `978` Bookland prefix keeps it EAN-13-shaped so it still passes the checksum
-  # gate; the `99999` "registration group" is unallocated by the ISBN agency, so no
-  # real published book can ever legitimately fall inside this block.
   @e2e_seed_isbn_prefix "97899999"
 
   @doc """
-  GET /api/test/confirmation-token?email=<email>
+      GET /api/test/confirmation-token?email=<email>
 
-  Returns the raw `email_confirmation_token` for the given user so the E2E
-  suite can exercise the confirm-email flow without real email delivery.
-
-  Responds `200 {"token": "<token>"}` for an existing E2E/test-domain user that
-  has a confirmation token, and `404` if the email is not an E2E/test-domain
-  address, the user does not exist, or the user has no token. The not-found and
-  out-of-scope cases are deliberately indistinguishable (both plain 404) so the
-  endpoint is not a user-enumeration oracle for real accounts.
-
-  The response body contains ONLY the token — no email, id, password data, or
-  any other PII.
+      Returns the raw email-confirmation token so the suite can drive the
+      confirm-email flow without real delivery. `200 {"token":...}` for a
+      test-domain user holding a token; `404` for anything out of scope.
   """
   def confirmation_token(conn, %{"email" => email}) when is_binary(email) do
     with true <- e2e_test_email?(email),
@@ -68,23 +43,13 @@ defmodule StacksWeb.TestHelperController do
   def confirmation_token(conn, _params), do: not_found(conn)
 
   @doc """
-  GET /api/test/sent-emails?email=<email>
+      GET /api/test/sent-emails?email=<email>
 
-  Returns the transactional emails delivered to the given address from the
-  Swoosh **Local** mailbox (the in-memory adapter used by the default preview /
-  offline E2E stack), so the E2E suite can assert an email was actually SENT and
-  extract the link it carries — proving the whole send path, not just that a DB
-  token exists.
-
-  Scoped to `@thestacks.test` emails ONLY, and only rows in the mailbox
-  addressed to that exact address are returned — a real user's mail can never
-  surface here, even on a public preview with the flag on. Returns
-  `200 {"emails": [%{to, subject, html_body, text_body}]}` (most recent first),
-  or `404` for any out-of-scope email.
-
-  When the stack is configured with a real provider (Resend, e.g. a
-  `preview-real-email` PR or prod), nothing lands in the Local mailbox and this
-  returns an empty list — the helper is for the default Local preview.
+      Returns emails delivered to the address from the Swoosh **Local** (in-memory)
+      mailbox, so the suite can prove the whole send path, not just that a DB token
+      exists. `.test`-domain addresses only; exact-recipient match — real users'
+      mail can never surface. `200 {"emails": [...]}` newest first (empty when the
+      stack uses a real provider); `404` out of scope.
   """
   def sent_emails(conn, %{"email" => email}) when is_binary(email) do
     if e2e_test_email?(email) do
@@ -102,11 +67,6 @@ defmodule StacksWeb.TestHelperController do
           }
         end)
 
-      # `mailbox_readable` tells the E2E client whether reading this mailbox is
-      # meaningful: only the Local adapter routes sends here. When a real
-      # provider (Resend) is configured — e.g. a `preview-real-email` PR — mail
-      # never lands in this in-memory store, so the client should SKIP rather
-      # than fail on an (expectedly) empty mailbox.
       json(conn, %{mailbox_readable: mailbox_readable?(), emails: emails})
     else
       not_found(conn)
@@ -125,25 +85,16 @@ defmodule StacksWeb.TestHelperController do
     Enum.any?(mail.to, fn recipient -> String.downcase(address(recipient)) == target end)
   end
 
-  # Swoosh normalises recipients to `{name, address}` tuples, but tolerate a
-  # bare address string too.
   defp address({_name, addr}), do: addr
   defp address(addr) when is_binary(addr), do: addr
 
   @doc """
-  PUT /api/test/age-verification  body: {"email": <email>, "verified": <bool>}
+      PUT /api/test/age-verification  body: {"email", "verified"}
 
-  Sets (or clears) a user's age verification so the E2E suite can create a
-  verified user without a real KYC provider (ADR-020 — production has no provider
-  and no verified users). `verified: true` records a verification via
-  `Stacks.AgeVerification.record_verification/3` with provider `"e2e_test_helper"`;
-  `verified: false` revokes it.
-
-  Scoped to `@thestacks.test` emails ONLY — a real user can never be in the
-  reserved test TLD, so this can never flip a real account's age status even when
-  the flag is on for a public preview. Responds `200 {"ok": true}` for an
-  existing test-domain user, and a plain `404` for any out-of-scope email or
-  unknown user (deliberately indistinguishable — not an enumeration oracle).
+      Sets or clears a user's age verification without a real KYC provider
+      (production has none). `true` records via
+      `AgeVerification.record_verification/3` with provider `"e2e_test_helper"`;
+      `false` clears. `.test`-domain emails only; `200 {"ok": true}` or `404`.
   """
   def set_age_verification(conn, %{"email" => email, "verified" => verified})
       when is_binary(email) and is_boolean(verified) do
@@ -163,33 +114,19 @@ defmodule StacksWeb.TestHelperController do
 
   defp apply_verification(user, false), do: AgeVerification.revoke(user)
 
-  # Shared, non-secret password for minted E2E users — matches E2E_PASSWORD in
-  # e2e/tests/helpers.ts so a spec can still drive the real login form for a
-  # minted account when it needs to.
   @mint_password "e2e-password"
 
   @doc """
-  POST /api/test/session  body: {"email": <optional>, "display_name": <optional>}
+      POST /api/test/session  body: {"email"?, "display_name"?}
 
-  Provisions a fresh, CONFIRMED user and returns a ready-to-use session token
-  in one call (Issue #192), so E2E specs can mint isolated throwaway users
-  without going through `/auth/register` + `/auth/login` — both of which sit
-  in the `:auth` rate bucket shared across the whole parallel suite.
+      Mints a fresh CONFIRMED user + session token in one call, bypassing the
+      shared `:auth` rate bucket. The token uses the exact `AuthController.login`
+      path (Guardian + fresh `family_id` + `rotate_token_family/1`, failing closed).
 
-  The token is minted via the exact same path `AuthController.login` uses
-  (`Guardian.encode_and_sign/2` with a fresh `family_id` claim +
-  `Accounts.open_token_family/1`, failing closed if the family row does not
-  persist), so it is indistinguishable from a real login session token.
-
-  Security posture: this endpoint MINTS AUTHENTICATION. Besides the
-  `STACKS_E2E_TEST_HELPERS` router gate (404 when off), the email — supplied
-  or defaulted — MUST be in the reserved `.test` E2E domain; anything else is
-  a plain 404 and no user is created. A real, deliverable address can never be
-  in the `.test` TLD, so a session can never be minted for a real account,
-  even on a public preview with the flag on.
-
-  Responds `201 {"email", "token", "user_id", "display_name"}` on success and
-  `422 {"errors": ...}` when the user cannot be created (e.g. email taken).
+      ⚠️ This endpoint MINTS AUTHENTICATION: the email MUST be in the reserved
+      `.test` TLD (else plain 404, no user created), so a session can never be
+      minted for a real account. `201 {email, token, user_id, display_name}`
+      or `422 {errors}`.
   """
   def mint_session(conn, params) do
     email = Map.get(params, "email") || generated_mint_email()
@@ -197,11 +134,14 @@ defmodule StacksWeb.TestHelperController do
 
     with true <- e2e_test_email?(email),
          {:ok, user} <-
-           Accounts.register(%{
-             "email" => email,
-             "password" => @mint_password,
-             "display_name" => display_name
-           }),
+           Accounts.register(
+             %{
+               "email" => email,
+               "password" => @mint_password,
+               "display_name" => display_name
+             },
+             skip_invite_gate: true
+           ),
          {:ok, user} <- Accounts.mark_confirmed(user) do
       issue_session(conn, user)
     else
@@ -216,21 +156,13 @@ defmodule StacksWeb.TestHelperController do
   end
 
   @doc """
-  POST /api/test/book-writing  body: {"email": <email>, "book_id": <uuid>, "title": <optional>}
+      POST /api/test/book-writing  body: {"email", "book_id", "title"?}
 
-  Seeds a blog post authored by the given test user with a VISIBLE manual
-  association to `book_id`, so the E2E suite can drive the spine bookmark-ribbon
-  (#287) deterministically. The production path associates books via an async
-  LLM worker on publish (`BlogAssociationHandler` → `PostBookAssociationWorker`),
-  which is non-deterministic for a browser test — this helper writes the same
-  end state directly via `Blog.associate_book/3` (visible, source `manual`).
-
-  Scoped to `@thestacks.test` emails ONLY (like every other helper here) — a real
-  account can never be in the reserved test TLD, so this can never fabricate
-  writing for a real user even on a public preview with the flag on. Responds
-  `201 {"ok": true, "post_id", "association_id"}` on success, a plain `404` for an
-  out-of-scope email or unknown user, and `422 {"errors": ...}` when the post or
-  association cannot be created.
+      Seeds a blog post with a VISIBLE manual book association so the spine
+      bookmark-ribbon E2E is deterministic (production associates via an async LLM
+      worker). Writes the same end state via `Blog.associate_book/3`. `.test`-domain
+      emails only. `201 {ok, post_id, association_id}`, `404` out of scope,
+      `422 {errors}`.
   """
   def seed_book_writing(conn, %{"email" => email, "book_id" => book_id} = params)
       when is_binary(email) and is_binary(book_id) do
@@ -258,53 +190,17 @@ defmodule StacksWeb.TestHelperController do
   def seed_book_writing(conn, _params), do: not_found(conn)
 
   @doc """
-  POST /api/test/book-description
+      POST /api/test/book-description  body: {"title", "description", "isbn"?}
 
-  Body `{"title": string, "description": string, "isbn"?: string}` → creates a
-  NEW public, single-edition book (work + primary edition) carrying the given
-  title and description, so the generated `op.books.description_tsv` column
-  populates and the #284 deep-search E2E can drive a live description match +
-  highlighted snippet. When `isbn` is omitted a unique, checksum-valid ISBN-13
-  in the reserved E2E-seed block (`#{@e2e_seed_isbn_prefix}…`, see
-  `generate_valid_isbn13/0`) is generated, so any book this helper seeds is
-  identifiable at a glance and can never masquerade as a verified catalogue row.
+      Creates a NEW public single-edition book so `description_tsv` populates for
+      the deep-search E2E. An omitted ISBN gets a checksum-valid one in the reserved
+      E2E-seed block (`generate_valid_isbn13/0`), so seeded books are identifiable
+      and can never masquerade as verified catalogue.
 
-  Unlike the other helpers this writes CATALOGUE metadata only — no user data,
-  no PII, no `.test`-domain scoping needed — and it INSERTS a fresh row rather
-  than mutating shared catalogue, so it is safe on a public preview. The
-  E2ETestHelper plug remains the sole gate (404 unless the flag is exactly "1").
-
-  ## Catalogue-pollution containment (Issue #297)
-
-  This is the only `/api/test/*` helper that inserts PUBLIC catalogue rows with
-  a synthetic, unverified ISBN — bypassing the ISBN Hard Gate's Open-Library /
-  Google-Books verification step (CLAUDE.md-non-negotiable in spirit). That
-  bypass is an accepted, DOCUMENTED risk, bounded by two facts verified against
-  the deploy scripts:
-
-    * **The gate never opens in production.** `STACKS_E2E_TEST_HELPERS` is set to
-      `"1"` ONLY in the preview branch of `scripts/deploy-stack.sh` (`STACKS_E2E_TEST_HELPERS="1"`);
-      the `--production` branch forces it empty (`STACKS_E2E_TEST_HELPERS=""`) and
-      the prod deploy additionally runs `fly secrets unset STACKS_E2E_TEST_HELPERS`
-      as defense-in-depth. With the flag off this endpoint is a plain 404, so no
-      unverified book is ever inserted into prod.
-    * **Preview catalogues are ephemeral and disposable.** Each preview runs against
-      a per-PR Neon branch created copy-on-write from `staging`
-      (`-d '{"branch": {"name": "${PREVIEW_NEON_BRANCH}", "parent_id": "${NEON_PARENT_BRANCH_ID}"}…'`
-      in `deploy-stack.sh`) and DELETED at teardown by `scripts/cleanup-preview.sh`
-      (`curl -s -X DELETE …/branches/${branch_id}` → "Neon branch … deleted"). A
-      seeded book therefore lives only in that throwaway branch (or a local dev DB)
-      and is discarded when the PR's preview is cleaned up — it never reaches, and
-      is never copy-on-write-linked to, the shared staging or production catalogue.
-
-  Identifiability makes the residual window auditable: the reserved
-  `#{@e2e_seed_isbn_prefix}` ISBN block flags every auto-seeded row, so an
-  operator inspecting a preview catalogue can tell E2E-seeded books from real
-  ones at a glance without any schema change, new column, or search filter.
-
-  Responds `201 {"ok": true, "book_id": <uuid>, "title": <title>}` on success,
-  or `422 {"errors": ...}` when the book cannot be created (e.g. a supplied ISBN
-  is malformed or already taken).
+      ⚠️ The one helper that inserts PUBLIC catalogue rows past the ISBN Hard
+      Gate's provider check — an accepted, bounded risk: reserved
+      prefix, insert-only (never mutates shared rows), flag-gated. Writes no user
+      data/PII. `201 {book_id, edition_id, isbn}` or `422 {errors}`.
   """
   def seed_book_description(conn, %{"title" => title, "description" => description} = params)
       when is_binary(title) and is_binary(description) do
@@ -325,17 +221,6 @@ defmodule StacksWeb.TestHelperController do
 
   def seed_book_description(conn, _params), do: not_found(conn)
 
-  # Generates a fresh, checksum-valid ISBN-13 inside the reserved E2E-seed block
-  # (`@e2e_seed_isbn_prefix`, Issue #297). The four digits after the 8-digit marker
-  # prefix come from a node-monotonic counter (`System.unique_integer/1`, mod 10_000)
-  # so successive calls don't collide on the edition unique-constraint within a node;
-  # the 13th digit is the EAN-13 mod-10 check digit (weights 1,3,1,3… — the same rule
-  # Books enforces). The block is deliberately recognisable, NOT verifiable: it
-  # bypasses the ISBN Hard Gate's Open-Library/Google-Books verification, which is
-  # an accepted, documented risk (see `seed_book_description/2`) precisely because
-  # this helper is gated behind `STACKS_E2E_TEST_HELPERS` (never set in prod) and its
-  # rows live only in ephemeral per-PR preview Neon branches (deleted at cleanup) or
-  # local dev DBs.
   defp generate_valid_isbn13 do
     serial =
       System.unique_integer([:positive])
@@ -355,16 +240,10 @@ defmodule StacksWeb.TestHelperController do
     first12 <> Integer.to_string(check)
   end
 
-  # Unique default address in the reserved E2E domain — mirrors uniqueEmail()
-  # in e2e/tests/helpers.ts so minted users are recognisable in preview data.
   defp generated_mint_email do
     "e2e-mint-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}@thestacks.test"
   end
 
-  # Same mint path as AuthController.login (Issue #179, Phase 2a): the
-  # family_id is generated BEFORE minting so it is embedded as a claim, and the
-  # token family row must persist or the token is revoked (fail closed) —
-  # preserving the invariant that every live access token has a family.
   defp issue_session(conn, user) do
     fid = Ecto.UUID.generate()
     {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
@@ -376,7 +255,7 @@ defmodule StacksWeb.TestHelperController do
       session_started_at: DateTime.from_unix!(claims["sst"])
     }
 
-    case Accounts.open_token_family(family_attrs) do
+    case Accounts.rotate_token_family(family_attrs) do
       {:ok, _family} ->
         conn
         |> put_status(:created)
@@ -388,7 +267,7 @@ defmodule StacksWeb.TestHelperController do
         })
 
       {:error, reason} ->
-        Logger.error("open_token_family failed on E2E session mint: #{inspect(reason)}")
+        Logger.error("rotate_token_family failed on E2E session mint: #{inspect(reason)}")
         revoke_minted_token(token)
 
         conn
@@ -404,9 +283,6 @@ defmodule StacksWeb.TestHelperController do
     end
   end
 
-  # Scope the endpoint to E2E/test-domain emails only. Case-insensitive to match
-  # `Accounts.get_user_by_email/1`. Uses a strict domain-suffix match so
-  # lookalikes such as `x@thestacks.test.evil.com` do NOT qualify.
   defp e2e_test_email?(email) do
     email
     |> String.downcase()

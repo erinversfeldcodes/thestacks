@@ -1,9 +1,9 @@
 defmodule StacksWeb.CatalogueControllerTest do
   @moduledoc """
-  Tests for GET /api/catalogue — the public book catalogue endpoint.
+      Tests for GET /api/catalogue — the public book catalogue endpoint.
 
-  Verifies pagination, search, subject filtering, sort, and most
-  importantly that no ownership data is ever exposed.
+      Verifies pagination, search, subject filtering, sort, and most
+      importantly that no ownership data is ever exposed.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -18,16 +18,14 @@ defmodule StacksWeb.CatalogueControllerTest do
   end
 
   defp insert_book_with_edition(attrs \\ []) do
-    book = insert(:book, Keyword.take(attrs, [:title, :visibility_tier, :author, :subjects]))
+    book =
+      insert(
+        :book,
+        Keyword.take(attrs, [:title, :visibility_tier, :author, :subjects]) ++
+          [editions: [build(:primary_book_edition, Keyword.take(attrs, [:isbn]))]]
+      )
 
-    edition_attrs =
-      attrs
-      |> Keyword.take([:isbn])
-      |> Keyword.put(:book, book)
-      |> Keyword.put_new(:is_primary, true)
-
-    edition = insert(:book_edition, edition_attrs)
-    {book, edition}
+    {book, hd(book.editions)}
   end
 
   describe "GET /api/catalogue" do
@@ -63,7 +61,6 @@ defmodule StacksWeb.CatalogueControllerTest do
       assert total == 2
       assert length(books) == 2
 
-      # Verify no ownership data is present
       for book <- books do
         refute Map.has_key?(book, "user_id")
         refute Map.has_key?(book, "owner")
@@ -177,10 +174,6 @@ defmodule StacksWeb.CatalogueControllerTest do
 
     test "excludes age_gated books for an authenticated-but-unverified user, total accurate",
          %{conn: conn} do
-      # #229: an authenticated user who is NOT age-verified must be treated like
-      # an anonymous viewer for age-gated listings — the books are omitted AND
-      # `total` reflects the exclusion (SQL-level filter, not a post-filter that
-      # would break pagination). Mirrors the anon total-correctness test above.
       user = insert(:user, age_verified: false)
       insert_book_with_edition(title: "Public A", visibility_tier: "public")
       insert_book_with_edition(title: "Public B", visibility_tier: "public")

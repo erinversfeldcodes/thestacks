@@ -5,7 +5,6 @@ cd apps/scraper
 
 cargo test
 
-# Code coverage via cargo-llvm-cov. Must be installed — run setup.sh to install.
 if ! command -v cargo-llvm-cov &>/dev/null; then
     echo "ERROR: cargo-llvm-cov is not installed. Run ./setup.sh to install it." >&2
     exit 1

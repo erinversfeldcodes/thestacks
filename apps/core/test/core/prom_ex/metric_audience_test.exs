@@ -1,10 +1,10 @@
 defmodule Core.PromEx.MetricAudienceTest do
   @moduledoc """
-  Enforces the ADR-021 §4 audience gate: every registered `stacks_*` family is
-  consciously classified (measured ⊆ classified), the default is fail-closed
-  (a new/unknown metric is NOT public until promoted), and there are no stale
-  entries. Derives the registered family list from the plugin the same way as
-  `DashboardDriftTest` / `DashboardLabelValidationTest` — never hard-coded.
+      Enforces the audience gate: every registered `stacks_*` family is
+      consciously classified (measured ⊆ classified), the default is fail-closed
+      (a new/unknown metric is NOT public until promoted), and there are no stale
+      entries. Derives the registered family list from the plugin the same way as
+      `DashboardDriftTest` / `DashboardLabelValidationTest` — never hard-coded.
   """
   use ExUnit.Case, async: true
 
@@ -36,7 +36,7 @@ defmodule Core.PromEx.MetricAudienceTest do
     assert MetricAudience.audience(future) == :unclassified
   end
 
-  test "all current families are :public (aggregate + non-PII per the #249 audit)" do
+  test "all current families are:public (aggregate + non-PII per the audit)" do
     non_public =
       for family <- registered_families(),
           MetricAudience.audience(family) != :public,
@@ -80,9 +80,6 @@ defmodule Core.PromEx.MetricAudienceTest do
              "to the public /metrics page: " <> inspect(non_public)
   end
 
-  # Map an exported series name back to its registered family key. Distribution
-  # series carry _bucket/_sum/_count; counters export `<family>_count_total`,
-  # which ends in `_total` (never stripped), so this only strips histogram suffixes.
   defp normalize_family(name) do
     cond do
       String.ends_with?(name, "_bucket") -> String.replace_suffix(name, "_bucket", "")

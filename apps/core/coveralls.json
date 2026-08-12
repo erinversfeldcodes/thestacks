@@ -4,6 +4,7 @@
     "test/",
     "priv/",
     "lib/stacks_web/telemetry.ex",
-    "lib/stacks/release.ex"
+    "lib/stacks/release.ex",
+    "lib/stacks/gen/proto/"
   ]
 }

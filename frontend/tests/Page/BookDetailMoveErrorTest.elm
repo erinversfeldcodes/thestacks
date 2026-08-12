@@ -1,7 +1,7 @@
 module Page.BookDetailMoveErrorTest exposing (suite)
 
 {-| Program tests for the reading-pile-full rejection on the BookDetail move
-path (Issue #276).
+path.
 
 The backend rejects a placement that would take the reading pile past 50 with
 a 422 whose body carries the `reading_pile_full` error code. These tests
@@ -91,7 +91,7 @@ placeErrorResponse status body =
 
 suite : Test
 suite =
-    describe "Page.BookDetail placement rejection (#276/#281)"
+    describe "Page.BookDetail placement rejection"
         [ fullPileShowsSpecificMessage
         , genericFailureKeepsGenericMessage
         , fullPile422WithoutCodeStaysGeneric

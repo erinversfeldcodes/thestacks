@@ -1,12 +1,11 @@
 defmodule Stacks.Books do
   @moduledoc """
-  Books context — book creation, discovery, and ISBN resolution.
+      Books context — book creation, discovery, and ISBN resolution.
 
-  In the works/editions model:
-  - A **book** (work) is the logical entity: "Circe" by Madeline Miller
-  - A **book_edition** is a specific ISBN/format: "Circe, Bloomsbury paperback, 9780316556347"
-
-  The ISBN hard gate is enforced here: every edition must have a verified ISBN.
+      A **book** (work) is the logical entity; a **book_edition** is one ISBN/format
+      of it. The ISBN hard gate is enforced here: every edition needs a verified
+      ISBN. Pure ISBN arithmetic lives in `Stacks.Books.ISBN`; upload-photo
+      lifecycle lives in `Stacks.Uploads` — neither is part of this contract.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -21,13 +20,12 @@ defmodule Stacks.Books do
 
   alias Core.Repo
   alias Ecto.Multi
-  alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
+  alias Stacks.Books.{Author, Book, BookEdition}
+  alias Stacks.Books.BookDetailCache
+  alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
   alias Stacks.Shelving
-  alias Stacks.Workers.IdentifyBookJob
-
-  # ── Field lists for changesets (moved from schemas) ──────────────────────
 
   @book_required_fields [:title]
   @book_optional_fields [
@@ -41,7 +39,7 @@ defmodule Stacks.Books do
 
   @author_cast_fields [:name, :bio, :website_url, :rss_feed_url, :open_library_id]
 
-  @edition_required_fields [:isbn, :book_id]
+  @edition_required_fields [:isbn, :book_id, :verification_source]
   @edition_optional_fields [
     :format_label,
     :cover_image_url,
@@ -53,34 +51,16 @@ defmodule Stacks.Books do
     :is_primary
   ]
 
-  @image_cast_fields [
-    :storage_path,
-    :status,
-    :rejection_reason,
-    :uploaded_at,
-    :expires_at,
-    :book_id,
-    :book_edition_id,
-    :book_ids,
-    :user_id
-  ]
-
-  # Image lifecycle:
-  #   awaiting_upload → client has been issued a presigned PUT URL but
-  #     hasn't yet committed. The bytes may or may not be in R2.
-  #   pending         → bytes verified in R2, IdentifyBookJob enqueued.
-  #   resolved        → pipeline identified one or more books.
-  #   rejected        → pipeline rejected (not-a-book, isbn-not-found, etc).
-  @valid_image_statuses ~w(awaiting_upload pending resolved rejected)
+  @verification_sources ~w(open_library google_books barcode_unverified)
 
   @doc """
-  Returns a book edition by ID, or nil if not found.
+      Returns a book edition by ID, or nil if not found.
   """
   @spec get_edition(binary()) :: BookEdition.t() | nil
   def get_edition(id), do: Repo.get(BookEdition, id)
 
   @doc """
-  Returns a book (work) by ID with the author and editions preloaded.
+      Returns a book (work) by ID with the author and editions preloaded.
   """
   @spec get_book_detail(binary()) :: Book.t() | nil
   def get_book_detail(id) do
@@ -91,8 +71,8 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Returns the community read count for a book from the wh.mart_community_read_count
-  analytics view. Returns 0 if the mart does not yet exist or the book has no entry.
+      Returns the community read count for a book from the wh.mart_community_read_count
+      analytics view. Returns 0 if the mart does not yet exist or the book has no entry.
   """
   @spec community_read_count(binary()) :: non_neg_integer()
   def community_read_count(book_id) do
@@ -114,14 +94,11 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Returns the primary edition for a book, or the earliest-created edition as a
-  fallback.
+      Returns the primary edition, falling back to the earliest-created one.
 
-  The pick is deterministic: `is_primary` first, then the oldest `created_at`,
-  then the smallest `id`. The page-count ceiling (`Shelving`) leans on this
-  edition, so a book with no (or multiple) `is_primary` flag must resolve to the
-  same edition every time — both here (preloaded editions) and in the query
-  clause below.
+      Deterministic on purpose (`is_primary`, then oldest `created_at`, then
+      smallest `id`): callers like the page-count ceiling must resolve the same
+      edition every time, with or without preloads.
   """
   @spec primary_edition(Book.t()) :: BookEdition.t() | nil
   def primary_edition(%Book{editions: editions}) when is_list(editions) do
@@ -138,11 +115,6 @@ defmodule Stacks.Books do
     |> Repo.one()
   end
 
-  # Sort key mirroring the query clause's `desc: is_primary, asc: created_at,
-  # asc: id`. `is_primary != true` maps the primary edition to `false` (0) so it
-  # sorts ahead of the non-primary ones; `created_at` is compared chronologically
-  # via Unix microseconds (Erlang term order over %DateTime{} is NOT
-  # chronological), with `id` as the final tiebreak.
   defp edition_sort_key(edition) do
     {edition.is_primary != true, edition_time_key(edition.created_at), edition.id}
   end
@@ -151,101 +123,130 @@ defmodule Stacks.Books do
   defp edition_time_key(nil), do: 0
 
   @doc """
-  Finds an existing book (work) by ISBN — looks up the edition, returns the parent work.
+      Finds an existing book (work) by ISBN — looks up the edition, returns the parent work.
   """
   @spec find_existing(String.t()) :: Book.t() | nil
   def find_existing(isbn) do
-    isbn13 = to_isbn13(isbn)
-
-    BookEdition
-    |> where([e], e.isbn == ^isbn13)
-    |> preload(book: [:author, :editions])
-    |> Repo.one()
-    |> case do
+    case find_existing_edition(isbn) do
       nil -> nil
       edition -> edition.book
     end
   end
 
   @doc """
-  Creates a book (work) with its first edition from attributes.
-  Requires `:isbn` and `:title`.
+      Like `find_existing/1`, but returns the matched EDITION (with its parent work
+      preloaded), not just the work. The scan resolves by a specific ISBN, so the
+      edition it matched is the printing the reader owns — the caller keeps it so the
+      placement can record it, instead of discarding it and defaulting to the
+      work's primary edition.
   """
-  @spec create(map()) :: {:ok, Book.t()} | {:error, Ecto.Changeset.t()}
-  def create(attrs) do
-    book_changeset =
-      %Book{}
-      |> book_changeset(attrs)
-      |> maybe_create_author(attrs)
+  @spec find_existing_edition(String.t()) :: BookEdition.t() | nil
+  def find_existing_edition(isbn) do
+    isbn13 = ISBN.to_isbn13(isbn)
 
-    Multi.new()
-    |> Multi.insert(:book, book_changeset)
-    |> Multi.insert(:edition, fn %{book: book} ->
-      %BookEdition{}
-      |> book_edition_changeset(%{
-        "isbn" => attrs["isbn"],
-        "book_id" => book.id,
-        "format_label" => attrs["format_label"],
-        "cover_image_url" => attrs["cover_image_url"],
-        "page_count" => attrs["page_count"],
-        "publisher" => attrs["publisher"],
-        "publication_year" => attrs["publication_year"],
-        "open_library_id" => attrs["open_library_id"],
-        "google_books_id" => attrs["google_books_id"],
-        "is_primary" => true
-      })
-    end)
-    |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
-      Events.emit_safe(%{
-        event_type: "book.created",
-        aggregate_type: "book",
-        aggregate_id: book.id,
-        payload: %{
-          isbn: edition.isbn,
-          title: book.title,
-          visibility_tier: book.visibility_tier
-        }
-      })
-
-      {:ok, book}
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{book: book, edition: edition}} ->
-        {:ok, %{book | editions: [edition]}}
-
-      {:error, :book, changeset, _} ->
-        {:error, changeset}
-
-      {:error, :edition, changeset, _} ->
-        {:error, changeset}
-
-      {:error, _, reason, _} ->
-        {:error, reason}
-    end
+    BookEdition
+    |> where([e], e.isbn == ^isbn13)
+    |> preload(book: [:author, :editions])
+    |> Repo.one()
   end
 
   @doc """
-  Sets a book's `visibility_tier` to `"public"` or `"age_gated"`.
+      Creates a book (work) with its first edition from attributes.
+      Requires `:isbn` and `:title`.
 
-  This replaced the removed automatic subject→BISAC age-gate classifier: a
-  book is age-gated because a PERSON marked it, not because code guessed.
+      Attributes are string-keyed. `"author"` (a name) is resolved to an
+      `op.authors` row; callers holding an id may pass `"author_id"` instead.
+      `"verification_source"` may be stated explicitly by a caller that knows the
+      provenance; otherwise it is derived from the identifiers in `attrs`.
+  """
+  @spec create(map()) :: {:ok, Book.t()} | {:error, Ecto.Changeset.t()}
+  def create(attrs), do: create_work(attrs, event: &book_created_event/2)
 
-  `opts`:
-    * `:source` — `:user` (default) | `:owner`. Only recorded on the
-      `[:stacks, :moderation, :tiering]` telemetry, never persisted.
-    * `:raise_only` — `true` (default). The safety rule for the USER path:
-      permit only `public → age_gated` (raising the gate). Attempting to
-      LOWER (`age_gated → public`) returns `{:error, :forbidden}` — only the
-      owner may un-gate, and the owner path passes `raise_only: false`.
+  defp create_work(attrs, opts) do
+    with {:ok, author} <- find_or_create_author(attrs["author"]) do
+      Multi.new()
+      |> Multi.insert(:book, book_changeset(%Book{}, book_attrs(attrs, author)))
+      |> Multi.insert(:edition, fn %{book: book} ->
+        book_edition_changeset(%BookEdition{}, edition_attrs(attrs, book))
+      end)
+      |> maybe_place(opts[:place])
+      |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
+        Events.emit_safe(opts[:event].(book, edition))
+        {:ok, book}
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{book: book, edition: edition}} ->
+          {:ok, %{book | editions: [edition]}}
 
-  Emits the `[:stacks, :moderation, :tiering]` counter (measurement
-  `%{count: 1}`, metadata `%{tier: :public | :age_gated, source: :user |
-  :owner}`) only on a successful CHANGE — a no-op (tier already matches) is
-  silent. Metadata is low-cardinality whitelisted atoms only (no ids/PII).
+        {:error, :book, changeset, _} ->
+          {:error, changeset}
 
-  Accepts a `%Book{}` or a book id. Returns `{:ok, book}` or
-  `{:error, :not_found | :forbidden | Ecto.Changeset.t()}`.
+        {:error, :edition, changeset, _} ->
+          {:error, changeset}
+
+        {:error, _, reason, _} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp book_attrs(attrs, nil), do: attrs
+  defp book_attrs(attrs, author), do: Map.put(attrs, "author_id", author.id)
+
+  defp edition_attrs(attrs, book) do
+    %{
+      "isbn" => attrs["isbn"],
+      "book_id" => book.id,
+      "format_label" => attrs["format_label"],
+      "cover_image_url" => attrs["cover_image_url"],
+      "page_count" => attrs["page_count"],
+      "publisher" => attrs["publisher"],
+      "publication_year" => attrs["publication_year"],
+      "open_library_id" => attrs["open_library_id"],
+      "google_books_id" => attrs["google_books_id"],
+      "is_primary" => true,
+      "verification_source" => attrs["verification_source"] || verification_source_from(attrs)
+    }
+  end
+
+  defp maybe_place(multi, nil), do: multi
+
+  defp maybe_place(multi, {user_id, shelf_name}) do
+    Multi.run(multi, :placement, fn _repo, %{book: book} ->
+      Shelving.place_book(user_id, book.id, shelf_name)
+    end)
+  end
+
+  defp book_created_event(book, edition) do
+    %{
+      event_type: "book.created",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{
+        isbn: edition.isbn,
+        title: book.title,
+        visibility_tier: book.visibility_tier
+      }
+    }
+  end
+
+  defp books_confirmed_event(book, edition, shelf_name) do
+    %{
+      event_type: "books.confirmed",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{isbn: edition.isbn, title: book.title, shelf: shelf_name}
+    }
+  end
+
+  @doc """
+      Sets a book's `visibility_tier` to `"public"` or `"age_gated"` — a PERSON
+      marks a book, code never guesses.
+
+      Options: `:source` (`:user` default | `:owner`; telemetry-only), and
+      `:raise_only` (`true` default) — the user path may only RAISE the gate;
+      lowering returns `{:error,:forbidden}` and is owner-only.
   """
   @spec set_visibility_tier(Book.t() | binary(), String.t(), keyword()) ::
           {:ok, Book.t()} | {:error, :not_found | :forbidden | Ecto.Changeset.t()}
@@ -264,7 +265,6 @@ defmodule Stacks.Books do
 
     cond do
       book.visibility_tier == tier ->
-        # No-op: the tier already matches. Succeed without emitting telemetry.
         {:ok, book}
 
       raise_only and not raising_gate?(book.visibility_tier, tier) ->
@@ -277,6 +277,7 @@ defmodule Stacks.Books do
         |> case do
           {:ok, updated} ->
             emit_tiering(updated.visibility_tier, source)
+            evict_then_announce(updated, source)
             {:ok, updated}
 
           {:error, changeset} ->
@@ -285,15 +286,45 @@ defmodule Stacks.Books do
     end
   end
 
-  # Raising the gate is only public → age_gated. Everything else (already
-  # age_gated, or a lower) is not a raise.
+  # The eviction is SYNCHRONOUS and the event is only the audit trail —
+  # deliberately in that order, and deliberately not the event alone.
+  #
+  # `GET /api/books/:id` enforces the age gate against whatever
+  # `cached_or_fetch/1` returned, so until the `BookDetailCache` entry is gone the
+  # raised gate is not applied to anybody: a probe against a live database read
+  # `tier="public"`, raised the tier, and read `tier="public"` again — for the
+  # full 5-minute TTL. Routing this through the event bus alone (the wire
+  # `books.edition_merged` uses) would replace a 5-minute window with a shorter
+  # one, and a **content-safety control must not have a deferral window whose
+  # width is queue latency**. So the cache is evicted in this process, before the
+  # caller is told the write succeeded. The event still goes out: `event_log` is
+  # where "this book was marked adults-only, by this kind of actor, at this time"
+  # becomes durable, and its subscription covers any future emitter of this type
+  # that is not this function.
+  #
+  # Payload carries the WORK id — what the cache is keyed by — rather than
+  # leaving the subscriber to read `aggregate_id`, because "the aggregate happens
+  # to be the cache key" is the assumption that made `book.cover_confirmed`
+  # silently evict nothing. `visibility_tier` is the same closed
+  # two-value enum `book.created` already carries. Nothing identifies the actor
+  # beyond `metadata.actor`'s `"user" | "owner"`: no id, no free text.
+  defp evict_then_announce(%Book{} = book, source) do
+    BookDetailCache.invalidate(book.id)
+
+    Events.emit_safe(%{
+      event_type: "book.visibility_tier_changed",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{book_id: book.id, visibility_tier: book.visibility_tier},
+      metadata: %{actor: to_string(source)}
+    })
+
+    :ok
+  end
+
   defp raising_gate?("public", "age_gated"), do: true
   defp raising_gate?(_from, _to), do: false
 
-  # Repointed age-gate tiering counter (formerly emitted by the removed
-  # pipeline classifier). `tier` is a whitelisted atom (:public /
-  # :age_gated) and `source` is :user / :owner — no BISAC code, ISBN,
-  # title, or id in metadata (GDPR: telemetry is a warehouse-adjacent sink).
   defp emit_tiering(tier, source) when source in [:user, :owner] do
     :telemetry.execute(
       [:stacks, :moderation, :tiering],
@@ -306,16 +337,45 @@ defmodule Stacks.Books do
   defp tier_atom("public"), do: :public
 
   @doc """
-  Resolves book metadata from an ISBN via Open Library / Google Books,
-  then creates the book (work) and edition records.
+      Resolves book metadata from an ISBN via Open Library / Google Books,
+      then creates the book (work) and edition records.
+
+      A resolver failure is reported as what it was — `:isbn_not_found` only when
+      the upstreams answered and did not know the ISBN, `:resolver_unavailable`
+      when they did not answer at all. See `resolver_failure/1`.
   """
   @spec create_from_isbn(String.t()) ::
-          {:ok, Book.t()} | {:error, :not_found | Ecto.Changeset.t()}
+          {:ok, Book.t()}
+          | {:error, :isbn_not_found | :resolver_unavailable | Ecto.Changeset.t()}
   def create_from_isbn(isbn) do
     with :ok <- validate_isbn_format(isbn),
-         {:ok, metadata} <- ISBNResolver.resolve(isbn),
-         {:ok, author} <- find_or_create_author(metadata[:author]) do
-      isbn |> build_book_attrs(metadata, author) |> create()
+         {:ok, metadata} <- resolve_for_write(isbn) do
+      isbn |> attrs_from_resolved(metadata) |> create()
+    end
+  end
+
+  defp resolve_for_write(isbn) do
+    case ISBNResolver.resolve(isbn) do
+      {:ok, metadata} -> {:ok, metadata}
+      {:error, reason} -> {:error, resolver_failure(reason)}
+    end
+  end
+
+  @spec resolver_failure(term()) :: :isbn_not_found | :resolver_unavailable
+  defp resolver_failure(reason) do
+    if ISBNResolver.resolver_error?(reason) do
+      case ISBNResolver.determination(reason) do
+        :not_found -> :isbn_not_found
+        :unavailable -> :resolver_unavailable
+      end
+    else
+      Logger.warning(
+        "Books: ISBN resolver returned #{inspect(reason)}, which is outside " <>
+          "ISBNResolver.error_reason/0 — treating as unavailable (a reason we cannot " <>
+          "name says nothing about the ISBN)"
+      )
+
+      :resolver_unavailable
     end
   end
 
@@ -331,9 +391,9 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Resolves book metadata from an ISBN using Open Library / Google Books.
-  Delegates to the internal ISBNResolver. Use this instead of calling
-  ISBNResolver directly from other contexts.
+      Resolves book metadata from an ISBN using Open Library / Google Books.
+      Delegates to the internal ISBNResolver. Use this instead of calling
+      ISBNResolver directly from other contexts.
   """
   @spec resolve_isbn(String.t()) ::
           {:ok, map()} | {:error, ISBNResolver.error_reason()}
@@ -342,210 +402,11 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Reads an uploaded file, stores it in object storage, inserts an `UploadedImage`
-  record with the `storage_path` set, and returns the record.
+      Paginated public catalogue of works — no ownership data.
 
-  Returns `{:ok, uploaded_image}` or `{:error, reason}`.
-
-  The storage key is persisted on the record so any machine can retrieve the
-  image via a presigned URL — no shared filesystem or base64 in job args needed.
-  """
-  @spec store_upload(binary(), Plug.Upload.t()) ::
-          {:ok, UploadedImage.t()} | {:error, term()}
-  def store_upload(user_id, %Plug.Upload{path: tmp_path}) do
-    image_id = Ecto.UUID.generate()
-    storage_key = "uploads/#{image_id}"
-
-    with {:ok, bytes} <- File.read(tmp_path),
-         {:ok, _key} <- Stacks.Storage.upload_image(image_id, bytes),
-         {:ok, image} <- insert_uploaded_image(image_id, storage_key, user_id) do
-      Events.emit_safe(%{
-        event_type: "image.submitted",
-        aggregate_type: "image",
-        aggregate_id: image.id,
-        payload: %{storage_path: storage_key}
-      })
-
-      {:ok, image}
-    else
-      {:error, reason} ->
-        # Clean up stored object if DB insert fails (no-op if upload never happened)
-        Stacks.Storage.delete_image(storage_key)
-        {:error, reason}
-    end
-  end
-
-  @doc """
-  Store raw image bytes for an upload initiated via `init_upload/2`.
-
-  Called by `UploadController.upload_data/2` when the browser PUTs file bytes
-  to the Phoenix-proxied upload endpoint. Returns `:ok` on success.
-  """
-  @spec store_upload_bytes(binary(), binary()) :: :ok | {:error, term()}
-  def store_upload_bytes(image_id, bytes) when is_binary(bytes) do
-    case Stacks.Storage.upload_image(image_id, bytes) do
-      {:ok, _key} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp insert_uploaded_image(image_id, storage_key, user_id, status \\ "pending") do
-    now = DateTime.utc_now()
-
-    %UploadedImage{id: image_id}
-    |> uploaded_image_changeset(%{
-      storage_path: storage_key,
-      status: status,
-      uploaded_at: now,
-      expires_at: DateTime.add(now, 30, :day),
-      user_id: user_id
-    })
-    |> Repo.insert()
-  end
-
-  @doc """
-  Init step of the presigned-URL upload flow. Allocates an `image_id`,
-  reserves the R2 storage key, inserts an `UploadedImage` row with
-  status `"awaiting_upload"`, and returns a short-lived presigned PUT
-  URL the client uploads to directly.
-
-  Bytes never touch the Phoenix handler — the client PUTs straight to
-  R2, then calls `commit_upload/2` to signal completion. Frees the
-  HTTP pool during the slow upload transit and removes R2 latency
-  from the API response.
-
-  Returns `{:ok, %{image_id: ..., upload_url: ..., expires_in: ...}}`
-  or `{:error, reason}` if the row insert or presigning fails.
-
-  `opts` may include:
-    * `:content_type` — MIME type hint baked into the presigned URL.
-      The client MUST send the matching `Content-Type` header on its
-      PUT or R2 rejects with a signature mismatch.
-    * `:ttl_seconds` — presigned URL lifetime. Default 900s (15 min).
-  """
-  @spec init_upload(binary(), keyword()) ::
-          {:ok, %{image_id: binary(), upload_url: String.t(), expires_in: pos_integer()}}
-          | {:error, term()}
-  def init_upload(user_id, opts \\ []) do
-    image_id = Ecto.UUID.generate()
-    storage_key = "uploads/#{image_id}"
-    ttl_seconds = Keyword.get(opts, :ttl_seconds, 900)
-
-    # Use a Phoenix-served upload URL rather than an R2 presigned URL.
-    # Direct browser→R2 PUT requires the R2 bucket to allow the request
-    # origin in its CORS policy. Preview deployments use *.fly.dev origins
-    # which may not be in the bucket allowlist, causing silent CORS failures.
-    # Proxying through Phoenix is same-origin from the browser's perspective,
-    # so no CORS preflight is needed. Phoenix then stores to the configured
-    # backend (R2 in production, Local in dev/preview).
-    upload_url = "/api/upload/#{image_id}/data"
-
-    with {:ok, _image} <-
-           insert_uploaded_image(image_id, storage_key, user_id, "awaiting_upload") do
-      {:ok, %{image_id: image_id, upload_url: upload_url, expires_in: ttl_seconds}}
-    end
-  end
-
-  @doc """
-  Commit step of the presigned-URL upload flow. Verifies the client's
-  direct PUT to R2 actually landed, flips the `UploadedImage` row from
-  `"awaiting_upload"` to `"pending"`, and enqueues `IdentifyBookJob`.
-
-  The HEAD check prevents a client from calling commit without actually
-  uploading — we won't enqueue vision work against a missing object.
-
-  Returns `{:ok, %{image_id: ..., job_id: ...}}` on success, or:
-    * `{:error, :not_found}` — no such upload row, or the client's
-      user_id doesn't own it.
-    * `{:error, :not_yet_uploaded}` — row exists and is owned, but R2
-      HEAD returned 404. Either the client is racing the commit before
-      their PUT completed, or the upload failed silently.
-    * `{:error, :already_committed}` — row status is already `"pending"`
-      or a terminal state. Idempotent — repeat commits are safe but
-      don't re-enqueue.
-  """
-  @spec commit_upload(binary(), binary()) ::
-          {:ok, %{image_id: binary(), job_id: binary()}} | {:error, term()}
-  def commit_upload(user_id, image_id) when is_binary(user_id) and is_binary(image_id) do
-    with {:ok, image} <- fetch_owned_awaiting_upload(user_id, image_id),
-         :ok <- verify_object_exists(image.storage_path),
-         {:ok, updated} <- flip_awaiting_to_pending(image),
-         {:ok, job} <- upload_and_identify(user_id, updated.id, updated.storage_path) do
-      Events.emit_safe(%{
-        event_type: "image.submitted",
-        aggregate_type: "image",
-        aggregate_id: updated.id,
-        payload: %{storage_path: updated.storage_path}
-      })
-
-      {:ok, %{image_id: updated.id, job_id: job.id}}
-    end
-  end
-
-  # Translate the storage backend's :not_found into :not_yet_uploaded so
-  # the controller can distinguish "no such row" from "row exists but
-  # the client PUT hasn't landed yet" — the latter is a race condition
-  # clients can retry, the former is a hard 404.
-  defp verify_object_exists(storage_path) do
-    case Stacks.Storage.head_image(storage_path) do
-      {:ok, _size} -> :ok
-      {:error, :not_found} -> {:error, :not_yet_uploaded}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp fetch_owned_awaiting_upload(user_id, image_id) do
-    case Repo.get(UploadedImage, image_id) do
-      nil ->
-        {:error, :not_found}
-
-      %UploadedImage{user_id: owner} when owner != user_id ->
-        {:error, :not_found}
-
-      %UploadedImage{status: "awaiting_upload"} = image ->
-        {:ok, image}
-
-      %UploadedImage{} ->
-        {:error, :already_committed}
-    end
-  end
-
-  defp flip_awaiting_to_pending(%UploadedImage{} = image) do
-    image
-    |> uploaded_image_changeset(%{status: "pending"})
-    |> Repo.update()
-  end
-
-  @doc """
-  Enqueues a vision-model identification job for an uploaded image.
-
-  The `storage_key` is included in the job args so the worker can fetch a
-  presigned URL at execution time — no base64 blob in the job payload.
-
-  Returns `{:ok, job}` immediately; the job resolves ISBN and creates the book asynchronously.
-  """
-  @spec upload_and_identify(binary(), binary(), String.t()) ::
-          {:ok, Oban.Job.t()} | {:error, term()}
-  def upload_and_identify(user_id, image_id, storage_key) do
-    %{user_id: user_id, image_id: image_id, storage_key: storage_key}
-    |> IdentifyBookJob.new()
-    |> Oban.insert()
-  end
-
-  @doc """
-  Returns a paginated list of all books (works) with optional search, subject filter,
-  and sort order. No ownership data is included — this powers the public
-  catalogue endpoint.
-
-  ## Options
-
-    * `:search` — free-text search against `title_tsv` (optional)
-    * `:subject` — filter to books containing this subject (optional)
-    * `:sort` — one of `"title"`, `"author"`, `"recent"` (default `"title"`)
-    * `:page` — 1-based page number (default 1)
-    * `:per_page` — items per page (default 24, max 100)
-
-  Returns `{books, total_count}`.
+      Options: `:search` (title tsv), `:subject`, `:sort` (`"title"` default,
+      `"author"`, `"recent"`), `:page` (1-based), `:per_page` (24, max 100).
+      Returns `{books, total_count}`.
   """
   @spec list_catalogue(keyword()) :: {[Book.t()], non_neg_integer()}
   def list_catalogue(opts \\ []) do
@@ -580,20 +441,10 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Lists books for the owner moderation surface (#118 owner age-gate override).
-
-  Unlike `list_catalogue/1`, this NEVER hides age-gated books — the platform
-  owner must see and act on every book regardless of tier. There is no viewer
-  filter here; the route is gated by the MFA-verified admin pipeline.
-
-  `opts`:
-    * `:search` — free-text search against `title_tsv` (optional)
-    * `:tier` — `"public"` | `"age_gated"` filter (optional)
-    * `:page` — 1-based page number (default 1)
-    * `:per_page` — items per page (default 50, max 100)
-
-  Returns `{books, total_count}`, each book preloaded with `:author` and
-  `:editions` so the caller can surface title/author/cover/isbn.
+      Lists books for the owner moderation surface. Unlike `list_catalogue/1` it
+      NEVER hides age-gated books — the owner must see every tier; the admin
+      pipeline gates the route. Options: `:search`, `:tier`, `:page`,
+      `:per_page` (50, max 100). Returns `{books, total_count}`.
   """
   @spec list_for_moderation(keyword()) :: {[Book.t()], non_neg_integer()}
   def list_for_moderation(opts \\ []) do
@@ -634,12 +485,6 @@ defmodule Stacks.Books do
   defp maybe_search(query, ""), do: query
 
   defp maybe_search(query, search) do
-    # Raw query straight to `plainto_tsquery` via the bound param — same rationale
-    # as `search_books/2` (#291): injection-safety comes from Ecto binding +
-    # plainto_tsquery treating input as plain text, NOT from stripping characters.
-    # This path uses `plainto_tsquery` (not `ilike`), so there are no `%`/`_`
-    # wildcard semantics to escape. A prior `String.replace(~r/[^\w\s]/)` sanitiser
-    # was lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" (#296).
     where(
       query,
       [b],
@@ -654,21 +499,9 @@ defmodule Stacks.Books do
     where(query, [b], ^subject in b.subjects)
   end
 
-  # #229: age-gated books are hidden from listing surfaces for any viewer who is
-  # not age-verified — anonymous OR authenticated-but-unverified. This must stay a
-  # SQL-level predicate so `total`/pagination (see list_catalogue/1) counts stay
-  # correct; an in-memory post-filter would break paging.
-  #
-  # Fail closed: ONLY a verified platform user (`{:platform_user, _id, true}`) is
-  # left unfiltered. Every other viewer shape — anonymous, unverified, or any
-  # unexpected/legacy tuple — has age-gated books excluded by default, so a future
-  # caller passing a stale 2-tuple can never silently leak age-gated content.
   defp maybe_exclude_age_gated(query, {:platform_user, _id, true}), do: query
 
   defp maybe_exclude_age_gated(query, _viewer) do
-    # Shipped dark (ADR-020): when age-gating is disabled the listing filter is a
-    # no-op for EVERY viewer — age-gated books are shown like public ones. Only
-    # `list_for_moderation`/`maybe_filter_tier` (owner-only) stays tier-aware.
     if Stacks.FeatureFlags.age_gating_enabled?() do
       where(query, [b], b.visibility_tier != "age_gated")
     else
@@ -691,26 +524,9 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Full-text search on books using the stored tsvector columns.
-
-  Returns up to `limit` results (default 20).
-
-  ## Options
-
-    * `:limit` — max results (default 20)
-    * `:scope` — `:title` (default) matches `title_tsv` only; `:deep` (#284)
-      ALSO matches `description_tsv`, so a book whose description mentions the
-      query surfaces even when its title does not. Under `:deep`, title matches
-      are ordered ahead of description-only matches (a boolean title-match key,
-      DESC, then title ASC) so the most-relevant hits stay first; the default
-      title scope is unchanged.
-
-  In both scopes the raw query is passed straight to `plainto_tsquery` via the
-  bound param: injection-safety comes from Ecto param binding + `plainto_tsquery`
-  treating its input as plain text (proven by the #115 edge-case suite), NOT from
-  stripping characters. A prior `String.replace(~r/[^\w\s]/)` sanitiser was
-  lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" — which changed the
-  lexemes and dropped legitimate matches (#291).
+      Full-text search over the stored tsvector columns; up to `:limit` results
+      (default 20). `:scope` — `:title` (default) matches titles only; `:deep`
+      also matches descriptions, ranking title matches first.
   """
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
@@ -738,9 +554,6 @@ defmodule Stacks.Books do
     where(query_ast, [b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
   end
 
-  # Under deep scope, rank title matches ahead of description-only matches: the
-  # boolean `title_tsv @@ ...` sorts `true` before `false` under DESC, then title
-  # breaks ties alphabetically. Title scope keeps its implicit (unordered) shape.
   defp search_scope_order(query_ast, :deep, query) do
     order_by(
       query_ast,
@@ -753,15 +566,9 @@ defmodule Stacks.Books do
   defp search_scope_order(query_ast, _title, _query), do: query_ast
 
   @doc """
-  Builds `ts_headline` description snippets for a deep search (#284).
-
-  Given a list of `book_ids` and the raw `query`, returns a map
-  `%{book_id => snippet}` for every book in the list whose `description_tsv`
-  matches — the "why this matched" excerpt behind US-1.5.2. Books whose
-  description does NOT match (title-only hits) are absent from the map, so the
-  caller leaves their snippet empty. The excerpt wraps matched lexemes in
-  `<mark>…</mark>`. Same `plainto_tsquery` injection-safety rationale as
-  `search_books/2`.
+      Builds `ts_headline` description snippets for a deep search: returns
+      `%{book_id => snippet}` with matches wrapped in `<mark>…</mark>`. Books whose
+      description did not match (title-only hits) are ABSENT from the map.
   """
   @spec description_snippets([binary()], String.t()) :: %{binary() => String.t()}
   def description_snippets([], _query), do: %{}
@@ -784,9 +591,9 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Update cover_image_url on a book edition after the vision sidecar confirms the association.
-  Emits a book.cover_confirmed event.
-  Returns {:ok, edition} or {:error, reason}.
+      Update cover_image_url on a book edition after the vision sidecar confirms the association.
+      Emits a book.cover_confirmed event.
+      Returns {:ok, edition} or {:error, reason}.
   """
   @spec confirm_cover_association(String.t(), String.t()) ::
           {:ok, BookEdition.t()} | {:error, :not_found} | {:error, Ecto.Changeset.t()}
@@ -805,7 +612,7 @@ defmodule Stacks.Books do
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
               aggregate_id: updated.id,
-              payload: %{cover_image_url: final_url},
+              payload: %{book_id: updated.book_id, cover_image_url: final_url},
               metadata: %{actor: "vision_sidecar"}
             })
 
@@ -818,8 +625,6 @@ defmodule Stacks.Books do
   end
 
   defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
-    # Covers are permanent — use a long-lived presigned URL (7 days).
-    # In production, R2 public bucket access or CDN would serve these.
     with {:ok, image_data} <- download_cover(cover_url),
          {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
          {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
@@ -832,24 +637,19 @@ defmodule Stacks.Books do
   defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
 
   defp download_cover(url) when is_binary(url) do
-    req = Finch.build(:get, url)
+    books_http_client().get_binary(url)
+  end
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: 10_000) do
-      {:ok, %Finch.Response{status: 200, body: body}} -> {:ok, body}
-      _ -> {:error, :download_failed}
-    end
-  rescue
-    e ->
-      Logger.warning("Books: cover download failed for #{url}: #{Exception.message(e)}")
-      {:error, :download_failed}
+  defp books_http_client do
+    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
   end
 
   @doc """
-  Finds books in the platform that are likely the same work as the given title
-  and author, using Jaro-Winkler string similarity on both fields combined.
+      Finds books in the platform that are likely the same work as the given title
+      and author, using Jaro-Winkler string similarity on both fields combined.
 
-  Returns matches where the combined similarity score exceeds 0.8.
-  Each result is a map with `:id`, `:title`, `:author`, `:similarity`.
+      Returns matches where the combined similarity score exceeds 0.8.
+      Each result is a map with `:id`, `:title`, `:author`, `:similarity`.
   """
   @spec find_same_work(String.t(), String.t()) :: [map()]
   def find_same_work(title, author) do
@@ -877,8 +677,6 @@ defmodule Stacks.Books do
     |> Enum.sort_by(& &1.similarity, :desc)
   end
 
-  # Jaro-Winkler similarity: jaro + prefix_len * p * (1 - jaro)
-  # p = 0.1, prefix length capped at 4.
   defp jaro_winkler(s1, s2) do
     jaro = String.jaro_distance(s1, s2)
 
@@ -896,79 +694,16 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Sends an image to the vision service to extract ISBN candidates, then resolves
-  each ISBN via Open Library / Google Books.
-
-  Returns `{:ok, candidates}` where each candidate is a map with `:isbn`,
-  `:title`, `:author`, and `:open_library_work_id`.
-  Returns `{:error, reason}` if the vision call fails.
-
-  Nothing is committed to the database by this function.
-  """
-  @spec identify(binary(), {:b64, binary()} | {:url, binary()}) ::
-          {:ok, [map()]} | {:error, term()}
-  def identify(_user_id, image_input) do
-    client = Application.get_env(:core, :vision_client, Stacks.AI.Client)
-    payload = build_identify_payload(image_input)
-
-    case client.call_vision("extract_isbn", payload) do
-      {:ok, %{"books" => books}} when is_list(books) ->
-        {:ok, Enum.flat_map(books, &resolve_candidates/1)}
-
-      {:ok, _other} ->
-        {:ok, []}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp build_identify_payload({:b64, data}), do: %{image_b64: data}
-  defp build_identify_payload({:url, data}), do: %{image_url: data}
-
-  defp resolve_candidates(book_result) do
-    book_result
-    |> Map.get("potential_isbns", [])
-    |> Enum.map(&resolve_isbn_candidate(&1, book_result))
-  end
-
-  defp resolve_isbn_candidate(isbn, book_result) do
-    metadata =
-      case ISBNResolver.resolve(isbn) do
-        {:ok, meta} -> meta
-        _ -> %{}
-      end
-
-    %{
-      isbn: isbn,
-      title: metadata[:title] || Map.get(book_result, "title"),
-      author: metadata[:author] || Map.get(book_result, "author"),
-      open_library_work_id: metadata[:open_library_work_id]
-    }
-  end
-
-  @doc """
-  Confirms a book by ISBN, creating the work, primary edition, and placing it
-  on a bookshelf for the given user.
-
-  If the ISBN already exists, returns `{:ok, existing_book}` without creating
-  a duplicate.
-
-  If a different ISBN resolves to a title+author that fuzzy-matches an existing
-  work (Jaro-Winkler score > 0.8), returns
-  `{:error, {:merge_required, existing_work_id}}`.
-
-  Otherwise creates the work + primary edition + placement and emits a
-  `books.confirmed` event, returning `{:ok, book}`.
-
-  ## Options
-
-    * `:shelf_name` in `attrs` — bookshelf to place on (default `"wishlist"`)
+      Confirms a book by ISBN: creates work + primary edition + placement and
+      emits `books.confirmed`. An existing ISBN returns `{:ok, existing_book}`;
+      a title+author fuzzy match to another work (Jaro-Winkler > 0.8) returns
+      `{:error, {:merge_required, work_id}}`. `attrs["shelf_name"]` picks the
+      bookshelf (default `"wishlist"`).
   """
   @spec confirm(binary(), map()) ::
           {:ok, :created, Book.t()}
-          | {:ok, :existing, Book.t(), Shelving.Placement.t()}
-          | {:ok, :already_placed, Book.t(), Shelving.Placement.t()}
+          | {:ok, :existing, Book.t(), Shelving.Placement.t(), [Shelving.Placement.t()]}
+          | {:ok, :already_placed, Book.t(), Shelving.Placement.t(), [Shelving.Placement.t()]}
           | {:error, {:merge_required, String.t()}}
           | {:error, term()}
   def confirm(user_id, attrs) do
@@ -976,16 +711,16 @@ defmodule Stacks.Books do
     shelf_name = attrs[:shelf_name] || attrs["shelf_name"] || "wishlist"
 
     with {:ok, isbn} <- require_isbn(isbn),
-         nil <- find_existing(isbn),
-         {:ok, metadata} <- ISBNResolver.resolve(isbn),
+         nil <- find_existing_edition(isbn),
+         {:ok, metadata} <- resolve_for_write(isbn),
          [] <- find_same_work(metadata[:title] || "Unknown Title", metadata[:author] || "") do
       create_confirmed_book(user_id, isbn, metadata, shelf_name)
     else
       {:error, :missing_isbn} ->
         {:error, :missing_isbn}
 
-      %Book{} = existing ->
-        place_or_return_existing(user_id, existing, shelf_name)
+      %BookEdition{} = edition ->
+        place_or_return_existing(user_id, edition.book, shelf_name, edition.id)
 
       [%{id: existing_work_id} | _] ->
         {:error, {:merge_required, existing_work_id}}
@@ -995,18 +730,20 @@ defmodule Stacks.Books do
     end
   end
 
-  defp place_or_return_existing(user_id, book, shelf_name) do
-    case Shelving.get_placement_for_book(user_id, book.id) do
-      nil -> create_placement_for_existing(user_id, book, shelf_name)
-      placement -> {:ok, :already_placed, book, placement}
+  defp place_or_return_existing(user_id, book, shelf_name, book_edition_id) do
+    placements = Shelving.get_placements_for_book(user_id, book.id)
+
+    case Enum.find(placements, &(&1.bookshelf.name == shelf_name)) do
+      nil -> create_placement_for_existing(user_id, book, shelf_name, placements, book_edition_id)
+      placement -> {:ok, :already_placed, book, placement, placements}
     end
   end
 
-  defp create_placement_for_existing(user_id, book, shelf_name) do
-    case Shelving.place_book(user_id, book.id, shelf_name) do
-      {:ok, _} ->
-        placement = Shelving.get_placement_for_book(user_id, book.id)
-        {:ok, :existing, book, placement}
+  defp create_placement_for_existing(user_id, book, shelf_name, existing, book_edition_id) do
+    case Shelving.place_book(user_id, book.id, shelf_name, book_edition_id) do
+      {:ok, placement} ->
+        placement = Repo.preload(placement, :bookshelf)
+        {:ok, :existing, book, placement, existing ++ [placement]}
 
       {:error, reason} ->
         {:error, reason}
@@ -1017,87 +754,50 @@ defmodule Stacks.Books do
   defp require_isbn(isbn), do: {:ok, isbn}
 
   defp create_confirmed_book(user_id, isbn, metadata, shelf_name) do
-    author_name = metadata[:author]
+    attrs = attrs_from_resolved(isbn, metadata)
 
-    with {:ok, author} <- find_or_create_author(author_name) do
-      attrs = build_book_attrs(isbn, metadata, author)
-
-      Multi.new()
-      |> Multi.insert(:book, %Book{} |> book_changeset(attrs))
-      |> Multi.insert(:edition, fn %{book: book} ->
-        %BookEdition{}
-        |> book_edition_changeset(%{
-          "isbn" => isbn,
-          "book_id" => book.id,
-          "format_label" => metadata[:format_label],
-          "cover_image_url" => metadata[:cover_image_url],
-          "page_count" => metadata[:page_count],
-          "publisher" => metadata[:publisher],
-          "publication_year" => metadata[:publication_year],
-          "open_library_id" => metadata[:open_library_id],
-          "is_primary" => true
-        })
-      end)
-      |> Multi.run(:placement, fn _repo, %{book: book} ->
-        Shelving.place_book(user_id, book.id, shelf_name)
-      end)
-      |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
-        Events.emit_safe(%{
-          event_type: "books.confirmed",
-          aggregate_type: "book",
-          aggregate_id: book.id,
-          payload: %{isbn: edition.isbn, title: book.title, shelf: shelf_name}
-        })
-
-        {:ok, book}
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{book: book, edition: edition}} ->
-          {:ok, :created, %{book | editions: [edition]}}
-
-        {:error, :book, changeset, _} ->
-          {:error, changeset}
-
-        {:error, :edition, changeset, _} ->
-          {:error, changeset}
-
-        {:error, _, reason, _} ->
-          {:error, reason}
-      end
+    case create_work(attrs,
+           place: {user_id, shelf_name},
+           event: &books_confirmed_event(&1, &2, shelf_name)
+         ) do
+      {:ok, book} -> {:ok, :created, book}
+      {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Merges a new edition (ISBN) into an existing work.
-
-  Creates a non-primary `book_edition` row linked to `work_id`.
-
-  Returns `{:ok, edition}` on success.
-  Returns `{:error, :not_found}` when `work_id` does not exist.
-  Returns `{:error, changeset}` on validation failure (e.g. duplicate ISBN).
+      Merges a new edition (ISBN) into an existing work as a non-primary row.
+      Errors: `:not_found` (work), `:isbn_not_found` (upstreams rejected it),
+      `:resolver_unavailable` (upstreams unreachable), or a changeset.
   """
   @spec merge_edition(String.t(), map()) :: {:ok, BookEdition.t()} | {:error, term()}
   def merge_edition(work_id, attrs) do
     isbn = attrs[:isbn] || attrs["isbn"]
     format_label = attrs[:format_label] || attrs["format_label"]
 
-    with {:ok, _meta} <- ISBNResolver.resolve(isbn),
+    with {:ok, meta} <- resolve_for_write(isbn),
          book when not is_nil(book) <- Repo.get(Book, work_id) do
-      insert_edition(book, isbn, format_label, work_id)
+      insert_edition(book, isbn, format_label, work_id, meta)
     else
-      {:error, _} -> {:error, :isbn_not_found}
+      {:error, reason} -> {:error, reason}
       nil -> {:error, :not_found}
     end
   end
 
-  defp insert_edition(book, isbn, format_label, work_id) do
+  defp insert_edition(book, isbn, format_label, work_id, meta) do
     %BookEdition{}
     |> book_edition_changeset(%{
       "isbn" => isbn,
       "book_id" => book.id,
       "format_label" => format_label,
-      "is_primary" => false
+      "cover_image_url" => meta[:cover_image_url],
+      "page_count" => meta[:page_count],
+      "publisher" => meta[:publisher],
+      "publication_year" => meta[:publication_year],
+      "open_library_id" => meta[:open_library_id],
+      "google_books_id" => meta[:google_books_id],
+      "is_primary" => false,
+      "verification_source" => verification_source_from(meta)
     })
     |> Repo.insert()
     |> emit_or_classify_edition(isbn, work_id)
@@ -1124,25 +824,10 @@ defmodule Stacks.Books do
     end)
   end
 
-  defp maybe_create_author(changeset, %{"author" => name}) when is_binary(name) and name != "" do
-    case find_or_create_author(name) do
-      {:ok, author} -> Ecto.Changeset.put_change(changeset, :author_id, author.id)
-      _ -> changeset
-    end
-  end
-
-  defp maybe_create_author(changeset, _attrs), do: changeset
-
   @doc """
-  Looks up an author row by exact `name`, inserting a new row if none
-  exists. Returns `{:ok, nil}` for nil or empty input — used during
-  enrichment, where Open Library / Google Books may legitimately not
-  carry an author. Returns `{:error, changeset}` only on insert failure
-  (e.g. row constraint).
-
-  Exposed (rather than kept private) so `Stacks.Workers.EnrichBookJob`
-  can link the resolver's author string to a real `op.authors` row when
-  filling in a placeholder book's `author_id`.
+      Finds an author by exact name, inserting if absent. `{:ok, nil}` for
+      nil/empty input (enrichment sources may carry no author). Public so
+      `EnrichBookJob` can link resolver author strings to `op.authors` rows.
   """
   @spec find_or_create_author(String.t() | nil) ::
           {:ok, Author.t() | nil} | {:error, Ecto.Changeset.t()}
@@ -1167,27 +852,22 @@ defmodule Stacks.Books do
     end
   end
 
-  defp build_book_attrs(isbn, metadata, author) do
-    base = %{
+  defp attrs_from_resolved(isbn, metadata) do
+    %{
       "isbn" => isbn,
       "title" => metadata[:title] || "Unknown Title",
+      "author" => metadata[:author],
       "description" => metadata[:description],
+      "subjects" => metadata[:subjects] || [],
+      "format_label" => metadata[:format_label],
       "cover_image_url" => metadata[:cover_image_url],
       "publisher" => metadata[:publisher],
       "publication_year" => metadata[:publication_year],
       "page_count" => metadata[:page_count],
-      "subjects" => metadata[:subjects] || [],
       "open_library_id" => metadata[:open_library_id],
       "google_books_id" => metadata[:google_books_id]
     }
-
-    case author do
-      nil -> base
-      author -> Map.put(base, "author_id", author.id)
-    end
   end
-
-  # ── Changeset functions (moved from schema modules) ────────────────────
 
   @doc false
   def book_changeset(book, attrs) do
@@ -1204,170 +884,119 @@ defmodule Stacks.Books do
     |> validate_required([:name])
   end
 
+  @doc """
+      The closed set of values `book_editions.verification_source` may hold.
+
+      Public so callers and tests name the same list the CHECK constraint does
+      rather than re-spelling the strings.
+  """
+  @spec verification_sources() :: [String.t()]
+  def verification_sources, do: @verification_sources
+
+  @doc """
+      Derives an edition's ISBN provenance from resolver metadata: the
+      cross-reference id present names the confirming catalogue
+      (`open_library`/`google_books`); neither present means nothing external
+      confirmed it — `"barcode_unverified"`.
+  """
+  @spec verification_source_from(map()) :: String.t()
+  def verification_source_from(metadata) when is_map(metadata) do
+    cond do
+      present?(metadata[:open_library_id] || metadata["open_library_id"]) -> "open_library"
+      present?(metadata[:google_books_id] || metadata["google_books_id"]) -> "google_books"
+      true -> "barcode_unverified"
+    end
+  end
+
+  defp present?(value), do: is_binary(value) and value != ""
+
+  @doc """
+      Vets one raw `op.book_editions` row through the production changeset before
+      `insert_all/3` (which bypasses changesets entirely), returning it with the
+      normalised `isbn`. Raises `ArgumentError` for a row production could not
+      write — seed fixtures must not be able to ship invalid ISBNs.
+  """
+  @spec vet_edition_row!(map()) :: map()
+  def vet_edition_row!(row) when is_map(row) do
+    changeset = book_edition_changeset(%BookEdition{}, castable_edition_row(row))
+
+    if changeset.valid? do
+      %{row | isbn: get_field(changeset, :isbn)}
+    else
+      raise ArgumentError, """
+      seed edition row is not one a production write path could produce:
+        isbn:    #{inspect(row[:isbn])}
+        errors:  #{inspect(changeset_error_messages(changeset))}
+      Fix the row in priv/repo/seeds.exs — do not relax this check.
+      """
+    end
+  end
+
+  @edition_row_cast_keys [:isbn, :book_id, :verification_source] ++
+                           [
+                             :format_label,
+                             :cover_image_url,
+                             :page_count,
+                             :publisher,
+                             :publication_year,
+                             :open_library_id,
+                             :google_books_id,
+                             :is_primary
+                           ]
+
+  defp castable_edition_row(row) do
+    row
+    |> Map.take(@edition_row_cast_keys)
+    |> Map.replace_lazy(:book_id, &load_uuid/1)
+  end
+
+  defp load_uuid(<<_::128>> = raw), do: Ecto.UUID.load!(raw)
+  defp load_uuid(other), do: other
+
+  defp changeset_error_messages(changeset) do
+    traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+      end)
+    end)
+  end
+
   @doc false
   def book_edition_changeset(edition, attrs) do
     edition
     |> cast(attrs, @edition_required_fields ++ @edition_optional_fields)
     |> validate_required(@edition_required_fields)
+    |> validate_inclusion(:verification_source, @verification_sources)
     |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
     |> validate_isbn_checksum()
     |> normalize_edition_isbn()
     |> unique_constraint(:isbn)
+    |> check_constraint(:isbn,
+      name: :book_editions_isbn_ean13_checksum,
+      message: "must be a valid ISBN-13 with a correct check digit"
+    )
+    |> check_constraint(:verification_source,
+      name: :book_editions_verification_source_check,
+      message: "is invalid"
+    )
   end
 
-  # Normalise any ISBN-10 input to ISBN-13 before storage so that
-  # find_existing/1 (which always searches by ISBN-13) can round-trip
-  # correctly. Without this, a title-search returning an ISBN-10 would be
-  # stored as-is, find_existing would miss it, and re-inserts would hit the
-  # unique constraint instead of deduplicating cleanly.
-  # Only runs when the changeset is still valid (format + checksum already passed).
   defp normalize_edition_isbn(%{valid?: false} = changeset), do: changeset
 
   defp normalize_edition_isbn(changeset) do
     case get_change(changeset, :isbn) do
       nil -> changeset
-      isbn -> put_change(changeset, :isbn, to_isbn13(isbn))
+      isbn -> put_change(changeset, :isbn, ISBN.to_isbn13(isbn))
     end
-  end
-
-  @doc false
-  def uploaded_image_changeset(image, attrs) do
-    image
-    |> cast(attrs, @image_cast_fields)
-    |> validate_required([:status, :uploaded_at, :expires_at, :user_id])
-    |> validate_inclusion(:status, @valid_image_statuses)
   end
 
   defp validate_isbn_checksum(changeset) do
     validate_change(changeset, :isbn, fn :isbn, isbn ->
-      if valid_isbn_checksum?(isbn) do
+      if ISBN.valid_isbn_checksum?(isbn) do
         []
       else
         [isbn: "has an invalid checksum"]
       end
     end)
   end
-
-  @doc """
-  True iff `isbn` is a well-formed ISBN-10 or ISBN-13 with a valid
-  check digit. Strings that don't match the shape are accepted (returns
-  `true`) so validation callsites can defer shape-checking to separate
-  validators; for explicit checksum gating, pre-filter with the shape
-  regex before calling.
-
-  Publicly exposed so callers (e.g. `Stacks.Moderation`) can trust a
-  scanner-decoded ISBN without a round-trip to Open Library: barcode
-  scanners won't decode a checksum-invalid EAN-13, and the 1-in-10 odds
-  of a random 13-digit string passing the checksum make false positives
-  vanishingly rare.
-  """
-  @spec valid_isbn_checksum?(String.t()) :: boolean()
-  def valid_isbn_checksum?(isbn) do
-    if isbn =~ ~r/^\d{10}$|^\d{13}$/ do
-      digits = Enum.map(String.graphemes(isbn), &String.to_integer/1)
-
-      case length(digits) do
-        13 -> isbn13_valid?(digits)
-        10 -> isbn10_valid?(digits)
-        _ -> false
-      end
-    else
-      true
-    end
-  end
-
-  defp isbn13_valid?(digits) do
-    sum =
-      digits
-      |> Enum.with_index()
-      |> Enum.reduce(0, fn {d, i}, acc ->
-        weight = if rem(i, 2) == 0, do: 1, else: 3
-        acc + d * weight
-      end)
-
-    rem(sum, 10) == 0
-  end
-
-  defp isbn10_valid?(digits) do
-    sum =
-      digits
-      |> Enum.take(9)
-      |> Enum.with_index()
-      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * (10 - i) end)
-
-    check = rem(11 - rem(sum, 11), 11)
-    check != 10 and check == Enum.at(digits, 9)
-  end
-
-  @doc """
-  Canonical ISBN-13 comparison form of `isbn`.
-
-  Strips hyphens/whitespace and upcases, then converts a checksum-valid
-  ISBN-10 (including an `X` check digit) to its ISBN-13 equivalent:
-  `"978"` + the first nine digits + a recomputed EAN-13 (mod-10) check
-  digit over those twelve. The ISBN-10 check digit is discarded — it
-  does not carry into the 13 form. Anything else (13-digit strings,
-  checksum-invalid 10s, garbage, `""`) is returned in the stripped and
-  upcased form otherwise unchanged; non-binary input (incl. `nil`)
-  returns `nil`.
-
-  Two ISBN strings identify the same edition iff their canonical forms
-  are equal, regardless of 10/13 form or hyphenation. Use this on BOTH
-  sides of any ISBN comparison (cache invalidation, rejection-retry
-  exclusions): OL/GB search docs often carry only the ISBN-10 form
-  while `book_editions.isbn` always stores ISBN-13, so bare
-  hyphen-stripped equality silently misses cross-form matches.
-  """
-  @spec canonical_isbn13(term()) :: String.t() | nil
-  def canonical_isbn13(isbn) when is_binary(isbn) do
-    normalised =
-      isbn
-      |> String.replace(~r/[\s-]/, "")
-      |> String.upcase()
-
-    if valid_isbn10?(normalised) do
-      to_isbn13(normalised)
-    else
-      normalised
-    end
-  end
-
-  def canonical_isbn13(_isbn), do: nil
-
-  # Shape + checksum gate for canonical_isbn13/1. Unlike isbn10_valid?/1
-  # (which only sees all-digit strings — valid_isbn_checksum?/1's regex
-  # filters `X` out before it), this accepts the `X` (= 10) check digit.
-  defp valid_isbn10?(isbn) do
-    isbn =~ ~r/^\d{9}[\dX]$/ and isbn10_check_digit_ok?(isbn)
-  end
-
-  defp isbn10_check_digit_ok?(<<first_nine::binary-size(9), check>>) do
-    sum =
-      first_nine
-      |> String.graphemes()
-      |> Enum.map(&String.to_integer/1)
-      |> Enum.with_index()
-      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * (10 - i) end)
-
-    expected = rem(11 - rem(sum, 11), 11)
-    actual = if check == ?X, do: 10, else: check - ?0
-    expected == actual
-  end
-
-  # Normalises an ISBN-10 to its ISBN-13 equivalent so DB lookups always use
-  # the canonical form. ISBN-13s (and anything else) are returned unchanged.
-  defp to_isbn13(<<a, b, c, d, e, f, g, h, i, _check>>) do
-    nine = [a - ?0, b - ?0, c - ?0, d - ?0, e - ?0, f - ?0, g - ?0, h - ?0, i - ?0]
-    prefix = [9, 7, 8 | nine]
-    weights = [1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3]
-
-    sum =
-      Enum.zip(prefix, weights)
-      |> Enum.reduce(0, fn {d, w}, acc -> acc + d * w end)
-
-    check = rem(10 - rem(sum, 10), 10)
-    "978" <> <<a, b, c, d, e, f, g, h, i>> <> Integer.to_string(check)
-  end
-
-  defp to_isbn13(isbn), do: isbn
 end

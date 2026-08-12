@@ -9,12 +9,15 @@ module Page.Settings.Privacy exposing
     )
 
 import Api
+import Components.SaveButton as SaveButton
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Page.Settings.Consent as Consent
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility
+import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
 
 
@@ -33,6 +36,7 @@ type alias Model =
     , loadingMore : Bool
     , unblocking : Maybe String
     , unblockError : Bool
+    , consent : Consent.Model
     }
 
 
@@ -62,6 +66,7 @@ type Msg
     | LoadMoreBlocked
     | UserClicksUnblock String
     | GotUnblockResponse String (Result Http.Error ())
+    | ConsentMsg Consent.Msg
 
 
 type OutMsg
@@ -143,18 +148,25 @@ init =
     , loadingMore = False
     , unblocking = Nothing
     , unblockError = False
+    , consent = Consent.init { analytics = False, writingAssistant = False }
     }
 
 
 {-| Entry point used by `Main` when the Privacy page opens: seeds the model and,
-when authenticated, kicks off the blocked-users fetch. The bare `init` is kept
+when authenticated, kicks off the blocked-users fetch. `consentSeed` reflects the
+signed-in user's current consent so the folded-in toggles open showing reality
+(same seeding the standalone consent page used to do). The bare `init` is kept
 for tests and flows that don't need the network.
 -}
-initWithToken : Maybe String -> ( Model, Cmd Msg )
-initWithToken maybeToken =
+initWithToken : Maybe String -> { analytics : Bool, writingAssistant : Bool } -> ( Model, Cmd Msg )
+initWithToken maybeToken consentSeed =
+    let
+        seeded =
+            { init | consent = Consent.init consentSeed }
+    in
     case maybeToken of
         Just token ->
-            ( { init | blockedUsers = Loading }
+            ( { seeded | blockedUsers = Loading }
             , Cmd.batch
                 [ Api.getPrivacySettings token GotPrivacySettings
                 , Api.listBlockedUsers token 1 GotBlockedUsers
@@ -162,7 +174,7 @@ initWithToken maybeToken =
             )
 
         Nothing ->
-            ( init, Cmd.none )
+            ( seeded, Cmd.none )
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
@@ -267,8 +279,6 @@ update msg model maybeToken =
             ( { model | deleteRequested = True }, Cmd.none, NoOut )
 
         UserCancelsDelete ->
-            -- Back out of the danger zone entirely, discarding what was typed.
-            -- Ignored while a request is in flight (the input/button are locked).
             if isDeleting model.deleting then
                 ( model, Cmd.none, NoOut )
 
@@ -279,10 +289,6 @@ update msg model maybeToken =
                 )
 
         UserTypesDeleteConfirmation typed ->
-            -- Ignore edits while a deletion is in flight: clearing `deleting`
-            -- here would re-enable the submit button and let a second DELETE
-            -- fire. The single-flight invariant lives in the handler, not the
-            -- view alone.
             if isDeleting model.deleting then
                 ( model, Cmd.none, NoOut )
 
@@ -290,9 +296,6 @@ update msg model maybeToken =
                 ( { model | deleteConfirmation = typed, deleting = NotAsked }, Cmd.none, NoOut )
 
         UserClicksDeleteAccount ->
-            -- Fire only on an exact confirmation AND when no request is already
-            -- in flight — a real single-flight guard in the handler, not just a
-            -- disabled attribute in the view.
             if deleteConfirmed model.deleteConfirmation && not (isDeleting model.deleting) then
                 case maybeToken of
                     Just token ->
@@ -310,8 +313,6 @@ update msg model maybeToken =
         GotDeleteResponse result ->
             case result of
                 Ok _ ->
-                    -- Queued server-side. Confirm to the user, then hand off to
-                    -- Main to clear the session and show the farewell.
                     ( { model | deleting = Success () }, Cmd.none, AccountDeleted )
 
                 Err err ->
@@ -327,6 +328,18 @@ update msg model maybeToken =
                     ( { model
                         | profileVisibility = settings.profileVisibility
                         , shelfVisibilities = seedShelves settings.shelves
+
+                        -- hydrate consent from the SERVER, overwriting the
+                        -- login-blob seed. The blob is written only at login /
+                        -- token renewal, so a consent change made in a prior
+                        -- session (or on another device) left the toggles showing
+                        -- a stale value until now. This init fetch is the source
+                        -- of truth for what the toggles display.
+                        , consent =
+                            Consent.init
+                                { analytics = settings.consentAnalytics
+                                , writingAssistant = settings.consentWritingAssistant
+                                }
                       }
                     , Cmd.none
                     , NoOut
@@ -337,15 +350,12 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Keep the defaults on failure; the user can still save.
                         ( model, Cmd.none, NoOut )
 
         GotBlockedUsers result ->
             case result of
                 Ok response ->
                     let
-                        -- Page 1 replaces the list; later pages append to the
-                        -- readers already loaded (the "Load more" affordance).
                         merged =
                             case model.blockedUsers of
                                 Success existing ->
@@ -400,8 +410,6 @@ update msg model maybeToken =
         GotUnblockResponse userId result ->
             case result of
                 Ok _ ->
-                    -- Drop the row locally; the reader's content reappears
-                    -- server-side on the next visibility-resolved fetch.
                     let
                         remaining =
                             case model.blockedUsers of
@@ -418,9 +426,22 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Keep the row, clear the in-flight flag, and surface an
-                        -- error so the failure isn't silent.
                         ( { model | unblocking = Nothing, unblockError = True }, Cmd.none, NoOut )
+
+        ConsentMsg subMsg ->
+            let
+                ( newConsent, subCmd, consentOut ) =
+                    Consent.update subMsg model.consent maybeToken
+
+                out =
+                    case consentOut of
+                        Consent.NoOut ->
+                            NoOut
+
+                        Consent.SessionExpired ->
+                            SessionExpired
+            in
+            ( { model | consent = newConsent }, Cmd.map ConsentMsg subCmd, out )
 
 
 view : Model -> Html Msg
@@ -445,7 +466,7 @@ view model =
                     ]
                 ]
             , div [ class "settings-actions" ]
-                [ viewSaveButton model.savingProfile SaveProfileVisibility "Save Profile Visibility"
+                [ SaveButton.primary model.savingProfile SaveProfileVisibility "Save Profile Visibility"
                 ]
             , viewFeedback model.savingProfile
             ]
@@ -457,6 +478,7 @@ view model =
                 (List.map (viewShelfRow model.profileVisibility) model.shelfVisibilities)
             , viewFeedback model.savingShelf
             ]
+        , viewConsentSection model.consent
         , viewExportSection model.exporting
         , viewBlockedUsersSection model
         , viewDangerZone model
@@ -497,7 +519,7 @@ viewBlockedUsersSection model =
         ]
 
 
-{-| "Load more" affordance for readers who've blocked more than one page (20)
+{-| "Load more" affordance for readers who've blocked more than one page
 of others. Shown only while fewer readers are loaded than the server's total.
 -}
 viewLoadMore : Model -> List Api.BlockedUser -> Html Msg
@@ -545,6 +567,16 @@ viewBlockedRow unblocking user =
                 )
             ]
         ]
+
+
+{-| The consent controls, folded in from the former /settings/consent page
+(TR-4). `Consent.viewSection` renders exactly the toggles the standalone
+page showed; its messages are mapped up through `ConsentMsg` and delegated
+straight back to `Consent.update`, so the recorded consent is unchanged.
+-}
+viewConsentSection : Consent.Model -> Html Msg
+viewConsentSection consent =
+    Html.map ConsentMsg (Consent.viewSection consent)
 
 
 viewExportSection : RemoteData Http.Error () -> Html Msg
@@ -737,30 +769,29 @@ viewShelfRow profileVisibility sv =
         ]
 
 
-viewSaveButton : RemoteData Http.Error () -> Msg -> String -> Html Msg
-viewSaveButton saving onClickMsg labelText =
-    case saving of
-        Loading ->
-            button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Saving…" ]
+{-| ⛔ "Could not save. Please try again." was the answer to every failure here,
+including the one this page documents four functions above.
 
-        Success _ ->
-            button [ class "btn btn--primary" ]
-                [ text "Saved!" ]
+`shelfOptionExceedsCeiling` explains that the server answers **422** when a shelf
+is set more exposed than the profile ceiling — a rule the reader can satisfy, and
+the only failure on this form they can do anything about. It was being reported
+with the same six words as a dropped connection, and "please try again" is the
+one instruction guaranteed not to work: the same request fails the same way
+forever until the ceiling moves.
 
-        _ ->
-            button [ class "btn btn--primary", onClick onClickMsg ]
-                [ text labelText ]
-
-
+-}
 viewFeedback : RemoteData Http.Error () -> Html Msg
 viewFeedback saving =
     case saving of
         Success _ ->
             p [ class "success" ] [ text "Visibility updated." ]
 
-        Failure _ ->
-            p [ class "error" ] [ text "Could not save. Please try again." ]
+        Failure (Http.BadStatus 422) ->
+            p [ class "error" ]
+                [ text "A shelf cannot be more visible than your profile. Raise your profile's visibility first, or choose a narrower setting for the shelf." ]
+
+        Failure err ->
+            p [ class "error" ] [ text (FailureCopy.saveFailure "that visibility setting" err) ]
 
         _ ->
             text ""

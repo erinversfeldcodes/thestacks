@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# post-tool-lint.sh — PostToolUse hook for per-file standards enforcement.
-#
-# Receives a JSON event on stdin. Extracts the file path from tool_input,
-# determines the file type, and runs the appropriate formatter/linter check.
-# Exits 2 on failure so Claude Code feeds the error back to the agent.
-#
-# Called by .claude/settings.json PostToolUse hook on Write|Edit|NotebookEdit.
 
 set -uo pipefail
 
@@ -14,15 +7,12 @@ REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null || e
 INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 
-# No file path in the tool input — nothing to check (e.g. MultiEdit root call).
 if [[ -z "$FILE_PATH" ]]; then
   exit 0
 fi
 
-# Derive extension (lowercase). Use tr for bash 3.x compat (macOS ships bash 3.2).
 EXT=$(printf '%s' "${FILE_PATH##*.}" | tr '[:upper:]' '[:lower:]')
 
-# Derive basename for checks that need it (e.g. Dockerfile detection).
 BASENAME=$(basename "$FILE_PATH")
 
 FAIL=0
@@ -44,14 +34,7 @@ run_check() {
   fi
 }
 
-# ---------------------------------------------------------------------------
-# gitleaks — runs on EVERY file write regardless of extension.
-# Must appear before the extension-specific dispatch block.
-# ---------------------------------------------------------------------------
 if command -v gitleaks > /dev/null 2>&1; then
-  # Skip .env files — they are gitignored by design and intentionally contain
-  # real secrets. The .gitleaks.toml path allowlist covers them in git-mode
-  # scans; --no-git --source on a bare file path bypasses that allowlist.
   case "$BASENAME" in
     .env|.env.local)
       : # SKIP: gitignored env file
@@ -71,10 +54,6 @@ else
   : # SKIP: gitleaks not installed
 fi
 
-# ---------------------------------------------------------------------------
-# Dockerfile detection — basename match, not extension.
-# Runs before the extension case because Dockerfiles have no reliable extension.
-# ---------------------------------------------------------------------------
 case "$BASENAME" in
   Dockerfile*)
     if command -v hadolint > /dev/null 2>&1; then
@@ -88,13 +67,8 @@ case "$BASENAME" in
     ;;
 esac
 
-# ---------------------------------------------------------------------------
-# Extension-specific checks.
-# ---------------------------------------------------------------------------
 case "$EXT" in
   ex|exs)
-    # mix format --check-formatted accepts absolute paths.
-    # Credo and Sobelow run in the Stop hook only (per-file credo exceeds 2s DoD limit).
     run_check \
       "mix format --check-formatted ${FILE_PATH}" \
       "cd ${REPO_ROOT}/apps/core && mix format ${FILE_PATH}" \
@@ -119,13 +93,11 @@ case "$EXT" in
     ;;
 
   rs)
-    # cargo fmt --check does not accept individual file paths; it checks the crate.
     run_check \
       "cargo fmt --check (apps/scraper)" \
       "cd ${REPO_ROOT}/apps/scraper && cargo fmt" \
       bash -c "cd '${REPO_ROOT}/apps/scraper' && cargo fmt --check"
 
-    # cargo clippy — full crate, fast on warm toolchain.
     if [[ $FAIL -eq 0 ]] && command -v cargo > /dev/null 2>&1; then
       run_check \
         "cargo clippy -- -D warnings (apps/scraper)" \
@@ -135,7 +107,6 @@ case "$EXT" in
     ;;
 
   py)
-    # Prefer the vision venv ruff; fall back to system ruff; skip if absent.
     if [[ -f "${REPO_ROOT}/apps/vision/.venv/bin/ruff" ]]; then
       RUFF="${REPO_ROOT}/apps/vision/.venv/bin/ruff"
     elif command -v ruff > /dev/null 2>&1; then
@@ -158,7 +129,6 @@ case "$EXT" in
       fi
     fi
 
-    # mypy — only for files inside apps/vision/.
     if [[ $FAIL -eq 0 ]]; then
       case "$FILE_PATH" in
         */apps/vision/*)
@@ -188,7 +158,6 @@ case "$EXT" in
     ;;
 
   sql)
-    # sqlfluff for plain SQL files.
     if command -v sqlfluff > /dev/null 2>&1; then
       run_check \
         "sqlfluff lint ${FILE_PATH}" \
@@ -200,7 +169,6 @@ case "$EXT" in
     ;;
 
   *)
-    # Unsupported extension — nothing more to check beyond the pre-dispatch checks above.
     ;;
 esac
 

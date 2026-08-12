@@ -1,17 +1,3 @@
-// e2e/global-setup.behavior.mjs
-//
-// Behavioural test for Guard B (Issue #175) — the Playwright globalSetup warmup.
-//
-// The static grep test (test/platform/e2e_global_setup_guard_test.sh) only
-// proves wiring; it cannot catch logic bugs (inverted guard, wrong URL, a loop
-// that never actually waits). This test EXECUTES the real default export with a
-// stubbed global fetch so it runs offline and instantly, and asserts behaviour.
-//
-// e2e/package.json is `type: commonjs`, which would force node to parse the
-// .ts as CommonJS and choke on `export default`. We instead strip the TS types
-// with node's built-in stripper and import the result as an ES module via a
-// data: URL — this uses node's OWN type-stripping (same as Playwright's loader
-// path) with no extra dependencies.
 
 import { stripTypeScriptTypes } from "node:module";
 import { readFileSync } from "node:fs";
@@ -21,7 +7,6 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TS_PATH = path.join(__dirname, "global-setup.ts");
 
-// ── tiny assert harness ──────────────────────────────────────────────────────
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -37,7 +22,6 @@ function ok(cond, msg) {
   }
 }
 
-// ── load the module under test as ESM (strip types → data: URL) ──────────────
 async function loadGlobalSetup() {
   const src = readFileSync(TS_PATH, "utf8");
   const js = stripTypeScriptTypes(src, { mode: "strip" });
@@ -46,8 +30,6 @@ async function loadGlobalSetup() {
   return mod.default;
 }
 
-// ── fetch stub factory ───────────────────────────────────────────────────────
-// mode: "ok" → returns {status:200}; "bad" → {status:502}; "throw" → rejects.
 function installFetchStub(mode) {
   const calls = [];
   globalThis.fetch = async (input) => {
@@ -70,7 +52,6 @@ async function main() {
   const globalSetup = await loadGlobalSetup();
   const realFetch = globalThis.fetch;
 
-  // ── Case (a): BASE_URL unset → no-op, NEVER calls fetch ────────────────────
   {
     clearEnv();
     const calls = installFetchStub("ok");
@@ -87,7 +68,6 @@ async function main() {
     ok(elapsed < 500, `(a) local mode returns immediately (${elapsed}ms)`);
   }
 
-  // ── Case (b): fetch → 200 → resolves after ≥1 fetch, URL ends /api/health ──
   {
     clearEnv();
     process.env.BASE_URL = "https://preview-175.example.test";
@@ -112,9 +92,6 @@ async function main() {
     );
   }
 
-  // ── Case (c): fetch always fails → REJECTS, honours the attempt bound ──────
-  // This is the timing-defect guard: with interval stubbed to 0 the loop must
-  // still make EXACTLY the configured number of attempts before giving up.
   {
     clearEnv();
     process.env.BASE_URL = "https://preview-175.example.test";
@@ -142,7 +119,6 @@ async function main() {
     );
   }
 
-  // ── Case (c2): non-200 responses also exhaust the bound ────────────────────
   {
     clearEnv();
     process.env.BASE_URL = "https://preview-175.example.test";

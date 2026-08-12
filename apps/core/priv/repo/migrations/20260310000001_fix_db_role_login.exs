@@ -1,12 +1,12 @@
 defmodule Core.Repo.Migrations.FixDbRoleLogin do
   @moduledoc """
-  Ensures stacks_app and stacks_dbt have LOGIN privilege and a password.
+      Ensures stacks_app and stacks_dbt have LOGIN privilege and a password.
 
-  The original create_db_roles migration used bare `CREATE ROLE` which defaults
-  to NOLOGIN. dbt and the application need to connect directly with these roles,
-  so they must have LOGIN.
+      The original create_db_roles migration used bare `CREATE ROLE` which defaults
+      to NOLOGIN. dbt and the application need to connect directly with these roles,
+      so they must have LOGIN.
 
-  This migration is idempotent — ALTER ROLE is safe to re-run.
+      This migration is idempotent — ALTER ROLE is safe to re-run.
   """
   use Ecto.Migration
 

@@ -1,28 +1,11 @@
 module RotationRaceTest exposing (suite)
 
-{-| Tests for Issue #180 Phase 2 — cross-tab token propagation + re-check-before-
-logout net.
-
-
-## What this covers
-
-Backend Phase 1 added a rotation grace so an in-flight just-rotated token no
-longer burns the refresh-token family. Phase 2 stops the _multi-tab_ spurious
-logout: when tab A renews (rotates `T0 -> T1`, writing localStorage `stacks-auth`)
-while tab B still holds `T0` in memory, tab B must ADOPT `T1` rather than logging
-every tab out on its next 401.
-
-The decision is centralised in one PURE, key-free helper — `Main.adoptExternalAuth`
-— so it is unit-testable even though `Main` itself is a `Browser.application`
-(unconstructable `Nav.Key`; see `SessionExpiryTest`'s seam note). The same helper
-backs BOTH:
-
-  - the cross-tab `storage`-event path (`AuthChangedExternally`), and
-  - the 401 re-check-before-logout net (`GotStoredAuth`).
-
-The Main-level wiring (ports, subscriptions, redirect) is E2E-covered by
-`e2e/tests/rotation-race.spec.ts`.
-
+{-| Cross-tab token propagation + re-check-before-logout. The backend
+grace stops an in-flight just-rotated token burning the family; this
+stops the multi-tab spurious logout: tab A rotates and writes
+localStorage, tab B (holding the stale token) adopts the sibling's
+newer credential via the storage event — and before any forced logout,
+re-checks storage once in case the write raced.
 -}
 
 import Expect
@@ -34,7 +17,7 @@ import Types.User exposing (User)
 
 suite : Test
 suite =
-    describe "Cross-tab token propagation + re-check net (Issue #180 Phase 2)"
+    describe "Cross-tab token propagation + re-check net"
         [ describe "adoptExternalAuth — cross-tab storage propagation"
             [ differentTokenWhileAuthedAdopts
             , differentTokenPreservesUser
@@ -63,10 +46,6 @@ suite =
             , renewalAndDraftOriginsMerge
             ]
         ]
-
-
-
--- FIXTURES
 
 
 aReader : User
@@ -106,10 +85,6 @@ storedAuthValue token =
                 ]
             )
         )
-
-
-
--- CROSS-TAB PROPAGATION
 
 
 differentTokenWhileAuthedAdopts : Test
@@ -184,16 +159,10 @@ validAuthWhileSignedOutIsIgnored =
                 |> Expect.equal Main.IgnoreExternal
 
 
-
--- 401 RE-CHECK NET (same pure helper)
-
-
 recheckNewerStoredTokenAdopts : Test
 recheckNewerStoredTokenAdopts =
     test "recheck_newer_stored_token_adopts: on a 401, a newer stored token is adopted instead of logging out" <|
         \() ->
-            -- in-memory token is the dead one that just 401'd; localStorage holds
-            -- the fresh token a sibling tab rotated in.
             Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith "T0-dead"))
                 |> Expect.equal (Main.AdoptAuth (authWith "T1"))
 
@@ -202,14 +171,8 @@ recheckSameStoredTokenProceedsToLogout : Test
 recheckSameStoredTokenProceedsToLogout =
     test "recheck_same_stored_token_proceeds_to_logout: nothing newer stored -> not adopted (caller logs out)" <|
         \() ->
-            -- stored token equals the in-memory (dead) token: no newer credential,
-            -- so the helper does NOT adopt and the caller proceeds to sessionExpiry.
             Main.adoptExternalAuth (storedAuthValue "T0-dead") (Just (authWith "T0-dead"))
                 |> Expect.equal Main.IgnoreExternal
-
-
-
--- resolveRecheck — the pure GotStoredAuth decision (P1a + P1b)
 
 
 renewalOrigin : Main.PendingLogout
@@ -236,7 +199,7 @@ renewalOriginAdoptReschedules =
 
 {-| P1b (the bug): a re-check from a PAGE 401 still has its 7h renewal tick armed,
 so adopting must NOT reschedule — a second timer per adopt is a self-perpetuating
-refresh storm (the contention #180 fights).
+refresh storm (the contention fights).
 -}
 pageOriginAdoptDoesNotReschedule : Test
 pageOriginAdoptDoesNotReschedule =
@@ -289,20 +252,13 @@ interleaveExternalAdoptCancelsParkedLogout =
         \() ->
             Expect.all
                 [ \() ->
-                    -- FIX: parked intent cleared by the cross-tab adopt -> no-op.
                     Main.resolveRecheck Nothing Main.IgnoreExternal
                         |> Expect.equal Main.ResolveNoop
                 , \() ->
-                    -- BUG it guards: had the intent NOT been cleared, the same
-                    -- late answer would have forced a logout.
                     Main.resolveRecheck (Just pageOrigin) Main.IgnoreExternal
                         |> Expect.equal (Main.ResolveForceLogout False)
                 ]
                 ()
-
-
-
--- parkPending — P2 sticky flags across overlapping expiry
 
 
 plainExpiryDoesNotDowngradeDraftSaved : Test

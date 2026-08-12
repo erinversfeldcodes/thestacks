@@ -124,6 +124,19 @@ The Elixir toolchain is pinned by `flake.nix` (**Elixir 1.18.4 / OTP 28**, via `
 - **If `_build` is already poisoned:** `rm -rf _build` then rebuild via `just run just verify` (single, consistent toolchain). Don't interleave a bare `mix …` call in between — that re-poisons it.
 - **DB roles after fresh-DB:** the `test-elixir`/fresh-DB path can leave `stacks_dbt` (and `stacks_app`/`stacks_readonly`) as `NOLOGIN`, breaking `dbt: checkpoint` (`role "stacks_dbt" is not permitted to log in`). Re-apply with `psql -h localhost -U postgres -d postgres -c "ALTER ROLE stacks_dbt WITH LOGIN;"` (also `stacks_app`, `stacks_readonly`). The `fix_db_role_login` migration should make this idempotent — a known follow-up.
 
+### Working in a git worktree — run `just bootstrap-worktree` first
+
+Agents build in isolated worktrees. A worktree shares git refs with the main checkout but **not its untracked files**, and this repo keeps a lot of load-bearing state untracked on purpose: `.env`, the proto-generated `apps/core/lib/stacks/gen/` tree, the generated Elm/Python/Rust proto artefacts, and the esbuild `priv/static/index.html`. So a fresh worktree does not compile, and the failures mislead — `Stacks.Accounts.User` "does not exist" (it is generated), or three `PageControllerTest` failures that read like a code defect but are a missing static asset.
+
+```sh
+just bootstrap-worktree            # from INSIDE the worktree; idempotent; no-op in the main checkout
+just bootstrap-worktree --from /path/to/main/checkout   # if it can't infer the source
+```
+
+It seeds the untracked state, runs `mix deps.get`, generates **all five** codegen targets (generating only the Elixir pair leaves `lint-proto.sh` failing for reasons unrelated to your change), and then runs `mix proto.sync --check` to prove the seed wasn't stale.
+
+⚠️ **`mix proto.sync` is cyclic**: it is a Mix task inside `apps/core`, but `core` cannot compile without the schemas it generates. Seeding `gen/` from the main checkout is what breaks the cycle — which is why copying it is a step and not a shortcut.
+
 ## Preview Deploys & E2E
 
 The preview core VM is **512 MB**. Run heavy release tasks (the full `seed/0`) via `/app/bin/core rpc '…'`, **never `eval`** — `eval` spawns a second BEAM that OOMs the VM (`fly machine exec … EOF`, ~11s, no stacktrace). The preview seed uses `Stacks.Release.seed_live/0` (rpc, runs in the live node). Because it runs the full dev-fixture seed inside whatever node it hits, `seed_live/0` **must be prod-guarded** on a persistent preview-only env (e.g. `STACKS_E2E_TEST_HELPERS`) — the `ALLOW_SEEDS` inline gate can't survive `rpc`, and "only called in the preview branch" is not a sufficient guard on its own.

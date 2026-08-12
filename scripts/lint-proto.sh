@@ -9,19 +9,13 @@ if ! command -v buf &>/dev/null; then
     exit 1
 fi
 
-# Skip gracefully if no .proto files exist yet (freshly scaffolded project).
-# Use an absolute path so this script is safe to invoke from any working directory.
 if ! find "$REPO_ROOT/proto" -name "*.proto" -print -quit 2>/dev/null | grep -q .; then
     echo "No .proto files found in proto/ — skipping."
     exit 0
 fi
 
-# Run buf lint from inside the module directory (where buf.yaml lives).
 (cd "$REPO_ROOT/proto" && buf lint)
 
-# Backward-compatibility check — only run if origin/main already has .proto files.
-# Skipped on first-commit of proto schemas (no baseline to compare against).
-# Set BUF_BREAKING_SKIP=1 for branches with intentional breaking changes (e.g., proto migration).
 if [[ "${BUF_BREAKING_SKIP:-}" == "1" ]]; then
     echo "BUF_BREAKING_SKIP=1 — skipping buf breaking check (intentional migration)."
 elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
@@ -32,8 +26,8 @@ elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
     fi
 fi
 
-# Proto codegen drift checks — only run locally where generated files are present.
-# Generated files are gitignored so they don't exist in CI (skip silently there).
+python3 "$REPO_ROOT/scripts/check-enum-coverage.py"
+
 if [[ "${CI:-}" != "true" ]]; then
     if [[ -x "$REPO_ROOT/scripts/gen-elm-proto.sh" ]]; then
         bash "$REPO_ROOT/scripts/gen-elm-proto.sh" --check

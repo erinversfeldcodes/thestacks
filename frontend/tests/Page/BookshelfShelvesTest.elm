@@ -4,7 +4,7 @@ module Page.BookshelfShelvesTest exposing (suite)
 
 The bookcase auto-flows: it fetches the server's shelves but flattens their
 placements and re-groups them into rows that fill the bookcase width (the
-physical op.shelves boundaries from #151 are ignored on the frontend). These
+physical op.shelves boundaries from are ignored on the frontend). These
 tests verify books render as spines, and that an all-empty response still shows
 the empty-bookshelf message.
 
@@ -107,21 +107,11 @@ suite =
         ]
 
 
-{-| Per-shelf ordering must survive the auto-flow flattening.
-
-`Shelving.list_shelves/1` orders shelves by `s.position` (`shelving.ex:712`),
-and the frontend preserves that order only because
-`List.concatMap .placements shelves` is order-preserving
-(`Page/Bookshelf.elm:333,380,396`). Auto-flow re-groups placements into rows
-that fill the bookcase width, which discards the _shelf boundaries_ — it must
-not discard the _sequence_.
-
-Nothing else asserts this at any layer: the two tests that covered it
-(`shelves_rendered_in_order`, `each_shelf_is_distinct_row`) were deleted in
-`989d86ab` along with the per-shelf DOM element they queried, and the ordering
-half was never carried anywhere else. This restores that guard against the DOM
-the page renders today (Issue #112).
-
+{-| Per-shelf ordering must survive the auto-flow flattening: the server
+orders shelves by position, and the frontend preserves it only because
+`List.concatMap.placements shelves` is order-preserving while auto-flow
+regroups into width-filling rows. Pins the flattened order so a
+refactor to any non-order-preserving grouping fails here.
 -}
 shelfOrderIsPreserved : Test
 shelfOrderIsPreserved =
@@ -141,14 +131,10 @@ shelfOrderIsPreserved =
                           }
                         ]
                     )
-                -- Both books are on the page at all...
                 |> ProgramTest.ensureView
                     (Query.findAll [ Selector.class "book-button" ]
                         >> Query.count (Expect.equal 2)
                     )
-                -- ...and shelf-first's book comes first. Pinning BOTH positions
-                -- is what makes a reversal fail: asserting only index 0 would
-                -- still pass if the flattening emitted [alpha, alpha].
                 |> ProgramTest.ensureView
                     (Query.findAll [ Selector.class "book-button" ]
                         >> Query.index 0

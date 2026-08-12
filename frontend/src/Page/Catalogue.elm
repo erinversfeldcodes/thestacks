@@ -131,9 +131,6 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                -- `Api.getCatalogue` is a genuinely public request that never
-                -- sends an auth header, so its failure stays LOCAL — a 401 here
-                -- is not a session-expiry signal and must not be routed.
                 Err err ->
                     ( { model | books = Failure err }, Cmd.none, NoOut )
 
@@ -286,10 +283,6 @@ fetchCatalogue model =
         CatalogueReceived
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--catalogue", testId "catalogue-page" ]
@@ -302,7 +295,7 @@ view model =
         ]
 
 
-{-| #281: the direct-place path can hit the reading-pile cap. Surface the
+{-| : the direct-place path can hit the reading-pile cap. Surface the
 specific full-pile copy (shared with the move/upload paths) as a page-level
 notice; transport failures stay silent here, as before.
 -}
@@ -625,10 +618,6 @@ viewPagination response =
               else
                 text ""
             ]
-
-
-
--- HELPERS
 
 
 applyCollectionFilter : CollectionFilter -> RemoteData Http.Error (List PlacementSummary) -> List Book -> List Book

@@ -4,13 +4,8 @@
 defmodule Core.Repo.Migrations.TitleSearchCache20260422072906 do
   use Ecto.Migration
 
-  # See IsbnResolverCache migration for the rationale on non-transactional
-  # index creation. CONCURRENTLY requires running outside a transaction.
   @disable_ddl_transaction true
 
-  # Same Neon-specific rationale as IsbnResolverCache: the advisory
-  # migration lock's idle connection is dropped by Neon mid-CONCURRENTLY,
-  # so disable it here too.
   @disable_migration_lock true
 
   def up do

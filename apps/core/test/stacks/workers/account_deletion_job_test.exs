@@ -1,14 +1,14 @@
 defmodule Stacks.Workers.AccountDeletionJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.AccountDeletionJob.
+      Tests for Stacks.Workers.AccountDeletionJob.
 
-  The worker calls GDPR.Deletion.delete_user_data/1:
-  - Returns :ok when user exists and all data is deleted.
-  - Returns {:error, _} when user does not exist (Ecto.NoResultsError raised
-    inside the Multi at the :delete_user step, causing the transaction to fail).
+      The worker calls GDPR.Deletion.delete_user_data/1:
+      - Returns:ok when user exists and all data is deleted.
+      - Returns {:error, _} when user does not exist (Ecto.NoResultsError raised
+        inside the Multi at the:delete_user step, causing the transaction to fail).
 
-  Deletion is NOT idempotent — calling it a second time after the user is
-  already deleted will fail because Repo.get!/1 raises for the missing user.
+      Deletion is NOT idempotent — calling it a second time after the user is
+      already deleted will fail because Repo.get!/1 raises for the missing user.
   """
 
   use Core.DataCase, async: true
@@ -25,20 +25,15 @@ defmodule Stacks.Workers.AccountDeletionJobTest do
 
       assert :ok = perform_job(AccountDeletionJob, %{"user_id" => user.id})
 
-      # User should no longer exist
       assert is_nil(Core.Repo.get(Stacks.Accounts.User, user.id))
     end
 
     test "returns {:error, _} for a nonexistent user_id" do
-      # The Multi fails at :delete_user when Repo.get! raises for unknown user
       assert {:error, _reason} =
                perform_job(AccountDeletionJob, %{"user_id" => Ecto.UUID.generate()})
     end
 
     test "logs the failed step name when the deletion Multi fails" do
-      # An unknown user_id makes the Multi fail at the :delete_user step
-      # (Deletion returns {:error, :delete_user, :user_not_found, _}). The worker
-      # must surface WHICH step failed so a partial erasure is diagnosable.
       user_id = Ecto.UUID.generate()
 
       log =
@@ -51,10 +46,8 @@ defmodule Stacks.Workers.AccountDeletionJobTest do
     end
   end
 
-  describe "job config (Issue #121 §6 — destructive-op safety)" do
+  describe "job config" do
     test "is configured with max_attempts of 1 (erasure must not retry)" do
-      # Retrying a destructive erasure risks partial/duplicated deletion and
-      # masks the original failure. max_attempts MUST be 1.
       assert AccountDeletionJob.__opts__()[:max_attempts] == 1
     end
   end

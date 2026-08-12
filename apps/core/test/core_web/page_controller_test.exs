@@ -19,4 +19,9 @@ defmodule CoreWeb.PageControllerTest do
     conn = get(conn, "/upload")
     assert conn.status == 200
   end
+
+  test "GET /settings/consent redirects to /settings/privacy", %{conn: conn} do
+    conn = get(conn, "/settings/consent")
+    assert redirected_to(conn, 302) == "/settings/privacy"
+  end
 end

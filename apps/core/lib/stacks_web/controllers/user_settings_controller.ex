@@ -1,10 +1,10 @@
 defmodule StacksWeb.UserSettingsController do
   @moduledoc """
-  Handles user settings: profile, location, password, notifications, privacy.
+      Handles user settings: profile, location, password, notifications, privacy.
 
-  Age verification is NO LONGER a user-facing setting (ADR-020): self-declaration
-  was removed as an unacceptable assurance mechanism. Verification is now
-  provider-sourced via `Stacks.AgeVerification.record_verification/3`.
+      Age verification is NO LONGER a user-facing setting: self-declaration
+      was removed as an unacceptable assurance mechanism. Verification is now
+      provider-sourced via `Stacks.AgeVerification.record_verification/3`.
   """
 
   use CoreWeb, :controller
@@ -25,7 +25,8 @@ defmodule StacksWeb.UserSettingsController do
           display_name: updated.display_name,
           website_url: updated.website_url,
           email: updated.email,
-          handle: updated.handle
+          handle: updated.handle,
+          syndication_default: updated.syndication_default
         })
 
       {:error, :invalid_password} ->
@@ -61,9 +62,6 @@ defmodule StacksWeb.UserSettingsController do
 
     case Accounts.change_password(user, current, new_pw) do
       {:ok, _} ->
-        # Password change logs the user out everywhere (Issue #179, Phase 2b):
-        # revoke all the user's families AND burn all their guardian_tokens so a
-        # stolen/leaked token cannot outlive the credential it was minted under.
         Accounts.revoke_all_user_sessions(user.id)
         json(conn, %{ok: true})
 
@@ -88,9 +86,9 @@ defmodule StacksWeb.UserSettingsController do
   end
 
   @doc """
-  GET /api/settings/notifications — return the current user's stored notification
-  preferences so the settings screen hydrates from saved values instead of
-  hardcoded defaults. Read-only: emits no event.
+      GET /api/settings/notifications — return the current user's stored notification
+      preferences so the settings screen hydrates from saved values instead of
+      hardcoded defaults. Read-only: emits no event.
   """
   def show_notifications(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
@@ -122,9 +120,9 @@ defmodule StacksWeb.UserSettingsController do
   end
 
   @doc """
-  GET /api/settings/privacy — return the current user's profile visibility and
-  their per-shelf visibilities so the privacy screen can seed saved values
-  instead of hardcoded defaults.
+      GET /api/settings/privacy — return the current user's profile visibility and
+      their per-shelf visibilities so the privacy screen can seed saved values
+      instead of hardcoded defaults.
   """
   def show_privacy(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
@@ -138,7 +136,9 @@ defmodule StacksWeb.UserSettingsController do
 
     json(conn, %{
       profile_visibility: user.profile_visibility,
-      shelves: shelves
+      shelves: shelves,
+      consent_analytics: user.consent_analytics,
+      consent_writing_assistant: user.consent_writing_assistant
     })
   end
 

@@ -1,32 +1,11 @@
-# Public Grafana — the human-facing dashboard surface (ADR-021 / Epic #249 #254).
-#
-# PROD-ONLY and always-on. Anonymous, read-only (Viewer): anyone on the internet
-# sees the dashboards, no login — the "ops dashboards shown, not hidden" surface of
-# ADR-019 §5. Dashboards + datasource are file-provisioned (baked into the image,
-# see deploy/grafana/Dockerfile) from the same JSON the app ships, so there is no
-# API token / SSO (the fly-metrics.net problem this epic removed). Grafana reaches
-# the 6PN-only VictoriaMetrics server-side via its datasource proxy, so the store
-# is never exposed to the public. No volume: state is ephemeral and re-provisioned
-# from files on every boot (immutable dashboards). Preview stacks run NO Grafana —
-# their validation is the CI emission smoke against the VM directly.
 app = "thestacks-grafana"
 primary_region = "iad"
 
 [build]
-  # Relative to THIS config file's dir (deploy/) — Fly resolves `[build] dockerfile`
-  # against the config location, so "deploy/grafana/Dockerfile" would double to
-  # deploy/deploy/grafana/Dockerfile. The build context is repo root (deploy-stack.sh
-  # passes it as the positional working dir) so the Dockerfile's COPY paths resolve.
   dockerfile = "grafana/Dockerfile"
 
 [env]
-  # Datasource target for the provisioned VictoriaMetrics datasource (Grafana
-  # expands ${STACKS_VM_URL} in provisioning). This is the PROD default; a preview
-  # Grafana overrides it via `fly deploy -e STACKS_VM_URL=…` (deploy-stack.sh) to
-  # point at its own preview VM.
   STACKS_VM_URL = "http://thestacks-victoriametrics.internal:8428"
-  # Public read-only: anonymous Viewer, and NO login form / basic auth so there is
-  # no interactive write path — the dashboards are immutable, code-provisioned.
   GF_AUTH_ANONYMOUS_ENABLED = "true"
   GF_AUTH_ANONYMOUS_ORG_ROLE = "Viewer"
   GF_AUTH_DISABLE_LOGIN_FORM = "true"
@@ -34,7 +13,6 @@ primary_region = "iad"
   GF_USERS_ALLOW_SIGN_UP = "false"
   GF_USERS_DEFAULT_THEME = "dark"
   GF_SERVER_ROOT_URL = "https://thestacks-grafana.fly.dev"
-  # Don't phone home.
   GF_ANALYTICS_REPORTING_ENABLED = "false"
   GF_ANALYTICS_CHECK_FOR_UPDATES = "false"
 

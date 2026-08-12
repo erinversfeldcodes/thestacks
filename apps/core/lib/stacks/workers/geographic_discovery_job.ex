@@ -1,13 +1,13 @@
 defmodule Stacks.Workers.GeographicDiscoveryJob do
   @moduledoc """
-  Oban worker that triggers source discovery for a geographic location.
+      Oban worker that triggers source discovery for a geographic location.
 
-  Accepts `%{"city" => city, "country_code" => country_code}`. Builds
-  multiple search queries targeting bookshops and community spaces in
-  the area, then enqueues a `SourceDiscoveryJob` for each query.
+      Accepts `%{"city" => city, "country_code" => country_code}`. Builds
+      multiple search queries targeting bookshops and community spaces in
+      the area, then enqueues a `SourceDiscoveryJob` for each query.
 
-  Triggered by the `user.location_updated` event via
-  `Stacks.Discovery.Handlers.LocationUpdatedHandler`.
+      Triggered by the `user.location_updated` event via
+      `Stacks.Discovery.Handlers.LocationUpdatedHandler`.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -54,7 +54,6 @@ defmodule Stacks.Workers.GeographicDiscoveryJob do
     ]
   end
 
-  # Map common country codes to names for richer search queries.
   defp country_name("ZA"), do: "South Africa"
   defp country_name("GB"), do: "United Kingdom"
   defp country_name("US"), do: "United States"

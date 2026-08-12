@@ -20,13 +20,10 @@ _INSECURE_DEFAULTS = {"change_me_in_dev", "change_me", "secret", ""}
 class Settings(BaseSettings):
     environment: str = "development"
     core_url: str = "http://core.internal:4000"
-    # VISION_CORE_API_URL — base URL of the Phoenix core (no trailing slash).
-    # Required in production; defaults to core_url for backwards compatibility.
     core_api_url: str = ""
     log_level: str = "info"
     hmac_secret: str = "change_me_in_dev"
     model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
-    # Modal function call timeout in seconds. Covers cold-start (~30s) + inference (~15s).
     request_timeout_seconds: int = 180
     max_image_size_bytes: int = 10_485_760  # 10 MB
     local_ocr_enabled: bool = True
@@ -58,8 +55,6 @@ class Settings(BaseSettings):
                 "VISION_CORE_API_URL must be set to the base URL of the Phoenix core "
                 "service (no trailing slash). Example: https://thestacks.fly.dev"
             )
-        # Modal credentials (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET) are validated by
-        # the Modal client at call time, not here — they live outside the VISION_ prefix.
         return self
 
 

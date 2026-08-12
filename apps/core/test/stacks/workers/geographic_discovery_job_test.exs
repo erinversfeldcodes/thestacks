@@ -15,7 +15,6 @@ defmodule Stacks.Workers.GeographicDiscoveryJobTest do
                  "country_code" => "ZA"
                })
 
-      # Should enqueue 5 queries based on build_queries/2
       assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "bookshops in Cape Town"})
 
       assert_enqueued(
@@ -107,7 +106,6 @@ defmodule Stacks.Workers.GeographicDiscoveryJobTest do
                  "country_code" => "IE"
                })
 
-      # Verify all 5 query patterns
       assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "bookshops in Dublin"})
       assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "independent bookstores Dublin"})
       assert_enqueued(worker: SourceDiscoveryJob, args: %{query: "reading groups Dublin"})

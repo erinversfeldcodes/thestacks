@@ -20,13 +20,11 @@ defmodule Stacks.AI.BudgetTrackerTest do
     end
 
     test "returns daily_limit_exceeded when over daily limit", %{pid: pid} do
-      # Default daily limit is 500 cents ($5)
       GenServer.cast(pid, {:record_cost, :openai, 600})
       assert {:error, :daily_limit_exceeded} == GenServer.call(pid, {:check_budget, :openai})
     end
 
     test "returns monthly_limit_exceeded when over monthly limit", %{pid: pid} do
-      # Default monthly limit is 5000 cents ($50)
       GenServer.cast(pid, {:record_cost, :openai, 6_000})
       assert {:error, :monthly_limit_exceeded} == GenServer.call(pid, {:check_budget, :openai})
     end

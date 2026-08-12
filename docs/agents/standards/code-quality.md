@@ -101,6 +101,40 @@ Ports break Elm's type safety guarantee. Use elm/file for uploads (typed port AP
 
 ---
 
+## CSS Conventions
+
+`frontend/css/main.css` is the single stylesheet source; everything under
+`apps/core/priv/static/assets/` is build output. Three gates guard it, all wired into
+`scripts/lint-elm.sh` and running in `just ci` / the CI lint-elm job (Issues #301, #306, #319):
+`check-orphan-classes.sh` (a class exists in the DOM but has no rule), `check-css.sh`
+(well-formedness, `[class*=]` bans, specificity/cascade-order traps), and `check-css-values.sh`
+(token-value drift).
+
+### Design tokens (Wave 9 / #319)
+- Every reusable value lives behind a token: the spacing scale (`--space-1…7`), the type scale
+  (`--size-xs…8xl`), radii (`--radius-sm/md/lg/pill`), shadows, the palette, and the semantic state
+  tokens (`--error`/`--error-strong`/`--success`/`--warning`/`--warning-text`).
+- **A bare literal equal to a token's value is a bug** — it should be `var(--that-token)`.
+  `check-css-values.sh` fails on it, on `var()` of an undefined token, on a fallback that disagrees
+  with the token's definition, and on a spacing literal equal to a `--space-*` step. Each dimension is
+  a ratchet at its current count — never add a new violation past the budget; migrate to lower it.
+- The palette is redefined by five shelf-theme blocks and a page-scoped parchment block. A value maps
+  to DIFFERENT token names per theme, so migrate a literal only when the token resolves to that exact
+  value in the rule's rendering context — editing one theme block silently forks the others.
+
+### Transitions and reserved space
+- **Indicators must never `transition`.** A tab's active underline, a progress dot, a status pip —
+  anything whose whole job is to say "this is the current state" — must change instantly. A transition
+  on an indicator animates the *lie* (the old state) for the duration and reads as lag (the login-tab
+  and progress-dot precedent).
+- **Never `transition: all`.** Name the properties you mean (`transition: background-color .2s, color
+  .2s`). `all` sweeps in layout and paint properties you never intended to animate, which is both a
+  jank source and how an indicator accidentally acquires a transition.
+- **Reserve space for state/network-dependent content.** Anything that appears on an async result — an
+  inline error, a validation message, a spinner slot — must have its space reserved by layout so the
+  surface does not reflow when it arrives (the shift-class pattern from register + upload). A surface
+  that jumps when the server answers is a layout bug, not a timing one.
+
 ## Rust Conventions
 
 ### Error Handling

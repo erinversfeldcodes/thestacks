@@ -8,7 +8,6 @@ defmodule StacksWeb.PartnerInventoryControllerTest do
   alias Stacks.Partners
 
   setup %{conn: conn} do
-    # Create and approve a partner, capture raw key for auth
     {:ok, partner} =
       Partners.register_partner(%{
         name: "Test Bookshop",
@@ -24,7 +23,6 @@ defmodule StacksWeb.PartnerInventoryControllerTest do
       |> put_req_header("authorization", "Bearer #{raw_key}")
       |> put_req_header("content-type", "application/json")
 
-    # Create a book edition with a known ISBN
     book = insert(:book)
     edition = insert(:book_edition, book: book, isbn: "9780743273565")
 
@@ -104,7 +102,6 @@ defmodule StacksWeb.PartnerInventoryControllerTest do
 
       assert resp["synced"] == 1
 
-      # Verify updated values via index
       index_resp = conn |> get("/api/partner/inventory") |> json_response(200)
       [item] = index_resp["inventory"]
       assert item["price_cents"] == 2000
@@ -154,7 +151,6 @@ defmodule StacksWeb.PartnerInventoryControllerTest do
 
   describe "GET /api/partner/inventory (index)" do
     test "lists partner's own inventory", %{conn: conn, partner: partner, edition: edition} do
-      # Sync an item first
       Partners.sync_inventory(partner, [
         %{"isbn" => edition.isbn, "price_cents" => 1500, "condition" => "good", "quantity" => 2}
       ])

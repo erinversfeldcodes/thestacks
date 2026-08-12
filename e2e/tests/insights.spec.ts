@@ -8,7 +8,7 @@ import {
 
 /**
  * Browser E2E for the authed, own-only personal-inference view
- * (Issue #242, ADR-019 §3a):
+ *:
  *   /me/insights  →  GET /api/me/inferences
  *
  * Drives the real Elm page against a running backend. The load-bearing
@@ -21,7 +21,7 @@ import {
  *   - the route is auth-guarded (unauthenticated → login page).
  *
  * The throwaway-user fixture mints an isolated, confirmed user via
- * POST /api/test/session (Issue #280) and injects the session — outside the
+ * POST /api/test/session and injects the session — outside the
  * `:auth` rate bucket, so this non-auth-testing spec no longer competes with the
  * parallel suite for the shared 60/60s budget. Injecting a placement-free user
  * still triggers the onboarding overlay, so a book is placed to suppress it and
@@ -45,7 +45,6 @@ test.describe("Personal inference view (/me/insights)", () => {
       timeout: 15_000,
     });
 
-    // The three grounded sections render from the user's own data.
     await expect(page.getByTestId("insights-interest")).toBeVisible();
     await expect(page.getByTestId("insights-behaviour")).toBeVisible();
     await expect(page.getByTestId("insights-deanon")).toBeVisible();
@@ -59,7 +58,6 @@ test.describe("Personal inference view (/me/insights)", () => {
     const reveal = page.getByTestId("insights-reveal-risk");
     await expect(reveal).toBeVisible();
 
-    // Revealing re-fetches with ?reveal_risk=true and shows the labelled block.
     await reveal.click();
     await expect(page.getByTestId("insights-risk-revealed")).toBeVisible({
       timeout: 10_000,

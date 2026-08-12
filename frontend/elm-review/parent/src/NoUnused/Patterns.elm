@@ -106,10 +106,6 @@ initialContext =
     []
 
 
-
--- EXPRESSION ENTER VISITOR
-
-
 declarationEnterVisitor : Node Declaration -> Context -> ( List (Rule.Error {}), Context )
 declarationEnterVisitor node context =
     case Node.value node of
@@ -338,10 +334,6 @@ valueVisitor (Node _ ( moduleName, value )) context =
             ( [], context )
 
 
-
---- ON ENTER
-
-
 findPatterns : PatternUse -> List (Node Pattern) -> List FoundPattern -> List FoundPattern
 findPatterns use patterns acc =
     case patterns of
@@ -441,10 +433,6 @@ findPatterns use patterns acc =
 
                 _ ->
                     findPatterns use rest acc
-
-
-
---- ON EXIT
 
 
 singularRemoveDetails : List String

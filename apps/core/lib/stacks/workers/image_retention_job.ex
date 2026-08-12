@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.ImageRetentionJob do
   @moduledoc """
-  Nightly safety net Oban worker. Cleans up uploaded images that are stuck in
-  `pending` status (i.e. their IdentifyBookJob failed or never ran).
+      Nightly safety net Oban worker. Cleans up uploaded images that are stuck in
+      `pending` status (i.e. their IdentifyBookJob failed or never ran).
 
-  Images are normally deleted immediately by IdentifyBookJob on success.
-  This job handles edge cases where that didn't happen.
+      Images are normally deleted immediately by IdentifyBookJob on success.
+      This job handles edge cases where that didn't happen.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -23,7 +23,6 @@ defmodule Stacks.Workers.ImageRetentionJob do
         "ImageRetentionJob: cleaned up #{stuck_count} stuck + #{expired_count} expired image records"
       )
 
-      # Missing-purge alarm: detect images that should have been cleaned but weren't
       orphaned = ImageRetention.missing_purge_check()
 
       if orphaned != [] do

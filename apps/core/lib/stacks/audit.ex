@@ -1,27 +1,27 @@
 defmodule Stacks.Audit do
   @moduledoc """
-  Audit logging context. Provides INSERT-only access to the audit_log table.
+      Audit logging context. Provides INSERT-only access to the audit_log table.
 
-  All significant user actions are recorded here with hashed IP addresses
-  and encrypted metadata. The audit_log has no inserted_at/updated_at —
-  it uses occurred_at for timing.
+      All significant user actions are recorded here with hashed IP addresses
+      and encrypted metadata. The audit_log has no inserted_at/updated_at —
+      it uses occurred_at for timing.
   """
 
   alias Core.Repo
 
   @doc """
-  Logs an audit entry. This function only ever INSERTs — never updates or deletes.
+      Logs an audit entry. This function only ever INSERTs — never updates or deletes.
 
-  ## Options
-  - `:resource_type` — type of the resource being acted on (e.g. "book", "user")
-  - `:resource_id` — UUID of the resource
-  - `:ip` — raw IP string (will be hashed via SHA-256 before storage)
-  - `:metadata` — arbitrary map stored as jsonb
-  - `:endpoint` — API endpoint for admin calls (e.g. "/api/admin/users/by_email")
-  - `:latency_ms` — round-trip latency in milliseconds for admin calls
-  - `:success` — whether the admin call succeeded
-  - `:row_count` — rows returned or affected by the admin call
-  - `:operator_session_id` — UUID of the admin session issuing the call
+      ## Options
+      - `:resource_type` — type of the resource being acted on (e.g. "book", "user")
+      - `:resource_id` — UUID of the resource
+      - `:ip` — raw IP string (will be hashed via SHA-256 before storage)
+      - `:metadata` — arbitrary map stored as jsonb
+      - `:endpoint` — API endpoint for admin calls (e.g. "/api/admin/users/by_email")
+      - `:latency_ms` — round-trip latency in milliseconds for admin calls
+      - `:success` — whether the admin call succeeded
+      - `:row_count` — rows returned or affected by the admin call
+      - `:operator_session_id` — UUID of the admin session issuing the call
   """
   @spec log(binary() | nil, String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def log(user_id, action, opts \\ []) do
@@ -54,7 +54,6 @@ defmodule Stacks.Audit do
       latency_ms: Keyword.get(opts, :latency_ms),
       success: Keyword.get(opts, :success),
       row_count: Keyword.get(opts, :row_count),
-      # Stored as text (not binary UUID) so raw SQL queries return the UUID string.
       operator_session_id: operator_session_id
     }
 
@@ -67,11 +66,6 @@ defmodule Stacks.Audit do
 
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
       {1, _} ->
-        # GDPR telemetry: audit-log write throughput. One event per successful
-        # audit insert so operators can watch the write rate and spot both
-        # throughput anomalies and silent audit-logging stalls. Tagged by
-        # `:action` and `:resource_type`. Registered in
-        # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_audit_write_count_total`.
         :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
           action: action,
           resource_type: resource_type
@@ -87,25 +81,12 @@ defmodule Stacks.Audit do
   end
 
   @doc """
-  Logs a deploy rollback event. Inserts an audit row (action `"system.rollback"`,
-  resource_type `"deploy"`) and, on successful insert, emits a
-  `[:stacks, :system, :rollback]` telemetry event with `%{count: 1}`.
-
-  `failed_sha` is the git SHA being rolled back **from** — i.e. the broken
-  deployment — not the target of the rollback. Because a git SHA is not a UUID,
-  it cannot live in the `resource_id` column; it is carried in metadata under
-  the atom key `:failed_sha`.
-
-  ## Allowed `triggered_by` values
-  - `"slo-gate"` — automatic rollback because a deploy SLO gate tripped
-  - `"manual"` — operator-initiated rollback
-  - `"step-failure"` — a deploy pipeline step failed
-  - `"migration-failure"` — a database migration failed during deploy
-
-  No runtime guard is enforced — the caller is trusted.
-
-  Telemetry is only emitted when the underlying audit insert succeeds, so a
-  rollback signal never fires for a rollback that was not recorded.
+      Logs a deploy rollback: audit row (action `"system.rollback"`, type
+      `"deploy"`) then a `[:stacks,:system,:rollback]` telemetry event — only
+      on successful insert, so a signal never fires for an unrecorded rollback.
+      `failed_sha` is the SHA rolled back FROM (not the target); it rides in
+      metadata because a git SHA is not a UUID. `triggered_by` ∈ "slo-gate",
+      "manual", "step-failure", "migration-failure" (caller-trusted, no guard).
   """
   @spec log_rollback(map()) :: {:ok, map()} | {:error, term()}
   def log_rollback(%{
@@ -141,25 +122,11 @@ defmodule Stacks.Audit do
   @max_per_page 100
 
   @doc """
-  Lists a single user's own audit-log entries, most recent first, paginated.
-
-  Read-only: this issues a single SELECT and never mutates the append-only
-  `audit.audit_log` table. Results are scoped to `user_id` — a caller can only
-  ever see their own rows.
-
-  For each entry the Cloak-encrypted `metadata` is decrypted via
-  `Stacks.Vault` and returned as a plain map for display. The hashed
-  `ip_address` column is **never selected** and therefore never surfaced.
-
-  Returns `{entries, total, page, per_page}` where:
-    * `entries` — list of maps with `:id`, `:action`, `:resource_type`,
-      `:resource_id`, `:occurred_at` (`%DateTime{}`) and decrypted `:metadata`
-    * `total` — total row count for the user (across all pages)
-    * `page` / `per_page` — the clamped pagination values actually applied
-
-  ## Options
-    * `:page` — 1-based page number (default 1, floored at 1)
-    * `:per_page` — items per page (default #{@default_per_page}, max #{@max_per_page})
+      Lists a user's own audit-log entries, newest first, paginated
+      (`:page`, `:per_page` — clamped, default #{@default_per_page}/max
+      #{@max_per_page}). Read-only and self-scoped. Cloak-encrypted `metadata`
+      is decrypted for display; the hashed `ip_address` column is never
+      selected. Returns `{entries, total, page, per_page}`.
   """
   @spec list_for_user(binary(), keyword()) ::
           {[map()], non_neg_integer(), pos_integer(), pos_integer()}
@@ -170,21 +137,12 @@ defmodule Stacks.Audit do
 
     user_id_binary = Ecto.UUID.dump!(user_id)
 
-    # Graceful on query error (e.g. a pathologically large page whose offset
-    # overflows bigint): return an empty page rather than crashing the request
-    # with a MatchError/500. Mirrors Stacks.Admin.Data.list_audit_log.
     total =
       case Repo.query("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary]) do
         {:ok, %{rows: [[count]]}} -> count
         _ -> 0
       end
 
-    # NOTE: ip_address is deliberately NOT selected — hashed IPs must never
-    # be surfaced to the read API/UI.
-    # ORDER BY includes id as a tiebreaker: rows sharing an occurred_at (bulk/
-    # transactional audit writes can collide at microsecond resolution) would
-    # otherwise order nondeterministically across page boundaries, duplicating
-    # or skipping rows.
     sql = """
     SELECT id, action, resource_type, resource_id, metadata, occurred_at
     FROM audit.audit_log
@@ -199,11 +157,6 @@ defmodule Stacks.Audit do
         _ -> []
       end
 
-    # GDPR telemetry (Issue #238): audit-log READ throughput. One event per
-    # user audit-log listing so "who looked at the audit log" is observable,
-    # not just writes. Deliberately UNTAGGED — no user-id/handle/IP reaches the
-    # sink (GDPR: telemetry is warehouse-adjacent). Registered in
-    # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_audit_read_count_total`.
     :telemetry.execute([:stacks, :gdpr, :audit, :read], %{count: 1}, %{})
 
     {Enum.map(rows, &decode_read_row/1), total, page, per_page}
@@ -238,9 +191,6 @@ defmodule Stacks.Audit do
   defp decode_read_timestamp(%NaiveDateTime{} = naive), do: DateTime.from_naive!(naive, "Etc/UTC")
   defp decode_read_timestamp(other), do: other
 
-  # Old rows (pre-encryption) and metadata-less rows have a nil column; treat
-  # as an empty map. Decryption/JSON failures are swallowed to a safe empty map
-  # so a single bad row can never break the whole listing.
   defp decrypt_metadata(nil), do: %{}
 
   defp decrypt_metadata(bin) when is_binary(bin) do

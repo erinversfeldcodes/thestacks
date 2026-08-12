@@ -4,16 +4,8 @@
 defmodule Core.Repo.Migrations.RetrievalLog20260713181720 do
   use Ecto.Migration
 
-  # `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so opt
-  # out of Ecto's default migration-wide transaction.
   @disable_ddl_transaction true
 
-  # Ecto holds its advisory migration lock on a separate idle connection
-  # for the full CONCURRENTLY build. Neon's managed Postgres drops idle
-  # TCP sockets on its own keepalive window, surfacing as a 300s hang +
-  # `ssl send: closed` on fresh envs (observed 2026-04-22 bootstrapping
-  # the staging project). Disabling the lock prevents that; deploys are
-  # already serialised by the release pipeline.
   @disable_migration_lock true
 
   def up do

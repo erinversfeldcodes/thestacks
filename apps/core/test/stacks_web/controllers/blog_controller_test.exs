@@ -12,10 +12,6 @@ defmodule StacksWeb.BlogControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/blog/posts
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/blog/posts" do
     test "creates a draft post when authenticated", %{conn: conn} do
       user = insert(:user)
@@ -65,10 +61,6 @@ defmodule StacksWeb.BlogControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/blog/posts
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/blog/posts" do
     test "returns published public posts for a user (unauthenticated)", %{conn: conn} do
       user = insert(:user, profile_visibility: "public")
@@ -107,12 +99,8 @@ defmodule StacksWeb.BlogControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/blog/posts/:id
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/blog/posts/:id" do
-    test "shows a published public post to unauthenticated viewer (#225)", %{conn: conn} do
+    test "shows a published public post to unauthenticated viewer", %{conn: conn} do
       user = insert(:user, profile_visibility: "public")
 
       post =
@@ -154,10 +142,6 @@ defmodule StacksWeb.BlogControllerTest do
       assert json_response(conn, 404)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # PUT /api/blog/posts/:id
-  # ---------------------------------------------------------------------------
 
   describe "PUT /api/blog/posts/:id" do
     test "updates a post when called by the owner", %{conn: conn} do
@@ -219,10 +203,6 @@ defmodule StacksWeb.BlogControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # DELETE /api/blog/posts/:id
-  # ---------------------------------------------------------------------------
-
   describe "DELETE /api/blog/posts/:id" do
     test "deletes a post when called by the owner", %{conn: conn} do
       user = insert(:user)
@@ -268,10 +248,6 @@ defmodule StacksWeb.BlogControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/blog/posts/:id/publish
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/blog/posts/:id/publish" do
     test "publishes a draft post", %{conn: conn} do
@@ -319,10 +295,6 @@ defmodule StacksWeb.BlogControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # PUT /api/blog/posts/:post_id/associations/:id/confirm
-  # ---------------------------------------------------------------------------
 
   describe "PUT /api/blog/posts/:post_id/associations/:id/confirm" do
     test "sets visible to true and returns association", %{conn: conn} do
@@ -383,10 +355,6 @@ defmodule StacksWeb.BlogControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/blog/posts/:post_id/associations/:id/dismiss
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/blog/posts/:post_id/associations/:id/dismiss" do
     test "sets visible to false and returns association", %{conn: conn} do
       user = insert(:user)
@@ -445,10 +413,6 @@ defmodule StacksWeb.BlogControllerTest do
       assert json_response(conn, 404)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/blog/posts/:id/chat — writing-assistant (consent-gated, Issue #184)
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/blog/posts/:id/chat" do
     alias Stacks.GDPR.Consent

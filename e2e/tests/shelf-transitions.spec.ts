@@ -1,5 +1,5 @@
 /**
- * US-1.2.5 — Bookshelf navigation transitions (issue #277, #112 punch #21).
+ * — Bookshelf navigation transitions (issue, punch).
  *
  * WHY THIS SPEC ASSERTS COMPUTED STYLE, NOT CLASS PRESENCE
  * -------------------------------------------------------
@@ -7,7 +7,7 @@
  * was applied to `main.app__main` on every navigation, but the CSS rule was empty
  * (`.fade-through-dark-in {}`), so the computed style was `animation-name: none;
  * animation-duration: 0s`. A test asserting only "the transition class is present"
- * passed against that broken feature for months — the #270 live drive is what
+ * passed against that broken feature for months — the live drive is what
  * finally caught it.
  *
  * So every assertion here reads `getComputedStyle`. A class name alone proves
@@ -40,7 +40,7 @@
  * navigations pile up inside one frame; the class gets swapped mid-flight
  * instead of removed and re-added, and the recorded sequence varies run to run.
  * That is precisely what made this spec non-deterministic against a deployed
- * preview while passing locally (issue #277).
+ * preview while passing locally (issue).
  *
  * So every wait-for-cleared must be preceded by a wait for the class to have
  * been *applied* (`recordedTransitions`). Applied-then-cleared is the invariant;
@@ -173,17 +173,29 @@ async function gotoShelf(page: Page, path: string): Promise<void> {
 }
 
 async function clickShelf(page: Page, href: string): Promise<void> {
-  const link = page.locator(`a.app-nav__link[href="${href}"]`);
+  // Wave 8 moved the five shelf links INSIDE a "Bookshelves"
+  // disclosure — a real <button aria-haspopup> whose menu is absent from the
+  // DOM until it is clicked open. So the navigation step is now: open the
+  // disclosure, then click the shelf link. Opening the disclosure only toggles
+  // `openNavMenu`; it does NOT touch `main`'s class, so it adds no spurious
+  // sample to the transition recording started before this call. A navigation
+  // does not reset `openNavMenu`, so on a repeat call the menu may already be
+  // open — open only when it is closed.
+  const trigger = page.locator(
+    'button.app-nav__disclosure:has-text("Bookshelves")'
+  );
+  await expect(trigger).toBeVisible({ timeout: 5000 });
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+  }
+
+  const link = page.locator(`a.app-nav__dropdown-link[href="${href}"]`);
   await expect(link).toBeVisible({ timeout: 5000 });
   await link.click();
-  // Exact pathname match via a predicate rather than `new RegExp(href)`:
-  // building a regex from a variable trips semgrep's non-literal-regexp rule
-  // (ReDoS), which is blocking in `just ci`. The predicate is also a stricter
-  // assertion than the old unanchored substring regex.
   await expect(page).toHaveURL((url) => url.pathname === href);
 }
 
-test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
+test.describe("— bookshelf navigation transitions", () => {
   test.use({ storageState: suiteAuthFile("navigation") });
 
   test("adjacent shelf, moving forwards, slides in from the right and actually animates", async ({
@@ -199,8 +211,6 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
     const sample = applied[0];
     expect(transitionClassOf(sample.className)).toBe("slide-in-right");
 
-    // The assertion that would have caught the original defect: the class must
-    // resolve to a real animation, not `none` / `0s`.
     expect(sample.animationName).toBe("slide-in-right");
     expect(sample.animationName).not.toBe("none");
     expect(durationToMs(sample.animationDuration)).toBeGreaterThanOrEqual(300);
@@ -263,8 +273,6 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
   test("an adjacent move and a room move are distinguishable", async ({
     page,
   }) => {
-    // The #270 finding: both yielded `fade-through-dark-in`, so the two kinds of
-    // navigation were indistinguishable on the DOM.
     await gotoShelf(page, "/library");
     await startRecording(page);
     await clickShelf(page, "/antilibrary");
@@ -283,22 +291,9 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
   test("the class is cleared after the animation, so repeat navigation re-triggers it", async ({
     page,
   }) => {
-    // Defect 3: without clearing, the class string persists and a later
-    // navigation selecting the same class never restarts the animation.
     await gotoShelf(page, "/library");
     await startRecording(page);
 
-    // Let each animation both *start* and *finish* before the next navigation,
-    // so the recording shows the class being genuinely removed and re-added
-    // rather than merely swapped mid-flight.
-    //
-    // Waiting only for "cleared" is not enough: immediately after a click the
-    // class has not been applied yet, so that wait is already satisfied and
-    // returns having observed nothing (see the header comment). The
-    // `recordedTransitions(page, n)` call is what pins the applied half of the
-    // applied-then-cleared invariant, and it is an added requirement — every
-    // one of the three navigations must now be observed to apply a class, where
-    // before a silently-skipped one went unnoticed.
     await clickShelf(page, "/antilibrary");
     await recordedTransitions(page, 1);
     await waitForTransitionCleared(page);
@@ -312,11 +307,8 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
     const samples = await readRecording(page);
     const sequence = samples.map((s) => transitionClassOf(s.className));
 
-    // All three navigations animated — none was collapsed into a neighbour.
     expect(transitionSamples(samples)).toHaveLength(3);
 
-    // slide-in-right must be applied twice, with the class absent in between —
-    // that gap is what lets the browser restart the animation.
     const firstRight = sequence.indexOf("slide-in-right");
     expect(firstRight).toBeGreaterThanOrEqual(0);
 
@@ -326,7 +318,6 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
     const secondRight = sequence.indexOf("slide-in-right", clearedAfter + 1);
     expect(secondRight).toBeGreaterThan(clearedAfter);
 
-    // And the final state is clean, not a stuck transition class.
     expect(transitionClassOf(samples[samples.length - 1].className)).toBe(
       undefined,
     );
@@ -335,8 +326,6 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
   test("the navigation bar does not shift during a transition", async ({
     page,
   }) => {
-    // `.app-header` is `position: relative` by design (main.css:172), so this
-    // asserts geometric stability, NOT `position: fixed`.
     const headerBox = () =>
       page.evaluate(() => {
         const el = document.querySelector(".app-header");
@@ -349,7 +338,6 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
     const before = await headerBox();
 
     await clickShelf(page, "/antilibrary");
-    // Sample mid-animation (the slide runs 300ms).
     await page.waitForTimeout(150);
     const during = await headerBox();
 
@@ -361,7 +349,7 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
   });
 });
 
-test.describe("US-1.2.5 — transitions honour prefers-reduced-motion", () => {
+test.describe("— transitions honour prefers-reduced-motion", () => {
   test.use({ storageState: suiteAuthFile("navigation") });
 
   /**
@@ -398,7 +386,6 @@ test.describe("US-1.2.5 — transitions honour prefers-reduced-motion", () => {
     const applied = await recordedTransitions(page);
     expect(applied.length).toBeGreaterThan(0);
 
-    // The class is still applied — it is suppressed in CSS, not in Elm.
     expect(transitionClassOf(applied[0].className)).toBe("slide-in-right");
     expect(applied[0].animationName).toBe("none");
   });

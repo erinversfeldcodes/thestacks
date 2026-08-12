@@ -30,10 +30,6 @@ defmodule StacksWeb.ListingControllerTest do
     listing
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/listings
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/listings — index" do
     test "returns active listings", %{conn: conn} do
       insert(:listing, status: "active", listed_at: DateTime.utc_now())
@@ -50,10 +46,6 @@ defmodule StacksWeb.ListingControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/listings/:id
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/listings/:id — show" do
     test "returns a listing by id", %{conn: conn} do
       listing = insert(:listing)
@@ -67,10 +59,6 @@ defmodule StacksWeb.ListingControllerTest do
       assert json_response(conn, 404)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/listings/mine
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/listings/mine" do
     test "returns the current user's listings", %{conn: conn} do
@@ -92,10 +80,6 @@ defmodule StacksWeb.ListingControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/listings
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/listings — create" do
     test "creates a draft listing", %{conn: conn} do
@@ -151,10 +135,6 @@ defmodule StacksWeb.ListingControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/listings/:id/activate
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/listings/:id/activate" do
     test "activates a draft listing", %{conn: conn} do
       seller = insert(:user)
@@ -187,12 +167,10 @@ defmodule StacksWeb.ListingControllerTest do
       seller = insert(:user)
       listing = create_listing_for(seller)
 
-      # Activate first
       conn
       |> auth_conn(seller)
       |> put("/api/listings/#{listing.id}/activate")
 
-      # Try to activate again
       conn =
         conn
         |> auth_conn(seller)
@@ -213,16 +191,11 @@ defmodule StacksWeb.ListingControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/listings/:id/sold
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/listings/:id/sold" do
     test "marks an active listing as sold", %{conn: conn} do
       seller = insert(:user)
       listing = create_listing_for(seller)
 
-      # Activate first
       conn
       |> auth_conn(seller)
       |> put("/api/listings/#{listing.id}/activate")
@@ -242,7 +215,6 @@ defmodule StacksWeb.ListingControllerTest do
       listing = create_listing_for(seller)
       other_user = insert(:user)
 
-      # Activate first
       conn
       |> auth_conn(seller)
       |> put("/api/listings/#{listing.id}/activate")
@@ -279,16 +251,11 @@ defmodule StacksWeb.ListingControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/listings/:id/deactivate
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/listings/:id/deactivate" do
     test "deactivates an active listing", %{conn: conn} do
       seller = insert(:user)
       listing = create_listing_for(seller)
 
-      # Activate first
       conn
       |> auth_conn(seller)
       |> put("/api/listings/#{listing.id}/activate")
@@ -319,7 +286,6 @@ defmodule StacksWeb.ListingControllerTest do
       listing = create_listing_for(seller)
       other_user = insert(:user)
 
-      # Activate first
       conn
       |> auth_conn(seller)
       |> put("/api/listings/#{listing.id}/activate")

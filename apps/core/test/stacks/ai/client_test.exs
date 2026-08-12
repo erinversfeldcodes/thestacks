@@ -1,20 +1,10 @@
-defmodule Stacks.AI.BadShapeClient do
-  @moduledoc false
-  @behaviour Stacks.AI.ClientBehaviour
-  @impl true
-  def call_vision("associate", _payload), do: {:ok, %{"unexpected_key" => "value"}}
-  def call_vision(_endpoint, _payload), do: {:ok, %{}}
-end
-
 defmodule Stacks.AI.ClientTest do
-  # async: false — tests mutate the global :vision_client application env key
-  # and the global BudgetTracker GenServer.
   use ExUnit.Case, async: false
 
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client
+  alias Stacks.AI.MockClient
 
-  # Token format: "<integer_timestamp>.<64_hex_chars>"
   @token_format ~r/\A\d+\.[0-9a-f]{64}\z/
 
   defp extract_token(req) do
@@ -107,8 +97,10 @@ defmodule Stacks.AI.ClientTest do
   describe "associate_isbn/4 — unexpected response shape" do
     setup do
       original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, Stacks.AI.BadShapeClient)
+      Application.put_env(:core, :vision_client, MockClient)
       on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
+
+      MockClient.put_response("associate", {:ok, %{"unexpected_key" => "value"}})
       :ok
     end
 
@@ -124,10 +116,6 @@ defmodule Stacks.AI.ClientTest do
   end
 
   describe "endpoint_path/1 — path mapping" do
-    # Verifies that endpoint_path/1 maps logical endpoint names to HTTP paths
-    # without making real HTTP calls. The vision sidecar requires GPU and
-    # never runs locally.
-
     test "maps is_book to /classify" do
       req = Client.build_vision_request("/classify", %{})
       assert req.path == "/classify"
@@ -155,15 +143,6 @@ defmodule Stacks.AI.ClientTest do
   end
 
   describe "build_vision_request/2 — cross-language HMAC compatibility" do
-    # Verifies that the token produced satisfies the same algorithm as the
-    # Python verify_hmac function:
-    #   message = f"{timestamp_str}.{method}.{path}"
-    #   expected_hex = hmac.new(secret.encode(), message.encode(), sha256).hexdigest()
-    #   token == f"{timestamp_str}.{expected_hex}"
-    #
-    # We replicate the Python verification here in Elixir so this test runs
-    # offline without the Modal vision service.
-
     test "token satisfies the Python verify_hmac algorithm" do
       secret = Application.fetch_env!(:core, :vision_hmac_secret)
       path = "/classify"
@@ -179,8 +158,6 @@ defmodule Stacks.AI.ClientTest do
     end
 
     test "a token with a timestamp >60s in the past would be outside the replay window" do
-      # The client generates tokens; the Modal vision service enforces the ±60s window.
-      # This confirms that a stale token's timestamp arithmetic is detectable.
       secret = Application.fetch_env!(:core, :vision_hmac_secret)
       stale_ts = Integer.to_string(System.os_time(:second) - 61)
       message = "#{stale_ts}.POST./classify"
@@ -193,22 +170,14 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
-  describe "make_vision_request/2 — BudgetTracker cost recording" do
-    # The real client path is exercised here (not the mock dispatch) because
-    # the cost-recording call site is inside `make_vision_request/2`. We
-    # point the client at an unreachable port so Finch returns a transport
-    # `{:error, _}` quickly without leaving the test host.
+  describe "make_vision_request/2 — the real transport path" do
     setup do
       original_url = Application.get_env(:core, :vision_service_url)
       original_client = Application.get_env(:core, :vision_client)
       original_state = :sys.get_state(BudgetTracker)
 
-      # Port 1 has no listener on any sane host; Finch returns a transport
-      # error in milliseconds. Avoids a 210s wait on a real timeout path.
       Application.put_env(:core, :vision_service_url, "http://127.0.0.1:1")
-      # Ensure dispatch lands in the real client, not the mock.
       Application.put_env(:core, :vision_client, Stacks.AI.Client)
-      # Reset any fuse melt from a previous test so :fuse.ask returns :ok.
       :fuse.reset(:vision_fuse)
 
       :sys.replace_state(BudgetTracker, fn state ->
@@ -226,21 +195,48 @@ defmodule Stacks.AI.ClientTest do
     end
 
     test "records modal cost in BudgetTracker even when the request errors" do
-      # Sanity: starting from a clean zero state.
       assert BudgetTracker.current_state().daily_total_cents == 0
 
-      # Drive a real Finch round-trip via call_vision/2. Port 1 will refuse,
-      # so we land in the {:error, reason} branch of make_vision_request/2.
       result = Client.call_vision("analyze", %{image: "test"})
       assert {:error, _reason} = result
 
-      # current_state/0 is a synchronous call — it serializes after the
-      # cost-recording cast, ensuring the GenServer has processed it.
       state = BudgetTracker.current_state()
       cost_per_call = Application.get_env(:core, :modal_cost_per_call_cents, 1)
       assert state.daily_total_cents == cost_per_call
       assert state.monthly_total_cents == cost_per_call
       assert state.providers["modal"] == cost_per_call
+    end
+
+    test "the :exception event carries a bounded reason_class, not just the raw reason" do
+      handler = {__MODULE__, :exception_metadata, self()}
+
+      :telemetry.attach(
+        handler,
+        [:stacks, :vision, :request, :exception],
+        fn _event, measurements, metadata, pid ->
+          send(pid, {:vision_exception, measurements, metadata})
+        end,
+        self()
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      assert {:error, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert_receive {:vision_exception, _measurements, metadata}, 5_000
+
+      assert Map.has_key?(metadata, :reason_class),
+             "the :exception emit site must carry :reason_class — the counter tags on it, and " <>
+               "a missing tag exports as an empty label rather than failing. Metadata: " <>
+               inspect(Map.keys(metadata))
+
+      assert metadata.reason_class in [:timeout, :closed, :unreachable, :protocol, :other],
+             "reason_class must stay inside the closed set that makes it safe as a metric " <>
+               "label; got #{inspect(metadata.reason_class)}"
+
+      assert metadata.reason_class == :unreachable,
+             "port 1 refuses, so Finch surfaces econnrefused and the classifier should say " <>
+               ":unreachable; got #{inspect(metadata.reason_class)} from #{inspect(metadata.reason)}"
     end
   end
 end

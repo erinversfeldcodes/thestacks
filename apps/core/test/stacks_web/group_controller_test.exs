@@ -12,10 +12,6 @@ defmodule StacksWeb.GroupControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/groups
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/groups" do
     test "creates a group (201)", %{conn: conn} do
       user = insert(:user)
@@ -48,10 +44,6 @@ defmodule StacksWeb.GroupControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/groups/:id
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/groups/:id" do
     test "returns group for member (200)", %{conn: conn} do
@@ -112,10 +104,6 @@ defmodule StacksWeb.GroupControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/groups/:group_id/invitations
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/groups/:group_id/invitations" do
     test "creates invitation (201)", %{conn: conn} do
       owner = insert(:user)
@@ -167,10 +155,6 @@ defmodule StacksWeb.GroupControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/groups/:group_id/invitations/:id/accept
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/groups/:group_id/invitations/:id/accept" do
     test "accepts invitation (200)", %{conn: conn} do
@@ -232,10 +216,6 @@ defmodule StacksWeb.GroupControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/groups/:group_id/invitations/:id/decline
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/groups/:group_id/invitations/:id/decline" do
     test "declines invitation (200)", %{conn: conn} do
       owner = insert(:user)
@@ -296,10 +276,6 @@ defmodule StacksWeb.GroupControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # DELETE /api/groups/:group_id/members/:user_id
-  # ---------------------------------------------------------------------------
-
   describe "DELETE /api/groups/:group_id/members/:user_id" do
     test "owner removes member (204)", %{conn: conn} do
       owner = insert(:user)
@@ -352,10 +328,6 @@ defmodule StacksWeb.GroupControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/groups/:group_id/leave
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/groups/:group_id/leave" do
     test "member leaves (204)", %{conn: conn} do

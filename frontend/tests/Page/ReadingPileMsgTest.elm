@@ -2,7 +2,7 @@ module Page.ReadingPileMsgTest exposing (suite)
 
 {-| Drives `Page.Bookshelf.ReadingPile.update` directly through its `Msg`
 constructors. Exists to prove the constructors are reachable from `tests/`;
-the full happy-path and sad-path program tests are Issue #112 punch #7/#8.
+the full happy-path and sad-path program tests live in the program-test suite.
 -}
 
 import Expect

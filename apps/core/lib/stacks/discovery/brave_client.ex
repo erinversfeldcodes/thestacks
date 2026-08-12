@@ -1,16 +1,16 @@
 defmodule Stacks.Discovery.BraveClient do
   @moduledoc """
-  Real HTTP client for Brave Search API.
+      Real HTTP client for Brave Search API.
 
-  Rate limited to ~67 queries/day (2000/month free tier).
-  Uses Finch with the shared `Stacks.Finch` pool.
-  API key configured via `Application.get_env(:core, :brave_search_api_key)`.
+      Rate limited to ~67 queries/day (2000/month free tier).
+      Uses Finch with the shared `Stacks.Finch` pool.
+      API key configured via `Application.get_env(:core,:brave_search_api_key)`.
 
-  Protected by `:brave_fuse` — managed by `Stacks.CircuitBreakers`. When
-  the fuse is blown (Brave is rate-limiting us, 5xx'ing, or off-budget),
-  requests short-circuit to `{:error, :circuit_open}` without touching
-  the upstream. `Stacks.CircuitBreakers` runs a periodic probe against
-  Brave's API and resets the fuse as soon as it's healthy again.
+      Protected by `:brave_fuse` — managed by `Stacks.CircuitBreakers`. When
+      the fuse is blown (Brave is rate-limiting us, 5xx'ing, or off-budget),
+      requests short-circuit to `{:error,:circuit_open}` without touching
+      the upstream. `Stacks.CircuitBreakers` runs a periodic probe against
+      Brave's API and resets the fuse as soon as it's healthy again.
   """
 
   @behaviour Stacks.Discovery.BraveClientBehaviour
@@ -18,14 +18,6 @@ defmodule Stacks.Discovery.BraveClient do
   require Logger
 
   @base_url "https://api.search.brave.com/res/v1/web/search"
-  # Daily cap. Free tier quota is 2000/month ≈ 67/day, but we typically
-  # run several gate windows per day (each generates dozens of author-
-  # discovery jobs) plus real-user traffic; 67 is too tight and caused
-  # oban_failure_rate_default breaches once the canary probe expanded
-  # to cover non-barcode book extraction. 200/day is a defensive buffer
-  # against spikes while still well under the 2000/month cap (at sustained
-  # 200/day you'd hit the monthly ceiling in ~10 days — a useful signal
-  # that the batch-cron refactor is overdue).
   @daily_budget 200
   @fuse_name :brave_fuse
 
@@ -38,10 +30,6 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  # Ask the fuse first — short-circuit without spending budget or network
-  # when we know Brave is unhealthy. `CircuitBreakers.melt/1` trips the
-  # fuse when `do_search/2` actually fails upstream, so the loop is
-  # self-healing and self-breaking.
   defp check_fuse do
     case :fuse.ask(@fuse_name, :sync) do
       :ok -> :ok
@@ -70,10 +58,10 @@ defmodule Stacks.Discovery.BraveClient do
           ]
         )
 
-      case Finch.request(req, Stacks.Finch, receive_timeout: 15_000) do
-        {:ok, %Finch.Response{status: 200, body: body}} ->
+      case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 20_000) do
+        {:ok, %Finch.Response{status: 200, body: body, headers: headers}} ->
           increment_daily_counter()
-          parse_results(body)
+          parse_results(maybe_gunzip(body, headers))
 
         {:ok, %Finch.Response{status: 429}} ->
           Logger.warning("BraveClient: rate limited by Brave API")
@@ -86,9 +74,6 @@ defmodule Stacks.Discovery.BraveClient do
           {:error, {:unexpected_status, status}}
 
         {:ok, %Finch.Response{status: status, body: body}} ->
-          # 4xx other than 429 (e.g. 401, 403, 400) — don't melt; likely
-          # a misconfigured request, not a service-health signal. Surface
-          # the error so callers see it but keep the fuse closed.
           Logger.warning("BraveClient: unexpected status #{status}: #{inspect(body)}")
           {:error, {:unexpected_status, status}}
 
@@ -98,6 +83,29 @@ defmodule Stacks.Discovery.BraveClient do
           {:error, reason}
       end
     end
+  end
+
+  # ⛔ We advertise `Accept-Encoding: gzip` and then have to actually decompress — Finch does not
+  # do it for us. Without this, every Brave **200** reached `Jason.decode/1` holding gzip bytes and
+  # returned `{:json_decode_error, ...}`, so `SourceDiscoveryJob` logged "Brave search failed" and
+  # fell through to the SearXNG fallback. **Brave had therefore never once succeeded.**
+  #
+  # ⚠️ What made this invisible for so long is the fallback working. The primary path was dead and
+  # the feature still produced rows, so nothing looked broken from the outside — the only signal was
+  # a warning line among gzip bytes rendered as a byte list, which reads like noise. A fallback that
+  # silently absorbs a broken primary is worse than no fallback: it converts an outage into a
+  # permanent, unnoticed regression. Discovery ran entirely on the backup search engine.
+  #
+  # Keyed on the response header rather than sniffing magic bytes: the server tells us what it did,
+  # and a `content-encoding` we do not handle should fail loudly rather than be guessed at.
+  defp maybe_gunzip(body, headers) do
+    gzipped? =
+      Enum.any?(headers, fn {name, value} ->
+        String.downcase(name) == "content-encoding" and
+          String.contains?(String.downcase(value), "gzip")
+      end)
+
+    if gzipped?, do: :zlib.gunzip(body), else: body
   end
 
   defp parse_results(body) do
@@ -122,8 +130,6 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  # Daily budget tracking via :counters (atomic, no global GC).
-  # The counter resets when the date changes.
   defp check_daily_budget do
     today = Date.utc_today()
     {date, count} = get_counter()
@@ -135,18 +141,28 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  defp increment_daily_counter do
-    today = Date.utc_today()
-    {stored_date, _count} = get_counter()
+  @doc """
+      Records one Brave call against today's budget.
 
-    if stored_date != today do
-      # Date changed — reset the counter
-      counter = :counters.new(1, [:atomics])
-      :counters.add(counter, 1, 1)
-      :persistent_term.put({__MODULE__, :daily_counter}, {today, counter})
-    else
-      {_date, counter} = :persistent_term.get({__MODULE__, :daily_counter})
-      :counters.add(counter, 1, 1)
+      ⚠️ **Public only so the fresh-node path is testable, and that is not a technicality.** This
+      function crashed on the first live call in any fresh node (see the comment below), source
+      discovery produced zero rows for weeks, and the cause was misattributed to a missing API key.
+      Nothing exercised it: `brave_client_test.exs` covered only the *Mock* client, so the real
+      counter had no coverage at all. A defect that reached production through an untested private
+      function earns a seam.
+  """
+  @spec increment_daily_counter() :: :ok
+  def increment_daily_counter do
+    today = Date.utc_today()
+
+    case :persistent_term.get({__MODULE__, :daily_counter}, nil) do
+      {^today, counter} ->
+        :counters.add(counter, 1, 1)
+
+      _absent_or_stale ->
+        counter = :counters.new(1, [:atomics])
+        :counters.add(counter, 1, 1)
+        :persistent_term.put({__MODULE__, :daily_counter}, {today, counter})
     end
   end
 

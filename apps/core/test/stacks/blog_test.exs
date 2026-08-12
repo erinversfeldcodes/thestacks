@@ -10,10 +10,6 @@ defmodule Stacks.BlogTest do
   alias Core.Repo
   alias Stacks.Blog
 
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
-
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
@@ -21,7 +17,6 @@ defmodule Stacks.BlogTest do
     )
   end
 
-  # Fetch the payload of the most recent event of the given type for an aggregate.
   defp latest_event_payload(event_type, aggregate_id) do
     Repo.one(
       from(e in "event_log",
@@ -33,10 +28,6 @@ defmodule Stacks.BlogTest do
       )
     )
   end
-
-  # ---------------------------------------------------------------------------
-  # create_post/2
-  # ---------------------------------------------------------------------------
 
   describe "create_post/2" do
     test "creates a post with valid attrs" do
@@ -60,7 +51,6 @@ defmodule Stacks.BlogTest do
     end
 
     test "enforces visibility ceiling — rejects visibility less restrictive than profile" do
-      # User has profile_visibility: "owner" (most restrictive)
       user = insert(:user, profile_visibility: "owner")
       attrs = %{title: "Public Post", body: "Body.", visibility: "platform"}
 
@@ -113,15 +103,9 @@ defmodule Stacks.BlogTest do
 
       assert payload["user_id"] == user.id
       assert payload["visibility"] == "platform"
-      # v2: title dropped — free text stays on the row, not in the event_log
-      # (events.ex UUID-only invariant). The post is identified by aggregate_id.
       refute Map.has_key?(payload, "title")
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # update_post/3
-  # ---------------------------------------------------------------------------
 
   describe "update_post/3" do
     test "updates a post when called by the owner" do
@@ -169,14 +153,9 @@ defmodule Stacks.BlogTest do
 
       assert payload["user_id"] == user.id
       assert payload["visibility"] == "owner"
-      # v2: title dropped (see blog.post_created).
       refute Map.has_key?(payload, "title")
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # publish_post/2
-  # ---------------------------------------------------------------------------
 
   describe "publish_post/2" do
     test "sets published_at timestamp" do
@@ -206,10 +185,6 @@ defmodule Stacks.BlogTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # delete_post/2
-  # ---------------------------------------------------------------------------
-
   describe "delete_post/2" do
     test "deletes a post when called by the owner" do
       user = insert(:user)
@@ -225,7 +200,6 @@ defmodule Stacks.BlogTest do
       post = insert(:post, user: owner)
 
       assert {:error, :unauthorized} = Blog.delete_post(post, other)
-      # Post should still exist
       assert Blog.get_post(post.id) != nil
     end
 
@@ -239,10 +213,6 @@ defmodule Stacks.BlogTest do
       assert event_count("blog.post_deleted") == before_count + 1
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # get_post/1
-  # ---------------------------------------------------------------------------
 
   describe "get_post/1" do
     test "returns a post by ID" do
@@ -258,10 +228,6 @@ defmodule Stacks.BlogTest do
       assert Blog.get_post(Ecto.UUID.generate()) == nil
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # list_user_posts/2
-  # ---------------------------------------------------------------------------
 
   describe "list_user_posts/2" do
     test "owner sees all posts including unpublished drafts" do
@@ -287,7 +253,7 @@ defmodule Stacks.BlogTest do
       assert length(posts) == 1
     end
 
-    test "unauthenticated viewer sees only published public posts (#225)" do
+    test "unauthenticated viewer sees only published public posts" do
       user = insert(:user, profile_visibility: "public")
       _draft = insert(:post, user: user, visibility: "public", published_at: nil)
 
@@ -310,12 +276,8 @@ defmodule Stacks.BlogTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # list_published — via list_user_posts with unauthenticated viewer
-  # ---------------------------------------------------------------------------
-
   describe "list_user_posts/2 public visibility" do
-    test "unauthenticated sees only published + public-visible posts (#225)" do
+    test "unauthenticated sees only published + public-visible posts" do
       user = insert(:user, profile_visibility: "public")
 
       _public_published =
@@ -326,7 +288,6 @@ defmodule Stacks.BlogTest do
 
       _public_draft = insert(:post, user: user, visibility: "public", published_at: nil)
 
-      # Platform (Members) posts are NOT visible to a logged-out viewer.
       _platform_published =
         insert(:post, user: user, visibility: "platform", published_at: DateTime.utc_now())
 
@@ -334,10 +295,6 @@ defmodule Stacks.BlogTest do
       assert length(posts) == 1
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # tighten_posts_to_ceiling/2
-  # ---------------------------------------------------------------------------
 
   describe "tighten_posts_to_ceiling/2" do
     test "tightens posts more visible than the new ceiling" do
@@ -377,7 +334,6 @@ defmodule Stacks.BlogTest do
       _p1 = insert(:post, user: user, visibility: "platform")
       _p2 = insert(:post, user: user, visibility: "platform")
 
-      # Verify it wraps in a transaction by checking all posts are updated
       assert {:ok, 2} = Blog.tighten_posts_to_ceiling(user.id, "owner")
 
       posts =
@@ -398,10 +354,6 @@ defmodule Stacks.BlogTest do
       assert Repo.get!(Blog.Post, other_post.id).visibility == "platform"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # book_ids_with_user_writing/2 — the spine bookmark-ribbon signal (#287)
-  # ---------------------------------------------------------------------------
 
   describe "book_ids_with_user_writing/2" do
     test "returns the ids of books the user has written a visible association about" do

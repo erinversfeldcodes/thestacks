@@ -1,11 +1,11 @@
 defmodule StacksWeb.UserSearchControllerTest do
   @moduledoc """
-  Tests for the people-search endpoint (#217): GET /api/search/users?q=<term>.
+      Tests for the people-search endpoint: GET /api/search/users?q=<term>.
 
-  Runs under `:optional_auth`. Asserts the endpoint returns the redacted
-  `public_profile_summary` shape and that ghost/blocked exclusion (enforced in
-  `Accounts.search_users/2` SQL) reaches the wire — a ghost or blocked user
-  never appears in the JSON result set.
+      Runs under `:optional_auth`. Asserts the endpoint returns the redacted
+      `public_profile_summary` shape and that ghost/blocked exclusion (enforced in
+      `Accounts.search_users/2` SQL) reaches the wire — a ghost or blocked user
+      never appears in the JSON result set.
   """
   use CoreWeb.ConnCase, async: true
 
@@ -33,7 +33,6 @@ defmodule StacksWeb.UserSearchControllerTest do
       assert [user] = body["users"]
       assert user["handle"] == "adal"
       assert user["display_name"] == "Ada Lovelace"
-      # REDACTED — no account/PII fields leak.
       refute Map.has_key?(user, "email")
       refute Map.has_key?(user, "consent_analytics")
       refute Map.has_key?(user, "role")
@@ -70,7 +69,7 @@ defmodule StacksWeb.UserSearchControllerTest do
       assert body["users"] == []
     end
 
-    test "an unauthenticated request returns public profiles but NOT platform/ghost ones (#225)",
+    test "an unauthenticated request returns public profiles but NOT platform/ghost ones",
          %{
            conn: conn
          } do
@@ -80,8 +79,6 @@ defmodule StacksWeb.UserSearchControllerTest do
 
       body = conn |> get("/api/search/users", q: "Ada") |> json_response(200)
 
-      # A logged-out searcher discovers only public profiles — platform (Members)
-      # is signed-in-only, owner is private.
       assert [user] = body["users"]
       assert user["handle"] == "seen"
     end

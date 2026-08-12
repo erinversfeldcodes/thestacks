@@ -1,19 +1,17 @@
 defmodule Core.Repo.Migrations.AddOnboardingStepsToUsers do
   @moduledoc """
-  Replaces the boolean `onboarding_completed` column with a JSONB `onboarding_steps`
-  column and a GENERATED ALWAYS AS computed `onboarding_completed` boolean.
+      Replaces the boolean `onboarding_completed` column with a JSONB `onboarding_steps`
+      column and a GENERATED ALWAYS AS computed `onboarding_completed` boolean.
 
-  The generated column stays true only when all three steps (profile, age_verification,
-  privacy) are individually set to true in the JSON object.
+      The generated column stays true only when all three steps (profile, age_verification,
+      privacy) are individually set to true in the JSON object.
 
-  The staging.stg_users view depends on `onboarding_completed`, so the migration drops
-  and recreates it around the column swap.
+      The staging.stg_users view depends on `onboarding_completed`, so the migration drops
+      and recreates it around the column swap.
   """
 
   use Ecto.Migration
 
-  # Recreated after each column swap. The DO block guards on schema existence so
-  # the migration is a no-op in the test database (which has no staging schema).
   @recreate_stg_users_view """
   DO $body$
   BEGIN

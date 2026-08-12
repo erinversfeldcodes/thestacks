@@ -1,26 +1,22 @@
 defmodule Stacks.TransparencyTest do
   @moduledoc """
-  Tests for the public transparency data layer (Issue #241 / ADR-019).
+      Tests for the public transparency data layer.
 
-  Load-bearing invariants:
-    * allowlist enforcement — only fixed, code-defined queries run; there is
-      NO code path that runs an arbitrary / user-supplied PromQL string;
-    * anonymisation — the payload is aggregates only (no per-user field,
-      no de-anonymisable / linked-account dimension);
-    * graceful degradation — with the Prometheus client/token absent the live
-      section is `:unavailable`, never an error/leak, and durable is still served;
-    * cache — a second call within TTL does not re-invoke the Prometheus client.
+      Load-bearing invariants:
+        * allowlist enforcement — only fixed, code-defined queries run; there is
+          NO code path that runs an arbitrary / user-supplied PromQL string;
+        * anonymisation — the payload is aggregates only (no per-user field,
+          no de-anonymisable / linked-account dimension);
+        * graceful degradation — with the Prometheus client/token absent the live
+          section is `:unavailable`, never an error/leak, and durable is still served;
+        * cache — a second call within TTL does not re-invoke the Prometheus client.
   """
 
-  # async: false — the ETS-backed cache and the shared config-wired mock are
-  # global; serialising keeps cross-test cache bleed deterministic.
   use Core.DataCase, async: false
 
   alias Stacks.Transparency
   alias Stacks.Transparency.{Cache, MockPrometheusClient}
 
-  # Only these keys may ever appear on a public entry. A stray :user_id,
-  # :email, :ip, :handle etc. would fail the subset assertions below.
   @allowed_entry_keys MapSet.new([:key, :label, :what, :how, :why, :unit, :value])
 
   setup do
@@ -30,20 +26,16 @@ defmodule Stacks.TransparencyTest do
   end
 
   describe "allowlist enforcement" do
-    test "a allowlisted signal returns a number via the client" do
+    test "a allowlisted signal returns the client's value unchanged" do
       MockPrometheusClient.put_response({:ok, 0.42})
 
       key = hd(Transparency.allowlist_keys())
-      assert {:ok, value} = Transparency.run_signal(key)
-      assert is_number(value)
+      assert {:ok, 0.42} = Transparency.run_signal(key)
     end
 
     test "an un-allowlisted key cannot be run (no arbitrary/injected PromQL path)" do
-      # The public API accepts only allowlist KEYS (atoms), never raw PromQL.
       assert {:error, :not_allowlisted} = Transparency.run_signal(:definitely_not_a_signal)
 
-      # Even an atom that looks like an injection attempt is rejected — there is
-      # no branch that forwards a caller-supplied string to the client.
       assert {:error, :not_allowlisted} =
                Transparency.run_signal(:"rate(secret_metric[1h]) or 1")
     end
@@ -56,12 +48,7 @@ defmodule Stacks.TransparencyTest do
   end
 
   describe "app scoping (Fly org-wide Prometheus)" do
-    # Fly's managed Prometheus is org-wide and adds an `app` label to every
-    # series; the PUBLIC page must show prod-only data, not blended preview
-    # traffic. Every allowlist query must therefore be app-scoped, and the
-    # scoping must be a code-defined literal (no user input can reach it).
     setup do
-      # Pin a deterministic app label for the assertions below, then restore.
       prev = Application.get_env(:core, :fly_metrics_app)
       Application.put_env(:core, :fly_metrics_app, "thestacks-core")
       on_exit(fn -> restore_env(:fly_metrics_app, prev) end)
@@ -74,8 +61,6 @@ defmodule Stacks.TransparencyTest do
       key = hd(Transparency.allowlist_keys())
       assert {:ok, _} = Transparency.run_signal(key)
 
-      # The client receives the substituted, app-scoped query — never the raw
-      # `$app` placeholder and never an unscoped selector.
       sent = MockPrometheusClient.last_query()
       assert sent =~ ~s|app="thestacks-core"|
       refute sent =~ "$app"
@@ -84,8 +69,6 @@ defmodule Stacks.TransparencyTest do
     test "every allowlisted query carries an app-scope matcher, so none can regress unscoped" do
       MockPrometheusClient.put_response({:ok, 1.0})
 
-      # Run each signal; assert the query the client actually saw is app-scoped
-      # on its stacks_* selector.
       for key <- Transparency.allowlist_keys() do
         assert {:ok, _} = Transparency.run_signal(key)
         sent = MockPrometheusClient.last_query()
@@ -108,7 +91,8 @@ defmodule Stacks.TransparencyTest do
       assert Map.has_key?(metrics, :live)
       assert Map.has_key?(metrics, :durable)
       assert %DateTime{} = metrics.generated_at
-      assert is_integer(metrics.cache_ttl)
+
+      assert metrics.cache_ttl == 45
     end
 
     test "every live entry carries what/how/why teaching metadata" do
@@ -124,7 +108,9 @@ defmodule Stacks.TransparencyTest do
         assert is_binary(entry.how)
         assert is_binary(entry.why)
         assert is_binary(entry.unit)
-        assert is_number(entry.value)
+
+        assert entry.value == 3.5,
+               "live entry #{inspect(entry.key)} did not carry the client's configured value"
       end)
     end
 
@@ -163,10 +149,6 @@ defmodule Stacks.TransparencyTest do
 
       body = Transparency.metrics() |> Jason.encode!() |> String.downcase()
 
-      # Free-text prose (e.g. "event handler") legitimately contains some
-      # substrings; a per-user field would be caught structurally by the
-      # @allowed_entry_keys subset assertion above. This scan targets tokens
-      # that can never appear in the curated copy.
       for forbidden <-
             ~w(user_id email password ip_address audible linked_account per_user) do
         refute String.contains?(body, forbidden),
@@ -198,11 +180,7 @@ defmodule Stacks.TransparencyTest do
     test "get_stale returns the last cached value regardless of age; get respects TTL" do
       Cache.put(:live_signals, [:cached])
 
-      # A zero TTL makes the fresh read miss (the entry is never younger than
-      # 0ms under monotonic time)...
       assert Cache.get(:live_signals, 0) == :miss
-      # ...but the stale-on-error read still serves the last good value — the
-      # exact path refresh_live_signals/0 takes when a later compute errors.
       assert Cache.get_stale(:live_signals) == {:ok, [:cached]}
     end
 

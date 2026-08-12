@@ -1,19 +1,11 @@
 defmodule Core.PromEx.DashboardCompletenessTest do
   @moduledoc """
-  Global "measured ⊆ displayed" gate (ADR-021 / Epic #249 #256).
-
-  The per-dashboard drift tests prove each dashboard's panels reference only
-  *registered* metrics (displayed ⊆ measured). This is the REVERSE, across ALL
-  dashboards registered in `Core.PromEx.dashboards/0`: every registered
-  `stacks_*` family classified `:public` in `Core.PromEx.MetricAudience` MUST
-  have a panel somewhere — a public metric with no panel is measured-but-invisible,
-  which is the whole failure mode this epic exists to kill. `:own`/`:break_glass`
-  families are exempt (they never go on the public dashboards); `:unclassified` is
-  already a hard failure in `MetricAudienceTest`.
-
-  Registered family names come from the plugin the same way as `DashboardDriftTest`
-  (`metric.name |> Enum.join("_")`); panel selectors are normalised back to that
-  family (histogram `_bucket`/`_sum`/`_count` stripped) before comparison.
+      Global "measured ⊆ displayed" gate: the per-dashboard drift
+      tests prove displayed ⊆ measured; this is the REVERSE across ALL
+      dashboards in `Core.PromEx.dashboards/0` — every registered `stacks_*`
+      family classified `:public` in `MetricAudience` must have a panel
+      somewhere. Measured-but-invisible is the failure mode this gate exists
+      to kill; `:own`/`:break_glass` families are exempt.
   """
   use ExUnit.Case, async: true
 
@@ -32,8 +24,6 @@ defmodule Core.PromEx.DashboardCompletenessTest do
 
   defp all_panels(_), do: []
 
-  # Every family referenced by any panel across ALL registered dashboards,
-  # normalised to the registered family key.
   defp displayed_families do
     for {:core, rel} <- Core.PromEx.dashboards(),
         path = Application.app_dir(:core, Path.join("priv", rel)),

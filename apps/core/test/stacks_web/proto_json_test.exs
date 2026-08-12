@@ -8,28 +8,27 @@ defmodule StacksWeb.ProtoJSONTest do
 
   alias StacksWeb.ProtoJSON
 
-  # ---------------------------------------------------------------------------
-  # book/2
-  # ---------------------------------------------------------------------------
-
   describe "book/2" do
     test "produces identical output to BookController.format_book/2 with all fields" do
       author = insert(:author, bio: "Great writer.", website_url: "https://example.com")
-      book = insert(:book, author: author, subjects: ["fiction", "philosophy"])
 
-      edition =
-        insert(:book_edition,
-          book: book,
-          isbn: "9780140449136",
-          format_label: "Paperback",
-          cover_image_url: "https://covers.example.com/1.jpg",
-          page_count: 320,
-          publisher: "Penguin",
-          publication_year: 2003,
-          is_primary: true
+      book =
+        insert(:book,
+          author: author,
+          subjects: ["fiction", "philosophy"],
+          editions: [
+            build(:primary_book_edition,
+              isbn: "9780140449136",
+              format_label: "Paperback",
+              cover_image_url: "https://covers.example.com/1.jpg",
+              page_count: 320,
+              publisher: "Penguin",
+              publication_year: 2003
+            )
+          ]
         )
 
-      book = %{book | editions: [edition]}
+      edition = hd(book.editions)
 
       result = ProtoJSON.book(book, community_read_count: 42)
 
@@ -56,7 +55,8 @@ defmodule StacksWeb.ProtoJSONTest do
                    page_count: 320,
                    publisher: "Penguin",
                    publication_year: 2003,
-                   is_primary: true
+                   is_primary: true,
+                   verification_source: edition.verification_source
                  }
                ],
                edition_count: 1,
@@ -68,7 +68,8 @@ defmodule StacksWeb.ProtoJSONTest do
                  page_count: 320,
                  publisher: "Penguin",
                  publication_year: 2003,
-                 is_primary: true
+                 is_primary: true,
+                 verification_source: edition.verification_source
                },
                community_read_count: 42
              }
@@ -94,7 +95,7 @@ defmodule StacksWeb.ProtoJSONTest do
 
     test "handles not-loaded author" do
       book = insert(:book)
-      # Simulate Ecto.Association.NotLoaded
+
       book = %{
         book
         | author: %Ecto.Association.NotLoaded{
@@ -139,19 +140,10 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # catalogue_book/1
-  # ---------------------------------------------------------------------------
-
   describe "catalogue_book/1" do
     test "includes subjects but omits description, language, bisac_codes, community_read_count" do
       author = insert(:author)
       book = insert(:book, author: author, subjects: ["history"])
-
-      edition =
-        insert(:book_edition, book: book, is_primary: true)
-
-      book = %{book | editions: [edition]}
 
       result = ProtoJSON.catalogue_book(book)
 
@@ -173,17 +165,10 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # search_book/1
-  # ---------------------------------------------------------------------------
-
   describe "search_book/1" do
     test "includes visibility_tier but omits description, subjects, language, bisac_codes" do
       author = insert(:author)
       book = insert(:book, author: author, visibility_tier: "age_gated")
-
-      edition = insert(:book_edition, book: book, is_primary: true)
-      book = %{book | editions: [edition]}
 
       result = ProtoJSON.search_book(book)
 
@@ -197,17 +182,10 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # bookshelf_book/1
-  # ---------------------------------------------------------------------------
-
   describe "bookshelf_book/1" do
     test "includes description and visibility_tier, author with bio: nil" do
       author = insert(:author, bio: "Great writer.", website_url: "https://example.com")
       book = insert(:book, author: author, description: "A fine book.")
-
-      edition = insert(:book_edition, book: book, is_primary: true)
-      book = %{book | editions: [edition]}
 
       result = ProtoJSON.bookshelf_book(book)
 
@@ -249,13 +227,14 @@ defmodule StacksWeb.ProtoJSONTest do
 
       assert result.editions == []
       assert result.edition_count == 0
-      assert result.primary_edition == nil
+
+      assert result.primary_edition.id == hd(book_editions(book)).id
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # author/1
-  # ---------------------------------------------------------------------------
+  defp book_editions(book) do
+    Core.Repo.all(Ecto.Query.where(Stacks.Books.BookEdition, book_id: ^book.id))
+  end
 
   describe "author/1" do
     test "full shape with id, name, bio, website" do
@@ -288,10 +267,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # author_slim/1
-  # ---------------------------------------------------------------------------
-
   describe "author_slim/1" do
     test "only id and name" do
       a = insert(:author, bio: "Should be excluded.")
@@ -308,10 +283,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # author_bookshelf/1
-  # ---------------------------------------------------------------------------
-
   describe "author_bookshelf/1" do
     test "includes id, name, and bio: nil" do
       a = insert(:author, bio: "Has a bio.")
@@ -324,10 +295,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # edition/1
-  # ---------------------------------------------------------------------------
-
   describe "edition/1" do
     test "all fields serialized" do
       book = insert(:book)
@@ -335,24 +302,26 @@ defmodule StacksWeb.ProtoJSONTest do
       ed =
         insert(:book_edition,
           book: book,
-          isbn: "9781234567890",
+          isbn: "9781600000102",
           format_label: "Hardcover",
           cover_image_url: "https://covers.example.com/2.jpg",
           page_count: 450,
           publisher: "HarperCollins",
           publication_year: 2021,
-          is_primary: false
+          is_primary: false,
+          verification_source: "barcode_unverified"
         )
 
       assert ProtoJSON.edition(ed) == %{
                id: ed.id,
-               isbn: "9781234567890",
+               isbn: "9781600000102",
                format_label: "Hardcover",
                cover_image_url: "https://covers.example.com/2.jpg",
                page_count: 450,
                publisher: "HarperCollins",
                publication_year: 2021,
-               is_primary: false
+               is_primary: false,
+               verification_source: "barcode_unverified"
              }
     end
 
@@ -377,18 +346,12 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # placement_detail/1
-  # ---------------------------------------------------------------------------
-
   describe "placement_detail/1" do
     test "matches BookshelfController.format_placement/1 shape" do
       user = insert(:user)
       author = insert(:author)
       bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book, author: author)
-      edition = insert(:book_edition, book: book, is_primary: true)
-      book = %{book | editions: [edition]}
 
       placement =
         insert(:placement,
@@ -407,7 +370,6 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.formats == ["physical"]
       assert result.personal_rating == 5
       assert result.notes == placement.notes
-      # Placement visibility feeds the faint hidden-spine on the shelf (#194).
       assert result.visibility == placement.visibility
       assert result.book != nil
       assert result.book.id == book.id
@@ -438,10 +400,6 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.book == nil
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # placement_ref/1
-  # ---------------------------------------------------------------------------
 
   describe "placement_ref/1" do
     test "matches BookshelfPlacementController.format_placement/1 shape" do
@@ -480,10 +438,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # book_placement/1
-  # ---------------------------------------------------------------------------
-
   describe "book_placement/1" do
     test "matches BookController.format_placement_or_nil/1 shape" do
       user = insert(:user)
@@ -499,7 +453,6 @@ defmodule StacksWeb.ProtoJSONTest do
           visibility: "owner"
         )
 
-      # Preload bookshelf so .bookshelf.name is available
       placement = Core.Repo.preload(placement, :bookshelf)
 
       result = ProtoJSON.book_placement(placement)
@@ -516,9 +469,8 @@ defmodule StacksWeb.ProtoJSONTest do
              }
     end
 
-    test "emits placement visibility and parent bookshelf visibility independently (US-10.2.2)" do
+    test "emits placement visibility and parent bookshelf visibility independently" do
       user = insert(:user)
-      # Parent bookshelf is the ceiling (group); the placement overrides down to owner.
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
       book = insert(:book)
 
@@ -572,9 +524,6 @@ defmodule StacksWeb.ProtoJSONTest do
           visibility: "owner"
         )
 
-      # Simulate an unpreloaded bookshelf association — a missing-preload BUG.
-      # The serializer must not crash, but must NOT degrade silently: it logs a
-      # warning so the missing preload is caught rather than quietly ungreying.
       placement = %{placement | bookshelf: %Ecto.Association.NotLoaded{}}
 
       {result, log} = with_log(fn -> ProtoJSON.book_placement(placement) end)
@@ -584,10 +533,6 @@ defmodule StacksWeb.ProtoJSONTest do
       assert log =~ "not preloaded"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # user/1
-  # ---------------------------------------------------------------------------
 
   describe "user/1" do
     test "matches AuthController.format_user/1 shape" do
@@ -630,10 +575,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # blog_post/1
-  # ---------------------------------------------------------------------------
-
   describe "blog_post/1" do
     test "matches BlogController.format_post/1 shape" do
       user = insert(:user, display_name: "Fable Quill")
@@ -651,8 +592,18 @@ defmodule StacksWeb.ProtoJSONTest do
                created_at: post.created_at,
                updated_at: post.updated_at,
                author_display_name: "Fable Quill",
-               author_handle: user.handle
+               author_handle: user.handle,
+               syndicated: true
              }
+    end
+
+    test "carries the syndicated flag — the take-list drops what it does not name" do
+      user = insert(:user)
+      in_feed = insert(:post, user: user, syndicated: true)
+      opted_out = insert(:post, user: user, syndicated: false)
+
+      assert ProtoJSON.blog_post(in_feed).syndicated == true
+      assert ProtoJSON.blog_post(opted_out).syndicated == false
     end
 
     test "published_at is nil for unpublished post" do
@@ -683,7 +634,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.author_display_name == nil
     end
 
-    test "includes the author's handle for the profile link (US-10.5.4)" do
+    test "includes the author's handle for the profile link" do
       user = insert(:user, handle: "fable_quill")
       post = insert(:post, user: user)
 
@@ -702,10 +653,6 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.author_handle == nil
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # blog_association/2
-  # ---------------------------------------------------------------------------
 
   describe "blog_association/2" do
     test "non-owner shape excludes reasoning" do
@@ -734,10 +681,6 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.status in ["confirmed", "dismissed"]
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # poll_response/1
-  # ---------------------------------------------------------------------------
 
   describe "poll_response/1" do
     test "matches UploadController render_status output" do
@@ -819,10 +762,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # listing/1
-  # ---------------------------------------------------------------------------
-
   describe "listing/1" do
     test "matches the Jason.Encoder derive shape" do
       listing = insert(:listing)
@@ -845,14 +784,12 @@ defmodule StacksWeb.ProtoJSONTest do
     test "serializes nested book and seller matching Jason.Encoder derive shapes" do
       author = insert(:author)
       book = insert(:book, author: author, subjects: ["fiction"])
-      _edition = insert(:book_edition, book: book, is_primary: true)
       seller = insert(:user, display_name: "Alice")
 
       listing = insert(:listing, book: book, seller: seller)
 
       result = ProtoJSON.listing(listing)
 
-      # Book matches Book @derive {Jason.Encoder, only: [...]} — no author, no editions
       assert result.book == %{
                id: book.id,
                title: book.title,
@@ -868,7 +805,6 @@ defmodule StacksWeb.ProtoJSONTest do
       refute Map.has_key?(result.book, :author)
       refute Map.has_key?(result.book, :editions)
 
-      # Seller matches User @derive {Jason.Encoder, only: [...]} — full user shape
       assert result.seller.id == seller.id
       assert result.seller.email == seller.email
       assert result.seller.display_name == "Alice"
@@ -888,13 +824,11 @@ defmodule StacksWeb.ProtoJSONTest do
         |> Jason.encode!()
         |> Jason.decode!()
 
-      # Scalar fields from derive_jason
       assert result["id"] == listing.id
       assert result["status"] == listing.status
       assert result["currency"] == listing.currency
       assert result["condition"] == listing.condition
 
-      # Embedded associations serialized by ProtoJSON (not by @derive)
       assert is_map(result["book"])
       assert result["book"]["id"] == book.id
       assert is_map(result["seller"])
@@ -925,10 +859,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # placement_formats/1
-  # ---------------------------------------------------------------------------
-
   describe "placement_formats/1" do
     test "returns id and formats" do
       user = insert(:user)
@@ -957,10 +887,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # visibility_update/1
-  # ---------------------------------------------------------------------------
-
   describe "visibility_update/1" do
     test "returns id and visibility for a bookshelf" do
       user = insert(:user)
@@ -982,10 +908,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # association_action/1
-  # ---------------------------------------------------------------------------
-
   describe "association_action/1" do
     test "returns id, book_id, and visible" do
       assoc = insert(:post_book_association, visible: true)
@@ -1004,14 +926,6 @@ defmodule StacksWeb.ProtoJSONTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # public_profile/2 + public_profile_summary/1 — REDACTED-profile contract
-  #
-  # Two-sided drift guard (#220): the paired Elm decoder round-trip lives in
-  # frontend/tests/Page/ProfileTest.elm. These key-set assertions and that
-  # decoder MUST describe the same shape — if you add/remove a key here, update
-  # the Elm side (and vice versa) or the contract has silently drifted.
-  # ---------------------------------------------------------------------------
   describe "public_profile/2" do
     test "emits EXACTLY the redacted key set — no account/PII field leaks" do
       user =
@@ -1030,15 +944,11 @@ defmodule StacksWeb.ProtoJSONTest do
 
       result = ProtoJSON.public_profile(user, shelves)
 
-      # Exact key-set equality (not has_key?/2): fails loud if a key is added or
-      # removed. Guards against a future refactor re-introducing `ProtoJson.user/1`
-      # (which leaks email/consent/role/notification prefs).
       assert result |> Map.keys() |> Enum.sort() ==
                [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
 
-      # Each bookshelf summary carries ONLY :name — no visibility, id, or counts.
       for shelf <- result.bookshelves do
-        assert shelf |> Map.keys() |> Enum.sort() == [:name]
+        assert shelf |> Map.keys() |> Enum.sort() == [:has_feed, :name]
       end
 
       assert Enum.map(result.bookshelves, & &1.name) == ["library", "wishlist"]
@@ -1050,7 +960,7 @@ defmodule StacksWeb.ProtoJSONTest do
       result = ProtoJSON.public_profile(user, [])
 
       assert result.display_name == ""
-      # Key set is unchanged when display_name is nil.
+
       assert result |> Map.keys() |> Enum.sort() ==
                [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
     end

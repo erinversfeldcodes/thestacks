@@ -2,7 +2,6 @@ defmodule Core.Repo.Migrations.CreatePartnerInventory do
   use Ecto.Migration
 
   def change do
-    # Add third_space_id to partners so they can manage events for their space
     alter table(:partners, prefix: "op") do
       add :third_space_id,
           references(:third_spaces, type: :binary_id, prefix: "op", on_delete: :nilify_all)

@@ -10,6 +10,7 @@ select
     user_id,
     published_at,
     visibility_group_id,
+    syndicated,
     created_at,
     updated_at
 from {{ source('op', 'blog_posts') }}

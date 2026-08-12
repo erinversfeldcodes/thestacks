@@ -1,18 +1,12 @@
 defmodule Stacks.Events.Registry do
   @moduledoc """
-  Central compile-time registry mapping event types to handler modules.
-
-  Each entry maps an event type string to a list of modules that implement
-  `Stacks.Events.Handler`. The registry is a plain module attribute — no
-  GenServer or runtime state is needed.
-
-  ## Adding a new subscription
-
-  Add an entry to the `@registry` map below:
-
-      "book.created" => [MyApp.SomeHandler]
-
-  The handler module must implement `Stacks.Events.Handler`.
+      Compile-time dispatch table for event types, plus the hand-maintained
+      list of types known to have no subscriber. `@registry` maps event type →
+      handler modules (`handlers_for/1`); `@unsubscribed` names real emitted
+      types nothing listens to. `all_event_types/0` returns BOTH — replay and
+      diagnostics want the whole vocabulary, and a registry-only answer once
+      silently hid 32 of 54 emitted types. A test derives the emitted set from
+      the codebase and fails when either list goes stale.
   """
 
   @registry %{
@@ -22,6 +16,15 @@ defmodule Stacks.Events.Registry do
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
     "book.cover_confirmed" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
+    "book.visibility_tier_changed" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
+    "book.enriched" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
+    "books.edition_merged" => [
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
     "blog.post_published" => [
@@ -40,9 +43,6 @@ defmodule Stacks.Events.Registry do
     "user.location_updated" => [
       Stacks.Discovery.Handlers.LocationUpdatedHandler
     ],
-    "user.registered" => [
-      Stacks.Notifications.EmailConfirmationHandler
-    ],
     "placement.created" => [
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
@@ -51,36 +51,19 @@ defmodule Stacks.Events.Registry do
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
-    # placement.removed (Issue #116 punch #14b): feeds AND a warehouse refresh.
-    # A removal decrements mart_community_read_count (an incremental table
-    # filtering removed_at is null); created/moved already refresh it via
-    # DbtRefreshHandler, so removed — which changes the same numbers — is wired
-    # the same way. See Stacks.Workers.DbtRefreshHandler @model_mapping.
     "placement.removed" => [
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
-    # placement.reread (US-1.6.3): emitted by Shelving.reread_book/2. Registered
-    # with an EMPTY handler set — matching the reading-lifecycle events below and
-    # PRESERVING this event's pre-existing no-handler behaviour (it was never
-    # wired to PlacementHandler/DbtRefreshHandler). stg_bookshelf_placements is a
-    # dbt view (the fresh library placement a re-read creates is reflected live),
-    # and no mart consumes re-read counts today, so no handler is warranted.
-    # Registering with `[]` keeps it in the all_event_types/0 catalog for
-    # replay/diagnostics without inventing a phantom handler. Surfacing re-reads
-    # in the activity feed would be a deliberate future change, tracked separately.
-    "placement.reread" => [],
-    # Reading-lifecycle events (US-1.6.6), emitted by
-    # Shelving.update_reading_progress/3. Registered with an EMPTY handler set
-    # deliberately: `stg_bookshelf_placements` is a dbt `view` (it always
-    # reflects the live reading_status/current_page — nothing to refresh), and
-    # no mart consumes reading progress today, so a DbtRefreshHandler would map
-    # to no models and enqueue a no-op job. Registering with `[]` keeps the
-    # registry the complete catalog of emitted event types (surfaced by
-    # `all_event_types/0` for replay/diagnostics) without inventing a phantom
-    # handler. Add a handler here if/when a reading-analytics mart lands.
-    "placement.reading_started" => [],
-    "placement.reading_completed" => [],
+    # placement.restored — the undo of the above, so it needs exactly the
+    # wiring the above needs. The feed regains an entry and
+    # mart_community_read_count regains a read; leaving this unsubscribed would
+    # make "remove then undo" a state the warehouse and the RSS feed never
+    # recover from until the next scheduled dbt run.
+    "placement.restored" => [
+      Stacks.Feeds.Handlers.PlacementHandler,
+      Stacks.Workers.DbtRefreshHandler
+    ],
     "enrichment.prices_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],
@@ -107,10 +90,85 @@ defmodule Stacks.Events.Registry do
     ]
   }
 
-  @doc """
-  Returns the list of handler modules registered for the given event type.
+  @unsubscribed [
+    # The confirmation email is enqueued directly at registration; the event
+    # remains for audit/replay but no longer carries the email.
+    "user.registered",
+    "image.submitted",
+    "image.rejected",
+    "image.resolved",
+    "image.expired",
+    "listing.created",
+    "listing.sold",
+    "listing.removed",
+    "listing.expired",
+    "placement.reread",
+    "placement.reading_started",
+    "placement.reading_completed",
+    "books.confirmed",
+    "blog.post_created",
+    "blog.association_confirmed",
+    "blog.association_dismissed",
+    "post.comment_created",
+    # the record that a syndication happened. The feed is generated
+    # per request behind an ETag (no cached artefact to invalidate — see the
+    # §6 warning in the story about op.feed_cache being the WRONG home for a
+    # blog-feed cache), and stg_post_syndications is a view, so a refresh
+    # handler would map to no models. The int_syndication_reach insights model
+    # is deferred with its x consumer — wiring a refresh for a model
+    # that doesn't exist yet is the "built but not wired" shape inverted.
+    "post.syndicated",
+    "group.created",
+    "group.member_joined",
+    "group.member_left",
+    "group.member_removed",
+    "social.user_blocked",
+    "social.user_unblocked",
+    "user.profile_updated",
+    "user.profile_visibility_changed",
+    "user.password_changed",
+    "user.notifications_updated",
+    "user.visibility_recap_completed",
+    "partner.inventory_synced",
+    "partner.event_created",
+    "partner.event_deleted",
+    "enrichment.sources_discovered",
+    "enrichment.author_sources_discovered",
+    "third_space.created",
+    "third_space.delisted",
+    "costs.refreshed",
+    "invite.issued",
+    "invite.redeemed",
+    "library_import.started",
+    "library_import.completed",
+    "invite.revoked"
+  ]
 
-  Returns an empty list if no handlers are registered.
+  @pending %{
+    "enrichment.reviews_scraped" =>
+      "reviews are planned, not deleted (owner ruling 2026-08-07): " <>
+        "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
+        "returns; its handler, payload contract and dbt models stay wired"
+  }
+
+  @overlap Enum.filter(@unsubscribed, &Map.has_key?(@registry, &1))
+  if @overlap != [] do
+    raise CompileError, description: "event type in @registry and @unsubscribed: #{@overlap}"
+  end
+
+  @uncatalogued_pending Enum.reject(
+                          Map.keys(@pending),
+                          &(Map.has_key?(@registry, &1) or &1 in @unsubscribed)
+                        )
+  if @uncatalogued_pending != [] do
+    raise CompileError,
+      description: "pending event type not in @registry/@unsubscribed: #{@uncatalogued_pending}"
+  end
+
+  @doc """
+      Returns the list of handler modules registered for the given event type.
+
+      Returns an empty list if no handlers are registered.
   """
   @spec handlers_for(String.t()) :: [module()]
   def handlers_for(event_type) when is_binary(event_type) do
@@ -123,12 +181,30 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-  Returns all registered event type strings.
+      Returns every event type this module catalogues, sorted — subscribed or not.
 
-  Useful for documentation, replay tooling, and diagnostics.
+      The vocabulary for replay tooling and diagnostics, so it deliberately includes
+      types with no handler. It is the union of two hand-maintained lists, not a derived
+      fact about the codebase: absence here means "not catalogued", not "never emitted"
+      (see the moduledoc). Use `handlers_for/1` to ask what will actually run.
   """
   @spec all_event_types() :: [String.t()]
   def all_event_types do
-    Map.keys(@registry)
+    Enum.sort(Map.keys(@registry) ++ @unsubscribed)
   end
+
+  @doc """
+      Returns the event types that are emitted but have no subscriber.
+
+      The standing inventory of what this system announces and nothing acts on.
+  """
+  @spec unsubscribed_event_types() :: [String.t()]
+  def unsubscribed_event_types, do: @unsubscribed
+
+  @doc """
+      Catalogued event types with no emitter yet, mapped to the reason each one's
+      consumer-side wiring is kept. See `@pending`.
+  """
+  @spec pending_event_types() :: %{String.t() => String.t()}
+  def pending_event_types, do: @pending
 end

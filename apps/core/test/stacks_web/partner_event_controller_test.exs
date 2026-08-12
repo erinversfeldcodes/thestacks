@@ -8,7 +8,6 @@ defmodule StacksWeb.PartnerEventControllerTest do
   alias Stacks.Partners
 
   setup %{conn: conn} do
-    # Create a third space and link it to the partner
     third_space = insert(:third_space)
 
     {:ok, partner} =
@@ -21,7 +20,6 @@ defmodule StacksWeb.PartnerEventControllerTest do
     admin = insert(:user)
     {:ok, {partner, raw_key}} = Partners.approve_partner(partner.id, admin.id)
 
-    # Link partner to third space
     partner
     |> Ecto.Changeset.change(%{third_space_id: third_space.id})
     |> Core.Repo.update!()
@@ -157,13 +155,11 @@ defmodule StacksWeb.PartnerEventControllerTest do
       resp = conn |> delete("/api/partner/events/#{event_id}") |> json_response(200)
       assert resp["ok"] == true
 
-      # Verify it's gone
       index_resp = conn |> get("/api/partner/events") |> json_response(200)
       assert index_resp["events"] == []
     end
 
     test "returns 404 for event belonging to another partner", %{conn: conn} do
-      # Create another partner's event
       other_space = insert(:third_space)
       other_event = insert(:third_space_event, space: other_space)
 

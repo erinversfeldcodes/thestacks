@@ -1,17 +1,14 @@
 defmodule Stacks.GDPR.Deletion do
   @moduledoc """
-  GDPR right-to-erasure. Deletes all operational data for a user.
-
-  All operations run in a single `Ecto.Multi` transaction to ensure atomicity.
-  A deletion record is inserted into the audit_log after all data is removed.
-
-  `op.event_log` rows are preserved (the event stream is immutable — events are
-  never deleted, including during erasure), but the erased user's own rows are
-  scrubbed in place: their `payload` and `metadata` are redacted to `{}` so no
-  PII survives. Current `user.*` emitters are UUID-only, so this only bites
-  legacy rows written before Issue #121 — but it runs unconditionally as a
-  safety net. `op.event_log` has no append-only trigger (unlike
-  `audit.audit_log`), so the scrub is a plain UPDATE needing no GUC.
+      GDPR right-to-erasure: deletes all of a user's operational data in one
+      `Ecto.Multi` transaction, then writes an audit record. `op.event_log`
+      rows are preserved (immutable stream) but the user's own rows have
+      `payload`/`metadata` scrubbed to `{}` in place — current emitters are
+      UUID-only, so this is a safety net for pre-121 legacy rows. Uploaded
+      images are erased both ways: R2 objects deleted, DB rows cascade.
+      A schema-guard test walks every table naming `user_id` and fails when a
+      new one is not covered here — free-text must be deleted/anonymised,
+      never just author-nulled.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -27,18 +24,21 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Accounts.User
   alias Stacks.Audit
   alias Stacks.Blog.PostComment
+  alias Stacks.Books.UploadedImage
   alias Stacks.Events.EventLog
   alias Stacks.Feeds.FeedCacheEntry
+  alias Stacks.GDPR.ImageRetention
+  alias Stacks.Imports.LibraryImport
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
-  Previews what `delete_user_data/2` would erase for a user WITHOUT mutating
-  anything — the read-only counterpart used by the operator dry-run
-  (`Stacks.Release.gdpr_erase_user/1`).
+      Previews what `delete_user_data/2` would erase for a user WITHOUT mutating
+      anything — the read-only counterpart used by the operator dry-run
+      (`Stacks.Release.gdpr_erase_user/1`).
 
-  Returns `{:ok, counts}` with a per-target row count (using the exact same
-  scopes the erasure uses, so the preview cannot drift from the real thing), or
-  `{:error, :user_not_found}` if no user has that id.
+      Returns `{:ok, counts}` with a per-target row count (using the exact same
+      scopes the erasure uses, so the preview cannot drift from the real thing), or
+      `{:error,:user_not_found}` if no user has that id.
   """
   @spec preview_user_data(binary()) :: {:ok, map()} | {:error, :user_not_found}
   def preview_user_data(user_id) do
@@ -60,22 +60,30 @@ defmodule Stacks.GDPR.Deletion do
                  where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
              ),
            feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
+           uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
+           library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
-           sessions_revoked:
-             count(from f in AuthTokenFamily, where: f.user_id == ^user_id) +
-               count(
-                 from t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)
-               )
+           sessions_revoked: session_row_count(Repo, user_id)
          }}
     end
   end
 
   defp count(query), do: Repo.aggregate(query, :count)
 
-  # The set of op.event_log rows the erasure scrubs — the user's own aggregate
-  # plus events under other aggregates whose payload references the user. Shared
-  # by the :scrub_event_log step and preview_user_data/1 so the two never drift.
+  defp session_row_count(repo, user_id) do
+    families = repo.aggregate(from(f in AuthTokenFamily, where: f.user_id == ^user_id), :count)
+
+    tokens =
+      repo.aggregate(
+        from(t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)),
+        :count,
+        :jti
+      )
+
+    families + tokens
+  end
+
   defp user_event_log_query(user_id) do
     uid = to_string(user_id)
 
@@ -89,13 +97,13 @@ defmodule Stacks.GDPR.Deletion do
   end
 
   @doc """
-  Deletes all operational data for a user.
+      Deletes all operational data for a user.
 
-  `opts` may carry `:reason` (operator justification — recorded, encrypted, in
-  the `user.data_deleted` audit row's metadata; do NOT put the data subject's
-  personal data in it) and `:actor` (who initiated the erasure).
+      `opts` may carry `:reason` (operator justification — recorded, encrypted, in
+      the `user.data_deleted` audit row's metadata; do NOT put the data subject's
+      personal data in it) and `:actor` (who initiated the erasure).
 
-  Returns `{:ok, map()}` on success.
+      Returns `{:ok, map}` on success.
   """
   @spec delete_user_data(binary(), keyword()) :: {:ok, map()} | {:error, atom(), term(), map()}
   def delete_user_data(user_id, opts \\ []) do
@@ -113,8 +121,11 @@ defmodule Stacks.GDPR.Deletion do
     |> Multi.run(:bookshelf_ids, fn _repo, %{bookshelves: bookshelves} ->
       {:ok, Enum.map(bookshelves, & &1.id)}
     end)
+    |> Multi.run(:delete_library_imports, fn repo, _ ->
+      {count, _} = repo.delete_all(from li in LibraryImport, where: li.user_id == ^user_id)
+      {:ok, count}
+    end)
     |> Multi.run(:delete_history, fn repo, %{bookshelf_ids: bookshelf_ids} ->
-      # PlacementHistory has from_bookshelf/to_bookshelf UUIDs, not placement_id
       {count, _} =
         repo.delete_all(
           from h in PlacementHistory,
@@ -128,14 +139,6 @@ defmodule Stacks.GDPR.Deletion do
       {:ok, count}
     end)
     |> Multi.run(:delete_feed_cache, fn repo, %{bookshelf_ids: bookshelf_ids} ->
-      # GDPR erasure: op.feed_cache holds derived Atom XML for the user's
-      # platform-visible bookshelves (the XML embeds user-authored book titles
-      # in <title>/<summary>). Its only user path is bookshelf_id →
-      # op.bookshelves, which the op.users schema-guard never inspects — so this
-      # explicit step is the authoritative erasure guarantee. The FK's ON DELETE
-      # CASCADE (from :delete_bookshelves below) is belt-and-suspenders; ordering
-      # this BEFORE :delete_bookshelves makes the delete independent of cascade
-      # timing. Scoped strictly to the erased user's bookshelves.
       {count, _} =
         repo.delete_all(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids)
 
@@ -146,15 +149,6 @@ defmodule Stacks.GDPR.Deletion do
       {:ok, count}
     end)
     |> Multi.run(:erase_comments, fn repo, _ ->
-      # GDPR erasure: op.post_comments.body is user-authored free-text PII.
-      # The author_id FK is ON DELETE SET NULL, so `repo.delete(user)` below
-      # nulls authorship but leaves the comment BODY behind — a right-to-erasure
-      # leak (#185). Comments are threaded (parent_id → replies), so deleting
-      # the user's comments outright would orphan any replies hanging off them.
-      # We therefore ANONYMISE: tombstone the body (strips the PII) and null
-      # author_id in-step (keeping the row self-consistent within this txn; the
-      # FK would null it anyway on delete_user). Thread structure is preserved.
-      # Scoped strictly to the erased user's own comments.
       {count, _} =
         repo.update_all(
           from(c in PostComment, where: c.author_id == ^user_id),
@@ -163,6 +157,31 @@ defmodule Stacks.GDPR.Deletion do
 
       {:ok, count}
     end)
+    |> Multi.run(:uploaded_image_rows, fn repo, _ ->
+      rows =
+        repo.all(
+          from i in UploadedImage,
+            where: i.user_id == ^user_id,
+            select: %{id: i.id, storage_path: i.storage_path}
+        )
+
+      {:ok, rows}
+    end)
+    |> Multi.run(:delete_image_objects, fn _repo, %{uploaded_image_rows: rows} ->
+      ImageRetention.delete_storage_objects(rows)
+      {:ok, length(rows)}
+    end)
+    |> Multi.run(:delete_uploaded_images, fn repo, %{uploaded_image_rows: rows} ->
+      ids = Enum.map(rows, & &1.id)
+      {count, _} = repo.delete_all(from i in UploadedImage, where: i.id in ^ids)
+      {:ok, count}
+    end)
+    |> Multi.run(:sessions_to_revoke, fn repo, _ ->
+      {:ok, session_row_count(repo, user_id)}
+    end)
+    |> Multi.run(:settle_invites_naming_user, fn repo, _ ->
+      settle_invites(repo, user_id, Keyword.get(opts, :restore_invite, false))
+    end)
     |> Multi.run(:delete_user, fn repo, _ ->
       case repo.get(User, user_id) do
         nil -> {:error, :user_not_found}
@@ -170,57 +189,16 @@ defmodule Stacks.GDPR.Deletion do
       end
     end)
     |> Multi.run(:scrub_event_log, fn repo, _ ->
-      # GDPR erasure: redact any PII/free-text the erased user's events wrote
-      # into op.event_log payload/metadata. We UPDATE rather than DELETE to
-      # preserve event-stream immutability — the event survives, only its PII
-      # is emptied. Two classes of row are scrubbed:
-      #
-      #   1. The user's OWN aggregate (`aggregate_type == "user"`, e.g. legacy
-      #      user.profile_updated with display_name; current emitters are
-      #      UUID-only but this is a safety net for legacy rows).
-      #   2. Events *about* the user emitted under a DIFFERENT aggregate whose
-      #      payload references the user — notably `blog.post_created` /
-      #      `blog.post_published` (aggregate_type "post") which carry the
-      #      user's free-text post `title` alongside `user_id`. We match those
-      #      by the payload's user-reference keys (user_id/author_id/seller_id),
-      #      closing the cross-aggregate free-text leak (#185). Bare-UUID
-      #      references that remain elsewhere are acceptable per the
-      #      UUIDs-are-not-PII contract.
-      #
-      # op.event_log has NO append-only trigger (unlike audit.audit_log), so
-      # this plain UPDATE needs no `app.audit_gdpr_erasure` GUC. It runs on the
-      # Multi's `repo`, so it commits/rolls back atomically with the erasure.
       {count, _} =
         repo.update_all(user_event_log_query(user_id), set: [payload: %{}, metadata: %{}])
 
       {:ok, count}
     end)
-    |> Multi.run(:revoke_sessions, fn repo, _ ->
-      # Kill every live auth session belonging to the erased user. Neither
-      # op.auth_token_families (no FK on user_id) nor op.guardian_tokens
-      # (schemaless; `sub` is a plain string, not an FK) cascades from the
-      # user delete, so without this step a hard-deleted user's access token
-      # keeps passing verify_claims for up to its 8h TTL and their session
-      # rows linger indefinitely.
-      #
-      # We DELETE the rows rather than mark `revoked_at`: this is an ERASURE,
-      # so the goal is full removal of the user's identifiers. Marking revoked
-      # would leave rows still keyed to the deleted user's UUID forever, which
-      # contradicts the right-to-erasure intent; deletion also achieves the
-      # same security outcome (the family vanishes ⇒ verify_claims fails
-      # closed, and the guardian_tokens row is gone ⇒ the JWT is unverifiable).
-      #
-      # Both deletes run on the Multi's `repo`, so they commit/rollback
-      # atomically with the rest of the erasure.
-      {family_count, _} =
-        repo.delete_all(from f in AuthTokenFamily, where: f.user_id == ^user_id)
-
-      {token_count, _} =
-        repo.delete_all(
-          from t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)
-        )
-
-      {:ok, family_count + token_count}
+    |> Multi.run(:revoke_sessions, fn repo, %{sessions_to_revoke: expected} ->
+      case session_row_count(repo, user_id) do
+        0 -> {:ok, expected}
+        survivors -> {:error, {:sessions_survived_erasure, survivors}}
+      end
     end)
     |> Multi.run(:audit, fn _repo, _ ->
       Audit.log(nil, "user.data_deleted",
@@ -234,5 +212,41 @@ defmodule Stacks.GDPR.Deletion do
       {:ok, :reset}
     end)
     |> Repo.transaction()
+  end
+
+  defp settle_invites(repo, user_id, restore?) do
+    user_email =
+      case repo.get(User, user_id) do
+        nil -> nil
+        user -> user.email
+      end
+
+    if restore? do
+      repo.update_all(
+        from(i in Stacks.Accounts.InviteCode,
+          where: i.redeemed_by_id == ^user_id and i.use_count > 0
+        ),
+        inc: [use_count: -1],
+        set: [redeemed_at: nil]
+      )
+    end
+
+    {:ok, %{scrubbed: scrub_invites(repo, user_id, user_email), restored: restore?}}
+  end
+
+  defp scrub_invites(repo, user_id, user_email) do
+    {scrubbed, _} =
+      repo.update_all(
+        from(i in Stacks.Accounts.InviteCode,
+          where:
+            i.redeemed_by_id == ^user_id or
+              (not is_nil(i.invited_email) and
+                 fragment("lower(?)", i.invited_email) == ^String.downcase(user_email || "")),
+          where: not is_nil(i.note) or not is_nil(i.invited_email) or not is_nil(i.redeemed_by_id)
+        ),
+        set: [note: nil, invited_email: nil, redeemed_by_id: nil]
+      )
+
+    scrubbed
   end
 end

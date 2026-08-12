@@ -1,9 +1,9 @@
 defmodule Stacks.Enrichment.Authors do
   @moduledoc """
-  Enrichment context for author intelligence.
+      Enrichment context for author intelligence.
 
-  Queries and updates `Stacks.Books.Author` records with discovered website
-  and RSS feed URLs. Does NOT own the Author schema — `Stacks.Books` owns it.
+      Queries and updates `Stacks.Books.Author` records with discovered website
+      and RSS feed URLs. Does NOT own the Author schema — `Stacks.Books` owns it.
   """
 
   import Ecto.Query
@@ -13,12 +13,12 @@ defmodule Stacks.Enrichment.Authors do
   alias Stacks.Books.Author
 
   @doc """
-  Updates website_url and/or rss_feed_url on an author record.
+      Updates website_url and/or rss_feed_url on an author record.
 
-  Accepts a map with string or atom keys containing `:website_url` and/or
-  `:rss_feed_url`.
+      Accepts a map with string or atom keys containing `:website_url` and/or
+      `:rss_feed_url`.
 
-  Returns `{:ok, author}` or `{:error, changeset}`.
+      Returns `{:ok, author}` or `{:error, changeset}`.
   """
   @spec update_author_sources(Author.t(), map()) ::
           {:ok, Author.t()} | {:error, Ecto.Changeset.t()}
@@ -29,9 +29,9 @@ defmodule Stacks.Enrichment.Authors do
   end
 
   @doc """
-  Returns authors missing a website_url or rss_feed_url.
+      Returns authors missing a website_url or rss_feed_url.
 
-  These are candidates for source discovery via Brave Search.
+      These are candidates for source discovery via Brave Search.
   """
   @spec authors_without_sources() :: [Author.t()]
   def authors_without_sources do
@@ -41,9 +41,9 @@ defmodule Stacks.Enrichment.Authors do
   end
 
   @doc """
-  Returns authors that have an rss_feed_url set.
+      Returns authors that have an rss_feed_url set.
 
-  These are candidates for RSS polling.
+      These are candidates for RSS polling.
   """
   @spec authors_with_rss() :: [Author.t()]
   def authors_with_rss do
@@ -53,7 +53,7 @@ defmodule Stacks.Enrichment.Authors do
   end
 
   @doc """
-  Returns an author by ID, or nil if not found.
+      Returns an author by ID, or nil if not found.
   """
   @spec get_author(binary()) :: Author.t() | nil
   def get_author(id) do

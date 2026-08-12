@@ -1,32 +1,5 @@
 name: GDPR erase user
 
-# Operator-initiated GDPR right-to-erasure for a single user, addressed STRICTLY
-# by user_id (the only globally-unique key). Runs
-# `Stacks.Release.gdpr_erase_user/1` inside the LIVE production core node via
-# `fly ssh console ... rpc` (no second BEAM, reuses the running node's
-# Vault/Repo; only FLY_API_TOKEN leaves CI — the prod DATABASE_URL and CLOAK_KEY
-# never touch the runner).
-#
-# Resolve an email/handle to a user_id FIRST with the `GDPR lookup user`
-# workflow (gdpr-lookup-user.yml). The erase path deliberately refuses anything
-# but a UUID so it can never delete the wrong person on an ambiguous key.
-#
-# Safety model:
-#   * Only the authorised operator (see the "Restrict operators" step) can run
-#     this, AND the `gdpr-erasure` GitHub Environment gates the job with required
-#     reviewers — configure it so every run needs approval.
-#   * Dry run is the DEFAULT: prints the per-target counts that WOULD be erased,
-#     deleting nothing.
-#   * Actual deletion requires execute=true, a non-empty reason (recorded,
-#     encrypted, in the audit row), AND re-typing the exact user_id in `confirm`.
-#     All three are re-checked inside the release function too.
-#   * Params are passed as Base64(JSON) → no shell/Elixir injection surface.
-#
-# Warehouse note: the erasure scrubs the operational + event-log data
-# immediately; the analytics warehouse (dbt marts) drops it on the next daily
-# DbtRefreshJob full run (apps/core/config/config.exs crontab — 05:00 UTC,
-# ≤24h). See docs/runbooks/gdpr-erase-user.md.
-
 on:
   workflow_dispatch:
     inputs:
@@ -72,9 +45,6 @@ jobs:
       ERASE_CONFIRM: ${{ inputs.confirm }}
     steps:
       - name: Restrict operators
-        # Belt-and-suspenders alongside the Environment's required reviewers:
-        # only the authorised operator may run this at all. Anyone else fails
-        # fast, before flyctl is even installed.
         run: |
           case "${{ github.actor }}" in
             erinversfeldcodes) ;;
@@ -91,7 +61,6 @@ jobs:
             echo "::error::user_id is required"
             exit 1
           fi
-          # A quick UUID sanity check here (the release function re-validates).
           if ! [[ "$ERASE_USER_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
             echo "::error::user_id must be a UUID — resolve an email/handle via the GDPR lookup workflow first"
             exit 1
@@ -119,9 +88,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Build the JSON param object with jq (proper escaping), then Base64
-          # it. The Base64 blob is the ONLY thing interpolated into the rpc
-          # expression, so there is no shell/Elixir injection surface.
           params_json="$(jq -cn \
             --arg user_id "$ERASE_USER_ID" \
             --arg reason "$ERASE_REASON" \

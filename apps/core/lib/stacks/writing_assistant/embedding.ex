@@ -1,16 +1,16 @@
 defmodule Stacks.WritingAssistant.Embedding do
   @moduledoc """
-  Ecto schema for op.embeddings — user-scoped retrieval vectors (Issue #183).
+      Ecto schema for op.embeddings — user-scoped retrieval vectors.
 
-  HAND-WRITTEN, not proto.sync-generated: it carries the pgvector
-  `field :embedding, Pgvector.Ecto.Vector` column that proto cannot express.
-  The matching manifest entry (proto/persisted.exs) uses `skip_ecto: true`, so
-  proto.sync neither generates nor drift-checks this file. The scalar columns
-  mirror the `Embedding` proto message; keep them in sync by hand if the proto
-  changes (proto.sync --check enforces the migration side).
+      HAND-WRITTEN, not proto.sync-generated: it carries the pgvector
+      `field:embedding, Pgvector.Ecto.Vector` column that proto cannot express.
+      The matching manifest entry (proto/persisted.exs) uses `skip_ecto: true`, so
+      proto.sync neither generates nor drift-checks this file. The scalar columns
+      mirror the `Embedding` proto message; keep them in sync by hand if the proto
+      changes (proto.sync --check enforces the migration side).
 
-  GDPR: PERSONAL, user-scoped. Erased via the op.embeddings.user_id FK
-  (ON DELETE CASCADE) when Stacks.GDPR.Deletion deletes the user row.
+      GDPR: PERSONAL, user-scoped. Erased via the op.embeddings.user_id FK
+      (ON DELETE CASCADE) when Stacks.GDPR.Deletion deletes the user row.
   """
 
   use Ecto.Schema
