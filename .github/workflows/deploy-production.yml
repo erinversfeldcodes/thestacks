@@ -3,6 +3,40 @@ name: Deploy production
 on:
   push:
     branches: [main]
+    # Deploy ONLY when the push touches code that runs in production or the
+    # deploy pipeline itself. A docs/tests/CI-workflow push (e.g. a gdpr
+    # workflow fix) must not cost a full deploy + 10-minute SLO gate.
+    # Include-list, so review it when adding a new prod-relevant path;
+    # workflow_dispatch remains the door for a manual deploy if a path was
+    # missed.
+    paths:
+      # code baked into the three images
+      - "apps/**"
+      - "frontend/**"
+      - "proto/**"
+      - "config/**"
+      - "mix.exs"
+      - "mix.lock"
+      - "rel/**"
+      - ".versions"
+      # the deploy pipeline itself
+      - "deploy/**"
+      - ".github/workflows/deploy-production.yml"
+      - ".github/actions/**"
+      - "scripts/deploy-stack.sh"
+      - "scripts/check-slo-gate.sh"
+      - "scripts/probe-production.sh"
+      - "scripts/rollback-production.sh"
+      - "scripts/preflight-resolver-health.sh"
+      - "scripts/gen-ecto-proto.sh"
+      - "scripts/gen-elm-proto.sh"
+      - "scripts/gen-elm-proto.py"
+      - "scripts/gen-python-proto.sh"
+      - "scripts/gen-rust-proto.sh"
+      - "scripts/gen_python_proto.py"
+      - "scripts/lib/**"
+      # probe canaries the SLO gate uploads
+      - "images/**"
   workflow_dispatch:
     inputs:
       target_app:
