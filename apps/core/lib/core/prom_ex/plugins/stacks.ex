@@ -94,6 +94,18 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Upload pipeline terminal outcomes (resolved/rejected/timeout).",
           tags: [:outcome]
         ),
+        counter(
+          [:stacks, :ai, :together_completion, :count, :total],
+          event_name: [:stacks, :ai, :together_completion],
+          description:
+            "Successful Together AI chat completions — the billable unit the cost page counts."
+        ),
+        counter(
+          [:stacks, :discovery, :brave_search, :count, :total],
+          event_name: [:stacks, :discovery, :brave_search],
+          description:
+            "Successful Brave Search API queries — counted against the plan quota on the cost page."
+        ),
 
         # ── Vision request latency () ───────────────────────
         # Wall-clock for ONE Modal vision HTTP call. Emitted by

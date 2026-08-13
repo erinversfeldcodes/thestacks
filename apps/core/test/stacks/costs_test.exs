@@ -221,13 +221,15 @@ defmodule Stacks.CostsTest do
       %{period_start: period_start, period_end: period_end}
     end
 
-    test "with vision_jobs 0 yields the 5 seeded line items summing to 1660", ctx do
+    test "with vision_jobs 0 yields the 10 seeded line items summing to 1660", ctx do
       items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0)
 
-      assert length(items) == 5
+      assert length(items) == 10
 
-      assert Enum.map(items, & &1.category) == ~w(hosting hosting compute database domain)
-      assert Enum.map(items, & &1.amount_cents) == [534, 1026, 0, 0, 100]
+      assert Enum.map(items, & &1.category) ==
+               ~w(hosting hosting compute compute database services services services services domain)
+
+      assert Enum.map(items, & &1.amount_cents) == [534, 1026, 0, 0, 0, 0, 0, 0, 0, 100]
       assert Enum.reduce(items, 0, fn i, acc -> acc + i.amount_cents end) == 1660
 
       for item <- items do
@@ -276,6 +278,87 @@ defmodule Stacks.CostsTest do
 
       core = Enum.find(items, &(&1.service == "Fly.io Core"))
       assert core.amount_cents == 534
+    end
+
+    test "third-party usage counts price their lines and land in descriptions", ctx do
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 0,
+          together_completions: 250,
+          brave_searches: 2500,
+          emails_sent: 42,
+          isbn_lookups: 87
+        )
+
+      together = Enum.find(items, &(&1.service == "Together AI"))
+      assert together.amount_cents == 25
+      assert together.description =~ "250 completions this month"
+
+      brave = Enum.find(items, &(&1.service == "Brave Search API"))
+      assert brave.amount_cents == 150
+      assert brave.description =~ "2500 of 2,000 free-tier"
+      assert brave.description =~ "500 over"
+
+      resend = Enum.find(items, &(&1.service == "Resend"))
+      assert resend.amount_cents == 0
+      assert resend.description =~ "42 of 3,000 free-tier sends"
+
+      metadata = Enum.find(items, &(&1.service == "Google Books & Open Library"))
+      assert metadata.amount_cents == 0
+      assert metadata.description =~ "87 lookups this month"
+    end
+
+    test "usage within every free tier stays at zero cents", ctx do
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 0,
+          together_completions: 0,
+          brave_searches: 1999,
+          emails_sent: 3000,
+          isbn_lookups: 0
+        )
+
+      for service <- ["Together AI", "Brave Search API", "Resend", "Axiom"] do
+        item = Enum.find(items, &(&1.service == service))
+        assert item.amount_cents == 0, "#{service} should be free at this volume"
+      end
+    end
+
+    test "usage over the resend free tier prices the paid plan", ctx do
+      items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0, emails_sent: 3001)
+
+      resend = Enum.find(items, &(&1.service == "Resend"))
+      assert resend.amount_cents == 2000
+      assert resend.description =~ "requires the $20/month plan"
+    end
+  end
+
+  describe "metric_count_this_month/1" do
+    alias Stacks.Transparency.MockPrometheusClient
+
+    setup do
+      MockPrometheusClient.reset()
+      :ok
+    end
+
+    test "rounds the month-to-date increase of the family" do
+      MockPrometheusClient.put_response({:ok, 42.7})
+
+      assert {:ok, 43} =
+               Costs.metric_count_this_month("stacks_discovery_brave_search_count_total")
+
+      query = MockPrometheusClient.last_query()
+      assert query =~ "sum(increase(stacks_discovery_brave_search_count_total{"
+    end
+
+    test "a family with no samples yet counts as zero, not an error" do
+      MockPrometheusClient.put_response({:error, :no_data})
+
+      assert {:ok, 0} = Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
+    end
+
+    test "an unreachable store is an error so callers fall back" do
+      MockPrometheusClient.put_response({:error, :nxdomain})
+
+      assert :error = Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
     end
   end
 
@@ -342,7 +425,7 @@ defmodule Stacks.CostsTest do
 
       costs = Costs.current_period_costs()
       assert costs != []
-      assert length(costs) == 5
+      assert length(costs) == 10
     end
 
     test "seeded items sum to a positive total (1660 cents with Modal at 0)" do
@@ -363,7 +446,7 @@ defmodule Stacks.CostsTest do
       month_end = end_of_current_month()
 
       seeded_rows = Core.Repo.all(PlatformCost)
-      assert length(seeded_rows) == 5
+      assert length(seeded_rows) == 10
 
       for cost <- seeded_rows do
         assert DateTime.compare(cost.period_start, month_start) == :eq
@@ -375,7 +458,7 @@ defmodule Stacks.CostsTest do
       Costs.seed_current_period_costs()
       Costs.seed_current_period_costs()
 
-      assert length(Costs.current_period_costs()) == 5
+      assert length(Costs.current_period_costs()) == 10
     end
   end
 
@@ -385,8 +468,8 @@ defmodule Stacks.CostsTest do
 
       Costs.seed_current_period_costs()
 
-      events = collect_costs_events(5)
-      assert length(events) == 5
+      events = collect_costs_events(10)
+      assert length(events) == 10
 
       refute_receive {:telemetry_event, [:stacks, :costs, :recorded], _, _}, 50
 
@@ -403,7 +486,12 @@ defmodule Stacks.CostsTest do
                  "Fly.io Core",
                  "Fly.io Services",
                  "Modal GPU Inference",
+                 "Together AI",
                  "Neon PostgreSQL",
+                 "Resend",
+                 "Brave Search API",
+                 "Google Books & Open Library",
+                 "Axiom",
                  "Domain Registration"
                ])
     end
@@ -459,7 +547,7 @@ defmodule Stacks.CostsTest do
       refute Enum.any?(costs, &(&1.id == prior_row.id))
 
       assert "Fly.io Core" in services
-      assert length(costs) == 5
+      assert length(costs) == 10
     end
   end
 end

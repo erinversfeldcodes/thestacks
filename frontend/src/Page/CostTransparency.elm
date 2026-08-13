@@ -404,6 +404,9 @@ formatCategoryName category =
         "domain" ->
             "Domain"
 
+        "services" ->
+            "Services"
+
         other ->
             other
 

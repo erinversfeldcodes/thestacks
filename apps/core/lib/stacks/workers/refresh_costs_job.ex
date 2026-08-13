@@ -42,7 +42,11 @@ defmodule Stacks.Workers.RefreshCostsJob do
       Costs.build_cost_items(period_start, period_end, vision_jobs,
         core_awake_seconds: core_awake_seconds,
         fly_services_cents: fly_services_cents,
-        neon_cents: neon_cents
+        neon_cents: neon_cents,
+        together_completions: metric_count("stacks_ai_together_completion_count_total"),
+        brave_searches: metric_count("stacks_discovery_brave_search_count_total"),
+        isbn_lookups: metric_count("stacks_moderation_isbn_resolution_count_total"),
+        emails_sent: Costs.emails_this_month()
       )
 
     results =
@@ -86,6 +90,13 @@ defmodule Stacks.Workers.RefreshCostsJob do
   defp billing_gauge(provider) do
     case Costs.billing_gauge_cents(provider) do
       {:ok, cents} -> cents
+      :error -> nil
+    end
+  end
+
+  defp metric_count(family) do
+    case Costs.metric_count_this_month(family) do
+      {:ok, count} -> count
       :error -> nil
     end
   end

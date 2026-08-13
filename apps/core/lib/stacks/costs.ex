@@ -139,7 +139,7 @@ defmodule Stacks.Costs do
     ) || 0
   end
 
-  @platform_cost_valid_categories ~w(hosting compute database domain)
+  @platform_cost_valid_categories ~w(hosting compute database domain services)
 
   @doc "Changeset for creating or updating a platform cost line item."
   def platform_cost_changeset(cost, attrs) do
@@ -196,13 +196,16 @@ defmodule Stacks.Costs do
   end
 
   @doc """
-      Builds the 5 platform cost line items for a billing period.
+      Builds the 10 platform cost line items for a billing period — every
+      third-party the platform integrates with, free tier or not, so the
+      public page accounts for all of them.
 
       Single source of truth for the platform cost line items, shared by
-      `Stacks.Workers.RefreshCostsJob` (which passes the live
-      `vision_jobs_this_month/0` count) and `seed_current_period_costs/0` (which
-      passes `0`). Each item is a map with `:category`, `:service`, `:description`,
-      `:amount_cents`, `:period_start`, `:period_end`, and `:currency`.
+      `Stacks.Workers.RefreshCostsJob` (which passes live usage counts and
+      measured figures via `opts`) and `seed_current_period_costs/0` (which
+      passes none, yielding the deterministic flat-estimate set). Each item
+      is a map with `:category`, `:service`, `:description`, `:amount_cents`,
+      `:period_start`, `:period_end`, and `:currency`.
 
       The Modal item's `amount_cents` is `vision_jobs * #{@modal_per_inference_cents}`
       and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
@@ -225,7 +228,17 @@ defmodule Stacks.Costs do
             "(~$0.03/each; Modal exposes no billing API, so this is our own count)",
         amount_cents: modal_cents
       }),
+      together_item(base, Keyword.get(opts, :together_completions)),
       neon_item(base, Keyword.get(opts, :neon_cents)),
+      resend_item(base, Keyword.get(opts, :emails_sent)),
+      brave_item(base, Keyword.get(opts, :brave_searches)),
+      metadata_apis_item(base, Keyword.get(opts, :isbn_lookups)),
+      Map.merge(base, %{
+        category: "services",
+        service: "Axiom",
+        description: "Log retention via the log shipper — free tier (0.5 TB/month ingest)",
+        amount_cents: 0
+      }),
       Map.merge(base, %{
         category: "domain",
         service: "Domain Registration",
@@ -233,6 +246,107 @@ defmodule Stacks.Costs do
         amount_cents: @domain_monthly_cents
       })
     ]
+  end
+
+  # Together bills per token with no billing API; we count our own successful
+  # completions (short prompts, ≤1k tokens) and price them at published
+  # Llama 3.3 70B Turbo rates — ~$0.001 per completion, i.e. 0.1¢ each.
+  defp together_item(base, nil) do
+    Map.merge(base, %{
+      category: "compute",
+      service: "Together AI",
+      description:
+        "Llama 3.3 70B for source vetting, post-book linking, review summaries — " <>
+          "usage counted daily from our own metrics",
+      amount_cents: 0
+    })
+  end
+
+  defp together_item(base, completions) when is_integer(completions) do
+    Map.merge(base, %{
+      category: "compute",
+      service: "Together AI",
+      description:
+        "Llama 3.3 70B for source vetting, post-book linking, review summaries — " <>
+          "#{completions} completions this month (~$0.001/each at published token " <>
+          "rates; no billing API, so this is our own count)",
+      amount_cents: round(completions * 0.1)
+    })
+  end
+
+  # Resend free tier: 3,000 emails/month; beyond it the $20/month plan applies.
+  defp resend_item(base, nil) do
+    Map.merge(base, %{
+      category: "services",
+      service: "Resend",
+      description:
+        "Transactional email (confirmations, invites) — usage counted daily " <>
+          "against the 3,000/month free tier",
+      amount_cents: 0
+    })
+  end
+
+  defp resend_item(base, sends) when is_integer(sends) do
+    over = sends > 3000
+
+    Map.merge(base, %{
+      category: "services",
+      service: "Resend",
+      description:
+        "Transactional email (confirmations, invites) — #{sends} of 3,000 " <>
+          "free-tier sends this month" <>
+          if(over, do: " (over the allowance: requires the $20/month plan)", else: ""),
+      amount_cents: if(over, do: 2000, else: 0)
+    })
+  end
+
+  # Brave free tier: 2,000 queries/month; overage priced at the Base plan's
+  # $3 per 1,000 queries (0.3¢ each).
+  defp brave_item(base, nil) do
+    Map.merge(base, %{
+      category: "services",
+      service: "Brave Search API",
+      description:
+        "Author/bookshop source discovery — usage counted daily against the " <>
+          "2,000/month free tier",
+      amount_cents: 0
+    })
+  end
+
+  defp brave_item(base, searches) when is_integer(searches) do
+    overage = max(searches - 2000, 0)
+
+    Map.merge(base, %{
+      category: "services",
+      service: "Brave Search API",
+      description:
+        "Author/bookshop source discovery — #{searches} of 2,000 free-tier " <>
+          "queries this month" <>
+          if(overage > 0, do: " (#{overage} over, at $3 per 1,000)", else: ""),
+      amount_cents: round(overage * 0.3)
+    })
+  end
+
+  # Google Books and Open Library are free at any volume — the line exists so
+  # the dependency is accounted for, with the real call volume shown.
+  defp metadata_apis_item(base, nil) do
+    Map.merge(base, %{
+      category: "services",
+      service: "Google Books & Open Library",
+      description: "ISBN verification for every book entering the system — free at any volume",
+      amount_cents: 0
+    })
+  end
+
+  defp metadata_apis_item(base, lookups) when is_integer(lookups) do
+    Map.merge(base, %{
+      category: "services",
+      service: "Google Books & Open Library",
+      description:
+        "ISBN verification for every book entering the system — #{lookups} " <>
+          "lookups this month; both APIs are free at any volume",
+      amount_cents: 0
+    })
   end
 
   # Fly bills started-machine-seconds. The core app pushes metrics every
@@ -331,10 +445,7 @@ defmodule Stacks.Costs do
     query =
       ~s|sum(count_over_time(stacks_fuse_state_state{app="#{app}",fuse_name="vision_fuse"}[#{window_s}s]))|
 
-    client =
-      Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
-
-    case client.query(query) do
+    case prometheus_client().query(query) do
       {:ok, samples} when is_number(samples) and samples > 0 ->
         {:ok, round(samples * interval_s)}
 
@@ -354,17 +465,53 @@ defmodule Stacks.Costs do
   def billing_gauge_cents(provider) when provider in ["fly", "neon"] do
     query = ~s|sum(last_over_time(stacks_billing_mtd_cents{provider="#{provider}"}[48h]))|
 
-    client =
-      Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
-
-    case client.query(query) do
+    case prometheus_client().query(query) do
       {:ok, cents} when is_number(cents) and cents >= 0 -> {:ok, round(cents)}
       _ -> :error
     end
   end
 
   @doc """
-      Seeds the 5 static current-month cost line items so fresh previews have
+      Month-to-date increase of a counter family from the metrics store —
+      the usage-count source for third-party lines (Together completions,
+      Brave queries, ISBN lookups). `increase` over the elapsed month
+      tolerates per-boot counter resets. `:error` when the store is
+      unreachable; a family with no samples yet counts as 0.
+  """
+  @spec metric_count_this_month(String.t()) :: {:ok, non_neg_integer()} | :error
+  def metric_count_this_month(family) do
+    now = DateTime.utc_now()
+    window_s = max(DateTime.diff(now, beginning_of_month(now), :second), 1)
+    app = System.get_env("FLY_APP_NAME") || "thestacks-core"
+
+    query = ~s|sum(increase(#{family}{app="#{app}"}[#{window_s}s]))|
+
+    case prometheus_client().query(query) do
+      {:ok, count} when is_number(count) and count >= 0 -> {:ok, round(count)}
+      {:error, :no_data} -> {:ok, 0}
+      _ -> :error
+    end
+  end
+
+  @doc "Emails handed to Resend this month, counted from the delivery jobs."
+  @spec emails_this_month() :: non_neg_integer()
+  def emails_this_month do
+    month_start = beginning_of_month(DateTime.utc_now())
+
+    Repo.one(
+      from(j in Job,
+        where: j.worker == "Stacks.Workers.EmailDeliveryJob" and j.inserted_at >= ^month_start,
+        select: count(j.id)
+      )
+    ) || 0
+  end
+
+  defp prometheus_client do
+    Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
+  end
+
+  @doc """
+      Seeds the 10 static current-month cost line items so fresh previews have
       data before the daily `RefreshCostsJob` cron (06:00) first fires. Reuses
       `build_cost_items/4` with Modal fixed at 0 inferences (1660 cents total)
       — the same list the cron produces, so seed and cron cannot diverge — and
