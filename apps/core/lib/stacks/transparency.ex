@@ -61,7 +61,11 @@ defmodule Stacks.Transparency do
     },
     %{
       key: :breakers_healthy,
-      query: ~s|min(stacks_fuse_state_state{app="$app"})|,
+      # last_over_time: an instant vector only looks back ~5m, and this app
+      # scales to zero — the first visitor after a nap would find the one
+      # always-emitted family "absent" and the whole live section rendered
+      # unavailable. The latest known state within 2h is the honest answer.
+      query: ~s|min(last_over_time(stacks_fuse_state_state{app="$app"}[2h]))|,
       label: "Circuit breakers healthy",
       what:
         "Whether every dependency circuit breaker is currently closed (1 = all healthy, 0 = one blown).",
