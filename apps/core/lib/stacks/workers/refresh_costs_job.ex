@@ -2,10 +2,12 @@ defmodule Stacks.Workers.RefreshCostsJob do
   @moduledoc """
       Daily Oban worker that refreshes platform cost data.
 
-      Computes costs from known infrastructure pricing and actual usage metrics.
-      Pricing is derived from published rate cards (Fly.io, Modal, Neon) and the
-      actual VM specs in `deploy/fly.core.toml`. Usage-proportional costs (Modal
-      inference) are estimated from the number of vision jobs this month.
+      Prefers measured figures over estimates: the core app's own awake time
+      from its pushed metrics, and the whole-account Fly/Neon month-to-date
+      gauges a scheduled workflow computes from provider billing inputs and
+      pushes into VictoriaMetrics. Each measurement falls back independently
+      to a flat rate-card estimate when unavailable. Modal inference stays
+      estimated from the vision-job count (Modal exposes no billing API).
 
       The worker emits a `costs.refreshed` event on success.
   """
@@ -26,7 +28,22 @@ defmodule Stacks.Workers.RefreshCostsJob do
     period_end = end_of_month(now)
 
     vision_jobs = Costs.vision_jobs_this_month()
-    cost_items = Costs.build_cost_items(period_start, period_end, vision_jobs)
+
+    core_awake_seconds =
+      case Costs.core_awake_seconds(period_start, now) do
+        {:ok, seconds} -> seconds
+        :error -> nil
+      end
+
+    fly_services_cents = billing_gauge("fly")
+    neon_cents = billing_gauge("neon")
+
+    cost_items =
+      Costs.build_cost_items(period_start, period_end, vision_jobs,
+        core_awake_seconds: core_awake_seconds,
+        fly_services_cents: fly_services_cents,
+        neon_cents: neon_cents
+      )
 
     results =
       Enum.map(cost_items, fn item ->
@@ -63,6 +80,13 @@ defmodule Stacks.Workers.RefreshCostsJob do
     else
       Logger.error("RefreshCostsJob: #{length(failures)} items failed")
       {:error, "#{length(failures)} cost items failed to upsert"}
+    end
+  end
+
+  defp billing_gauge(provider) do
+    case Costs.billing_gauge_cents(provider) do
+      {:ok, cents} -> cents
+      :error -> nil
     end
   end
 

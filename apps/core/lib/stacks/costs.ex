@@ -19,7 +19,9 @@ defmodule Stacks.Costs do
   alias Stacks.Shelving.Placement
 
   @fly_core_cents 534
-  @fly_vision_cents 534
+  # always-on support services (Grafana, VictoriaMetrics, SearXNG, scraper):
+  # 2× shared-1x/256MB ($1.94) + 2× shared-1x/512MB ($3.19) at the Fly rate card
+  @fly_services_cents 1026
   @modal_per_inference_cents 3
   @neon_cents 0
   @domain_monthly_cents 100
@@ -206,37 +208,24 @@ defmodule Stacks.Costs do
       and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
       `amount_cents: 0` and `"0 inferences this month"`.
   """
-  @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer()) :: [map()]
-  def build_cost_items(period_start, period_end, vision_jobs) do
+  @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer(), keyword()) :: [map()]
+  def build_cost_items(period_start, period_end, vision_jobs, opts \\ []) do
     base = %{period_start: period_start, period_end: period_end, currency: "USD"}
 
     modal_cents = vision_jobs * @modal_per_inference_cents
 
     [
-      Map.merge(base, %{
-        category: "hosting",
-        service: "Fly.io Core",
-        description: "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD)",
-        amount_cents: @fly_core_cents
-      }),
-      Map.merge(base, %{
-        category: "hosting",
-        service: "Fly.io Vision Sidecar",
-        description: "FastAPI HMAC proxy to Modal (shared-cpu-1x, 512MB, IAD)",
-        amount_cents: @fly_vision_cents
-      }),
+      fly_core_item(base, Keyword.get(opts, :core_awake_seconds)),
+      fly_services_item(base, Keyword.get(opts, :fly_services_cents)),
       Map.merge(base, %{
         category: "compute",
         service: "Modal GPU Inference",
-        description: "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month (~$0.03/each)",
+        description:
+          "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month " <>
+            "(~$0.03/each; Modal exposes no billing API, so this is our own count)",
         amount_cents: modal_cents
       }),
-      Map.merge(base, %{
-        category: "database",
-        service: "Neon PostgreSQL",
-        description: "Serverless Postgres (free tier: 0.5 GiB, 190 compute hours)",
-        amount_cents: @neon_cents
-      }),
+      neon_item(base, Keyword.get(opts, :neon_cents)),
       Map.merge(base, %{
         category: "domain",
         service: "Domain Registration",
@@ -246,10 +235,138 @@ defmodule Stacks.Costs do
     ]
   end
 
+  # Fly bills started-machine-seconds. The core app pushes metrics every
+  # ~15s while awake, so its own series in VictoriaMetrics measure exactly
+  # the thing Fly meters — no billing API, no extra credentials. With no
+  # measurement (preview seeds, metrics store unreachable) the line falls
+  # back to the flat full-time estimate and says so.
+  @fly_full_month_seconds 730 * 3600
+
+  defp fly_core_item(base, nil) do
+    Map.merge(base, %{
+      category: "hosting",
+      service: "Fly.io Core",
+      description: "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD) — estimated flat-rate",
+      amount_cents: @fly_core_cents
+    })
+  end
+
+  defp fly_core_item(base, awake_seconds) when is_integer(awake_seconds) do
+    hours = Float.round(awake_seconds / 3600, 1)
+    cents = round(@fly_core_cents * awake_seconds / @fly_full_month_seconds)
+
+    Map.merge(base, %{
+      category: "hosting",
+      service: "Fly.io Core",
+      description:
+        "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD) — measured: " <>
+          "awake #{hours}h this period (scales to zero when idle)",
+      amount_cents: cents
+    })
+  end
+
+  # The rest of the Fly account: every machine and volume that is not the
+  # scale-to-zero core app — always-on support services, plus any preview
+  # stacks still running. Measured figures come from the billing gauges a
+  # scheduled workflow computes from the Fly machine inventory × rate card
+  # and pushes into VictoriaMetrics; without them, a flat rate-card estimate
+  # of the four always-on prod services.
+  defp fly_services_item(base, nil) do
+    Map.merge(base, %{
+      category: "hosting",
+      service: "Fly.io Services",
+      description:
+        "Always-on support services (Grafana, metrics store, search, scraper) — " <>
+          "estimated flat-rate",
+      amount_cents: @fly_services_cents
+    })
+  end
+
+  defp fly_services_item(base, cents) when is_integer(cents) do
+    Map.merge(base, %{
+      category: "hosting",
+      service: "Fly.io Services",
+      description:
+        "All non-core machines and volumes on the account (support services + " <>
+          "any running preview stacks) — measured from the live machine inventory " <>
+          "at Fly's rate card",
+      amount_cents: cents
+    })
+  end
+
+  defp neon_item(base, nil) do
+    Map.merge(base, %{
+      category: "database",
+      service: "Neon PostgreSQL",
+      description: "Serverless Postgres (free tier: 0.5 GiB, 190 compute hours)",
+      amount_cents: @neon_cents
+    })
+  end
+
+  defp neon_item(base, cents) when is_integer(cents) do
+    Map.merge(base, %{
+      category: "database",
+      service: "Neon PostgreSQL",
+      description:
+        "Serverless Postgres — measured from Neon's own consumption API " <>
+          "(all projects, compute + storage vs plan allowance)",
+      amount_cents: cents
+    })
+  end
+
+  @doc """
+      Measured awake-seconds of the core app this period, from its own pushed
+      metrics: samples of one always-emitted series counted over the window,
+      times the push interval. `:error` when the metrics store is unreachable
+      or holds no samples — callers fall back to the flat estimate.
+  """
+  @spec core_awake_seconds(DateTime.t(), DateTime.t()) :: {:ok, non_neg_integer()} | :error
+  def core_awake_seconds(%DateTime{} = period_start, %DateTime{} = now) do
+    window_s = max(DateTime.diff(now, period_start, :second), 1)
+    interval_s = div(Application.get_env(:core, :metrics_push_interval_ms, 15_000), 1000)
+    app = System.get_env("FLY_APP_NAME") || "thestacks-core"
+
+    # sum across series: each running machine pushes its own series, and Fly
+    # bills per started machine, so total samples ≈ machine-seconds / interval
+    query =
+      ~s|sum(count_over_time(stacks_fuse_state_state{app="#{app}",fuse_name="vision_fuse"}[#{window_s}s]))|
+
+    client =
+      Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
+
+    case client.query(query) do
+      {:ok, samples} when is_number(samples) and samples > 0 ->
+        {:ok, round(samples * interval_s)}
+
+      _ ->
+        :error
+    end
+  end
+
+  @doc """
+      Month-to-date cents for a provider from the billing gauges a scheduled
+      workflow computes (Fly machine inventory × rate card, Neon consumption
+      API) and pushes into VictoriaMetrics daily. The 48h lookback tolerates a
+      missed run; beyond that (or with no gauge at all) returns `:error` and
+      callers fall back to the flat estimates.
+  """
+  @spec billing_gauge_cents(String.t()) :: {:ok, non_neg_integer()} | :error
+  def billing_gauge_cents(provider) when provider in ["fly", "neon"] do
+    query = ~s|sum(last_over_time(stacks_billing_mtd_cents{provider="#{provider}"}[48h]))|
+
+    client =
+      Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
+
+    case client.query(query) do
+      {:ok, cents} when is_number(cents) and cents >= 0 -> {:ok, round(cents)}
+      _ -> :error
+    end
+  end
+
   @doc """
       Seeds the 5 static current-month cost line items so fresh previews have
       data before the daily `RefreshCostsJob` cron (06:00) first fires. Reuses
-      `build_cost_items/3` with Modal fixed at 0 inferences (1168 cents total)
+      `build_cost_items/4` with Modal fixed at 0 inferences (1660 cents total)
       — the same list the cron produces, so seed and cron cannot diverge — and
       the same period window + conflict target, so the cron updates these rows
       in place. Idempotent; returns `:ok`.

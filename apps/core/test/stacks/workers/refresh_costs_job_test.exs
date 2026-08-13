@@ -18,7 +18,7 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
 
       services = Enum.map(costs, & &1.service)
       assert "Fly.io Core" in services
-      assert "Fly.io Vision Sidecar" in services
+      assert "Fly.io Services" in services
       assert "Modal GPU Inference" in services
       assert "Neon PostgreSQL" in services
       assert "Domain Registration" in services

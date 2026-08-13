@@ -1,0 +1,47 @@
+name: Refresh billing metrics
+
+# Computes month-to-date provider costs from the same inputs the providers
+# bill on (Fly machine inventory x rate card, Neon consumption API) and
+# pushes them as gauges into the self-hosted VictoriaMetrics, where the
+# app's daily RefreshCostsJob reads them. Keeps provider credentials in CI
+# instead of on the production app.
+
+on:
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  push-billing-metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      # The metrics store is 6PN-internal; expose it locally for the push.
+      - name: Compute and push provider costs
+        run: |
+          set -euo pipefail
+          flyctl proxy 18428:8428 thestacks-victoriametrics.flycast \
+            --app thestacks-victoriametrics &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 2 "http://localhost:18428/health" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf --max-time 5 "http://localhost:18428/health" >/dev/null
+          VM_URL=http://localhost:18428 python3 scripts/push_billing_metrics.py
