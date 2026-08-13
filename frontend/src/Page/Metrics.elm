@@ -58,7 +58,11 @@ view model =
     div [ class "page page--metrics curator-desk" ]
         [ h1 [ class "page__title metrics__title" ] [ text "What we measure" ]
         , p [ class "metrics__subtitle" ]
-            [ text "A plain, honest look at what this platform observes, how it runs, and what it costs. Placeholder copy — the owner will refine this." ]
+            [ text "Everything we measure about ourselves (The Stacks platform) and you (our users) is made visible here, with the exception of anything that can be used to identify folks. That data is made visible to its owners (the users who took the actions that resulted in the metric being produced) only via their personal metrics page, available on login. The reason for this level of transparency is discussed in greater detail in "
+            , a [ class "metrics__rights-link", href "/transparency", testId "metrics-transparency-essay-link" ]
+                [ text "this piece" ]
+            , text "."
+            ]
         , case model.metrics of
             NotAsked ->
                 text ""

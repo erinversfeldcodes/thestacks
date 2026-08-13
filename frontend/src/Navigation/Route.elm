@@ -35,6 +35,7 @@ type Route
     | CostTransparency
     | Metrics
     | About
+    | DataTransparency
     | ListingRemoval
     | Catalogue
     | MarketplaceBrowse
@@ -87,6 +88,7 @@ parser =
         , Parser.map CostTransparency (s "costs")
         , Parser.map Metrics (s "metrics")
         , Parser.map About (s "about")
+        , Parser.map DataTransparency (s "transparency")
         , Parser.map ListingRemoval (s "listing-removal")
         , Parser.map Catalogue (s "catalogue")
         , Parser.map MarketplaceCreate (s "marketplace" </> s "create")
@@ -180,6 +182,9 @@ toPath route =
 
         About ->
             "/about"
+
+        DataTransparency ->
+            "/transparency"
 
         ListingRemoval ->
             "/listing-removal"

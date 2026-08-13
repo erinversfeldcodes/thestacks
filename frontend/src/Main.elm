@@ -79,6 +79,7 @@ import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
+import Page.DataTransparency as DataTransparencyPage
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Home as Home
@@ -245,6 +246,7 @@ type Page
     | PageCostTransparency CostTransparency.Model
     | PageMetrics MetricsPage.Model
     | PageAbout
+    | PageDataTransparency
     | PageListingRemoval ListingRemoval.Model
     | PageCatalogue Catalogue.Model
     | PageMarketplaceBrowse MarketplaceBrowse.Model
@@ -799,6 +801,9 @@ requiresAuth route =
         About ->
             False
 
+        DataTransparency ->
+            False
+
         ListingRemoval ->
             False
 
@@ -1098,6 +1103,9 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         About ->
             ( PageAbout, Cmd.none )
+
+        DataTransparency ->
+            ( PageDataTransparency, Cmd.none )
 
         ListingRemoval ->
             ( PageListingRemoval ListingRemoval.init, Cmd.none )
@@ -3436,6 +3444,9 @@ pageTitle page =
         PageAbout ->
             titled "About"
 
+        PageDataTransparency ->
+            titled "On Data Transparency"
+
         PageListingRemoval _ ->
             titled "Remove a listing"
 
@@ -3948,6 +3959,9 @@ viewPage model =
 
         PageAbout ->
             AboutPage.view
+
+        PageDataTransparency ->
+            DataTransparencyPage.view
 
         PageListingRemoval subModel ->
             Html.map ListingRemovalMsg (ListingRemoval.view subModel)
