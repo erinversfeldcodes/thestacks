@@ -1,0 +1,65 @@
+name: Cleanup preview stacks
+
+# Two layers against preview leaks (a merged branch's stack once ran 24/7
+# for three days):
+#   1. On PR close/merge — tear down that branch's suffix-less preview
+#      resources. (Per-run ci-suffixed stacks are cleaned by their own CI
+#      run's always() step.)
+#   2. Weekly sweep — destroy any preview-patterned Fly app or Neon preview
+#      branch that no open PR owns and that is past the grace period. This
+#      is the backstop for manual deploys and crashed CI runs.
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  cleanup-closed-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      NEON_STAGING_API_KEY: ${{ secrets.NEON_STAGING_API_KEY }}
+      NEON_STAGING_PROJECT_ID: ${{ secrets.NEON_STAGING_PROJECT_ID }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      - name: Tear down preview for closed PR branch
+        run: |
+          bash scripts/cleanup-preview.sh --branch "${{ github.event.pull_request.head.ref }}"
+
+  sweep-orphans:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      NEON_STAGING_API_KEY: ${{ secrets.NEON_STAGING_API_KEY }}
+      NEON_STAGING_PROJECT_ID: ${{ secrets.NEON_STAGING_PROJECT_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      - name: Sweep preview orphans
+        run: bash scripts/sweep-preview-orphans.sh
