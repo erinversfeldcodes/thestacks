@@ -19,7 +19,8 @@ defmodule CoreWeb.Telemetry do
     :r2_fuse,
     :nominatim_fuse,
     :neon_fuse,
-    :resend_fuse
+    :resend_fuse,
+    :log_shipper_fuse
   ]
 
   @route_group_handler_id "stacks-route-group-router-dispatch-stop"
@@ -201,21 +202,36 @@ defmodule CoreWeb.Telemetry do
   def poll_log_shipper_keepalive do
     case Application.get_env(:core, :log_shipper_keepalive_url) do
       url when is_binary(url) and url != "" ->
-        request = Finch.build(:get, url <> "/health")
+        case ping_log_shipper(url) do
+          :ok ->
+            :ok
 
-        _ =
-          Finch.request(request, Stacks.Finch,
-            receive_timeout: 2_000,
-            request_timeout: 2_000
-          )
+          {:error, _reason} ->
+            # log-shipper analogue of the db watchdog: a shipper we cannot
+            # reach while we are awake means logs are being lost right now —
+            # melt so the fuse gauge (and the public breakers signal) shows
+            # it. One cold-start miss per wake stays under the blow
+            # threshold; a dead shipper blows it within a minute.
+            Stacks.CircuitBreakers.melt(:log_shipper_fuse)
+        end
 
         :ok
 
       _ ->
         :ok
     end
+  end
+
+  defp ping_log_shipper(url) do
+    request = Finch.build(:get, url <> "/health")
+
+    case Finch.request(request, Stacks.Finch, receive_timeout: 2_000, request_timeout: 2_000) do
+      {:ok, %Finch.Response{status: 200}} -> :ok
+      {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+      {:error, reason} -> {:error, reason}
+    end
   rescue
-    _error -> :ok
+    error -> {:error, error}
   end
 
   @doc """

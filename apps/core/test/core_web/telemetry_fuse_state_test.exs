@@ -29,7 +29,8 @@ defmodule CoreWeb.TelemetryFuseStateTest do
     :r2_fuse,
     :nominatim_fuse,
     :neon_fuse,
-    :resend_fuse
+    :resend_fuse,
+    :log_shipper_fuse
   ]
 
   defp attach_state_handler do
@@ -213,19 +214,32 @@ defmodule CoreWeb.TelemetryFuseStateTest do
 
   describe "poll_log_shipper_keepalive/0" do
     setup do
-      on_exit(fn -> Application.delete_env(:core, :log_shipper_keepalive_url) end)
+      CircuitBreakers.install_all()
+      :fuse.reset(:log_shipper_fuse)
+
+      on_exit(fn ->
+        Application.delete_env(:core, :log_shipper_keepalive_url)
+        :fuse.reset(:log_shipper_fuse)
+      end)
+
       :ok
     end
 
     test "is a no-op when no shipper URL is configured" do
       Application.delete_env(:core, :log_shipper_keepalive_url)
-      assert :ok = CoreWeb.Telemetry.poll_log_shipper_keepalive()
+
+      Enum.each(1..6, fn _ -> CoreWeb.Telemetry.poll_log_shipper_keepalive() end)
+
+      assert :ok = :fuse.ask(:log_shipper_fuse, :sync)
     end
 
-    test "an unreachable shipper never raises out of the poller" do
-      # nothing listens here; the request must fail and be swallowed
+    test "an unreachable shipper never raises but melts the fuse to blown" do
+      # nothing listens here; the request must fail, be swallowed, and melt
       Application.put_env(:core, :log_shipper_keepalive_url, "http://127.0.0.1:1")
-      assert :ok = CoreWeb.Telemetry.poll_log_shipper_keepalive()
+
+      Enum.each(1..6, fn _ -> assert :ok = CoreWeb.Telemetry.poll_log_shipper_keepalive() end)
+
+      assert :blown = :fuse.ask(:log_shipper_fuse, :sync)
     end
   end
 end

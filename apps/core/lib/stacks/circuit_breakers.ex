@@ -46,7 +46,8 @@ defmodule Stacks.CircuitBreakers do
     r2_fuse: @standard_spec,
     nominatim_fuse: @standard_spec,
     neon_fuse: @standard_spec,
-    resend_fuse: @standard_spec
+    resend_fuse: @standard_spec,
+    log_shipper_fuse: @standard_spec
   ]
 
   @probes %{
@@ -60,7 +61,8 @@ defmodule Stacks.CircuitBreakers do
     r2_fuse: &__MODULE__.probe_r2/0,
     nominatim_fuse: &__MODULE__.probe_nominatim/0,
     neon_fuse: &__MODULE__.probe_neon/0,
-    resend_fuse: &__MODULE__.probe_resend/0
+    resend_fuse: &__MODULE__.probe_resend/0,
+    log_shipper_fuse: &__MODULE__.probe_log_shipper/0
   }
 
   @doc "Start the circuit breaker installer as a supervised process."
@@ -341,6 +343,20 @@ defmodule Stacks.CircuitBreakers do
         )
 
         {:error, :api_key_not_configured}
+    end
+  end
+
+  @doc false
+  # Same endpoint the telemetry keepalive pings; the keepalive melts this
+  # fuse on failure (log-shipper analogue of the neon watchdog).
+  @spec probe_log_shipper() :: :ok | {:error, term()}
+  def probe_log_shipper do
+    case Application.get_env(:core, :log_shipper_keepalive_url) do
+      url when is_binary(url) and url != "" ->
+        probe_http_get(url <> "/health")
+
+      _ ->
+        {:error, :url_not_configured}
     end
   end
 

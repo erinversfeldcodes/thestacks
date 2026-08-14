@@ -832,7 +832,8 @@ defmodule Stacks.CircuitBreakersTest do
             r2_fuse: nil,
             nominatim_fuse: nil,
             neon_fuse: nil,
-            resend_fuse: nil
+            resend_fuse: nil,
+            log_shipper_fuse: nil
           ] do
         assert function_exported?(
                  CircuitBreakers,
