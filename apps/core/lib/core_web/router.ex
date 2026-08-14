@@ -79,6 +79,7 @@ defmodule CoreWeb.Router do
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
+    get "/health/ready", HealthController, :ready
   end
 
   scope "/api", StacksWeb do
