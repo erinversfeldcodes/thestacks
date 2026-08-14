@@ -97,6 +97,10 @@ else
 
   config :core, :metrics_push_url, System.get_env("STACKS_METRICS_PUSH_URL")
 
+  # Flycast health URL of the log shipper; the telemetry keepalive pings it so
+  # the shipper wakes/sleeps with this app (unset = no shipper, ping disabled)
+  config :core, :log_shipper_keepalive_url, System.get_env("LOG_SHIPPER_KEEPALIVE_URL")
+
   grafana_host = System.get_env("GRAFANA_HOST")
   grafana_token = System.get_env("GRAFANA_AUTH_TOKEN")
 

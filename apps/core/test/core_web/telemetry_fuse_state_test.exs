@@ -210,4 +210,22 @@ defmodule CoreWeb.TelemetryFuseStateTest do
       assert :ok = :fuse.ask(:neon_fuse, :sync)
     end
   end
+
+  describe "poll_log_shipper_keepalive/0" do
+    setup do
+      on_exit(fn -> Application.delete_env(:core, :log_shipper_keepalive_url) end)
+      :ok
+    end
+
+    test "is a no-op when no shipper URL is configured" do
+      Application.delete_env(:core, :log_shipper_keepalive_url)
+      assert :ok = CoreWeb.Telemetry.poll_log_shipper_keepalive()
+    end
+
+    test "an unreachable shipper never raises out of the poller" do
+      # nothing listens here; the request must fail and be swallowed
+      Application.put_env(:core, :log_shipper_keepalive_url, "http://127.0.0.1:1")
+      assert :ok = CoreWeb.Telemetry.poll_log_shipper_keepalive()
+    end
+  end
 end

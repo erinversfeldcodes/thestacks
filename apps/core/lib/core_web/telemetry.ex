@@ -179,8 +179,43 @@ defmodule CoreWeb.Telemetry do
   defp periodic_measurements do
     [
       {__MODULE__, :poll_fuse_state, []},
-      {__MODULE__, :poll_db_watchdog, []}
+      {__MODULE__, :poll_db_watchdog, []},
+      {__MODULE__, :poll_log_shipper_keepalive, []}
     ]
+  end
+
+  @doc """
+      Keepalive ping that keeps the log shipper's lifecycle coupled to ours.
+
+      The shipper subscribes to Fly's log stream, which has no replay — logs
+      emitted while it sleeps are gone — and Fly only auto-starts machines on
+      proxied traffic, which a log tailer never receives on its own. This GET
+      against its Flycast health endpoint IS that traffic: the first ping
+      after our boot wakes the shipper, each 10s tick resets its idle timer,
+      and ~5min after we go quiet it sleeps again. Fire-and-forget: a dead
+      shipper must never affect us (the daily billing sweep reports it).
+
+      No-op unless `:log_shipper_keepalive_url` is configured (prod only).
+  """
+  @spec poll_log_shipper_keepalive() :: :ok
+  def poll_log_shipper_keepalive do
+    case Application.get_env(:core, :log_shipper_keepalive_url) do
+      url when is_binary(url) and url != "" ->
+        request = Finch.build(:get, url <> "/health")
+
+        _ =
+          Finch.request(request, Stacks.Finch,
+            receive_timeout: 2_000,
+            request_timeout: 2_000
+          )
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  rescue
+    _error -> :ok
   end
 
   @doc """

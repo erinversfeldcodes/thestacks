@@ -591,6 +591,14 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 # is never committed here. Runbook: docs/runbooks/email-delivery-failure.md.
 EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
 
+# The telemetry keepalive that wakes the log shipper (prod only — previews
+# don't ship logs). Set only when the shipper will actually be deployed, so
+# a shipper-less stack doesn't ping a nonexistent Flycast name every 10s.
+LOG_SHIPPER_KEEPALIVE_URL=""
+if [[ "$PROD_MODE" -eq 1 && -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
+    LOG_SHIPPER_KEEPALIVE_URL="http://${LOG_SHIPPER_APP:-thestacks-log-shipper}.flycast:8686"
+fi
+
 if [[ "$PROD_MODE" -eq 1 && -z "${EMAIL_FROM:-}" ]]; then
     echo "WARN: EMAIL_FROM is not set — prod email keeps the onboarding@resend.dev"
     echo "      stopgap sender, which CANNOT deliver to real users. Set it via:"
@@ -622,6 +630,7 @@ fly secrets set \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
     ${METRICS_PUSH_URL:+STACKS_METRICS_PUSH_URL="${METRICS_PUSH_URL}"} \
+    ${LOG_SHIPPER_KEEPALIVE_URL:+LOG_SHIPPER_KEEPALIVE_URL="${LOG_SHIPPER_KEEPALIVE_URL}"} \
     ${PROD_OWNER_EMAIL:+PROD_OWNER_EMAIL="${PROD_OWNER_EMAIL}"} \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
@@ -933,6 +942,10 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
         echo "==> Deploying log shipper (app: ${LOG_SHIPPER_APP})..."
 
         ensure_fly_app "${LOG_SHIPPER_APP}"
+
+        # Private Flycast IPv6 so the core keepalive can reach (and wake) the
+        # proxied vector health port. Never a public IP — 6PN-only.
+        fly ips allocate-v6 --private --app "${LOG_SHIPPER_APP}" 2>&1 | grep -v "^Error" || true
 
         fly secrets set \
             LOG_SHIPPER_ACCESS_TOKEN="${LOG_SHIPPER_ACCESS_TOKEN}" \
