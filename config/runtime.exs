@@ -133,18 +133,23 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # Pool sizes are dimensioned for the real workload (a handful of users +
+  # probe traffic on a scale-to-zero app), and their sum must stay under the
+  # database's connection cap at the smallest compute size — Neon allows
+  # ~112 connections at 0.25 CU, and every boot opens all pools at once
+  # against a just-woken database.
   config :core, Core.Repo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "40"),
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6
 
   config :core, Core.ObanRepo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "80"),
+    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "20"),
     socket_options: maybe_ipv6
 
   if System.get_env("PHX_SERVER") do
