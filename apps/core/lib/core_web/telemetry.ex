@@ -16,7 +16,10 @@ defmodule CoreWeb.Telemetry do
     :scraper_fuse,
     :brave_fuse,
     :searxng_fuse,
-    :r2_fuse
+    :r2_fuse,
+    :nominatim_fuse,
+    :neon_fuse,
+    :resend_fuse
   ]
 
   @route_group_handler_id "stacks-route-group-router-dispatch-stop"
@@ -175,8 +178,51 @@ defmodule CoreWeb.Telemetry do
 
   defp periodic_measurements do
     [
-      {__MODULE__, :poll_fuse_state, []}
+      {__MODULE__, :poll_fuse_state, []},
+      {__MODULE__, :poll_db_watchdog, []}
     ]
+  end
+
+  @doc """
+      Active database watchdog: pings the database every poll tick and melts
+      `:neon_fuse` on failure.
+
+      Every other fuse melts under real traffic, but a database outage on a
+      scale-to-zero app with no visitors produces NO traffic — nothing would
+      melt, the fuse-state gauge would keep reporting healthy, and the outage
+      would be invisible on every dashboard (exactly what happened when the
+      free-tier compute quota was exhausted). The melt threshold (5/60s at a
+      10s poll) blows the fuse within about a minute of the database going
+      away; the standard probe loop closes it again on recovery.
+
+      Disabled via `:db_watchdog_enabled` in test — the SQL sandbox would
+      report ownership errors as outages.
+  """
+  @spec poll_db_watchdog() :: :ok
+  def poll_db_watchdog do
+    if Application.get_env(:core, :db_watchdog_enabled, true) do
+      case db_ping().() do
+        :ok -> :ok
+        {:error, _reason} -> Stacks.CircuitBreakers.melt(:neon_fuse)
+      end
+    end
+
+    :ok
+  end
+
+  defp db_ping do
+    Application.get_env(:core, :db_watchdog_ping, &__MODULE__.default_db_ping/0)
+  end
+
+  @doc false
+  @spec default_db_ping() :: :ok | {:error, term()}
+  def default_db_ping do
+    case Core.Repo.query("SELECT 1", [], timeout: 2_000) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
   end
 
   @doc """

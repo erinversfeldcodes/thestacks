@@ -54,6 +54,10 @@ config :core, :storage, Stacks.Storage.Mock
 config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
 config :core, :transparency_prometheus_client, Stacks.Transparency.MockPrometheusClient
 
+# The DB watchdog would read the SQL sandbox's ownership errors as an outage
+# and melt :neon_fuse mid-suite; tests exercise it via the :db_watchdog_ping seam.
+config :core, :db_watchdog_enabled, false
+
 config :core, :geocoder, Stacks.Geocoding.Mock
 
 config :core, Stacks.Vault,

@@ -76,8 +76,14 @@ defmodule Stacks.Workers.EmailDeliveryJob do
       email = build_email(user, template, params)
 
       case Mailer.deliver(email) do
-        {:ok, _} -> :ok
-        {:error, reason} -> {:error, reason}
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          # feeds the :resend_fuse state gauge — delivery failures are the
+          # only real-traffic signal that the email provider is down
+          Stacks.CircuitBreakers.melt(:resend_fuse)
+          {:error, reason}
       end
     else
       :ok
