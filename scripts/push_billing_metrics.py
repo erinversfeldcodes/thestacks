@@ -8,10 +8,11 @@ app is excluded — the app itself measures its awake time from its own
 pushed metrics. Neon: the consumption API for every project, priced
 against the account plan (free plan -> 0, with the allowance tracked).
 
-Pushed series (read by the app's daily RefreshCostsJob):
+Pushed series (read by the app's daily RefreshCostsJob and the ops dashboard):
     stacks_billing_mtd_cents{provider="fly",component="machines|volumes"}
     stacks_billing_mtd_cents{provider="neon",component="database"}
     stacks_billing_run_rate_cents_per_month{provider="fly"}
+    stacks_billing_allowance_pct{provider="neon",project="..."}
 
 Requires FLY_API_TOKEN and NEON_API_KEY. The metrics store is 6PN-internal,
 so the caller must expose it first (fly proxy) and pass VM_URL.
@@ -35,7 +36,7 @@ VOLUME_CENTS_PER_GB_MONTH = 15
 SHARED_1X_BASE_CENTS_FALLBACK = 194  # shared-cpu-1x @ 256MB
 SHARED_1X_INCLUDED_GB = 0.25
 
-NEON_FREE_PLAN_CU_HOURS = 191.9
+NEON_FREE_PLAN_CU_HOURS_PER_PROJECT = 100.0
 
 
 def http_json(url, token, payload=None):
@@ -153,7 +154,10 @@ def fly_costs(fly_token, month_start, now, month_seconds):
 
 
 def neon_costs(neon_key):
-    """Month-to-date Neon cents across this platform's projects (consumption API)."""
+    """Month-to-date Neon cents and per-project allowance use (consumption API).
+
+    Returns (cents_or_None, [(project_name, pct_of_free_allowance)]).
+    """
     me = http_json(f"{NEON_API}/users/me", neon_key)
     plan = me.get("plan", "unknown")
 
@@ -163,20 +167,33 @@ def neon_costs(neon_key):
         listing = http_json(f"{NEON_API}/projects?org_id={org['id']}", neon_key)
         projects.extend(listing["projects"])
 
-    cu_hours = 0.0
+    allowance = []
     for project in projects:
         # the account hosts unrelated projects too; only this platform's count
         if not project["name"].startswith("thestacks"):
             print(f"neon: skipping unrelated project '{project['name']}'")
             continue
         detail = http_json(f"{NEON_API}/projects/{project['id']}", neon_key)["project"]
-        cu_hours += detail.get("compute_time_seconds", 0) / 3600
+        cu_hours = detail.get("compute_time_seconds", 0) / 3600
+        # the free-tier allowance is PER PROJECT; a project at its cap is
+        # suspended by Neon until the monthly reset
+        pct = round(cu_hours / NEON_FREE_PLAN_CU_HOURS_PER_PROJECT * 100, 1)
+        allowance.append((project["name"], pct))
+        print(
+            f"neon: {project['name']} {cu_hours:.1f}/"
+            f"{NEON_FREE_PLAN_CU_HOURS_PER_PROJECT:.0f} CU-hours ({pct:.0f}%)"
+        )
+        if pct >= 80:
+            print(
+                f"warn: {project['name']} at {pct:.0f}% of its free-tier "
+                "compute allowance — it suspends at 100%",
+                file=sys.stderr,
+            )
 
     if plan == "free":
-        print(f"neon: free plan, {cu_hours:.1f}/{NEON_FREE_PLAN_CU_HOURS} CU-hours")
-        return 0
+        return 0, allowance
     print(f"warn: neon plan '{plan}' has no rate model here; not pushing", file=sys.stderr)
-    return None
+    return None, allowance
 
 
 def push_gauges(vm_url, lines):
@@ -196,13 +213,17 @@ def main():
     month_seconds = (month_end - month_start).total_seconds()
 
     machines_mtd, volumes_mtd, run_rate = fly_costs(fly_token, month_start, now, month_seconds)
-    neon_mtd = neon_costs(neon_key)
+    neon_mtd, neon_allowance = neon_costs(neon_key)
 
     lines = [
         f'stacks_billing_mtd_cents{{provider="fly",component="machines"}} {machines_mtd}',
         f'stacks_billing_mtd_cents{{provider="fly",component="volumes"}} {volumes_mtd}',
         f'stacks_billing_run_rate_cents_per_month{{provider="fly"}} {run_rate}',
     ]
+    for project_name, pct in neon_allowance:
+        lines.append(
+            f'stacks_billing_allowance_pct{{provider="neon",project="{project_name}"}} {pct}'
+        )
     if neon_mtd is not None:
         lines.append(f'stacks_billing_mtd_cents{{provider="neon",component="database"}} {neon_mtd}')
 
