@@ -13,7 +13,11 @@ kill_timeout = "5s"
   PHX_HOST = "readinginthestacks.com"
   PORT = "4000"
   ECTO_IPV6 = "true"
-  SEARXNG_URL = "http://thestacks-searxng.internal:8080"
+  # Flycast: SearXNG is a [[services]] app (scale-to-zero via fly-proxy) and
+  # its port is connection-refused on the plain 6PN `.internal` address.
+  # The deploy script overrides this via the SEARXNG_URL secret; this default
+  # exists for hand deploys and must stay in sync with it.
+  SEARXNG_URL = "http://thestacks-searxng.flycast:8080"
 
 [http_service]
   internal_port = 4000

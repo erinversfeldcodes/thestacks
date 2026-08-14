@@ -346,7 +346,10 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 else
     SCRAPER_APP="${PREVIEW_SCRAPER_APP}"
 fi
-SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
+# Flycast, not `.internal`: the scraper is a `[[services]]` app (scale-to-zero
+# via fly-proxy), and a services-exposed port is connection-refused on the
+# instance's 6PN address — the same trap the VM hit (see VM_HOST below).
+SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.flycast:8080"
 
 if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo ""
@@ -355,6 +358,10 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
         fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
     fi
     ensure_fly_app "${SCRAPER_APP}"
+
+    # Private Flycast IPv6 so `<app>.flycast` resolves; idempotent. Never
+    # allocate a public IP here — the scraper must stay 6PN-only.
+    fly ips allocate-v6 --private --app "${SCRAPER_APP}" 2>&1 | grep -v "^Error" || true
 
     fly secrets set \
         SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}" \
@@ -383,7 +390,9 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 else
     SEARXNG_APP="${PREVIEW_SEARXNG_APP}"
 fi
-SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.internal:8080"
+# Flycast for the same reason as the scraper above — and SearXNG must never
+# get a public IP: an internet-reachable metasearch instance is an open proxy.
+SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.flycast:8080"
 
 if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     echo ""
@@ -392,6 +401,8 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
         fly apps destroy "${SEARXNG_APP}" --yes 2>&1 | grep -v "^Error" || true
     fi
     ensure_fly_app "${SEARXNG_APP}"
+
+    fly ips allocate-v6 --private --app "${SEARXNG_APP}" 2>&1 | grep -v "^Error" || true
 
     if [[ "$PROD_MODE" -eq 1 ]]; then
         fly apps resume "${SEARXNG_APP}" 2>&1 | grep -v "^Error" || true
