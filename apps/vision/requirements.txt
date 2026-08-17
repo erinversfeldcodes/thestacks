@@ -1,6 +1,6 @@
 -r ../../requirements/base.txt
 fastapi==0.141.1
-starlette==1.4.0
+starlette==1.6.0
 uvicorn[standard]==0.52.1
 modal==1.5.3
 pyzbar==0.1.9
