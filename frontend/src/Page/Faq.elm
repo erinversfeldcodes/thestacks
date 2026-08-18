@@ -451,9 +451,7 @@ closedBeta inviteOnly =
           , question = "How do I get an invitation?"
           , answer =
                 [ answer
-                    [ text "Invitations are issued by hand, one at a time. Someone who already has an account may have one to spare; otherwise ask through "
-                    , external (repositoryUrl ++ "/issues") "the repository"
-                    , text ". There is no waiting list to join and no queue to jump — asking is the whole process."
+                    [ text "At the moment, you don't — invitations are extended personally by the owner, and there is no process for requesting one. That isn't a velvet rope; it is the honest size of the platform right now. If that changes, this answer will too."
                     ]
                 ]
           }
