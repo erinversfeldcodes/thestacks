@@ -338,7 +338,7 @@ viewPhilosophy =
             [ text
                 ("Every number on this page is real. Costs are computed from "
                     ++ "published rate cards and actual database metrics — not estimates "
-                    ++ "or projections. The Stacks is open-source and maintainer-funded; "
+                    ++ "or projections. The Stacks is source-available and maintainer-funded; "
                     ++ "this page exists because we believe you should know exactly "
                     ++ "what it costs run this platform."
                 )
