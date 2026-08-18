@@ -41,7 +41,7 @@ suite =
                         |> Expect.all
                             [ Query.has [ Selector.tag "p" ]
                             , Query.has
-                                [ Selector.text "The Stacks — open source book management" ]
+                                [ Selector.text "The Stacks — source-available book management" ]
                             ]
             ]
         , describe "viewNotFound"

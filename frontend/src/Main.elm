@@ -4232,7 +4232,7 @@ viewFooter : Html Msg
 viewFooter =
     footer [ class "app-footer" ]
         [ p [ class "app-footer__text" ]
-            [ text "The Stacks — open source book management" ]
+            [ text "The Stacks — source-available book management" ]
         ]
 
 

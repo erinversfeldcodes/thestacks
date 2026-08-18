@@ -47,7 +47,7 @@ viewWhatItIs =
     section [ class "about__section" ]
         [ h2 [ class "about__section-title" ] [ text "What The Stacks is" ]
         , p [ class "about__section-prose" ]
-            [ text "The Stacks is an open-source reading-management and book-discovery platform. It keeps your collection on your own terms: no ads, no selling your reading habits, no algorithm deciding what you should want next. Just your books and the things you've read, arranged the way a good shelf is — with room for the ones you haven't gotten around to yet." ]
+            [ text "The Stacks is a source-available reading-management and book-discovery platform. It keeps your collection on your own terms: no ads, no selling your reading habits, no algorithm deciding what you should want next. Just your books and the things you've read, arranged the way a good shelf is — with room for the ones you haven't gotten around to yet." ]
         , p [ class "about__section-prose" ]
             [ text "It's built around a simple conviction: things you haven't read matter as much as the ones you have. Umberto Eco called that unread portion an "
             , strong [] [ text "antilibrary" ]
@@ -114,7 +114,7 @@ viewBuiltToBeYours =
     section [ class "about__section" ]
         [ h2 [ class "about__section-title" ] [ text "Built to be yours" ]
         , p [ class "about__section-prose" ]
-            [ text "The Stacks is open source and privately hosted, though you are also welcome to self-host." ]
+            [ text "The Stacks is source-available and privately hosted. Read the code, take inspiration from it, and build something similar for yourself — but be a mensch and don't fork this one, or I'll have to come find you every time I fix a bug of my own." ]
         , p [ class "about__section-prose" ]
             [ text "Privacy isn't a setting here, it's the default. Your data is classified, minimised, and erasable: ask to be forgotten and you are, completely. Reading is a private act, and The Stacks treats it that way, allowing you to invite a close circle to share your reflections with — but by default encouraging depth and range rather than shallow performance." ]
         ]

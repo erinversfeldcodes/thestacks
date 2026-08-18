@@ -58,11 +58,11 @@ suite =
                 rendered
                     |> Query.find [ Selector.class "about__do-list" ]
                     |> Query.has [ Selector.text "Add a book by its cover." ]
-        , test "'Built to be yours' states the open-source / self-host framing" <|
+        , test "'Built to be yours' states the source-available, build-your-own framing" <|
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "The Stacks is open source and privately hosted, though you are also welcome to self-host." ]
+                        [ Selector.text "The Stacks is source-available and privately hosted. Read the code, take inspiration from it, and build something similar for yourself — but be a mensch and don't fork this one, or I'll have to come find you every time I fix a bug of my own." ]
         , test "'The wider shelf' is PRESENT-TENSE (owner ruling) — no 'coming soon' hedge" <|
             \() ->
                 rendered

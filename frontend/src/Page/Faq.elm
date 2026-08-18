@@ -415,7 +415,7 @@ theCode =
           , question = "Can I self-host it?"
           , answer =
                 [ answer
-                    [ text "Not today, and the reason is the licence rather than the software. The platform is built to be self-hosted — that is a design property, and everything needed to do it is in the repository — but the licence does not currently grant you the right to run it. That is a decision that could change; it has not yet."
+                    [ text "Not today, and the reason is the licence rather than the software. The platform is built to be self-hosted — that is a design property, and everything needed to do it is in the repository — but the licence does not currently grant you the right to run it. That is a decision that could change; it has not yet. In the meantime: take inspiration and build something similar of your own — but be a mensch and don't fork this one, or I will have to come find you every time I fix a bug of my own."
                     ]
                 ]
           }
