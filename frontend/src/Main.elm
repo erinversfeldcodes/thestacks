@@ -3641,6 +3641,7 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
                                         , navLink Route.AdminScraperConfig "Scrapers"
                                         , navLink Route.AdminBookModeration "Book Moderation"
                                         , navLink Route.AdminRemovalRequests "Removal Requests"
+                                        , navLink Route.AdminInvites "Invites"
                                         ]
                                 }
 
