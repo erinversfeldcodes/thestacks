@@ -472,15 +472,16 @@ observe:
 observe-down:
     docker compose -f infra/local-observability/docker-compose.yml down
 
-# Local FULL-STACK profile: VictoriaMetrics + Grafana + SearXNG on the same
-# images/Dockerfiles prod runs, so the pipeline mechanisms can be proven on a
-# laptop — a pushed metric reaching the public /metrics page, a scrape reaching
-# a database row. Ingestion is PUSH here, matching prod, which is what makes it
-# a proof rather than a demo; `just observe` scrapes instead, and the two cannot
-# run together because both bind 8428.
+# On the same images/Dockerfiles prod runs, so the pipeline mechanisms can be
+# proven on a laptop — a pushed metric reaching the public /metrics page, a
+# scrape reaching a database row. Ingestion is PUSH here, matching prod, which
+# is what makes it a proof rather than a demo; `just observe` scrapes instead,
+# and the two cannot run together because both bind 8428.
 #
 # Phoenix and the Rust scraper run natively beside it — see docs/local-full-stack.md.
 # Grafana (no login): http://localhost:3010 · VictoriaMetrics: http://localhost:8428
+#
+# Bring up the local full-stack profile: VictoriaMetrics + Grafana + SearXNG.
 local-stack-up:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -493,8 +494,10 @@ local-stack-up:
     docker compose -f deploy/local/docker-compose.yml up -d --build
     docker compose -f deploy/local/docker-compose.yml ps
 
-# Stop + remove the local full-stack profile (keeps the vm-data volume, so a
-# metric you pushed before lunch is still queryable after it).
+# Keeps the vm-data volume, so a metric pushed before lunch is still queryable
+# after it.
+#
+# Stop + remove the local full-stack profile.
 local-stack-down:
     docker compose -f deploy/local/docker-compose.yml down
 
