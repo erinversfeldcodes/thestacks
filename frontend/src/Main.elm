@@ -80,6 +80,7 @@ import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.DataTransparency as DataTransparencyPage
+import Page.Faq as FaqPage
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Home as Home
@@ -246,6 +247,7 @@ type Page
     | PageCostTransparency CostTransparency.Model
     | PageMetrics MetricsPage.Model
     | PageAbout
+    | PageFaq
     | PageDataTransparency
     | PageListingRemoval ListingRemoval.Model
     | PageCatalogue Catalogue.Model
@@ -801,6 +803,9 @@ requiresAuth route =
         About ->
             False
 
+        Faq ->
+            False
+
         DataTransparency ->
             False
 
@@ -1103,6 +1108,9 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         About ->
             ( PageAbout, Cmd.none )
+
+        Faq ->
+            ( PageFaq, Cmd.none )
 
         DataTransparency ->
             ( PageDataTransparency, Cmd.none )
@@ -3444,6 +3452,9 @@ pageTitle page =
         PageAbout ->
             titled "About"
 
+        PageFaq ->
+            titled "Questions, Answered"
+
         PageDataTransparency ->
             titled "On Data Transparency"
 
@@ -3959,6 +3970,9 @@ viewPage model =
 
         PageAbout ->
             AboutPage.view
+
+        PageFaq ->
+            FaqPage.view { inviteOnly = model.config.inviteOnly }
 
         PageDataTransparency ->
             DataTransparencyPage.view

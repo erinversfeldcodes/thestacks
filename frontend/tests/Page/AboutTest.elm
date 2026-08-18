@@ -85,4 +85,9 @@ suite =
                         , Query.find [ Selector.attribute (Attr.attribute "data-testid" "about-costs-link") ]
                             >> Query.has [ Selector.attribute (Attr.href "/costs") ]
                         ]
+        , test "reaches the FAQ — the reference companion is linked, not URL-only" <|
+            \() ->
+                rendered
+                    |> Query.find [ Selector.attribute (Attr.attribute "data-testid" "about-faq-link") ]
+                    |> Query.has [ Selector.attribute (Attr.href "/faq") ]
         ]

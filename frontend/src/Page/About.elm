@@ -153,5 +153,7 @@ viewTransparency =
             [ text "See what we measure" ]
         , a [ class "about__link about__link--costs", href "/costs", testId "about-costs-link" ]
             [ text "See what it costs to run" ]
+        , a [ class "about__link about__link--faq", href "/faq", testId "about-faq-link" ]
+            [ text "Questions, answered" ]
         ]
     ]

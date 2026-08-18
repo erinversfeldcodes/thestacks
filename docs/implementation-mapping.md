@@ -2221,8 +2221,9 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | A platform-info FAQ page reached via nav/footer, answering the questions a stranger asks before trusting the platform. Launch Milestone B; a new member of the existing epic 15 (15.1–15.3 taken). |
 | **Phase** | Phase 1 (extended) |
-| **Status** | Not built — spec only (`Page.Faq` absent; `/api/config` / `Page.About` exist and would be reused). |
-| **Implementation** | Planned: `Page.Faq` (static content surface, reusing `curator-desk`/`about__*` styles), reachable from nav/footer; server flags via `GET /api/config` → `StacksWeb.ConfigController.show`. Fourteen new CSS classes must ship with rules in the same change (`scripts/check-css.sh`). |
+| **Status** | Built — `/faq` renders `Page.Faq`, publicly and without authentication, linked from the home landing and from About. |
+| **Implementation** | `frontend/src/Page/Faq.elm` — nineteen questions across six sections, each a native `<details>` shipped `open` (keyboard-operable, no JavaScript, findable by browser search). `Route.Faq` → `/faq` in `frontend/src/Navigation/Route.elm`; `PageFaq` wired through `Main.requiresAuth` (public), `initPage`, `pageTitle`, and `viewPage`, which passes `model.config.inviteOnly` so the closed-beta answer follows the server flag rather than a constant. Entry points: `Page.Home.viewLanding` (`home-faq-link`) and `Page.About.viewTransparency` (`about-faq-link`). Data-rights answers link `/settings/privacy`, `/settings/audit-log`, `/transparency`, `/metrics`, `/costs`. Styles reuse `curator-desk` and the shared About/Metrics heading groups; the `faq__*` block ships its own rules in `frontend/css/main.css` (`scripts/check-css.sh` clean, zero orphaned classes). Tests: `frontend/tests/Page/FaqTest.elm`, plus route and auth-matrix coverage in `RouteTest` and `MainRequiresAuthTest`. |
+| **Open** | The licence answers state the tracked `LICENSE` accurately ("source available"), which contradicts the "open source" wording still carried by `Page.About` and the footer — an owner ruling, tracked separately. Fragment deep links (`/faq#erasure`) resolve to real element ids but are not scrolled into view on a cold load; that needs the `Browser.Dom` command from the story's §12. Collapse-all / expand-all is not built. |
 
 ---
 
