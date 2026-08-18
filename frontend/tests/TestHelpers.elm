@@ -18,6 +18,7 @@ module TestHelpers exposing
     , simulateAuthErrorResponse
     , simulateAuthResponse
     , simulateBookDetailResponse
+    , simulateBookDetailResponseWithFormats
     , simulateBookDetailResponseWithPlacement
     , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
@@ -30,6 +31,7 @@ module TestHelpers exposing
     , simulateEmptyBookPricesResponse
     , simulateMergeFormatResponse
     , simulateMultiShelfResponse
+    , simulatePlacementFormatsResponse
     , simulatePlacementVisibilityResponse
     , simulateRegisterResponse
     , simulateRegisterValidationResponse
@@ -812,6 +814,61 @@ simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibil
         json
 
 
+{-| A book-detail response carrying a placement that already owns `formats`.
+Drives the format picker, whose starting state decides which way a click
+toggles.
+-}
+simulateBookDetailResponseWithFormats : String -> Book -> List String -> Http.Response String
+simulateBookDetailResponseWithFormats bookId book formats =
+    let
+        placementJson =
+            Encode.object
+                [ ( "id", Encode.string "placement-fmt-001" )
+                , ( "formats", Encode.list Encode.string formats )
+                , ( "bookshelf_name", Encode.string "library" )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", placementJson )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| A successful `PUT /api/placements/:id/formats` response:
+`{placement: {id, formats}}`.
+-}
+simulatePlacementFormatsResponse : String -> List String -> Http.Response String
+simulatePlacementFormatsResponse placementId formats =
+    Http.GoodStatus_
+        { url = "/api/placements/" ++ placementId ++ "/formats"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "placement"
+                  , Encode.object
+                        [ ( "id", Encode.string placementId )
+                        , ( "formats", Encode.list Encode.string formats )
+                        ]
+                  )
+                ]
+            )
+        )
+
+
 {-| A successful `PUT /api/placements/:id/visibility` response: `{id, visibility}`.
 -}
 simulatePlacementVisibilityResponse : String -> String -> Http.Response String
@@ -1501,6 +1558,21 @@ bookDetailEffects msg model maybeToken =
                         , timeout = Nothing
                         , tracker = Nothing
                         }
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.ToggleFormat _ ->
+            case ( model.placement, maybeToken, model.formatsState ) of
+                ( Just placement, Just token, Types.RemoteData.Loading ) ->
+                    authedRequestFromSpec
+                        (Api.updatePlacementFormatsRequest placement.id
+                            (List.map Types.Placement.formatToString model.selectedFormats)
+                        )
+                        token
+                        (SimulatedEffect.Http.expectJson BookDetail.FormatsUpdated
+                            (Decode.at [ "placement", "formats" ] (Decode.list Decode.string))
+                        )
 
                 _ ->
                     SimulatedEffect.Cmd.none

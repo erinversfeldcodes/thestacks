@@ -808,19 +808,19 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Track which formats the user owns per book. Formats are now derived from `book_editions` — each owned format is a row in `book_editions` under the same work. Adding a format means creating a new edition (with its own ISBN) or toggling `is_primary`. |
+| **Summary** | Track which formats the reader owns of a book they have shelved — physical, ebook, audiobook — as a set carried on their own placement. This is a claim about the reader's copies, not about which editions of the work exist, so it needs no ISBN and no new edition row. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.FormatPicker` on Book Detail overlay. Shows all known editions as filled icons (owned) plus outlined icons for formats not yet owned. Clicking an un-owned format prompts: "Enter the ISBN for the [format] edition" (inline ISBN input), which triggers the multi-format merge flow (US-1.1.8). |
-| **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row. No `update_placement_formats` — formats are no longer a column on placements. |
-| **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.book_editions` (existing editions for the work). |
-| **Jobs (Oban)** | `EnrichBookJob` (fetch edition-specific metadata). |
-| **External Services** | Open Library, Google Books (ISBN resolution for new format). |
-| **dbt Models** | `stg_book_editions`, `int_format_distribution`. |
+| **Frontend (Elm)** | `Components.FormatPicker`, rendered by `Page.BookDetail.viewFormatsOnShelf` for a reader who owns a placement. Three toggle buttons; a click sends the whole resulting set through `Api.updatePlacementFormats`, and a rejected save rolls the button back and says so. Format strings cross the wire via `Types.Placement.formatToString`/`parseFormat`. |
+| **Backend (Phoenix)** | `PUT /api/placements/:id/formats` → `BookshelfPlacementController.update_formats/2` → `Stacks.Shelving.update_placement_formats/3`, ownership-checked against the placement's bookshelf. Response serialised by `ProtoJSON.placement_formats/1` as `{placement: {id, formats}}`. |
+| **Database** | **Write / Read:** `op.bookshelf_placements.formats` (`{:array, :string}`, default `[]`). Whole-list replacement, not a delta. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. `stg_book_editions` models the work's editions, which is a different question from which copies a reader owns. |
 | **Infrastructure** | None additional. |
-| **Dependencies** | US-1.3.2 (format picker lives on detail overlay), US-1.1.8 (merge flow). |
+| **Dependencies** | US-1.3.2 (the picker lives on the detail overlay), US-1.5.1 (a placement must exist to carry the set). Distinct from US-1.1.8, whose ISBN-driven merge flow adds *editions* and lives on the upload page. |
 
 ---
 

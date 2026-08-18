@@ -201,6 +201,8 @@ module Api exposing
     , updateLocation
     , updateNotifications
     , updatePassword
+    , updatePlacementFormats
+    , updatePlacementFormatsRequest
     , updatePlacementVisibility
     , updateProfile
     , updateProfileVisibility
@@ -3627,6 +3629,58 @@ updatePlacementVisibility placementId visibility token toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| PUT /api/placements/:id/formats — replace the set of formats a reader owns
+for one placement.
+
+The request is a whole-list replacement, not a delta, so the caller sends the
+set it wants to end up with. The 200 body is `{placement: {id, formats}}`; we
+decode the stored list back rather than assume the optimistic set survived, so a
+server that normalises or rejects a member is visible to the caller.
+
+-}
+updatePlacementFormats :
+    String
+    -> List String
+    -> String
+    -> (Result Http.Error (List String) -> msg)
+    -> Cmd msg
+updatePlacementFormats placementId formats token toMsg =
+    let
+        spec =
+            updatePlacementFormatsRequest placementId formats
+    in
+    Http.request
+        { method = spec.method
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = spec.url
+        , body = specHttpBody spec
+        , expect = Http.expectJson toMsg placementFormatsDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| The data of `updatePlacementFormats`'s request — see `RequestSpec`.
+-}
+updatePlacementFormatsRequest : String -> List String -> RequestSpec
+updatePlacementFormatsRequest placementId formats =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/formats"
+    , body =
+        Just
+            (Encode.object
+                [ ( "formats", Encode.list Encode.string formats ) ]
+            )
+    }
+
+
+{-| The formats the server actually stored, out of the `update_formats` body.
+-}
+placementFormatsDecoder : Decoder (List String)
+placementFormatsDecoder =
+    Decode.at [ "placement", "formats" ] (Decode.list Decode.string)
 
 
 {-| A block failure.
