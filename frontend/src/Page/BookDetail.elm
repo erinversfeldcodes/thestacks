@@ -23,6 +23,7 @@ import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal as RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
+import Components.ShelfRowPicker exposing (shelfRowPicker)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
 import Html.Events exposing (on, onClick, onInput, preventDefaultOn, targetValue)
@@ -33,6 +34,7 @@ import Task
 import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isUnidentified)
 import Types.Placement exposing (Format, Placement, ReadingStatus(..), formatToString, parseFormat, readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Shelf exposing (BookshelfResponse, Shelf, rowLabel)
 import Types.Visibility as Visibility exposing (Visibility)
 import Util.TestId exposing (testId)
 
@@ -61,6 +63,16 @@ type alias Model =
     , formatsState : RemoteData Http.Error ()
     , moveState : RemoteData Api.MoveError ()
     , removeState : RemoteData Http.Error ()
+
+    -- The physical shelf rows of the bookcase the placement sits in, in the
+    -- order the reader sees them, so an id's index is the row's name. Held as
+    -- bare ids rather than `Shelf` records: the books on the other rows are the
+    -- bookshelf page's business, and keeping them here would be a second copy
+    -- of the shelf going stale behind the overlay.
+    , shelfRowIds : List String
+    , currentShelfId : Maybe String
+    , selectedShelfId : String
+    , shelfMoveState : RemoteData Api.ShelfMoveError ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
     , authorEvents : RemoteData Http.Error (List Api.AuthorEvent)
@@ -115,6 +127,10 @@ type Msg
     | RemoveCompleted (Result Http.Error ())
     | RemovePlacement String
     | PlacementRemoved String (Result Http.Error ())
+    | ShelfRowsLoaded (Result Http.Error BookshelfResponse)
+    | SelectShelfRow String
+    | ConfirmShelfMove
+    | ShelfMoveCompleted (Result Api.ShelfMoveError String)
     | ToggleFormat Format
     | FormatsUpdated (Result Http.Error (List String))
     | EditionSelected String
@@ -162,6 +178,10 @@ init bookId maybeToken maybePreviousRoute =
       , formatsState = NotAsked
       , moveState = NotAsked
       , removeState = NotAsked
+      , shelfRowIds = []
+      , currentShelfId = Nothing
+      , selectedShelfId = ""
+      , shelfMoveState = NotAsked
       , selectedEdition = Nothing
       , previousRoute = maybePreviousRoute
       , authorEvents = NotAsked
@@ -243,6 +263,73 @@ fetchPrices bookId maybeToken =
         , timeout = Api.standardTimeout
         , tracker = Nothing
         }
+
+
+{-| Read the shelf rows of the bookcase a placement sits in.
+
+The bookshelf's own endpoint is the source: it is the only one that answers both
+halves of the question at once — which rows the bookcase has, and which of them
+this book is on. `GET /api/bookshelves/:name/shelves` lists the rows but not
+their contents, so it could not tell the picker which row to leave out.
+
+A book with no placement is on no shelf at all, and a signed-out reader cannot
+be shown their own rows, so both send nothing rather than an unusable request.
+
+-}
+fetchShelfRows : Maybe Placement -> String -> Maybe String -> Cmd Msg
+fetchShelfRows maybePlacement bookshelfName maybeToken =
+    case ( maybePlacement, maybeToken ) of
+        ( Just _, Just token ) ->
+            if String.isEmpty bookshelfName then
+                Cmd.none
+
+            else
+                Api.getBookshelf bookshelfName token ShelfRowsLoaded
+
+        _ ->
+            Cmd.none
+
+
+{-| Drop the rows on the way to a different bookcase.
+
+Rows belong to one bookshelf, and the server rejects a move to a row hanging in
+another. Leaving the old bookcase's rows on screen while the new read is in
+flight would offer the reader exactly the options that are guaranteed to fail.
+
+-}
+forgetShelfRows : Model -> Model
+forgetShelfRows model =
+    { model | shelfRowIds = [], currentShelfId = Nothing, selectedShelfId = "" }
+
+
+{-| Which row a placement is on — the row whose books include it.
+
+`GET /api/books/:id` describes the placement without naming its shelf row, so
+the answer is read off the bookcase instead.
+
+-}
+shelfRowHolding : Maybe Placement -> List Shelf -> Maybe String
+shelfRowHolding maybePlacement shelves =
+    case maybePlacement of
+        Nothing ->
+            Nothing
+
+        Just placement ->
+            shelves
+                |> List.filter (\shelf -> List.any (\p -> p.id == placement.id) shelf.placements)
+                |> List.head
+                |> Maybe.map .id
+
+
+{-| The row the picker should offer first — any row but the one the book is
+already on, since moving a book to where it already is does nothing.
+-}
+firstRowOtherThan : Maybe String -> List String -> String
+firstRowOtherThan currentRowId rowIds =
+    rowIds
+        |> List.filter (\rowId -> Just rowId /= currentRowId)
+        |> List.head
+        |> Maybe.withDefault ""
 
 
 {-| One flat row per (edition, store), as the API returns it.
@@ -428,12 +515,15 @@ update msg model maybeToken =
                         , shelfCeiling = shelfCeiling
                         , progressCard = progressCard
                       }
-                    , case response.book.author of
-                        Just author ->
-                            Api.getAuthorEvents author.id GotAuthorEvents
+                    , Cmd.batch
+                        [ case response.book.author of
+                            Just author ->
+                                Api.getAuthorEvents author.id GotAuthorEvents
 
-                        Nothing ->
-                            Cmd.none
+                            Nothing ->
+                                Cmd.none
+                        , fetchShelfRows response.placement bookshelf maybeToken
+                        ]
                     , NoOut
                     )
 
@@ -532,7 +622,8 @@ update msg model maybeToken =
                         , placement = updatedPlacement
                         , bookshelfMoverOpen = False
                       }
-                    , Cmd.none
+                        |> forgetShelfRows
+                    , fetchShelfRows updatedPlacement newBookshelf maybeToken
                     , PlacementMutated
                     )
 
@@ -567,7 +658,8 @@ update msg model maybeToken =
                         , selectedBookshelf = firstAvailableBookshelf shelfName
                         , bookshelfMoverOpen = False
                       }
-                    , Cmd.none
+                        |> forgetShelfRows
+                    , fetchShelfRows (Just placement) shelfName maybeToken
                     , PlacementMutated
                     )
 
@@ -680,6 +772,74 @@ update msg model maybeToken =
 
         PricesLoaded (Err err) ->
             ( { model | prices = Failure err }, Cmd.none, NoOut )
+
+        ShelfRowsLoaded (Ok response) ->
+            let
+                rowIds =
+                    List.map .id response.shelves
+
+                current =
+                    shelfRowHolding model.placement response.shelves
+            in
+            ( { model
+                | shelfRowIds = rowIds
+                , currentShelfId = current
+                , selectedShelfId = firstRowOtherThan current rowIds
+              }
+            , Cmd.none
+            , NoOut
+            )
+
+        ShelfRowsLoaded (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                -- The picker is an addition to a page that works without it, so
+                -- a failed read leaves no rows and therefore no picker, rather
+                -- than an error the reader can do nothing about.
+                ( forgetShelfRows model, Cmd.none, NoOut )
+
+        SelectShelfRow rowId ->
+            ( { model | selectedShelfId = rowId }, Cmd.none, NoOut )
+
+        ConfirmShelfMove ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    if model.shelfMoveState == Loading || String.isEmpty model.selectedShelfId then
+                        ( model, Cmd.none, NoOut )
+
+                    else
+                        ( { model | shelfMoveState = Loading }
+                        , Api.movePlacementToShelf placement.id model.selectedShelfId token ShelfMoveCompleted
+                        , NoOut
+                        )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        ShelfMoveCompleted (Ok storedShelfId) ->
+            -- The row the server says the book is on, not the one that was
+            -- asked for: they agree today, and the moment they stop agreeing
+            -- the reader should see the truth rather than their own request.
+            ( { model
+                | shelfMoveState = Success ()
+                , currentShelfId = Just storedShelfId
+                , selectedShelfId = firstRowOtherThan (Just storedShelfId) model.shelfRowIds
+              }
+            , Cmd.none
+            , PlacementMutated
+            )
+
+        ShelfMoveCompleted (Err (Api.ShelfMoveHttpError err)) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | shelfMoveState = Failure (Api.ShelfMoveHttpError err) }, Cmd.none, NoOut )
+
+        ShelfMoveCompleted (Err err) ->
+            ( { model | shelfMoveState = Failure err }, Cmd.none, NoOut )
 
         ToggleFormat format ->
             let
@@ -1076,6 +1236,7 @@ viewBook model book =
                         , viewFormatsOnShelf model
                         , viewVisibilityControl model
                         , viewShelfActions model
+                        , viewShelfRows model
                         , viewDangerZone model
                         ]
 
@@ -1708,6 +1869,93 @@ viewShelfActions model =
                 [ text "Choose Bookshelf" ]
         , viewMoveState model.moveState
         ]
+
+
+{-| Which physical row of the bookcase this book stands on.
+
+Hidden below two rows, and that is the whole rule: a bookcase with one shelf has
+nowhere to move the book to, so the picker would be a control whose only
+outcome is the state the reader is already in.
+
+-}
+viewShelfRows : Model -> Html Msg
+viewShelfRows model =
+    if List.length model.shelfRowIds < 2 then
+        text ""
+
+    else
+        section
+            [ class "book-detail__section book-detail__shelf-rows"
+            , attribute "role" "region"
+            , attribute "aria-labelledby" "section-shelf-rows"
+            ]
+            [ h3 [ class "book-detail__section-title", id "section-shelf-rows" ]
+                [ text "Which Shelf It Sits On" ]
+            , p [ class "book-detail__shelf-rows-note" ]
+                [ text (currentRowSentence model) ]
+            , shelfRowPicker
+                { rowIds = model.shelfRowIds
+                , currentRowId = model.currentShelfId
+                , selectedRowId = model.selectedShelfId
+                , busy = model.shelfMoveState == Loading
+                , onSelectRow = SelectShelfRow
+                , onMove = ConfirmShelfMove
+                }
+            , viewShelfMoveState model.shelfMoveState
+            ]
+
+
+{-| Where the book stands now, named in the same words as the picker's options.
+
+A placement can sit on no row at all — a book placed before the reader ever
+divided the bookcase up — and that is worth saying, because it explains why the
+picker offers every row instead of all but one.
+
+-}
+currentRowSentence : Model -> String
+currentRowSentence model =
+    case rowIndexOf model.currentShelfId model.shelfRowIds of
+        Just index ->
+            "On " ++ rowLabel index ++ " right now."
+
+        Nothing ->
+            "Not on any shelf in this bookcase yet."
+
+
+rowIndexOf : Maybe String -> List String -> Maybe Int
+rowIndexOf maybeRowId rowIds =
+    case maybeRowId of
+        Nothing ->
+            Nothing
+
+        Just rowId ->
+            rowIds
+                |> List.indexedMap Tuple.pair
+                |> List.filter (\( _, id ) -> id == rowId)
+                |> List.head
+                |> Maybe.map Tuple.first
+
+
+viewShelfMoveState : RemoteData Api.ShelfMoveError () -> Html Msg
+viewShelfMoveState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Moving to that shelf…" ]
+
+        Success _ ->
+            div [ class "book-detail__status book-detail__status--success" ]
+                [ text "Moved to that shelf." ]
+
+        Failure err ->
+            div
+                [ class "book-detail__status book-detail__status--error"
+                , testId "shelf-row-move-error"
+                ]
+                [ text (Api.shelfMoveErrorMessage err) ]
 
 
 viewMoveState : RemoteData Api.MoveError () -> Html Msg

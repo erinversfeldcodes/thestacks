@@ -58,6 +58,7 @@ module Api exposing
     , RequestSpec
     , RiskInference
     , SearchSections
+    , ShelfMoveError(..)
     , ShelfVisibilitySetting
     , SourceHealth
     , SubjectCount
@@ -119,6 +120,7 @@ module Api exposing
     , getBook
     , getBookRequest
     , getBookshelf
+    , getBookshelfRequest
     , getCatalogue
     , getGroup
     , getGroupFeed
@@ -153,6 +155,8 @@ module Api exposing
     , mergeFormatRequest
     , mergeFormatResponseDecoder
     , moveBook
+    , movePlacementToShelf
+    , movePlacementToShelfRequest
     , moveResponseToResult
     , personalInferencesDecoder
     , placeBook
@@ -192,6 +196,8 @@ module Api exposing
     , sendFeedbackRequest
     , setBookAgeGate
     , setPostSyndicated
+    , shelfMoveErrorMessage
+    , shelfMoveResponseToResult
     , soldListing
     , standardTimeout
     , streamEventDecoder
@@ -1674,15 +1680,29 @@ getBookshelf :
     -> (Result Http.Error BookshelfResponse -> msg)
     -> Cmd msg
 getBookshelf shelfName token toMsg =
+    let
+        spec =
+            getBookshelfRequest shelfName
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg bookshelfResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getBookshelf`'s request — see `RequestSpec`.
+-}
+getBookshelfRequest : String -> RequestSpec
+getBookshelfRequest shelfName =
+    { method = "GET"
+    , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
+    , body = Nothing
+    }
 
 
 {-| Error type for `moveBook`. The backend rejects a move that would
@@ -3685,6 +3705,142 @@ updatePlacementFormatsRequest placementId formats =
 placementFormatsDecoder : Decoder (List String)
 placementFormatsDecoder =
     Decode.at [ "placement", "formats" ] (Decode.list Decode.string)
+
+
+{-| Why a book would not move to the shelf row the reader picked.
+
+A shelf row belongs to exactly one bookshelf, so the interesting rejection is
+`wrong_bookshelf`: the row is real and the reader owns it, but it hangs in a
+different bookcase. Telling them "failed, try again" invites the same click
+forever, so it gets its own constructor and its own sentence.
+
+⛔ 422 is read as `wrong_bookshelf` on status alone, without parsing the body.
+The action answers 422 in two cases — a shelf on another bookshelf, and a
+missing `shelf_id` — but it distinguishes them only in English prose
+("shelf belongs to a different bookshelf" vs "shelf\_id is required"), and
+matching on prose makes a copy edit a client bug. The second case is
+unreachable from here: `movePlacementToShelfRequest` always writes the key.
+
+-}
+type ShelfMoveError
+    = ShelfMoveNotFound
+    | ShelfMoveForbidden
+    | ShelfMoveWrongBookshelf
+    | ShelfMoveHttpError Http.Error
+
+
+{-| The shelf the placement ended up on, or why it did not move.
+
+Success carries the server's `shelf_id` rather than `()`: the caller asked for a
+row, and the row it gets back is the only one worth painting. 401 stays an
+`Http.Error` so `isUnauthorized` still sees it and the session-expiry path runs.
+Pure so the elm-program-test simulated effect can reuse the exact mapping.
+
+-}
+shelfMoveResponseToResult : Http.Response String -> Result ShelfMoveError String
+shelfMoveResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ShelfMoveHttpError (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (ShelfMoveHttpError Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (ShelfMoveHttpError Http.NetworkError)
+
+        Http.BadStatus_ metadata _ ->
+            case metadata.statusCode of
+                403 ->
+                    Err ShelfMoveForbidden
+
+                404 ->
+                    Err ShelfMoveNotFound
+
+                422 ->
+                    Err ShelfMoveWrongBookshelf
+
+                code ->
+                    Err (ShelfMoveHttpError (Http.BadStatus code))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString placementShelfDecoder bodyText of
+                Ok shelfId ->
+                    Ok shelfId
+
+                Err err ->
+                    Err (ShelfMoveHttpError (Http.BadBody (Decode.errorToString err)))
+
+
+{-| The shelf the server put the placement on, out of the `move_to_shelf` body.
+-}
+placementShelfDecoder : Decoder String
+placementShelfDecoder =
+    Decode.at [ "placement", "shelf_id" ] Decode.string
+
+
+{-| The reader-facing sentence for a rejected shelf move.
+-}
+shelfMoveErrorMessage : ShelfMoveError -> String
+shelfMoveErrorMessage error =
+    case error of
+        ShelfMoveNotFound ->
+            "That shelf is no longer there. Reload the page and try again."
+
+        ShelfMoveForbidden ->
+            "That shelf isn't yours to rearrange."
+
+        ShelfMoveWrongBookshelf ->
+            "That shelf belongs to a different bookshelf — move the book to that bookshelf first."
+
+        ShelfMoveHttpError _ ->
+            "We couldn't move the book to that shelf. Please try again."
+
+
+expectShelfMove : (Result ShelfMoveError String -> msg) -> Http.Expect msg
+expectShelfMove toMsg =
+    Http.expectStringResponse toMsg shelfMoveResponseToResult
+
+
+{-| PUT /api/placements/:id/shelf — move one placement to a physical shelf row
+within the bookshelf it already sits on.
+
+⛔ This is not `moveBook`. `moveBook` moves a book between BOOKSHELVES — the
+five named collections (library, antilibrary, …). This moves it between the
+SHELF ROWS of one bookcase, and the server rejects a row belonging to any other
+bookshelf rather than quietly performing the bookshelf move as well.
+
+-}
+movePlacementToShelf :
+    String
+    -> String
+    -> String
+    -> (Result ShelfMoveError String -> msg)
+    -> Cmd msg
+movePlacementToShelf placementId shelfId token toMsg =
+    let
+        spec =
+            movePlacementToShelfRequest placementId shelfId
+    in
+    Http.request
+        { method = spec.method
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = spec.url
+        , body = specHttpBody spec
+        , expect = expectShelfMove toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| The data of `movePlacementToShelf`'s request — see `RequestSpec`.
+-}
+movePlacementToShelfRequest : String -> String -> RequestSpec
+movePlacementToShelfRequest placementId shelfId =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/shelf"
+    , body = Just (Encode.object [ ( "shelf_id", Encode.string shelfId ) ])
+    }
 
 
 {-| A block failure.

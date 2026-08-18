@@ -1204,6 +1204,41 @@ h4 {
     font-weight: 600;
 }
 
+.shelf-row-picker {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    margin-top: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.shelf-row-picker__select {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    font-size: var(--size-sm);
+    cursor: pointer;
+}
+
+.shelf-row-picker__btn {
+    padding: 0.4rem 0.8rem;
+    background-color: var(--accent);
+    border: none;
+    border-radius: var(--radius-md);
+    color: #fff;
+    cursor: pointer;
+    font-size: var(--size-sm);
+    font-weight: 600;
+}
+
+.shelf-row-picker__select:disabled,
+.shelf-row-picker__btn:disabled {
+    opacity: 0.55;
+    cursor: progress;
+}
+
 .isbn-input-wrapper {
     display: flex;
     flex-direction: column;
@@ -1739,6 +1774,46 @@ h4 {
 }
 
 .book-detail__shelf-actions .shelf-mover__btn {
+    background-color: var(--parchment-accent);
+    color: #fff;
+}
+
+.shelf-row-picker__label {
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
+.book-detail__shelf-rows {
+    padding: var(--space-5) 0 0;
+    border-top: 1px solid var(--parchment-border);
+}
+
+.book-detail__shelf-rows-note {
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted, var(--text-muted));
+    margin-bottom: var(--space-3);
+}
+
+.book-detail__shelf-rows .shelf-row-picker__label {
+    font-family: var(--font-heading);
+    font-size: var(--size-sm);
+    color: var(--parchment-muted);
+    font-style: italic;
+}
+
+.book-detail__shelf-rows .shelf-row-picker__select {
+    background-color: var(--parchment-cream);
+    border: 1px solid var(--parchment-border);
+    color: var(--parchment-text);
+    font-family: var(--font-heading);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--size-sm);
+    box-shadow: 1px 2px 4px rgba(44, 31, 14, 0.1);
+}
+
+.book-detail__shelf-rows .shelf-row-picker__btn {
     background-color: var(--parchment-accent);
     color: #fff;
 }

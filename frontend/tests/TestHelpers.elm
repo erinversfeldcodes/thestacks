@@ -32,6 +32,7 @@ module TestHelpers exposing
     , simulateMergeFormatResponse
     , simulateMultiShelfResponse
     , simulatePlacementFormatsResponse
+    , simulatePlacementShelfResponse
     , simulatePlacementVisibilityResponse
     , simulateRegisterResponse
     , simulateRegisterValidationResponse
@@ -869,6 +870,36 @@ simulatePlacementFormatsResponse placementId formats =
         )
 
 
+{-| A successful `PUT /api/placements/:id/shelf` response, in the shape
+`ProtoJSON.placement_ref/1` emits: `{placement: {id, shelf_id, …}}`.
+
+The `shelf_id` is a parameter rather than a copy of what was asked for, so a
+test can hand back a DIFFERENT row and see whether the page believes the server
+or itself.
+
+-}
+simulatePlacementShelfResponse : String -> String -> Http.Response String
+simulatePlacementShelfResponse placementId shelfId =
+    Http.GoodStatus_
+        { url = "/api/placements/" ++ placementId ++ "/shelf"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "placement"
+                  , Encode.object
+                        [ ( "id", Encode.string placementId )
+                        , ( "shelf_id", Encode.string shelfId )
+                        , ( "position", Encode.int 0 )
+                        ]
+                  )
+                ]
+            )
+        )
+
+
 {-| A successful `PUT /api/placements/:id/visibility` response: `{id, visibility}`.
 -}
 simulatePlacementVisibilityResponse : String -> String -> Http.Response String
@@ -1568,6 +1599,38 @@ bookDetailEffects msg model maybeToken =
                         token
                         (SimulatedEffect.Http.expectJson BookDetail.FormatsUpdated
                             (Decode.at [ "placement", "formats" ] (Decode.list Decode.string))
+                        )
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.BookLoaded (Ok _) ->
+            case ( model.placement, maybeToken ) of
+                ( Just _, Just token ) ->
+                    if String.isEmpty model.currentBookshelf then
+                        SimulatedEffect.Cmd.none
+
+                    else
+                        authedRequestFromSpec
+                            (Api.getBookshelfRequest model.currentBookshelf)
+                            token
+                            (SimulatedEffect.Http.expectJson
+                                BookDetail.ShelfRowsLoaded
+                                bookshelfResponseDecoder
+                            )
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        BookDetail.ConfirmShelfMove ->
+            case ( model.placement, maybeToken, model.shelfMoveState ) of
+                ( Just placement, Just token, Types.RemoteData.Loading ) ->
+                    authedRequestFromSpec
+                        (Api.movePlacementToShelfRequest placement.id model.selectedShelfId)
+                        token
+                        (SimulatedEffect.Http.expectStringResponse
+                            BookDetail.ShelfMoveCompleted
+                            Api.shelfMoveResponseToResult
                         )
 
                 _ ->
