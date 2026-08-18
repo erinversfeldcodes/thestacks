@@ -80,13 +80,13 @@ expectedAuth route =
         Metrics ->
             False
 
+        DataTransparency ->
+            False
+
         About ->
             False
 
         Faq ->
-            False
-
-        DataTransparency ->
             False
 
         ListingRemoval ->
@@ -187,9 +187,9 @@ allRoutes =
     , ( "Insights", Insights )
     , ( "CostTransparency", CostTransparency )
     , ( "Metrics", Metrics )
+    , ( "DataTransparency", DataTransparency )
     , ( "About", About )
     , ( "Faq", Faq )
-    , ( "DataTransparency", DataTransparency )
     , ( "Catalogue", Catalogue )
     , ( "MarketplaceBrowse", MarketplaceBrowse )
     , ( "MarketplaceCreate", MarketplaceCreate )

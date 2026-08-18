@@ -48,9 +48,9 @@ allRoutes =
     , Insights
     , CostTransparency
     , Metrics
+    , DataTransparency
     , About
     , Faq
-    , DataTransparency
     , ListingRemoval
     , Catalogue
     , MarketplaceBrowse
@@ -138,14 +138,14 @@ routeLabel route =
         Metrics ->
             "Metrics"
 
+        DataTransparency ->
+            "DataTransparency"
+
         About ->
             "About"
 
         Faq ->
             "Faq"
-
-        DataTransparency ->
-            "DataTransparency"
 
         ListingRemoval ->
             "ListingRemoval"
@@ -317,6 +317,10 @@ suite =
                 \_ ->
                     fromPath "/metrics"
                         |> Expect.equal Metrics
+            , test "DataTransparency" <|
+                \_ ->
+                    fromPath "/transparency"
+                        |> Expect.equal DataTransparency
             , test "About" <|
                 \_ ->
                     fromPath "/about"
