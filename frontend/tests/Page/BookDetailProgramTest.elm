@@ -194,7 +194,9 @@ multiShelfRemoveTargetsThatPlacementOnly =
 
 {-| Unlike the danger-zone remove, tidying one extra shelf must NOT navigate the
 reader out of the book — they still have the book, just in one fewer place. The
-notice disappears because only one placement is left.
+notice disappears because only one placement is left. The signal out is the
+mutation one and not `NoOut`: the reader stays, but a shelf they can see behind
+this page has just lost a book and has to be told.
 -}
 multiShelfRemoveKeepsTheReaderOnThePage : Test
 multiShelfRemoveKeepsTheReaderOnThePage =
@@ -232,7 +234,7 @@ multiShelfRemoveKeepsTheReaderOnThePage =
                 |> ProgramTest.expectModel
                     (\model ->
                         Expect.all
-                            [ \m -> Expect.equal BookDetail.NoOut m.lastOut
+                            [ \m -> Expect.equal BookDetail.PlacementMutated m.lastOut
                             , \m -> Expect.equal [ "pl-lib" ] (List.map .id m.page.placements)
                             , \m -> Expect.equal (Just "pl-lib") (Maybe.map .id m.page.placement)
                             ]

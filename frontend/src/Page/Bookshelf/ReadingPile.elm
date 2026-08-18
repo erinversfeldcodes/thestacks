@@ -46,6 +46,7 @@ type OutMsg
 
 type Msg
     = BooksLoaded (Result Http.Error (List Shelf))
+    | ReloadRequested
     | DismissAgeGate
     | BookHovered String
     | BookClicked Book
@@ -58,16 +59,24 @@ type Msg
     | FocusReturned
 
 
+{-| The one read of the pile: `init` and every refetch go through it, so a
+refetch cannot end up asking for something other than what the page shows.
+-}
+fetchPile : Maybe String -> Cmd Msg
+fetchPile maybeToken =
+    case maybeToken of
+        Just token ->
+            Api.getBookshelf "reading_pile" token (BooksLoaded << Result.map .shelves)
+
+        Nothing ->
+            Cmd.none
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     let
         cmd =
-            case maybeToken of
-                Just token ->
-                    Api.getBookshelf "reading_pile" token (BooksLoaded << Result.map .shelves)
-
-                Nothing ->
-                    Cmd.none
+            fetchPile maybeToken
     in
     ( { books = Loading
       , showAgeGate = False
@@ -102,6 +111,9 @@ update msg model =
 
                     else
                         ( { model | books = Failure err }, Cmd.none, NoOut )
+
+        ReloadRequested ->
+            ( model, fetchPile model.token, NoOut )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )

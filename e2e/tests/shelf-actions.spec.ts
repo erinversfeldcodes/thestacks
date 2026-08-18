@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { provisionBookOnShelf, assertSeedOrSkip } from "./helpers";
+import {
+  provisionBookOnShelf,
+  assertSeedOrSkip,
+  injectSession,
+  mintOrSkip,
+} from "./helpers";
 
 /**
  * Shelf-actions flagship suite — move, add, and remove a book through the real
@@ -306,5 +311,146 @@ test.describe("Shelf actions — mutation failures", () => {
       { timeout: 5000 }
     );
     await expect(overlay).toBeVisible();
+  });
+});
+
+/**
+ * The overlay opens ON TOP of the shelf page, which stays mounted underneath.
+ * Drive evidence: after a move the server was right and the bookcase behind the
+ * overlay was wrong — it still showed the book on the shelf it had just left,
+ * and stayed wrong until the reader pressed reload.
+ *
+ * These tests therefore never reload. `window.__noReloadSentinel` is planted
+ * before the move and read after it: a full page load would wipe it, so its
+ * survival is what makes "without a reload" an assertion rather than a claim
+ * about how the test happens to be written.
+ *
+ * The count assertions run while the overlay is still open, before it is
+ * dismissed. Asserting only after dismissal would leave a second explanation
+ * standing (that closing the overlay is what rebuilt the page), and the shelf
+ * has to be correct the moment the write lands, not the moment the reader
+ * looks away.
+ */
+test.describe("Shelf actions — the page behind the overlay after a move", () => {
+  /** Place `count` distinct catalogue books on `shelf` for one fresh user. */
+  async function provisionBooksOnShelf(
+    page: import("@playwright/test").Page,
+    request: import("@playwright/test").APIRequestContext,
+    shelf: string,
+    count: number,
+  ): Promise<void> {
+    const session = await mintOrSkip(request);
+    const resp = await request.get(`/api/catalogue?per_page=${count}`);
+    expect(resp.ok(), "catalogue fetch for shelf provisioning").toBeTruthy();
+    const books = ((await resp.json()).books ?? []) as Array<{ id: string }>;
+    assertSeedOrSkip(
+      books.length >= count,
+      `catalogue has fewer than ${count} books to provision this shelf`,
+    );
+    for (const book of books.slice(0, count)) {
+      const place = await request.post(`/api/bookshelves/${shelf}/placements`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+        data: { book_id: book.id },
+      });
+      expect(place.status(), `place book on ${shelf}`).toBe(201);
+    }
+    await injectSession(page, session);
+  }
+
+  async function plantReloadSentinel(
+    page: import("@playwright/test").Page,
+  ): Promise<void> {
+    await page.evaluate(() => {
+      (window as unknown as { __noReloadSentinel: boolean })
+        .__noReloadSentinel = true;
+    });
+  }
+
+  async function expectNoReloadHappened(
+    page: import("@playwright/test").Page,
+  ): Promise<void> {
+    const survived = await page.evaluate(
+      () =>
+        (window as unknown as { __noReloadSentinel?: boolean })
+          .__noReloadSentinel === true,
+    );
+    expect(
+      survived,
+      "the page reloaded, so this proves nothing about live truth",
+    ).toBe(true);
+  }
+
+  test("moving a book out of the library empties its place on the bookcase behind", async ({
+    page,
+    request,
+  }) => {
+    await provisionBooksOnShelf(page, request, "library", 2);
+
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+
+    const shelvedBooks = page.locator(".bookcase").getByTestId("book-spine");
+    await expect(shelvedBooks).toHaveCount(2, { timeout: 10000 });
+
+    await plantReloadSentinel(page);
+
+    await shelvedBooks.first().evaluate((el) => (el as HTMLElement).click());
+
+    const overlay = page.getByTestId("book-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10000 });
+
+    await overlay.locator('button:has-text("Choose Bookshelf")').click();
+    await overlay.getByTestId("shelf-mover-select").selectOption("wishlist");
+    await overlay.locator('button:text-is("Move")').click();
+
+    await expect(overlay.locator(".book-detail__status--success")).toBeVisible({
+      timeout: 5000,
+    });
+
+    await expect(shelvedBooks).toHaveCount(1, { timeout: 10000 });
+
+    await overlay.getByTestId("book-overlay-close").click();
+    await expect(overlay).not.toBeVisible({ timeout: 5000 });
+    await expect(shelvedBooks).toHaveCount(1);
+    await expect(page).toHaveURL((url) => url.pathname === "/library");
+
+    await expectNoReloadHappened(page);
+  });
+
+  test("moving a book out of the reading pile takes it off the pile behind", async ({
+    page,
+    request,
+  }) => {
+    await provisionBooksOnShelf(page, request, "reading_pile", 2);
+
+    await page.goto("/reading-pile");
+    await page.getByTestId("reading-pile-page").waitFor({ timeout: 10000 });
+
+    const piledBooks = page.locator(".book-pile__book");
+    await expect(piledBooks).toHaveCount(2, { timeout: 10000 });
+
+    await plantReloadSentinel(page);
+
+    await piledBooks.first().click();
+
+    const overlay = page.getByTestId("book-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10000 });
+
+    await overlay.locator('button:has-text("Choose Bookshelf")').click();
+    await overlay.getByTestId("shelf-mover-select").selectOption("library");
+    await overlay.locator('button:text-is("Move")').click();
+
+    await expect(overlay.locator(".book-detail__status--success")).toBeVisible({
+      timeout: 5000,
+    });
+
+    await expect(piledBooks).toHaveCount(1, { timeout: 10000 });
+
+    await overlay.getByTestId("book-overlay-close").click();
+    await expect(overlay).not.toBeVisible({ timeout: 5000 });
+    await expect(piledBooks).toHaveCount(1);
+    await expect(page).toHaveURL((url) => url.pathname === "/reading-pile");
+
+    await expectNoReloadHappened(page);
   });
 });

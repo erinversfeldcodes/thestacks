@@ -78,9 +78,21 @@ type alias Model =
     }
 
 
+{-| What the page needs from whoever is hosting it.
+
+`PlacementMutated` is the stale-read signal: a placement write has SUCCEEDED on
+the server, so any placement-bearing page this one is sitting in front of is now
+showing something that is no longer true. It deliberately carries no payload —
+the destination bookshelf would be a lie for a format or shelf-row write, and
+the host cannot repaint from a diff anyway; it re-reads. Every branch that
+completes a placement write emits it, and the host stays open, unlike
+`NavigateTo`, which is the removal path leaving the page behind entirely.
+
+-}
 type OutMsg
     = NoOut
     | NavigateTo Route
+    | PlacementMutated
     | RequestCloseOverlay
     | SessionExpired
 
@@ -515,7 +527,7 @@ update msg model maybeToken =
                         , bookshelfMoverOpen = False
                       }
                     , Cmd.none
-                    , NoOut
+                    , PlacementMutated
                     )
 
                 Err Api.ReadingPileFull ->
@@ -550,7 +562,7 @@ update msg model maybeToken =
                         , bookshelfMoverOpen = False
                       }
                     , Cmd.none
-                    , NoOut
+                    , PlacementMutated
                     )
 
                 Err Api.PlaceReadingPileFull ->
@@ -638,7 +650,7 @@ update msg model maybeToken =
                                 |> Maybe.withDefault model.currentBookshelf
                       }
                     , Cmd.none
-                    , NoOut
+                    , PlacementMutated
                     )
 
                 Err err ->
