@@ -121,7 +121,9 @@ viewQuestion q =
 viewClosing : Html msg
 viewClosing =
     p [ class "faq__closing" ]
-        [ text "Still stuck? Everything the platform measures about itself is on "
+        [ text "Still stuck? If you have an account, "
+        , link Feedback "tell us — we read everything"
+        , text ". Everything the platform measures about itself is on "
         , link Metrics "what we measure"
         , text ", and the reasoning behind publishing any of it is "
         , link DataTransparency "set out at length here"
