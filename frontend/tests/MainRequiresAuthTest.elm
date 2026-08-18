@@ -86,6 +86,9 @@ expectedAuth route =
         About ->
             False
 
+        Faq ->
+            False
+
         ListingRemoval ->
             False
 
@@ -186,6 +189,7 @@ allRoutes =
     , ( "Metrics", Metrics )
     , ( "DataTransparency", DataTransparency )
     , ( "About", About )
+    , ( "Faq", Faq )
     , ( "Catalogue", Catalogue )
     , ( "MarketplaceBrowse", MarketplaceBrowse )
     , ( "MarketplaceCreate", MarketplaceCreate )
@@ -244,6 +248,16 @@ isPageLogin page =
             False
 
 
+isPageFaq : Main.Page -> Bool
+isPageFaq page =
+    case page of
+        Main.PageFaq ->
+            True
+
+        _ ->
+            False
+
+
 isPageAdminGate : Main.Page -> Bool
 isPageAdminGate page =
     case page of
@@ -280,12 +294,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "20 public routes and 22 protected routes are enumerated" <|
+            [ test "21 public routes and 22 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 20, 22 )
+                        |> Expect.equal ( 21, 22 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|
@@ -336,5 +350,11 @@ suite =
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal False
+            , test "an anonymous visitor lands on the FAQ itself, not a sign-in wall" <|
+                \() ->
+                    Main.initPage config Faq "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
+                        |> Tuple.first
+                        |> isPageFaq
+                        |> Expect.equal True
             ]
         ]

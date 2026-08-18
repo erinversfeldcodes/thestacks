@@ -4187,12 +4187,14 @@ h4 {
 }
 
 .page--metrics,
-.page--about {
+.page--about,
+.page--faq {
     padding-bottom: 4rem;
 }
 
 .metrics__title,
-.about__title {
+.about__title,
+.faq__title {
     font-size: var(--size-4xl);
     font-family: var(--font-heading);
     letter-spacing: 0.01em;
@@ -4200,7 +4202,8 @@ h4 {
 }
 
 .metrics__subtitle,
-.about__lede {
+.about__lede,
+.faq__lede {
     color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
@@ -4285,7 +4288,8 @@ h4 {
 }
 
 .metrics__section-title,
-.about__section-title {
+.about__section-title,
+.faq__section-title {
     font-family: var(--font-heading);
     font-size: var(--size-xxl);
     margin-bottom: 0.5rem;
@@ -4513,6 +4517,132 @@ h4 {
     color: var(--text);
     line-height: 1.7;
     max-width: 640px;
+}
+
+/* The FAQ reference page. Shares About's measure and heading scale (see the
+   grouped .faq__title / .faq__lede / .faq__section-title selectors above) so
+   the two public pages read as one surface; what is local to it is the
+   section-jump row and the question expanders. */
+
+.faq__jumps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+    max-width: 640px;
+    margin-bottom: 2.5rem;
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
+
+.faq__jump {
+    font-family: var(--font-heading);
+    font-size: var(--size-xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+
+.faq__jump:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.faq__section {
+    max-width: 640px;
+    margin-bottom: var(--space-7);
+    scroll-margin-top: var(--space-5);
+}
+
+/* Ships with `open`. The reader may collapse a question; nothing re-renders
+   this page, so the browser's own state is the only state there is. */
+.faq__question {
+    border-top: 1px solid var(--border);
+    padding: var(--space-4) 0 var(--space-1);
+    scroll-margin-top: var(--space-5);
+}
+
+.faq__question-summary {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+    line-height: 1.4;
+}
+
+.faq__question-summary::-webkit-details-marker {
+    display: none;
+}
+
+.faq__question-summary::before {
+    content: "▸ ";
+    color: var(--accent);
+    font-size: var(--size-sm);
+}
+
+.faq__question[open] .faq__question-summary::before {
+    content: "▾ ";
+}
+
+.faq__question-summary:hover {
+    color: var(--accent);
+}
+
+.faq__answer {
+    font-size: var(--size-base);
+    color: var(--text-muted);
+    line-height: 1.7;
+    margin: var(--space-3) 0 0;
+}
+
+.faq__answer-link {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease-in;
+}
+
+.faq__answer-link:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent-hover);
+}
+
+.faq__list {
+    list-style: none;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.faq__list-item {
+    font-size: var(--size-base);
+    color: var(--text-muted);
+    line-height: 1.7;
+    padding-left: 0.9rem;
+    border-left: 2px solid var(--border);
+}
+
+.faq__closing {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    font-style: italic;
+    color: var(--text);
+    line-height: 1.7;
+    max-width: 640px;
+    margin-top: var(--space-4);
+}
+
+/* The quiet third affordance on the signed-out landing — deliberately not a
+   third button, so the two CTAs above it keep their weight. */
+.home__questions {
+    margin-top: var(--space-5);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    line-height: 1.6;
 }
 
 @media (max-width: 768px) {
@@ -5567,6 +5697,7 @@ h4 {
 }
 
 .about__link--costs,
+.about__link--faq,
 .about__link--metrics,
 .blog-archive__link,
 .book-detail__author-rss-link,
@@ -6189,6 +6320,7 @@ h4 {
 }
 
 .about__link--costs:hover,
+.about__link--faq:hover,
 .about__link--metrics:hover,
 .blog-archive__link:hover,
 .book-detail__author-rss-link:hover,
@@ -6485,6 +6617,7 @@ h4 {
 .privacy__blocked-load-more,
 .blog-post__author-link,
 .home__link--about,
+.home__link--faq,
 .home__link--marketplace {
     color: var(--accent);
     background: none;
@@ -6501,6 +6634,7 @@ h4 {
 .privacy__blocked-load-more:hover,
 .blog-post__author-link:hover,
 .home__link--about:hover,
+.home__link--faq:hover,
 .home__link--marketplace:hover {
     border-bottom-color: var(--accent);
     color: var(--accent-hover);

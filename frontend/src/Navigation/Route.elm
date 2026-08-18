@@ -35,6 +35,7 @@ type Route
     | CostTransparency
     | Metrics
     | About
+    | Faq
     | DataTransparency
     | ListingRemoval
     | Catalogue
@@ -88,6 +89,7 @@ parser =
         , Parser.map CostTransparency (s "costs")
         , Parser.map Metrics (s "metrics")
         , Parser.map About (s "about")
+        , Parser.map Faq (s "faq")
         , Parser.map DataTransparency (s "transparency")
         , Parser.map ListingRemoval (s "listing-removal")
         , Parser.map Catalogue (s "catalogue")
@@ -182,6 +184,9 @@ toPath route =
 
         About ->
             "/about"
+
+        Faq ->
+            "/faq"
 
         DataTransparency ->
             "/transparency"

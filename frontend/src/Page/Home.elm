@@ -118,6 +118,16 @@ viewLanding =
             , a [ href (Route.toPath MarketplaceBrowse), class "btn btn--secondary home__link--marketplace" ]
                 [ text "Browse the Marketplace" ]
             ]
+        , p [ class "home__questions" ]
+            [ text "Wondering how any of this works, or what happens to your data? "
+            , a
+                [ href (Route.toPath Faq)
+                , class "home__link--faq"
+                , testId "home-faq-link"
+                ]
+                [ text "Questions, answered" ]
+            , text "."
+            ]
         ]
 
 

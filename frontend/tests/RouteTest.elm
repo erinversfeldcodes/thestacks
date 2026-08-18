@@ -50,6 +50,7 @@ allRoutes =
     , Metrics
     , DataTransparency
     , About
+    , Faq
     , ListingRemoval
     , Catalogue
     , MarketplaceBrowse
@@ -142,6 +143,9 @@ routeLabel route =
 
         About ->
             "About"
+
+        Faq ->
+            "Faq"
 
         ListingRemoval ->
             "ListingRemoval"
@@ -321,6 +325,14 @@ suite =
                 \_ ->
                     fromPath "/about"
                         |> Expect.equal About
+            , test "Faq" <|
+                \_ ->
+                    fromPath "/faq"
+                        |> Expect.equal Faq
+            , test "a /faq fragment still parses to Faq" <|
+                \_ ->
+                    fromPath "/faq#erasure"
+                        |> Expect.equal Faq
             , test "Insights" <|
                 \_ ->
                     fromPath "/me/insights"
@@ -383,6 +395,10 @@ suite =
                 \_ ->
                     Route.toPath About
                         |> Expect.equal "/about"
+            , test "Faq path" <|
+                \_ ->
+                    Route.toPath Faq
+                        |> Expect.equal "/faq"
             , test "Insights path" <|
                 \_ ->
                     Route.toPath Insights
