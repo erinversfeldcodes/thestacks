@@ -1405,33 +1405,29 @@ searchEffects msg model maybeToken =
 
 {-| The book-search SimulatedEffect, shared by the debounce and deep-toggle paths
 so the mirror URL (`/api/search?q=…` + optional `&scope=deep`) and the reused
-`Api.searchResponseDecoder` can never drift from the real wire. Fires
-nothing without a token (book search is authenticated-only).
+`Api.searchResponseDecoder` can never drift from the real wire. Optional-auth:
+it fires with or without a token, carrying the Authorization header only when
+there is one.
 -}
 searchBooksEffect : String -> Bool -> Maybe String -> SimulatedEffect Search.Msg
 searchBooksEffect query deep maybeToken =
-    case maybeToken of
-        Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url =
-                    "/api/search?q="
-                        ++ query
-                        ++ (if deep then
-                                "&scope=deep"
+    SimulatedEffect.Http.request
+        { method = "GET"
+        , headers = authHeaderList maybeToken
+        , url =
+            "/api/search?q="
+                ++ query
+                ++ (if deep then
+                        "&scope=deep"
 
-                            else
-                                ""
-                           )
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            SimulatedEffect.Cmd.none
+                    else
+                        ""
+                   )
+        , body = SimulatedEffect.Http.emptyBody
+        , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
@@ -1931,7 +1927,7 @@ searchProgram maybeToken =
                         Search.update msg model maybeToken
                 in
                 ( newModel, searchEffects msg model maybeToken )
-        , view = Search.view
+        , view = Search.view (maybeToken /= Nothing)
         }
         |> ProgramTest.withSimulatedEffects identity
 

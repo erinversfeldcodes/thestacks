@@ -15,8 +15,14 @@ defmodule StacksWeb.SearchController do
       provenance); `platform_hits` = platform-visible books excluding the
       viewer's collection, each with optional discovery provenance (listing /
       looking_for_home). `results` is DEPRECATED: always empty, key kept
-      for wire-compat, proto field number reserved. Anonymous callers get only
-      `platform_hits`.
+      for wire-compat, proto field number reserved.
+
+      Anonymous callers get the catalogue slice and nothing else: an empty
+      `collection`, and `platform_hits` stripped of provenance. Both of the
+      segments withheld are derived from someone's shelf — the caller's own in
+      `collection`, another reader's handle and asking price in the labels — so
+      they sit at the platform tier, and the one gate that decides it is the
+      viewer here rather than a rule repeated per segment.
   """
   def index(conn, %{"q" => query}) when is_binary(query) and query != "" do
     limit = parse_limit(conn.params["limit"])
@@ -30,7 +36,7 @@ defmodule StacksWeb.SearchController do
 
     collection = collection_section(viewer, query, limit, scope)
     collection_ids = MapSet.new(collection, & &1.book.id)
-    labels = discovery_labels(platform_books)
+    labels = discovery_labels(viewer, platform_books)
 
     snippets = deep_snippets(scope, query, platform_books, collection)
 
@@ -94,7 +100,9 @@ defmodule StacksWeb.SearchController do
     end
   end
 
-  defp discovery_labels(books) do
+  defp discovery_labels(:unauthenticated, _books), do: %{}
+
+  defp discovery_labels(_viewer, books) do
     book_ids = Enum.map(books, & &1.id)
     lfh = Shelving.looking_for_home_labels(book_ids)
     listed = Marketplace.active_listing_labels(book_ids)
