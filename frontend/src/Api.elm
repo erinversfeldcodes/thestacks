@@ -2,6 +2,7 @@ module Api exposing
     ( AdminAuthError(..)
     , AdminBook
     , AdminBooksResponse
+    , AdminFeedbackEntry
     , AdminInvite
     , AdminMfaEnrolment
     , AdminSession
@@ -108,6 +109,7 @@ module Api exposing
     , fetchSyndicationExport
     , foldProgress
     , forgotPassword
+    , getAdminFeedback
     , getAdminInvites
     , getAdminSources
     , getAuditLog
@@ -186,6 +188,8 @@ module Api exposing
     , searchBooks
     , searchResponseDecoder
     , searchUsers
+    , sendFeedback
+    , sendFeedbackRequest
     , setBookAgeGate
     , setPostSyndicated
     , soldListing
@@ -4371,6 +4375,88 @@ adminInviteDecoder =
         |> andMap (Decode.field "revoked_at" (Decode.nullable Decode.string))
         |> andMap (Decode.field "redeemed_at" (Decode.nullable Decode.string))
         |> andMap (Decode.field "redeemed_by_handle" (Decode.nullable Decode.string))
+
+
+{-| One reader's message in the owner's queue.
+
+`body` is the reader's own free text, and this record is the only place in the
+SPA it exists. It is fetched by the admin page and rendered there; nothing
+caches it, and no other surface asks for it.
+
+-}
+type alias AdminFeedbackEntry =
+    { id : String
+    , body : String
+    , pageContext : Maybe String
+    , senderHandle : Maybe String
+    , createdAt : String
+    }
+
+
+adminFeedbackEntryDecoder : Decoder AdminFeedbackEntry
+adminFeedbackEntryDecoder =
+    Decode.succeed AdminFeedbackEntry
+        |> andMap (Decode.field "id" Decode.string)
+        |> andMap (Decode.field "body" Decode.string)
+        |> andMap (Decode.field "page_context" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "sender_handle" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "created_at" Decode.string)
+
+
+{-| GET /api/admin/feedback — the owner's queue, newest first.
+-}
+getAdminFeedback : String -> (Result Http.Error (List AdminFeedbackEntry) -> msg) -> Cmd msg
+getAdminFeedback token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/feedback"
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg (Decode.field "feedback" (Decode.list adminFeedbackEntryDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/feedback — send the reader's message.
+
+The 201 carries no body back, deliberately, so this resolves to `()`: there is
+nothing to render but the acknowledgement, and re-displaying what they just
+typed would be the server telling them what they already know.
+
+-}
+sendFeedback : { body : String, pageContext : String } -> Authed Http.Error () msg -> Cmd msg
+sendFeedback body request =
+    let
+        spec =
+            sendFeedbackRequest body
+    in
+    Http.request
+        { method = spec.method
+        , headers = authedHeaders request
+        , url = spec.url
+        , body = specHttpBody spec
+        , expect = authedExpect resolveWhatever request
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| The data of `sendFeedback`'s request — see `RequestSpec`.
+-}
+sendFeedbackRequest : { body : String, pageContext : String } -> RequestSpec
+sendFeedbackRequest body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/feedback"
+    , body =
+        Just
+            (Encode.object
+                [ ( "body", Encode.string body.body )
+                , ( "page_context", Encode.string body.pageContext )
+                ]
+            )
+    }
 
 
 {-| GET /api/admin/invites — every invitation, newest first.

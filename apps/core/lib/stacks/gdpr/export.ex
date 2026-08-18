@@ -10,6 +10,7 @@ defmodule Stacks.GDPR.Export do
   alias Stacks.Accounts
   alias Stacks.Blog.{Post, PostComment}
   alias Stacks.Books.UploadedImage
+  alias Stacks.Feedback.Entry, as: FeedbackEntry
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
@@ -103,6 +104,14 @@ defmodule Stacks.GDPR.Export do
       })
       |> Repo.all()
 
+    # The reader's own words are theirs, so the body goes out in full.
+    feedback_entries =
+      FeedbackEntry
+      |> where([f], f.user_id == ^user_id)
+      |> order_by([f], desc: f.created_at)
+      |> select([f], %{body: f.body, page_context: f.page_context, created_at: f.created_at})
+      |> Repo.all()
+
     library_imports =
       Stacks.Imports.LibraryImport
       |> where([li], li.user_id == ^user_id)
@@ -160,7 +169,8 @@ defmodule Stacks.GDPR.Export do
       blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
       invitations: invitations,
       library_imports: library_imports,
-      blog_syndications: blog_syndications
+      blog_syndications: blog_syndications,
+      feedback: feedback_entries
     }
 
     {:ok, export}

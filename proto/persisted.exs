@@ -758,6 +758,37 @@
       }
     },
     %{
+      proto_file: "stacks/common/v1/feedback.proto",
+      proto_message: "FeedbackEntry",
+      table_name: "feedback_entries",
+      schema_prefix: "op",
+      ecto_module: Stacks.Feedback.Entry,
+      ecto_path: "lib/stacks/gen/feedback/entry.ex",
+      dbt_path: "stg_feedback_entries.sql",
+      timestamps: false,
+      migration_exists: false,
+      dbt_grant: false,
+      # No staging model, deliberately: `body` is free text a reader wrote, and
+      # the wh schema has no erasure path — a copy there would outlive
+      # delete_user_data/1 permanently. Volume questions are answerable from
+      # the feedback.submitted event, which carries no body.
+      skip_dbt: true,
+      indexes: [
+        %{name: "feedback_entries_created_at_index", columns: [{:desc, :created_at}]},
+        %{name: "feedback_entries_user_id_index", columns: [:user_id]}
+      ],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        body: %{null: false},
+        created_at: %{ecto_type: :utc_datetime_usec, null: false, default: {:fragment, "NOW()"}}
+      }
+    },
+    %{
       proto_file: "stacks/common/v1/costs.proto",
       proto_message: "PlatformCost",
       table_name: "platform_costs",

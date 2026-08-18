@@ -86,6 +86,11 @@ expectedAuth route =
         About ->
             False
 
+        -- Signed in: the minimal channel records who wrote it, so the owner
+        -- can write back.
+        Feedback ->
+            True
+
         ListingRemoval ->
             False
 
@@ -132,6 +137,9 @@ expectedAuth route =
             True
 
         AdminRemovalRequests ->
+            True
+
+        AdminFeedback ->
             True
 
         Groups ->
@@ -186,6 +194,7 @@ allRoutes =
     , ( "Metrics", Metrics )
     , ( "DataTransparency", DataTransparency )
     , ( "About", About )
+    , ( "Feedback", Feedback )
     , ( "Catalogue", Catalogue )
     , ( "MarketplaceBrowse", MarketplaceBrowse )
     , ( "MarketplaceCreate", MarketplaceCreate )
@@ -200,6 +209,7 @@ allRoutes =
     , ( "AdminScraperConfig", AdminScraperConfig )
     , ( "AdminBookModeration", AdminBookModeration )
     , ( "AdminRemovalRequests", AdminRemovalRequests )
+    , ( "AdminFeedback", AdminFeedback )
     , ( "Groups", Groups )
     , ( "GroupDetail", GroupDetail "g1" )
     , ( "Profile", Profile "handle" )
@@ -280,12 +290,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "20 public routes and 22 protected routes are enumerated" <|
+            [ test "20 public routes and 24 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 20, 22 )
+                        |> Expect.equal ( 20, 24 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|

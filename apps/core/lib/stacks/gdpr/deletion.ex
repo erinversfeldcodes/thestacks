@@ -26,6 +26,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Blog.PostComment
   alias Stacks.Books.UploadedImage
   alias Stacks.Events.EventLog
+  alias Stacks.Feedback.Entry, as: FeedbackEntry
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Imports.LibraryImport
@@ -62,6 +63,7 @@ defmodule Stacks.GDPR.Deletion do
            feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
            uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
            library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
+           feedback_entries: count(from f in FeedbackEntry, where: f.user_id == ^user_id),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
            sessions_revoked: session_row_count(Repo, user_id)
@@ -146,6 +148,14 @@ defmodule Stacks.GDPR.Deletion do
     end)
     |> Multi.run(:delete_bookshelves, fn repo, _ ->
       {count, _} = repo.delete_all(from bs in Bookshelf, where: bs.user_id == ^user_id)
+      {:ok, count}
+    end)
+    # DELETE, not author-null: the body is the reader's own words, and a row
+    # that survives with a null user_id is a message from someone who asked to
+    # be forgotten sitting in the owner's queue. Explicit rather than left to
+    # the FK cascade so the operator summary can report a count.
+    |> Multi.run(:delete_feedback_entries, fn repo, _ ->
+      {count, _} = repo.delete_all(from f in FeedbackEntry, where: f.user_id == ^user_id)
       {:ok, count}
     end)
     |> Multi.run(:erase_comments, fn repo, _ ->

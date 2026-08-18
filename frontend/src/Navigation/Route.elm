@@ -4,6 +4,7 @@ module Navigation.Route exposing
     , fromUrl
     , isSettingsRoute
     , toPath
+    , toPattern
     )
 
 import Url exposing (Url)
@@ -47,11 +48,13 @@ type Route
     | BlogNew
     | BlogEdit String
     | BlogPost String
+    | Feedback
     | AdminSourceApproval
     | AdminInvites
     | AdminScraperConfig
     | AdminBookModeration
     | AdminRemovalRequests
+    | AdminFeedback
     | Groups
     | GroupDetail String
     | Profile String
@@ -100,7 +103,9 @@ parser =
         , Parser.map BlogEdit (s "blog" </> string </> s "edit")
         , Parser.map BlogPost (s "blog" </> string)
         , Parser.map BlogArchive (s "blog")
+        , Parser.map Feedback (s "feedback")
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
+        , Parser.map AdminFeedback (s "admin" </> s "feedback")
         , Parser.map AdminInvites (s "admin" </> s "invites")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
@@ -219,8 +224,14 @@ toPath route =
         BlogPost postId ->
             "/blog/" ++ postId
 
+        Feedback ->
+            "/feedback"
+
         AdminSourceApproval ->
             "/admin/sources"
+
+        AdminFeedback ->
+            "/admin/feedback"
 
         AdminInvites ->
             "/admin/invites"
@@ -263,6 +274,163 @@ toPath route =
 
         NotFound ->
             "/not-found"
+
+
+{-| The shape of a route's path, with every argument replaced by its name.
+
+⚠️ **This is not a cosmetic variant of `toPath`.** `toPath (Profile "mara")` is
+`/u/mara` — another reader's handle, and a bug report that captured it would be
+putting a person who was never involved into a support record. `toPattern`
+gives `/u/:handle`, which is everything a bug report actually needs.
+
+The case has **no wildcard**, deliberately. A new route with an argument is a
+compile error here until someone writes its pattern, which is the only reliable
+way to stop the next parameterised route from quietly leaking its argument.
+
+-}
+toPattern : Route -> String
+toPattern route =
+    case route of
+        BookDetail _ ->
+            "/books/:id"
+
+        MarketplaceDetail _ ->
+            "/marketplace/:id"
+
+        BlogEdit _ ->
+            "/blog/:id/edit"
+
+        BlogPost _ ->
+            "/blog/:id"
+
+        GroupDetail _ ->
+            "/groups/:id"
+
+        Profile _ ->
+            "/u/:handle"
+
+        ProfileShelf _ _ ->
+            "/u/:handle/:bookshelf"
+
+        ConfirmEmail _ ->
+            "/confirm-email"
+
+        ResetPassword _ ->
+            "/reset-password/:token"
+
+        Home ->
+            toPath Home
+
+        Login ->
+            toPath Login
+
+        Library ->
+            toPath Library
+
+        AntiLibrary ->
+            toPath AntiLibrary
+
+        WishList ->
+            toPath WishList
+
+        ReadingPile ->
+            toPath ReadingPile
+
+        LookingForHome ->
+            toPath LookingForHome
+
+        Upload ->
+            toPath Upload
+
+        Import ->
+            toPath Import
+
+        Search ->
+            toPath Search
+
+        SettingsProfile ->
+            toPath SettingsProfile
+
+        SettingsPassword ->
+            toPath SettingsPassword
+
+        SettingsNotifications ->
+            toPath SettingsNotifications
+
+        SettingsAuditLog ->
+            toPath SettingsAuditLog
+
+        Insights ->
+            toPath Insights
+
+        CostTransparency ->
+            toPath CostTransparency
+
+        Metrics ->
+            toPath Metrics
+
+        About ->
+            toPath About
+
+        DataTransparency ->
+            toPath DataTransparency
+
+        ListingRemoval ->
+            toPath ListingRemoval
+
+        Catalogue ->
+            toPath Catalogue
+
+        MarketplaceBrowse ->
+            toPath MarketplaceBrowse
+
+        MarketplaceCreate ->
+            toPath MarketplaceCreate
+
+        MarketplaceMyListings ->
+            toPath MarketplaceMyListings
+
+        SettingsPrivacy ->
+            toPath SettingsPrivacy
+
+        BlogArchive ->
+            toPath BlogArchive
+
+        BlogNew ->
+            toPath BlogNew
+
+        Feedback ->
+            toPath Feedback
+
+        AdminSourceApproval ->
+            toPath AdminSourceApproval
+
+        AdminInvites ->
+            toPath AdminInvites
+
+        AdminScraperConfig ->
+            toPath AdminScraperConfig
+
+        AdminBookModeration ->
+            toPath AdminBookModeration
+
+        AdminRemovalRequests ->
+            toPath AdminRemovalRequests
+
+        AdminFeedback ->
+            toPath AdminFeedback
+
+        Groups ->
+            toPath Groups
+
+        ForgotPassword ->
+            toPath ForgotPassword
+
+        ResendConfirmation ->
+            toPath ResendConfirmation
+
+        NotFound ->
+            toPath NotFound
 
 
 isSettingsRoute : Route -> Bool

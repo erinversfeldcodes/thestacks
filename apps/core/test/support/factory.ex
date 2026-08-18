@@ -12,6 +12,7 @@ defmodule Stacks.Factory do
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
+  alias Stacks.Feedback.Entry, as: FeedbackEntry
 
   alias Stacks.Enrichment.{
     Bookstore,
@@ -343,6 +344,14 @@ defmodule Stacks.Factory do
       post: build(:post),
       author: build(:user),
       body: sequence(:comment_body, &"Comment #{&1}")
+    }
+  end
+
+  def feedback_entry_factory do
+    %FeedbackEntry{
+      user: build(:user),
+      body: sequence(:feedback_body, &"Something I noticed #{&1}."),
+      page_context: "/library"
     }
   end
 

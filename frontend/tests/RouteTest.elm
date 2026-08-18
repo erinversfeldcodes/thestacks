@@ -50,6 +50,7 @@ allRoutes =
     , Metrics
     , DataTransparency
     , About
+    , Feedback
     , ListingRemoval
     , Catalogue
     , MarketplaceBrowse
@@ -65,6 +66,7 @@ allRoutes =
     , AdminScraperConfig
     , AdminBookModeration
     , AdminRemovalRequests
+    , AdminFeedback
     , Groups
     , GroupDetail "group-1"
     , Profile "handle"
@@ -143,6 +145,9 @@ routeLabel route =
         About ->
             "About"
 
+        Feedback ->
+            "Feedback"
+
         ListingRemoval ->
             "ListingRemoval"
 
@@ -190,6 +195,9 @@ routeLabel route =
 
         AdminRemovalRequests ->
             "AdminRemovalRequests"
+
+        AdminFeedback ->
+            "AdminFeedback"
 
         Groups ->
             "Groups"
@@ -329,6 +337,14 @@ suite =
                 \_ ->
                     fromPath "/admin/book-moderation"
                         |> Expect.equal AdminBookModeration
+            , test "Feedback" <|
+                \_ ->
+                    fromPath "/feedback"
+                        |> Expect.equal Feedback
+            , test "AdminFeedback" <|
+                \_ ->
+                    fromPath "/admin/feedback"
+                        |> Expect.equal AdminFeedback
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"

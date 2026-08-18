@@ -65,6 +65,7 @@ import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSetti
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
+import Page.Admin.Feedback as AdminFeedback
 import Page.Admin.Invites as AdminInvites
 import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
@@ -80,6 +81,7 @@ import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.DataTransparency as DataTransparencyPage
+import Page.Feedback as FeedbackPage
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Home as Home
@@ -257,7 +259,9 @@ type Page
     | PageBlogArchive BlogArchive.Model
     | PageBlogEditor BlogEditor.Model
     | PageBlogPost BlogPostPage.Model
+    | PageFeedback FeedbackPage.Model
     | PageAdminSourceApproval AdminSourceApproval.Model
+    | PageAdminFeedback AdminFeedback.Model
     | PageAdminInvites AdminInvites.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminBookModeration AdminBookModeration.Model
@@ -949,6 +953,20 @@ initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
         initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival
 
 
+{-| What the feedback form records about where the reader was.
+
+`Route.toPattern`, never `Route.toPath`: the reader may have walked here from
+someone else's profile, and `/u/:handle` is all a bug report needs. Empty when
+they arrived directly, which is honest — nothing is invented to fill the field.
+
+-}
+feedbackContextFor : Maybe Route -> String
+feedbackContextFor maybePreviousRoute =
+    maybePreviousRoute
+        |> Maybe.map Route.toPattern
+        |> Maybe.withDefault ""
+
+
 {-| The routes behind the `:admin` pipeline. Exhaustive on purpose — a `_ -> False` catch-all would
 silently leave a newly added admin route ungated, which is the bug this whole change is fixing.
 -}
@@ -959,6 +977,9 @@ isAdminRoute route =
             True
 
         Route.AdminInvites ->
+            True
+
+        Route.AdminFeedback ->
             True
 
         Route.AdminScraperConfig ->
@@ -1225,6 +1246,9 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
 
+        Route.Feedback ->
+            ( PageFeedback (FeedbackPage.init (feedbackContextFor maybePreviousRoute)), Cmd.none )
+
         Route.AdminSourceApproval ->
             if isOwner maybeAuth then
                 let
@@ -1232,6 +1256,17 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                         AdminSourceApproval.init adminToken
                 in
                 ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminFeedback ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminFeedback.init adminToken
+                in
+                ( PageAdminFeedback subModel, Cmd.map AdminFeedbackMsg subCmd )
 
             else
                 ( PageNotFound, Cmd.none )
@@ -1771,7 +1806,9 @@ type Msg
     | BlogArchiveMsg BlogArchive.Msg
     | BlogEditorMsg BlogEditor.Msg
     | BlogPostMsg BlogPostPage.Msg
+    | FeedbackMsg FeedbackPage.Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
+    | AdminFeedbackMsg AdminFeedback.Msg
     | AdminInvitesMsg AdminInvites.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
@@ -2567,6 +2604,47 @@ update msg model =
                                 , copyToClipboard payload
                                 ]
                             )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        FeedbackMsg subMsg ->
+            case model.page of
+                PageFeedback subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            FeedbackPage.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        FeedbackPage.NoOut ->
+                            ( { model | page = PageFeedback newSubModel }
+                            , Cmd.map FeedbackMsg subCmd
+                            )
+
+                        FeedbackPage.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminFeedbackMsg subMsg ->
+            case model.page of
+                PageAdminFeedback subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminFeedback.update subMsg subModel
+                    in
+                    case outMsg of
+                        AdminFeedback.NoOut ->
+                            ( { model | page = PageAdminFeedback newSubModel }
+                            , Cmd.map AdminFeedbackMsg subCmd
+                            )
+
+                        AdminFeedback.SessionExpired ->
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -3497,6 +3575,12 @@ pageTitle page =
         PageAdminRemovalRequests _ ->
             titled "Removal Requests"
 
+        PageFeedback _ ->
+            titled "Tell us"
+
+        PageAdminFeedback _ ->
+            titled "Feedback"
+
         PageAdminGate _ _ ->
             titled "Admin Sign-In"
 
@@ -3641,6 +3725,7 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
                                         , navLink Route.AdminScraperConfig "Scrapers"
                                         , navLink Route.AdminBookModeration "Book Moderation"
                                         , navLink Route.AdminRemovalRequests "Removal Requests"
+                                        , navLink Route.AdminFeedback "Feedback"
                                         ]
                                 }
 
@@ -3677,6 +3762,7 @@ settingsLinks =
     , { label = "Password", path = Route.toPath SettingsPassword }
     , { label = "Activity Log", path = Route.toPath SettingsAuditLog }
     , { label = "Reading Insights", path = Route.toPath Insights }
+    , { label = "Tell us", path = Route.toPath Route.Feedback }
     ]
 
 
@@ -4008,6 +4094,12 @@ viewPage model =
 
         PageAdminRemovalRequests subModel ->
             Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel)
+
+        PageFeedback subModel ->
+            Html.map FeedbackMsg (FeedbackPage.view subModel)
+
+        PageAdminFeedback subModel ->
+            Html.map AdminFeedbackMsg (AdminFeedback.view subModel)
 
         PageAdminGate _ subModel ->
             Html.map AdminSessionMsg (AdminSession.view subModel)

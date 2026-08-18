@@ -103,7 +103,7 @@ defmodule Stacks.GDPRTest do
       assert row.private_notes == "my private note"
     end
 
-    test "payload contains all 14 documented keys" do
+    test "payload contains all 15 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -122,7 +122,8 @@ defmodule Stacks.GDPRTest do
                  :blog_comments,
                  :invitations,
                  :library_imports,
-                 :blog_syndications
+                 :blog_syndications,
+                 :feedback
                ])
     end
 
