@@ -472,6 +472,32 @@ observe:
 observe-down:
     docker compose -f infra/local-observability/docker-compose.yml down
 
+# Local FULL-STACK profile: VictoriaMetrics + Grafana + SearXNG on the same
+# images/Dockerfiles prod runs, so the pipeline mechanisms can be proven on a
+# laptop — a pushed metric reaching the public /metrics page, a scrape reaching
+# a database row. Ingestion is PUSH here, matching prod, which is what makes it
+# a proof rather than a demo; `just observe` scrapes instead, and the two cannot
+# run together because both bind 8428.
+#
+# Phoenix and the Rust scraper run natively beside it — see docs/local-full-stack.md.
+# Grafana (no login): http://localhost:3010 · VictoriaMetrics: http://localhost:8428
+local-stack-up:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # SearXNG's Dockerfile COPYs a rendered settings file that never lands in
+    # git (it carries the secret). Prod renders it in deploy-stack.sh; render it
+    # here too, or the build fails on a missing COPY source.
+    sed "s|__SEARXNG_SECRET_KEY__|${SEARXNG_SECRET_KEY:-local-dev-searxng-secret}|g" \
+        deploy/searxng/settings.yml > deploy/searxng/settings.rendered.yml
+    trap 'rm -f deploy/searxng/settings.rendered.yml' EXIT
+    docker compose -f deploy/local/docker-compose.yml up -d --build
+    docker compose -f deploy/local/docker-compose.yml ps
+
+# Stop + remove the local full-stack profile (keeps the vm-data volume, so a
+# metric you pushed before lunch is still queryable after it).
+local-stack-down:
+    docker compose -f deploy/local/docker-compose.yml down
+
 # Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement): evaluates
 # EVERY dashboard panel's real PromQL against a live VictoriaMetrics (seeded with
 # synthesized well-formed data) and fails on any blank panel or malformed query.
