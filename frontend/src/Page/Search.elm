@@ -87,7 +87,7 @@ update msg model maybeToken =
                 | query = query
                 , debounceCount = newCount
                 , results =
-                    if String.isEmpty query || maybeToken == Nothing then
+                    if String.isEmpty query then
                         NotAsked
 
                     else
@@ -110,12 +110,7 @@ update msg model maybeToken =
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
                     bookCmd =
-                        case maybeToken of
-                            Just token ->
-                                Api.searchBooks model.query model.deepSearch token SearchCompleted
-
-                            Nothing ->
-                                Cmd.none
+                        Api.searchBooks model.query model.deepSearch maybeToken SearchCompleted
 
                     readersCmd =
                         Api.searchUsers maybeToken model.query ReadersCompleted
@@ -198,24 +193,30 @@ update msg model maybeToken =
                 newModel =
                     { model | deepSearch = deep }
             in
-            case ( maybeToken, String.isEmpty model.query ) of
-                ( Just token, False ) ->
-                    ( { newModel | results = Loading }
-                    , Api.searchBooks model.query deep token SearchCompleted
-                    , NoOut
-                    )
+            if String.isEmpty model.query then
+                ( newModel, Cmd.none, NoOut )
 
-                _ ->
-                    ( newModel, Cmd.none, NoOut )
+            else
+                ( { newModel | results = Loading }
+                , Api.searchBooks model.query deep maybeToken SearchCompleted
+                , NoOut
+                )
 
         BookClicked bookId ->
             ( model, Cmd.none, OpenOverlay bookId )
 
 
-view : Model -> Html Msg
-view model =
+{-| `signedIn` decides only what the page says about itself, never what it
+shows: the catalogue slice below is the same either way, and the shelf sections
+the server withholds from an anonymous reader are already absent from the
+payload. Taken at render rather than at `init` so a session that expires
+mid-visit starts telling the truth on the next frame.
+-}
+view : Bool -> Model -> Html Msg
+view signedIn model =
     div [ class "page page--search", testId "search-page" ]
         [ h1 [ class "page__title" ] [ text "Search books & readers" ]
+        , viewAnonNote signedIn
         , searchBar
             { query = model.query
             , onInput = QueryChanged
@@ -277,6 +278,25 @@ view model =
                         ]
         , viewReadersSection model.readers
         ]
+
+
+{-| The strip an anonymous reader sees: what this page already does for them
+(the whole open catalogue) and the one thing an account adds (their own
+shelves searched alongside it). Named plainly so nobody has to guess whether a
+thin result set means "walled off" or "nothing matched".
+-}
+viewAnonNote : Bool -> Html Msg
+viewAnonNote signedIn =
+    if signedIn then
+        text ""
+
+    else
+        p [ class "search-anon-note", testId "search-anon-note" ]
+            [ text "You're searching the open catalogue — every book on the shelves here. "
+            , a [ class "search-anon-note__link", href (Route.toPath Route.Login) ]
+                [ text "Sign in" ]
+            , text " and your own shelves are searched alongside it."
+            ]
 
 
 {-| The "Deep search" toggle: off by default, it opts the query into matching

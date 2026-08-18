@@ -1634,13 +1634,17 @@ getBookRequest bookId =
     }
 
 
+{-| Book search. Optional-auth like `searchUsers`: without a token the server
+answers with the catalogue slice alone, so an anonymous reader still gets book
+results rather than a 401.
+-}
 searchBooks :
     String
     -> Bool
-    -> String
+    -> Maybe String
     -> (Result Http.Error SearchSections -> msg)
     -> Cmd msg
-searchBooks query deep token toMsg =
+searchBooks query deep maybeToken toMsg =
     let
         queryParams =
             Url.Builder.string "q" query
@@ -1653,7 +1657,7 @@ searchBooks query deep token toMsg =
     in
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authHeaders maybeToken
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg searchResponseDecoder

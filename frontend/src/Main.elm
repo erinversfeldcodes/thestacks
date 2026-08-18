@@ -4027,7 +4027,7 @@ viewPage model =
             Html.map ImportPageMsg (ImportPage.view subModel)
 
         PageSearch subModel ->
-            Html.map SearchMsg (Search.view subModel)
+            Html.map SearchMsg (Search.view (currentAuth model.auth /= Nothing) subModel)
 
         PageSettingsAuditLog subModel ->
             viewSettingsHub model.route

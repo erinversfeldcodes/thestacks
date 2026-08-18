@@ -260,7 +260,7 @@ navigateToSearch =
                     fromPath "/search"
 
                 view =
-                    Search.view Search.init
+                    Search.view True Search.init
             in
             Expect.all
                 [ \_ -> route |> Expect.equal Search

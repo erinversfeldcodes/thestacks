@@ -127,6 +127,7 @@ defmodule CoreWeb.Router do
 
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth, :rate_limit_public]
+    get "/search", SearchController, :index
     get "/search/users", UserSearchController, :index
     get "/u/:handle", ProfileController, :show
     get "/u/:handle/bookshelves/:bookshelf_name", ProfileController, :shelf
@@ -180,8 +181,6 @@ defmodule CoreWeb.Router do
     post "/books/:id/merge-format", BookController, :merge_format
     put "/books/:id/age-gate", BookController, :set_age_gate
     resources "/books", BookController, only: [:create]
-
-    get "/search", SearchController, :index
 
     post "/imports/goodreads", ImportController, :create
     get "/imports", ImportController, :index
