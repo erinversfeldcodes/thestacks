@@ -99,6 +99,15 @@ navOpen menu =
         |> Query.fromHtml
 
 
+{-| Owner nav on a given route — the Admin disclosure is rendered for the
+owner alone, so its tests cannot reuse the reader helpers.
+-}
+ownerNav : Route -> Maybe NavMenu -> Query.Single Main.Msg
+ownerNav route menu =
+    Main.viewNav route (Just ownerAuth) menu UserMenu.init Types.RemoteData.NotAsked
+        |> Query.fromHtml
+
+
 flags : String -> Encode.Value
 flags role =
     Encode.object
@@ -264,6 +273,30 @@ suite =
                     navClosed
                         |> Query.find addBook
                         |> Query.has [ Selector.class "btn", Selector.class "btn--primary" ]
+            ]
+        , describe "the Admin disclosure"
+            [ test "open: every admin surface is one click away" <|
+                \() ->
+                    ownerNav Library (Just AdminMenu)
+                        |> Query.find [ Selector.class "app-nav__dropdown-menu" ]
+                        |> Query.findAll [ Selector.class "app-nav__dropdown-link" ]
+                        |> Query.count (Expect.equal 5)
+            , test "open: the invitations surface is one of them" <|
+                \() ->
+                    ownerNav Library (Just AdminMenu)
+                        |> Query.find [ Selector.class "app-nav__dropdown-menu" ]
+                        |> Query.findAll [ Selector.attribute (Attr.href "/admin/invites") ]
+                        |> Query.count (Expect.equal 1)
+            , test "the invitations route keeps the Admin item active" <|
+                \() ->
+                    ownerNav AdminInvites Nothing
+                        |> Query.find [ Selector.class "app-nav__item--active" ]
+                        |> Query.has [ Selector.text "Admin" ]
+            , test "the invitations route lights exactly one nav item" <|
+                \() ->
+                    ownerNav AdminInvites Nothing
+                        |> Query.findAll [ Selector.class "app-nav__item--active" ]
+                        |> Query.count (Expect.equal 1)
             ]
         , describe "active-route highlight on child routes"
             [ test "a book-detail keeps the Bookshelves item active" <|
