@@ -141,7 +141,11 @@ defmodule Stacks.Events.Registry do
     "invite.redeemed",
     "library_import.started",
     "library_import.completed",
-    "invite.revoked"
+    "invite.revoked",
+    # The admin queue is the system of record and the owner reads it directly;
+    # nothing downstream acts on a submission. A notification handler is the
+    # obvious future subscriber, and this line is where it will attach.
+    "feedback.submitted"
   ]
 
   @pending %{

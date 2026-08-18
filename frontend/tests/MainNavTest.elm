@@ -280,7 +280,7 @@ suite =
                     ownerNav Library (Just AdminMenu)
                         |> Query.find [ Selector.class "app-nav__dropdown-menu" ]
                         |> Query.findAll [ Selector.class "app-nav__dropdown-link" ]
-                        |> Query.count (Expect.equal 5)
+                        |> Query.count (Expect.equal 6)
             , test "open: the invitations surface is one of them" <|
                 \() ->
                     ownerNav Library (Just AdminMenu)

@@ -38,6 +38,10 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :social
   end
 
+  pipeline :rate_limit_feedback do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :feedback
+  end
+
   pipeline :rate_limit_public do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
@@ -275,6 +279,11 @@ defmodule CoreWeb.Router do
     delete "/users/:id/block", SocialController, :unblock
   end
 
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :rate_limit_feedback]
+    post "/feedback", FeedbackController, :create
+  end
+
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :admin, :rate_limit_admin]
     get "/sources", SourceAdminController, :index
@@ -291,6 +300,8 @@ defmodule CoreWeb.Router do
     get "/partners", PartnerController, :index
     put "/partners/:id/approve", PartnerController, :approve
     put "/partners/:id/reject", PartnerController, :reject
+
+    get "/feedback", FeedbackAdminController, :index
   end
 
   scope "/api/partner", StacksWeb do

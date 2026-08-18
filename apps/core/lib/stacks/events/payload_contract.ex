@@ -86,6 +86,9 @@ defmodule Stacks.Events.PayloadContract do
     "enrichment.prices_scraped" => %{version: 1, keys: ~w(book_ids count)},
     "enrichment.reviews_scraped" => %{version: 1, keys: ~w(book_count)},
     "costs.refreshed" => %{version: 1, keys: ~w(item_count period vision_jobs)},
+    # No body, deliberately. op.event_log is immutable outside GDPR redaction,
+    # so a reader's words written here would outlive every erasure request.
+    "feedback.submitted" => %{version: 1, keys: ~w(user_id character_count)},
     "source_health.recorded" => %{
       version: 1,
       keys: ~w(consecutive_failures source_name source_type status)

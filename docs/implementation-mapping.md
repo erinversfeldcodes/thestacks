@@ -2231,10 +2231,11 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | An in-app feedback channel for beta users to submit feedback, with an owner-side triage/status view. A new member of the existing epic 15, reached via nav/footer. |
+| **Summary** | An in-app feedback channel for beta users to submit feedback, with an owner-side reading view. A new member of the existing epic 15, reached from the account menu and the admin disclosure. |
 | **Phase** | Phase 1 (extended) |
-| **Status** | Not built — spec only (`Stacks.Feedback`, `Page.Admin.Feedback` absent). |
-| **Implementation** | Planned: `POST /api/feedback` → `Stacks.Feedback.submit`; `GET /api/admin/feedback`, `PUT /api/admin/feedback/:id/status` → `StacksWeb.FeedbackAdminController`; `Stacks.Notifications.FeedbackHandler`, `Stacks.Workers.FeedbackRetentionJob`; frontend `Page.Admin.Feedback`. |
+| **Status** | Built (minimal shape — one form, one table, one admin list). |
+| **Implementation** | `POST /api/feedback` (authed, `:feedback` rate-limit bucket) → `StacksWeb.FeedbackController.create` → `Stacks.Feedback.submit/3`; `GET /api/admin/feedback` (`:admin` pipeline, MFA + audited) → `StacksWeb.FeedbackAdminController.index` → `Stacks.Feedback.list_entries/1`. Table `op.feedback_entries` from `proto/stacks/common/v1/feedback.proto` (`FeedbackEntry`, `skip_dbt` — the body never reaches the warehouse). Event `feedback.submitted` carries a sender id and a character count, no body. Erasure deletes the rows (`GDPR.Deletion.delete_user_data/2`, `:delete_feedback_entries`); export gains a `feedback` key. Frontend `Page.Feedback` (account menu) and `Page.Admin.Feedback` (admin disclosure); page context is captured via `Route.toPattern`, never `Route.toPath`. |
+| **Deferred** | The story's wider shape: anonymous submission, the four categories, the optional contact email, `PUT /api/admin/feedback/:id/status` triage, `Stacks.Notifications.FeedbackHandler`, `Stacks.Workers.FeedbackRetentionJob` (180-day sweep), and the `stg_feedback_submissions` / `mart_feedback_volume` models. The retention sweep is the one with a standing obligation behind it — it only bites once anonymous submission exists, since every row today is erasure-reachable through its sender. |
 
 ---
 
