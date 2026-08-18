@@ -173,6 +173,15 @@ test.describe("Admin session gate", () => {
     await expect(page.getByTestId("source-approve")).toHaveCount(pendingBefore - 1, {
       timeout: 15000,
     });
+
+    // One fewer button could be a row this page dropped from its own list.
+    // Re-entering the console rebuilds the queue from the server, so the source
+    // still being gone is the approval having actually been recorded.
+    await page.reload();
+    await passTheGate(page, secret);
+    await expect(page.getByTestId("source-approve")).toHaveCount(pendingBefore - 1, {
+      timeout: 15000,
+    });
   });
 
   test("an admin failure does NOT sign the operator out of the app", async ({ page, request }) => {

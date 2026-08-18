@@ -28,12 +28,30 @@ import {
  * healthy API never produces.
  */
 
+/**
+ * The mutating endpoint behind a journey, awaited around the click that fires
+ * it. A success banner is painted from the overlay's own state, so it says only
+ * that the reader was told the write worked — these helpers ask the network.
+ */
+function awaitPlacementWrite(
+  page: import("@playwright/test").Page,
+  method: string,
+  pathPattern: RegExp,
+) {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === method &&
+      pathPattern.test(new URL(response.url()).pathname),
+    { timeout: 15000 },
+  );
+}
+
 test.describe("Shelf actions — move book between shelves", () => {
   test("move a book from library to wishlist via book detail overlay", async ({
     page,
     request,
   }) => {
-    await provisionBookOnShelf(page, request, "library");
+    const { bookId } = await provisionBookOnShelf(page, request, "library");
 
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
@@ -55,7 +73,13 @@ test.describe("Shelf actions — move book between shelves", () => {
 
     await overlay.getByTestId('shelf-mover-select').selectOption("wishlist");
 
+    const moved = awaitPlacementWrite(
+      page,
+      "PUT",
+      /^\/api\/placements\/[^/]+\/move$/,
+    );
     await overlay.locator('button:text-is("Move")').click();
+    expect((await moved).status(), "PUT /api/placements/:id/move").toBe(200);
 
     await expect(
       overlay.locator(".book-detail__status--success")
@@ -65,6 +89,21 @@ test.describe("Shelf actions — move book between shelves", () => {
       hasText: "Move to Shelf from Wish List",
     });
     await expect(updatedTitle).toBeVisible();
+
+    // The overlay retitles itself from the state it already holds, so it reads
+    // the same whether the server kept the move or dropped it. Only a reload
+    // asks the shelves themselves where the book stands.
+    await page.goto("/wishlist");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    await expect(page.locator(`#spine-${bookId}`)).toBeVisible({
+      timeout: 10000,
+    });
+
+    await page.goto("/library");
+    await expect(page.getByTestId("bookshelf-empty")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.locator(`#spine-${bookId}`)).toHaveCount(0);
   });
 });
 
@@ -94,15 +133,38 @@ test.describe("Shelf actions — add book from catalogue", () => {
       page.locator(".catalogue__card-picker").first()
     ).toBeVisible({ timeout: 3000 });
 
+    const placed = awaitPlacementWrite(
+      page,
+      "POST",
+      /^\/api\/bookshelves\/library\/placements$/,
+    );
     await page
       .locator('.catalogue__card-picker-option:has-text("Library")')
       .first()
       .click();
+    expect(
+      (await placed).status(),
+      "POST /api/bookshelves/library/placements",
+    ).toBe(201);
 
-    await page.waitForTimeout(2000);
+    await expect
+      .poll(() => page.locator(".catalogue__card-badge").count(), {
+        timeout: 10000,
+        message: "the new placement never drew a badge on the catalogue card",
+      })
+      .toBeGreaterThanOrEqual(initialBadges + 1);
 
-    const finalBadges = await page.locator(".catalogue__card-badge").count();
-    expect(finalBadges).toBeGreaterThanOrEqual(initialBadges + 1);
+    // The badge is drawn from the placement list the page is already holding.
+    // Reloading rebuilds that list from the server, so a badge still there is
+    // a placement the server actually kept.
+    await page.reload();
+    await page.getByTestId("catalogue-grid").waitFor({ timeout: 10000 });
+    await expect
+      .poll(() => page.locator(".catalogue__card-badge").count(), {
+        timeout: 15000,
+        message: "the new placement did not survive a reload of the catalogue",
+      })
+      .toBeGreaterThanOrEqual(initialBadges + 1);
   });
 });
 
@@ -178,7 +240,17 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
     await expect(overlay.locator(".shelf-mover")).toBeVisible();
 
     await overlay.getByTestId('shelf-mover-select').selectOption("antilibrary");
+
+    const placed = awaitPlacementWrite(
+      page,
+      "POST",
+      /^\/api\/bookshelves\/antilibrary\/placements$/,
+    );
     await overlay.getByTestId('shelf-mover-btn').click();
+    expect(
+      (await placed).status(),
+      "POST /api/bookshelves/antilibrary/placements",
+    ).toBe(201);
 
     await expect(
       overlay.locator(".book-detail__status--success")
@@ -188,6 +260,15 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
         hasText: "Move to Shelf from Antilibrary",
       })
     ).toBeVisible();
+
+    // The overlay relabels itself from local state; the antilibrary is where
+    // the book has to actually be.
+    const addedBookId = (unplacedHref as string).split("/books/")[1];
+    await page.goto("/antilibrary");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    await expect(page.locator(`#spine-${addedBookId}`)).toBeVisible({
+      timeout: 10000,
+    });
   });
 });
 
@@ -216,7 +297,7 @@ test.describe("Shelf actions — remove book from collection", () => {
     page,
     request,
   }) => {
-    await provisionBookOnShelf(page, request, "library");
+    const { bookId } = await provisionBookOnShelf(page, request, "library");
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
@@ -233,10 +314,80 @@ test.describe("Shelf actions — remove book from collection", () => {
 
     const confirmBtn = page.getByTestId('remove-book-confirm');
     await expect(confirmBtn).toBeVisible();
+
+    const removed = awaitPlacementWrite(
+      page,
+      "DELETE",
+      /^\/api\/placements\/[^/]+$/,
+    );
     await confirmBtn.click();
+    expect((await removed).status(), "DELETE /api/placements/:id").toBe(204);
 
     await expect(overlay).not.toBeVisible({ timeout: 10000 });
     await expect(page).toHaveURL(/\/library/, { timeout: 10000 });
+
+    // A closed overlay and a /library URL are both reachable without the
+    // placement ever having been deleted. The emptied shelf, rebuilt from the
+    // server, is not.
+    await page.reload();
+    await expect(page.getByTestId("bookshelf-empty")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.locator(`#spine-${bookId}`)).toHaveCount(0);
+  });
+});
+
+/**
+ * Removal offers a time-limited "Undo" on the shelf the reader lands on, and
+ * the undo is a real write of its own (POST /api/placements/:id/restore) — the
+ * placement comes back rather than a new one being created. Nothing drove that
+ * loop before: the toast could paint, the button could be inert, and the book
+ * would look restored right up until the reader came back to the shelf.
+ */
+test.describe("Shelf actions — undoing a removal", () => {
+  test("Undo puts the removed book back, and it is still there after a reload", async ({
+    page,
+    request,
+  }) => {
+    const { bookId } = await provisionBookOnShelf(page, request, "library");
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+
+    const spine = page.locator(`#spine-${bookId}`);
+    await expect(spine).toBeAttached({ timeout: 10000 });
+    await spine.evaluate((el) => (el as HTMLElement).click());
+
+    const overlay = page.getByTestId("book-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10000 });
+    await overlay.locator('button:has-text("Remove from collection")').click();
+    await page.getByTestId("remove-book-confirm").click();
+
+    await expect(page.getByTestId("bookshelf-empty")).toBeVisible({
+      timeout: 10000,
+    });
+
+    const restored = awaitPlacementWrite(
+      page,
+      "POST",
+      /^\/api\/placements\/[^/]+\/restore$/,
+    );
+    await page.getByTestId("undo-remove").click();
+    expect((await restored).status(), "POST /api/placements/:id/restore").toBe(
+      200,
+    );
+
+    await expect(page.getByTestId("undo-toast")).toHaveCount(0, {
+      timeout: 10000,
+    });
+    await expect(page.locator(`#spine-${bookId}`)).toBeVisible({
+      timeout: 10000,
+    });
+
+    await page.reload();
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    await expect(page.locator(`#spine-${bookId}`)).toBeVisible({
+      timeout: 10000,
+    });
   });
 });
 
@@ -415,6 +566,12 @@ test.describe("Shelf actions — the page behind the overlay after a move", () =
     await expect(page).toHaveURL((url) => url.pathname === "/library");
 
     await expectNoReloadHappened(page);
+
+    // Live truth and durable truth are different claims; the sentinel above has
+    // already made the first, so the reload can now make the second.
+    await page.reload();
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    await expect(shelvedBooks).toHaveCount(1, { timeout: 10000 });
   });
 
   test("moving a book out of the reading pile takes it off the pile behind", async ({
@@ -452,6 +609,10 @@ test.describe("Shelf actions — the page behind the overlay after a move", () =
     await expect(page).toHaveURL((url) => url.pathname === "/reading-pile");
 
     await expectNoReloadHappened(page);
+
+    await page.reload();
+    await page.getByTestId("reading-pile-page").waitFor({ timeout: 10000 });
+    await expect(piledBooks).toHaveCount(1, { timeout: 10000 });
   });
 });
 

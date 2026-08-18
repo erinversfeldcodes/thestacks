@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile } from "./helpers";
+import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
 /**
  * Browser E2E for the CORE privacy/visibility flows (, child of the
@@ -52,15 +52,37 @@ test.describe("Privacy — Profile & Shelf visibility", () => {
 
     await profileSelect.selectOption("platform");
 
+    const saved = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/settings/profile_visibility" &&
+        r.request().method() === "PUT",
+      { timeout: 15000 }
+    );
     await profileSection
       .getByRole("button", { name: "Save Profile Visibility" })
       .click();
+    expect(
+      (await saved).status(),
+      "PUT /api/settings/profile_visibility"
+    ).toBe(200);
 
     await expect(
       page.getByRole("button", { name: "Saved!" })
     ).toBeVisible({ timeout: 10000 });
     await expect(page.getByText("Visibility updated.")).toBeVisible();
     await expect(page.locator(".error")).toHaveCount(0);
+
+    // "Saved!" is the button's own state. The select is seeded from the stored
+    // visibility on load, so only a reload reports what was stored.
+    await page.reload();
+    const reloadedSection = page
+      .locator(".settings-section")
+      .filter({
+        has: page.getByRole("button", { name: "Save Profile Visibility" }),
+      });
+    await expect(reloadedSection.locator("select")).toHaveValue("platform", {
+      timeout: 10000,
+    });
   });
 
   test("shelf visibility: select 'Only me' → Save issues an accepted PUT", async ({
@@ -87,6 +109,15 @@ test.describe("Privacy — Profile & Shelf visibility", () => {
     expect(resp.status()).toBe(200);
     await expect(page.locator(".error")).toHaveCount(0);
     await expect(page.getByText("Visibility updated.")).toBeVisible();
+
+    // An accepted PUT and a stored value are different claims — the row is
+    // rebuilt from the server's shelf list on load, so reload and read it back
+    // before restoring the original.
+    await page.reload();
+    const reloadedRow = page.locator(".privacy__shelf-row").first();
+    await expect(reloadedRow.locator("select")).toHaveValue("owner", {
+      timeout: 10000,
+    });
 
     await firstShelfRow.locator("select").selectOption(original);
     await Promise.all([
@@ -118,26 +149,61 @@ test.describe("Privacy — Blog editor visibility", () => {
   }) => {
     await page.goto("/blog/new");
 
+    const postTitle = `E2E privacy draft ${Date.now()}`;
     const title = page.getByPlaceholder("Post title");
     await expect(title).toBeVisible({ timeout: 10000 });
-    await title.fill(`E2E privacy draft ${Date.now()}`);
+    await title.fill(postTitle);
     await page
       .getByPlaceholder("Write your post here...")
-      .fill("Body written by the #198 privacy E2E spec.");
+      .fill("Body written by the privacy E2E spec.");
 
     await page.locator(".blog-editor__form select").selectOption("owner");
 
+    const created = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/blog/posts" &&
+        r.request().method() === "POST",
+      { timeout: 15000 }
+    );
     await page.getByRole("button", { name: "Save Draft" }).click();
+    const createResp = await created;
+    expect(createResp.status(), "POST /api/blog/posts").toBe(201);
+    const postId = (await createResp.json()).post.id as string;
     await expect(
       page.getByRole("button", { name: "Draft saved!" })
     ).toBeVisible({ timeout: 10000 });
 
+    const published = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === `/api/blog/posts/${postId}/publish` &&
+        r.request().method() === "POST",
+      { timeout: 15000 }
+    );
     await page.getByRole("button", { name: "Publish" }).click();
+    expect(
+      (await published).status(),
+      `POST /api/blog/posts/${postId}/publish`
+    ).toBe(200);
     await expect(
       page.getByRole("button", { name: "Published!" })
     ).toBeVisible({ timeout: 10000 });
 
     await expect(page.locator(".error")).toHaveCount(0);
+
+    // "Published!" is a button label. Publication is `published_at` being set on
+    // the stored post, which only a fresh read can report.
+    const stored = await apiCallFromPage(page, "GET", `/api/blog/posts/${postId}`);
+    expect(stored.status, `GET /api/blog/posts/${postId}`).toBe(200);
+    const storedPost = (stored.data as { post: { title: string; published_at: string } })
+      .post;
+    expect(storedPost.title).toBe(postTitle);
+    expect(storedPost.published_at, "the stored post carries a publish time")
+      .toBeTruthy();
+
+    await page.goto(`/blog/${postId}`);
+    await expect(page.locator(".blog-post__title")).toHaveText(postTitle, {
+      timeout: 10000,
+    });
   });
 });
 
