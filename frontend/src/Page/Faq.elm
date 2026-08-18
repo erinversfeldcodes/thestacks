@@ -375,6 +375,19 @@ yourData =
                     ]
                 ]
           }
+        , { id = "business-listings"
+          , question = "My business is listed here — how do I get it removed?"
+          , answer =
+                [ answer
+                    [ text "Tell us, and we take it down. The Stacks finds bookshops and places to read publicly and lists them, which means a business can end up on this platform without ever having been asked, so leaving cannot be made harder than arriving was. "
+                    , link ListingRemoval "The removal form"
+                    , text " is the whole of it — no account, no sign-in. Bring the web address of the page your business appears on, because that is what we match against."
+                    ]
+                , answer
+                    [ text "What happens next depends on the address you write from, and it is worth knowing which you will get. From an email address on the listing's own domain, the listing comes down immediately and is not added again. From any other address the request is recorded and waits for a person to read it — submitting a form is not proof that a shop is yours — and until then the listing is still visible. You are told which of the two happened rather than left to assume."
+                    ]
+                ]
+          }
         ]
     }
 

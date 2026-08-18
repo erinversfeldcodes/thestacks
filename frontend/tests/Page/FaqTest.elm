@@ -53,6 +53,7 @@ publishedQuestionIds =
     , "photo-retention"
     , "who-sees-my-shelves"
     , "what-leaves-the-platform"
+    , "business-listings"
     , "open-source"
     , "licence"
     , "self-hosting"
@@ -162,6 +163,22 @@ suite =
                     inviteOnly
                         |> Query.find [ testIdSelector "faq-question-photo-retention" ]
                         |> Query.has [ Selector.text "Thirty days at the outside" ]
+            , test "the business-listing answer links the removal form itself" <|
+                \() ->
+                    -- The reason this question exists: the form was reachable
+                    -- only by typed URL, so an answer that described it without
+                    -- linking it would leave the gap exactly where it was.
+                    inviteOnly
+                        |> Query.find [ testIdSelector "faq-question-business-listings" ]
+                        |> Query.has [ Selector.attribute (Attr.href "/listing-removal") ]
+            , test "the business-listing answer names both outcomes, not just the fast one" <|
+                \() ->
+                    inviteOnly
+                        |> Query.find [ testIdSelector "faq-question-business-listings" ]
+                        |> Expect.all
+                            [ Query.has [ Selector.text "the listing comes down immediately" ]
+                            , Query.has [ Selector.text "the listing is still visible" ]
+                            ]
             ]
         , describe "the licence answers match the tracked LICENSE"
             [ test "the open-source answer says source available, not open source" <|

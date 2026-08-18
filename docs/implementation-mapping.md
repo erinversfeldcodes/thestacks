@@ -1089,12 +1089,12 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Businesses discovered and listed without their consent can request removal. "Is this your business?" link on every discovered listing. Exclusion list prevents re-discovery. |
+| **Summary** | Businesses discovered and listed without their consent can request removal. "Is this your business?" link wherever a discovered business is named on a routed page. Exclusion list prevents re-discovery. |
 | **Phase** | Phase 2 (Enrichment) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | Subtle "Is this your business?" link on `Components.SpaceCard` and `Components.PriceInfo` for discovered (non-partner) sources. Links to a simple form: business name, contact email, choice between "Remove my listing" and "Become a partner". |
+| **Frontend (Elm)** | The link is one component, `Components.BusinessClaim`, so the copy and the route live in one place. Rendered from `Components.PriceInfo` (beside a scraped shop's price) and `Components.AuthorCard` (beside a shop hosting a scraped event) — in each case only when a shop was actually named, since the form's first question is the listing's web address. `Page.ListingRemoval` at `/listing-removal` is the form: the listing's web address, a contact email, an optional note, and an `/about` link for a business that would rather be listed properly. `Page.Faq` carries the same route under `business-listings` in the "Your data" section, and that answer is the entry point that is present unconditionally — the two book-detail blocks appear only when scrape output exists, which today it does not. `Page.ThirdSpaces` also carries the link but is not routed, so it reaches nobody. |
 | **Backend (Phoenix)** | `StacksWeb.OptOutController.create/2` (`POST /api/opt-out`) — unauthenticated endpoint. Creates an opt-out request. Platform owner is notified. For removal: sets `discovered_sources.status = 'excluded'` and/or `third_spaces.opted_out = true`. For partnership interest: routes to US-9.1.1 flow. `Stacks.Discovery.OptOut` context — `request_removal/1`, `process_removal/1`, `add_to_exclusion_list/1`. |
 | **Database** | **Write:** `op.discovered_sources` (status = 'excluded', excluded_at, exclusion_email). `op.third_spaces` (opted_out = true, opted_out_at). `op.audit_log`. |
 | **Jobs (Oban)** | `Stacks.Workers.OptOutConfirmationJob` — sends confirmation email to the business. |

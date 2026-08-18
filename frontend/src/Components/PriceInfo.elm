@@ -11,6 +11,7 @@ prices, so a work can legitimately show several.
 
 -}
 
+import Components.BusinessClaim as BusinessClaim
 import Html exposing (Html, a, div, h3, h4, p, section, span, text)
 import Html.Attributes exposing (attribute, class, href, id, rel, target)
 import Types.RemoteData exposing (RemoteData(..))
@@ -84,6 +85,7 @@ view priceData =
                             (List.map viewEditionPrices data.editions)
                         , p [ class "book-detail__prices-footer" ]
                             [ text ("Prices checked by The Stacks — last updated " ++ data.lastUpdated) ]
+                        , BusinessClaim.view
                         ]
         ]
 

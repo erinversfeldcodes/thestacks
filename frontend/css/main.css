@@ -7277,3 +7277,22 @@ h4 {
     white-space: pre-wrap;
     margin: 0;
 }
+
+/* The business opt-out link. Sits at the foot of any block that names a shop
+   we found rather than one that asked to be here. Quiet on purpose — the reader
+   browsing for a book is not its audience — but never hidden, because an
+   opt-out nobody can see is not one. */
+.business-claim {
+    display: inline-block;
+    margin-top: var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.business-claim:hover,
+.business-claim:focus-visible {
+    color: var(--accent);
+}
