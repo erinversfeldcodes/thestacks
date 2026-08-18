@@ -6,6 +6,7 @@ module Page.Search exposing
     , init
     , parseSnippet
     , update
+    , updateWithEffect
     , view
     )
 
@@ -13,13 +14,12 @@ import Api
 import Components.FilterPanel exposing (FilterState, SortOrder(..), defaultFilterState, filterPanel)
 import Components.SearchBar exposing (searchBar)
 import Components.SortSelector exposing (sortSelector)
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h2, h3, input, label, mark, p, text)
 import Html.Attributes exposing (checked, class, href, id, type_)
 import Html.Events exposing (onCheck, onClick)
 import Http
 import Navigation.Route as Route
-import Process
-import Task
 import Types.Book exposing (Book, authorName, bookPublicationYear)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -73,15 +73,31 @@ init =
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effect as data.
+
+The program-test harness runs THIS one and interprets the effect, so whether a
+debounce tick is the current one — and therefore whether it searches at all —
+is decided here and nowhere else. `update` is this composed with
+`Effect.perform`.
+
+-}
+updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         QueryChanged query ->
             let
                 newCount =
                     model.debounceCount + 1
 
-                debounceCmd =
-                    Task.perform (\_ -> DebounceExpired newCount)
-                        (Process.sleep 300)
+                debounceEffect =
+                    Effect.sleepThen debounceMillis (DebounceExpired newCount)
             in
             ( { model
                 | query = query
@@ -99,50 +115,51 @@ update msg model maybeToken =
                     else
                         Loading
               }
-            , debounceCmd
+            , debounceEffect
             , NoOut
             )
 
         ClearQuery ->
-            ( { model | query = "", results = NotAsked, readers = NotAsked }, Cmd.none, NoOut )
+            ( { model | query = "", results = NotAsked, readers = NotAsked }, Effect.none, NoOut )
 
         DebounceExpired count ->
             if count == model.debounceCount && not (String.isEmpty model.query) then
-                let
-                    bookCmd =
-                        Api.searchBooks model.query model.deepSearch maybeToken SearchCompleted
-
-                    readersCmd =
-                        Api.searchUsers maybeToken model.query ReadersCompleted
-                in
-                ( model, Cmd.batch [ bookCmd, readersCmd ], NoOut )
+                ( model
+                , Effect.batch
+                    [ booksSearch model.query model.deepSearch maybeToken
+                    , Effect.public (Api.searchUsersRequest model.query)
+                        maybeToken
+                        (Api.resolveJson Api.peopleSearchDecoder >> ReadersCompleted)
+                    ]
+                , NoOut
+                )
 
             else
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
         SearchCompleted result ->
             case result of
                 Ok sections ->
-                    ( { model | results = Success sections }, Cmd.none, NoOut )
+                    ( { model | results = Success sections }, Effect.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | results = Failure err }, Cmd.none, NoOut )
+                        ( { model | results = Failure err }, Effect.none, NoOut )
 
         ReadersCompleted result ->
             case result of
                 Ok readers ->
-                    ( { model | readers = Success readers }, Cmd.none, NoOut )
+                    ( { model | readers = Success readers }, Effect.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | readers = Failure err }, Cmd.none, NoOut )
+                        ( { model | readers = Failure err }, Effect.none, NoOut )
 
         SortChanged sortStr ->
             let
@@ -160,10 +177,10 @@ update msg model maybeToken =
                         _ ->
                             ByRelevance
             in
-            ( { model | sort = newSort }, Cmd.none, NoOut )
+            ( { model | sort = newSort }, Effect.none, NoOut )
 
         ToggleFilterPanel ->
-            ( { model | filterPanelOpen = not model.filterPanelOpen }, Cmd.none, NoOut )
+            ( { model | filterPanelOpen = not model.filterPanelOpen }, Effect.none, NoOut )
 
         YearFromChanged str ->
             let
@@ -173,7 +190,7 @@ update msg model maybeToken =
                 newFilters =
                     { oldFilters | yearFrom = String.toInt str }
             in
-            ( { model | filters = newFilters }, Cmd.none, NoOut )
+            ( { model | filters = newFilters }, Effect.none, NoOut )
 
         YearToChanged str ->
             let
@@ -183,10 +200,10 @@ update msg model maybeToken =
                 newFilters =
                     { oldFilters | yearTo = String.toInt str }
             in
-            ( { model | filters = newFilters }, Cmd.none, NoOut )
+            ( { model | filters = newFilters }, Effect.none, NoOut )
 
         ClearFilters ->
-            ( { model | filters = defaultFilterState }, Cmd.none, NoOut )
+            ( { model | filters = defaultFilterState }, Effect.none, NoOut )
 
         DeepSearchToggled deep ->
             let
@@ -194,16 +211,33 @@ update msg model maybeToken =
                     { model | deepSearch = deep }
             in
             if String.isEmpty model.query then
-                ( newModel, Cmd.none, NoOut )
+                ( newModel, Effect.none, NoOut )
 
             else
                 ( { newModel | results = Loading }
-                , Api.searchBooks model.query deep maybeToken SearchCompleted
+                , booksSearch model.query deep maybeToken
                 , NoOut
                 )
 
         BookClicked bookId ->
-            ( model, Cmd.none, OpenOverlay bookId )
+            ( model, Effect.none, OpenOverlay bookId )
+
+
+{-| How long the page waits for typing to stop before it searches.
+-}
+debounceMillis : Float
+debounceMillis =
+    300
+
+
+{-| The book search a query runs — shared by the debounce tick and the
+deep-search toggle so the two cannot ask for different things.
+-}
+booksSearch : String -> Bool -> Maybe String -> Effect Msg
+booksSearch query deep maybeToken =
+    Effect.public (Api.searchBooksRequest query deep)
+        maybeToken
+        (Api.resolveJson Api.searchResponseDecoder >> SearchCompleted)
 
 
 {-| `signedIn` decides only what the page says about itself, never what it

@@ -110,8 +110,8 @@ the point: this is the occluded window, in which no such message ever arrives.
 shellUpdate : Login.Msg -> ShellModel -> ( ShellModel, SimulatedEffect Login.Msg )
 shellUpdate msg model =
     let
-        ( newPage, _, outMsg ) =
-            Login.update msg model.page
+        ( newPage, effect, outMsg ) =
+            Login.updateWithEffect msg model.page
 
         withPage =
             { model | page = newPage }
@@ -130,7 +130,7 @@ shellUpdate msg model =
                 _ ->
                     withPage
     in
-    ( newModel, TestHelpers.loginEffects msg model.page )
+    ( newModel, TestHelpers.simulateEffect effect )
 
 
 shellProgram : ProgramTest ShellModel Login.Msg (SimulatedEffect Login.Msg)

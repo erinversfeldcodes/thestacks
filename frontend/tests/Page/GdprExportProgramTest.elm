@@ -9,6 +9,7 @@ failure surfaces an error message.
 
 -}
 
+import Api
 import Http
 import Page.Settings.Privacy as Privacy exposing (Msg(..))
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
@@ -16,6 +17,7 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 suite : Test
@@ -60,15 +62,9 @@ effectsFor : Privacy.Msg -> SimulatedEffect Privacy.Msg
 effectsFor msg =
     case msg of
         UserClicksExport ->
-            SimulatedEffect.Http.request
-                { method = "POST"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/gdpr/export"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectWhatever GotExportResponse
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec Api.requestExportRequest
+                token
+                (SimulatedEffect.Http.expectWhatever GotExportResponse)
 
         _ ->
             SimulatedEffect.Cmd.none
