@@ -48,14 +48,19 @@ async function renderedTitles(page: Page): Promise<string[]> {
   return page.locator(".search-result__title").allInnerTexts();
 }
 
-/** First catalogue book (id + title) via the API — the deterministic anchor. */
-async function firstCatalogueBook(
+/** Nth catalogue book (id + title) via the API — a deterministic anchor.
+ * The listing test and the dedupe test MUST anchor on different books: the
+ * listing test leaves a permanently active listing on its anchor, which would
+ * put the dedupe test's anchor under On the Platform forever on any
+ * persistent database. */
+async function catalogueBookAt(
   request: APIRequestContext,
+  index: number,
 ): Promise<{ id: string; title: string }> {
-  const resp = await request.get("/api/catalogue?per_page=1");
+  const resp = await request.get(`/api/catalogue?per_page=${index + 1}`);
   expect(resp.ok(), "catalogue fetch for sectioned-search anchor").toBeTruthy();
   const data = await resp.json();
-  const book = ((data.books ?? []) as Array<{ id: string; title: string }>)[0];
+  const book = ((data.books ?? []) as Array<{ id: string; title: string }>)[index];
   assertSeedOrSkip(
     book !== undefined,
     "catalogue has no books to anchor a sectioned-search spec",
@@ -389,7 +394,7 @@ test.describe("Anonymous search", () => {
     request,
   }) => {
     const seller = await mintOrSkip(request);
-    const book = await firstCatalogueBook(request);
+    const book = await catalogueBookAt(request, 1);
 
     const place = await request.post("/api/bookshelves/library/placements", {
       headers: { Authorization: `Bearer ${seller.token}` },
@@ -473,7 +478,7 @@ test.describe("Sectioned search", () => {
     request,
   }) => {
     const owner = await mintOrSkip(request);
-    const book = await firstCatalogueBook(request);
+    const book = await catalogueBookAt(request, 0);
 
     const place = await request.post("/api/bookshelves/library/placements", {
       headers: { Authorization: `Bearer ${owner.token}` },
@@ -518,7 +523,7 @@ test.describe("Sectioned search", () => {
     request,
   }) => {
     const seller = await mintOrSkip(request);
-    const book = await firstCatalogueBook(request);
+    const book = await catalogueBookAt(request, 2);
 
     const place = await request.post("/api/bookshelves/library/placements", {
       headers: { Authorization: `Bearer ${seller.token}` },
