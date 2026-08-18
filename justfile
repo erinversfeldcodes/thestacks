@@ -282,6 +282,12 @@ test-e2e-ci:
 check-licenses:
     scripts/check-licenses.sh
 
+# Does every API route have a client that calls it? Runs inside lint-elixir too.
+#   just check-route-clients             # the gate, as CI runs it
+#   just check-route-clients --report    # every route, its call site, and how it matched
+check-route-clients *ARGS:
+    @bash scripts/check-route-clients.sh {{ARGS}}
+
 # Lint changed migrations with squawk
 squawk:
     scripts/security-squawk.sh
