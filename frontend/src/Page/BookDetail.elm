@@ -31,7 +31,7 @@ import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Task
 import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isUnidentified)
-import Types.Placement exposing (Format, Placement, ReadingStatus(..), readingStatusToString)
+import Types.Placement exposing (Format, Placement, ReadingStatus(..), formatToString, parseFormat, readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility exposing (Visibility)
 import Util.TestId exposing (testId)
@@ -57,6 +57,8 @@ type alias Model =
     , currentBookshelf : String
     , selectedBookshelf : String
     , selectedFormats : List Format
+    , previousFormats : List Format
+    , formatsState : RemoteData Http.Error ()
     , moveState : RemoteData Api.MoveError ()
     , removeState : RemoteData Http.Error ()
     , selectedEdition : Maybe Edition
@@ -102,6 +104,7 @@ type Msg
     | RemovePlacement String
     | PlacementRemoved String (Result Http.Error ())
     | ToggleFormat Format
+    | FormatsUpdated (Result Http.Error (List String))
     | EditionSelected String
     | DismissAgeGate
     | CloseOverlay
@@ -143,6 +146,8 @@ init bookId maybeToken maybePreviousRoute =
       , currentBookshelf = routeToBookshelf maybePreviousRoute
       , selectedBookshelf = firstAvailableBookshelf (routeToBookshelf maybePreviousRoute)
       , selectedFormats = []
+      , previousFormats = []
+      , formatsState = NotAsked
       , moveState = NotAsked
       , removeState = NotAsked
       , selectedEdition = Nothing
@@ -404,6 +409,7 @@ update msg model maybeToken =
                         , currentBookshelf = bookshelf
                         , selectedBookshelf = firstAvailableBookshelf bookshelf
                         , selectedFormats = formats
+                        , previousFormats = formats
                         , selectedEdition = response.book.primaryEdition
                         , placementVisibility = placementVisibility
                         , previousVisibility = placementVisibility
@@ -672,7 +678,55 @@ update msg model maybeToken =
                     else
                         format :: model.selectedFormats
             in
-            ( { model | selectedFormats = newFormats }, Cmd.none, NoOut )
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    if model.formatsState == Loading then
+                        ( model, Cmd.none, NoOut )
+
+                    else
+                        ( { model
+                            | selectedFormats = newFormats
+                            , previousFormats = model.selectedFormats
+                            , formatsState = Loading
+                          }
+                        , Api.updatePlacementFormats placement.id
+                            (List.map formatToString newFormats)
+                            token
+                            FormatsUpdated
+                        , NoOut
+                        )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        FormatsUpdated result ->
+            case result of
+                Ok stored ->
+                    let
+                        confirmed =
+                            List.filterMap parseFormat stored
+                    in
+                    ( { model
+                        | formatsState = Success ()
+                        , selectedFormats = confirmed
+                        , previousFormats = confirmed
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model
+                            | formatsState = Failure err
+                            , selectedFormats = model.previousFormats
+                          }
+                        , Cmd.none
+                        , NoOut
+                        )
 
         PlacementVisibilitySelected raw ->
             case ( Visibility.fromString raw, model.placement, maybeToken ) of
@@ -1374,7 +1428,31 @@ viewFormatsOnShelf model =
             { selected = model.selectedFormats
             , onToggle = ToggleFormat
             }
+        , viewFormatsState model.formatsState
         ]
+
+
+{-| The save state of the format picker. The failure copy names the rollback,
+because the buttons have already snapped back: without it the reader sees their
+click undo itself and is left to guess whether that was the save or the failure.
+-}
+viewFormatsState : RemoteData Http.Error () -> Html Msg
+viewFormatsState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Saving formats…" ]
+
+        Success _ ->
+            div [ class "book-detail__status book-detail__status--success" ]
+                [ text "Formats saved." ]
+
+        Failure _ ->
+            div [ class "book-detail__status book-detail__status--error" ]
+                [ text "We couldn't save your formats, so we've put them back as they were." ]
 
 
 {-| "Who can see this book" — per-placement visibility override.

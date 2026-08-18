@@ -68,8 +68,14 @@ test.describe("Book Detail overlay — layout and structure", () => {
     const overlay = await openBookDetailOverlay(page);
     const formatBtn = overlay.locator(".format-picker__btn").first();
     await expect(formatBtn).toBeVisible({ timeout: 10000 });
+    // The suite user's shelf carries over between runs, so which way this
+    // button toggles is not knowable in advance — only that it toggles.
+    const before = await formatBtn.getAttribute("aria-pressed");
     await formatBtn.click();
-    await expect(formatBtn).toHaveClass(/format-picker__btn--selected/);
+    await expect(formatBtn).toHaveAttribute(
+      "aria-pressed",
+      before === "true" ? "false" : "true"
+    );
   });
 
   test("Move to Shelf dropdown works", async ({ page }) => {
@@ -484,6 +490,71 @@ test.describe("Book Detail overlay — remove-modal focus & scoped escape (rev 1
     await expect
       .poll(() => activeElementId(page), { timeout: 3000 })
       .toBe("main-content");
+  });
+});
+
+test.describe("Book Detail — format picker persistence", () => {
+  /**
+   * The interactivity test above cannot tell a saved toggle from a painted one:
+   * the button styles itself from local state either way, which is how this
+   * control shipped for as long as it did with nothing behind it. Only a reload
+   * asks the server what it actually kept.
+   */
+  test("a toggled format survives a reload", async ({ page, request }) => {
+    const { bookId } = await provisionBookOnShelf(page, request, "library");
+    await page.goto(`/books/${bookId}`);
+
+    const physical = page.locator('.format-picker__btn[title="Physical"]');
+    await expect(physical).toBeVisible({ timeout: 10000 });
+    await expect(physical).toHaveAttribute("aria-pressed", "false");
+
+    const [saved] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          /\/api\/placements\/[^/]+\/formats$/.test(
+            new URL(response.url()).pathname
+          ),
+        { timeout: 15000 }
+      ),
+      physical.click(),
+    ]);
+    expect(saved.status(), "PUT /api/placements/:id/formats").toBe(200);
+    expect((await saved.json()).placement.formats).toContain("physical");
+
+    await page.reload();
+    const afterReload = page.locator('.format-picker__btn[title="Physical"]');
+    await expect(afterReload).toBeVisible({ timeout: 10000 });
+    await expect(afterReload).toHaveAttribute("aria-pressed", "true");
+    await expect(afterReload).toHaveClass(/format-picker__btn--selected/);
+  });
+
+  test("a rejected save rolls the picker back and says so", async ({
+    page,
+    request,
+  }) => {
+    const { bookId } = await provisionBookOnShelf(page, request, "library");
+    await page.route("**/api/placements/*/formats", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "boom" }),
+      })
+    );
+    await page.goto(`/books/${bookId}`);
+
+    const physical = page.locator('.format-picker__btn[title="Physical"]');
+    await expect(physical).toBeVisible({ timeout: 10000 });
+    await physical.click();
+
+    await expect(physical).toHaveAttribute("aria-pressed", "false", {
+      timeout: 10000,
+    });
+    await expect(
+      page.locator(".book-detail__status--error", {
+        hasText: "We couldn't save your formats",
+      })
+    ).toBeVisible();
   });
 });
 
