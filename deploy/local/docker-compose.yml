@@ -1,0 +1,101 @@
+# The Stacks — local full-stack profile.
+#
+# Brings up the three containerisable side services beside a natively-run
+# Phoenix so the pipeline MECHANISMS can be proven on a laptop instead of only
+# on a preview deploy: a metric pushed by the app becomes a stored sample
+# becomes a rendered value on the public /metrics page; a scrape becomes a
+# database row.
+#
+# Images and Dockerfiles are the SAME artefacts prod runs (deploy/fly.*.toml),
+# so what you prove here is the real path, not a stand-in.
+#
+#   VictoriaMetrics  victoriametrics/victoria-metrics:v1.103.0  (= fly.victoriametrics.toml)
+#   Grafana          deploy/grafana/Dockerfile                  (= fly.grafana.toml)
+#   SearXNG          deploy/searxng/Dockerfile                  (= fly.searxng.toml)
+#
+# The Rust scraper is deliberately NOT here — it runs natively:
+#
+#   cd apps/scraper && SCRAPER_HMAC_SECRET=local-dev-scraper-secret cargo run
+#
+# It resolves its store configs from a `scrapers/` directory relative to the
+# working directory, and a native `cargo run` reuses apps/scraper/target, so a
+# container would cost a multi-minute Rust build to gain nothing.
+#
+# ⚠️ Ingestion here is PUSH, matching prod: nothing scrapes Phoenix. The app's
+# Core.PromEx.MetricsPusher POSTs to VictoriaMetrics every 15s when
+# STACKS_METRICS_PUSH_URL is set. This is the difference from
+# infra/local-observability/, which scrapes /internal/metrics — an older shape
+# that no longer matches how metrics reach prod. Both bind 8428, so run one or
+# the other, never both.
+#
+# See docs/local-full-stack.md for bring-up and the mechanism proofs.
+name: stacks-local-stack
+
+services:
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.103.0
+    command:
+      - "--storageDataPath=/victoria-metrics-data"
+      # Months. Prod keeps 3; a laptop only ever needs the current session.
+      - "--retentionPeriod=1"
+      - "--httpListenAddr=:8428"
+      # Same as prod. It delays a just-written sample from appearing in query
+      # results by 15s, which is why the proofs below tell you to wait ~30s
+      # before querying rather than treating an empty result as a failure.
+      - "--search.latencyOffset=15s"
+    volumes:
+      - vm-data:/victoria-metrics-data
+    ports:
+      # VM's own UI (/vmui) plus the Prometheus-compatible query and import
+      # APIs. Phoenix pushes to and queries this port from the host.
+      - "8428:8428"
+
+  grafana:
+    build:
+      # Repo root: the Dockerfile COPYs both deploy/grafana/provisioning and
+      # apps/core/priv/grafana, so a narrower context cannot build it.
+      context: ../..
+      dockerfile: deploy/grafana/Dockerfile
+    environment:
+      # The datasource provisioning file interpolates this. Prod points at the
+      # 6PN internal address; on the compose network it is the service name.
+      STACKS_VM_URL: http://victoriametrics:8428
+      # Anonymous viewer, no login form — the same public-dashboard posture as
+      # fly.grafana.toml, so what you see locally is what a visitor sees.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_DEFAULT_THEME: dark
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      # The image already bakes these in (that is what makes prod's Grafana
+      # stateless). Mounting them again means an edited dashboard JSON or
+      # datasource shows up on the provider's 30s refresh with no rebuild.
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../apps/core/priv/grafana:/var/lib/grafana/dashboards:ro
+    ports:
+      # 3000 is where Phoenix-adjacent tooling tends to live; 3010 matches the
+      # port infra/local-observability already taught people to open.
+      - "3010:3000"
+    depends_on:
+      - victoriametrics
+
+  searxng:
+    build:
+      # deploy/searxng/, NOT the repo root — the Dockerfile COPYs
+      # `settings.rendered.yml` by bare basename, and the root .dockerignore
+      # collapses the context to nothing. Same constraint prod hit.
+      context: ../searxng
+      dockerfile: Dockerfile
+    environment:
+      SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
+    ports:
+      # Published on 8888 because that is the port Core.Application already
+      # defaults :searxng_url to, so a bare local run needs no override.
+      - "8888:8080"
+
+volumes:
+  vm-data:
