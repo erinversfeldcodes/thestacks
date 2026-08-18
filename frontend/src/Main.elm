@@ -30,6 +30,7 @@ port module Main exposing
     , parkPending
     , reconnectShouldRefetch
     , redirectAfterNavigation
+    , refreshShelfBehindOverlay
     , renewAuthToken
     , requiresAuth
     , resetPasswordDestination
@@ -2104,6 +2105,11 @@ update msg model =
                         BookDetail.NoOut ->
                             ( baseModel, baseCmd )
 
+                        -- The routed page fills the window: the mutation signal
+                        -- has no covered page to correct.
+                        BookDetail.PlacementMutated ->
+                            ( baseModel, baseCmd )
+
                         BookDetail.SessionExpired ->
                             handleSessionExpiry model
 
@@ -2911,6 +2917,19 @@ update msg model =
                                 ]
                             )
 
+                        BookDetail.PlacementMutated ->
+                            let
+                                ( refreshedPage, refreshCmd ) =
+                                    refreshShelfBehindOverlay model.page
+                                        |> Maybe.withDefault ( model.page, Cmd.none )
+                            in
+                            ( { model
+                                | bookDetailOverlay = Just updatedOverlay
+                                , page = refreshedPage
+                              }
+                            , Cmd.batch [ Cmd.map OverlayBookDetailMsg subCmd, refreshCmd ]
+                            )
+
                         BookDetail.NoOut ->
                             ( { model | bookDetailOverlay = Just updatedOverlay }
                             , Cmd.map OverlayBookDetailMsg subCmd
@@ -3160,6 +3179,45 @@ update msg model =
 
         SwipeIgnored ->
             ( model, Cmd.none )
+
+
+{-| Re-read the page the overlay is covering, after a placement write the
+overlay reports as done.
+
+The overlay is a layer over a page that is still mounted and still rendering
+what it read on arrival, so a successful write leaves a page behind it telling
+the reader something untrue — a book on the shelf it just left. The pages named
+here are the ones whose content IS placements; a page not named keeps what it
+has, which is correct for pages a placement write does not change.
+
+The refetch is asked for as a `Msg` rather than reached for as a `Cmd` so each
+page stays the only thing that decides how to re-read itself — the read-only
+profile shelf reads from a different endpoint than the reader's own.
+
+`Nothing` is "there is nothing behind this that a placement write makes untrue",
+which is a different answer from handing back the page and an empty command:
+the caller leaves `model.page` alone rather than rewriting it with itself.
+
+-}
+refreshShelfBehindOverlay : Page -> Maybe ( Page, Cmd Msg )
+refreshShelfBehindOverlay page =
+    case page of
+        PageBookshelf shelf ->
+            let
+                ( refreshed, cmd, _ ) =
+                    Bookshelf.update Bookshelf.ReloadRequested shelf
+            in
+            Just ( PageBookshelf refreshed, Cmd.map BookshelfMsg cmd )
+
+        PageReadingPile pile ->
+            let
+                ( refreshed, cmd, _ ) =
+                    ReadingPile.update ReadingPile.ReloadRequested pile
+            in
+            Just ( PageReadingPile refreshed, Cmd.map ReadingPileMsg cmd )
+
+        _ ->
+            Nothing
 
 
 {-| Open the book detail overlay for a given book ID.

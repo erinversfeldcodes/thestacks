@@ -1110,11 +1110,14 @@ libraryEffects msg model =
                 _ ->
                     SimulatedEffect.Cmd.none
 
-        ( Bookshelf.UndoCompleted (Ok ()), _, Just token ) ->
-            bookshelfInitEffects model.config (Just token)
+        ( Bookshelf.UndoCompleted (Ok ()), _, _ ) ->
+            shelvesFetchEffects model.config model.token
 
-        ( Bookshelf.ShelfMutated _, _, Just token ) ->
-            bookshelfInitEffects model.config (Just token)
+        ( Bookshelf.ShelfMutated _, _, _ ) ->
+            shelvesFetchEffects model.config model.token
+
+        ( Bookshelf.ReloadRequested, _, _ ) ->
+            shelvesFetchEffects model.config model.token
 
         _ ->
             SimulatedEffect.Cmd.none
@@ -1221,36 +1224,48 @@ moveShelfToId draggedId targetId shelves =
             shelves
 
 
-{-| Translate the owner-mode `Page.Bookshelf.init` Cmd into a SimulatedEffect.
+{-| Translate `Page.Bookshelf`'s one shelf read into a SimulatedEffect.
 
-Mirrors `Page.Bookshelf.init`'s own structure: with no token there is no
-request at all, and with a token the GET targets `config.apiName` and tags the
-response with `requestKey config`. Keyed off the config so the
-Library / Antilibrary / Wish List harnesses all share one mirror.
+Production has a single `fetchShelves` behind `init` and every refetch, and it
+picks its endpoint from `Bookshelf.shelvesSource`. This asks that same
+production function which read is being made, so the harness cannot decide the
+owner/profile split differently from the page — only the URL each source maps
+to lives here.
 
 -}
-bookshelfInitEffects : Bookshelf.Config -> Maybe String -> SimulatedEffect Bookshelf.Msg
-bookshelfInitEffects config maybeToken =
-    case maybeToken of
-        Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/bookshelves/" ++ config.apiName
-                , body = SimulatedEffect.Http.emptyBody
-                , expect =
-                    SimulatedEffect.Http.expectJson
-                        (Bookshelf.ShelvesLoaded (Bookshelf.requestKey config))
-                        bookshelfResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+shelvesFetchEffects : Bookshelf.Config -> Maybe String -> SimulatedEffect Bookshelf.Msg
+shelvesFetchEffects config maybeToken =
+    case Bookshelf.shelvesSource config maybeToken of
+        Bookshelf.OwnShelf token bookshelfName ->
+            ownShelfFetchEffect config token bookshelfName
 
-        Nothing ->
+        Bookshelf.ProfileShelf token handle bookshelfName ->
+            profileShelfInitEffects token handle bookshelfName
+
+        Bookshelf.NoShelvesRequest ->
             SimulatedEffect.Cmd.none
 
 
-{-| Translate the read-only profile-shelf init Cmd into a SimulatedEffect.
+{-| Mirror of `Api.getBookshelf` — the owner's own shelf, tagged with
+`requestKey config`.
+-}
+ownShelfFetchEffect : Bookshelf.Config -> String -> String -> SimulatedEffect Bookshelf.Msg
+ownShelfFetchEffect config token bookshelfName =
+    SimulatedEffect.Http.request
+        { method = "GET"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/bookshelves/" ++ bookshelfName
+        , body = SimulatedEffect.Http.emptyBody
+        , expect =
+            SimulatedEffect.Http.expectJson
+                (Bookshelf.ShelvesLoaded (Bookshelf.requestKey config))
+                bookshelfResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Translate the read-only profile-shelf read into a SimulatedEffect.
 
 Mirrors `Api.getProfileShelf`: an optional-auth GET to the profile endpoint
 (`/api/u/:handle/bookshelves/:name`), decoding into `Bookshelf.ShelvesLoaded`.
@@ -1625,7 +1640,7 @@ bookshelfProgram config maybeToken =
                     ( model, _ ) =
                         Bookshelf.init config maybeToken "test-user-id"
                 in
-                ( model, bookshelfInitEffects config maybeToken )
+                ( model, shelvesFetchEffects config maybeToken )
         , update =
             \msg model ->
                 let
@@ -1691,6 +1706,9 @@ routes it back into the page.
 readingPileEffects : ReadingPile.Msg -> ReadingPile.Model -> Maybe String -> SimulatedEffect ReadingPile.Msg
 readingPileEffects msg newPage maybeToken =
     case ( msg, maybeToken ) of
+        ( ReadingPile.ReloadRequested, _ ) ->
+            readingPileInitEffects maybeToken
+
         ( ReadingPile.CardMsg placementId _, Just token ) ->
             case newPage.saveState of
                 Types.RemoteData.Loading ->
@@ -1786,7 +1804,7 @@ bookshelfUndoProgram config maybeToken removal =
                     ( seeded, _ ) =
                         Bookshelf.withPendingUndo (Just removal) ( model, Cmd.none )
                 in
-                ( seeded, bookshelfInitEffects config maybeToken )
+                ( seeded, shelvesFetchEffects config maybeToken )
         , update =
             \msg model ->
                 let
@@ -1815,7 +1833,7 @@ profileShelfProgram maybeToken handle bookshelfName =
                     ( model, _ ) =
                         Bookshelf.init config maybeToken "viewer-user-id"
                 in
-                ( model, profileShelfInitEffects maybeToken handle bookshelfName )
+                ( model, shelvesFetchEffects config maybeToken )
         , update =
             \msg model ->
                 let

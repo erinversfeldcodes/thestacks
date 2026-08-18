@@ -4,6 +4,7 @@ module Page.Bookshelf exposing
     , Msg(..)
     , OutMsg(..)
     , Removal
+    , ShelvesSource(..)
     , UndoToast(..)
     , antiLibraryConfig
     , init
@@ -11,6 +12,7 @@ module Page.Bookshelf exposing
     , mutationToken
     , profileConfig
     , requestKey
+    , shelvesSource
     , undoToastMillis
     , update
     , view
@@ -227,6 +229,57 @@ requestKey config =
             config.apiName
 
 
+{-| Which read answers "what is on this bookshelf", as data rather than as a
+`Cmd` nobody can look at.
+
+The distinction is not cosmetic: `/library` and `/u/ada/library` are different
+shelves belonging to different people, and both arrive here under the same
+`apiName`. Naming the source in one place is what stops a second dispatch from
+being written slightly differently from the first — which is how a refetch ends
+up painting the VIEWER's own books onto the page of the profile they are
+browsing, tagged with the profile's `requestKey` so nothing downstream can tell.
+
+-}
+type ShelvesSource
+    = OwnShelf String String
+    | ProfileShelf (Maybe String) String String
+    | NoShelvesRequest
+
+
+shelvesSource : Config -> Maybe String -> ShelvesSource
+shelvesSource config maybeToken =
+    case ( config.readOnly, config.profileHandle ) of
+        ( True, Just handle ) ->
+            ProfileShelf maybeToken handle config.apiName
+
+        _ ->
+            case maybeToken of
+                Just token ->
+                    OwnShelf token config.apiName
+
+                Nothing ->
+                    NoShelvesRequest
+
+
+{-| The one shelf read in this module. `init` and every refetch go through it,
+so there is no second place for the read-only dispatch above to be got wrong.
+-}
+fetchShelves : Config -> Maybe String -> Cmd Msg
+fetchShelves config maybeToken =
+    case shelvesSource config maybeToken of
+        ProfileShelf token handle bookshelfName ->
+            Api.getProfileShelf token
+                handle
+                bookshelfName
+                (ShelvesLoaded (requestKey config) << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
+
+        OwnShelf token bookshelfName ->
+            Api.getBookshelf bookshelfName token (ShelvesLoaded (requestKey config))
+
+        NoShelvesRequest ->
+            Cmd.none
+
+
 type Msg
     = ShelvesLoaded String (Result Http.Error BookshelfResponse)
     | DismissAgeGate
@@ -236,6 +289,7 @@ type Msg
     | SortColumnClicked BookList.SortColumn
     | OrganiserMsg ShelfOrganiser.Msg
     | ShelfMutated (Result Http.Error ())
+    | ReloadRequested
     | UndoRemove
     | UndoCompleted (Result Http.Error ())
     | ToastExpired
@@ -246,25 +300,16 @@ type Msg
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
-        ( apiCmd, initialShelves ) =
-            case ( config.readOnly, config.profileHandle ) of
-                ( True, Just handle ) ->
-                    ( Api.getProfileShelf maybeToken
-                        handle
-                        config.apiName
-                        (ShelvesLoaded (requestKey config) << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
-                    , Loading
-                    )
+        apiCmd =
+            fetchShelves config maybeToken
+
+        initialShelves =
+            case shelvesSource config maybeToken of
+                NoShelvesRequest ->
+                    NotAsked
 
                 _ ->
-                    case maybeToken of
-                        Just token ->
-                            ( Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
-                            , Loading
-                            )
-
-                        Nothing ->
-                            ( Cmd.none, NotAsked )
+                    Loading
     in
     ( { shelves = initialShelves
       , showAgeGate = False
@@ -401,6 +446,9 @@ update msg model =
                 , reloadShelves model
                 , NoOut
                 )
+
+        ReloadRequested ->
+            ( model, reloadShelves model, NoOut )
 
         UndoRemove ->
             case ( model.undoToast, mutationToken model ) of
@@ -587,21 +635,20 @@ moveToId draggedId targetId shelves =
             shelves
 
 
-{-| Refetch after a shelf mutation — via `getBookshelf`, the SAME call as
-the initial load, which is the point: the old `Api.getShelves` payload
-carried a hardcoded empty `placements` per shelf, so every shelf
-mutation repainted the bookcase placement-less (nineteen books vanished;
-the organiser called a full shelf "empty"). One endpoint, one shape,
-no lying refetch.
+{-| Refetch after a mutation — through `fetchShelves`, the SAME call as the
+initial load, which is the point: the old `Api.getShelves` payload carried a
+hardcoded empty `placements` per shelf, so every shelf mutation repainted the
+bookcase placement-less (nineteen books vanished; the organiser called a full
+shelf "empty"). One endpoint, one shape, no lying refetch.
+
+Sharing `fetchShelves` rather than re-issuing `Api.getBookshelf` also carries
+the read-only dispatch across: this used to re-read the viewer's OWN bookshelf
+while browsing someone else's profile shelf.
+
 -}
 reloadShelves : Model -> Cmd Msg
 reloadShelves model =
-    case model.token of
-        Just token ->
-            Api.getBookshelf model.config.apiName token (ShelvesLoaded (requestKey model.config))
-
-        Nothing ->
-            Cmd.none
+    fetchShelves model.config model.token
 
 
 {-| A load failure in the reader's terms. The two cases split from
