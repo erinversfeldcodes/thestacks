@@ -223,15 +223,21 @@ defmodule CoreWeb.Telemetry do
   end
 
   defp ping_log_shipper(url) do
-    request = Finch.build(:get, url <> "/health")
-
-    case Finch.request(request, Stacks.Finch, receive_timeout: 2_000, request_timeout: 2_000) do
-      {:ok, %Finch.Response{status: 200}} -> :ok
-      {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+    case log_shipper_http_client().get(url <> "/health", []) do
+      {:ok, 200} -> :ok
+      {:ok, status} -> {:error, {:http_status, status}}
       {:error, reason} -> {:error, reason}
     end
   rescue
     error -> {:error, error}
+  end
+
+  defp log_shipper_http_client do
+    Application.get_env(
+      :core,
+      :log_shipper_probe_http_client,
+      Stacks.CircuitBreakers.ProbeHttpClient
+    )
   end
 
   @doc """

@@ -39,6 +39,16 @@ SHARED_1X_INCLUDED_GB = 0.25
 NEON_FREE_PLAN_CU_HOURS_PER_PROJECT = 100.0
 
 
+def open_http_only(req):
+    # Operator-set env URLs, never user input — but urllib honours file://,
+    # so a mis-set variable could read local files. Refuse non-http(s)
+    # schemes before the request leaves the process.
+    scheme = urllib.parse.urlparse(req.full_url).scheme
+    if scheme not in ("http", "https"):
+        raise ValueError(f"refusing non-http(s) url scheme: {scheme!r}")
+    return urllib.request.urlopen(req, timeout=30)  # nosemgrep
+
+
 def http_json(url, token, payload=None):
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
@@ -49,7 +59,7 @@ def http_json(url, token, payload=None):
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with open_http_only(req) as resp:
         return json.load(resp)
 
 
@@ -199,7 +209,7 @@ def neon_costs(neon_key):
 def push_gauges(vm_url, lines):
     body = ("\n".join(lines) + "\n").encode()
     req = urllib.request.Request(f"{vm_url}/api/v1/import/prometheus", data=body)
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with open_http_only(req) as resp:
         resp.read()
 
 

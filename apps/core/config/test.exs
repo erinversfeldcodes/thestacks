@@ -50,6 +50,7 @@ config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
 config :core, :together_client, Stacks.AI.MockTogetherClient
 config :core, :rss_fetcher, Stacks.Enrichment.MockRssFetcher
 config :core, :circuit_breaker_probe_http_client, Stacks.Testing.DisabledProbeHttpClient
+config :core, :log_shipper_probe_http_client, Stacks.Testing.DisabledProbeHttpClient
 config :core, :storage, Stacks.Storage.Mock
 config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
 config :core, :transparency_prometheus_client, Stacks.Transparency.MockPrometheusClient
