@@ -45,6 +45,7 @@ suite =
     describe "a placement write in the overlay reaches the page behind it"
         [ overlayMoveReportsAMutation
         , overlayMoveFailureReportsNothing
+        , overlayFormatsReportsAMutation
         , shelfAnswersAReloadRequest
         , profileShelfReloadReadsTheProfileShelf
         , readingPileAnswersAReloadRequest
@@ -89,6 +90,25 @@ moveResponse =
         , headers = Dict.empty
         }
         ""
+
+
+overlayFormatsReportsAMutation : Test
+overlayFormatsReportsAMutation =
+    test "overlay_formats_reports_a_mutation: a stored formats change tells the host the placement changed" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailOverlayProgramWithOut "book-test-001" (Just "test-token") (Just Route.Library))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Physical"
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    "/api/placements/placement-test-001/formats"
+                    (TestHelpers.simulatePlacementFormatsResponse "placement-test-001" [ "physical" ])
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.equal BookDetail.PlacementMutated model.lastOut
+                    )
 
 
 overlayMoveReportsAMutation : Test

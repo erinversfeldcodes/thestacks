@@ -884,7 +884,7 @@ update msg model maybeToken =
                         , previousFormats = confirmed
                       }
                     , Cmd.none
-                    , NoOut
+                    , PlacementMutated
                     )
 
                 Err err ->
