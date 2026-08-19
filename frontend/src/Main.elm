@@ -1911,11 +1911,7 @@ update msg model =
                 , userMenu = UserMenu.init
                 , arrival = consumeArrival page model.arrival
               }
-            , if newRoute /= model.route then
-                Cmd.batch [ cmd, resetScroll ]
-
-              else
-                cmd
+            , cmd
             )
 
         TransitionEnded animationName ->
@@ -3272,25 +3268,6 @@ the command can run alongside the route change regardless of ordering.
 focusMainContent : Cmd Msg
 focusMainContent =
     Task.attempt (always FocusResult) (Browser.Dom.focus "main-content")
-
-
-{-| Put a newly-arrived page at its top.
-
-Nothing did this before, so following a link from halfway down a long shelf
-landed you halfway down the next page — usually past its heading, occasionally
-past its only content. Guarded on the route actually changing, because a
-same-route `UrlChanged` (a replaced query, a re-render) should leave the reader
-where they were.
-
-⛔ Elm's `onUrlChange` cannot distinguish a push from a pop, so this resets on
-back/forward too, overriding the browser's own scroll restoration. That is a
-knowing trade: arriving at the top of a page is right nearly always, and being
-returned to the wrong offset is worse than being returned to the top.
-
--}
-resetScroll : Cmd Msg
-resetScroll =
-    Task.perform (always FocusResult) (Browser.Dom.setViewport 0 0)
 
 
 {-| The default top-level Escape behaviour when no book overlay is open and the

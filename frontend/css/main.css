@@ -126,7 +126,22 @@
 
 html {
     font-size: 16px;
-    scroll-behavior: smooth;
+}
+
+/* `scroll-behavior: smooth` used to sit on `html` unconditionally, and it made
+   every PROGRAMMATIC scroll a no-op — `window.scrollTo(0, 0)` moved nothing, and
+   so did Elm's `Browser.Dom.setViewport`, because both respect this property and
+   the animation never survived the next render. That is why arriving on a new
+   page left you at the old page's scroll offset: not because nothing tried to
+   reset it, but because the reset was silently swallowed.
+
+   Smooth is kept for what actually wanted it — jumping to an in-page anchor,
+   like the skip link — and only for readers who have not asked for less motion,
+   which the unconditional version ignored. */
+@media (prefers-reduced-motion: no-preference) {
+    html:focus-within {
+        scroll-behavior: smooth;
+    }
 }
 
 body {
