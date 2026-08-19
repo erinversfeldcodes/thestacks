@@ -1,6 +1,8 @@
 module TestHelpers exposing
-    ( BookDetailTestModel
+    ( AdminChromeTestModel
+    , BookDetailTestModel
     , ReadingPileTestModel
+    , adminChromeProgram
     , authedRequestFromSpec
     , bookDetailOverlayProgramWithOut
     , bookDetailProgram
@@ -51,8 +53,10 @@ simulators, and test data builders.
 -}
 
 import Api
+import Components.AdminChrome as AdminChrome
 import Dict
 import Effect
+import Html
 import Http
 import Json.Encode as Encode
 import Navigation.Route exposing (Route)
@@ -1011,6 +1015,46 @@ authHeaderList maybeToken =
 
         Nothing ->
             []
+
+
+{-| Harness model for the admin chrome: the chrome's own model plus the most
+recent `OutMsg`, which is the only way "the session actually ended" is
+observable — `Main` owns the admin token, so the chrome cannot show its own
+removal.
+-}
+type alias AdminChromeTestModel =
+    { chrome : AdminChrome.Model
+    , lastOut : AdminChrome.OutMsg
+    }
+
+
+{-| Create a ProgramTest harness for the admin chrome, holding the admin token
+the surfaces would have.
+
+It renders production's own `AdminChrome.view` around an empty page, so the
+button a test clicks is the button an operator clicks; and the request that
+click produces comes from `AdminChrome.updateWithEffect` through
+`simulateEffect`, so nothing here restates which endpoint sign-out calls.
+
+-}
+adminChromeProgram : Maybe String -> ProgramDefinition () AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
+adminChromeProgram adminToken =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                ( { chrome = AdminChrome.init, lastOut = AdminChrome.NoOut }
+                , SimulatedEffect.Cmd.none
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newChrome, effect, out ) =
+                        AdminChrome.updateWithEffect msg model.chrome adminToken
+                in
+                ( { chrome = newChrome, lastOut = out }, simulateEffect effect )
+        , view = \model -> AdminChrome.view identity model.chrome (Html.text "")
+        }
+        |> ProgramTest.withSimulatedEffects identity
 
 
 {-| Create a ProgramTest harness for the Upload page. `ageGatingEnabled`

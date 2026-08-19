@@ -52,6 +52,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import Components.AdminChrome as AdminChrome
 import Components.OnboardingOverlay as OnboardingOverlay
 import Components.Syndication as Syndication
 import Components.UserMenu as UserMenu
@@ -450,6 +451,7 @@ type alias Model =
     , route : Route
     , auth : AuthState
     , adminAuth : Maybe String
+    , adminChrome : AdminChrome.Model
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
@@ -553,6 +555,7 @@ init flags url key =
       , auth =
             maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
       , adminAuth = Nothing
+      , adminChrome = AdminChrome.init
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
@@ -1833,6 +1836,7 @@ type Msg
     | SwipeIgnored
     | OverlayBookDetailMsg BookDetail.Msg
     | EscapePressed
+    | AdminChromeMsg AdminChrome.Msg
     | OnboardingMsg OnboardingOverlay.Msg
     | OnboardingStatusReceived Bool
     | FocusResult
@@ -2778,6 +2782,26 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+        AdminChromeMsg subMsg ->
+            let
+                ( newChrome, subCmd, outMsg ) =
+                    AdminChrome.update subMsg model.adminChrome (adminTokenFor model)
+
+                withChrome =
+                    { model | adminChrome = newChrome }
+            in
+            case outMsg of
+                AdminChrome.NoOut ->
+                    ( withChrome, Cmd.map AdminChromeMsg subCmd )
+
+                AdminChrome.SessionEnded ->
+                    ( { withChrome
+                        | adminAuth = Nothing
+                        , page = PageAdminGate model.route (AdminSession.initWithNotice adminSessionEndedNotice)
+                      }
+                    , Cmd.map AdminChromeMsg subCmd
+                    )
 
         AdminRemovalRequestsMsg subMsg ->
             case model.page of
@@ -4163,25 +4187,31 @@ viewPage model =
             Html.map BlogPostMsg (BlogPostPage.view subModel)
 
         PageAdminSourceApproval subModel ->
-            Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel)
+            viewAdminSurface model
+                (Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel))
 
         PageAdminInvites subModel ->
-            Html.map AdminInvitesMsg (AdminInvites.view subModel)
+            viewAdminSurface model
+                (Html.map AdminInvitesMsg (AdminInvites.view subModel))
 
         PageAdminScraperConfig subModel ->
-            Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)
+            viewAdminSurface model
+                (Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel))
 
         PageAdminBookModeration subModel ->
-            Html.map AdminBookModerationMsg (AdminBookModeration.view subModel)
+            viewAdminSurface model
+                (Html.map AdminBookModerationMsg (AdminBookModeration.view subModel))
 
         PageAdminRemovalRequests subModel ->
-            Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel)
+            viewAdminSurface model
+                (Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel))
 
         PageFeedback subModel ->
             Html.map FeedbackMsg (FeedbackPage.view subModel)
 
         PageAdminFeedback subModel ->
-            Html.map AdminFeedbackMsg (AdminFeedback.view subModel)
+            viewAdminSurface model
+                (Html.map AdminFeedbackMsg (AdminFeedback.view subModel))
 
         PageAdminGate _ subModel ->
             Html.map AdminSessionMsg (AdminSession.view subModel)
@@ -4203,6 +4233,17 @@ viewPage model =
 
         PageNotFound ->
             viewNotFound
+
+
+{-| Every admin surface, in its chrome. Applied at the ONE place the admin
+pages already have in common — this dispatch — so a new admin page gets the
+sign-out affordance by being routed here, not by remembering to add it.
+`PageAdminGate` is deliberately not wrapped: there is no session to end on the
+page that exists because there isn't one.
+-}
+viewAdminSurface : Model -> Html Msg -> Html Msg
+viewAdminSurface model content =
+    AdminChrome.view AdminChromeMsg model.adminChrome content
 
 
 viewSettingsHub : Route -> Html Msg -> Html Msg
@@ -4349,6 +4390,16 @@ viewConnectivity connectivity =
                 [ p [ class "connectivity-banner__text" ]
                     [ text "You are offline. The Stacks can’t reach the library right now — anything already on screen stays put, and this will clear as soon as you reconnect." ]
                 ]
+
+
+{-| What the gate says to an operator who ended their own session. It names the
+thing that did NOT happen, because "signed out" on a product where the ordinary
+session and the admin session are different things would read as both being
+gone.
+-}
+adminSessionEndedNotice : String
+adminSessionEndedNotice =
+    "Your admin session has ended. Your ordinary session is untouched — sign in again to reopen the admin surfaces."
 
 
 {-| An admin API call came back unauthorised. All four admin pages used to

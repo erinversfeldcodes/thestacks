@@ -4,6 +4,7 @@ module Page.Admin.Session exposing
     , OutMsg(..)
     , enrolmentSecret
     , init
+    , initWithNotice
     , update
     , view
     )
@@ -74,6 +75,15 @@ init =
     , notice = Nothing
     , busy = False
     }
+
+
+{-| The gate, opened with something to say — the operator arrived here on
+purpose (they ended their session) rather than by being turned away, and a form
+with no explanation would read as the sign-in having failed.
+-}
+initWithNotice : String -> Model
+initWithNotice notice =
+    { init | notice = Just notice }
 
 
 {-| The `secret=` parameter from an `otpauth://` provisioning URI, **base32, unmodified**.

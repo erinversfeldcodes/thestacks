@@ -75,6 +75,7 @@ module Api exposing
     , adminListBooks
     , adminListBooksRequest
     , adminLogin
+    , adminLogoutRequest
     , adminMfaConfirm
     , adminMfaSetup
     , adminSetBookAgeGate
@@ -4336,6 +4337,25 @@ adminVerifyMfa body toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| DELETE /api/admin/auth/logout — revoke THIS admin session server-side.
+
+Send it with the admin token (`Main.adminTokenFor`), never the ordinary one: the
+route reads the session off the admin pipeline, so the Guardian token 401s here
+exactly as it does on every other `/api/admin/*` path.
+
+A `RequestSpec` rather than a `Cmd`-returning function because the caller
+dispatches it through `Effect`, which is what lets a program test read the
+request instead of restating it.
+
+-}
+adminLogoutRequest : RequestSpec
+adminLogoutRequest =
+    { method = "DELETE"
+    , url = baseUrl ++ "/api/admin/auth/logout"
+    , body = Nothing
+    }
 
 
 {-| What enrolment hands back: the `otpauth://` URI for an authenticator app, and one-time
