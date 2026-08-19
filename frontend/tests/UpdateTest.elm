@@ -66,6 +66,7 @@ bookDetailInit =
     , progressCard = Nothing
     , progressSaveState = NotAsked
     , finishedReadPrompt = False
+    , coverFailed = False
     , undoableRemoval = Nothing
     }
 

@@ -90,6 +90,7 @@ type alias Model =
     , progressCard : Maybe Card.Model
     , progressSaveState : RemoteData Api.ProgressError ()
     , finishedReadPrompt : Bool
+    , coverFailed : Bool
     , undoableRemoval : Maybe { placementId : String, bookTitle : String }
     }
 
@@ -147,6 +148,7 @@ type Msg
     | RecordReadRequested
     | FinishedReadDismissed
     | ProgressFocusReturned
+    | CoverFailed
     | EscapePressed
     | FocusWrapToFirst
     | FocusWrapToLast
@@ -204,6 +206,7 @@ initWithEffect bookId maybeToken maybePreviousRoute =
       , progressCard = Nothing
       , progressSaveState = NotAsked
       , finishedReadPrompt = False
+      , coverFailed = False
       , undoableRemoval = Nothing
       }
     , Effect.batch
@@ -1048,6 +1051,13 @@ updateWithEffect msg model maybeToken =
         ProgressFocusReturned ->
             ( model, Effect.none, NoOut )
 
+        CoverFailed ->
+            -- A cover URL that 404s leaves the browser's broken-image glyph in a
+            -- frame the catalogue fills with a styled initial. Falling back to
+            -- the placeholder that already exists keeps the two surfaces telling
+            -- the same story about a book with no usable cover.
+            ( { model | coverFailed = True }, Effect.none, NoOut )
+
         RecordReadRequested ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
@@ -1306,13 +1316,21 @@ viewHero model book =
             [ div [ class "book-detail__cover" ]
                 [ case Maybe.andThen .coverImageUrl edition of
                     Just url ->
-                        img
-                            [ src url
-                            , alt ("Cover of " ++ book.title)
-                            , class "book-detail__cover-img"
-                            , testId "book-cover"
-                            ]
-                            []
+                        if model.coverFailed then
+                            div [ class "book-detail__cover-placeholder" ]
+                                [ span [ class "book-detail__cover-placeholder-text" ]
+                                    [ text (String.left 1 book.title) ]
+                                ]
+
+                        else
+                            img
+                                [ src url
+                                , alt ("Cover of " ++ book.title)
+                                , class "book-detail__cover-img"
+                                , testId "book-cover"
+                                , on "error" (Decode.succeed CoverFailed)
+                                ]
+                                []
 
                     Nothing ->
                         div [ class "book-detail__cover-placeholder" ]
