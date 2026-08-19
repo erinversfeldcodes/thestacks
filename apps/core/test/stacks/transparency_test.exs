@@ -19,6 +19,8 @@ defmodule Stacks.TransparencyTest do
 
   @allowed_entry_keys MapSet.new([:key, :label, :what, :how, :why, :unit, :value])
 
+  @app_label "app-under-test"
+
   setup do
     Cache.invalidate_all()
     MockPrometheusClient.reset()
@@ -26,11 +28,16 @@ defmodule Stacks.TransparencyTest do
   end
 
   describe "allowlist enforcement" do
-    test "a allowlisted signal returns the client's value unchanged" do
+    test "a allowlisted key runs that key's own query, so no signal can render another's number" do
+      with_pinned_app_label()
       MockPrometheusClient.put_response({:ok, 0.42})
 
-      key = hd(Transparency.allowlist_keys())
-      assert {:ok, 0.42} = Transparency.run_signal(key)
+      for {key, query} <- allowlist_pairs() do
+        assert {:ok, 0.42} = Transparency.run_signal(key)
+
+        assert MockPrometheusClient.last_query() == scoped(query),
+               "run_signal(#{inspect(key)}) sent #{inspect(MockPrometheusClient.last_query())}"
+      end
     end
 
     test "an un-allowlisted key cannot be run (no arbitrary/injected PromQL path)" do
@@ -79,8 +86,21 @@ defmodule Stacks.TransparencyTest do
     end
   end
 
-  defp restore_env(_key, nil), do: :ok
+  defp restore_env(key, nil), do: Application.delete_env(:core, key)
   defp restore_env(key, value), do: Application.put_env(:core, key, value)
+
+  # Pin the app label the queries are scoped to, so a test can name the exact PromQL
+  # it expects instead of re-deriving the production default.
+  defp with_pinned_app_label do
+    prev = Application.get_env(:core, :fly_metrics_app)
+    Application.put_env(:core, :fly_metrics_app, @app_label)
+    on_exit(fn -> restore_env(:fly_metrics_app, prev) end)
+  end
+
+  defp scoped(query), do: String.replace(query, "$app", @app_label)
+
+  defp allowlist_pairs,
+    do: Enum.zip(Transparency.allowlist_keys(), Transparency.allowlist_queries())
 
   describe "metrics/0 — shape + teaching metadata" do
     test "returns live, durable, generated_at, cache_ttl" do
@@ -108,10 +128,31 @@ defmodule Stacks.TransparencyTest do
         assert is_binary(entry.how)
         assert is_binary(entry.why)
         assert is_binary(entry.unit)
-
-        assert entry.value == 3.5,
-               "live entry #{inspect(entry.key)} did not carry the client's configured value"
+        assert is_number(entry.value)
       end)
+    end
+
+    test "every live entry carries the value returned for its own query" do
+      with_pinned_app_label()
+
+      # A distinct value per signal: one shared value cannot tell a correctly wired
+      # payload from one that labels every reading with the first query's number.
+      value_for =
+        Transparency.allowlist_queries()
+        |> Enum.with_index(1)
+        |> Map.new(fn {query, index} -> {scoped(query), index * 1.0} end)
+
+      MockPrometheusClient.put_response(fn promql -> {:ok, Map.fetch!(value_for, promql)} end)
+
+      rendered = Map.new(Transparency.metrics().live, &{&1.key, &1.value})
+
+      for {key, query} <- allowlist_pairs() do
+        expected = Map.fetch!(value_for, scoped(query))
+
+        assert rendered[key] == expected,
+               "live entry #{inspect(key)} shows #{inspect(rendered[key])}, " <>
+                 "which is another signal's reading (expected #{expected})"
+      end
     end
 
     test "every durable entry carries what/how/why teaching metadata" do

@@ -56,10 +56,14 @@ defmodule Stacks.GeocodingTest do
       :ok
     end
 
-    test "delegates to the configured provider" do
+    test "hands the configured provider the trimmed query, and returns its answer" do
       MockGeocoder.put_point("Somewhere", 1.5, 2.5)
 
-      assert {:ok, %{latitude: 1.5, longitude: 2.5}} = Geocoding.geocode("Somewhere")
+      assert {:ok, %{latitude: 1.5, longitude: 2.5}} = Geocoding.geocode("  Somewhere  ")
+
+      assert MockGeocoder.queries() == ["Somewhere"],
+             "the provider was asked #{inspect(MockGeocoder.queries())} — a geocoder " <>
+               "matches on the string it is given, so the padding must not survive the seam"
     end
 
     test "refuses a blank query without asking the provider" do
