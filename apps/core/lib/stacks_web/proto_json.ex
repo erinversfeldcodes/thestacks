@@ -23,7 +23,8 @@ defmodule StacksWeb.ProtoJSON do
     :age_verified,
     :consent_analytics
   ]
-  @user_auth_fields @user_core_fields ++ [:handle, :country_code, :city, :onboarding_completed]
+  @user_auth_fields @user_core_fields ++
+                      [:handle, :country_code, :city, :website_url, :onboarding_completed]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   @doc """

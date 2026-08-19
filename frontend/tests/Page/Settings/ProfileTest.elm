@@ -37,7 +37,7 @@ sampleUser =
 
 initialModel : Profile.Model
 initialModel =
-    Profile.init sampleUser
+    Profile.seedFromSession sampleUser
 
 
 {-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
@@ -271,14 +271,14 @@ suite =
                 \_ ->
                     let
                         model =
-                            Profile.init sampleUser
+                            Profile.seedFromSession sampleUser
                     in
                     model.handle |> Expect.equal model.initialHandle
             , test "init baselines initialHandle for a handle-less (injected) session" <|
                 \_ ->
                     let
                         model =
-                            Profile.init { sampleUser | handle = "" }
+                            Profile.seedFromSession { sampleUser | handle = "" }
                     in
                     Expect.all
                         [ \_ -> model.handle |> Expect.equal ""

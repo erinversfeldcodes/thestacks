@@ -544,7 +544,8 @@ defmodule StacksWeb.ProtoJSONTest do
           age_verified: true,
           consent_analytics: true,
           country_code: "ZA",
-          city: "Cape Town"
+          city: "Cape Town",
+          website_url: "https://alice.example"
         )
 
       result = ProtoJSON.user(u)
@@ -560,6 +561,7 @@ defmodule StacksWeb.ProtoJSONTest do
                consent_analytics: true,
                country_code: "ZA",
                city: "Cape Town",
+               website_url: "https://alice.example",
                onboarding_completed: nil,
                next_onboarding_step: "profile"
              }

@@ -1,5 +1,6 @@
 module Api exposing
-    ( AdminAuthError(..)
+    ( Account
+    , AdminAuthError(..)
     , AdminBook
     , AdminBooksResponse
     , AdminFeedbackEntry
@@ -68,6 +69,7 @@ module Api exposing
     , TransparencyMetrics
     , UploadInit
     , acceptInvitation
+    , accountDecoder
     , activateListing
     , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
@@ -116,6 +118,7 @@ module Api exposing
     , fetchSyndicationExport
     , foldProgress
     , forgotPasswordRequest
+    , getAccountRequest
     , getAdminFeedback
     , getAdminInvites
     , getAdminSources
@@ -2731,6 +2734,66 @@ getCatalogueRequest params =
                 , params.subject |> Maybe.map (Url.Builder.string "subject")
                 ]
             )
+    , body = Nothing
+    }
+
+
+{-| The reader's own account, as the server holds it — the fields Settings →
+Profile edits.
+
+Deliberately not `Types.User`. That record is what the stored login blob can
+reconstruct; this one is the answer to "what did the server actually keep",
+which is a different question, and the difference is the whole point of asking.
+
+-}
+type alias Account =
+    { displayName : String
+    , handle : String
+    , email : String
+    , websiteUrl : String
+    , countryCode : String
+    , city : String
+    }
+
+
+{-| Decoder for `GET /api/auth/me`'s `user` object.
+
+`email` is required, so a body that is not an account — an error envelope, a
+captive portal's HTML, `{}` — comes back `Err` and the page can say so. The
+lenient alternative decodes those into six empty strings, which the form would
+then render as the reader's account: a wrong answer stated confidently, and
+indistinguishable from a reader who has filled nothing in.
+
+The rest default to `""` because they are genuinely optional columns. Someone
+who has never set a city is not a malformed response.
+
+-}
+accountDecoder : Decoder Account
+accountDecoder =
+    Decode.field "user"
+        (Decode.map6 Account
+            (optionalString "display_name")
+            (optionalString "handle")
+            (Decode.field "email" Decode.string)
+            (optionalString "website_url")
+            (optionalString "country_code")
+            (optionalString "city")
+        )
+
+
+{-| GET /api/auth/me — the reader's own account. Sent through `Effect`, so
+there is no `Cmd` twin here; the caller pairs this spec with `accountDecoder`.
+
+Authenticated, and the one request whose 401 is least surprising: asking who you
+are is exactly what discovers the session is gone. A caller must route that (see
+`isUnauthorized`) rather than render "could not load your account", which tells
+the reader to retry something that cannot work.
+
+-}
+getAccountRequest : RequestSpec
+getAccountRequest =
+    { method = "GET"
+    , url = baseUrl ++ "/api/auth/me"
     , body = Nothing
     }
 

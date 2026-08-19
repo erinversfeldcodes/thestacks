@@ -1149,15 +1149,17 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         SettingsProfile ->
             let
-                profileModel =
-                    case maybeAuth of
-                        Just auth ->
-                            Profile.init auth.user
+                ( model, cmd ) =
+                    Profile.initWithToken maybeToken
+                        (case maybeAuth of
+                            Just auth ->
+                                auth.user
 
-                        Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                            Nothing ->
+                                { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                        )
             in
-            ( PageSettingsProfile profileModel, Cmd.none )
+            ( PageSettingsProfile model, Cmd.map ProfileMsg cmd )
 
         SettingsPassword ->
             ( PageSettingsPassword Password.init, Cmd.none )

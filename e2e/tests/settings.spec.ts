@@ -593,18 +593,16 @@ test.describe("Settings — Profile UI flow", () => {
     // "Profile saved." is the form telling itself the news, so the account has
     // to be read back to know anything was written.
     //
-    // Read back through the API, not through a reloaded form: this page seeds
-    // its fields from the session blob in localStorage and never asks the
-    // server, so a reloaded form shows the name the reader signed in with no
-    // matter what was saved. Asserting on that form would pin the spec to that
-    // behaviour instead of to the save.
-    const stored = await request.get("/api/auth/me", {
-      headers: { Authorization: `Bearer ${session.token}` },
+    // Read it back the way the reader does: reload, and look at the form. The
+    // page fetches the account on open, so the fields are the server's answer.
+    // (This assertion used to go through the API instead, because the page
+    // seeded from the localStorage session blob and never asked the server — a
+    // reloaded form showed the name signed in with, whatever had been saved.)
+    await page.reload();
+    await expect(field(page, "Display Name")).toHaveValue("E2E Renamed User", {
+      timeout: 10000,
     });
-    expect(stored.status(), "GET /api/auth/me").toBe(200);
-    const storedUser = (await stored.json()).user;
-    expect(storedUser.display_name).toBe("E2E Renamed User");
-    expect(storedUser.email).toBe(newEmail);
+    await expect(field(page, "Email")).toHaveValue(newEmail);
   });
 });
 
@@ -631,17 +629,17 @@ test.describe("Settings — Location UI flow", () => {
     await page.getByRole("button", { name: "Save Location" }).click();
     await expect(page.getByText("Location saved.")).toBeVisible();
 
-    // Read back from the account, for the same reason as the profile save
-    // above: the form is seeded from the stored session, which carries no
-    // location at all, so a reloaded form is blank whether or not the save
-    // landed.
-    const stored = await request.get("/api/auth/me", {
-      headers: { Authorization: `Bearer ${session.token}` },
+    // Reload and read the form, for the same reason as the profile save above.
+    // This is the whole point of the location fields: a reader who sets a city
+    // and comes back tomorrow should see the city. (The stored session carries
+    // no location at all, so before the page fetched the account this reload
+    // came back blank whether or not the save had landed — which is why this
+    // assertion used to go through the API.)
+    await page.reload();
+    await expect(field(page, "Country Code")).toHaveValue("GB", {
+      timeout: 10000,
     });
-    expect(stored.status(), "GET /api/auth/me").toBe(200);
-    const storedUser = (await stored.json()).user;
-    expect(storedUser.country_code).toBe("GB");
-    expect(storedUser.city).toBe("London");
+    await expect(field(page, "City")).toHaveValue("London");
   });
 });
 
