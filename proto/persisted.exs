@@ -70,7 +70,13 @@
       field_overrides: %{
         user_id: %{ecto_type: :binary_id},
         resource_id: %{ecto_type: :binary_id},
-        metadata: %{ecto_type: :map}
+        # Ciphertext in a bytea column. The warehouse cannot read it and has no
+        # question that needs it; carrying it would only widen where the
+        # encrypted personal data sits.
+        metadata: %{ecto_type: :map, dbt_exclude: true},
+        # A keyed digest of a reader's address. Keyed is not anonymous, and the
+        # warehouse has no question that a per-person network identifier answers.
+        ip_address: %{dbt_exclude: true}
       }
     },
     %{

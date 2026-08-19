@@ -37,7 +37,8 @@ config :core, Oban,
        {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob},
        {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob},
        {"30 9 * * *", Stacks.Workers.ExpiredInvitesSweepJob},
-       {"45 9 * * *", Stacks.Workers.ExpiredEmailChangesJob}
+       {"45 9 * * *", Stacks.Workers.ExpiredEmailChangesJob},
+       {"0 3 * * *", Stacks.Workers.AuditRetentionJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 20, scraper: 5, notifications: 3, dbt_refresh: 1]

@@ -379,10 +379,6 @@ models:
         description: Resource type.
       - name: resource_id
         description: Resource id.
-      - name: ip_address
-        description: Ip address.
-      - name: metadata
-        description: Metadata.
       - name: occurred_at
         description: Occurred at.
       - name: endpoint
