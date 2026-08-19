@@ -202,10 +202,7 @@ defmodule Stacks.Audit do
     _ -> %{}
   end
 
-  defp hash_ip(ip) when is_binary(ip) do
-    :crypto.hash(:sha256, ip)
-    |> Base.encode16(case: :lower)
-  end
+  defp hash_ip(ip) when is_binary(ip), do: Stacks.IPDigest.hash(ip)
 
   defp encode_uuid(nil), do: nil
 

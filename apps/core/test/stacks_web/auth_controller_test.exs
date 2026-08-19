@@ -227,7 +227,7 @@ defmodule StacksWeb.AuthControllerTest do
         )
 
       client_ip = "203.0.113.7"
-      expected_hash = :crypto.hash(:sha256, client_ip) |> Base.encode16(case: :lower)
+      expected_hash = Stacks.IPDigest.hash(client_ip)
 
       conn
       |> put_req_header("fly-client-ip", client_ip)
@@ -253,8 +253,8 @@ defmodule StacksWeb.AuthControllerTest do
 
       spoofed_ip = "203.0.113.99"
       fallback_ip = conn.remote_ip |> :inet.ntoa() |> to_string()
-      spoofed_hash = :crypto.hash(:sha256, spoofed_ip) |> Base.encode16(case: :lower)
-      fallback_hash = :crypto.hash(:sha256, fallback_ip) |> Base.encode16(case: :lower)
+      spoofed_hash = Stacks.IPDigest.hash(spoofed_ip)
+      fallback_hash = Stacks.IPDigest.hash(fallback_ip)
 
       conn
       |> put_req_header("x-forwarded-for", spoofed_ip)

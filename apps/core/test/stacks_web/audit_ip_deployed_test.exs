@@ -21,7 +21,7 @@ defmodule StacksWeb.AuditIpDeployedTest do
   @spoofed_xff "203.0.113.99"
 
   defp sha256_hex(value) do
-    :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
+    Stacks.IPDigest.hash(value)
   end
 
   defp latest_audit_ip(conn, user_id, action) do
