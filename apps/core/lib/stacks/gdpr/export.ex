@@ -11,7 +11,9 @@ defmodule Stacks.GDPR.Export do
   alias Stacks.Blog.{Post, PostComment}
   alias Stacks.Books.UploadedImage
   alias Stacks.Feedback.Entry, as: FeedbackEntry
+  alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
   @doc """
@@ -176,12 +178,174 @@ defmodule Stacks.GDPR.Export do
       invitations: invitations,
       library_imports: library_imports,
       blog_syndications: blog_syndications,
-      feedback: feedback_entries
+      feedback: feedback_entries,
+      marketplace_listings: marketplace_listings(user_id),
+      marketplace_offer_threads: marketplace_offer_threads(user_id),
+      marketplace_offer_messages: marketplace_offer_messages(user_id),
+      marketplace_transactions: marketplace_transactions(user_id),
+      reading_groups: reading_groups(user_id),
+      reading_group_memberships: reading_group_memberships(user_id),
+      reading_group_invitations: reading_group_invitations(user_id),
+      blocked_users: blocked_users(user_id),
+      visibility_grants: visibility_grants(user_id)
     }
 
     {:ok, export}
   rescue
     error -> {:error, error}
+  end
+
+  defp marketplace_listings(user_id) do
+    Listing
+    |> where([l], l.seller_id == ^user_id)
+    |> order_by([l], desc: l.created_at)
+    |> select([l], %{
+      id: l.id,
+      book_id: l.book_id,
+      status: l.status,
+      pricing_mode: l.pricing_mode,
+      price_cents: l.price_cents,
+      currency: l.currency,
+      condition: l.condition,
+      description: l.description,
+      contact_info: l.contact_info,
+      photo_urls: l.photo_urls,
+      listed_at: l.listed_at,
+      expires_at: l.expires_at,
+      sold_at: l.sold_at,
+      created_at: l.created_at
+    })
+    |> Repo.all()
+  end
+
+  defp marketplace_offer_threads(user_id) do
+    OfferThread
+    |> where([t], t.buyer_id == ^user_id)
+    |> order_by([t], desc: t.created_at)
+    |> select([t], %{
+      id: t.id,
+      placement_id: t.placement_id,
+      status: t.status,
+      created_at: t.created_at
+    })
+    |> Repo.all()
+  end
+
+  # Only the messages this user WROTE. The counterparty's words on the same
+  # thread are their personal data, not the subject's, and a portability export
+  # is not a licence to walk off with someone else's half of the conversation.
+  defp marketplace_offer_messages(user_id) do
+    OfferMessage
+    |> where([m], m.sender_id == ^user_id)
+    |> order_by([m], asc: m.created_at)
+    |> select([m], %{
+      id: m.id,
+      thread_id: m.thread_id,
+      type: m.type,
+      body: m.body,
+      amount_cents: m.amount_cents,
+      created_at: m.created_at
+    })
+    |> Repo.all()
+  end
+
+  # `payment_provider_ref` / `shipping_provider_ref` are deliberately absent:
+  # they are integration handles into third-party systems, and putting them in
+  # a file the user downloads adds lookup risk without portability value.
+  defp marketplace_transactions(user_id) do
+    Transaction
+    |> where([t], t.buyer_id == ^user_id or t.seller_id == ^user_id)
+    |> order_by([t], desc: t.created_at)
+    |> Repo.all()
+    |> Enum.map(
+      &%{
+        id: &1.id,
+        listing_id: &1.listing_id,
+        role: if(&1.buyer_id == user_id, do: "buyer", else: "seller"),
+        amount_cents: &1.amount_cents,
+        currency: &1.currency,
+        payment_status: &1.payment_status,
+        shipping_status: &1.shipping_status,
+        shipping_cost_cents: &1.shipping_cost_cents,
+        completed_at: &1.completed_at,
+        created_at: &1.created_at
+      }
+    )
+  end
+
+  # Groups the user OWNS. The member roster is not exported with them — who
+  # else is in a reading group is those readers' data.
+  defp reading_groups(user_id) do
+    Group
+    |> where([g], g.owner_id == ^user_id)
+    |> order_by([g], desc: g.created_at)
+    |> select([g], %{
+      id: g.id,
+      name: g.name,
+      type: g.type,
+      visibility: g.visibility,
+      created_at: g.created_at
+    })
+    |> Repo.all()
+  end
+
+  defp reading_group_memberships(user_id) do
+    GroupMember
+    |> where([m], m.user_id == ^user_id)
+    |> order_by([m], desc: m.created_at)
+    |> select([m], %{
+      id: m.id,
+      group_id: m.group_id,
+      role: m.role,
+      joined_at: m.joined_at
+    })
+    |> Repo.all()
+  end
+
+  defp reading_group_invitations(user_id) do
+    GroupInvitation
+    |> where([i], i.invited_user_id == ^user_id or i.invited_by_id == ^user_id)
+    |> order_by([i], desc: i.created_at)
+    |> Repo.all()
+    |> Enum.map(
+      &%{
+        id: &1.id,
+        group_id: &1.group_id,
+        direction: if(&1.invited_by_id == user_id, do: "sent", else: "received"),
+        status: &1.status,
+        responded_at: &1.responded_at,
+        created_at: &1.created_at
+      }
+    )
+  end
+
+  # The user's own block list only. Rows where they are the BLOCKED party are
+  # someone else's decision about them — exporting those would hand the subject
+  # a list of who has blocked them.
+  defp blocked_users(user_id) do
+    UserBlock
+    |> where([b], b.blocker_id == ^user_id)
+    |> order_by([b], desc: b.created_at)
+    |> select([b], %{id: b.id, blocked_id: b.blocked_id, created_at: b.created_at})
+    |> Repo.all()
+  end
+
+  defp visibility_grants(user_id) do
+    VisibilityGrant
+    |> where([g], g.granted_by_id == ^user_id or g.granted_to_id == ^user_id)
+    |> order_by([g], desc: g.created_at)
+    |> Repo.all()
+    |> Enum.map(
+      &%{
+        id: &1.id,
+        direction: if(&1.granted_by_id == user_id, do: "granted", else: "received"),
+        resource_type: &1.resource_type,
+        resource_id: &1.resource_id,
+        granted_to_id: &1.granted_to_id,
+        granted_by_id: &1.granted_by_id,
+        created_at: &1.created_at
+      }
+    )
   end
 
   defp library_import_to_map(import) do
