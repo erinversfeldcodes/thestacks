@@ -86,12 +86,21 @@ defmodule Stacks.DegradedAccountRecoveryTest do
           session_started_at: DateTime.utc_now() |> DateTime.truncate(:second)
         })
 
-      assert session_count(degraded.id) > 0
+      seed_guardian_token(degraded.id)
+
+      assert live_family_count(degraded.id) > 0
+      assert guardian_token_count(degraded.id) > 0
 
       assert {:ok, _restored} = Accounts.restore_degraded_account(degraded.id)
 
-      assert session_count(degraded.id) == 0,
+      # Revocation is TWO things — the refresh family AND the issued access
+      # tokens. Asserting only the family stays green while live tokens keep
+      # working, which is the half that actually lets someone back in.
+      assert live_family_count(degraded.id) == 0,
              "a change made from a stolen session is not undone while that session is open"
+
+      assert guardian_token_count(degraded.id) == 0,
+             "issued access tokens must be burned too, or the session survives the revoke"
     end
 
     test "refuses an account that is not degraded" do
@@ -111,12 +120,43 @@ defmodule Stacks.DegradedAccountRecoveryTest do
     end
   end
 
-  defp session_count(user_id) do
+  defp live_family_count(user_id) do
     Repo.aggregate(
       from(f in Stacks.Accounts.AuthTokenFamily,
         where: f.user_id == ^user_id and is_nil(f.revoked_at)
       ),
       :count
+    )
+  end
+
+  defp guardian_token_count(user_id) do
+    Repo.aggregate(
+      from(t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)),
+      :count,
+      :jti
+    )
+  end
+
+  defp seed_guardian_token(user_id) do
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    Repo.insert_all(
+      "guardian_tokens",
+      [
+        %{
+          jti: Ecto.UUID.generate(),
+          aud: "core",
+          typ: "access",
+          iss: "core",
+          sub: to_string(user_id),
+          exp: DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_unix(),
+          jwt: "review-probe-jwt",
+          claims: %{},
+          inserted_at: now,
+          updated_at: now
+        }
+      ],
+      prefix: "op"
     )
   end
 end
