@@ -85,6 +85,24 @@ defmodule Stacks.BlogCommentTest do
       assert comment.author_id == commenter.id
     end
 
+    test "the returned comment carries its timestamp, because the caller serialises it" do
+      user = insert(:user)
+      post = published_post(user)
+      commenter = insert(:user)
+
+      assert {:ok, comment} =
+               Blog.create_comment(post.id, commenter.id, %{body: "Timestamped?"})
+
+      # The column's NOW() default fills the ROW, not the struct. `create/2`
+      # serialises exactly this struct into its 201, so a nil here is a comment
+      # that reaches its own author without a timestamp while everyone who
+      # reloads the thread sees one.
+      assert comment.created_at, "the struct handed to the serialiser must carry created_at"
+
+      reloaded = Repo.get(Stacks.Blog.PostComment, comment.id)
+      assert reloaded.created_at == comment.created_at, "and it must be the value actually stored"
+    end
+
     test "returns :post_not_found for unpublished post" do
       user = insert(:user)
       post = insert(:post, user: user, published_at: nil)

@@ -500,6 +500,12 @@ defmodule Stacks.Blog do
   defp comment_changeset(comment, attrs) do
     comment
     |> cast(attrs, [:post_id, :author_id, :parent_id, :body])
+    # The column has a NOW() default, but a default only fills the ROW — the
+    # struct handed back from the insert carries a nil, and `create/2` serialises
+    # that struct straight into its 201. So the reader who just posted a comment
+    # got one with no timestamp, while everyone who loaded the thread afterwards
+    # saw the real one. Same trap `Stacks.Feedback.submit/3` documents and avoids.
+    |> put_change(:created_at, DateTime.utc_now())
     |> validate_required([:post_id, :author_id, :body])
     |> validate_length(:body, min: 1, max: 2000)
   end
