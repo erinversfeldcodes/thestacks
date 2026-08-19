@@ -37,13 +37,14 @@ defmodule Stacks.StorageTest do
   end
 
   describe "delete_image/1" do
-    test "removes data from mock storage" do
-      key = "uploads/delete-me"
-      Mock.seed(key, "data")
-      assert Mock.get(key) == "data"
+    test "an uploaded object is gone from the backend afterwards" do
+      {:ok, key} = Storage.upload_image(Ecto.UUID.generate(), "data")
+
+      assert {:ok, _bytes} = Storage.head_image(key),
+             "the object was never there, so its absence below would prove nothing"
 
       assert :ok = Storage.delete_image(key)
-      assert Mock.get(key) == nil
+      assert {:error, :not_found} = Storage.head_image(key)
     end
 
     test "returns :ok even when key does not exist" do

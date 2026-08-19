@@ -11,43 +11,21 @@ defmodule Stacks.Workers.ScoreSourceJobTest do
   alias Stacks.Workers.ScoreSourceJob
 
   describe "perform/1" do
-    test "scores a source via LLM and updates confidence" do
-      source = insert(:discovered_source)
-      MockTogetherClient.put_response({:ok, "0.85"})
+    test "an in-range score is parsed out of the LLM's text and persisted as a float" do
+      for text <- ["0.85", "0.95", "0.2", " 0.7\n"] do
+        source = insert(:discovered_source)
+        MockTogetherClient.put_response({:ok, text})
 
-      assert :ok =
-               perform_job(ScoreSourceJob, %{
-                 "source_id" => source.id
-               })
+        assert :ok =
+                 perform_job(ScoreSourceJob, %{
+                   "source_id" => source.id
+                 })
 
-      updated = Core.Repo.get!(DiscoveredSource, source.id)
-      assert updated.confidence == 0.85
-    end
+        updated = Core.Repo.get!(DiscoveredSource, source.id)
 
-    test "handles high confidence score (> 0.8)" do
-      source = insert(:discovered_source)
-      MockTogetherClient.put_response({:ok, "0.95"})
-
-      assert :ok =
-               perform_job(ScoreSourceJob, %{
-                 "source_id" => source.id
-               })
-
-      updated = Core.Repo.get!(DiscoveredSource, source.id)
-      assert updated.confidence == 0.95
-    end
-
-    test "handles low confidence score" do
-      source = insert(:discovered_source)
-      MockTogetherClient.put_response({:ok, "0.2"})
-
-      assert :ok =
-               perform_job(ScoreSourceJob, %{
-                 "source_id" => source.id
-               })
-
-      updated = Core.Repo.get!(DiscoveredSource, source.id)
-      assert updated.confidence == 0.2
+        assert updated.confidence == text |> String.trim() |> String.to_float(),
+               "the LLM answered #{inspect(text)}; the source scored #{inspect(updated.confidence)}"
+      end
     end
 
     test "defaults to 0.5 when LLM response is not a number" do
