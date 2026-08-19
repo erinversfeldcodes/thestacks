@@ -44,6 +44,26 @@ echo "==> Bootstrapping worktree"
 echo "    worktree: $WORKTREE_ROOT"
 echo "    seed from: $SOURCE_CHECKOUT"
 
+# LFS FIRST — before any step that copies or bundles an asset. A fresh worktree
+# materialises frontend/public/textures/*.png as ~130-byte pointer files, and an
+# asset build will happily bundle the pointer. What you get then is not a build
+# error but fifteen red texture specs describing a product defect that does not
+# exist. Objects come from the shared .git/lfs, so this is offline.
+echo "==> git lfs checkout"
+if command -v git-lfs &>/dev/null; then
+    git -C "$WORKTREE_ROOT" lfs checkout
+    still_pointers="$(find "$WORKTREE_ROOT/frontend/public/textures" -name '*.png' -size -1k 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$still_pointers" != "0" ]]; then
+        echo "    WARNING: $still_pointers texture(s) are still pointer files." >&2
+        echo "             Run 'git lfs fetch --all' in $SOURCE_CHECKOUT, then re-run this." >&2
+    else
+        echo "    textures materialised"
+    fi
+else
+    echo "    WARNING: git-lfs not installed — textures will stay as pointer files" >&2
+    echo "             and the texture specs will fail for that reason alone." >&2
+fi
+
 if [[ -f "$SOURCE_CHECKOUT/.env" && ! -f "$WORKTREE_ROOT/.env" ]]; then
     cp "$SOURCE_CHECKOUT/.env" "$WORKTREE_ROOT/.env"
     echo "    .env copied"
@@ -77,6 +97,15 @@ done
 
 echo "==> mix deps.get"
 (cd "$WORKTREE_ROOT" && mix deps.get >/dev/null)
+
+# e2e/ is not symlinked like the other node_modules trees: a branch can change
+# the Playwright pinning, and a shared tree would resolve against the wrong one.
+if [[ -d "$WORKTREE_ROOT/e2e" && ! -d "$WORKTREE_ROOT/e2e/node_modules" ]]; then
+    echo "==> npm ci (e2e)"
+    (cd "$WORKTREE_ROOT/e2e" && npm ci)
+else
+    echo "==> e2e/node_modules present — skipped"
+fi
 
 echo "==> Generating proto artefacts (all five targets)"
 bash "$WORKTREE_ROOT/scripts/regen-proto.sh"
