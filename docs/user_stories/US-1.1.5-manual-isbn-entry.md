@@ -63,7 +63,7 @@
 
 Note: This endpoint looks up an *existing* book by ISBN. If the book doesn't exist in the platform yet, it returns 404. The Elm frontend shows the "Book not found" error, at which point the user can try a different ISBN.
 
-For creating a book from a manually entered ISBN, the `POST /api/books` endpoint (`BookController.create/2`) calls `Books.create_from_isbn/1`, but the current Elm `Api.lookupByIsbn` function calls the GET endpoint instead.
+For creating a book from a manually entered ISBN, the `POST /api/books/confirm` endpoint (`BookController.confirm/2`) calls `Books.confirm/2`. It is the only way in: a second creating endpoint (`POST /api/books`) existed with no client and was removed, so manual entry and the upload flow now pass through one ISBN gate rather than two.
 
 ### Subsequent calls (on success)
 Same as US-1.1.1:
@@ -89,12 +89,12 @@ Same as US-1.1.1:
 - **Indexes used**: Unique constraint on `book_editions.isbn`
 - **Function**: `Books.find_existing/1`
 
-### Write (if book doesn't exist and POST /api/books is used)
-- Same as US-1.1.1 create flow via `Books.create_from_isbn/1`:
-  1. Validates ISBN format via `BookEdition.changeset`
+### Write (if book doesn't exist, via POST /api/books/confirm)
+- Same as US-1.1.1 create flow via `Books.confirm/2`:
+  1. Validates ISBN shape and checksum via `book_edition_changeset` — before any upstream call
   2. Calls `ISBNResolver.resolve(isbn)` for metadata
   3. Calls `find_or_create_author/1`
-  4. Creates book + edition via `Books.create/1` (Ecto.Multi)
+  4. Creates book + edition + placement (Ecto.Multi)
 
 ---
 
@@ -104,7 +104,7 @@ Same as US-1.1.1:
 If the book already exists in the catalogue, no events are emitted during the ISBN lookup itself. Events are emitted during the subsequent shelf placement (same as US-1.1.1):
 - `placement.created` -- when the user places the book on a shelf
 
-If the book needs to be created (via `POST /api/books`):
+If the book needs to be created (via `POST /api/books/confirm`):
 - `book.created` -- same as US-1.1.1
 
 ### Event Handlers Triggered
@@ -114,7 +114,7 @@ Same as US-1.1.1 for any events that fire.
 
 ## 7. Background Jobs (Oban)
 
-N/A -- manual ISBN entry is a synchronous flow. No Oban job is enqueued. The ISBN lookup (`GET /api/books/isbn/:isbn`) and book creation (`POST /api/books`) are handled inline in the request cycle.
+N/A -- manual ISBN entry is a synchronous flow. No Oban job is enqueued. The ISBN lookup (`GET /api/books/isbn/:isbn`) and book creation (`POST /api/books/confirm`) are handled inline in the request cycle.
 
 This is a key difference from the photo upload flow (US-1.1.1), which enqueues `IdentifyBookJob` and uses polling.
 
@@ -133,7 +133,7 @@ This is a key difference from the photo upload flow (US-1.1.1), which enqueues `
 - **Client module**: `Stacks.Books.ISBNResolver.resolve/1`
 - **Auth**: API key
 
-These calls only happen if the book doesn't already exist in the platform and the `POST /api/books` endpoint is used (calling `Books.create_from_isbn/1`). The `GET /api/books/isbn/:isbn` endpoint is a local database lookup only.
+These calls only happen if the book doesn't already exist in the platform and the `POST /api/books/confirm` endpoint is used (calling `Books.confirm/2`). The `GET /api/books/isbn/:isbn` endpoint is a local database lookup only.
 
 ---
 
@@ -222,10 +222,10 @@ The server-side `BookEdition.changeset/2` performs the same validation via `vali
 - **Type**: counter
 - **Labels/dimensions**: endpoint (`POST /api/bookshelves/:bookshelf_name/placements`), status_code (201, 422)
 
-- **Metric name**: `book_create_request_count` (if `POST /api/books` is used)
+- **Metric name**: `book_create_request_count` (if `POST /api/books/confirm` is used)
 - **Source**: Phoenix Telemetry via `[:phoenix, :endpoint, :stop]`
 - **Type**: counter
-- **Labels/dimensions**: endpoint (`POST /api/books`), status_code (201, 404, 422)
+- **Labels/dimensions**: endpoint (`POST /api/books/confirm`), status_code (201, 404, 422)
 
 ### Oban Job Metrics
 
@@ -268,8 +268,8 @@ N/A — manual ISBN entry is a synchronous flow. No Oban jobs are enqueued.
 - **Target/SLA**: p50 < 30ms, p95 < 100ms (local DB query on unique index)
 - **Dashboard**: API latency section
 
-- **Metric name**: Book creation latency (if `POST /api/books` is used)
-- **How measured**: Phoenix Telemetry `[:phoenix, :endpoint, :stop]` for `POST /api/books`
+- **Metric name**: Book creation latency (if `POST /api/books/confirm` is used)
+- **How measured**: Phoenix Telemetry `[:phoenix, :endpoint, :stop]` for `POST /api/books/confirm`
 - **Target/SLA**: p50 < 500ms, p95 < 2s (includes synchronous Open Library/Google Books API calls)
 - **Dashboard**: API latency section
 

@@ -180,7 +180,6 @@ defmodule CoreWeb.Router do
     post "/books/confirm", BookController, :confirm
     post "/books/:id/merge-format", BookController, :merge_format
     put "/books/:id/age-gate", BookController, :set_age_gate
-    resources "/books", BookController, only: [:create]
 
     post "/imports/goodreads", ImportController, :create
     get "/imports", ImportController, :index

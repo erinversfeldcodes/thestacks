@@ -139,15 +139,21 @@ defmodule Stacks.Books do
       edition it matched is the printing the reader owns — the caller keeps it so the
       placement can record it, instead of discarding it and defaulting to the
       work's primary edition.
+
+      An ISBN-10 the conversion refuses names no edition, so it matches nothing.
   """
   @spec find_existing_edition(String.t()) :: BookEdition.t() | nil
   def find_existing_edition(isbn) do
-    isbn13 = ISBN.to_isbn13(isbn)
+    case ISBN.to_isbn13(isbn) do
+      {:error, :invalid_isbn10_checksum} ->
+        nil
 
-    BookEdition
-    |> where([e], e.isbn == ^isbn13)
-    |> preload(book: [:author, :editions])
-    |> Repo.one()
+      {:ok, isbn13} ->
+        BookEdition
+        |> where([e], e.isbn == ^isbn13)
+        |> preload(book: [:author, :editions])
+        |> Repo.one()
+    end
   end
 
   @doc """
@@ -699,6 +705,11 @@ defmodule Stacks.Books do
       a title+author fuzzy match to another work (Jaro-Winkler > 0.8) returns
       `{:error, {:merge_required, work_id}}`. `attrs["shelf_name"]` picks the
       bookshelf (default `"wishlist"`).
+
+      Shape and checksum are judged before the upstreams are asked: a string
+      that cannot be an ISBN has nothing to resolve, so spending an Open
+      Library round-trip on it only turns a definite answer into a slower one
+      — and, when the upstreams are down, into the wrong one.
   """
   @spec confirm(binary(), map()) ::
           {:ok, :created, Book.t()}
@@ -711,6 +722,7 @@ defmodule Stacks.Books do
     shelf_name = attrs[:shelf_name] || attrs["shelf_name"] || "wishlist"
 
     with {:ok, isbn} <- require_isbn(isbn),
+         :ok <- validate_isbn_format(isbn),
          nil <- find_existing_edition(isbn),
          {:ok, metadata} <- resolve_for_write(isbn),
          [] <- find_same_work(metadata[:title] || "Unknown Title", metadata[:author] || "") do
@@ -985,8 +997,17 @@ defmodule Stacks.Books do
 
   defp normalize_edition_isbn(changeset) do
     case get_change(changeset, :isbn) do
-      nil -> changeset
-      isbn -> put_change(changeset, :isbn, ISBN.to_isbn13(isbn))
+      nil ->
+        changeset
+
+      isbn ->
+        case ISBN.to_isbn13(isbn) do
+          {:ok, isbn13} ->
+            put_change(changeset, :isbn, isbn13)
+
+          {:error, :invalid_isbn10_checksum} ->
+            add_error(changeset, :isbn, "has an invalid checksum")
+        end
     end
   end
 

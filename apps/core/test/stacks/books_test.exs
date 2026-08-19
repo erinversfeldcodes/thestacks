@@ -158,6 +158,15 @@ defmodule Stacks.BooksTest do
       assert found = Books.find_existing("0743273567")
       assert found.id == book.id
     end
+
+    test "an ISBN-10 with a wrong check digit matches nothing, not its neighbour" do
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      assert nil == Books.find_existing("0743273568"),
+             "0743273567 and 0743273568 differ only in the check digit, so recomputing " <>
+               "the EAN-13 from the first nine digits would hand back the wrong book"
+    end
   end
 
   describe "confirm/2 records the scanned edition on the placement" do
@@ -1274,6 +1283,38 @@ defmodule Stacks.BooksTest do
     test "returns nil for non-binary input" do
       assert ISBN.canonical_isbn13(nil) == nil
       assert ISBN.canonical_isbn13(123) == nil
+    end
+  end
+
+  describe "to_isbn13/1" do
+    test "converts an ISBN-10 whose own check digit is right" do
+      assert ISBN.to_isbn13("0306406152") == {:ok, "9780306406157"}
+      assert ISBN.to_isbn13("080442957X") == {:ok, "9780804429573"}
+      assert ISBN.to_isbn13("080442957x") == {:ok, "9780804429573"}
+    end
+
+    test "refuses an ISBN-10 whose own check digit is wrong" do
+      assert ISBN.to_isbn13("0306406153") == {:error, :invalid_isbn10_checksum}
+    end
+
+    test "the refusal is what stops a wrong ISBN-10 becoming a flawless ISBN-13" do
+      assert {:ok, good} = ISBN.to_isbn13("0306406152")
+
+      refute ISBN.to_isbn13("0306406153") == {:ok, good},
+             "the EAN-13 check digit is recomputed from the first nine digits, which " <>
+               "0306406152 and 0306406153 share — converting the wrong one produces a " <>
+               "valid ISBN-13 that every later layer accepts"
+    end
+
+    test "passes an ISBN-13 through untouched" do
+      assert ISBN.to_isbn13("9780306406157") == {:ok, "9780306406157"}
+    end
+
+    test "passes anything not shaped like an ISBN-10 through untouched" do
+      assert ISBN.to_isbn13("garbage!!!") == {:ok, "garbage!!!"}
+      assert ISBN.to_isbn13("0-306-40615-2") == {:ok, "0-306-40615-2"}
+      assert ISBN.to_isbn13("") == {:ok, ""}
+      assert ISBN.to_isbn13(nil) == {:ok, nil}
     end
   end
 
