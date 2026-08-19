@@ -508,4 +508,24 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Could not save location. Please try again." ]
             ]
+        , describe "the reader's own public profile"
+            [ test "the handle hint links to it — the only route to your own profile in the app" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetHandle "ada")
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has
+                            [ Selector.tag "a"
+                            , Selector.attribute (Attr.href "/u/ada")
+                            , Selector.text "thestacks.app/u/ada"
+                            ]
+            , test "with no handle yet there is nothing to link to, so it stays guidance" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetHandle "")
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.tag "a", Selector.attribute (Attr.href "/u/") ]
+            ]
         ]

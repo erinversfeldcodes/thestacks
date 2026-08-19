@@ -6313,6 +6313,19 @@ h4 {
     margin-top: 0.3rem;
 }
 
+/* The reader's own public address, inside the muted hint. Underlined rather than
+   recoloured: it sits in deliberately quiet text, and an accent here would pull
+   more attention than a hint deserves. */
+.form-field__hint-link {
+    color: var(--text);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.form-field__hint-link:hover {
+    color: var(--accent);
+}
+
 .pending-email {
     font-family: var(--font-body);
     background: rgba(184, 134, 11, 0.12);

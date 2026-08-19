@@ -34,10 +34,11 @@ to one question.
 import Api
 import Components.SaveButton as SaveButton
 import Effect exposing (Effect)
-import Html exposing (Html, div, h1, h2, input, label, p, strong, text)
-import Html.Attributes exposing (class, placeholder, type_, value)
+import Html exposing (Html, a, div, h1, h2, input, label, p, strong, text)
+import Html.Attributes exposing (class, href, placeholder, type_, value)
 import Html.Events exposing (onInput)
 import Http
+import Navigation.Route as Route
 import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (User)
 
@@ -399,7 +400,7 @@ view model =
                     ]
                     []
                 , p [ class "form-field__hint" ]
-                    [ text (handleHint model.handle) ]
+                    (viewHandleHint model.handle)
                 , viewHandleError model.savingProfile
                 ]
             , div [ class "form-field" ]
@@ -616,14 +617,30 @@ handleErrorMessage saving =
 
 {-| The live public-address hint under the handle field. Shows the full address
 once a handle is present, and gentle guidance while the field is empty.
+
+The address is a real link once there is a handle to link to. This is the only
+route to your OWN public profile anywhere in the app — every other link to a
+profile is a link to somebody ELSE's, so without this a reader cannot see what
+their profile looks like to other people without hand-typing the URL.
+
 -}
-handleHint : String -> String
-handleHint handle =
-    if String.trim handle == "" then
-        "Choose a handle — others will find you at thestacks.app/u/your_handle"
+viewHandleHint : String -> List (Html msg)
+viewHandleHint handle =
+    let
+        trimmed =
+            String.trim handle
+    in
+    if trimmed == "" then
+        [ text "Choose a handle — others will find you at thestacks.app/u/your_handle" ]
 
     else
-        "Your public profile lives at thestacks.app/u/" ++ handle
+        [ text "Your public profile lives at "
+        , a
+            [ href (Route.toPath (Route.Profile trimmed))
+            , class "form-field__hint-link"
+            ]
+            [ text ("thestacks.app/u/" ++ trimmed) ]
+        ]
 
 
 handleErrorCopy : String -> String
