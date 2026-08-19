@@ -145,8 +145,14 @@ defmodule Stacks.Email.Templates do
     """
   end
 
-  @doc "GDPR data export ready notification."
-  def gdpr_export_ready(download_url) do
+  @doc """
+      GDPR data export ready notification.
+
+      The stated expiry is rendered from the real one rather than written into
+      the copy: the link is a signature with a deadline on it, and a promise
+      that outlives the signature sends people to a dead URL.
+  """
+  def gdpr_export_ready(download_url, expires_in_seconds \\ 86_400) do
     """
     <html>
     <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
@@ -160,7 +166,8 @@ defmodule Stacks.Email.Templates do
           </a>
         </p>
         <p style="font-size: 12px; color: #7a6b5d;">
-          This link will expire after 7 days.
+          This link will expire in #{expiry_phrase(expires_in_seconds)}. The copy of your
+          data is deleted at the same time — request another export whenever you need one.
         </p>
       </div>
     </body>
@@ -262,4 +269,11 @@ defmodule Stacks.Email.Templates do
     </html>
     """
   end
+
+  defp expiry_phrase(seconds) when seconds < 3600, do: plural(div(seconds, 60), "minute")
+  defp expiry_phrase(seconds) when seconds < 172_800, do: plural(div(seconds, 3600), "hour")
+  defp expiry_phrase(seconds), do: plural(div(seconds, 86_400), "day")
+
+  defp plural(1, unit), do: "1 #{unit}"
+  defp plural(count, unit), do: "#{count} #{unit}s"
 end

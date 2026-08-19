@@ -20,6 +20,7 @@ config :core, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
+       {"15 * * * *", Stacks.Workers.ExportRetentionJob},
        {"30 2 * * *", Stacks.Workers.LibraryImportRowRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},

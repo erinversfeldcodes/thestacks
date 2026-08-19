@@ -73,6 +73,11 @@ else
     config :core, :r2_bucket, System.get_env("R2_BUCKET_NAME", "stacks-images")
   end
 
+  # How long a mailed GDPR export link — and the stored copy behind it — lives.
+  if export_ttl = System.get_env("EXPORT_TTL_SECONDS") do
+    config :core, :export_ttl_seconds, String.to_integer(export_ttl)
+  end
+
   if scraper_hmac = System.get_env("SCRAPER_HMAC_SECRET") do
     config :core, :scraper_hmac_secret, scraper_hmac
   end

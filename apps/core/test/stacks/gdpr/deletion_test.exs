@@ -25,6 +25,8 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.Events.EventLog
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.GDPR.Deletion
+  alias Stacks.GDPR.DeletionTest.RecordingStorage
+  alias Stacks.GDPR.DeletionTest.UnreachableStorage
   alias Stacks.MFA
   alias Stacks.MFA.UserMFA
 
@@ -437,6 +439,25 @@ defmodule Stacks.GDPR.DeletionTest do
       assert_received {:storage_delete, "uploads/obj-b"}
       refute_received {:storage_delete, _other}
     end
+
+    test "deletes any outstanding data-export object for the user" do
+      user = insert(:user)
+      key = "exports/#{user.id}/#{DateTime.to_unix(DateTime.utc_now())}-abc.json"
+      RecordingStorage.seed_listing("exports/#{user.id}/", [key])
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      assert_received {:storage_delete, ^key}
+    end
+
+    test "erasure still completes when the export copy cannot be reached" do
+      user = insert(:user)
+      Application.put_env(:core, :storage, Stacks.GDPR.DeletionTest.UnreachableStorage)
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      refute Repo.get(Stacks.Accounts.User, user.id)
+    end
   end
 
   describe "erasure completeness — schema-level guard" do
@@ -567,8 +588,42 @@ defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
   def head(_key), do: {:error, :not_found}
 
   @impl true
+  def list(prefix), do: {:ok, Process.get({__MODULE__, prefix}, [])}
+
+  @impl true
   def delete(key) do
     send(self(), {:storage_delete, key})
     :ok
   end
+
+  @doc "Make `list/1` answer `keys` for `prefix`."
+  def seed_listing(prefix, keys), do: Process.put({__MODULE__, prefix}, keys)
+end
+
+defmodule Stacks.GDPR.DeletionTest.UnreachableStorage do
+  @moduledoc """
+      Test-local storage backend that is simply down. Erasure of the user's rows
+      must not be held hostage to it — the deadline encoded in each export key
+      is what guarantees the unreachable copy still goes.
+  """
+
+  @behaviour Stacks.Storage.StorageBehaviour
+
+  @impl true
+  def put(_key, _data, _opts \\ []), do: {:error, :circuit_open}
+
+  @impl true
+  def presigned_url(_key, _ttl_seconds \\ 900), do: {:error, :circuit_open}
+
+  @impl true
+  def presigned_put_url(_key, _ttl_seconds \\ 900, _opts \\ []), do: {:error, :circuit_open}
+
+  @impl true
+  def head(_key), do: {:error, :circuit_open}
+
+  @impl true
+  def list(_prefix), do: {:error, :circuit_open}
+
+  @impl true
+  def delete(_key), do: {:error, :circuit_open}
 end

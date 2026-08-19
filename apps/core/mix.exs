@@ -70,6 +70,10 @@ defmodule Core.MixProject do
       {:elixir_feed_parser, "~> 2.1"},
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
+      # ExAws parses S3 list responses as XML and errors without a parser. The
+      # only listing we do is the GDPR export retention sweep — put/get/head/
+      # delete need no parser, which is why this was optional until now.
+      {:sweet_xml, "~> 0.7"},
       {:ex_machina, "~> 2.8", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:timex, "~> 3.7"},
