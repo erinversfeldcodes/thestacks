@@ -51,6 +51,13 @@ defmodule Stacks.Shelving do
     :source
   ]
 
+  @doc """
+      The five bookshelf names an account may own, in no particular order.
+      `bookshelf_changeset/2` validates against this list.
+  """
+  @spec bookshelf_names() :: [String.t()]
+  def bookshelf_names, do: @valid_bookshelf_names
+
   @doc "Changeset for creating or updating a bookshelf."
   def bookshelf_changeset(bookshelf, attrs) do
     bookshelf

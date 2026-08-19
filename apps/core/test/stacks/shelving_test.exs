@@ -23,6 +23,22 @@ defmodule Stacks.ShelvingTest do
     %{user: user, bookshelf: bookshelf, book: book, placement: placement}
   end
 
+  # Every reading-progress test moves a book the reader has NOT started:
+  # `update_reading_progress/3` stamps `started_at` only on the FIRST move to
+  # "reading", and a `finished_at` only ever arrives with "completed". A book on
+  # a library shelf is one the factory takes to be finished already, so this says
+  # otherwise out loud.
+  defp setup_unread_placement(_ctx) do
+    user = insert(:user)
+    bookshelf = insert(:bookshelf, user: user, name: "library")
+    book = insert(:book)
+
+    placement =
+      insert(:placement, bookshelf: bookshelf, book: book, reading_status: "to_read")
+
+    %{user: user, bookshelf: bookshelf, book: book, placement: placement}
+  end
+
   describe "get_bookshelf_books/2" do
     setup :setup_user_bookshelf_book
 
@@ -1093,7 +1109,7 @@ defmodule Stacks.ShelvingTest do
   end
 
   describe "update_reading_progress/3" do
-    setup :setup_user_bookshelf_book
+    setup :setup_unread_placement
 
     test "transitions status from to_read to reading", %{user: user, placement: placement} do
       assert {:ok, updated} =
