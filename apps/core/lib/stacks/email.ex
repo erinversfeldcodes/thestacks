@@ -47,13 +47,23 @@ defmodule Stacks.Email do
 
   @doc """
       Looks up a user by email and enqueues a password reset email.
-      Always returns `:ok` — no enumeration of registered email addresses.
+
+      Returns `{:error, :rate_limited}` when the limiter suppressed a send that
+      was otherwise due, and `:ok` otherwise — including when there is no such
+      account, since then nothing was dropped. Every outcome is also counted on
+      `[:stacks, :auth, :password_reset]` with an `:outcome` tag.
+
+      The truthful return exists for the platform, not for the wire:
+      `AuthController.forgot_password/2` answers identically either way, so no
+      enumeration of registered addresses becomes possible. Before this, a reset
+      the platform swallowed was indistinguishable from one it sent, which left
+      "I asked for a link and never got one" unanswerable from the inside.
   """
-  @spec send_password_reset(String.t()) :: :ok
+  @spec send_password_reset(String.t()) :: :ok | {:error, :rate_limited}
   def send_password_reset(email) do
-    user = Accounts.get_user_by_email(email)
-    do_send_password_reset(user)
-    :ok
+    email
+    |> Accounts.get_user_by_email()
+    |> do_send_password_reset()
   end
 
   @doc """
@@ -73,21 +83,27 @@ defmodule Stacks.Email do
   end
 
   @doc """
-      Issues a FRESH confirmation link and enqueues the email. Always returns
-      `:ok` (anti-enumeration — see `AuthController.resend_confirmation/2`).
-      Nothing happens when: no such account, already confirmed, or past
-      `unverified_account_max_lifetime_seconds/0` (renewal has a ceiling; see
-      `confirmation_resendable?/1`). Otherwise a NEW token is signed and
-      stored — re-signing is what makes the affordance safe: the fresh
-      `signed_at` buys a full TTL, and the reaper honours it.
+      Issues a FRESH confirmation link and enqueues the email.
+
+      Returns `{:error, :rate_limited}` when the limiter suppressed a link that
+      was otherwise due, and `:ok` for every other outcome — including the three
+      where there was nothing to send: no such account, already confirmed, or
+      past `unverified_account_max_lifetime_seconds/0` (renewal has a ceiling;
+      see `confirmation_resendable?/1`). All five outcomes are counted on
+      `[:stacks, :auth, :confirmation_resend]` with an `:outcome` tag.
+
+      `AuthController.resend_confirmation/2` answers identically for all of them
+      (anti-enumeration), so the distinction never leaves the platform.
+
+      When a link IS issued, a NEW token is signed and stored — re-signing is
+      what makes the affordance safe: the fresh `signed_at` buys a full TTL,
+      and the reaper honours it.
   """
-  @spec send_confirmation_resend(String.t()) :: :ok
+  @spec send_confirmation_resend(String.t()) :: :ok | {:error, :rate_limited}
   def send_confirmation_resend(email) do
     email
     |> Accounts.get_user_by_email()
     |> do_send_confirmation_resend()
-
-    :ok
   end
 
   @doc """
@@ -110,68 +126,98 @@ defmodule Stacks.Email do
     end
   end
 
-  defp do_send_password_reset(nil), do: :ok
+  defp do_send_password_reset(nil), do: reset_outcome(:no_account)
 
   defp do_send_password_reset(user) do
-    with :ok <- check_rate_limit(user.id) do
-      token = Phoenix.Token.sign(CoreWeb.Endpoint, "password_reset", user.id)
-      now = DateTime.utc_now()
+    case check_rate_limit(user.id) do
+      :ok ->
+        token = Phoenix.Token.sign(CoreWeb.Endpoint, "password_reset", user.id)
+        now = DateTime.utc_now()
 
-      Repo.transaction(fn ->
-        user
-        |> Accounts.password_reset_changeset(%{
-          password_reset_token: token,
-          password_reset_sent_at: now
-        })
-        |> Repo.update!()
+        Repo.transaction(fn ->
+          user
+          |> Accounts.password_reset_changeset(%{
+            password_reset_token: token,
+            password_reset_sent_at: now
+          })
+          |> Repo.update!()
 
-        EmailDeliveryJob.new(%{
-          "template" => "password_reset",
-          "user_id" => user.id,
-          "params" => %{"token" => token}
-        })
-        |> Oban.insert!()
-      end)
+          EmailDeliveryJob.new(%{
+            "template" => "password_reset",
+            "user_id" => user.id,
+            "params" => %{"token" => token}
+          })
+          |> Oban.insert!()
+        end)
+
+        reset_outcome(:sent)
+
+      {:error, :rate_limited} ->
+        reset_outcome(:rate_limited)
     end
-
-    :ok
   end
 
-  defp do_send_confirmation_resend(nil), do: :ok
+  defp do_send_confirmation_resend(nil), do: resend_outcome(:no_account)
 
-  defp do_send_confirmation_resend(%User{email_confirmed: true}), do: :ok
+  defp do_send_confirmation_resend(%User{email_confirmed: true}),
+    do: resend_outcome(:already_confirmed)
 
   defp do_send_confirmation_resend(%User{} = user) do
     if Accounts.confirmation_resendable?(user) do
       issue_confirmation_link(user)
+    else
+      resend_outcome(:past_renewal_ceiling)
     end
-
-    :ok
   end
 
   defp issue_confirmation_link(%User{} = user) do
-    with :ok <- check_rate_limit(user.id) do
-      token = Accounts.sign_confirmation_token(user.id)
+    case check_rate_limit(user.id) do
+      :ok ->
+        token = Accounts.sign_confirmation_token(user.id)
 
-      Repo.transaction(fn ->
-        user
-        |> Accounts.email_confirmation_changeset(%{
-          email_confirmed: false,
-          email_confirmation_token: token
-        })
-        |> Repo.update!()
+        Repo.transaction(fn ->
+          user
+          |> Accounts.email_confirmation_changeset(%{
+            email_confirmed: false,
+            email_confirmation_token: token
+          })
+          |> Repo.update!()
 
-        EmailDeliveryJob.new(%{
-          "template" => "registration_confirmation",
-          "user_id" => user.id,
-          "params" => %{"token" => token}
-        })
-        |> Oban.insert!()
-      end)
+          EmailDeliveryJob.new(%{
+            "template" => "registration_confirmation",
+            "user_id" => user.id,
+            "params" => %{"token" => token}
+          })
+          |> Oban.insert!()
+        end)
+
+        resend_outcome(:sent)
+
+      {:error, :rate_limited} ->
+        resend_outcome(:rate_limited)
     end
-
-    :ok
   end
+
+  # Counting an outcome and answering the caller are the same act, so a new
+  # outcome cannot be added to one flow without also reaching the other. The
+  # metadata carries the outcome only — no address, no id — because these
+  # counters cover unauthenticated endpoints and must not become a record of
+  # who asked.
+  defp reset_outcome(outcome) do
+    :telemetry.execute([:stacks, :auth, :password_reset], %{count: 1}, %{outcome: outcome})
+    outcome_reply(outcome)
+  end
+
+  defp resend_outcome(outcome) do
+    :telemetry.execute([:stacks, :auth, :confirmation_resend], %{count: 1}, %{outcome: outcome})
+    outcome_reply(outcome)
+  end
+
+  # Suppression is the only outcome the caller has to handle: it is the one
+  # where the platform owed someone an email and did not send it. Having
+  # nothing to send is not a failure.
+  defp outcome_reply(:rate_limited), do: {:error, :rate_limited}
+  defp outcome_reply(_delivered_or_nothing_to_send), do: :ok
 
   defp do_confirm_email(nil), do: {:error, :invalid}
 

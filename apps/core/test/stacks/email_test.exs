@@ -7,6 +7,52 @@ defmodule Stacks.EmailTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Email
+  alias Stacks.Workers.EmailDeliveryJob
+
+  # The email limiter counts this user's EmailDeliveryJob rows in the last hour
+  # against @per_user_hourly_limit (10), so ten jobs is the cheapest way to make
+  # the next send land on the suppressed branch.
+  defp saturate_email_limit(user_id) do
+    for _ <- 1..10 do
+      EmailDeliveryJob.new(%{
+        "template" => "registration_confirmation",
+        "user_id" => user_id,
+        "params" => %{"token" => "saturating-the-limiter"}
+      })
+      |> Oban.insert!()
+    end
+  end
+
+  defp enqueued_count do
+    length(all_enqueued(worker: EmailDeliveryJob))
+  end
+
+  # Record the outcomes `event` reports, but only for events raised inside THIS
+  # process — :telemetry handlers are global and this file is async, so a
+  # sibling test's send would otherwise show up as ours.
+  defp watch_outcomes(event) do
+    test = self()
+    id = {__MODULE__, event, System.unique_integer([:positive])}
+
+    :telemetry.attach(
+      id,
+      event,
+      fn ^event, measurements, metadata, ^test ->
+        if self() == test, do: send(test, {:outcome, metadata[:outcome], measurements})
+      end,
+      test
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  defp outcomes do
+    receive do
+      {:outcome, outcome, measurements} -> [{outcome, measurements} | outcomes()]
+    after
+      0 -> []
+    end
+  end
 
   defp user_with_confirmation_token(attrs \\ []) do
     user = insert(:user, Keyword.merge([email_confirmed: false], attrs))
@@ -89,6 +135,119 @@ defmodule Stacks.EmailTest do
     test "does not enqueue a job for an unknown email" do
       Email.send_password_reset("ghost@example.com")
       refute_enqueued(worker: Stacks.Workers.EmailDeliveryJob)
+    end
+  end
+
+  describe "send_password_reset/1 — what the platform knows about its own silence" do
+    test "reports the suppression when the limiter drops a reset that was due" do
+      user = insert(:user, email: "suppressed@example.com")
+      saturate_email_limit(user.id)
+
+      assert {:error, :rate_limited} = Email.send_password_reset(user.email),
+             "a reset the platform swallowed reported the same :ok as one it sent"
+    end
+
+    test "a suppressed reset enqueues nothing and stores no token" do
+      user = insert(:user, email: "suppressed-effects@example.com")
+      saturate_email_limit(user.id)
+      before = enqueued_count()
+
+      assert {:error, :rate_limited} = Email.send_password_reset(user.email)
+
+      assert enqueued_count() == before,
+             "the limiter refused the send but a delivery job was enqueued anyway"
+
+      assert is_nil(Core.Repo.reload!(user).password_reset_token),
+             "a reset token was stored for a link that will never be sent"
+    end
+
+    test "counts the suppression on [:stacks, :auth, :password_reset] as :rate_limited" do
+      user = insert(:user, email: "counted@example.com")
+      saturate_email_limit(user.id)
+      watch_outcomes([:stacks, :auth, :password_reset])
+
+      Email.send_password_reset(user.email)
+
+      assert [{:rate_limited, %{count: 1}}] = outcomes()
+    end
+
+    test "counts a delivered reset as :sent" do
+      user = insert(:user, email: "counted-sent@example.com")
+      watch_outcomes([:stacks, :auth, :password_reset])
+
+      assert :ok = Email.send_password_reset(user.email)
+
+      assert [{:sent, %{count: 1}}] = outcomes()
+    end
+
+    test "counts an address with no account as :no_account, and still answers :ok" do
+      watch_outcomes([:stacks, :auth, :password_reset])
+
+      assert :ok = Email.send_password_reset("no-such-reader@example.com"),
+             "nothing was dropped, so nothing is owed — this is not an error"
+
+      assert [{:no_account, %{count: 1}}] = outcomes()
+    end
+  end
+
+  describe "send_confirmation_resend/1 — what the platform knows about its own silence" do
+    test "reports the suppression when the limiter drops a link that was due" do
+      user = insert(:unconfirmed_user, email: "resend-suppressed@example.com")
+      saturate_email_limit(user.id)
+
+      assert {:error, :rate_limited} = Email.send_confirmation_resend(user.email)
+    end
+
+    test "a suppressed resend enqueues nothing and leaves the old link in place" do
+      user = insert(:unconfirmed_user, email: "resend-effects@example.com")
+      original = user.email_confirmation_token
+      saturate_email_limit(user.id)
+      before = enqueued_count()
+
+      assert {:error, :rate_limited} = Email.send_confirmation_resend(user.email)
+
+      assert enqueued_count() == before,
+             "the limiter refused the send but a delivery job was enqueued anyway"
+
+      assert Core.Repo.reload!(user).email_confirmation_token == original,
+             "the stored link was re-signed for a mail that will never be sent, " <>
+               "invalidating the link the reader already has"
+    end
+
+    test "counts each outcome on [:stacks, :auth, :confirmation_resend]" do
+      unconfirmed = insert(:unconfirmed_user, email: "resend-sent@example.com")
+      confirmed = insert(:user, email: "resend-confirmed@example.com", email_confirmed: true)
+
+      watch_outcomes([:stacks, :auth, :confirmation_resend])
+
+      assert :ok = Email.send_confirmation_resend(unconfirmed.email)
+      assert :ok = Email.send_confirmation_resend(confirmed.email)
+      assert :ok = Email.send_confirmation_resend("no-such-reader@example.com")
+
+      assert [{:sent, _}, {:already_confirmed, _}, {:no_account, _}] = outcomes()
+    end
+
+    test "counts an account past the renewal ceiling as :past_renewal_ceiling" do
+      user = insert(:unconfirmed_user, email: "resend-capped@example.com")
+
+      {1, _} =
+        Core.Repo.update_all(
+          Ecto.Query.where(Stacks.Accounts.User, [u], u.id == ^user.id),
+          set: [
+            created_at:
+              DateTime.add(
+                DateTime.utc_now(),
+                -(Accounts.unverified_account_max_lifetime_seconds() + 60),
+                :second
+              )
+          ]
+        )
+
+      watch_outcomes([:stacks, :auth, :confirmation_resend])
+
+      assert :ok = Email.send_confirmation_resend(user.email)
+
+      assert [{:past_renewal_ceiling, %{count: 1}}] = outcomes()
     end
   end
 
