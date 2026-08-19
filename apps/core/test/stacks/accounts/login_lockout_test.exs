@@ -173,10 +173,18 @@ defmodule Stacks.Accounts.LoginLockoutTest do
 
       past = DateTime.add(DateTime.utc_now(), -60, :second)
 
+      # The shape a real expired lock has: the window that reached the
+      # threshold opened one duration before the lock did. A count without its
+      # window start is not a state authenticate/2 can produce, and the trio
+      # CHECK on op.users now rejects it.
       {1, nil} =
         Repo.update_all(
           User |> Ecto.Query.where([u], u.id == ^user.id),
-          set: [locked_until: past, failed_login_count: 3]
+          set: [
+            locked_until: past,
+            failed_login_count: 3,
+            failed_login_first_at: DateTime.add(past, -120, :second)
+          ]
         )
 
       assert {:ok, _} = Accounts.authenticate(user.email, @password)
@@ -194,16 +202,16 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       first = Repo.get!(User, user.id)
       first_lock_seconds = DateTime.diff(first.locked_until, DateTime.utc_now())
 
+      # Age the lock out WITHOUT touching the counters. Only a successful login
+      # clears them, and it clears `locked_until` in the same statement, so a
+      # lock standing over a zeroed counter is a state no login can reach — and
+      # the trio CHECK on op.users now says so.
       just_expired = DateTime.add(DateTime.utc_now(), -1, :second)
 
       {1, nil} =
         Repo.update_all(
           User |> Ecto.Query.where([u], u.id == ^user.id),
-          set: [
-            locked_until: just_expired,
-            failed_login_count: 0,
-            failed_login_first_at: nil
-          ]
+          set: [locked_until: just_expired]
         )
 
       Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
@@ -228,13 +236,11 @@ defmodule Stacks.Accounts.LoginLockoutTest do
 
         just_expired = DateTime.add(DateTime.utc_now(), -1, :second)
 
+        # Age the lock out only — see the note on the previous test for why the
+        # counters are left where the lockout put them.
         Repo.update_all(
           User |> Ecto.Query.where([u], u.id == ^user.id),
-          set: [
-            locked_until: just_expired,
-            failed_login_count: 0,
-            failed_login_first_at: nil
-          ]
+          set: [locked_until: just_expired]
         )
       end)
 
