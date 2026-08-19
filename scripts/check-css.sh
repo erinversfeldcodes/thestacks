@@ -127,8 +127,11 @@ def has_rule(cls):
     check reported no finding and passed. Precisely the substring flaw that had handed out 14 bogus
     hook exemptions, reproduced in the check written to catch its consequences. A trailing word or
     hyphen character means it is a different class.
+
+    Searches the comment-stripped source, as check-orphan-classes.sh does, so a class named only in
+    a CSS comment — an example, or a note about a rule someone deleted — does not read as styled.
     """
-    return re.search(r"\." + re.escape(cls) + r"(?![\w-])", raw) is not None
+    return re.search(r"\." + re.escape(cls) + r"(?![\w-])", css) is not None
 
 declared_classes = set()
 for _lit in re.findall(r'class\s+"([^"\n]+)"', src):
@@ -142,6 +145,11 @@ for missing in sorted(declared - styled):
         "and this family had four unstyled at once while the orphan gate read zero"
     )
 
+# There is deliberately NO hook exemption below, and check-orphan-classes.sh's header is the
+# argument for its absence: the exemption it used to carry was a substring match that handed out 14
+# bogus passes, and tightening it to real selector syntax still protected seven classes a live drive
+# found unstyled. A hook belongs in `data-testid`, which needs no rule because it is not a class.
+# A second allowlist here would be the same mistake under a new name.
 blocks = {}
 for _cls in sorted(declared_classes):
     _b = re.split(r"__|--", _cls)[0]
@@ -153,6 +161,19 @@ for _b, _v in sorted(blocks.items()):
         problems.append(
             f"block `{_b}` is partly styled: {len(_v['styled'])} member(s) have rules and "
             f"{_v['bare']} do not — a partly-styled block is an oversight, not a decision"
+        )
+    elif _v["bare"] and any(("__" in _m or "--" in _m) for _m in _v["bare"]):
+        # The partly-styled rule above is structurally blind to this case: it compares bare members
+        # against styled ones, so a block with NO styled member never reaches it. That is the shape a
+        # brand-new component has on the day it ships, and three surfaces — the listing-removal page,
+        # the shelf organiser, the profile shelf feed — went out through exactly this hole, rendering
+        # as raw browser chrome. A block is judged whole here: it needs at least one `__`/`--` member,
+        # so this names components rather than restating every loose class the orphan gate already has.
+        problems.append(
+            f"block `{_b}` is WHOLLY unstyled: every one of its {len(_v['bare'])} member(s) "
+            f"{_v['bare']} lacks a rule, so the entire component renders unstyled. The partly-styled "
+            "rule cannot see this — it needs a styled member to compare against. Add the rules, or "
+            "move the names to `data-testid` if they are only hooks."
         )
 
 byclass = defaultdict(list)
