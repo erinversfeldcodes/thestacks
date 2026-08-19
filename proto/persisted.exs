@@ -251,7 +251,8 @@
         email_confirmation_token: %{dbt_exclude: true},
         failed_login_count: %{default: 0, null: false, dbt_exclude: true},
         failed_login_first_at: %{dbt_exclude: true},
-        locked_until: %{dbt_exclude: true}
+        locked_until: %{dbt_exclude: true},
+        lockout_duration_seconds: %{dbt_exclude: true}
       }
     },
     %{
@@ -1369,7 +1370,8 @@
         :password_reset_sent_at,
         :failed_login_count,
         :failed_login_first_at,
-        :locked_until
+        :locked_until,
+        :lockout_duration_seconds
       ],
       field_overrides: %{}
     },

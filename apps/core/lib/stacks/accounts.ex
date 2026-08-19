@@ -691,16 +691,23 @@ defmodule Stacks.Accounts do
         failed_login_count: 0,
         failed_login_first_at: nil,
         locked_until: nil,
+        lockout_duration_seconds: nil,
         updated_at: DateTime.utc_now()
       ]
     )
 
-    %{user | failed_login_count: 0, failed_login_first_at: nil, locked_until: nil}
+    %{
+      user
+      | failed_login_count: 0,
+        failed_login_first_at: nil,
+        locked_until: nil,
+        lockout_duration_seconds: nil
+    }
   end
 
   # Failed login: increment the counter inside the rolling window. If we hit
-  # the threshold, set `locked_until` with exponential backoff based on any
-  # prior recent lock.
+  # the threshold, set `locked_until` and the length it was set for, escalating
+  # from any prior recent lock.
   defp record_failed_login(%User{} = user, now) do
     threshold = login_lockout_threshold()
     window_seconds = login_lockout_window_seconds()
@@ -717,6 +724,7 @@ defmodule Stacks.Accounts do
           failed_login_count: new_count,
           failed_login_first_at: new_first_at,
           locked_until: locked_until,
+          lockout_duration_seconds: duration,
           updated_at: now
         ]
       )
@@ -755,13 +763,21 @@ defmodule Stacks.Accounts do
   end
 
   # Compute the duration of the next lock. If the user has a recent prior lock
-  # (within `:login_lockout_backoff_window_seconds`), double the previous
-  # duration up to the configured cap.
-  #
-  # We derive "previous duration" from the existing locked_until value, treating
-  # any locked_until set within the backoff window as evidence of a prior lock.
-  # When locked_until is nil OR older than the backoff window, start at the
+  # (within `:login_lockout_backoff_window_seconds`), double that lock's
+  # duration up to the configured cap; otherwise the ladder starts over at the
   # initial duration.
+  #
+  # The previous duration is read from `lockout_duration_seconds`, which is
+  # written alongside `locked_until` and NULL exactly when it is NULL — the
+  # lockout CHECK on op.users says so, which is why there is no clause here for
+  # a lock without a recorded length. It cannot be derived from the other columns
+  # instead: `locked_until` is the lock's END, and `failed_login_first_at` has
+  # already rolled forward past it by the time we get here (a lock outlasts the
+  # failure window that earned it, so the first failure after it expires starts
+  # a fresh window).
+  #
+  # The floor at the configured initial duration keeps a lowered config from
+  # letting an in-flight ladder step backwards.
   defp next_lockout_duration_seconds(%User{locked_until: nil}, _now),
     do: login_lockout_duration_seconds()
 
@@ -770,16 +786,7 @@ defmodule Stacks.Accounts do
     horizon = DateTime.add(now, -backoff_window, :second)
 
     if DateTime.compare(prior_lock, horizon) == :gt do
-      prior_duration =
-        if user.failed_login_first_at do
-          max(
-            login_lockout_duration_seconds(),
-            DateTime.diff(prior_lock, user.failed_login_first_at, :second)
-          )
-        else
-          login_lockout_duration_seconds()
-        end
-
+      prior_duration = max(user.lockout_duration_seconds, login_lockout_duration_seconds())
       min(prior_duration * 2, login_lockout_max_duration_seconds())
     else
       login_lockout_duration_seconds()

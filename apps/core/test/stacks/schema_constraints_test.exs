@@ -354,7 +354,7 @@ defmodule Stacks.SchemaConstraintsTest do
     end
   end
 
-  describe "op.users login lockout trio CHECK (20260819120000)" do
+  describe "op.users login lockout state CHECK (20260819120000, 20260819154412)" do
     test "a failure count with no window start is rejected" do
       user = insert(:user)
 
@@ -380,12 +380,58 @@ defmodule Stacks.SchemaConstraintsTest do
 
       error =
         assert_raise Postgrex.Error, fn ->
-          set_user!(user, locked_until: DateTime.add(DateTime.utc_now(), 900, :second))
+          set_user!(user,
+            locked_until: DateTime.add(DateTime.utc_now(), 900, :second),
+            lockout_duration_seconds: 900
+          )
         end
 
       assert error.postgres.constraint == "users_login_lockout_state_consistent",
              "only a successful login zeroes the counter, and it clears the lock in " <>
                "the same statement — a lock with no history behind it is unreachable"
+    end
+
+    test "a lock with no recorded length is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user,
+            locked_until: DateTime.add(DateTime.utc_now(), 900, :second),
+            failed_login_count: 3,
+            failed_login_first_at: DateTime.utc_now()
+          )
+        end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent",
+             "the escalation reads the previous lock's length off the row — a lock " <>
+               "that did not record its own length cannot be doubled"
+    end
+
+    test "a recorded lock length with no lock is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn -> set_user!(user, lockout_duration_seconds: 900) end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent"
+    end
+
+    test "a lock length of zero is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user,
+            locked_until: DateTime.add(DateTime.utc_now(), 900, :second),
+            lockout_duration_seconds: 0,
+            failed_login_count: 3,
+            failed_login_first_at: DateTime.utc_now()
+          )
+        end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent",
+             "a lock of zero seconds is one nobody was ever held by"
     end
 
     test "an expired lock may outlive its window, because a later failure rolls the count to 1" do
@@ -395,6 +441,7 @@ defmodule Stacks.SchemaConstraintsTest do
       assert {1, _} =
                set_user!(user,
                  locked_until: past,
+                 lockout_duration_seconds: 900,
                  failed_login_count: 1,
                  failed_login_first_at: DateTime.utc_now()
                )
@@ -413,6 +460,7 @@ defmodule Stacks.SchemaConstraintsTest do
       assert cleared.failed_login_count == 0
       assert is_nil(cleared.failed_login_first_at)
       assert is_nil(cleared.locked_until)
+      assert is_nil(cleared.lockout_duration_seconds)
     end
   end
 

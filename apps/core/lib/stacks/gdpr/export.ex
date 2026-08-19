@@ -130,7 +130,7 @@ defmodule Stacks.GDPR.Export do
       #   Account-security mechanics — internal auth state, not user-provided
       #     personal data:
       #     email_confirmed, password_reset_sent_at, failed_login_count,
-      #     failed_login_first_at, locked_until.
+      #     failed_login_first_at, locked_until, lockout_duration_seconds.
       #   Internal UX progress flags — app state, not personal data:
       #     onboarding_completed, onboarding_steps.
       user: %{

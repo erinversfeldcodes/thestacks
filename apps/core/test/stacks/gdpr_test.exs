@@ -20,6 +20,7 @@ defmodule Stacks.GDPRTest do
     :failed_login_count,
     :failed_login_first_at,
     :locked_until,
+    :lockout_duration_seconds,
     :onboarding_completed,
     :onboarding_steps
   ]
