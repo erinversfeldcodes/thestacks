@@ -124,6 +124,122 @@ defmodule Stacks.GDPR.DeletionTest do
       assert decrypted["actor"] == "gh-actions"
     end
 
+    test "scrubs metadata and ip from the erased user's audit rows but preserves the rows" do
+      user = insert(:user)
+      other = insert(:user)
+
+      Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        ip: "197.87.142.19",
+        metadata: %{book_id: Ecto.UUID.generate(), bookshelf: "library"}
+      )
+
+      Audit.log(other.id, "placement.created",
+        resource_type: "placement",
+        ip: "10.0.0.1",
+        metadata: %{book_id: Ecto.UUID.generate(), bookshelf: "wishlist"}
+      )
+
+      before_other =
+        Repo.one(
+          from(a in "audit_log",
+            where: a.user_id == type(^other.id, :binary_id),
+            select: %{metadata: a.metadata, ip_address: a.ip_address}
+          ),
+          prefix: "audit"
+        )
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+      assert Map.has_key?(result, :scrub_audit_log)
+
+      rows =
+        Repo.all(
+          from(a in "audit_log",
+            where: a.user_id == type(^user.id, :binary_id),
+            select: %{
+              action: a.action,
+              resource_type: a.resource_type,
+              occurred_at: a.occurred_at,
+              metadata: a.metadata,
+              ip_address: a.ip_address
+            }
+          ),
+          prefix: "audit"
+        )
+
+      # The trail survives — this is the half the retention decision keeps.
+      assert length(rows) == 1
+      assert Enum.all?(rows, &(&1.action == "placement.created"))
+      assert Enum.all?(rows, &(&1.resource_type == "placement"))
+      assert Enum.all?(rows, &(&1.occurred_at != nil))
+
+      # The detail does not. A retained IP digest is unkeyed, so leaving it would
+      # leave the erased reader locatable through a column that only looks hashed.
+      assert Enum.all?(rows, &(&1.metadata == nil))
+      assert Enum.all?(rows, &(&1.ip_address == nil))
+
+      # Another reader's rows are untouched — the scrub is scoped, not a sweep.
+      after_other =
+        Repo.one(
+          from(a in "audit_log",
+            where: a.user_id == type(^other.id, :binary_id),
+            select: %{metadata: a.metadata, ip_address: a.ip_address}
+          ),
+          prefix: "audit"
+        )
+
+      assert after_other == before_other
+      assert after_other.metadata != nil
+      assert after_other.ip_address != nil
+    end
+
+    test "the erasure's own audit row keeps its operator reason through the scrub" do
+      user = insert(:user)
+
+      Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        metadata: %{bookshelf: "library"}
+      )
+
+      assert {:ok, _result} =
+               Deletion.delete_user_data(user.id,
+                 reason: "verified DSAR ticket",
+                 actor: "gh-actions"
+               )
+
+      # The scrub is scoped by user_id and this row carries a nil one, so the
+      # record of WHO erased and WHY outlives the pass that erases — without an
+      # exception clause that a later scope change could silently drop.
+      metadata_bin =
+        Repo.one(
+          from(a in "audit_log", where: a.action == "user.data_deleted", select: a.metadata),
+          prefix: "audit"
+        )
+
+      decrypted = metadata_bin |> Stacks.Vault.decrypt!() |> Jason.decode!()
+      assert decrypted["reason"] == "verified DSAR ticket"
+      assert decrypted["actor"] == "gh-actions"
+    end
+
+    test "the scrubbed rows read back as an empty map, matching a scrubbed event row" do
+      user = insert(:user)
+
+      Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        metadata: %{bookshelf: "library"}
+      )
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # Nulling the column rather than storing a fresh ciphertext of `{}` is only
+      # safe because the reader maps null to the same value a scrubbed event_log
+      # row shows. If that mapping ever goes, this is the test that says so.
+      {rows, _page, _total_pages, _per_page} = Audit.list_for_user(user.id)
+
+      assert rows != [], "expected the retained trail to still be listable after erasure"
+      assert Enum.all?(rows, &(&1.metadata == %{}))
+    end
+
     test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
       user = insert(:user)
       other_id = Ecto.UUID.generate()
@@ -479,8 +595,10 @@ defmodule Stacks.GDPR.DeletionTest do
       "op.bookstore_events.author_id" => "op.authors — an event's featured writer, not a user",
       "audit.audit_log.user_id" =>
         "the audit trail is retained past erasure by design, so it deliberately has no FK that " <>
-          "would cascade it away; the row keeps a now-dangling id, a hashed IP and encrypted " <>
-          "operator metadata, and the erasure GUC is the only path that may mutate it"
+          "would cascade it away; the row keeps a now-dangling id and the shape of the request " <>
+          "(action, resource_type, occurred_at) so the platform can still say who did what and " <>
+          "when, while erasure scrubs the two fields that carry the person — metadata and the " <>
+          "ip digest — through the GUC, which is the only path permitted to mutate this table"
     }
 
     test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
