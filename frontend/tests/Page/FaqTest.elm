@@ -163,7 +163,7 @@ suite =
                     inviteOnly
                         |> Query.find [ testIdSelector "faq-question-what-leaves-the-platform" ]
                         |> Expect.all
-                            [ Query.has [ Selector.text "only if you have switched the writing assistant on in" ]
+                            [ Query.has [ Selector.text "only if you have switched automatic book linking on in" ]
                             , Query.has [ Selector.text "With it off, nothing you write is sent there at all, and the book links a post already carries stay where they are." ]
                             , Query.has [ Selector.attribute (Attr.href "/settings/privacy") ]
                             ]
