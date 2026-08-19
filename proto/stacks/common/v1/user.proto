@@ -153,6 +153,14 @@ message User {
   // DB-only — never sent on the wire (clients learn lock state from the 423 response).
   google.protobuf.Timestamp locked_until = 29 [json_name = "locked_until"];
 
+  // How long, in seconds, the lock ending at `locked_until` was set for — the
+  // input the NEXT lock doubles. Written and cleared with `locked_until`, and
+  // NULL exactly when it is NULL. It exists because the expiry alone cannot
+  // say how long the lock was: a lock outlives the failure window that earned
+  // it, so by the time the next lock is computed the window start has already
+  // rolled forward past the old expiry. DB-only — never sent on the wire.
+  int32 lockout_duration_seconds = 34 [json_name = "lockout_duration_seconds"];
+
   // (POSSE): whether NEW public posts default to syndicated=true —
   // the writer's account-level preference, applied by Blog.create_post/2.
   // Defaults true: publishing publicly is the consenting act, and the per-post

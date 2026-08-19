@@ -286,6 +286,8 @@ sources:
             description: Timestamp of the first failure in the current rolling window.
           - name: locked_until
             description: When non-null and in the future, the account is locked.
+          - name: lockout_duration_seconds
+            description: Length in seconds of the lock ending at locked_until; the next lock doubles it.
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.
