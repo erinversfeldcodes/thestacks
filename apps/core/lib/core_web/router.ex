@@ -353,6 +353,8 @@ defmodule CoreWeb.Router do
     get "/platform_stats", AdminController, :platform_stats
     get "/gdpr_export", AdminController, :gdpr_export
     post "/gdpr_erase", AdminController, :gdpr_erase
+    get "/degraded_accounts", AdminController, :degraded_accounts
+    post "/degraded_accounts/restore", AdminController, :restore_degraded_account
   end
 
   scope "/api/admin", StacksWeb do

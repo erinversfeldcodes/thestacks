@@ -10,7 +10,9 @@ defmodule StacksWeb.AdminController do
 
   use CoreWeb, :controller
 
+  alias Stacks.Accounts
   alias Stacks.Admin.Data
+  alias Stacks.Audit
   alias Stacks.GDPR.Deletion
   alias Stacks.GDPR.Export
 
@@ -91,6 +93,62 @@ defmodule StacksWeb.AdminController do
         |> put_status(404)
         |> json(%{error: "user_not_found"})
     end
+  end
+
+  @doc "GET /api/admin/degraded_accounts"
+  @spec degraded_accounts(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def degraded_accounts(conn, _params) do
+    accounts = Accounts.list_degraded_accounts()
+
+    conn
+    |> assign(:audit_row_count, length(accounts))
+    |> json(%{
+      accounts:
+        Enum.map(accounts, fn u ->
+          %{
+            user_id: u.id,
+            email: u.email,
+            pending_email: u.pending_email,
+            pending_email_sent_at: u.pending_email_sent_at
+          }
+        end)
+    })
+  end
+
+  @doc "POST /api/admin/degraded_accounts/restore"
+  @spec restore_degraded_account(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def restore_degraded_account(conn, %{"user_id" => user_id}) do
+    case Accounts.restore_degraded_account(user_id) do
+      {:ok, restored} ->
+        # Named here rather than left to the admin-call plug: that plug records
+        # that an endpoint was hit, while this records WHICH account an operator
+        # reached into and put back. Un-degrading an account without a trace
+        # would be worse than the lockout it fixes.
+        Audit.log(
+          conn.assigns[:current_user] && conn.assigns.current_user.id,
+          "admin.account_restored",
+          resource_type: "user",
+          resource_id: restored.id,
+          operator_session_id: conn.assigns[:admin_session] && conn.assigns.admin_session.id
+        )
+
+        conn
+        |> assign(:audit_row_count, 1)
+        |> json(%{ok: true, email: restored.email})
+
+      {:error, :user_not_found} ->
+        conn |> put_status(404) |> json(%{error: "user_not_found"})
+
+      {:error, :not_degraded} ->
+        conn |> put_status(422) |> json(%{error: "not_degraded"})
+
+      {:error, _reason} ->
+        conn |> put_status(422) |> json(%{error: "restore_failed"})
+    end
+  end
+
+  def restore_degraded_account(conn, _params) do
+    conn |> put_status(422) |> json(%{error: "user_id_required"})
   end
 
   @doc "POST /api/admin/gdpr_erase"

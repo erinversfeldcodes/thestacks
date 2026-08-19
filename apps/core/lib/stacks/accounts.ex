@@ -644,6 +644,78 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
+      Accounts currently degraded by an email change that was never answered.
+
+      The two conditions together are the whole definition, and both matter.
+      `email_confirmed == false` alone would also match an abandoned signup — and
+      the reaper ERASES those, so a query that confuses the two is a data-loss
+      bug rather than a cosmetic one (see `expired_unverified_ids/1`'s note).
+      `pending_email` being present is what says "this is an established account
+      waiting on a change", not "this account never confirmed at all".
+
+      Ordered oldest-first: the accounts closest to losing their undo link are the
+      ones an operator most needs to see.
+  """
+  @spec list_degraded_accounts() :: [User.t()]
+  def list_degraded_accounts do
+    Repo.all(
+      from u in User,
+        where: u.email_confirmed == false and not is_nil(u.pending_email),
+        order_by: [asc: u.pending_email_sent_at]
+    )
+  end
+
+  @doc """
+      Restores a degraded account from the operator side, doing exactly what the
+      undo link does: clears the pending quartet and confirms the settled address.
+
+      This exists because the reader cannot do it themselves. A degraded account
+      fails `RequireConfirmedEmail`, so the settings page that would fix it is
+      behind the very gate it fails, and the resend path refuses them for an
+      unrelated reason (`confirmation_resendable?/2` gates on account age). The
+      undo link mailed to the settled address is otherwise the only way back, and
+      it expires — after which nothing at all could restore the account.
+
+      Sessions are revoked, matching `Email.revert_email_change/1`. That function
+      revokes because someone clicking undo may be saying "that wasn't me", and a
+      change made from a stolen session is not undone while that session is still
+      open. The same reasoning applies when an operator does it on their behalf,
+      so the guarantee travels with the operation rather than with the link.
+  """
+  @spec restore_degraded_account(binary()) ::
+          {:ok, User.t()} | {:error, :user_not_found | :not_degraded | term()}
+  def restore_degraded_account(user_id) do
+    case Repo.get(User, user_id) do
+      nil ->
+        {:error, :user_not_found}
+
+      %User{pending_email: nil} ->
+        {:error, :not_degraded}
+
+      %User{email_confirmed: true} ->
+        {:error, :not_degraded}
+
+      user ->
+        case Repo.update(revert_email_change_changeset(user)) do
+          {:ok, restored} ->
+            revoke_all_user_sessions(restored.id)
+
+            Events.emit_safe(%{
+              event_type: "user.email_change_reverted",
+              aggregate_type: "user",
+              aggregate_id: restored.id,
+              payload: %{}
+            })
+
+            {:ok, restored}
+
+          error ->
+            error
+        end
+    end
+  end
+
+  @doc """
       People search for discovery: up to 20 users matching `term` on
       `display_name` (ILIKE), restricted to discoverable profiles
       (`profile_visibility = "platform"`) and excluding blocks in either direction.

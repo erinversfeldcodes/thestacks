@@ -23,6 +23,8 @@
 /api/admin/audit_log                            server-route-not-SPA: break-glass operator read, driven by curl behind admin MFA and audited by the admin-call plug
 /api/admin/gdpr_export                          server-route-not-SPA: break-glass operator export for a subject request that arrives outside the app
 /api/admin/gdpr_erase                           server-route-not-SPA: break-glass operator erasure for a subject request that arrives outside the app
+/api/admin/degraded_accounts                    server-route-not-SPA: operator lookup for readers locked out by a lapsed email change; they cannot reach the app to self-serve, which is the whole reason the endpoint exists (docs/runbooks/degraded-account-recovery.md)
+/api/admin/degraded_accounts/restore            server-route-not-SPA: the recovery itself, driven by curl from the runbook; the reader is by definition unable to sign in and trigger it
 /api/admin/platform_stats                       server-route-not-SPA: break-glass operator read; the public metrics page reads the transparency endpoint instead
 /api/admin/users/by_email                       server-route-not-SPA: break-glass operator lookup when answering a support or subject request
 /api/admin/users/by_id                          server-route-not-SPA: break-glass operator lookup when answering a support or subject request
