@@ -8,6 +8,7 @@ defmodule StacksWeb.AuthControllerTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.Guardian
+  alias Stacks.Workers.EmailDeliveryJob
   alias StacksWeb.AuthController
 
   defp latest_audit_row(action) do
@@ -27,7 +28,15 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   defp resend_response(email) do
-    conn = post(build_conn(), "/api/auth/resend-confirmation", %{email: email})
+    mirror_response("/api/auth/resend-confirmation", email)
+  end
+
+  defp forgot_password_response(email) do
+    mirror_response("/api/auth/forgot-password", email)
+  end
+
+  defp mirror_response(path, email) do
+    conn = post(build_conn(), path, %{email: email})
 
     %{
       status: conn.status,
@@ -37,6 +46,19 @@ defmodule StacksWeb.AuthControllerTest do
         |> Enum.reject(fn {name, _value} -> name == "x-request-id" end)
         |> Enum.sort()
     }
+  end
+
+  # Ten EmailDeliveryJob rows inside the hour puts this user over the email
+  # limiter's per-user ceiling, so their next transactional mail is suppressed.
+  defp saturate_email_limit(user_id) do
+    for _ <- 1..10 do
+      EmailDeliveryJob.new(%{
+        "template" => "registration_confirmation",
+        "user_id" => user_id,
+        "params" => %{"token" => "saturating-the-limiter"}
+      })
+      |> Oban.insert!()
+    end
   end
 
   describe "POST /api/auth/register" do
@@ -875,6 +897,46 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert json_response(conn, 422)
     end
+
+    test "no_enumeration: sent, suppressed and unknown addresses get one identical answer" do
+      insert(:user, email: "gets-a-link@example.com")
+      throttled = insert(:user, email: "gets-nothing@example.com")
+      saturate_email_limit(throttled.id)
+
+      sent = forgot_password_response("gets-a-link@example.com")
+      suppressed = forgot_password_response("gets-nothing@example.com")
+      unknown = forgot_password_response("nobody-at-all@example.com")
+
+      assert sent == suppressed,
+             """
+             A reset that was sent and one the limiter swallowed answered differently.
+             The context now knows which happened; the wire must not.
+             sent:       #{inspect(sent)}
+             suppressed: #{inspect(suppressed)}
+             """
+
+      assert suppressed == unknown,
+             """
+             A registered address and an address with no account answered differently.
+             suppressed: #{inspect(suppressed)}
+             unknown:    #{inspect(unknown)}
+             """
+
+      assert sent.status == 200
+      assert {"content-type", "application/json; charset=utf-8"} in sent.headers
+    end
+
+    test "the suppressed request really was suppressed — the reply is uniform, the effect is not" do
+      throttled = insert(:user, email: "provably-throttled@example.com")
+      saturate_email_limit(throttled.id)
+
+      assert %{status: 200} = forgot_password_response("provably-throttled@example.com")
+
+      assert is_nil(Repo.reload!(throttled).password_reset_token),
+             "precondition for the uniformity test above: this address must be one " <>
+               "the platform answered without sending anything, or the pair it " <>
+               "compares are both ordinary sends"
+    end
   end
 
   describe "POST /api/auth/resend-confirmation" do
@@ -961,6 +1023,27 @@ defmodule StacksWeb.AuthControllerTest do
     test "an unknown address is sent nothing" do
       assert %{status: 200} = resend_response("nobody-at-all@example.com")
       assert Repo.all(Oban.Job) == []
+    end
+
+    test "an address the email limiter has throttled answers exactly like an unknown one" do
+      throttled = insert(:unconfirmed_user, email: "throttled@example.com")
+      original = throttled.email_confirmation_token
+      saturate_email_limit(throttled.id)
+
+      suppressed = resend_response("throttled@example.com")
+      unknown = resend_response("nobody-at-all@example.com")
+
+      assert suppressed == unknown,
+             """
+             A real address whose link the limiter swallowed answered differently
+             from an address with no account.
+             suppressed: #{inspect(suppressed)}
+             unknown:    #{inspect(unknown)}
+             """
+
+      assert Repo.reload!(throttled).email_confirmation_token == original,
+             "precondition: the throttled address must have been sent nothing, or " <>
+               "the comparison above is between two ordinary sends"
     end
 
     test "returns 422 when the email param is missing", %{conn: conn} do

@@ -160,6 +160,21 @@ defmodule CoreWeb.Telemetry do
         tags: [:bucket],
         description: "Rate-limit rejections tagged by bucket (incl. :social, :auth)"
       ),
+      counter("stacks.auth.password_reset.count",
+        event_name: [:stacks, :auth, :password_reset],
+        tags: [:outcome],
+        description:
+          "Password reset requests by outcome (sent/rate_limited/no_account). " <>
+            "The rate_limited series is the count of readers who asked for a " <>
+            "link and were silently sent nothing"
+      ),
+      counter("stacks.auth.confirmation_resend.count",
+        event_name: [:stacks, :auth, :confirmation_resend],
+        tags: [:outcome],
+        description:
+          "Confirmation resend requests by outcome (sent/rate_limited/" <>
+            "no_account/already_confirmed/past_renewal_ceiling)"
+      ),
       counter("stacks.view_as.usage.count",
         event_name: [:stacks, :view_as, :usage],
         tags: [:perspective],
