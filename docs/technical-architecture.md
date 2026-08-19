@@ -2038,7 +2038,7 @@ just dev-test-services
 just test
 
 # Equivalent to:
-MIX_ENV=test TEST_TARGET=local mix test
+MIX_ENV=test mix test
 cd frontend && elm-test
 cd apps/vision && pytest
 cd apps/scraper && cargo test
@@ -2068,10 +2068,9 @@ just deploy-dev
 #   + a Neon PostgreSQL dev instance
 
 # Run tests against it
-TEST_TARGET=remote \
-TEST_BASE_URL=https://stacks-core-dev-erin.fly.dev \
-TEST_TOKEN=$(just get-dev-token) \
-mix test test/acceptance/ test/integration/
+BASE_URL=https://stacks-core-dev-erin.fly.dev \
+DATABASE_URL=postgres://…  \
+just test-deployed
 
 # Tear down when done
 just teardown-dev
@@ -2152,12 +2151,9 @@ jobs:
       # Smoke tests against the real deployment
       - name: Run acceptance tests against preview
         env:
-          TEST_TARGET: remote
-          TEST_BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
-          TEST_TOKEN: ${{ secrets.PREVIEW_TEST_TOKEN }}
-        run: |
-          mix test test/acceptance/ --exclude chaos
-          mix test test/integration/
+          BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          DATABASE_URL: ${{ secrets.PREVIEW_DATABASE_URL }}
+        run: bash scripts/test-deployed.sh
 
       # Security scan against the real deployment
       - name: OWASP ZAP baseline scan
@@ -2181,52 +2177,63 @@ jobs:
 
 #### Environment Configuration Matrix
 
-The test harness uses a single `TEST_TARGET` env var to control behaviour:
+There is no single env var that selects an environment, and no test-harness
+module that reads one. Two independent switches do the work.
+
+**1. `MIX_ENV=test` decides mocked vs real service wiring**, at config load
+rather than at runtime. `apps/core/config/test.exs` *is* the mock roster: each
+external seam is bound to its mock there, so a test run under `MIX_ENV=test` is
+mocked by construction and nothing un-mocks a seam in-process.
 
 ```elixir
-# test/support/test_config.ex
-defmodule TheStacks.TestConfig do
-  def target, do: System.get_env("TEST_TARGET", "local")
+# apps/core/config/test.exs (excerpt — the full roster is that file)
+config :core, :vision_client, Stacks.AI.MockClient
+config :core, :isbn_http_client, Stacks.Books.MockHttpClient
+config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
+config :core, :storage, Stacks.Storage.Mock
+config :core, :geocoder, Stacks.Geocoding.Mock
+config :core, :brave_client, Stacks.Discovery.MockBraveClient
+config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
+config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
+```
 
-  def base_url do
-    case target() do
-      "local" -> "http://localhost:4002"
-      "remote" -> System.fetch_env!("TEST_BASE_URL")
-    end
-  end
+`scripts/check-outbound-test-default.sh` gates that roster, so a newly added
+outbound client cannot default to the real implementation under test.
 
-  def use_mocks?, do: target() in ["local", "ci"]
-  def use_real_services?, do: target() in ["remote", "ci_deploy"]
+**2. `BASE_URL` decides local vs deployed target.** Tests that need real
+infrastructure do not un-mock — they point at a *deployed* stack:
 
-  def setup_mocks! do
-    if use_mocks?() do
-      # Register all Mox mocks
-      Mox.defmock(MockVision, for: TheStacks.AI.VisionProvider)
-      Mox.defmock(MockISBNResolver, for: TheStacks.Books.ISBNResolver)
-      # ... etc
-    end
-  end
+```elixir
+# The deployed-only modules are excluded by default…
+# apps/core/test/test_helper.exs
+ExUnit.configure(exclude: [:deployed_only])
+
+# …and each one guards on BASE_URL, skipping itself when there is no stack.
+@moduletag :deployed_only
+@base_url System.get_env("BASE_URL")
+
+if @base_url in [nil, ""] do
+  @moduletag skip: "BASE_URL not set — deployed Fly preview required"
 end
 ```
 
-```elixir
-# test/support/acceptance_case.ex
-defmodule TheStacks.AcceptanceCase do
-  use ExUnit.CaseTemplate
+Playwright reads the same variable (`e2e/playwright.config.ts` falls back to
+`http://localhost:4000`, and bumps the per-step timeout to 90 s when `BASE_URL`
+is set, for cold-start tolerance).
 
-  setup do
-    if TheStacks.TestConfig.use_mocks?() do
-      # Local/CI: use Mox mocks, Ecto sandbox
-      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-      Mox.verify_on_exit!()
-    else
-      # Remote: real DB, real services — use API-level setup/teardown
-      {:ok, cleanup_fn} = TheStacks.TestHelpers.setup_remote_test_data()
-      on_exit(cleanup_fn)
-    end
-  end
-end
-```
+Because those modules skip themselves, `scripts/test-deployed.sh` requires both
+`BASE_URL` and `DATABASE_URL` up front — without them the live-API half of the
+suite silently skips and the run still reports green.
+
+**3. `E2E_EXPECT_*` hardens conditionals in CI.** A spec that skips on a missing
+precondition locally must not stay skippable where the precondition is
+guaranteed. `E2E_EXPECT_FULL_SEEDS`, `E2E_EXPECT_LIVE_METRICS` and
+`E2E_EXPECT_RATE_LIMITING` turn those skips into hard failures; the CI E2E step
+sets all three.
+
+Local test cases use the ordinary Ecto sandbox via the shared case templates in
+`apps/core/test/support/` (`conn_case.ex`, `data_case.ex`), with fixtures and
+factories alongside them.
 
 #### Just Commands for Every Context
 
@@ -2339,7 +2346,7 @@ These are the most important tests in the system. They answer: **"Can the user a
 
 ```elixir
 defmodule TheStacks.Acceptance.AddBookTest do
-  use TheStacks.AcceptanceCase
+  use Core.DataCase, async: true
 
   describe "uploading photos to add a book" do
     test "happy path: single photo of book cover → book identified and shelved" do
@@ -4358,7 +4365,7 @@ Targeted tests for the Phoenix JSON API attack surface.
 
 ```elixir
 defmodule TheStacks.Security.APISecurityTest do
-  use TheStacks.AcceptanceCase
+  use Core.DataCase, async: true
   @moduletag :security
 
   describe "authentication" do

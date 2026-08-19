@@ -292,7 +292,7 @@ check-route-clients *ARGS:
 squawk:
     scripts/security-squawk.sh
 
-# Run deployed-only tests against a preview stack (requires TEST_TARGET=deployed)
+# Run deployed-only tests against a preview stack (requires DATABASE_URL + BASE_URL)
 test-deployed:
     bash scripts/test-deployed.sh
 
