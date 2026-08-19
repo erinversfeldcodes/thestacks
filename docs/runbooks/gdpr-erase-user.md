@@ -107,7 +107,9 @@ full refresh manually after the erasure completes.
   `resource_id`, `user_id = nil`, and your reason in the (encrypted) metadata.
 - `op.event_log` rows for that `user_id` still exist but have `payload = {}`.
 - `audit.audit_log` rows for that `user_id` still exist but have `metadata` and
-  `ip_address` NULL. The counts map reports how many were scrubbed as
+  `ip_address` NULL. Note the asymmetry, which is deliberate: the trail is
+  retained past erasure on a different lawful basis, but it IS disclosed to the
+  person it describes — a subject-access export carries it under `audit_trail`. The counts map reports how many were scrubbed as
   `audit_log_rows_scrubbed`, and the dry-run preview shows the same number
   before you commit to anything.
 
