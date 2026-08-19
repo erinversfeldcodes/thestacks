@@ -4,19 +4,62 @@ defmodule Stacks.Workers.DbtRefreshJobTest do
 
   alias Stacks.Workers.DbtRefreshHandler
   alias Stacks.Workers.DbtRefreshJob
+  alias Stacks.Workers.MockDbtRunner
 
   describe "DbtRefreshJob selective refresh" do
-    test "calls runner with --select and model names" do
+    test "passes two models as a single space-joined --select value" do
       assert :ok =
                perform_job(DbtRefreshJob, %{
-                 "models" => ["mart_book_prices", "int_price_trends"]
+                 "models" => ["int_price_trends", "mart_book_prices"]
                })
+
+      # dbt reads one selector list per --select. A model in its own argv slot
+      # is a positional argument, which dbt rejects outright.
+      assert MockDbtRunner.last_args() ==
+               ["run", "--select", "int_price_trends mart_book_prices"]
+    end
+
+    test "passes three models as a single space-joined --select value" do
+      assert :ok =
+               perform_job(DbtRefreshJob, %{
+                 "models" => ["int_blog_engagement", "mart_blog_activity", "mart_system_health"]
+               })
+
+      assert MockDbtRunner.last_args() ==
+               [
+                 "run",
+                 "--select",
+                 "int_blog_engagement mart_blog_activity mart_system_health"
+               ]
+    end
+
+    test "passes a single model unchanged" do
+      assert :ok = perform_job(DbtRefreshJob, %{"models" => ["mart_community_read_count"]})
+
+      assert MockDbtRunner.last_args() == ["run", "--select", "mart_community_read_count"]
+    end
+
+    test "fails loudly when the runner reports an error" do
+      Process.put(:mock_dbt_result, {:error, "Database Error in model int_price_trends"})
+
+      assert {:error, "Database Error in model int_price_trends"} =
+               perform_job(DbtRefreshJob, %{
+                 "models" => ["int_price_trends", "mart_book_prices"]
+               })
+    end
+
+    test "fails loudly rather than invoking dbt with an empty selector" do
+      assert {:error, _} = perform_job(DbtRefreshJob, %{"models" => []})
+
+      refute MockDbtRunner.last_args()
     end
   end
 
   describe "DbtRefreshJob full refresh" do
     test "calls runner with run only" do
       assert :ok = perform_job(DbtRefreshJob, %{"full" => true})
+
+      assert MockDbtRunner.last_args() == ["run"]
     end
   end
 
