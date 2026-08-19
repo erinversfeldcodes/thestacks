@@ -40,6 +40,8 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   @known_templates %{
     "registration_confirmation" => :registration_confirmation,
     "password_reset" => :password_reset,
+    "email_change_confirmation" => :email_change_confirmation,
+    "email_change_notice" => :email_change_notice,
     "marketplace_sale" => :marketplace_sale,
     "gdpr_export_ready" => :gdpr_export_ready,
     "wishlist_availability" => :wishlist_availability,
@@ -52,6 +54,8 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   @bypass_prefs [
     :registration_confirmation,
     :password_reset,
+    :email_change_confirmation,
+    :email_change_notice,
     :gdpr_export_ready,
     :opt_out_confirmation
   ]
@@ -72,21 +76,42 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   defp deliver(template, user_id, params) do
     user = Repo.get!(User, user_id)
 
-    if should_send?(user, template) do
-      email = build_email(user, template, params)
+    cond do
+      stale_email_change?(user, template, params) ->
+        {:discard, "email change already settled or superseded — its #{template} is a dead link"}
 
-      case Mailer.deliver(email) do
-        {:ok, _} ->
-          :ok
+      should_send?(user, template) ->
+        send_email(user, template, params)
 
-        {:error, reason} ->
-          # feeds the :resend_fuse state gauge — delivery failures are the
-          # only real-traffic signal that the email provider is down
-          Stacks.CircuitBreakers.melt(:resend_fuse)
-          {:error, reason}
-      end
-    else
-      :ok
+      true ->
+        :ok
+    end
+  end
+
+  # An email change can be confirmed, undone, or re-requested between enqueue and
+  # delivery. In all three the row no longer holds this job's token, and the link
+  # in the email would resolve to nothing — so the job is dropped rather than
+  # delivering a letter whose only affordance is already dead.
+  defp stale_email_change?(user, :email_change_confirmation, %{"token" => token}),
+    do: user.pending_email_token != token
+
+  defp stale_email_change?(user, :email_change_notice, %{"token" => token}),
+    do: user.pending_email_revert_token != token
+
+  defp stale_email_change?(_user, _template, _params), do: false
+
+  defp send_email(user, template, params) do
+    email = build_email(user, template, params)
+
+    case Mailer.deliver(email) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        # feeds the :resend_fuse state gauge — delivery failures are the
+        # only real-traffic signal that the email provider is down
+        Stacks.CircuitBreakers.melt(:resend_fuse)
+        {:error, reason}
     end
   end
 
@@ -118,6 +143,28 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Reset your password — The Stacks")
     |> Swoosh.Email.html_body(Templates.password_reset(reset_url))
+  end
+
+  defp build_email(user, :email_change_confirmation, %{"token" => token}) do
+    confirmation_url = CoreWeb.Endpoint.url() <> "/api/auth/confirm-email-change/#{token}"
+
+    # The one email in this system NOT addressed to the account's own address:
+    # it is asking an address that is not yet the account's to prove it can read.
+    Swoosh.Email.new()
+    |> Swoosh.Email.to(user.pending_email)
+    |> Swoosh.Email.from(from_address())
+    |> Swoosh.Email.subject("Confirm your new email address — The Stacks")
+    |> Swoosh.Email.html_body(Templates.email_change_confirmation(confirmation_url))
+  end
+
+  defp build_email(user, :email_change_notice, %{"token" => token}) do
+    revert_url = CoreWeb.Endpoint.url() <> "/api/auth/revert-email-change/#{token}"
+
+    Swoosh.Email.new()
+    |> Swoosh.Email.to(recipient(user))
+    |> Swoosh.Email.from(from_address())
+    |> Swoosh.Email.subject("Your email address is being changed — The Stacks")
+    |> Swoosh.Email.html_body(Templates.email_change_notice(user.pending_email, revert_url))
   end
 
   defp build_email(user, :marketplace_sale, %{"role" => role, "book_title" => book_title}) do

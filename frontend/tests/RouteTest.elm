@@ -75,6 +75,9 @@ allRoutes =
     , ProfileShelf "handle" "library"
     , ConfirmEmail EmailConfirmed
     , ConfirmEmail EmailConfirmFailed
+    , ConfirmEmail EmailChangeConfirmed
+    , ConfirmEmail EmailChangeReverted
+    , ConfirmEmail EmailChangeFailed
     , ForgotPassword
     , ResetPassword "tok-abc123"
     , NotFound
@@ -221,6 +224,15 @@ routeLabel route =
 
         ConfirmEmail EmailConfirmFailed ->
             "ConfirmEmail EmailConfirmFailed"
+
+        ConfirmEmail EmailChangeConfirmed ->
+            "ConfirmEmail EmailChangeConfirmed"
+
+        ConfirmEmail EmailChangeReverted ->
+            "ConfirmEmail EmailChangeReverted"
+
+        ConfirmEmail EmailChangeFailed ->
+            "ConfirmEmail EmailChangeFailed"
 
         ForgotPassword ->
             "ForgotPassword"

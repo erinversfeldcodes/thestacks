@@ -28,6 +28,76 @@ defmodule Stacks.Email.Templates do
     """
   end
 
+  @doc """
+      Sent to the address an account is asking to move TO. Until this link is
+      clicked the account still answers on its old address — so the copy has to say
+      what is waiting on this click, not congratulate anyone on a change that has
+      not happened.
+  """
+  def email_change_confirmation(confirmation_url) do
+    expiry_days = div(Accounts.email_change_grace_seconds(), 86_400)
+
+    """
+    <html>
+    <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
+      <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px; border: 1px solid #c9b89a;">
+        <h1 style="color: #2c1810; font-size: 24px;">Confirm your new email address</h1>
+        <p>Someone asked to move a Stacks account to this address. Until you confirm,
+           the account keeps using its old address.</p>
+        <p>
+          <a href="#{confirmation_url}"
+             style="background: #2c1810; color: #f5f0e8; padding: 12px 24px; text-decoration: none; display: inline-block;">
+            Confirm this address
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #7a6b5d;">
+          This link expires in #{expiry_days} days. If you were not expecting it, you can
+          safely ignore this email — the account will simply keep the address it has.
+        </p>
+      </div>
+    </body>
+    </html>
+    """
+  end
+
+  @doc """
+      Sent to the address an account is asking to move AWAY from — the one letter
+      in this flow whose reader might be the person the change is being done to.
+      It names the address, offers the undo, and says plainly what happens if the
+      reader does nothing, because "you'll be signed out in a week" is not a
+      detail to discover afterwards.
+  """
+  def email_change_notice(pending_email, revert_url) do
+    expiry_days = div(Accounts.email_change_grace_seconds(), 86_400)
+
+    """
+    <html>
+    <body style="font-family: Georgia, serif; background: #f5f0e8; padding: 40px; color: #2c1810;">
+      <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px; border: 1px solid #c9b89a;">
+        <h1 style="color: #2c1810; font-size: 24px;">Your email address is being changed</h1>
+        <p>A request was made to change this Stacks account's email address to
+           <strong>#{Plug.HTML.html_escape(pending_email)}</strong>. We have asked that address
+           to confirm itself. Nothing has changed yet.</p>
+        <p><strong>If this wasn't you</strong>, undo it now. That cancels the change, signs
+           out every device currently signed in, and leaves your address as it is — then
+           change your password.</p>
+        <p>
+          <a href="#{revert_url}"
+             style="background: #2c1810; color: #f5f0e8; padding: 12px 24px; text-decoration: none; display: inline-block;">
+            This wasn't me — undo it
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #7a6b5d;">
+          If neither address answers within #{expiry_days} days, the account will be signed
+          out and stay locked until an address is confirmed — this link will still work, and
+          will be the way back in. Keep this email until the change is settled.
+        </p>
+      </div>
+    </body>
+    </html>
+    """
+  end
+
   @doc "Password reset email."
   def password_reset(reset_url) do
     """

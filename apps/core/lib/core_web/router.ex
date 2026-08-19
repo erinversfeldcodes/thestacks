@@ -145,6 +145,8 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through :api
     get "/auth/confirm/:token", EmailVerificationController, :confirm
+    get "/auth/confirm-email-change/:token", EmailVerificationController, :confirm_change
+    get "/auth/revert-email-change/:token", EmailVerificationController, :revert_change
   end
 
   scope "/api", StacksWeb do

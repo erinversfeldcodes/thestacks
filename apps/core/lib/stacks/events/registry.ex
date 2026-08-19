@@ -126,6 +126,16 @@ defmodule Stacks.Events.Registry do
     "social.user_unblocked",
     "user.profile_updated",
     "user.profile_visibility_changed",
+    # The four moments of an email change — asked for, proven, undone, or left
+    # unanswered until the platform stopped trusting the account. Nothing acts on
+    # them: every effect they could trigger (the two emails, the session revoke,
+    # the degrade) is done inline by the flow itself, because each one has to
+    # happen inside the transaction that makes the change real or not at all.
+    # What they are is the audit trail of an account's identity moving.
+    "user.email_change_requested",
+    "user.email_change_confirmed",
+    "user.email_change_reverted",
+    "user.email_change_expired",
     "user.password_changed",
     "user.notifications_updated",
     "user.visibility_recap_completed",

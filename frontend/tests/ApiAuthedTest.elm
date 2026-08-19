@@ -55,7 +55,7 @@ whatever =
     Api.interpretAuthed Api.resolveWhatever authedOutcome
 
 
-profile : Http.Response String -> Outcome Api.ProfileError String
+profile : Http.Response String -> Outcome Api.ProfileError Api.ProfileSaved
 profile =
     Api.interpretAuthed Api.resolveProfile authedOutcome
 
@@ -130,8 +130,15 @@ suite =
                         |> Expect.equal (Just (Ok ()))
             , test "a_success_body_is_still_decoded" <|
                 \() ->
-                    profile (goodStatus "{\"handle\":\"ada\"}")
+                    profile (goodStatus "{\"handle\":\"ada\",\"email\":\"ada@example.com\",\"pending_email\":null}")
                         |> resultOf
-                        |> Expect.equal (Just (Ok "ada"))
+                        |> Expect.equal
+                            (Just (Ok { handle = "ada", email = "ada@example.com", pendingEmail = Nothing }))
+            , test "a_pending_email_change_is_read_off_the_save_response" <|
+                \() ->
+                    profile (goodStatus "{\"handle\":\"ada\",\"email\":\"ada@example.com\",\"pending_email\":\"new@example.com\"}")
+                        |> resultOf
+                        |> Expect.equal
+                            (Just (Ok { handle = "ada", email = "ada@example.com", pendingEmail = Just "new@example.com" }))
             ]
         ]

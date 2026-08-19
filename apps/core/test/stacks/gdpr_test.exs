@@ -14,6 +14,12 @@ defmodule Stacks.GDPRTest do
   @export_excluded_fields [
     :password_hash,
     :email_confirmation_token,
+    # Credentials behind the two links an email change is made of. Exporting them
+    # would hand anyone holding the export the ability to complete or undo a change
+    # — the same reason the confirmation token above is excluded. The address they
+    # resolve to IS exported.
+    :pending_email_token,
+    :pending_email_revert_token,
     :password_reset_token,
     :email_confirmed,
     :password_reset_sent_at,

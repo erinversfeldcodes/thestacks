@@ -1149,15 +1149,15 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         SettingsProfile ->
             let
-                profileModel =
+                ( profileModel, profileCmd ) =
                     case maybeAuth of
                         Just auth ->
-                            Profile.init auth.user
+                            Profile.init auth.user maybeToken
 
                         Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False } Nothing
             in
-            ( PageSettingsProfile profileModel, Cmd.none )
+            ( PageSettingsProfile profileModel, Cmd.map ProfileMsg profileCmd )
 
         SettingsPassword ->
             ( PageSettingsPassword Password.init, Cmd.none )
@@ -3668,6 +3668,15 @@ pageTitle page =
         PageConfirmEmail EmailConfirmFailed ->
             titled "Confirmation Failed"
 
+        PageConfirmEmail EmailChangeConfirmed ->
+            titled "Email Address Updated"
+
+        PageConfirmEmail EmailChangeReverted ->
+            titled "Change Undone"
+
+        PageConfirmEmail EmailChangeFailed ->
+            titled "Link No Longer Valid"
+
         PageResetPassword _ ->
             titled "Reset Password"
 
@@ -4274,6 +4283,30 @@ viewConfirmEmailCard status =
                 ]
                 [ text "Send me a new link" ]
             , a [ class "btn btn--secondary", href (Route.toPath Login) ] [ text "Back to sign in" ]
+            ]
+
+        EmailChangeConfirmed ->
+            [ h1 [ class "login-card__title" ] [ text "Email address updated" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "This is your account's address from now on — it's what you'll sign in with, and where we'll write. The link we sent to your old address no longer does anything." ]
+            , a [ class "btn btn--primary", href (Route.toPath SettingsProfile) ] [ text "Back to settings" ]
+            ]
+
+        EmailChangeReverted ->
+            [ h1 [ class "login-card__title" ] [ text "Change undone" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "Your address is unchanged and the confirmation link we sent to the new one no longer works. Every signed-in device has been signed out." ]
+            , p [ class "login-card__subtitle" ]
+                [ text "If you didn't ask for this change, change your password now — whoever asked for it could sign in as you." ]
+            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Sign in" ]
+            , a [ class "btn btn--secondary", href (Route.toPath ForgotPassword) ] [ text "Change my password" ]
+            ]
+
+        EmailChangeFailed ->
+            [ h1 [ class "login-card__title" ] [ text "This link no longer works" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "Email-change links stop working once the change is settled one way or the other — confirmed, undone, or replaced by a newer request. Sign in and check your profile settings to see where your account stands." ]
+            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Sign in" ]
             ]
 
 

@@ -6231,6 +6231,31 @@ h4 {
     margin-top: 0.3rem;
 }
 
+.pending-email {
+    font-family: var(--font-body);
+    background: rgba(184, 134, 11, 0.12);
+    border-left: 2px solid var(--warning);
+    padding: 0.7rem 0.9rem;
+    margin-top: 0.6rem;
+    border-radius: var(--radius-sm);
+}
+
+.pending-email__lede {
+    font-size: var(--size-sm);
+    color: var(--text);
+    margin: 0 0 0.4rem;
+}
+
+.pending-email__detail {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    margin: 0 0 0.35rem;
+}
+
+.pending-email__detail:last-child {
+    margin-bottom: 0;
+}
+
 .groups-detail__invite-form,
 .groups__create-form,
 .listing-removal__form,

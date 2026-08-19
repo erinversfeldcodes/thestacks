@@ -126,6 +126,7 @@ defmodule Stacks.GDPR.Export do
       # test/stacks/gdpr_test.exs, whose exclusion list mirrors this rationale):
       #   Secrets — exporting them would defeat their purpose / leak credentials:
       #     password_hash, email_confirmation_token, password_reset_token,
+      #     pending_email_token, pending_email_revert_token,
       #     password (virtual, never persisted).
       #   Account-security mechanics — internal auth state, not user-provided
       #     personal data:
@@ -136,6 +137,11 @@ defmodule Stacks.GDPR.Export do
       user: %{
         id: user.id,
         email: user.email,
+        # An address the reader typed, and the moment they typed it. Personal data
+        # even though the account does not answer on it (yet, or ever) — a change
+        # in flight is a fact about the reader that the platform is holding.
+        pending_email: user.pending_email,
+        pending_email_sent_at: user.pending_email_sent_at,
         display_name: user.display_name,
         handle: user.handle,
         role: user.role,

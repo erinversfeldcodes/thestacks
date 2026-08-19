@@ -345,6 +345,44 @@ defmodule StacksWeb.AuthControllerTest do
       assert returned_user["handle"] == "ada_me"
     end
 
+    test "carries a pending email change, which is where the settings page reads it from", %{
+      conn: conn
+    } do
+      # The serializer's take-list is a wire ALLOWLIST: a field the context sets
+      # and the allowlist omits is dropped in silence, and the settings panel
+      # simply never appears on reload. Nothing but a test at this boundary
+      # notices — the unit tests, the decoder and the page all pass without it.
+      user = insert(:user, email: "changing@example.com")
+
+      {:ok, pending} =
+        user
+        |> Stacks.Accounts.pending_email_changeset(%{
+          pending_email: "wanted@example.com",
+          pending_email_token: Stacks.Accounts.sign_email_change_token(user.id),
+          pending_email_sent_at: DateTime.utc_now(),
+          pending_email_revert_token: Stacks.Accounts.sign_email_revert_token(user.id)
+        })
+        |> Core.Repo.update()
+
+      {:ok, token, _} = Guardian.encode_and_sign(pending)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned_user} = json_response(conn, 200)
+      assert returned_user["email"] == "changing@example.com"
+      assert returned_user["pending_email"] == "wanted@example.com"
+      assert returned_user["pending_email_sent_at"]
+
+      refute Map.has_key?(returned_user, "pending_email_token"),
+             "the confirmation credential must never reach the wire"
+
+      refute Map.has_key?(returned_user, "pending_email_revert_token"),
+             "the undo credential must never reach the wire"
+    end
+
     test "returns 401 without token", %{conn: conn} do
       conn = get(conn, "/api/auth/me")
       assert json_response(conn, 401)

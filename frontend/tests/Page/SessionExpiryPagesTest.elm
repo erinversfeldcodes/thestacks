@@ -442,7 +442,7 @@ suite =
                         ( _, _, outMsg ) =
                             Profile.update
                                 Profile.SessionExpiryDetected
-                                (Profile.init settingsUser)
+                                (Tuple.first (Profile.init settingsUser Nothing))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Profile.SessionExpired
@@ -454,7 +454,7 @@ suite =
                                 (Profile.SaveProfileCompleted
                                     (Err (Api.ProfileValidationFailed [ ( "handle", [ "has already been taken" ] ) ]))
                                 )
-                                (Profile.init settingsUser)
+                                (Tuple.first (Profile.init settingsUser Nothing))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Profile.NoOut
@@ -464,7 +464,7 @@ suite =
                         ( _, _, outMsg ) =
                             Profile.update
                                 (Profile.SaveLocationCompleted (Err nonAuth))
-                                (Profile.init settingsUser)
+                                (Tuple.first (Profile.init settingsUser Nothing))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Profile.NoOut
@@ -474,7 +474,7 @@ suite =
                         ( typed, _, _ ) =
                             Profile.update
                                 (Profile.SetCurrentPassword "hunter2")
-                                (Profile.init settingsUser)
+                                (Tuple.first (Profile.init settingsUser Nothing))
                                 (Just "tok")
 
                         ( afterExpiry, _, _ ) =

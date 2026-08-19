@@ -11,9 +11,20 @@ import Url exposing (Url)
 import Url.Parser as Parser exposing ((</>), Parser, s, string)
 
 
+{-| Which "you clicked a link in an email" page the reader landed on.
+
+The three `EmailChange*` variants are the email-change flow's landing pages. They
+are separate from the registration pair because the reader arrives with a
+different question: not "am I in?" but "which address does my account have now?" —
+and after a revert, "why was I signed out?".
+
+-}
 type ConfirmStatus
     = EmailConfirmed
     | EmailConfirmFailed
+    | EmailChangeConfirmed
+    | EmailChangeReverted
+    | EmailChangeFailed
 
 
 type Route
@@ -118,6 +129,9 @@ parser =
         , Parser.map Profile (s "u" </> string)
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
+        , Parser.map (ConfirmEmail EmailChangeConfirmed) (s "confirm-email" </> s "change-confirmed")
+        , Parser.map (ConfirmEmail EmailChangeReverted) (s "confirm-email" </> s "change-reverted")
+        , Parser.map (ConfirmEmail EmailChangeFailed) (s "confirm-email" </> s "change-error")
         , Parser.map ForgotPassword (s "forgot-password")
         , Parser.map ResendConfirmation (s "resend-confirmation")
         , Parser.map ResetPassword (s "reset-password" </> string)
@@ -267,6 +281,15 @@ toPath route =
 
         ConfirmEmail EmailConfirmFailed ->
             "/confirm-email/error"
+
+        ConfirmEmail EmailChangeConfirmed ->
+            "/confirm-email/change-confirmed"
+
+        ConfirmEmail EmailChangeReverted ->
+            "/confirm-email/change-reverted"
+
+        ConfirmEmail EmailChangeFailed ->
+            "/confirm-email/change-error"
 
         ForgotPassword ->
             "/forgot-password"

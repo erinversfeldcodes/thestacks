@@ -12,6 +12,7 @@ defmodule Stacks.Email do
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.User
+  alias Stacks.Events
   alias Stacks.Workers.EmailDeliveryJob
 
   @per_user_hourly_limit 10
@@ -104,6 +105,105 @@ defmodule Stacks.Email do
     email
     |> Accounts.get_user_by_email()
     |> do_send_confirmation_resend()
+  end
+
+  @doc """
+      Mails the two letters an email change is made of: a confirmation link to the
+      PENDING address, and a notice to the address the account currently answers
+      on, carrying an undo link.
+
+      Called as the last step of the transaction that records the change, so it can
+      refuse the whole thing: `{:error, :rate_limited}` rolls the pending state
+      back rather than leaving a reader with a change they cannot resolve and no
+      letter explaining why. A pending change and the links that resolve it exist
+      together or not at all.
+
+      Both outcomes are counted on `[:stacks, :auth, :email_change]`.
+  """
+  @spec send_email_change_pair(User.t()) :: {:ok, User.t()} | {:error, :rate_limited}
+  def send_email_change_pair(%User{} = user) do
+    case check_rate_limit(user.id) do
+      :ok ->
+        EmailDeliveryJob.new(%{
+          "template" => "email_change_confirmation",
+          "user_id" => user.id,
+          "params" => %{"token" => user.pending_email_token}
+        })
+        |> Oban.insert!()
+
+        EmailDeliveryJob.new(%{
+          "template" => "email_change_notice",
+          "user_id" => user.id,
+          "params" => %{"token" => user.pending_email_revert_token}
+        })
+        |> Oban.insert!()
+
+        email_change_outcome(:requested, {:ok, user})
+
+      {:error, :rate_limited} ->
+        email_change_outcome(:rate_limited, {:error, :rate_limited})
+    end
+  end
+
+  @doc """
+      Confirms a pending email change from the link mailed to the new address.
+      Returns `{:ok, user}` or `{:error, :invalid}`.
+
+      Two gates, both required: the token must still verify (its `max_age` IS the
+      grace window), and it must still be the token stored on the row — so a
+      re-requested change, a confirmed one, and an undone one all kill their
+      predecessor's link by overwriting or clearing it.
+
+      Every failure answers identically. The caller redirects to one page for all
+      of them, so nothing here can become a way to ask whether an address, an
+      account, or a change exists.
+  """
+  @spec confirm_email_change(String.t()) :: {:ok, User.t()} | {:error, :invalid}
+  def confirm_email_change(token) do
+    with {:ok, user_id} <- Accounts.verify_email_change_token(token),
+         %User{} = user <- Repo.get_by(User, id: user_id, pending_email_token: token),
+         {:ok, updated} <- Repo.update(Accounts.confirm_email_change_changeset(user)) do
+      Events.emit_safe(%{
+        event_type: "user.email_change_confirmed",
+        aggregate_type: "user",
+        aggregate_id: updated.id,
+        payload: %{}
+      })
+
+      email_change_outcome(:confirmed, {:ok, updated})
+    else
+      _ -> email_change_outcome(:invalid_confirm, {:error, :invalid})
+    end
+  end
+
+  @doc """
+      Undoes a pending email change from the link mailed to the address the account
+      already answers on. Returns `{:ok, user}` or `{:error, :invalid}`.
+
+      Clearing the quartet is what invalidates the confirmation link: it is matched
+      against the stored token, and there is no longer one. Sessions are revoked
+      too — someone using this link may be a reader saying "that wasn't me", and a
+      change made from a stolen session is not undone while the session that made
+      it is still open.
+  """
+  @spec revert_email_change(String.t()) :: {:ok, User.t()} | {:error, :invalid}
+  def revert_email_change(token) do
+    with {:ok, user_id} <- Accounts.verify_email_revert_token(token),
+         %User{} = user <- Repo.get_by(User, id: user_id, pending_email_revert_token: token),
+         {:ok, updated} <- Repo.update(Accounts.revert_email_change_changeset(user)) do
+      Accounts.revoke_all_user_sessions(updated.id)
+
+      Events.emit_safe(%{
+        event_type: "user.email_change_reverted",
+        aggregate_type: "user",
+        aggregate_id: updated.id,
+        payload: %{}
+      })
+
+      email_change_outcome(:reverted, {:ok, updated})
+    else
+      _ -> email_change_outcome(:invalid_revert, {:error, :invalid})
+    end
   end
 
   @doc """
@@ -211,6 +311,18 @@ defmodule Stacks.Email do
   defp resend_outcome(outcome) do
     :telemetry.execute([:stacks, :auth, :confirmation_resend], %{count: 1}, %{outcome: outcome})
     outcome_reply(outcome)
+  end
+
+  # Same bargain as the two above, with the reply passed in rather than derived:
+  # this flow's six outcomes do not collapse to one answer (a confirmed change
+  # returns the user, a dead link returns an error), but every exit from all three
+  # entry points still goes through here, so an outcome cannot be added to one of
+  # them without the counter seeing it. The metadata is the outcome alone — two of
+  # these three are unauthenticated, and a counter tagged with an address or an id
+  # would be a record of who clicked what.
+  defp email_change_outcome(outcome, reply) do
+    :telemetry.execute([:stacks, :auth, :email_change], %{count: 1}, %{outcome: outcome})
+    reply
   end
 
   # Suppression is the only outcome the caller has to handle: it is the one

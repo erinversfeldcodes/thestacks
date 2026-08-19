@@ -39,6 +39,8 @@
 /api/upload/:image_id/data                      server-issued-url: the SPA PUTs file bytes to the upload_url that the init response hands back, so the path is never a literal in client code
 /api/internal/smoke/circuit_breakers            server-route-not-SPA: the circuit-breaker smoke script drives it against a deployed stack
 /api/internal/vision/associate                  webhook: the vision sidecar POSTs identification results back to the platform, HMAC-signed
+/api/auth/confirm-email-change/:token           server-route-not-SPA: the reader opens it from a link in the email sent to the address they are moving TO — proving they can read that inbox is the whole point, so a call from the signed-in SPA would prove nothing
+/api/auth/revert-email-change/:token            server-route-not-SPA: the reader opens it from a link in the email sent to the address they are moving AWAY from, possibly on a device that is not signed in and possibly because the session that asked for the change was not theirs
 
 # --- Built ahead of the surface, on purpose ---
 /api/third-spaces                               deliberate-dark: the venue map waits on real partner-sourced venue data; its page exists but is deliberately left off the router until there is something to map

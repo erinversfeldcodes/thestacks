@@ -121,6 +121,24 @@ message User {
   // Token used for email confirmation flow.
   string email_confirmation_token = 19 [json_name = "email_confirmation_token"];
 
+  // The address an email change is waiting on. NULL when no change is in
+  // flight. The account's address does NOT move here — `email` keeps answering
+  // until the new address proves itself, and this column is what the swap reads.
+  // Personal data: exported, excluded from the warehouse, never in a payload.
+  string pending_email = 34 [json_name = "pending_email"];
+
+  // Token behind the confirmation link mailed to `pending_email`. DB-only.
+  string pending_email_token = 35 [json_name = "pending_email_token"];
+
+  // When the change was requested. The grace window is DERIVED from this — there
+  // is no window-end column, so the sweep's clock and the link's clock cannot
+  // drift apart.
+  google.protobuf.Timestamp pending_email_sent_at = 36 [json_name = "pending_email_sent_at"];
+
+  // Token behind the undo link mailed to the CURRENT address. Outlives the
+  // window, because after the window it is the account's way back. DB-only.
+  string pending_email_revert_token = 37 [json_name = "pending_email_revert_token"];
+
   // Token used for password reset flow.
   string password_reset_token = 20 [json_name = "password_reset_token"];
 
