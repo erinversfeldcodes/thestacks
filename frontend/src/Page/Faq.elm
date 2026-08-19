@@ -363,7 +363,9 @@ yourData =
                         ]
                     , li [ class "faq__list-item" ]
                         [ strong [] [ text "Together AI" ]
-                        , text " — the text of a post you publish, to work out which books it is about."
+                        , text " — the text of a post you publish, to work out which books it is about, and only if you have switched the writing assistant on in "
+                        , link SettingsPrivacy "your privacy settings"
+                        , text ". With it off, nothing you write is sent there at all, and the book links a post already carries stay where they are."
                         ]
                     ]
                 , answer
