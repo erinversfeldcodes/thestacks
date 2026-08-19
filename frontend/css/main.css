@@ -5794,6 +5794,64 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
+/* The strip every admin page wears. Quiet by design — it sits above the page's
+   own title rather than competing with it — but present on all of them, so the
+   way out of an admin session is never somewhere else. */
+
+.admin-surface__bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    /* No width of its own: the bar spans whatever the page's container gives
+       it, so the label lines up with the page title and the button with the
+       right edge of the page's own content. A max-width here would centre the
+       strip inside a wider page and read as a misalignment. */
+    padding: 0 0 var(--space-3);
+}
+
+.admin-surface__label {
+    font-family: var(--font-heading);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-right: auto;
+}
+
+.admin-surface__end {
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-heading);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.admin-surface__end:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+}
+
+.admin-surface__end:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.admin-surface__error {
+    flex-basis: 100%;
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--error);
+    text-align: right;
+}
+
 .about__link--costs,
 .about__link--faq,
 .about__link--metrics,

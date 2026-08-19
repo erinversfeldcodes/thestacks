@@ -184,6 +184,97 @@ test.describe("Admin session gate", () => {
     });
   });
 
+  /**
+   * ⛔ The assertion this test exists for is the LAST one: the captured token,
+   * which worked a moment ago, now 401s.
+   *
+   * `DELETE /api/admin/auth/logout` was routed, correct, and never called — an
+   * admin session could only time out or be dropped client-side. A test that
+   * only watched the gate reappear would pass just as happily against a button
+   * that cleared `Model.adminAuth` and sent nothing, leaving the session live
+   * server-side for the rest of its 30-minute window. Proving the revoke fired
+   * means using the token afterwards.
+   *
+   * The token is read off the wire because that is the only place it exists:
+   * the SPA holds it in memory and never persists it, deliberately.
+   */
+  test("ending an admin session revokes it server-side", async ({ page, request }) => {
+    const secret = readOwnerMfaSecret();
+    await signInOrdinary(page, request);
+
+    const verified = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/auth/verify_mfa") && r.status() === 200,
+    );
+    await page.goto("/admin/sources");
+    await passTheGate(page, secret);
+    const adminToken = (await (await verified).json()).token as string;
+
+    const before = await page.request.get("/api/admin/invites", {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(
+      before.status(),
+      "the captured token must be a WORKING admin token before sign-out, or the 401 below proves nothing",
+    ).toBe(200);
+
+    const revoked = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/auth/logout") && r.request().method() === "DELETE",
+    );
+    await page.getByTestId("admin-end-session").click();
+    expect((await revoked).status(), "the sign-out request itself failed").toBe(200);
+
+    const after = await page.request.get("/api/admin/invites", {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(
+      after.status(),
+      "the admin token still works — the session was dropped client-side only, which is the defect",
+    ).toBe(401);
+  });
+
+  /**
+   * The surface closes where the operator is standing, with no reload. A
+   * reload would re-gate anyway — the admin token is memory-only — so
+   * navigating and finding the gate would prove nothing at all; staying put
+   * and watching the page be replaced is what proves it.
+   */
+  test("ending an admin session re-gates the surface in place", async ({ page, request }) => {
+    const secret = readOwnerMfaSecret();
+    await signInOrdinary(page, request);
+    await page.goto("/admin/sources");
+    await passTheGate(page, secret);
+    await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });
+
+    await page.getByTestId("admin-end-session").click();
+
+    await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByTestId("admin-surface"),
+      "the admin page is still rendered behind the gate",
+    ).toBeHidden();
+    await expect(page.locator("tbody tr")).toHaveCount(0);
+    await expect(page.getByTestId("admin-gate-notice")).toContainText("admin session has ended");
+    expect(page.url(), "ending an admin session must not navigate away").toContain("/admin/sources");
+  });
+
+  test("ending an admin session leaves the ordinary session alone", async ({ page, request }) => {
+    const secret = readOwnerMfaSecret();
+    await signInOrdinary(page, request);
+    await page.goto("/admin/sources");
+    await passTheGate(page, secret);
+
+    await page.getByTestId("admin-end-session").click();
+    await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
+
+    const ordinarySession = await page.evaluate(() =>
+      window.localStorage.getItem("stacks-auth"),
+    );
+    expect(
+      ordinarySession,
+      "ending the ADMIN session signed the operator out of the whole product",
+    ).not.toBeNull();
+  });
+
   test("an admin failure does NOT sign the operator out of the app", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
