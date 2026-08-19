@@ -249,7 +249,7 @@ suite =
                                 [ Selector.attribute
                                     (Html.Attributes.attribute "data-testid" "writing-assistant-consent-toggle")
                                 ]
-                            , Query.has [ Selector.text "Writing assistant" ]
+                            , Query.has [ Selector.text "Linking books in your writing" ]
                             ]
             , test "initWithToken seeds the folded-in consent from the user's state" <|
                 \_ ->

@@ -1258,13 +1258,8 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                 currentUserId =
                     Maybe.map (.user >> .id) maybeAuth
 
-                writingAssistantConsent =
-                    maybeAuth
-                        |> Maybe.map (.user >> .consentWritingAssistant)
-                        |> Maybe.withDefault False
-
                 ( postModel, postCmd ) =
-                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent origin
+                    BlogPostPage.init postId maybeToken currentUserId origin
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
 

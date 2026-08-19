@@ -105,7 +105,7 @@ test.describe("Settings — Privacy & Consent", () => {
     );
   });
 
-  test("writing-assistant consent grants, flips the off-copy, and persists server-side", async ({
+  test("book-linking consent grants, flips the off-copy, and persists server-side", async ({
     page,
   }) => {
     await page.goto("/settings/consent");
@@ -115,7 +115,7 @@ test.describe("Settings — Privacy & Consent", () => {
     await expect(toggle).toBeVisible();
 
     const offCopy = page.getByText(
-      "Disabling this turns off the writing assistant and deletes your session history and embeddings."
+      "Your published posts are not sent to an AI model, so books you mention won't be linked automatically."
     );
 
     const waConsentPost = () =>

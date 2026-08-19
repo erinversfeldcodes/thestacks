@@ -222,27 +222,6 @@ defmodule StacksWeb.BlogController do
     end
   end
 
-  @doc """
-      POST /api/blog/posts/:id/chat — writing-assistant chat for a post.
-
-      Gated by `StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"` in the
-      router pipeline: reaching this action means the user has granted consent (a
-      403 is returned upstream otherwise). The assistant itself is not built yet —
-      this is an honest "under construction" surface, NOT real AI.
-  """
-  @spec chat(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def chat(conn, %{"id" => id}) do
-    user = Guardian.Plug.current_resource(conn)
-
-    with {:ok, post} <- fetch_post(id),
-         :ok <- check_ownership(post, user) do
-      json(conn, %{
-        status: "under_construction",
-        message: "The writing assistant is coming soon."
-      })
-    end
-  end
-
   defp fetch_post(id) do
     case Blog.get_post(id) do
       nil -> {:error, :not_found}

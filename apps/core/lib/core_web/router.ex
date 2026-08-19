@@ -18,10 +18,6 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.OptionalAuthPipeline
   end
 
-  pipeline :writing_assistant_consent do
-    plug StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"
-  end
-
   pipeline :rate_limit_auth do
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
   end
@@ -256,11 +252,6 @@ defmodule CoreWeb.Router do
     post "/gdpr/export", GDPRController, :export
     delete "/gdpr/account", GDPRController, :delete_account
     post "/gdpr/consent", GDPRController, :update_consent
-  end
-
-  scope "/api", StacksWeb do
-    pipe_through [:api, :authenticated, :writing_assistant_consent]
-    post "/blog/posts/:id/chat", BlogController, :chat
   end
 
   scope "/api", StacksWeb do
