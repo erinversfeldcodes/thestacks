@@ -46,6 +46,7 @@ module Api exposing
     , PollStatus(..)
     , PrivacySettings
     , ProfileError(..)
+    , ProfileSaved
     , ProfileShelfSummary
     , Progress
     , ProgressError(..)
@@ -136,6 +137,7 @@ module Api exposing
     , getInferences
     , getInferencesRequest
     , getListings
+    , getMe
     , getMyListings
     , getMyPlacements
     , getNotifications
@@ -250,6 +252,7 @@ import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
 import Stacks.Api.V1.Requests as Requests
 import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
+import Stacks.Common.V1.User as ProtoUser
 import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
@@ -2749,6 +2752,20 @@ type ProfileError
     | ProfileRequestFailed Http.Error
 
 
+{-| What a saved profile came back as.
+
+`email` is the address the account ANSWERS on, and `pendingEmail` the one waiting
+to prove itself — an email change moves the second, never the first, so the form
+must take both from the server rather than assuming the typed value landed.
+
+-}
+type alias ProfileSaved =
+    { handle : String
+    , email : String
+    , pendingEmail : Maybe String
+    }
+
+
 {-| PUT /api/settings/profile — update display name, email, website URL, and handle.
 
 `emailChanged` decides whether the email/current-password pair is sent at all
@@ -2765,7 +2782,7 @@ updateProfile :
     , emailChanged : Bool
     , handleChanged : Bool
     }
-    -> Authed ProfileError String msg
+    -> Authed ProfileError ProfileSaved msg
     -> Cmd msg
 updateProfile body request =
     Http.request
@@ -2817,6 +2834,76 @@ encodeProfileBody body =
         )
 
 
+{-| The account's own record, as `GET /api/auth/me` answers it.
+
+The settings page asks for this on load rather than reading the stored session:
+a pending email change is server truth that outlives the tab that started it, and
+a panel driven from localStorage would go quiet on reload while the change was
+still very much in flight.
+
+-}
+getMe : Authed Http.Error ProfileSaved msg -> Cmd msg
+getMe request =
+    Http.request
+        { method = "GET"
+        , headers = authedHeaders request
+        , url = baseUrl ++ "/api/auth/me"
+        , body = Http.emptyBody
+        , expect = authedExpect resolveMe request
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+resolveMe : Http.Response String -> Result Http.Error ProfileSaved
+resolveMe response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (Http.BadUrl url)
+
+        Http.Timeout_ ->
+            Err Http.Timeout
+
+        Http.NetworkError_ ->
+            Err Http.NetworkError
+
+        Http.BadStatus_ metadata _ ->
+            Err (Http.BadStatus metadata.statusCode)
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString (Decode.field "user" ProtoUser.decodeUser) bodyText of
+                Ok user ->
+                    Ok
+                        { handle = user.handle
+                        , email = user.email
+                        , pendingEmail = emptyToNothing user.pendingEmail
+                        }
+
+                Err _ ->
+                    Err (Http.BadBody "could not read the account record")
+
+
+{-| What the client falls back to when a 200 body cannot be read: the handle
+empty (the caller keeps what it had) and NO pending change. Claiming a pending
+change we did not read would put a panel on screen about a state we cannot see.
+-}
+emptyProfileSaved : ProfileSaved
+emptyProfileSaved =
+    { handle = "", email = "", pendingEmail = Nothing }
+
+
+profileSavedDecoder : Decoder ProfileSaved
+profileSavedDecoder =
+    Decode.map3 ProfileSaved
+        (Decode.oneOf [ Decode.field "handle" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "email" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf
+            [ Decode.field "pending_email" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+
+
 {-| Keep the structured `{"errors":...}` payload a 422 carries so the caller
 can surface the real reason a profile save was rejected (mirrors
 `expectRegister`). On success it hands back the server-normalised handle (the
@@ -2828,7 +2915,7 @@ as `ProfileRequestFailed (BadStatus 401)` — which is precisely how the page
 came to render "Please try again" at it.
 
 -}
-resolveProfile : Http.Response String -> Result ProfileError String
+resolveProfile : Http.Response String -> Result ProfileError ProfileSaved
 resolveProfile response =
     case response of
         Http.BadUrl_ url ->
@@ -2853,12 +2940,7 @@ resolveProfile response =
                 Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
 
         Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
-                Ok handle ->
-                    Ok handle
-
-                Err _ ->
-                    Ok ""
+            Ok (Result.withDefault emptyProfileSaved (Decode.decodeString profileSavedDecoder bodyText))
 
 
 {-| PUT /api/settings/location — update the user's location.

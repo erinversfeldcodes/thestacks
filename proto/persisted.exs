@@ -249,6 +249,13 @@
         password_reset_token: %{dbt_exclude: true},
         password_reset_sent_at: %{dbt_exclude: true},
         email_confirmation_token: %{dbt_exclude: true},
+        # The pending-change quartet: one fact in four columns, none of which the
+        # warehouse has a question for. `pending_email` is an address the reader
+        # typed (personal data); the two tokens are credentials.
+        pending_email: %{dbt_exclude: true},
+        pending_email_token: %{dbt_exclude: true},
+        pending_email_sent_at: %{dbt_exclude: true},
+        pending_email_revert_token: %{dbt_exclude: true},
         failed_login_count: %{default: 0, null: false, dbt_exclude: true},
         failed_login_first_at: %{dbt_exclude: true},
         locked_until: %{dbt_exclude: true},
@@ -1366,6 +1373,8 @@
       skip_fields: [
         :password_hash,
         :email_confirmation_token,
+        :pending_email_token,
+        :pending_email_revert_token,
         :password_reset_token,
         :password_reset_sent_at,
         :failed_login_count,

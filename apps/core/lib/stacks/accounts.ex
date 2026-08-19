@@ -35,6 +35,10 @@ defmodule Stacks.Accounts do
 
   @unverified_account_max_lifetime_seconds 7 * 24 * 60 * 60
 
+  @email_change_grace_seconds 7 * 24 * 60 * 60
+
+  @email_revert_link_seconds 30 * 24 * 60 * 60
+
   @registration_required_fields [:email, :password]
   @registration_optional_fields [:display_name, :role, :profile_visibility]
 
@@ -115,6 +119,106 @@ defmodule Stacks.Accounts do
       nil -> changeset
       email -> put_change(changeset, :email, normalise_email(email))
     end
+  end
+
+  @pending_email_fields [
+    :pending_email,
+    :pending_email_token,
+    :pending_email_sent_at,
+    :pending_email_revert_token
+  ]
+
+  @doc """
+      Changeset for the pending email-change quartet — the address awaiting
+      confirmation, the two links that resolve it, and the clock the grace window
+      is measured from. All four move together (the database says so too, via
+      `users_pending_email_state_consistent`), so clearing a change is this same
+      changeset with four nils.
+
+      Validation errors are reported under `:email`, not `:pending_email`: the
+      caller typed one address into one field, and the API's error shape should not
+      leak which column the platform happened to park it in.
+  """
+  def pending_email_changeset(user, attrs) do
+    user
+    |> cast(attrs, @pending_email_fields)
+    |> downcase_pending_email()
+    |> validate_pending_email(user)
+  end
+
+  defp downcase_pending_email(changeset) do
+    case get_change(changeset, :pending_email) do
+      nil -> changeset
+      email -> put_change(changeset, :pending_email, normalise_email(email))
+    end
+  end
+
+  # Only a changeset that is SETTING a pending address is validated; clearing one
+  # (four explicit nils) has nothing to check.
+  defp validate_pending_email(changeset, user) do
+    case get_change(changeset, :pending_email) do
+      nil ->
+        changeset
+
+      address ->
+        cond do
+          not Regex.match?(~r/^[^\s]+@[^\s]+$/, address) ->
+            add_error(changeset, :email, "must be a valid email address")
+
+          email_taken?(address, user.id) ->
+            add_error(changeset, :email, "has already been taken")
+
+          true ->
+            changeset
+        end
+    end
+  end
+
+  # The address must be free NOW for the change to be worth starting. It is
+  # checked again at the moment of the swap, by the `lower(email)` unique index —
+  # this one is the courtesy, that one is the guarantee.
+  defp email_taken?(address, user_id) do
+    Repo.exists?(
+      from u in User,
+        where: fragment("lower(?)", u.email) == ^address and u.id != ^user_id
+    )
+  end
+
+  @cleared_pending_email %{
+    pending_email: nil,
+    pending_email_token: nil,
+    pending_email_sent_at: nil,
+    pending_email_revert_token: nil
+  }
+
+  @doc """
+      Changeset for a confirmed email change: the pending address becomes the
+      account's address, the quartet clears, and the account is confirmed — it has
+      just been proven, which is the entire point of the link that got here.
+
+      Takes no attrs. Everything it needs is already on the row, and an email
+      change that could be handed an address from somewhere else would not be a
+      confirmation of anything. The `lower(email)` unique constraint is the last
+      word: an address claimed by someone else while the change sat pending fails
+      here rather than colliding.
+  """
+  def confirm_email_change_changeset(%User{} = user) do
+    user
+    |> email_changeset(%{"email" => user.pending_email})
+    |> change(Map.put(@cleared_pending_email, :email_confirmed, true))
+  end
+
+  @doc """
+      Changeset for an undone email change: the quartet clears and the account is
+      confirmed. The address does not move, because it never moved.
+
+      `email_confirmed: true` is a RESTORE, not a no-op — the window may already
+      have lapsed and degraded the account, and clicking this link is proof of
+      control of the address on the row. It is the same proof a confirmation link
+      is, arriving from the other direction.
+  """
+  def revert_email_change_changeset(%User{} = user) do
+    change(user, Map.put(@cleared_pending_email, :email_confirmed, true))
   end
 
   @doc "Changeset for location update (country_code, city)."
@@ -322,6 +426,15 @@ defmodule Stacks.Accounts do
       mints a fresh token, so age alone would erase accounts under still-live
       links. The SQL is only a prefilter; the decision is the same
       `Phoenix.Token.verify/4` the confirm click makes.
+
+      ⛔ `email_confirmed == false` alone does NOT mean "never confirmed". An
+      account whose email change outlived its grace window is degraded to exactly
+      that flag while keeping every shelf, placement and post it ever had — and
+      this function's callers ERASE what it returns. Two further conditions keep
+      those accounts out: they still hold the signup token registration minted
+      (confirming nulls it, and nothing outside the renewal ceiling re-mints it),
+      and they have no email change in flight. An abandoned signup satisfies both;
+      a degraded account satisfies neither.
   """
   @spec expired_unverified_ids(DateTime.t()) :: [binary()]
   def expired_unverified_ids(now \\ DateTime.utc_now()) do
@@ -330,7 +443,9 @@ defmodule Stacks.Accounts do
     candidates =
       Repo.all(
         from u in User,
-          where: u.email_confirmed == false and u.created_at < ^cutoff,
+          where:
+            u.email_confirmed == false and u.created_at < ^cutoff and
+              not is_nil(u.email_confirmation_token) and is_nil(u.pending_email),
           select: {u.id, u.email_confirmation_token}
       )
 
@@ -399,6 +514,133 @@ defmodule Stacks.Accounts do
   @spec confirmation_link_live?(String.t() | nil) :: boolean()
   def confirmation_link_live?(token) do
     match?({:ok, _user_id}, verify_confirmation_token(token))
+  end
+
+  @doc """
+      How long an email change may sit unconfirmed before the account stops being
+      treated as confirmed. One value, spoken here, read by three things that must
+      agree: the confirmation link's `max_age`, the sweep's cutoff, and the copy in
+      both emails. A window that is stored per-row, or restated per-caller, is a
+      window that eventually means two different things.
+  """
+  @spec email_change_grace_seconds() :: pos_integer()
+  def email_change_grace_seconds, do: @email_change_grace_seconds
+
+  @doc """
+      How long the undo link mailed to the CURRENT address stays good.
+
+      Deliberately longer than the grace window. Once the window lapses the account
+      is gated out of every authenticated route and refused a fresh login, so it
+      cannot ask for another change to dig itself out — this link is the way back,
+      and it has to still be there when the reader finally reads that email.
+  """
+  @spec email_revert_link_seconds() :: pos_integer()
+  def email_revert_link_seconds, do: @email_revert_link_seconds
+
+  @doc "Sign the confirmation link for a pending address. Lives exactly as long as the window."
+  @spec sign_email_change_token(binary()) :: String.t()
+  def sign_email_change_token(user_id) do
+    Phoenix.Token.sign(CoreWeb.Endpoint, "email_change", user_id)
+  end
+
+  @doc """
+      Verify a pending-address confirmation link and return the user id it was
+      signed over. The one place the `"email_change"` salt and its `max_age` are
+      spoken.
+  """
+  @spec verify_email_change_token(String.t() | nil) :: {:ok, binary()} | :error
+  def verify_email_change_token(token) when is_binary(token) do
+    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_change", token,
+           max_age: @email_change_grace_seconds
+         ) do
+      {:ok, user_id} -> {:ok, user_id}
+      {:error, _reason} -> :error
+    end
+  end
+
+  def verify_email_change_token(_token), do: :error
+
+  @doc "Sign the undo link for the address the account currently answers on."
+  @spec sign_email_revert_token(binary()) :: String.t()
+  def sign_email_revert_token(user_id) do
+    Phoenix.Token.sign(CoreWeb.Endpoint, "email_change_revert", user_id)
+  end
+
+  @doc """
+      Verify an undo link and return the user id it was signed over. Its own salt,
+      so a confirmation link can never be replayed as an undo (or the reverse) —
+      the two do opposite things to the same row.
+  """
+  @spec verify_email_revert_token(String.t() | nil) :: {:ok, binary()} | :error
+  def verify_email_revert_token(token) when is_binary(token) do
+    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_change_revert", token,
+           max_age: @email_revert_link_seconds
+         ) do
+      {:ok, user_id} -> {:ok, user_id}
+      {:error, _reason} -> :error
+    end
+  end
+
+  def verify_email_revert_token(_token), do: :error
+
+  @doc """
+      IDs of accounts whose email change has outlived the grace window and is still
+      pending. Feeds `ExpiredEmailChangesJob`.
+
+      `email_confirmed == true` is part of the query, not a nicety: it makes the
+      sweep idempotent (a degraded account is not degraded again tomorrow) and
+      keeps the emitted event a record of the moment trust was withdrawn rather
+      than a daily repetition of it.
+  """
+  @spec lapsed_email_change_ids(DateTime.t()) :: [binary()]
+  def lapsed_email_change_ids(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -@email_change_grace_seconds, :second)
+
+    Repo.all(
+      from u in User,
+        where:
+          not is_nil(u.pending_email) and u.email_confirmed == true and
+            u.pending_email_sent_at < ^cutoff,
+        select: u.id
+    )
+  end
+
+  @doc """
+      Withdraws confirmed status from an account whose email change was never
+      answered. `RequireConfirmedEmail` does the rest — the plug's semantics are
+      untouched; this flag is the whole mechanism.
+
+      The pending columns are deliberately KEPT. The row still has to be able to
+      say what the account is waiting on, and the undo link still has to resolve —
+      it is now the only way back in.
+  """
+  @spec degrade_lapsed_email_change(binary()) :: {:ok, User.t()} | {:error, term()}
+  def degrade_lapsed_email_change(user_id) do
+    case Repo.get(User, user_id) do
+      nil ->
+        {:error, :user_not_found}
+
+      user ->
+        result =
+          user
+          |> email_confirmation_changeset(%{email_confirmed: false})
+          |> Repo.update()
+
+        case result do
+          {:ok, degraded} ->
+            Events.emit_safe(%{
+              event_type: "user.email_change_expired",
+              aggregate_type: "user",
+              aggregate_id: degraded.id,
+              payload: %{}
+            })
+
+            {:ok, degraded}
+
+          error ->
+            error
+        end
+    end
   end
 
   @doc """
@@ -854,7 +1096,8 @@ defmodule Stacks.Accounts do
       is verified before the email is updated.
   """
   @spec update_profile(User.t(), map()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy}
+          {:ok, User.t()}
+          | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy | :rate_limited}
   def update_profile(%User{} = user, attrs) do
     if email_change?(user, attrs) do
       update_profile_with_email(user, attrs)
@@ -890,16 +1133,31 @@ defmodule Stacks.Accounts do
 
   defp tap_emit_handle_claimed(error, _changeset), do: error
 
+  # An email change does not change the account's email. It records the address
+  # as PENDING and mails two links: one asking the new address to prove itself,
+  # one telling the current address this is happening and offering to undo it.
+  # `email_confirmed` is untouched, so the account stays usable while the two
+  # letters race — see `email_change_grace_seconds/0` for why that grace is the
+  # difference between a warning and a lockout.
+  #
+  # The two enqueues are the LAST step of the transaction, so a pending change
+  # cannot commit without the links that resolve it, and nothing that could roll
+  # the transaction back happens after they are counted.
   defp update_profile_with_email(user, attrs) do
     with :ok <- verify_password(user, Map.get(attrs, "current_password")) do
       changeset = profile_changeset(user, attrs)
 
       Multi.new()
       |> Multi.update(:profile, changeset)
-      |> Multi.update(:email, fn %{profile: u} ->
-        email_changeset(u, %{"email" => attrs["email"]})
+      |> Multi.update(:pending_email, fn %{profile: u} ->
+        pending_email_changeset(u, %{
+          pending_email: attrs["email"],
+          pending_email_token: sign_email_change_token(u.id),
+          pending_email_sent_at: DateTime.utc_now(),
+          pending_email_revert_token: sign_email_revert_token(u.id)
+        })
       end)
-      |> Multi.run(:emit_event, fn _repo, %{email: u} ->
+      |> Multi.run(:emit_event, fn _repo, %{pending_email: u} ->
         Events.emit_safe(%{
           event_type: "user.profile_updated",
           aggregate_type: "user",
@@ -907,11 +1165,21 @@ defmodule Stacks.Accounts do
           payload: %{}
         })
 
+        Events.emit_safe(%{
+          event_type: "user.email_change_requested",
+          aggregate_type: "user",
+          aggregate_id: u.id,
+          payload: %{}
+        })
+
         {:ok, u}
+      end)
+      |> Multi.run(:send_links, fn _repo, %{pending_email: u} ->
+        Email.send_email_change_pair(u)
       end)
       |> Repo.transaction()
       |> case do
-        {:ok, %{email: u}} -> tap_emit_handle_claimed({:ok, u}, changeset)
+        {:ok, %{pending_email: u}} -> tap_emit_handle_claimed({:ok, u}, changeset)
         {:error, _, reason, _} -> {:error, reason}
       end
     end

@@ -52,6 +52,13 @@ defmodule Stacks.Events.PayloadContract do
     "user.profile_visibility_changed" => %{version: 1, keys: ~w(visibility)},
     "user.location_updated" => %{version: 1, keys: ~w()},
     "user.password_changed" => %{version: 1, keys: ~w()},
+    # Empty by construction, not by omission: the only facts these events could
+    # carry beyond the aggregate id are two email addresses, and event_log is
+    # append-only — erasure blanks a payload where it can delete a row.
+    "user.email_change_requested" => %{version: 1, keys: ~w()},
+    "user.email_change_confirmed" => %{version: 1, keys: ~w()},
+    "user.email_change_reverted" => %{version: 1, keys: ~w()},
+    "user.email_change_expired" => %{version: 1, keys: ~w()},
     "invite.issued" => %{version: 1, keys: ~w(max_uses expires_at email_bound)},
     "invite.redeemed" => %{version: 1, keys: ~w(user_id use_count)},
     "invite.revoked" => %{version: 1, keys: ~w()},

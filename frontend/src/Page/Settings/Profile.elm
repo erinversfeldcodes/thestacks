@@ -23,6 +23,7 @@ type alias Model =
     , initialHandle : String
     , email : String
     , initialEmail : String
+    , pendingEmail : Maybe String
     , currentPassword : String
     , currentPasswordError : Maybe String
     , websiteUrl : String
@@ -42,7 +43,8 @@ type Msg
     | SetCountryCode String
     | SetCity String
     | SaveProfile
-    | SaveProfileCompleted (Result Api.ProfileError String)
+    | SaveProfileCompleted (Result Api.ProfileError Api.ProfileSaved)
+    | GotAccount (Result Http.Error Api.ProfileSaved)
     | SaveLocation
     | SaveLocationCompleted (Result Http.Error ())
     | SessionExpiryDetected
@@ -61,21 +63,42 @@ type OutMsg
     | SessionExpired
 
 
-init : User -> Model
-init user =
-    { displayName = user.displayName
-    , handle = user.handle
-    , initialHandle = user.handle
-    , email = user.email
-    , initialEmail = user.email
-    , currentPassword = ""
-    , currentPasswordError = Nothing
-    , websiteUrl = ""
-    , countryCode = Maybe.withDefault "" user.countryCode
-    , city = Maybe.withDefault "" user.city
-    , savingProfile = NotAsked
-    , savingLocation = NotAsked
-    }
+{-| The stored session is enough to render the form, but not to answer "is a
+change to this address waiting on confirmation?" — that is server truth, and it
+outlives the tab that started it. So the page asks.
+
+A session with no token renders the same form and simply learns nothing; the
+account state it would have shown is the account state it cannot reach anyway.
+
+-}
+init : User -> Maybe String -> ( Model, Cmd Msg )
+init user maybeToken =
+    ( { displayName = user.displayName
+      , handle = user.handle
+      , initialHandle = user.handle
+      , email = user.email
+      , initialEmail = user.email
+      , pendingEmail = Nothing
+      , currentPassword = ""
+      , currentPasswordError = Nothing
+      , websiteUrl = ""
+      , countryCode = Maybe.withDefault "" user.countryCode
+      , city = Maybe.withDefault "" user.city
+      , savingProfile = NotAsked
+      , savingLocation = NotAsked
+      }
+    , case maybeToken of
+        Just token ->
+            Api.getMe
+                (Api.authed token
+                    { onExpired = SessionExpiryDetected
+                    , onResult = GotAccount
+                    }
+                )
+
+        Nothing ->
+            Cmd.none
+    )
 
 
 {-| The email is only a _change_ when it differs from the stored value, compared
@@ -159,18 +182,31 @@ update msg model maybeToken =
 
         SaveProfileCompleted result ->
             case result of
-                Ok normalisedHandle ->
+                Ok saved ->
                     let
                         settledHandle =
-                            if normalisedHandle == "" then
+                            if saved.handle == "" then
                                 model.handle
 
                             else
-                                normalisedHandle
+                                saved.handle
+
+                        -- The email field snaps back to the address the account
+                        -- ANSWERS on. Leaving the typed address in place would
+                        -- show a settled change that has not happened, and the
+                        -- pending panel below would contradict the field above it.
+                        settledEmail =
+                            if saved.email == "" then
+                                model.initialEmail
+
+                            else
+                                saved.email
                     in
                     ( { model
                         | savingProfile = Success ()
-                        , initialEmail = model.email
+                        , email = settledEmail
+                        , initialEmail = settledEmail
+                        , pendingEmail = saved.pendingEmail
                         , currentPassword = ""
                         , currentPasswordError = Nothing
                         , handle = settledHandle
@@ -182,6 +218,21 @@ update msg model maybeToken =
 
                 Err err ->
                     ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
+
+        GotAccount (Ok account) ->
+            ( { model
+                | email = account.email
+                , initialEmail = account.email
+                , pendingEmail = account.pendingEmail
+              }
+            , Cmd.none
+            , NoOut
+            )
+
+        GotAccount (Err _) ->
+            -- The form still works; it just cannot report a change in flight.
+            -- Inventing one here would be worse than saying nothing.
+            ( model, Cmd.none, NoOut )
 
         SaveLocation ->
             case maybeToken of
@@ -253,6 +304,7 @@ view model =
                     , placeholder "your@email.com"
                     ]
                     []
+                , viewPendingEmail model
                 ]
             , viewCurrentPasswordField model
             , div [ class "form-field" ]
@@ -301,6 +353,34 @@ view model =
             , viewFeedback model.savingLocation "Location saved." "Could not save location. Please try again."
             ]
         ]
+
+
+{-| What is actually happening while an email change is in flight, in the place
+the reader will look for it: under the address field they changed.
+
+Both addresses are named, because the reader's next question is which inbox to
+open, and after a change they did not make, which one to trust. The consequence
+of ignoring both letters is stated here too — being signed out in a week is not
+something to discover a week later.
+
+-}
+viewPendingEmail : Model -> Html Msg
+viewPendingEmail model =
+    case model.pendingEmail of
+        Just pending ->
+            div [ class "pending-email" ]
+                [ p [ class "pending-email__lede" ]
+                    [ text "Waiting on "
+                    , Html.strong [] [ text pending ]
+                    ]
+                , p [ class "pending-email__detail" ]
+                    [ text ("We sent a confirmation link there, and a link to undo this change to " ++ model.initialEmail ++ ". Your account still uses " ++ model.initialEmail ++ " until the new address confirms itself.") ]
+                , p [ class "pending-email__detail" ]
+                    [ text "If neither is used within seven days, you'll be signed out until an address is confirmed — the undo link will still work." ]
+                ]
+
+        Nothing ->
+            text ""
 
 
 {-| The current-password prompt only appears once the email field actually

@@ -175,6 +175,21 @@ defmodule CoreWeb.Telemetry do
           "Confirmation resend requests by outcome (sent/rate_limited/" <>
             "no_account/already_confirmed/past_renewal_ceiling)"
       ),
+      counter("stacks.auth.email_change.count",
+        event_name: [:stacks, :auth, :email_change],
+        tags: [:outcome],
+        description:
+          "Email change flow by outcome (requested/rate_limited/confirmed/" <>
+            "reverted/invalid_confirm/invalid_revert). The reverted series is " <>
+            "readers saying a change to their account was not theirs"
+      ),
+      last_value("stacks.accounts.email_change_lapsed.degraded",
+        event_name: [:stacks, :accounts, :email_change_lapsed],
+        measurement: :degraded,
+        description:
+          "Accounts the daily sweep degraded because neither address answered " <>
+            "an email change inside the grace window"
+      ),
       counter("stacks.view_as.usage.count",
         event_name: [:stacks, :view_as, :usage],
         tags: [:perspective],

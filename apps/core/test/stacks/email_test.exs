@@ -351,4 +351,221 @@ defmodule Stacks.EmailTest do
              "a replayed reset token set a new password — the link is not single-use"
     end
   end
+
+  # An account mid-change, written the way the request flow writes it.
+  defp user_with_pending_change(attrs \\ []) do
+    user = insert(:user, Keyword.merge([email: "old@thestacks.test"], attrs))
+
+    {:ok, pending} =
+      user
+      |> Accounts.pending_email_changeset(%{
+        pending_email: "new@thestacks.test",
+        pending_email_token: Accounts.sign_email_change_token(user.id),
+        pending_email_sent_at: DateTime.utc_now(),
+        pending_email_revert_token: Accounts.sign_email_revert_token(user.id)
+      })
+      |> Core.Repo.update()
+
+    pending
+  end
+
+  describe "send_email_change_pair/1" do
+    test "mails the new address a confirmation and the old address an undo link" do
+      user = user_with_pending_change()
+
+      assert {:ok, _user} = Email.send_email_change_pair(user)
+
+      jobs = all_enqueued(worker: EmailDeliveryJob)
+      templates = Enum.map(jobs, & &1.args["template"]) |> Enum.sort()
+
+      assert templates == ["email_change_confirmation", "email_change_notice"]
+
+      confirmation = Enum.find(jobs, &(&1.args["template"] == "email_change_confirmation"))
+      notice = Enum.find(jobs, &(&1.args["template"] == "email_change_notice"))
+
+      assert confirmation.args["params"]["token"] == user.pending_email_token
+      assert notice.args["params"]["token"] == user.pending_email_revert_token
+    end
+
+    test "refuses rather than recording a change whose letters cannot be sent" do
+      user = user_with_pending_change()
+      saturate_email_limit(user.id)
+      watch_outcomes([:stacks, :auth, :email_change])
+      before = enqueued_count()
+
+      assert {:error, :rate_limited} = Email.send_email_change_pair(user)
+
+      assert enqueued_count() == before
+      assert [{:rate_limited, _}] = outcomes()
+    end
+  end
+
+  describe "confirm_email_change/1" do
+    test "swaps the pending address in and clears the whole quartet" do
+      user = user_with_pending_change()
+
+      assert {:ok, updated} = Email.confirm_email_change(user.pending_email_token)
+
+      assert updated.email == "new@thestacks.test"
+      assert updated.email_confirmed
+      assert updated.pending_email == nil
+      assert updated.pending_email_token == nil
+      assert updated.pending_email_sent_at == nil
+      assert updated.pending_email_revert_token == nil
+    end
+
+    test "a confirmed change kills the undo link that was mailed with it" do
+      user = user_with_pending_change()
+      revert_token = user.pending_email_revert_token
+
+      assert {:ok, _} = Email.confirm_email_change(user.pending_email_token)
+
+      assert {:error, :invalid} = Email.revert_email_change(revert_token)
+      assert Core.Repo.reload!(user).email == "new@thestacks.test"
+    end
+
+    test "a confirmation link cannot be replayed" do
+      user = user_with_pending_change()
+      token = user.pending_email_token
+
+      assert {:ok, _} = Email.confirm_email_change(token),
+             "precondition: the first use must succeed, or the replay proves nothing"
+
+      assert {:error, :invalid} = Email.confirm_email_change(token)
+    end
+
+    test "a link signed for one account cannot confirm another's pending change" do
+      user = user_with_pending_change()
+      stranger = insert(:user, email: "stranger@thestacks.test")
+
+      foreign_token = Accounts.sign_email_change_token(stranger.id)
+
+      assert {:error, :invalid} = Email.confirm_email_change(foreign_token)
+      assert Core.Repo.reload!(user).email == "old@thestacks.test"
+    end
+
+    test "a link older than the grace window no longer confirms" do
+      user = user_with_pending_change()
+
+      stale =
+        Phoenix.Token.sign(CoreWeb.Endpoint, "email_change", user.id,
+          signed_at: System.system_time(:second) - (Accounts.email_change_grace_seconds() + 60)
+        )
+
+      {:ok, _} =
+        user
+        |> Accounts.pending_email_changeset(%{pending_email_token: stale})
+        |> Core.Repo.update()
+
+      assert {:error, :invalid} = Email.confirm_email_change(stale)
+      assert Core.Repo.reload!(user).email == "old@thestacks.test"
+    end
+
+    test "an undo token cannot be replayed as a confirmation" do
+      user = user_with_pending_change()
+
+      assert {:error, :invalid} = Email.confirm_email_change(user.pending_email_revert_token)
+      assert Core.Repo.reload!(user).email == "old@thestacks.test"
+    end
+
+    test "counts confirmed and dead links apart" do
+      user = user_with_pending_change()
+      watch_outcomes([:stacks, :auth, :email_change])
+
+      {:ok, _} = Email.confirm_email_change(user.pending_email_token)
+      {:error, :invalid} = Email.confirm_email_change("not-a-token")
+
+      counted = outcomes() |> Enum.map(fn {outcome, _} -> outcome end) |> Enum.sort()
+      assert counted == [:confirmed, :invalid_confirm]
+    end
+  end
+
+  describe "revert_email_change/1" do
+    test "clears the quartet, leaves the address alone, and restores confirmed status" do
+      user = user_with_pending_change(email_confirmed: false)
+
+      assert {:ok, updated} = Email.revert_email_change(user.pending_email_revert_token)
+
+      assert updated.email == "old@thestacks.test"
+      assert updated.email_confirmed, "the click proves control of the address on the row"
+      assert updated.pending_email == nil
+      assert updated.pending_email_token == nil
+      assert updated.pending_email_sent_at == nil
+      assert updated.pending_email_revert_token == nil
+    end
+
+    test "invalidates the pending confirmation — the hijack heals itself" do
+      user = user_with_pending_change()
+      confirmation_token = user.pending_email_token
+
+      assert {:ok, _} = Email.revert_email_change(user.pending_email_revert_token)
+
+      assert {:error, :invalid} = Email.confirm_email_change(confirmation_token),
+             "the confirmation link outlived the undo that was supposed to cancel it"
+
+      assert Core.Repo.reload!(user).email == "old@thestacks.test"
+    end
+
+    test "revokes every live session, because the change may not have been the reader's" do
+      user = user_with_pending_change()
+      fid = Ecto.UUID.generate()
+
+      {:ok, _family} =
+        Accounts.rotate_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-before-revert",
+          session_started_at: DateTime.utc_now()
+        })
+
+      refute Core.Repo.get(AuthTokenFamily, fid).revoked_at,
+             "precondition: the family must start live, or this test proves nothing"
+
+      assert {:ok, _} = Email.revert_email_change(user.pending_email_revert_token)
+
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(fid, "jti-before-revert", to_string(user.id)),
+             "the session that requested the change still authenticates after the undo"
+    end
+
+    test "an undo link outlives the grace window" do
+      user = user_with_pending_change()
+
+      aged =
+        Phoenix.Token.sign(CoreWeb.Endpoint, "email_change_revert", user.id,
+          signed_at: System.system_time(:second) - (Accounts.email_change_grace_seconds() + 60)
+        )
+
+      {:ok, user} =
+        user
+        |> Accounts.pending_email_changeset(%{pending_email_revert_token: aged})
+        |> Core.Repo.update()
+
+      assert {:ok, _} = Email.revert_email_change(user.pending_email_revert_token),
+             "a degraded account's only way back must still work after the window"
+    end
+
+    test "an undo link older than its own life does not work" do
+      user = user_with_pending_change()
+
+      expired =
+        Phoenix.Token.sign(CoreWeb.Endpoint, "email_change_revert", user.id,
+          signed_at: System.system_time(:second) - (Accounts.email_revert_link_seconds() + 60)
+        )
+
+      {:ok, user} =
+        user
+        |> Accounts.pending_email_changeset(%{pending_email_revert_token: expired})
+        |> Core.Repo.update()
+
+      assert {:error, :invalid} = Email.revert_email_change(user.pending_email_revert_token)
+    end
+
+    test "a confirmation token cannot be replayed as an undo" do
+      user = user_with_pending_change()
+
+      assert {:error, :invalid} = Email.revert_email_change(user.pending_email_token)
+      assert Core.Repo.reload!(user).pending_email == "new@thestacks.test"
+    end
+  end
 end

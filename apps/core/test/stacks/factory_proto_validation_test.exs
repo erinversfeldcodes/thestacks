@@ -13,7 +13,7 @@ defmodule Stacks.FactoryProtoValidationTest do
   @factories %{
     user:
       {Stacks.Accounts.User,
-       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at consent_writing_assistant_at email_confirmation_token password_reset_token password_reset_sent_at onboarding_completed failed_login_first_at locked_until lockout_duration_seconds)a},
+       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at consent_writing_assistant_at email_confirmation_token password_reset_token password_reset_sent_at onboarding_completed failed_login_first_at locked_until lockout_duration_seconds pending_email pending_email_token pending_email_sent_at pending_email_revert_token)a},
     author: {Stacks.Books.Author, ~w(website_url rss_feed_url open_library_id)a},
     book: {Stacks.Books.Book, ~w()a},
     book_edition:
