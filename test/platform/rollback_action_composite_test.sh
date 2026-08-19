@@ -172,7 +172,13 @@ done
 
 test_case "step_ids_and_gating" "validate-inputs, run-rollback, log-audit, emit-outputs in order with correct if: gating"
 STEP_IDS_JSON="$(yaml_query '[.runs.steps[]?.id // empty]' "$ACTION_YML")"
-mapfile -t STEP_IDS < <(printf '%s' "$STEP_IDS_JSON" | jq -r '.[]?')
+# Read into the array by hand: `mapfile` is bash 4+, and a bare shell on macOS
+# is bash 3.2, where it is simply not found — STEP_IDS stays empty and all four
+# step ids are reported missing from an action.yml that declares every one.
+STEP_IDS=()
+while IFS= read -r _step_id; do
+    [[ -n "$_step_id" ]] && STEP_IDS+=("$_step_id")
+done < <(printf '%s' "$STEP_IDS_JSON" | jq -r '.[]?')
 
 _idx_of() {
     local target="$1"
