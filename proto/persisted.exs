@@ -831,7 +831,10 @@
       ],
       field_overrides: %{
         owner_id: %{belongs_to: Stacks.Accounts.User},
-        visibility: %{default: "invite_only"}
+        visibility: %{default: "invite_only"},
+        # User-authored free text that can carry a person's name — the
+        # placements.notes discipline applies; counts are enough for wh.
+        name: %{dbt_exclude: true}
       }
     },
     %{

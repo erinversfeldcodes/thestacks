@@ -1336,7 +1336,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Database** | **Delete:** All user rows in `op.*`. **Update:** `wh.*` (anonymise user_id, hash PII). |
 | **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation; `max_attempts: 1`. It is the only job in this flow, enqueued directly by the controller with nothing scheduled ahead of it. |
 | **External Services** | None. |
-| **dbt Models** | `mart_gdpr_deletions` (tracking). |
+| **dbt Models** | `mart_gdpr_compliance` (tracking). |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-8.1.3 (consent), US-8.1.5 (audit log records deletion event). |
 | **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, re-affirmed 2026-08-19). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, it delays an erasure that is supposed to happen without undue delay, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation, and there is exactly one place it lives — the typed `DELETE` phrase that enables the submit button. Past it the controller enqueues `AccountDeletionJob` immediately: no confirmation email, no waiting period, nothing behind. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
@@ -2686,7 +2686,7 @@ Which user stories touch each database table:
 | `mart_data_freshness` | Mart | Multiple | US-5.1.1 |
 | `mart_cost_tracking` | Mart | Multiple | US-5.1.1 |
 | `mart_gdpr_compliance` | Mart | US-8.1.1--5 | US-5.1.1 |
-| `mart_gdpr_deletions` | Mart | US-8.1.2 | US-5.1.1 |
+| `mart_gdpr_compliance` | Mart | US-8.1.2 | US-5.1.1 |
 | `mart_consent_status` | Mart | US-8.1.3 | US-5.1.1 |
 | `mart_image_retention_stats` | Mart | US-8.1.4 | US-5.1.1 |
 | `mart_audit_summary` | Mart | US-8.1.5 | US-5.1.1 |

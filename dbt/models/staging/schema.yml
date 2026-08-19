@@ -463,8 +463,6 @@ models:
           - unique
       - name: owner_id
         description: Owner id.
-      - name: name
-        description: Name.
       - name: type
         description: Type.
       - name: visibility
