@@ -239,9 +239,22 @@ h4 {
     text-decoration: none;
 }
 
+/* Active and hover used to differ only by 0.04 alpha on the same translucent
+   white, with identical text colour — so a cursor resting on the last-clicked
+   pill was indistinguishable from the current page, and read as two active
+   pills at once. The current page now carries the accent: a bottom rule, the
+   accent text colour, and more weight. None of those is something hover does,
+   so the two states can no longer be confused for one another. */
 .app-nav__item--active .app-nav__link {
     background-color: rgba(255, 255, 255, 0.1);
-    color: var(--text);
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.app-nav__item--active .app-nav__link:hover {
+    color: var(--accent-hover);
+    box-shadow: inset 0 -2px 0 0 var(--accent-hover);
 }
 
 .app-nav__dropdown {
