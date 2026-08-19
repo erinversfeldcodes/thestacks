@@ -108,7 +108,7 @@ This section is mandatory. The human will decide what to act on.
 Load and check against:
 - `./docs/agents/standards/code-quality.md` — consistency, no over-engineering
 - `./docs/agents/standards/security.md` — private networking, secrets management, container scanning, IaC scanning, secret detection
-- `./docs/agents/standards/testing.md` — CI must execute the 12-layer test strategy across the four `TEST_TARGET` environments; new platform changes must not silently drop a layer
+- `./docs/agents/standards/testing.md` — CI must execute the 12-layer test strategy across all four execution environments (mocked local/CI under `MIX_ENV=test`, and both deployed targets under `BASE_URL`); new platform changes must not silently drop a layer, and a deployed job that loses `BASE_URL` or its `E2E_EXPECT_*` flags drops one silently by skipping
 
 ### 8. Forward Compatibility (judgment — reviewer only)
 - Read every file in `issues/` whose **Dependencies** section references the current issue, and every issue in the same or the next roadmap phase

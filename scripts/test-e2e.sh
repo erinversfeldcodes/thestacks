@@ -117,9 +117,14 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
         echo "  Phoenix already running on :4000 — skipping start"
     else
         echo "==> Starting Phoenix on :4000..."
+        # Both feature flags default OFF outside :test, and the preview stack
+        # turns both ON — so a local run without them drives a different product
+        # than the specs describe: the invite-gate and age-gate families read as
+        # product failures when they are really a flag that was never set.
         (
             cd "$REPO_ROOT"
-            AGE_GATING_ENABLED=true STACKS_E2E_TEST_HELPERS=1 MIX_ENV=dev mix phx.server
+            AGE_GATING_ENABLED=true INVITE_ONLY_REGISTRATION=true \
+                STACKS_E2E_TEST_HELPERS=1 MIX_ENV=dev mix phx.server
         ) &>/tmp/stacks-phoenix.log &
         STARTED_PIDS+=($!)
         SERVICES_STARTED+=(phoenix)

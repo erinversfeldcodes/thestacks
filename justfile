@@ -63,11 +63,12 @@ setup:
     bash setup.sh
 
 # Make a fresh git worktree buildable (idempotent). Run it from INSIDE the
-# worktree. Copies the untracked state a worktree does not inherit — .env, the
-# proto-generated gen/ tree, the esbuild index.html — then runs deps.get and all
-# FIVE codegen targets, and verifies there is no drift. A no-op in the main
-# checkout. Agents building in worktrees should run this first, instead of
-# rediscovering the steps by hand.
+# worktree. Materialises the LFS textures (pointer files otherwise get bundled
+# into the assets), copies the untracked state a worktree does not inherit —
+# .env, the proto-generated gen/ tree, the esbuild index.html — then runs
+# deps.get, seeds e2e/node_modules, and runs all FIVE codegen targets, and
+# verifies there is no drift. A no-op in the main checkout. Agents building in
+# worktrees should run this first, instead of rediscovering the steps by hand.
 bootstrap-worktree *ARGS:
     bash scripts/bootstrap-worktree.sh {{ARGS}}
 
@@ -292,7 +293,7 @@ check-route-clients *ARGS:
 squawk:
     scripts/security-squawk.sh
 
-# Run deployed-only tests against a preview stack (requires TEST_TARGET=deployed)
+# Run deployed-only tests against a preview stack (requires DATABASE_URL + BASE_URL)
 test-deployed:
     bash scripts/test-deployed.sh
 

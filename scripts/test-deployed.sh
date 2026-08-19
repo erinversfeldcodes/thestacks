@@ -15,24 +15,25 @@ RESET='\033[0m'
 
 echo -e "${CYAN}${BOLD}=== Deployed-only test suite ===${RESET}"
 
+# Both of these are load-bearing, and BASE_URL especially so: the deployed-only
+# modules that drive the live API guard on it themselves and self-skip when it
+# is unset, so a run without it exercises the dbt/storage half, skips the
+# live-API half, and still prints "All deployed-only checks passed". Requiring
+# it up front is what stops that vacuous green.
 missing=()
 [[ -z "${DATABASE_URL:-}" ]] && missing+=("DATABASE_URL")
-[[ -z "${TEST_TARGET:-}" ]] && missing+=("TEST_TARGET")
+[[ -z "${BASE_URL:-}" ]] && missing+=("BASE_URL")
 
 if [[ ${#missing[@]} -gt 0 ]]; then
     echo -e "${RED}${BOLD}ERROR:${RESET} Missing required env vars: ${missing[*]}"
     echo "Set them before running, e.g.:"
-    echo "  TEST_TARGET=deployed DATABASE_URL=postgres://... bash scripts/test-deployed.sh"
-    exit 1
-fi
-
-if [[ "${TEST_TARGET}" != "deployed" ]]; then
-    echo -e "${RED}${BOLD}ERROR:${RESET} TEST_TARGET must be 'deployed', got '${TEST_TARGET}'"
+    echo "  DATABASE_URL=postgres://... BASE_URL=https://<preview>.fly.dev \\"
+    echo "    bash scripts/test-deployed.sh"
     exit 1
 fi
 
 echo "  DATABASE_URL is set"
-echo "  TEST_TARGET=${TEST_TARGET}"
+echo "  BASE_URL=${BASE_URL}"
 
 DBT_OK=false
 
