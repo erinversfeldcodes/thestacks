@@ -80,6 +80,15 @@ disproven.
 8. **Integration, not just isolation (completion-bar §6).** For epics: `just verify`
    green on the integration branch after every merge, PE gate on the cumulative diff.
 
+9. **Guard attestations and undischarged residue.** An absolute attestation ("NO further
+   orphans", "all clean", "run_all.sh completes") cited as evidence is a claim to break:
+   demand the planted-violation red run for any guard, and the caller for any runner — a
+   guard once attested clean while structurally blind to the one violation that existed,
+   and a runner was proven working while nothing invoked it. Separately, grep the
+   deliverable's close-out notes for residue phrases ("remains", "follow-up-class",
+   "not filed") with no follow-up issue or `plans/residue-ledger.md` row — undischarged
+   residue is unfinished work dressed as done, same as a phantom `#NNN`.
+
 ## Output — a verdict, not a rubber stamp
 - **PASS** only when every class above is clear, each with a cited artifact. Say what
   you drove live and what you observed.

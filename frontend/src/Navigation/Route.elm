@@ -49,6 +49,7 @@ type Route
     | About
     | Faq
     | DataTransparency
+    | Architecture
     | ListingRemoval
     | Catalogue
     | MarketplaceBrowse
@@ -105,6 +106,7 @@ parser =
         , Parser.map About (s "about")
         , Parser.map Faq (s "faq")
         , Parser.map DataTransparency (s "transparency")
+        , Parser.map Architecture (s "architecture")
         , Parser.map ListingRemoval (s "listing-removal")
         , Parser.map Catalogue (s "catalogue")
         , Parser.map MarketplaceCreate (s "marketplace" </> s "create")
@@ -209,6 +211,9 @@ toPath route =
 
         DataTransparency ->
             "/transparency"
+
+        Architecture ->
+            "/architecture"
 
         ListingRemoval ->
             "/listing-removal"
@@ -405,6 +410,9 @@ toPattern route =
 
         DataTransparency ->
             toPath DataTransparency
+
+        Architecture ->
+            toPath Architecture
 
         ListingRemoval ->
             toPath ListingRemoval

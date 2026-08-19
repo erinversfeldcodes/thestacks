@@ -94,7 +94,19 @@ there, delete it and do the work.
    - a **live drive** for any user-facing surface — unit tests do not establish reachability;
    - a **mutation probe** on every load-bearing assertion, with the failure output quoted;
    - a **wiring trace + zero-row sweep** for anything with a pipeline behind it;
-   - for a data-touching diff, the `gdpr-review` lens.
+   - for a data-touching diff, the `gdpr-review` lens;
+   - for an issue that **adds a gate/guard/runner**: the red run of a planted violation quoted in
+     the DoD, and the runner's caller named ("NO further orphans" was once attested by a guard
+     blind to the orphan that existed; a runner was proven working and left uncalled);
+   - **cross-artefact propagation boxes**: deleting a symbol → docs grep (0 refs or updated);
+     adding a route → nav entry or a recorded URL-only decision; building a storied feature →
+     mapping status flipped. A sibling artefact left stale is how a deleted job got documented as
+     a live deletion gate three days after it ceased to exist;
+   - **instance-vs-class**: the DoD states which the issue closes; instance-only issues name the
+     class follow-up (issue or `plans/residue-ledger.md` row) inline.
+   **Close-out duty:** if an issue's notes say "remains / follow-up-class / not filed", either file
+   the follow-up or add a residue-ledger row before marking the issue complete — residue recorded
+   only as prose is how #347's 42 remaining sites got lost.
 4. **Hand the epic and its filed children to the orchestrator in epic mode.** Do not re-derive its
    DAG, its worktree isolation, its per-child review cycle, or its gates. `just ci` — not `just
    verify` — is the integration gate (the #119 lesson).

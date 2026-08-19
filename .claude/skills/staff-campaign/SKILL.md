@@ -94,6 +94,17 @@ could summarise. Do not narrate. Screenshots are expensive: capture them for vis
    and a human had to notice. Run Mode C's **six-direction gap analysis** and **"Finding what nobody
    wrote"** over the scope, and diff `notes/` intent against the story corpus. **No Stage 4 until
    every finding is either spec'd into a story file or recorded as a deliberate exclusion.**
+2b. ⛔ **Stage 0 includes a predecessor sweep — the 2026-08-18 retro's lesson.** Run `just
+   campaign-residue` and read every prior `plans/staff-campaign-*.md` exclusions table, every
+   campaign state file's `not_started` items, and `plans/residue-ledger.md`. Any open row whose
+   `due_when` is satisfied **joins the frame**; anything already ruled (struck, excluded) is cited
+   as an exclusion rather than re-found. That retro showed ~2/3 of a campaign's findings were
+   identifiable earlier and ~1/3 were *literally already written down* — detection was never the
+   weak link; retention was. This sweep is how a campaign inherits instead of rediscovers.
+2c. **The milestone-truth pass is a standing Stage 2 instrument**, not an optional extra: verify
+   each launch-milestone claim in `notes/` against code with file:line evidence (BUILT / PARTIAL /
+   ABSENT, env-gated or not, proven where). First run (2026-08-18) it produced the campaign's
+   entire frame layer — run it whenever the frame cites milestones.
 3. ⛔ **The walkthrough is Stage 1 and nothing else starts until it is done.** Deploy a preview
    (`bash scripts/deploy-preview.sh`), authenticate with the recipe in the agent file's Drive
    section, and walk **every** surface from the Stage 1a inventory — including the upload/vision
@@ -221,6 +232,18 @@ execution happened outside any harness.
   find how `e2e/tests/helpers.ts` already does it.
 - **Cluster, don't list.** A raw concatenation of every subsystem's findings is not a plan. Root
   causes with their symptoms as acceptance criteria; leverage stated per item.
+- **A count must have its member list on disk.** A recon number that is really a list ("~18 routes
+  with no client caller") must have every member disposed at Stage 6: into a filed issue, a
+  recorded exclusion, or a `plans/residue-ledger.md` row. The 07-30 campaign's ledger held that
+  exact list as prose; two of its members resurfaced as "new" ⛔ findings three weeks later.
+- **Instance or class — say which.** Every finding-derived issue states whether it closes the
+  *class* or an *instance*; an instance-only issue names the class follow-up (issue number or
+  ledger row) inline. "#347 converted 5 of 47 sites, no follow-up filed" is the failure this
+  prevents.
+- **A guard must prove it can fire.** Any issue that adds a gate/guard/runner quotes, in its DoD,
+  the red run of a planted violation — and a runner's DoD names its caller. "NO further orphans"
+  was attested by a guard structurally blind to the orphan that existed; "run_all.sh completes"
+  was proven for a runner nothing invokes.
 - **Sequence deliberately.** Deletions before refactors; contracts before consumers; guarantees
   before the refactors needing them — but only for tests that survive the refactor; ladder climbs
   before retiring the tests they replace.

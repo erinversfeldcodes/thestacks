@@ -4548,6 +4548,17 @@ h4 {
     margin-bottom: 1.25rem;
 }
 
+/* Inline link inside prose — distinct from .about__link, which is a block card. */
+.about__prose-link {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.about__prose-link:hover {
+    color: var(--text);
+}
+
 .about__link {
     display: block;
     background: linear-gradient(145deg, rgba(61, 43, 31, 0.6), rgba(42, 31, 20, 0.8));

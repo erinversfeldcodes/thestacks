@@ -77,10 +77,13 @@ expectedAuth route =
         CostTransparency ->
             False
 
-        Metrics ->
+        DataTransparency ->
             False
 
-        DataTransparency ->
+        Architecture ->
+            False
+
+        Metrics ->
             False
 
         About ->
@@ -194,8 +197,9 @@ allRoutes =
     , ( "SettingsAuditLog", SettingsAuditLog )
     , ( "Insights", Insights )
     , ( "CostTransparency", CostTransparency )
-    , ( "Metrics", Metrics )
     , ( "DataTransparency", DataTransparency )
+    , ( "Architecture", Architecture )
+    , ( "Metrics", Metrics )
     , ( "About", About )
     , ( "Faq", Faq )
     , ( "Feedback", Feedback )
@@ -304,12 +308,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "21 public routes and 24 protected routes are enumerated" <|
+            [ test "22 public routes and 24 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 21, 24 )
+                        |> Expect.equal ( 22, 24 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|

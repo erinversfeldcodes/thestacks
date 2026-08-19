@@ -525,3 +525,11 @@ render-gate:
 #   just wave-status staff-campaign-2026-07-27 --next
 wave-status *ARGS:
     @bash scripts/wave-status.sh {{ARGS}}
+
+# Residual-findings sweep: open residue-ledger rows, not_started campaign items,
+# and DoD residue phrases citing no follow-up number. Reading aid for a campaign's
+# Stage 0 (the frame must absorb any row whose due_when is satisfied). Exists
+# because the 2026-08 retro showed findings recorded as prose get lost — detection
+# was never the weak link, retention was.
+campaign-residue:
+    @bash scripts/campaign-residue.sh

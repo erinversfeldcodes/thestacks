@@ -1,10 +1,6 @@
 module Page.About exposing (view)
 
-{-| The public About page. Carries the owner's approved launch
-copy, one drafted section per `section.about__section` in the draft's
-order, so a copy edit is a local change. "The wider shelf" (partner
-events) describes an aspiration the platform is built for, not a live
-feature — the copy is deliberately future-tense.
+{-| The public About page.
 -}
 
 import Html exposing (Html, a, div, h1, h2, li, p, section, strong, text, ul)
@@ -25,9 +21,9 @@ viewHero : List (Html msg)
 viewHero =
     [ h1 [ class "page__title about__title" ] [ text "About The Stacks" ]
     , p [ class "about__lede" ]
-        [ text "A quiet place for the books you own, the pieces you've read, and the knowledge you're still circling." ]
+        [ text "A quiet place for the books you own, the pieces you've read, and the knowledge you've yet to map." ]
     , p [ class "about__section-prose" ]
-        [ text "The Stacks is a self-hosted home for your library — the read and the unread alike — built for people who believe a bookshelf is a kind of autobiography." ]
+        [ text "The Stacks is built for people who believe a bookshelf is an acknowledgement of everything they have yet to learn, and who place the act of reading and everything that stems from it before the performance of it." ]
     ]
 
 
@@ -49,9 +45,9 @@ viewWhatItIs =
         , p [ class "about__section-prose" ]
             [ text "The Stacks is a source-available reading-management and book-discovery platform. It keeps your collection on your own terms: no ads, no selling your reading habits, no algorithm deciding what you should want next. Just your books and the things you've read, arranged the way a good shelf is — with room for the ones you haven't gotten around to yet." ]
         , p [ class "about__section-prose" ]
-            [ text "It's built around a simple conviction: things you haven't read matter as much as the ones you have. Umberto Eco called that unread portion an "
+            [ text "It's built around two simple convictions: firstly, things you haven't read matter as much as the ones you have. Umberto Eco called that unread portion an "
             , strong [] [ text "antilibrary" ]
-            , text " — a private promise of everything still ahead of you. The Stacks gives it a shelf of its own."
+            , text " — a private promise of everything still ahead of you. The Stacks gives it a shelf of its own. Secondly, the best way to process what you've read and to turn it into your own unique knowledge is to write and discuss it. The Stacks Writing Space allows you to freely write about topics you've read about, treating all writing as deeply personal and private as a default, and to help you discover new books to help you explore important themes more deeply and broadly."
             ]
         ]
 
@@ -61,16 +57,16 @@ viewFiveShelves =
     section [ class "about__section" ]
         [ h2 [ class "about__section-title" ] [ text "The five shelves" ]
         , p [ class "about__section-prose" ]
-            [ text "Every book you add finds a home on one of five shelves:" ]
+            [ text "Every book and written piece you add finds a home on one of five shelves:" ]
         , ul [ class "about__shelves" ]
-            [ viewShelf "Antilibrary" "owned, unread. The promise."
-            , viewShelf "Library" "read, and kept."
+            [ viewShelf "Antilibrary" "owned or bookmarked, unread. The promise."
+            , viewShelf "Library" "read and kept to come back to again."
             , viewShelf "Reading pile" "what you're in the middle of right now."
             , viewShelf "Wishlist" "not yet yours, but wanted."
             , viewShelf "Looking for a home" "read, and ready to pass on."
             ]
         , p [ class "about__section-prose" ]
-            [ text "Move a book between them as your relationship with it changes." ]
+            [ text "Move pieces between them as your relationship with it changes." ]
         ]
 
 
@@ -88,9 +84,9 @@ viewWhatYouCanDo =
         [ h2 [ class "about__section-title" ] [ text "What you can do" ]
         , ul [ class "about__do-list" ]
             [ viewDo "Add a book by its cover."
-                "Photograph a spine or a barcode and The Stacks identifies it — every title verified against a real catalogue before it enters your collection, so your shelves never fill up with guesses."
+                "Photograph or screenshot a spine, cover or a barcode and The Stacks identifies it — every title verified against a real catalogue before it enters your collection."
             , viewDo "Arrange a bookcase that looks like yours."
-                "Real spines, real proportions, shelved the way you'd shelve them."
+                "Organise the bookcase the way you like to have your books shelved."
             , viewDo "Keep it private, or share a shelf."
                 "You decide what any other person can see, down to the individual book."
             , viewDo "Take your library with you."
@@ -146,7 +142,7 @@ these two links by their test ids.
 viewTransparency : List (Html msg)
 viewTransparency =
     [ section [ class "about__transparency" ]
-        [ h2 [ class "about__section-title" ] [ text "Radical transparency" ]
+        [ h2 [ class "about__section-title" ] [ text "True transparency" ]
         , p [ class "about__section-prose" ]
             [ text "We show what we measure, how we run the platform, and what it costs — the same signals operators see, with plain explanations of why." ]
         , a [ class "about__link about__link--metrics", href "/metrics", testId "about-metrics-link" ]

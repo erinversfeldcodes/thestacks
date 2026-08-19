@@ -34,7 +34,7 @@ suite =
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "A quiet place for the books you own, the pieces you've read, and the knowledge you're still circling." ]
+                        [ Selector.text "A quiet place for the books you own, the pieces you've read, and the knowledge you've yet to map." ]
         , test "'What The Stacks is' names the antilibrary conviction" <|
             \() ->
                 rendered

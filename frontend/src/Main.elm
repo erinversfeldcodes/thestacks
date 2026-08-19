@@ -73,6 +73,7 @@ import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.Session as AdminSession
 import Page.Admin.SourceApproval as AdminSourceApproval
+import Page.Architecture as ArchitecturePage
 import Page.Blog.Archive as BlogArchive
 import Page.Blog.Editor as BlogEditor
 import Page.Blog.Post as BlogPostPage
@@ -253,6 +254,7 @@ type Page
     | PageAbout
     | PageFaq
     | PageDataTransparency
+    | PageArchitecture
     | PageListingRemoval ListingRemoval.Model
     | PageCatalogue Catalogue.Model
     | PageMarketplaceBrowse MarketplaceBrowse.Model
@@ -817,6 +819,9 @@ requiresAuth route =
         DataTransparency ->
             False
 
+        Architecture ->
+            False
+
         ListingRemoval ->
             False
 
@@ -1139,6 +1144,9 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         DataTransparency ->
             ( PageDataTransparency, Cmd.none )
+
+        Architecture ->
+            ( PageArchitecture, Cmd.none )
 
         ListingRemoval ->
             ( PageListingRemoval ListingRemoval.init, Cmd.none )
@@ -3620,6 +3628,9 @@ pageTitle page =
         PageDataTransparency ->
             titled "On Data Transparency"
 
+        PageArchitecture ->
+            titled "No Such Thing as a Free Lunch"
+
         PageListingRemoval _ ->
             titled "Remove a listing"
 
@@ -4156,6 +4167,9 @@ viewPage model =
 
         PageDataTransparency ->
             DataTransparencyPage.view
+
+        PageArchitecture ->
+            ArchitecturePage.view
 
         PageListingRemoval subModel ->
             Html.map ListingRemovalMsg (ListingRemoval.view subModel)

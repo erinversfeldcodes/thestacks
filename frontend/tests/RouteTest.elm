@@ -47,8 +47,9 @@ allRoutes =
     , SettingsAuditLog
     , Insights
     , CostTransparency
-    , Metrics
     , DataTransparency
+    , Architecture
+    , Metrics
     , About
     , Faq
     , Feedback
@@ -242,6 +243,9 @@ routeLabel route =
 
         ResetPassword _ ->
             "ResetPassword"
+
+        Architecture ->
+            "Architecture"
 
         NotFound ->
             "NotFound"

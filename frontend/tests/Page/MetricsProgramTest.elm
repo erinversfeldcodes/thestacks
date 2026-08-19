@@ -139,7 +139,7 @@ displaysTeachingTooltips =
 
 featuresCostsWidget : Test
 featuresCostsWidget =
-    test "loaded: features the platform-cost figure with placeholder prose" <|
+    test "loaded: features the platform-cost figure and the free-lunch thesis" <|
         \() ->
             start
                 |> ProgramTest.simulateHttpOk "GET"
@@ -147,7 +147,7 @@ featuresCostsWidget =
                     livePayload
                 |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "metrics-costs-widget") ]
                 |> ProgramTest.ensureViewHas [ Selector.text "$13.09" ]
-                |> ProgramTest.expectViewHas [ Selector.text "we don't sell your data" ]
+                |> ProgramTest.expectViewHas [ Selector.text "no such thing as a free lunch in software" ]
 
 
 showsDataRightsLinks : Test
