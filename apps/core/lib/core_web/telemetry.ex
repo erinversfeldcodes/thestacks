@@ -136,6 +136,13 @@ defmodule CoreWeb.Telemetry do
         tags: [:outcome],
         description: "Blog posts capped by the visibility recap job"
       ),
+      counter("stacks.blog.association.count",
+        event_name: [:stacks, :blog, :association],
+        tags: [:outcome],
+        description:
+          "Blog book-association job outcomes — no_consent counts the posts whose " <>
+            "text was never sent to Together AI"
+      ),
       counter("stacks.visibility.ceiling_rejection.count",
         event_name: [:stacks, :visibility, :ceiling_rejection],
         tags: [:resource_type],

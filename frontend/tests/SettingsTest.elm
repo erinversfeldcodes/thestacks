@@ -35,6 +35,24 @@ suite =
                             , Query.hasNot [ Selector.class "toggle--off" ]
                             ]
             ]
+        , describe "the analytics toggle says what it actually does"
+            [ test "the description names the switch as reserved rather than collecting" <|
+                \_ ->
+                    Consent.analyticsDescription
+                        |> Expect.equal "Reserved — nothing reads this yet. No usage data is collected about you, by us or by anyone else. Your answer is recorded now so that if that ever changes, it changes with your say-so already on file rather than assumed."
+            , test "the page renders that description rather than a claim of its own" <|
+                \_ ->
+                    Consent.init { analytics = False, writingAssistant = False }
+                        |> Consent.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text Consent.analyticsDescription ]
+            , test "it says the same with the toggle on — consent does not start a collection" <|
+                \_ ->
+                    Consent.init { analytics = True, writingAssistant = False }
+                        |> Consent.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text Consent.analyticsDescription ]
+            ]
         , describe "Consent"
             [ test "SaveConsent with token sets saving to Loading" <|
                 \_ ->

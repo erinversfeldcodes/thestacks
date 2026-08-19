@@ -157,6 +157,15 @@ suite =
                     inviteOnly
                         |> Query.find [ testIdSelector "faq-question-what-leaves-the-platform" ]
                         |> Query.has [ Selector.attribute (Attr.href "/transparency") ]
+            , test "the Together AI line is conditional, because the worker now gates on consent" <|
+                \() ->
+                    inviteOnly
+                        |> Query.find [ testIdSelector "faq-question-what-leaves-the-platform" ]
+                        |> Expect.all
+                            [ Query.has [ Selector.text "only if you have switched the writing assistant on in" ]
+                            , Query.has [ Selector.text "With it off, nothing you write is sent there at all, and the book links a post already carries stay where they are." ]
+                            , Query.has [ Selector.attribute (Attr.href "/settings/privacy") ]
+                            ]
             , test "photo retention states the thirty-day ceiling" <|
                 \() ->
                     inviteOnly
