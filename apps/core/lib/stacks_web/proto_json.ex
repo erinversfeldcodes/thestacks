@@ -33,6 +33,7 @@ defmodule StacksWeb.ProtoJSON do
                         :handle,
                         :country_code,
                         :city,
+                        :website_url,
                         :onboarding_completed,
                         :pending_email,
                         :pending_email_sent_at

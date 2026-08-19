@@ -1,5 +1,6 @@
 module Api exposing
-    ( AdminAuthError(..)
+    ( Account
+    , AdminAuthError(..)
     , AdminBook
     , AdminBooksResponse
     , AdminFeedbackEntry
@@ -69,6 +70,7 @@ module Api exposing
     , TransparencyMetrics
     , UploadInit
     , acceptInvitation
+    , accountDecoder
     , activateListing
     , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
@@ -118,6 +120,7 @@ module Api exposing
     , fetchSyndicationExport
     , foldProgress
     , forgotPasswordRequest
+    , getAccountRequest
     , getAdminFeedback
     , getAdminInvites
     , getAdminSources
@@ -138,7 +141,6 @@ module Api exposing
     , getInferences
     , getInferencesRequest
     , getListings
-    , getMe
     , getMyListings
     , getMyPlacements
     , getNotifications
@@ -2739,6 +2741,68 @@ getCatalogueRequest params =
     }
 
 
+{-| The reader's own account, as the server holds it — the fields Settings →
+Profile edits.
+
+Deliberately not `Types.User`. That record is what the stored login blob can
+reconstruct; this one is the answer to "what did the server actually keep",
+which is a different question, and the difference is the whole point of asking.
+
+-}
+type alias Account =
+    { displayName : String
+    , handle : String
+    , email : String
+    , websiteUrl : String
+    , countryCode : String
+    , city : String
+    , pendingEmail : Maybe String
+    }
+
+
+{-| Decoder for `GET /api/auth/me`'s `user` object.
+
+`email` is required, so a body that is not an account — an error envelope, a
+captive portal's HTML, `{}` — comes back `Err` and the page can say so. The
+lenient alternative decodes those into six empty strings, which the form would
+then render as the reader's account: a wrong answer stated confidently, and
+indistinguishable from a reader who has filled nothing in.
+
+The rest default to `""` because they are genuinely optional columns. Someone
+who has never set a city is not a malformed response.
+
+-}
+accountDecoder : Decoder Account
+accountDecoder =
+    Decode.field "user"
+        (Decode.map7 Account
+            (optionalString "display_name")
+            (optionalString "handle")
+            (Decode.field "email" Decode.string)
+            (optionalString "website_url")
+            (optionalString "country_code")
+            (optionalString "city")
+            (Decode.maybe (Decode.field "pending_email" Decode.string))
+        )
+
+
+{-| GET /api/auth/me — the reader's own account. Sent through `Effect`, so
+there is no `Cmd` twin here; the caller pairs this spec with `accountDecoder`.
+
+Authenticated, and the one request whose 401 is least surprising: asking who you
+are is exactly what discovers the session is gone. A caller must route that (see
+`isUnauthorized`) rather than render "could not load your account", which tells
+the reader to retry something that cannot work.
+
+-}
+getAccountRequest : RequestSpec
+getAccountRequest =
+    { method = "GET"
+    , url = baseUrl ++ "/api/auth/me"
+    , body = Nothing
+    }
+
+
 {-| A profile-update failure.
 
 Like registration, a 422 carries per-field validation errors (`handle`,
@@ -2833,55 +2897,6 @@ encodeProfileBody body =
                 []
             ]
         )
-
-
-{-| The account's own record, as `GET /api/auth/me` answers it.
-
-The settings page asks for this on load rather than reading the stored session:
-a pending email change is server truth that outlives the tab that started it, and
-a panel driven from localStorage would go quiet on reload while the change was
-still very much in flight.
-
--}
-getMe : Authed Http.Error ProfileSaved msg -> Cmd msg
-getMe request =
-    Http.request
-        { method = "GET"
-        , headers = authedHeaders request
-        , url = baseUrl ++ "/api/auth/me"
-        , body = Http.emptyBody
-        , expect = authedExpect resolveMe request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-resolveMe : Http.Response String -> Result Http.Error ProfileSaved
-resolveMe response =
-    case response of
-        Http.BadUrl_ url ->
-            Err (Http.BadUrl url)
-
-        Http.Timeout_ ->
-            Err Http.Timeout
-
-        Http.NetworkError_ ->
-            Err Http.NetworkError
-
-        Http.BadStatus_ metadata _ ->
-            Err (Http.BadStatus metadata.statusCode)
-
-        Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString (Decode.field "user" ProtoUser.decodeUser) bodyText of
-                Ok user ->
-                    Ok
-                        { handle = user.handle
-                        , email = user.email
-                        , pendingEmail = emptyToNothing user.pendingEmail
-                        }
-
-                Err _ ->
-                    Err (Http.BadBody "could not read the account record")
 
 
 {-| What the client falls back to when a 200 body cannot be read: the handle

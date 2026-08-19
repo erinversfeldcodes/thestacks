@@ -37,7 +37,7 @@ sampleUser =
 
 initialModel : Profile.Model
 initialModel =
-    Profile.init sampleUser Nothing |> Tuple.first
+    Profile.seedFromSession sampleUser
 
 
 {-| A 200 from `PUT /api/settings/profile` with no change in flight: the account
@@ -54,6 +54,26 @@ second address is waiting to prove itself.
 pendingSave : Api.ProfileSaved
 pendingSave =
     { handle = "ada", email = "ada@example.com", pendingEmail = Just "new@example.com" }
+
+
+{-| The account as `/api/auth/me` reports it mid-change: address unmoved, a
+second one waiting.
+-}
+accountPending : Api.Account
+accountPending =
+    { displayName = "Ada"
+    , handle = "ada"
+    , email = "ada@example.com"
+    , websiteUrl = ""
+    , countryCode = ""
+    , city = ""
+    , pendingEmail = Just "new@example.com"
+    }
+
+
+accountSettled : Api.Account
+accountSettled =
+    { accountPending | pendingEmail = Nothing }
 
 
 {-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
@@ -316,22 +336,22 @@ suite =
             , test "the account record answers the panel on load, so a reload does not lose it" <|
                 \_ ->
                     initialModel
-                        |> apply (GotAccount (Ok pendingSave))
+                        |> apply (AccountReceived (Ok accountPending))
                         |> Profile.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.class "pending-email" ]
             , test "a settled change clears the panel" <|
                 \_ ->
                     initialModel
-                        |> apply (GotAccount (Ok pendingSave))
-                        |> apply (GotAccount (Ok (savedAs "ada")))
+                        |> apply (AccountReceived (Ok accountPending))
+                        |> apply (AccountReceived (Ok accountSettled))
                         |> Profile.view
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.class "pending-email" ]
             , test "an unreadable account record claims no pending change rather than inventing one" <|
                 \_ ->
                     initialModel
-                        |> apply (GotAccount (Err Http.NetworkError))
+                        |> apply (AccountReceived (Err Http.NetworkError))
                         |> .pendingEmail
                         |> Expect.equal Nothing
             ]
@@ -350,14 +370,14 @@ suite =
                 \_ ->
                     let
                         model =
-                            Profile.init sampleUser Nothing |> Tuple.first
+                            Profile.seedFromSession sampleUser
                     in
                     model.handle |> Expect.equal model.initialHandle
             , test "init baselines initialHandle for a handle-less (injected) session" <|
                 \_ ->
                     let
                         model =
-                            Profile.init { sampleUser | handle = "" } Nothing |> Tuple.first
+                            Profile.seedFromSession { sampleUser | handle = "" }
                     in
                     Expect.all
                         [ \_ -> model.handle |> Expect.equal ""

@@ -736,6 +736,7 @@ userSuite =
                         , failedLoginCount = 0
                         , failedLoginFirstAt = ""
                         , lockedUntil = ""
+                        , lockoutDurationSeconds = 0
                         }
 
                     result =
@@ -1258,6 +1259,7 @@ responseSuite =
                             , failedLoginCount = 0
                             , failedLoginFirstAt = ""
                             , lockedUntil = ""
+                            , lockoutDurationSeconds = 0
                             }
                         }
 

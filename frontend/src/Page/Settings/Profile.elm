@@ -2,14 +2,39 @@ module Page.Settings.Profile exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
-    , init
+    , initWithEffect
+    , initWithToken
+    , seedFromSession
     , update
     , view
     )
 
+{-| Settings → Profile: the reader's own account, as an editable form.
+
+**This page owns account freshness.** Nothing else in the app asks the server
+who the reader is. `Main` reconstructs `auth.user` from the `stacks-auth` blob
+in localStorage, which carries only what a login response put there — id,
+email, display name, handle, role — and hard-codes the rest to `Nothing`;
+`app.js` fetches `/api/config` for server feature flags and nothing else. So
+the blob is a credential cache, not a record of the account: it has no country,
+no city, no website, and it never learns that any of them changed. Seeding this
+form from it and calling the result "your profile" is how a saved location came
+back blank on the next visit.
+
+`initWithToken` therefore asks `GET /api/auth/me` when the page opens and
+hydrates the form from the answer. The blob still seeds the fields first, so
+the form is filled the instant it renders instead of flashing empty — but it is
+a placeholder with no authority, and the response replaces it. If a wider
+surface later needs fresh account data, that fetch belongs in `Main` and this
+page should read it from there; two independent fetchers would be two answers
+to one question.
+
+-}
+
 import Api
 import Components.SaveButton as SaveButton
-import Html exposing (Html, div, h1, h2, input, label, p, text)
+import Effect exposing (Effect)
+import Html exposing (Html, div, h1, h2, input, label, p, strong, text)
 import Html.Attributes exposing (class, placeholder, type_, value)
 import Html.Events exposing (onInput)
 import Http
@@ -23,7 +48,6 @@ type alias Model =
     , initialHandle : String
     , email : String
     , initialEmail : String
-    , pendingEmail : Maybe String
     , currentPassword : String
     , currentPasswordError : Maybe String
     , websiteUrl : String
@@ -31,6 +55,9 @@ type alias Model =
     , city : String
     , savingProfile : RemoteData Api.ProfileError ()
     , savingLocation : RemoteData Http.Error ()
+    , account : RemoteData Http.Error ()
+    , edited : Bool
+    , pendingEmail : Maybe String
     }
 
 
@@ -44,9 +71,9 @@ type Msg
     | SetCity String
     | SaveProfile
     | SaveProfileCompleted (Result Api.ProfileError Api.ProfileSaved)
-    | GotAccount (Result Http.Error Api.ProfileSaved)
     | SaveLocation
     | SaveLocationCompleted (Result Http.Error ())
+    | AccountReceived (Result Http.Error Api.Account)
     | SessionExpiryDetected
 
 
@@ -63,42 +90,127 @@ type OutMsg
     | SessionExpired
 
 
-{-| The stored session is enough to render the form, but not to answer "is a
-change to this address waiting on confirmation?" — that is server truth, and it
-outlives the tab that started it. So the page asks.
+{-| The form as the stored session can describe it — an instant placeholder,
+not the account.
 
-A session with no token renders the same form and simply learns nothing; the
-account state it would have shown is the account state it cannot reach anyway.
+Deliberately not called `init`: on every sibling page `init` is the whole way in,
+and here it would be the bug this module exists to fix, one keystroke from the
+right answer. `initWithToken` is the way in. This is kept exported for the tests
+and the flows with no network, under a name that says what it is worth.
 
 -}
-init : User -> Maybe String -> ( Model, Cmd Msg )
-init user maybeToken =
-    ( { displayName = user.displayName
-      , handle = user.handle
-      , initialHandle = user.handle
-      , email = user.email
-      , initialEmail = user.email
-      , pendingEmail = Nothing
-      , currentPassword = ""
-      , currentPasswordError = Nothing
-      , websiteUrl = ""
-      , countryCode = Maybe.withDefault "" user.countryCode
-      , city = Maybe.withDefault "" user.city
-      , savingProfile = NotAsked
-      , savingLocation = NotAsked
-      }
-    , case maybeToken of
+seedFromSession : User -> Model
+seedFromSession user =
+    { displayName = user.displayName
+    , handle = user.handle
+    , initialHandle = user.handle
+    , email = user.email
+    , initialEmail = user.email
+    , currentPassword = ""
+    , currentPasswordError = Nothing
+    , websiteUrl = ""
+    , countryCode = Maybe.withDefault "" user.countryCode
+    , city = Maybe.withDefault "" user.city
+    , savingProfile = NotAsked
+    , savingLocation = NotAsked
+    , account = NotAsked
+    , pendingEmail = Nothing
+    , edited = False
+    }
+
+
+{-| How `Main` opens the page: seed from the blob, then ask the server.
+
+`Loading` renders nothing of its own — the placeholder fields are already there
+and usable, and a spinner over a filled form would be a worse answer than the
+one it hides. Only `Failure` speaks up, because then the fields on screen are
+the blob's and the reader deserves to know that.
+
+-}
+initWithToken : Maybe String -> User -> ( Model, Cmd Msg )
+initWithToken maybeToken user =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken user
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `initWithToken`, with its effect as data.
+
+The one place that decides whether the page asks the server anything — so the
+program test runs the request the page actually makes, rather than a harness's
+second guess at it. Given only a `Cmd`, a hydration deleted from here would
+leave that harness, and the whole suite, green. The save paths below still
+return `Cmd`; they were not the thing at risk.
+
+-}
+initWithEffect : Maybe String -> User -> ( Model, Effect Msg )
+initWithEffect maybeToken user =
+    let
+        seeded =
+            seedFromSession user
+    in
+    case maybeToken of
         Just token ->
-            Api.getMe
-                (Api.authed token
-                    { onExpired = SessionExpiryDetected
-                    , onResult = GotAccount
-                    }
-                )
+            ( { seeded | account = Loading }
+            , Effect.authed Api.getAccountRequest
+                token
+                (Api.resolveJson Api.accountDecoder >> AccountReceived)
+            )
 
         Nothing ->
-            Cmd.none
-    )
+            ( seeded, Effect.none )
+
+
+{-| Replace the placeholder values with the server's, and rebaseline the
+email/handle comparisons against them — a baseline left on the blob's email
+would read the server's own address as a change and demand a password for it.
+
+Skipped once the reader has typed: a response that lands after the first
+keystroke would delete what they wrote, and a fetch that eats an edit is worse
+than the stale field it was sent to fix.
+
+-}
+hydrate : Api.Account -> Model -> Model
+hydrate account model =
+    if model.edited then
+        -- A typed edit outranks the fetch for the FORM fields, but whether a
+        -- change is waiting on confirmation is server truth with no local
+        -- rival — the panel always follows the account.
+        { model | pendingEmail = account.pendingEmail }
+
+    else
+        { model
+            | displayName = account.displayName
+            , handle = account.handle
+            , initialHandle = account.handle
+            , email = account.email
+            , initialEmail = account.email
+            , websiteUrl = account.websiteUrl
+            , countryCode = account.countryCode
+            , city = account.city
+            , pendingEmail = account.pendingEmail
+        }
+
+
+{-| May this form write? Only once it has read what it would be writing over.
+
+Both saves post the whole form, and the placeholder carries no website and no
+location at all — so a save made before the account arrives, or after the read
+failed, writes those blanks over values the reader never saw and did not
+intend to clear. The `Failure` branch is the sharp one: the page says the fields
+may be stale and would then let the reader save the stale ones.
+
+-}
+savable : Model -> Bool
+savable model =
+    case model.account of
+        Success _ ->
+            True
+
+        _ ->
+            False
 
 
 {-| The email is only a _change_ when it differs from the stored value, compared
@@ -129,25 +241,25 @@ update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetDisplayName val ->
-            ( { model | displayName = val, savingProfile = NotAsked }, Cmd.none, NoOut )
+            ( { model | displayName = val, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SetHandle val ->
-            ( { model | handle = val, savingProfile = NotAsked }, Cmd.none, NoOut )
+            ( { model | handle = val, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SetEmail val ->
-            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none, NoOut )
+            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none, NoOut )
+            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SetWebsiteUrl val ->
-            ( { model | websiteUrl = val, savingProfile = NotAsked }, Cmd.none, NoOut )
+            ( { model | websiteUrl = val, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SetCountryCode val ->
-            ( { model | countryCode = val, savingLocation = NotAsked }, Cmd.none, NoOut )
+            ( { model | countryCode = val, savingLocation = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SetCity val ->
-            ( { model | city = val, savingLocation = NotAsked }, Cmd.none, NoOut )
+            ( { model | city = val, savingLocation = NotAsked, edited = True }, Cmd.none, NoOut )
 
         SaveProfile ->
             if emailChanged model && String.isEmpty (String.trim model.currentPassword) then
@@ -219,21 +331,6 @@ update msg model maybeToken =
                 Err err ->
                     ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
 
-        GotAccount (Ok account) ->
-            ( { model
-                | email = account.email
-                , initialEmail = account.email
-                , pendingEmail = account.pendingEmail
-              }
-            , Cmd.none
-            , NoOut
-            )
-
-        GotAccount (Err _) ->
-            -- The form still works; it just cannot report a change in flight.
-            -- Inventing one here would be worse than saying nothing.
-            ( model, Cmd.none, NoOut )
-
         SaveLocation ->
             case maybeToken of
                 Just token ->
@@ -259,6 +356,16 @@ update msg model maybeToken =
                 Err err ->
                     ( { model | savingLocation = Failure err }, Cmd.none, NoOut )
 
+        AccountReceived (Ok account) ->
+            ( hydrate account { model | account = Success () }, Cmd.none, NoOut )
+
+        AccountReceived (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | account = Failure err }, Cmd.none, NoOut )
+
         SessionExpiryDetected ->
             ( model, Cmd.none, SessionExpired )
 
@@ -267,6 +374,7 @@ view : Model -> Html Msg
 view model =
     div [ class "page page--settings" ]
         [ h1 [ class "page__title" ] [ text "Profile" ]
+        , viewAccountLoadFailure model.account
         , div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Personal Information" ]
             , div [ class "form-field" ]
@@ -304,9 +412,9 @@ view model =
                     , placeholder "your@email.com"
                     ]
                     []
-                , viewPendingEmail model
                 ]
             , viewCurrentPasswordField model
+            , viewPendingEmail model
             , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Website URL" ]
                 , input
@@ -319,7 +427,7 @@ view model =
                     []
                 ]
             , div [ class "settings-actions" ]
-                [ SaveButton.primary model.savingProfile SaveProfile "Save Profile"
+                [ SaveButton.primaryWhenReady (savable model) model.savingProfile SaveProfile "Save Profile"
                 ]
             , viewProfileFeedback model.savingProfile
             ]
@@ -348,21 +456,32 @@ view model =
                     []
                 ]
             , div [ class "settings-actions" ]
-                [ SaveButton.primary model.savingLocation SaveLocation "Save Location"
+                [ SaveButton.primaryWhenReady (savable model) model.savingLocation SaveLocation "Save Location"
                 ]
             , viewFeedback model.savingLocation "Location saved." "Could not save location. Please try again."
             ]
         ]
 
 
-{-| What is actually happening while an email change is in flight, in the place
-the reader will look for it: under the address field they changed.
+{-| Said only when the account could not be read. The fields below are then the
+stored session's values, which carry no location and no website at all — so
+staying quiet would present a form the reader has every reason to read as their
+saved profile, and no way to tell apart from one.
+-}
+viewAccountLoadFailure : RemoteData Http.Error () -> Html Msg
+viewAccountLoadFailure account =
+    case account of
+        Failure _ ->
+            p [ class "error" ]
+                [ text "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
 
-Both addresses are named, because the reader's next question is which inbox to
-open, and after a change they did not make, which one to trust. The consequence
-of ignoring both letters is stated here too — being signed out in a week is not
-something to discover a week later.
+        _ ->
+            text ""
 
+
+{-| A change in flight, stated with both addresses and the consequence. Server
+truth only — the panel renders from what `/api/auth/me` (or a save's answer)
+said, never from what was typed.
 -}
 viewPendingEmail : Model -> Html Msg
 viewPendingEmail model =
@@ -371,7 +490,7 @@ viewPendingEmail model =
             div [ class "pending-email" ]
                 [ p [ class "pending-email__lede" ]
                     [ text "Waiting on "
-                    , Html.strong [] [ text pending ]
+                    , strong [] [ text pending ]
                     ]
                 , p [ class "pending-email__detail" ]
                     [ text ("We sent a confirmation link there, and a link to undo this change to " ++ model.initialEmail ++ ". Your account still uses " ++ model.initialEmail ++ " until the new address confirms itself.") ]

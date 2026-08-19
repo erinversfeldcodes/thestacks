@@ -383,6 +383,40 @@ defmodule StacksWeb.AuthControllerTest do
              "the undo credential must never reach the wire"
     end
 
+    # The settings profile form reads this endpoint to show what the account
+    # actually holds. A field missing from `ProtoJSON`'s wire allowlist is
+    # dropped silently, and the form then renders it blank over a stored value —
+    # which is exactly how a saved website URL came back empty on every visit.
+    test "carries every account field the settings profile form edits", %{conn: conn} do
+      user =
+        insert(:user,
+          email: "fields@example.com",
+          display_name: "Ada Lovelace",
+          handle: "ada_fields",
+          country_code: "GB",
+          city: "London",
+          website_url: "https://ada.dev"
+        )
+
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned_user} = json_response(conn, 200)
+
+      assert %{
+               "email" => "fields@example.com",
+               "display_name" => "Ada Lovelace",
+               "handle" => "ada_fields",
+               "country_code" => "GB",
+               "city" => "London",
+               "website_url" => "https://ada.dev"
+             } = returned_user
+    end
+
     test "returns 401 without token", %{conn: conn} do
       conn = get(conn, "/api/auth/me")
       assert json_response(conn, 401)
