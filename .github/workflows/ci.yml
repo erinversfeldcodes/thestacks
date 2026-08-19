@@ -115,6 +115,7 @@ jobs:
       e2e: ${{ steps.filter.outputs.e2e }}
       migrations: ${{ steps.filter.outputs.migrations }}
       licenses: ${{ steps.filter.outputs.licenses }}
+      platform: ${{ steps.filter.outputs.platform }}
       workflows: ${{ steps.filter.outputs.workflows }}
       docker: ${{ steps.filter.outputs.docker }}
       iac: ${{ steps.filter.outputs.iac }}
@@ -148,6 +149,11 @@ jobs:
               - 'e2e/**'
             migrations:
               - 'apps/core/priv/repo/migrations/**'
+            platform:
+              - 'test/platform/**'
+              - 'scripts/**'
+              - 'deploy/**'
+              - '.github/actions/**'
             licenses:
               - 'mix.lock'
               - 'frontend/package-lock.json'
@@ -603,6 +609,22 @@ jobs:
         run: mix deps.get
       - name: Check licences
         run: scripts/check-licenses.sh
+
+  platform-suites:
+    needs: changes
+    if: needs.changes.outputs.platform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install suite dependencies
+        run: |
+          pip3 install --quiet pyyaml
+          mkdir -p "$HOME/.local/bin"
+          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/5db9d9cde2f3deb5035dea3e45f0a9fff2f29448/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Platform shell suites
+        run: bash test/platform/run_all.sh
 
   trufflehog:
     needs: changes
