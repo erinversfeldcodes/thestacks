@@ -6,6 +6,8 @@ import {
   uniqueEmail,
   mintOrSkip,
   injectSession,
+  fetchSentEmails,
+  extractLink,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
@@ -590,19 +592,45 @@ test.describe("Settings — Profile UI flow", () => {
     await page.getByRole("button", { name: "Save Profile" }).click();
     await expect(page.getByText("Profile saved.")).toBeVisible();
 
+    // The typed address does NOT land: it parks as pending, and the account
+    // answers on the old address until the new one confirms itself. The form
+    // snaps back to the settled address and announces the wait.
+    await expect(field(page, "Email")).toHaveValue(session.email);
+    await expect(page.locator(".pending-email")).toContainText(newEmail);
+
     // "Profile saved." is the form telling itself the news, so the account has
     // to be read back to know anything was written.
     //
     // Read it back the way the reader does: reload, and look at the form. The
-    // page fetches the account on open, so the fields are the server's answer.
-    // (This assertion used to go through the API instead, because the page
-    // seeded from the localStorage session blob and never asked the server — a
-    // reloaded form showed the name signed in with, whatever had been saved.)
+    // page fetches the account on open, so the fields are the server's answer
+    // — including the pending change, which a login-time blob never carried.
     await page.reload();
     await expect(field(page, "Display Name")).toHaveValue("E2E Renamed User", {
       timeout: 10000,
     });
-    await expect(field(page, "Email")).toHaveValue(newEmail);
+    await expect(field(page, "Email")).toHaveValue(session.email);
+    await expect(page.locator(".pending-email")).toContainText(newEmail);
+
+    // Confirm from the new address's mailbox; only now does the change land.
+    const emails = await fetchSentEmails(request, newEmail);
+    test.skip(emails === null, "sent-emails helper unavailable");
+    const confirm = emails!.find((e) =>
+      /confirm-email-change/.test(`${e.html_body ?? ""} ${e.text_body ?? ""}`),
+    );
+    expect(confirm, "expected a confirm-your-new-address email").toBeTruthy();
+    const link = extractLink(
+      confirm!,
+      /\/api\/auth\/confirm-email-change\/[^"'\s]+/,
+    );
+    expect(link).toBeTruthy();
+    await page.goto(link!);
+    await expect(page).toHaveURL(/\/confirm-email\/change-confirmed/);
+
+    await page.goto("/settings/profile");
+    await expect(field(page, "Email")).toHaveValue(newEmail, {
+      timeout: 10000,
+    });
+    await expect(page.locator(".pending-email")).toHaveCount(0);
   });
 });
 
