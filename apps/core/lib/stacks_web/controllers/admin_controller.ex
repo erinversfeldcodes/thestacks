@@ -99,22 +99,37 @@ defmodule StacksWeb.AdminController do
     user_id = params["user_id"]
     reason = params["reason"]
 
-    if is_nil(reason) or String.trim(reason) == "" do
-      conn
-      |> put_status(422)
-      |> json(%{error: "reason_required"})
-    else
-      case Deletion.delete_user_data(user_id, reason: reason, actor: "admin_api") do
-        {:ok, _} ->
-          conn
-          |> assign(:audit_row_count, 1)
-          |> json(%{ok: true})
+    cond do
+      is_nil(reason) or String.trim(reason) == "" ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "reason_required"})
 
-        {:error, _, _, _} ->
-          conn
-          |> put_status(422)
-          |> json(%{error: "erase_failed"})
-      end
+      # The reason is stored in the `user.data_deleted` audit row, which is kept
+      # after the erasure on purpose. Personal data pasted in here would outlive
+      # the deletion it authorised, so it is refused rather than quietly stored.
+      Stacks.Audit.reason_carries_personal_data?(reason) ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          error: "reason_carries_personal_data",
+          detail:
+            "The reason is kept in an audit row that outlives this erasure. " <>
+              "Reference a ticket instead of naming the person."
+        })
+
+      true ->
+        case Deletion.delete_user_data(user_id, reason: reason, actor: "admin_api") do
+          {:ok, _} ->
+            conn
+            |> assign(:audit_row_count, 1)
+            |> json(%{ok: true})
+
+          {:error, _, _, _} ->
+            conn
+            |> put_status(422)
+            |> json(%{error: "erase_failed"})
+        end
     end
   end
 

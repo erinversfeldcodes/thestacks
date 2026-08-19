@@ -202,6 +202,33 @@ defmodule Stacks.Audit do
     _ -> %{}
   end
 
+  @email_shaped ~r/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/
+
+  @doc """
+      Whether an operator-supplied justification carries something that reads as a
+      data subject's personal data.
+
+      This exists because a `reason` typed by an operator is stored in an audit
+      row, and the row written by an erasure deliberately outlives the erasure —
+      so an email pasted into it survives the deletion it was authorising. Until
+      now the only control was a docstring asking people not to, which is a wish
+      rather than a mechanism.
+
+      ⛔ Deliberately a floor, not a ceiling. It catches the habitual paste — the
+      operator who writes "erasing at the request of jane@example.com" — and it
+      does not catch "jane at example dot com", a phone number, or a full name.
+      Treat a pass as "the obvious mistake was not made", never as "this string
+      is clean". The durable fix is to stop putting prose in a retained column at
+      all and reference a ticket instead; this guard is what stands in the gap
+      until that happens.
+  """
+  @spec reason_carries_personal_data?(String.t() | nil) :: boolean()
+  def reason_carries_personal_data?(nil), do: false
+
+  def reason_carries_personal_data?(reason) when is_binary(reason) do
+    Regex.match?(@email_shaped, reason)
+  end
+
   defp hash_ip(ip) when is_binary(ip), do: Stacks.IPDigest.hash(ip)
 
   defp encode_uuid(nil), do: nil

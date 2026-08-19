@@ -245,6 +245,37 @@ defmodule StacksWeb.AdminControllerTest do
       assert %{"error" => "reason_required"} = json_response(conn, 422)
     end
 
+    test "refuses a reason that names the person, since that row outlives the erasure", %{
+      conn: conn
+    } do
+      {conn, _admin, _session} = setup_full_admin(conn)
+      target = insert(:user)
+
+      conn =
+        post(conn, "/api/admin/gdpr_erase", %{
+          user_id: target.id,
+          reason: "erasing at the request of jane@example.com, ticket 4417"
+        })
+
+      assert %{"error" => "reason_carries_personal_data"} = json_response(conn, 422)
+
+      # And the erasure did NOT happen — a refused reason must not half-run.
+      assert Stacks.Accounts.get_user(target.id)
+    end
+
+    test "accepts a reason that references a ticket instead of a person", %{conn: conn} do
+      {conn, _admin, _session} = setup_full_admin(conn)
+      target = insert(:user)
+
+      conn =
+        post(conn, "/api/admin/gdpr_erase", %{
+          user_id: target.id,
+          reason: "verified DSAR, ticket 4417"
+        })
+
+      assert %{"ok" => true} = json_response(conn, 200)
+    end
+
     test "returns 422 for unknown user_id", %{conn: conn} do
       {conn, _admin, _session} = setup_full_admin(conn)
 
