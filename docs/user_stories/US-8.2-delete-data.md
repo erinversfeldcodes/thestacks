@@ -162,11 +162,10 @@ N/A -- no event handlers are registered for deletion events.
 - **On success**: Logs success. Returns `:ok`.
 - **On failure**: Logs the failed step name and reason. Returns `{:error, "deletion failed at {step}"}`. No retry (max_attempts: 1).
 
-### `Stacks.Workers.ConfirmDeletionJob`
-- **Worker**: `Stacks.Workers.ConfirmDeletionJob`
-- **Queue**: `:default`
-- **Max attempts**: 3
-- **What it does**: Stub -- would send a deletion confirmation email in production. Currently logs only.
+`AccountDeletionJob` is the only worker in this flow. Nothing is enqueued ahead of
+it: the controller inserts it directly, so the typed `DELETE` phrase in the UI is
+the only gate between the request and the erasure. No confirmation email is sent,
+by design — the erasure is meant to be prompt.
 
 ---
 
@@ -240,6 +239,6 @@ N/A -- The deletion operates on operational tables. Warehouse anonymisation woul
 ## 15. Cost Tracking
 
 - **Neon**: Compute cost for the cascade DELETE transaction. Multiple table scans and deletes within a single transaction. Users with large libraries will incur higher compute time. The `max_attempts: 1` policy limits retry cost but increases manual intervention risk.
-- **Resend** (future): Email cost for the deletion confirmation notification via `ConfirmDeletionJob` (currently a stub).
+- **Email**: None. No confirmation or verification message is sent as part of deletion, so this flow carries no mail-provider cost.
 - **R2 storage**: Image cleanup is handled separately by the image retention system (US-8.4), not by this deletion pipeline. No direct R2 cost here.
 - All operations are DB-only with no external service calls -- cost is dominated by Neon compute for the cascade transaction.

@@ -112,7 +112,7 @@ can reopen the decision rather than rediscover the gap.
 
 | Not built | Ruling | Why, and what stands instead |
 |---|---|---|
-| **Cancel-deletion grace period** — a window after "delete my account" in which the user can change their mind | Owner, 2026-07-30 (Wave 7 of `plans/staff-campaign-2026-07-30.md`; recorded by #376) | **Immediate erasure stays.** A grace period means the data still exists after the person asked for it to be gone, which is the opposite of what they asked for, and it turns a one-shot operation into a scheduled state that has to be defended against every other write path for the length of the window. The confirmation flow is where doubt belongs: the delete flow on `Page.Settings.Privacy` already requires a typed confirmation phrase, and `ConfirmDeletionJob` sends a verification email before anything executes. Two deliberate gates in front, none behind. See US-8.1.2. |
+| **Cancel-deletion grace period** — a window after "delete my account" in which the user can change their mind | Owner, 2026-07-30 (`plans/staff-campaign-2026-07-30.md`), re-affirmed 2026-08-19 | **Immediate erasure stays.** A grace period means the data still exists after the person asked for it to be gone, which is the opposite of what they asked for, and it delays an erasure the law expects us to perform without undue delay. It also turns a one-shot operation into a scheduled state that has to be defended against every other write path for the length of the window. There is exactly one gate, and it sits in front: the delete flow on `Page.Settings.Privacy` requires the phrase `DELETE` to be typed exactly before the submit button enables (`deleteConfirmationPhrase`/`deleteConfirmed`). Past that, `DELETE /api/gdpr/account` records the request in the audit log and enqueues `AccountDeletionJob` immediately — no confirmation email, no waiting period, no second gate — and the worker runs the cascade in a single transaction with `max_attempts: 1`. The typed phrase is the deliberate friction; promptness is the reason there is nothing after it. See US-8.1.2. |
 | **User-facing "delete this photo"** — a public control for removing an uploaded image before its retention window expires | Owner, 2026-07-30 (same ruling) | **Excluded publicly**, not excluded outright. Automatic deletion at 30 days (US-8.1.4, `ImageRetentionJob`) is the guarantee we make, and a manual button is a second, weaker path to the same outcome that would need its own authorisation, its own audit, and its own R2 reconciliation. What the ruling *does* require is a follow-up that **verifies the automatic path actually works** — an unverified auto-delete is worse than no button, because it is a promise. That verification is folded into the deferred GDPR revisit; until it is done, US-8.1.4's guarantee is asserted rather than proven. See US-8.1.4. |
 
 Wave 7's other two recovery legs were **not** excluded and are built: undo-remove
@@ -1332,14 +1332,14 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | No dedicated page. The delete flow lives on `Page.Settings.Privacy` — a typed confirmation phrase (`"DELETE"`, `deleteConfirmed`) gates `UserClicksDeleteAccount` → `Api.deleteAccount` → `DELETE /api/gdpr/account`, emitting the `AccountDeleted` out-message. There is no `Page.Settings.DeleteAccount` module. |
-| **Backend (Phoenix)** | `Stacks.GDPR.Deletion` -- `delete_user_data/1`. Ecto.Multi transaction for cascade delete across op schema. Separate call to anonymise `wh` schema records. `StacksWeb.GDPRController.delete/2`. |
+| **Backend (Phoenix)** | `Stacks.GDPR.Deletion` -- `delete_user_data/1`. Ecto.Multi transaction for cascade delete across op schema. Separate call to anonymise `wh` schema records. `StacksWeb.GDPRController.delete_account/2` audit-logs the request, enqueues the job, and returns 202. |
 | **Database** | **Delete:** All user rows in `op.*`. **Update:** `wh.*` (anonymise user_id, hash PII). |
-| **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation. `Stacks.Workers.ConfirmDeletionJob` -- verification email before execution. |
+| **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation; `max_attempts: 1`. It is the only job in this flow, enqueued directly by the controller with nothing scheduled ahead of it. |
 | **External Services** | None. |
 | **dbt Models** | `mart_gdpr_deletions` (tracking). |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-8.1.3 (consent), US-8.1.5 (audit log records deletion event). |
-| **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, recorded by #376). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation — the typed confirmation phrase and `ConfirmDeletionJob`'s verification email — not behind it. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
+| **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, re-affirmed 2026-08-19). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, it delays an erasure that is supposed to happen without undue delay, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation, and there is exactly one place it lives — the typed `DELETE` phrase that enables the submit button. Past it the controller enqueues `AccountDeletionJob` immediately: no confirmation email, no waiting period, nothing behind. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
 
 ---
 
@@ -2543,7 +2543,7 @@ These are choices, not gaps. Each names the ruling so a future audit stops
 re-raising it (and a future reader can reopen the decision rather than
 rediscover it). See also the phase-level exclusions table near the top.
 
-- **Cancel-deletion grace period** — EXCLUDED; immediate erasure stays (owner ruling, 2026-07-30). A grace window means the data still exists after the person asked for it to be gone. The doubt belongs in the confirmation flow, not behind it. See US-8.1.2.
+- **Cancel-deletion grace period** — EXCLUDED; immediate erasure stays (owner ruling, 2026-07-30, re-affirmed 2026-08-19). A grace window means the data still exists after the person asked for it to be gone, and it delays an erasure that should happen without undue delay. There is one gate and it is in front: the typed `DELETE` phrase that enables the submit button. Past it the erasure job is enqueued immediately — no confirmation email, nothing behind. See US-8.1.2.
 - **Public "delete this photo" UI** — EXCLUDED publicly; the guarantee is automatic 30-day deletion (US-8.1.4, `ImageRetentionJob`). What the ruling requires instead is *verifying the auto-deletion path actually works* — that verification folds into the deferred GDPR revisit.
 - **Age-gate self-service Verify affordance** — REMOVED by ADR-020 §2; provider-sourced verification is the model, and the provider flow is tracked in #069. A spec asking for a user-facing "Verify my age" button describes a withdrawn design — treat as `n/a (ADR-020 §2, #069)`.
 - **Non-ISBN readables** (articles, zines, papers, video as first-class knowledge sources) — OUT OF SCOPE by the ISBN hard gate (no book enters the system without a verified ISBN). A generalisation to non-ISBN Readables would warrant its own ADR because it touches that gate; recorded as a forward-looking Phase 7 direction, not built.
@@ -2615,7 +2615,6 @@ Which user stories touch each database table:
 | `ShipmentTrackingJob` | US-7.2.1 | Scheduled (hourly) — **DEFERRED** (ADR 013) |
 | `DataExportJob` | US-8.1.1 | On-demand |
 | `AccountDeletionJob` | US-8.1.2 | On-demand |
-| `ConfirmDeletionJob` | US-8.1.2 | On-demand |
 | `ImageRetentionJob` | US-8.1.4 | Scheduled (daily) |
 | `PartnerApprovalNotificationJob` | US-9.1.1 | Event-driven (partner.approved/declined) |
 | `PartnerISBNResolveJob` | US-9.2.1, US-9.2.2 | Event-driven (unknown ISBN in partner inventory) |
