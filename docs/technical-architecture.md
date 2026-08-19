@@ -2245,23 +2245,24 @@ just test-elixir                    # Elixir only
 just test-elm                       # Elm only
 just test-rust                      # Rust only
 just test-python                    # Python only
-just test-acceptance                # Acceptance tests only
-just test-quick                     # Unit + property tests only (fastest)
+just test-dbt                       # Resets the DB, seeds, validates dbt staging models
+just test-e2e                       # Playwright E2E (needs `just dev` on :4000/:4001)
 
-# Environment 2: Local → deployed dev stack
-just deploy-dev                     # Deploy personal dev stack to Fly.io
-just test-against-dev               # Run acceptance + integration against dev
-just teardown-dev                   # Destroy dev stack
+# Environment 2: Local → deployed preview stack
+just deploy-preview                 # Deploy an ephemeral preview, run E2E, destroy it
+just test-deployed                  # Deployed-only tests (needs DATABASE_URL + BASE_URL)
 
 # Environment 3: CI (automated — runs in GitHub Actions)
-# Triggered by push/PR — same as `just test` but in CI service containers
+# Triggered by push/PR. `just ci` is the integration gate and takes optional
+# group names: `just ci elixir dbt`. `just verify` is the local pre-push sweep
+# (lint, tests, proto drift, dbt models + checkpoint, Elm lint+tests).
 
 # Environment 4: CI → deployed preview (automated)
 # Triggered by deploy-preview label on PR or post-merge
 
 # Cross-environment
-just test-all-local                 # Env 1: full suite including chaos
-just test-security                  # Security-specific tests (see below)
+just test-e2e-ci                    # E2E with service lifecycle management
+just test-security                  # Security scans (SAST + secrets + deps + IaC)
 ```
 
 ### Test Infrastructure

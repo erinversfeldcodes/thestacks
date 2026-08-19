@@ -116,14 +116,20 @@ fly logs -a thestacks-core | grep -i "local_ocr\|barcode\|pyzbar" | tail -50
 
 `Stacks.AI.Client` emits `[:stacks, :vision, :request, :start | :stop | :exception]` (see `apps/core/lib/stacks/ai/client.ex`). Plot `:stop` events grouped by endpoint (`classify` vs `extract`) and by returned confidence — a sudden distribution shift towards high confidence on extracts that subsequently fail OL/GB resolution is the canonical hallucination signature.
 
-### Step 4: Run the benchmark suite (if available)
+### Step 4: Run the resolver eval (the only harness that exists)
 
 ```bash
-# From project root — requires corpus from Issue #005
-just benchmark
+# From project root
+just run mix eval.resolver
 ```
 
-This runs the vision evaluation harness against the known-good corpus in `apps/vision/benchmark/`. If accuracy has dropped significantly from the baseline, it confirms model drift.
+This replays a recorded corpus (`apps/core/priv/eval/corpus.exs`) through the
+candidate scorer and exits 1 on a regression against pinned expectations. Note
+what it does NOT do: it evaluates the **resolver's ranking**, not the vision
+model's accuracy, and its corpus holds recorded OL/GB metadata and VLM signals
+rather than images. **There is no vision-accuracy harness yet**, so this step
+cannot confirm model drift — it can only tell you whether ranking behaviour
+changed. Treat a clean run here as silence, not as evidence the model is fine.
 
 ### Step 5: Sample recent resolved uploads for manual review
 
@@ -222,17 +228,18 @@ If the prompts themselves are suspected (e.g. a recent edit to `_CLASSIFY_PROMPT
 - If the platform has a feedback mechanism, monitor for user reports of incorrect identifications.
 
 **Verify accuracy recovery:**
-```bash
-just benchmark
-```
 
-Review the `apps/vision/benchmark/reports/` output — ISBN recall and classification F1 scores should return to baseline.
+There is no accuracy harness to run — see Step 4. Recovery has to be judged from
+live signal instead: watch the vision telemetry distribution from Step 3b return
+to its normal shape, and sample recent resolved uploads (Step 5) until
+identifications look right again. Record what you sampled and what you saw, so
+the next responder inherits evidence rather than a memory.
 
 ---
 
 ## Post-Incident
 
-- Commit the benchmark run results showing the regression and the recovery.
+- Record the sampled evidence showing the regression and the recovery.
 - If a model update caused the drift: implement commit SHA pinning (tracked in Issue #005 benchmark framework).
 - If a pre-processing bug caused the issue: add regression tests for the specific image condition that triggered it.
 - Update the benchmark corpus with examples of images that caused false positives.

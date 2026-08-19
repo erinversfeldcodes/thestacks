@@ -1752,7 +1752,9 @@ viewAboutSection book =
 
 
 {-| Price info section — delegates to the PriceInfo component.
-Currently passes NotAsked since the API does not yet provide per-book prices.
+`init` issues `pricesRequest` alongside the book and availability fetches, so
+this renders Loading first and then the server's answer; the component owns the
+empty and failed cases.
 -}
 viewPricesSection : Model -> Html Msg
 viewPricesSection model =

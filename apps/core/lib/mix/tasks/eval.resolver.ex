@@ -12,8 +12,9 @@ defmodule Mix.Tasks.Eval.Resolver do
           mix eval.resolver --w-<component> N  # any scorer weight
           mix eval.resolver --corpus path.exs  # alternative corpus
 
-      Corpus: `priv/eval/resolver_corpus.exs`. Exit 0 always — it reports, it
-      does not gate.
+      Corpus: `priv/eval/corpus.exs`. Exits 1 on a regression against pinned
+      expectations, so it CAN gate — but nothing calls it yet, so today it gates
+      nothing. Wiring it to a caller is what turns that exit code into a gate.
   """
 
   use Mix.Task
