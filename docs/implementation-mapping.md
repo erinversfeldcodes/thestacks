@@ -810,6 +810,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 |-----------|--------|
 | **Summary** | Track which formats the reader owns of a book they have shelved — physical, ebook, audiobook — as a set carried on their own placement. This is a claim about the reader's copies, not about which editions of the work exist, so it needs no ISBN and no new edition row. |
 | **Phase** | Phase 1 (MVP) |
+| **Status** | Built |
 
 | Layer | Components |
 |-------|------------|
@@ -890,7 +891,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Record that a book has been read again (re-read), incrementing its read count. Canonical refresh of the older US-1.5.3 entry. |
+| **Summary** | Record that a book has been read again (re-read), incrementing its read count. Canonical refresh of an earlier re-read entry that carried the number US-1.5.3 before that number was reassigned to Platform-Wide Discovery Search — cite this section, not the old number. |
 | **Phase** | Phase 1 (MVP) |
 | **Status** | Built |
 | **Implementation** | `Stacks.Shelving.reread_book/2` (context; a re-read is recorded when a completed book is moved back to the Reading Pile). Frontend `Page.BookDetail`. Registered event via `Stacks.Events.Registry`. |
