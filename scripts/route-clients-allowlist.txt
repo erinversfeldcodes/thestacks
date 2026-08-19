@@ -52,7 +52,6 @@
 /api/admin/partners/:id/reject                  known-defect: no partner approval queue means no reject affordance either
 /api/admin/auth/logout                          known-defect: no admin sign-out exists, so an admin session is only dropped client-side and the server-side revoke is unreachable
 /api/blog/posts/:id/chat                        known-defect: the writing assistant's backend and its consent gate shipped, but the post editor never calls it
-/api/books                                      known-defect: manual ISBN entry goes through the confirm endpoint instead, leaving a second untested way into the ISBN gate
 /api/groups/:group_id/members/:user_id          known-defect: a group owner cannot remove a member from the app; only leaving is wired
 /api/imports                                    known-defect: the import list is never fetched — the import page goes straight to a single import by id, so a user cannot find an earlier one
 /api/onboarding/reset                           known-defect: the endpoint exists to let someone re-enter onboarding from settings, and settings has no such control
