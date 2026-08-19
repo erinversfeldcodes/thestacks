@@ -14,9 +14,13 @@ defmodule Stacks.FactoryHonestyTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Accounts.User
   alias Stacks.Books
+  alias Stacks.Books.Book
   alias Stacks.Books.BookEdition
   alias Stacks.Books.ISBN
+  alias Stacks.Books.UploadedImage
+  alias Stacks.Shelving
   alias Stacks.Shelving.{Placement, Shelf}
 
   describe "probe 1 — a work always has its primary edition (ISBN hard gate)" do
@@ -159,6 +163,163 @@ defmodule Stacks.FactoryHonestyTest do
       assert registered.email_confirmed == factory_built.email_confirmed
       assert is_binary(registered.email_confirmation_token)
       assert is_binary(factory_built.email_confirmation_token)
+    end
+  end
+
+  describe "probe 5 — a placement's reading dates match the status it carries" do
+    test "the reading pile holds books being read, and a book being read was started" do
+      placement = insert(:placement, bookshelf: build(:bookshelf, name: "reading_pile"))
+
+      assert placement.reading_status == "reading"
+      assert placement.started_at
+      refute placement.finished_at
+    end
+
+    test "the library holds books that were finished, and a finished book has a finish date" do
+      placement = insert(:placement, bookshelf: build(:bookshelf, name: "library"))
+
+      assert placement.reading_status == "completed"
+      assert placement.finished_at
+    end
+
+    test "a wishlist book has not been started" do
+      placement = insert(:placement, bookshelf: build(:bookshelf, name: "wishlist"))
+
+      assert placement.reading_status == "to_read"
+      refute placement.started_at
+      refute placement.finished_at
+    end
+
+    test "no bookshelf and status pairing reaches a date the write path would have stamped" do
+      for name <- Shelving.bookshelf_names(),
+          status <- ~w(to_read reading completed abandoned) do
+        placement =
+          insert(:placement,
+            bookshelf: build(:bookshelf, name: name),
+            reading_status: status
+          )
+
+        context = "#{status} on #{name}"
+
+        if status == "reading", do: assert(placement.started_at, "started_at nil for #{context}")
+
+        if status == "completed",
+          do: assert(placement.finished_at, "finished_at nil for #{context}")
+
+        if status == "to_read" do
+          refute placement.started_at, "started_at set for #{context}"
+          refute placement.finished_at, "finished_at set for #{context}"
+        end
+      end
+    end
+
+    test "a pinned date is the one that survives" do
+      pinned = ~U[2026-01-02 03:04:05.000000Z]
+
+      placement = insert(:placement, reading_status: "reading", started_at: pinned)
+
+      assert placement.started_at == pinned
+    end
+
+    test "the derived state is one update_reading_progress/3 would accept unchanged" do
+      bookshelf = insert(:bookshelf, name: "reading_pile")
+      placement = insert(:placement, bookshelf: bookshelf)
+
+      assert {:ok, unchanged} =
+               Shelving.update_reading_progress(placement.id, bookshelf.user_id, %{
+                 "reading_status" => placement.reading_status
+               })
+
+      assert unchanged.started_at == placement.started_at
+    end
+  end
+
+  describe "probe 6 — a bookshelf is one bookshelf_changeset/2 would accept" do
+    test "a name outside the five is unreachable without even reaching the enum" do
+      assert_raise ArgumentError, ~r/no write path/, fn -> build(:bookshelf, name: "kitchen") end
+    end
+
+    test "a visibility off the audience ladder is unreachable the same way" do
+      assert_raise ArgumentError, ~r/no write path/, fn ->
+        build(:bookshelf, visibility: "everyone")
+      end
+    end
+
+    test "a user with the whole set owns exactly the five named bookshelves" do
+      user = insert_user_with_bookshelves()
+
+      names = user.id |> Shelving.list_user_bookshelves() |> Enum.map(& &1.name)
+
+      assert Enum.sort(names) == Enum.sort(Shelving.bookshelf_names())
+      assert Enum.all?(names, &Shelving.get_bookshelf(user.id, &1))
+    end
+  end
+
+  describe "probe 7 — an uploaded image has an uploader and a stored object" do
+    test "insert(:uploaded_image) is reachable from the account that uploaded it" do
+      image = insert(:uploaded_image)
+
+      assert image.user_id
+      assert Repo.get_by(UploadedImage, id: image.id, user_id: image.user_id)
+    end
+
+    test "the storage key is the one store_upload/2 would have derived from the row" do
+      image = insert(:uploaded_image)
+
+      assert image.storage_path == "uploads/#{image.id}"
+    end
+
+    test "naming the owner attaches to that account rather than inventing another" do
+      user = insert(:user)
+      before = Repo.aggregate(User, :count)
+
+      image = insert(:uploaded_image, user_id: user.id)
+
+      assert image.user_id == user.id
+      assert Repo.aggregate(User, :count) == before
+    end
+
+    test "the ownerless state stays reachable through the factory that names it" do
+      image = insert(:orphaned_uploaded_image)
+
+      assert image.user_id == nil
+    end
+  end
+
+  describe "probe 8 — an edition belongs to the work it was given" do
+    test "attaching to a work by struct does not mint a second one" do
+      book = insert(:book)
+      before = Repo.aggregate(Book, :count)
+
+      edition = insert(:book_edition, book: book)
+
+      assert edition.book_id == book.id
+      assert Repo.aggregate(Book, :count) == before
+    end
+
+    test "attaching to a work by id does not mint a second one" do
+      book = insert(:book)
+      before = Repo.aggregate(Book, :count)
+
+      edition = insert(:book_edition, book_id: book.id)
+
+      assert edition.book_id == book.id
+      assert Repo.aggregate(Book, :count) == before
+    end
+
+    test "a work's only edition is its primary edition" do
+      book = insert(:editionless_book)
+
+      edition = insert(:book_edition, book: book)
+
+      assert edition.is_primary
+      assert Books.primary_edition(Repo.preload(book, :editions)).id == edition.id
+    end
+
+    test "an edition on a work that already has a primary is a secondary one" do
+      book = insert(:book)
+
+      refute insert(:book_edition, book: book).is_primary
     end
   end
 end
