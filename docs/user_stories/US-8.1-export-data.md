@@ -118,10 +118,12 @@ N/A
 - **What it does**:
   1. Calls `Stacks.GDPR.Export.export_user_data(user_id)`.
   2. The export function collects: user profile (id, email, display_name, role, profile_visibility, age_verified, consent_analytics, consent_analytics_at, created_at), all bookshelves (id, name, visibility, created_at), all placements (id, book_isbn via `Books.primary_edition/1`, book_title, bookshelf_id, position, placed_at, removed_at, formats, personal_rating, notes), and all placement history (id, book_id, from_bookshelf, to_bookshelf, moved_at).
-  3. Returns a JSON-serialisable map keyed by `exported_at`, `user`, `bookshelves`, `placements`, `placement_history`, `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary`.
+  3. Returns a JSON-serialisable map keyed by `exported_at`, `user`, `bookshelves`, `placements`, `placement_history`, `writing_assistant_sessions`, `writing_assistant_feedback`, `embeddings_summary`, `uploaded_images`, `blog_posts`, `blog_comments`, `blog_syndications`, `invitations`, `library_imports`, `feedback`, `marketplace_listings`, `marketplace_offer_threads`, `marketplace_offer_messages`, `marketplace_transactions`, `reading_groups`, `reading_group_memberships`, `reading_group_invitations`, `blocked_users`, `visibility_grants`.
      - `writing_assistant_sessions`: all `op.blog_assistant_sessions` for the user — full chat turn history per post
      - `writing_assistant_feedback`: all `op.turn_feedback` records for the user
      - `embeddings_summary`: a human-readable list of what has been embedded (source type, source title, shelf name, date embedded) — the raw vectors are not included as they are not human-readable
+     - the marketplace and social keys carry only the subject's own side: the messages they sent, the groups they own, the blocks they made. The counterparty's words, a group's member roster, and the identity of anyone who blocked them belong to those readers and stay out.
+     - the table-level guard in `apps/core/test/stacks/gdpr_test.exs` fails if a table with a foreign key to `op.users` is neither exported nor excluded with a written reason, so this list cannot silently fall behind the schema again.
   4. Stub: currently logs the export size. In production, would write to object storage and notify the user.
 - **On success**: Logs "export generated for user {id}, keys={count}". Returns `:ok`.
 - **On failure**: Logs error. Returns `{:error, reason}` for Oban retry.

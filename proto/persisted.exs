@@ -953,6 +953,11 @@
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
         seller_id: %{belongs_to: Stacks.Accounts.User},
+        # Seller free text and a direct contact handle — the same class as a
+        # placement note or an upload's storage key: the warehouse has no
+        # question that needs them.
+        description: %{dbt_exclude: true},
+        contact_info: %{dbt_exclude: true},
         status: %{default: "draft"},
         currency: %{default: "ZAR"},
         photo_urls: %{ecto_type: {:array, :string}, default: []},
@@ -1014,7 +1019,10 @@
       ],
       field_overrides: %{
         thread_id: %{belongs_to: Stacks.Marketplace.OfferThread},
-        sender_id: %{belongs_to: Stacks.Accounts.User}
+        sender_id: %{belongs_to: Stacks.Accounts.User},
+        # A private message between two readers. Offer analytics need the
+        # amount and the type, never what they said to each other.
+        body: %{dbt_exclude: true}
       }
     },
     %{
@@ -1050,6 +1058,11 @@
         offer_id: %{ecto_type: :binary_id},
         buyer_id: %{belongs_to: Stacks.Accounts.User},
         seller_id: %{belongs_to: Stacks.Accounts.User},
+        # Handles into the payment and shipping providers. They resolve to a
+        # named individual's payment or delivery record on the other side, and
+        # revenue analytics is served by the amount and the status.
+        payment_provider_ref: %{dbt_exclude: true},
+        shipping_provider_ref: %{dbt_exclude: true},
         currency: %{default: "ZAR"},
         payment_status: %{default: "pending"}
       }

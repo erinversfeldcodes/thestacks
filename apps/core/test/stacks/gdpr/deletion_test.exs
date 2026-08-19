@@ -1,10 +1,12 @@
 defmodule Stacks.GDPR.DeletionTest do
   @moduledoc """
-      138 Phase 1: erasure must be able to modify the append-only audit log.
-      A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
-      audit cleanup; asserts the GUC works inside the transaction (an
-      audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
-      UPDATE outside the transaction is still refused).
+      Erasure must be able to modify the append-only audit log. A `Multi.run`
+      issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before audit cleanup;
+      these tests assert the GUC works inside the transaction (an audit-row
+      UPDATE succeeds under the trigger) and is LOCAL (the same UPDATE outside
+      the transaction is still refused), and that erasure reaches every row a
+      user owns — by cascade where there is an FK, by an explicit step where
+      the content is theirs to have deleted.
   """
   use Core.DataCase, async: false
 
@@ -446,6 +448,20 @@ defmodule Stacks.GDPR.DeletionTest do
         "note/invited_email scrubbed by :settle_invites_naming_user step; nilify keeps beta history"
     }
 
+    # A uuid column whose NAME reads like a user reference but which either does
+    # not point at a platform user, or points at rows that outlive erasure on
+    # purpose. Anything not listed here must carry a real FK — the name pattern
+    # is the only thing standing between a new user-scoping column and silent
+    # survival, because erasure reaches rows through the FK graph alone.
+    @fkless_user_column_allowlist %{
+      "op.books.author_id" => "op.authors — the writer of the book, not a platform user",
+      "op.bookstore_events.author_id" => "op.authors — an event's featured writer, not a user",
+      "audit.audit_log.user_id" =>
+        "the audit trail is retained past erasure by design, so it deliberately has no FK that " <>
+          "would cascade it away; the row keeps a now-dangling id, a hashed IP and encrypted " <>
+          "operator metadata, and the erasure GUC is the only path that may mutate it"
+    }
+
     test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
       {:ok, %{rows: rows}} =
         Repo.query("""
@@ -476,18 +492,27 @@ defmodule Stacks.GDPR.DeletionTest do
                "on it is erased by a delete_user_data/1 step."
     end
 
-    test "every op.* user_id / *_user_id column has a foreign key to op.users" do
+    test "every user-referencing column in op and audit has a foreign key to op.users" do
       {:ok, %{rows: rows}} =
         Repo.query("""
-        SELECT c.relname, a.attname
+        SELECT n.nspname, c.relname, a.attname
         FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'op'
+        JOIN pg_type t ON t.oid = a.atttypid
+        WHERE n.nspname IN ('op', 'audit')
           AND c.relkind = 'r'
           AND a.attnum > 0
           AND NOT a.attisdropped
-          AND (a.attname = 'user_id' OR a.attname LIKE '%\\_user\\_id')
+          AND t.typname = 'uuid'
+          AND (a.attname = 'user_id'
+               OR a.attname LIKE '%\\_user\\_id'
+               OR a.attname LIKE '%\\_by\\_id'
+               OR a.attname LIKE '%\\_to\\_id'
+               OR a.attname IN ('author_id', 'actor_id', 'owner_id', 'seller_id',
+                                'buyer_id', 'sender_id', 'recipient_id', 'blocker_id',
+                                'blocked_id', 'follower_id', 'followed_id',
+                                'member_id', 'requester_id', 'reviewer_id'))
           AND NOT EXISTS (
             SELECT 1
             FROM pg_constraint con
@@ -499,18 +524,22 @@ defmodule Stacks.GDPR.DeletionTest do
               AND rn.nspname = 'op'
               AND rc.relname = 'users'
           )
-        ORDER BY c.relname, a.attname
+        ORDER BY n.nspname, c.relname, a.attname
         """)
 
-      offenders = for [table, col] <- rows, do: "#{table}.#{col}"
+      offenders =
+        for [schema, table, col] <- rows,
+            not Map.has_key?(@fkless_user_column_allowlist, "#{schema}.#{table}.#{col}"),
+            do: "#{schema}.#{table}.#{col}"
 
       assert offenders == [],
-             "op.* columns named user_id / *_user_id with NO foreign key to op.users. " <>
-               "Erasure reaches personal data via repo.delete(user) + FK CASCADE; a " <>
-               "user-scoping column with no FK is invisible to that path and to the CASCADE " <>
-               "audit above, so the user's rows survive erasure silently (the #353 " <>
-               "uploaded_images leak). Offenders: #{inspect(offenders)}. Add a CASCADE FK to " <>
-               "op.users (see migration 20260805100000)."
+             "columns that name a user but carry no foreign key to op.users. Erasure reaches " <>
+               "personal data via repo.delete(user) + FK CASCADE; a user-scoping column with " <>
+               "no FK is invisible to that path and to the CASCADE audit above, so the user's " <>
+               "rows survive erasure silently. Offenders: #{inspect(offenders)}. Add a CASCADE " <>
+               "FK to op.users, or — if the column does not name a platform user at all, or " <>
+               "the rows are deliberately retained past erasure — add it to " <>
+               "@fkless_user_column_allowlist WITH the reason."
     end
   end
 end
