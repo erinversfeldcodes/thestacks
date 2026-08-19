@@ -10,7 +10,6 @@ import Json.Encode as Encode
 import Page.BookDetail as BookDetail
 import ProgramTest
 import Test exposing (Test, describe, test)
-import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
