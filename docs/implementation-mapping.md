@@ -42,7 +42,7 @@
 
 | Phase | Name | Stories | Rationale |
 |-------|------|---------|-----------|
-| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.1, US-1.6.2, US-1.6.3, US-1.6.4, US-1.6.5, US-1.6.6, US-1.7.1, US-1.1.9, US-1.5.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8), importing an existing Goodreads library through the ISBN gate (US-1.1.9), and browsing the full catalogue (US-1.5.5). Everything a single user needs to start using The Stacks. |
+| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.4, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.1, US-1.6.2, US-1.6.3, US-1.6.4, US-1.6.5, US-1.6.6, US-1.7.1, US-1.1.9, US-1.5.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8), importing an existing Goodreads library through the ISBN gate (US-1.1.9), and browsing the full catalogue (US-1.5.5). Everything a single user needs to start using The Stacks. |
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3, US-2.6.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), automatic edition discovery (US-2.6.1), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
@@ -925,8 +925,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 |-----------|--------|
 | **Summary** | Bulk-import a Goodreads CSV export: each row resolved through the ISBN hard gate and placed on a bookshelf, with a per-row import status view. |
 | **Phase** | Phase 1 (MVP) |
-| **Status** | Not built — spec only (`Page.Import`, `POST /api/imports/goodreads`, `GET /api/imports/:id/rows` are specified but absent). Reuses the shipped `Stacks.Books.ISBNResolver` and `POST /api/bookshelves/:bookshelf_name/placements`. |
-| **Implementation** | Planned: `Page.Import`, `StacksWeb.ImportController`; row resolution via `Stacks.Books.ISBNResolver.resolve/1`. |
+| **Status** | Built |
+| **Implementation** | `POST /api/imports/goodreads`, `GET /api/imports`, `GET /api/imports/:id`, `GET /api/imports/:id/rows` → `StacksWeb.ImportController`; `Page.Import`; row resolution via `Stacks.Books.ISBNResolver.resolve/1`. |
 
 ---
 
@@ -1249,8 +1249,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 |-----------|--------|
 | **Summary** | Publish Own Site, Syndicate Elsewhere: syndicate a native blog post to Substack (and record the syndication link), with the canonical URL remaining `/blog/:id`. Depends on the blog (Phase 7). |
 | **Phase** | Phase 7 (Blog) |
-| **Status** | Not built — spec only (no syndication modules in `apps/core`). Email-to-Substack leg deliberately deferred; canonical URL stays the post UUID (`/blog/:id`) — slugs deferred with the reasoning recorded in the story. |
-| **Implementation** | Planned: `POST/PUT /api/blog/posts/:id/syndications`, `GET /api/blog/posts/:id/syndication` → `StacksWeb.BlogController`; `Page.Blog.Editor` / `Page.Blog.Post`; visibility gated by `Stacks.Visibility`. Existing per-handle blog feed: `GET /api/feeds/u/:handle/blog`. |
+| **Status** | Built. Email-to-Substack leg deliberately deferred; canonical URL stays the post UUID (`/blog/:id`) — slugs deferred with the reasoning recorded in the story. |
+| **Implementation** | `GET /api/blog/posts/:id/syndication`, `POST /api/blog/posts/:id/syndications`, `PUT /api/blog/posts/:id/syndications/:sid` → `StacksWeb.BlogController`; `Stacks.Blog.Syndication`; `Components.Syndication`. Existing per-handle blog feed: `GET /api/feeds/u/:handle/blog`. |
 
 ---
 
@@ -1935,8 +1935,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | An in-editor writing assistant (chat + contextual nudges) that draws on the author's own reading data, gated by consent (#184). |
 | **Phase** | Phase 7 (Blog & Comments) |
-| **Status** | Built |
-| **Implementation** | `POST /api/blog/posts/:id/chat`, `GET /api/blog/posts/:id/assistant/session`, `.../assistant/nudge` → `StacksWeb.BlogController`; consent-gated route pipeline (#184). Backend `Stacks.WritingAssistant` (`stacks/writing_assistant/`). Frontend `Page.Blog.Editor`. |
+| **Status** | Not built — designed, deferred to Phase 2, which will build it with its own eval. The consent and data-lifecycle surface around it IS shipped; the assistant is not. |
+| **Implementation** | Shipped: `POST /api/blog/posts/:id/chat` → `StacksWeb.BlogController.chat/2`, which answers `{"status": "under_construction"}` — an honest placeholder, not a model call; the consent-gated route pipeline (`:writing_assistant_consent`, #184); the `Stacks.WritingAssistant.*` Ecto schemas and their pgvector tables. Absent: any embedding, retrieval or model-call path (nothing writes a row to `op.embeddings` or `op.book_content_chunks`), `GET /api/blog/posts/:id/assistant/session`, `.../assistant/nudge`, and any assistant UI in `Page.Blog.Editor`. |
 
 ---
 
@@ -1946,8 +1946,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | View and delete the writing-assistant sessions and the derived data the assistant holds about the user. |
 | **Phase** | Phase 7 (Blog & Comments) |
-| **Status** | Built |
-| **Implementation** | `GET /api/writing-assistant/sessions`, `DELETE /api/writing-assistant/sessions/:id` → writing-assistant controller; schema `Stacks.AI.BlogAssistantSession` (`gen/writing_assistant/session.ex`). Frontend `Page.Settings.WritingAssistant`. GDPR-covered derived data. |
+| **Status** | Not built — deferred to Phase 2 with US-12.2.1. There is no assistant data to manage yet, so the management surface is unbuilt; the erasure and export paths that would cover it ARE shipped. |
+| **Implementation** | Shipped: the `Stacks.WritingAssistant.*` schemas (`gen/writing_assistant/session.ex` and siblings); GDPR export coverage (`GDPR.Export`) and purge-on-consent-revoke (`Stacks.Workers.WritingAssistantDataPurgeWorker`), both of which operate correctly over zero rows. Absent: `GET /api/writing-assistant/sessions`, `DELETE /api/writing-assistant/sessions/:id`, and `Page.Settings.WritingAssistant`. |
 
 ---
 
@@ -2131,8 +2131,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | Gate registration behind an invite code during closed beta; the owner issues and revokes invites, and the SPA reflects invite-only mode via `/api/config`. |
 | **Phase** | Phase 1 (extended) |
-| **Status** | Not built — spec only (`Stacks.Accounts.Invites`, `Page.Admin.Invites`, invite routes are specified but absent). Builds on shipped `Stacks.Accounts.register` and `/api/config`. |
-| **Implementation** | Planned: `POST /api/auth/register` (invite-gated), `GET /api/auth/invite/:code`, `GET/POST/DELETE /api/admin/invites` → invites admin; `Page.Admin.Invites`, `Page.Login`. |
+| **Status** | Built |
+| **Implementation** | `GET /api/invite/:code` → `StacksWeb.InviteController`; `GET/POST/DELETE /api/admin/invites` → `StacksWeb.InviteAdminController`; `Stacks.Accounts.Invites`; `Page.Admin.Invites`. Invite-gated registration builds on `Stacks.Accounts.register` and `/api/config`. |
 
 ---
 
