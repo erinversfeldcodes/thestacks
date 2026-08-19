@@ -128,12 +128,14 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.html_body(Templates.marketplace_sale(role, book_title))
   end
 
-  defp build_email(user, :gdpr_export_ready, %{"download_url" => download_url}) do
+  defp build_email(user, :gdpr_export_ready, %{"download_url" => download_url} = params) do
+    expires_in_seconds = Map.get(params, "expires_in_seconds", 86_400)
+
     Swoosh.Email.new()
     |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Your data export is ready — The Stacks")
-    |> Swoosh.Email.html_body(Templates.gdpr_export_ready(download_url))
+    |> Swoosh.Email.html_body(Templates.gdpr_export_ready(download_url, expires_in_seconds))
   end
 
   defp build_email(user, :wishlist_availability, %{"book_title" => book_title}) do

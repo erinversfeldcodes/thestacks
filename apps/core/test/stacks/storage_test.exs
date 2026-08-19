@@ -62,4 +62,74 @@ defmodule Stacks.StorageTest do
       assert Mock.get(key) == data
     end
   end
+
+  describe "list_objects/1" do
+    test "returns only the keys under the prefix" do
+      Mock.seed("exports/alice/1-a.json", "{}")
+      Mock.seed("exports/bob/2-b.json", "{}")
+      Mock.seed("uploads/an-image", "bytes")
+
+      assert {:ok, ["exports/alice/1-a.json"]} = Storage.list_objects("exports/alice/")
+      assert {:ok, keys} = Storage.list_objects("exports/")
+      assert Enum.sort(keys) == ["exports/alice/1-a.json", "exports/bob/2-b.json"]
+    end
+  end
+end
+
+defmodule Stacks.Storage.LocalTest do
+  @moduledoc """
+      Filesystem-backend tests. The dev backend is the one place a GDPR export
+      could be served to the world by accident: `priv/static/uploads` is handed
+      to `Plug.Static`, so an export written there would be a public URL away
+      from anyone who guessed it. These pin the separation and the listing the
+      retention sweep depends on.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Stacks.Storage.Local
+
+  setup do
+    base = Path.join(System.tmp_dir!(), "stacks-local-#{System.unique_integer([:positive])}")
+    uploads = Path.join(base, "static/uploads")
+    exports = Path.join(base, "exports")
+
+    Application.put_env(:core, :upload_dir, uploads)
+    Application.put_env(:core, :export_dir, exports)
+
+    on_exit(fn ->
+      Application.delete_env(:core, :upload_dir)
+      Application.delete_env(:core, :export_dir)
+      File.rm_rf(base)
+    end)
+
+    {:ok, uploads: uploads, exports: exports}
+  end
+
+  test "an export is written outside the statically served upload directory", ctx do
+    assert {:ok, key} = Local.put("exports/alice/1-a.json", "{}")
+    assert {:ok, _size} = Local.head(key)
+
+    assert File.exists?(Path.join(ctx.exports, key))
+    refute File.exists?(Path.join(ctx.uploads, key))
+  end
+
+  test "listing finds nested export keys and leaves uploads alone", ctx do
+    {:ok, _} = Local.put("exports/alice/1-a.json", "{}")
+    {:ok, _} = Local.put("exports/bob/2-b.json", "{}")
+    {:ok, _} = Local.put("uploads/an-image", "bytes")
+
+    assert {:ok, keys} = Local.list("exports/")
+    assert Enum.sort(keys) == ["exports/alice/1-a.json", "exports/bob/2-b.json"]
+
+    assert {:ok, ["exports/alice/1-a.json"]} = Local.list("exports/alice/")
+    assert File.exists?(Path.join(ctx.uploads, "uploads/an-image"))
+  end
+
+  test "a deleted export is gone from the listing" do
+    {:ok, key} = Local.put("exports/alice/1-a.json", "{}")
+
+    assert :ok = Local.delete(key)
+    assert {:ok, []} = Local.list("exports/")
+  end
 end

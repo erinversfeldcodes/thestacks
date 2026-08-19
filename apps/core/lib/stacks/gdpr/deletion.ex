@@ -9,6 +9,10 @@ defmodule Stacks.GDPR.Deletion do
       A schema-guard test walks every table naming `user_id` and fails when a
       new one is not covered here — free-text must be deleted/anonymised,
       never just author-nulled.
+
+      Outstanding GDPR export objects are erased too. They live only in object
+      storage, so no table names them and the schema guard cannot see them;
+      `Stacks.GDPR.ExportDelivery` finds them by key prefix instead.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -17,6 +21,8 @@ defmodule Stacks.GDPR.Deletion do
   @dialyzer :no_opaque
 
   import Ecto.Query
+
+  require Logger
 
   alias Core.Repo
   alias Ecto.Multi
@@ -28,6 +34,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Events.EventLog
   alias Stacks.Feedback.Entry, as: FeedbackEntry
   alias Stacks.Feeds.FeedCacheEntry
+  alias Stacks.GDPR.ExportDelivery
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Imports.LibraryImport
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -185,6 +192,21 @@ defmodule Stacks.GDPR.Deletion do
       ids = Enum.map(rows, & &1.id)
       {count, _} = repo.delete_all(from i in UploadedImage, where: i.id in ^ids)
       {:ok, count}
+    end)
+    |> Multi.run(:delete_export_objects, fn _repo, _ ->
+      case ExportDelivery.delete_user_exports(user_id) do
+        {:ok, count} ->
+          {:ok, count}
+
+        {:error, reason} ->
+          # Storage being down must not strand the user's rows in the database.
+          # The deadline in each export key means the sweep still collects them.
+          Logger.error(
+            "Deletion: export objects for #{user_id} survived erasure: #{inspect(reason)}"
+          )
+
+          {:ok, 0}
+      end
     end)
     |> Multi.run(:sessions_to_revoke, fn repo, _ ->
       {:ok, session_row_count(repo, user_id)}
