@@ -29,6 +29,52 @@ FAILED=0
 _pass() { echo "ok   $1"; PASSED=$((PASSED + 1)); }
 _fail() { echo "FAIL $1" >&2; FAILED=$((FAILED + 1)); }
 
+# `tomllib` is stdlib only from 3.11; macOS ships 3.9 as /usr/bin/python3, and
+# a bare shell (CI runner, git hook) resolves python3 to that one. Every TOML
+# assertion below then dies in the interpreter and is recorded as a config
+# failure — the suite reports a broken vector.toml when the config is fine.
+# Pick an interpreter that can actually parse TOML, the way the rollback
+# composite suite picks one that can import yaml.
+_TOML_PRELUDE='
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib
+'
+
+_pick_toml_python() {
+    local candidates=(
+        "$REPO_ROOT/.venv-tools/bin/python3"
+        "$REPO_ROOT/scripts/mcp/.venv/bin/python3"
+        "$REPO_ROOT/apps/vision/.venv/bin/python3"
+        "python3"
+    )
+    local cand
+    for cand in "${candidates[@]}"; do
+        if command -v "$cand" >/dev/null 2>&1 \
+            && "$cand" -c "$_TOML_PRELUDE" >/dev/null 2>&1; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    local fallback_venv="${TMPDIR:-/tmp}/stacks-log-shipper-test-venv"
+    if [[ ! -x "$fallback_venv/bin/python3" ]] \
+        || ! "$fallback_venv/bin/python3" -c "$_TOML_PRELUDE" >/dev/null 2>&1; then
+        python3 -m venv "$fallback_venv" >/dev/null 2>&1 || return 1
+        "$fallback_venv/bin/pip" install --quiet tomli >/dev/null 2>&1 || return 1
+    fi
+    echo "$fallback_venv/bin/python3"
+    return 0
+}
+
+TOML_PYTHON="$(_pick_toml_python || true)"
+if [[ -z "$TOML_PYTHON" ]]; then
+    echo "FATAL: no Python interpreter that can parse TOML; cannot validate the configs" >&2
+    echo "       (tried .venv-tools, scripts/mcp/.venv, apps/vision/.venv, system" >&2
+    echo "        python3, and an ephemeral venv with tomli)" >&2
+    exit 1
+fi
+
 _case() {
     echo ""
     echo "# === $1 ==="
@@ -36,9 +82,9 @@ _case() {
 }
 
 _case "vector_toml_structure" "vector.toml has fly source, scrub_pii transform, axiom sink"
-if python3 -c "
+if "$TOML_PYTHON" -c "
 import sys
-import tomllib
+${_TOML_PRELUDE}
 with open('${VECTOR_TOML}', 'rb') as f:
     data = tomllib.load(f)
 missing = []
@@ -57,8 +103,8 @@ fi
 
 _case "vector_toml_nats_source" \
     "fly source connects to Fly NATS with user_password auth"
-if python3 -c "
-import tomllib
+if "$TOML_PYTHON" -c "
+${_TOML_PRELUDE}
 with open('${VECTOR_TOML}', 'rb') as f:
     data = tomllib.load(f)
 src = data['sources']['fly']
@@ -90,8 +136,8 @@ else
 fi
 
 _case "fly_toml_build_dockerfile" "fly.log-shipper.toml builds from our custom Dockerfile"
-if python3 -c "
-import tomllib
+if "$TOML_PYTHON" -c "
+${_TOML_PRELUDE}
 with open('${FLY_TOML}', 'rb') as f:
     data = tomllib.load(f)
 assert data['build']['dockerfile'] == 'log-shipper/Dockerfile', \
@@ -151,8 +197,8 @@ _check_dockerfile_copy_paths \
 
 _case "vector_toml_api_enabled" \
     "[api] block enables /health on :8686 for Fly's health check"
-if python3 -c "
-import tomllib
+if "$TOML_PYTHON" -c "
+${_TOML_PRELUDE}
 with open('${VECTOR_TOML}', 'rb') as f:
     data = tomllib.load(f)
 api = data.get('api', {})
@@ -166,8 +212,8 @@ else
 fi
 
 _case "vector_toml_axiom_sink" "axiom sink uses env-interpolated token + dataset"
-if python3 -c "
-import tomllib
+if "$TOML_PYTHON" -c "
+${_TOML_PRELUDE}
 with open('${VECTOR_TOML}', 'rb') as f:
     data = tomllib.load(f)
 sink = data['sinks']['axiom']

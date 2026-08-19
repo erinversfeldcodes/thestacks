@@ -77,7 +77,14 @@ fi
 if [[ -z "${PRE_MIGRATE_LSN:-}" ]]; then
     echo "WARN rollback: PRE_MIGRATE_LSN unset — skipping Neon DB rollback (image-only)" >&2
 else
-    PRESERVE_NAME="pre-rollback-${GITHUB_SHA:0:7}-$(date -u +%Y%m%dT%H%M%SZ)"
+    # GITHUB_SHA is only set when a workflow runs this; an operator following
+    # the runbook by hand has no such variable, and `${GITHUB_SHA:0:7}` under
+    # `set -u` aborts on the unset name (bash 4.4+; bash 3.2 silently yields an
+    # empty segment instead). Either way it lands here — after the core image
+    # has already been rolled back and before the DB is restored — leaving
+    # production on old code against new schema. Default the name instead.
+    _SHA_TAG="${GITHUB_SHA:-manual}"
+    PRESERVE_NAME="pre-rollback-${_SHA_TAG:0:7}-$(date -u +%Y%m%dT%H%M%SZ)"
     echo ""
 
     # The restore mints a pre-rollback-* backup branch, and Neon's project

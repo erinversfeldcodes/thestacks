@@ -41,7 +41,7 @@ run_group() {
 }
 
 if [[ $# -eq 0 ]]; then
-    CI_GROUPS=(elixir elm rust python proto dbt security squawk licenses)
+    CI_GROUPS=(elixir elm rust python proto dbt security squawk platform licenses)
 else
     CI_GROUPS=("$@")
 fi
@@ -126,6 +126,16 @@ if has_group squawk; then
         2) skip "squawk: migration lint — 0 migrations inspected (nothing was checked)" ;;
         *) fail "squawk: migration lint"; FAILED+=(squawk) ;;
     esac
+fi
+
+if has_group platform; then
+    # The shell suites over the deploy/rollback/migration-safety scripts. They
+    # run their own per-suite watchdog, which needs a timeout binary — present
+    # in the pinned shell, absent from a bare macOS one, where run_all.sh says
+    # so on stdout.
+    if ! run_group "platform: shell suites" bash test/platform/run_all.sh; then
+        FAILED+=(platform)
+    fi
 fi
 
 if has_group e2e; then
