@@ -38,6 +38,7 @@ defmodule Stacks.GDPRTest do
   # the sweep — which is how a newly added user-linked table gets noticed
   # before it ships silently un-exportable.
   @export_table_roster %{
+    "audit_log" => :audit_trail,
     "blog_assistant_sessions" => :writing_assistant_sessions,
     "blog_posts" => :blog_posts,
     "bookshelves" => :bookshelves,
@@ -151,7 +152,40 @@ defmodule Stacks.GDPRTest do
       assert row.private_notes == "my private note"
     end
 
-    test "payload contains all 24 documented keys" do
+    test "carries the reader's own audit rows, with metadata readable and the ip digest withheld" do
+      user = insert(:user)
+      other = insert(:user)
+
+      Stacks.Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        ip: "197.87.142.19",
+        metadata: %{bookshelf: "library"}
+      )
+
+      Stacks.Audit.log(other.id, "placement.created",
+        resource_type: "placement",
+        metadata: %{bookshelf: "wishlist"}
+      )
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+
+      assert [row] = export.audit_trail,
+             "expected exactly the reader's own audit row, never another reader's"
+
+      assert row.action == "placement.created"
+      assert row.resource_type == "placement"
+      assert row.occurred_at
+
+      # Stored as ciphertext to protect it at rest, not to keep it from its owner.
+      assert row.metadata == %{"bookshelf" => "library"}
+
+      # The ip digest is withheld on purpose: it tells the reader nothing they do
+      # not know, and hands an interceptor a value matchable against the column.
+      refute Map.has_key?(row, :ip_address)
+      refute Map.has_key?(row, :operator_session_id)
+    end
+
+    test "payload contains all 25 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -159,6 +193,7 @@ defmodule Stacks.GDPRTest do
                MapSet.new([
                  :exported_at,
                  :user,
+                 :audit_trail,
                  :bookshelves,
                  :placements,
                  :placement_history,
@@ -354,6 +389,25 @@ defmodule Stacks.GDPRTest do
       rows |> List.flatten() |> MapSet.new()
     end
 
+    # The FK sweep above cannot see `audit.audit_log`, twice over: it lives in the
+    # `audit` schema, and it deliberately carries no foreign key to op.users so the
+    # trail survives erasure. A table that is invisible to the guard is a table that
+    # can be forgotten, which is exactly how the audit log stayed out of the export
+    # without anyone deciding it should. So discovery is widened: ANY table in `op`
+    # or `audit` naming a user_id column is in scope, FK or not.
+    defp user_column_tables do
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        SELECT DISTINCT c.table_name
+        FROM information_schema.columns c
+        WHERE c.table_schema IN ('op', 'audit')
+          AND c.column_name = 'user_id'
+        ORDER BY 1
+        """)
+
+      rows |> List.flatten() |> MapSet.new()
+    end
+
     test "every op.* table linked to op.users is exported, or excluded with a reason" do
       accounted =
         MapSet.union(
@@ -362,10 +416,13 @@ defmodule Stacks.GDPRTest do
         )
 
       unaccounted =
-        user_linked_tables() |> MapSet.difference(accounted) |> Enum.sort()
+        user_linked_tables()
+        |> MapSet.union(user_column_tables())
+        |> MapSet.difference(accounted)
+        |> Enum.sort()
 
       assert unaccounted == [],
-             "op.* tables with a foreign key to op.users that GDPR export neither carries nor " <>
+             "op.*/audit.* tables naming a user that GDPR export neither carries nor " <>
                "excludes: #{inspect(unaccounted)}. Personal data belongs in " <>
                "Export.export_user_data/2 under a payload key, listed in @export_table_roster. " <>
                "Only credentials, session mechanics, business-entity records and derived rows " <>

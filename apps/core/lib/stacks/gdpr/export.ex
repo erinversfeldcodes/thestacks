@@ -187,12 +187,60 @@ defmodule Stacks.GDPR.Export do
       reading_group_memberships: reading_group_memberships(user_id),
       reading_group_invitations: reading_group_invitations(user_id),
       blocked_users: blocked_users(user_id),
-      visibility_grants: visibility_grants(user_id)
+      visibility_grants: visibility_grants(user_id),
+      audit_trail: audit_trail(user_id)
     }
 
     {:ok, export}
   rescue
     error -> {:error, error}
+  end
+
+  @doc false
+  # The reader's own audit rows. `audit.audit_log` is retained past erasure on a
+  # different lawful basis to the rest of this export, but retention is not a
+  # reason to withhold it from the person it describes — a subject-access request
+  # asks what we hold, and we hold this.
+  #
+  # Scoped by `user_id`, which on this table means "the account that PERFORMED the
+  # action". So an operator exporting their own data receives their admin actions;
+  # a reader receives their own. Nobody receives a row describing someone else.
+  #
+  # `metadata` is decrypted here on purpose: it is stored as ciphertext to protect
+  # it at rest, not to keep it from its owner. `ip_address` is deliberately NOT
+  # exported — it is a digest of the reader's own IP, which tells them nothing they
+  # do not already know while handing anyone who intercepts the export a value that
+  # can be matched against the column. `operator_session_id` is likewise omitted:
+  # it identifies an admin session, and its only use to a reader would be
+  # correlating operator activity.
+  defp audit_trail(user_id) do
+    from(a in "audit_log",
+      prefix: "audit",
+      where: a.user_id == type(^user_id, :binary_id),
+      order_by: [desc: a.occurred_at],
+      select: %{
+        action: a.action,
+        resource_type: a.resource_type,
+        resource_id: a.resource_id,
+        occurred_at: a.occurred_at,
+        endpoint: a.endpoint,
+        success: a.success,
+        metadata: a.metadata
+      }
+    )
+    |> Repo.all()
+    |> Enum.map(fn row -> %{row | metadata: decrypt_audit_metadata(row.metadata)} end)
+  end
+
+  defp decrypt_audit_metadata(nil), do: %{}
+
+  defp decrypt_audit_metadata(bin) when is_binary(bin) do
+    case Stacks.Vault.decrypt(bin) do
+      {:ok, json} -> Jason.decode!(json)
+      _ -> %{}
+    end
+  rescue
+    _ -> %{}
   end
 
   defp marketplace_listings(user_id) do
