@@ -136,6 +136,14 @@ defmodule Stacks.Events.Registry do
     "enrichment.author_sources_discovered",
     "third_space.created",
     "third_space.delisted",
+    # The admin decision on a discovered source. Approval already creates the
+    # third space inline in the same call and a rejection ends the source's
+    # life, so nothing downstream has work to do — these are the audit record of
+    # who decided what. Both are emitted with the type passed down as an
+    # argument (approve_source/1 and reject_source/1 → transition_source/3 →
+    # after_transition/3), so neither string appears at its own emit call.
+    "source.approved",
+    "source.rejected",
     "costs.refreshed",
     "invite.issued",
     "invite.redeemed",
@@ -149,6 +157,12 @@ defmodule Stacks.Events.Registry do
   ]
 
   @pending %{
+    "offer.opened" =>
+      "the marketplace offer flow is deferred (owner ruling 2026-08-19): the " <>
+        "offer_threads and offer_messages tables, their schemas and their changesets " <>
+        "are built, but no context function opens a thread and no route reaches one, " <>
+        "so nothing can emit this yet. OfferNotificationHandler stays registered so " <>
+        "the flow lands with its consumer already wired",
     "enrichment.reviews_scraped" =>
       "reviews are planned, not deleted (owner ruling 2026-08-07): " <>
         "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
