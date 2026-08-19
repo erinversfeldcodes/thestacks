@@ -40,7 +40,7 @@ config :core, :vision_client, Stacks.AI.MockClient
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient
 config :core, :storage, Stacks.Storage.Mock
 ```
-Deployed runs are driven by `scripts/test-deployed.sh`, which requires `BASE_URL` and `DATABASE_URL` — the `:deployed_only` modules guard on `BASE_URL` and skip themselves without it. Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` and bumps per-step timeout to 90 s. In CI the `E2E_EXPECT_*` flags (`FULL_SEEDS`, `LIVE_METRICS`, `RATE_LIMITING`) turn a spec's precondition skip into a hard failure.
+Deployed runs are driven by `scripts/test-deployed.sh`, which requires `BASE_URL` and `DATABASE_URL` — the `:deployed_only` modules that drive the live API additionally guard on `BASE_URL` and skip themselves without it. Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` and bumps per-step timeout to 90 s. In CI the `E2E_EXPECT_*` flags (`FULL_SEEDS`, `LIVE_METRICS`, `RATE_LIMITING`) turn a spec's precondition skip into a hard failure.
 
 ## Test-to-Story Mapping
 

@@ -2208,7 +2208,8 @@ infrastructure do not un-mock — they point at a *deployed* stack:
 # apps/core/test/test_helper.exs
 ExUnit.configure(exclude: [:deployed_only])
 
-# …and each one guards on BASE_URL, skipping itself when there is no stack.
+# …and the ones that drive the live API additionally guard on BASE_URL,
+# skipping themselves when there is no stack to point at.
 @moduletag :deployed_only
 @base_url System.get_env("BASE_URL")
 

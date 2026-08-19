@@ -229,10 +229,11 @@ targets a *deployed* stack instead, which is what `BASE_URL` selects.
   when `BASE_URL` is set the browser drives the deployed stack and the per-step
   timeout goes to 90 s for cold-start tolerance.
 - The `@moduletag :deployed_only` ExUnit modules — excluded by default in
-  `test_helper.exs`, and each guards on `System.get_env("BASE_URL")`, skipping
-  itself when unset. `scripts/test-deployed.sh` therefore *requires* both
-  `BASE_URL` and `DATABASE_URL`: without them the live-API modules skip and the
-  run still reports green.
+  `test_helper.exs`. The ones that drive the deployed API (the JWT-at-rest and
+  audit-IP modules) additionally guard on `System.get_env("BASE_URL")` and skip
+  themselves when it is unset; the dbt/storage ones need only `DATABASE_URL`.
+  `scripts/test-deployed.sh` therefore requires both: with `BASE_URL` missing
+  the live-API half self-skips and the run still reports green.
 
 ### Hardening Conditionals in CI
 Specs that legitimately skip on a missing precondition locally must not stay
@@ -244,6 +245,12 @@ those skips into hard failures, and CI sets them:
 | `E2E_EXPECT_FULL_SEEDS=1` | `assertSeedOrSkip` skipping for insufficient seed data |
 | `E2E_EXPECT_LIVE_METRICS=1` | the transparency spec skipping its frontend-render guarantee |
 | `E2E_EXPECT_RATE_LIMITING=1` | the rate-limit spec skipping when limiting looks disabled |
+
+`E2E_EXPECT_RATE_LIMITING` is the one that reads in both directions: it is
+explicit operator intent, so any value other than `1` asserts that this stack
+legitimately runs unlimited. Left unset it falls back to inference — a
+*non-loopback* `BASE_URL` already means enforcement, since only local Phoenix
+disables the limiter in config.
 
 ---
 

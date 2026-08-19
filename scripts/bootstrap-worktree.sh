@@ -47,8 +47,8 @@ echo "    seed from: $SOURCE_CHECKOUT"
 # LFS FIRST — before any step that copies or bundles an asset. A fresh worktree
 # materialises frontend/public/textures/*.png as ~130-byte pointer files, and an
 # asset build will happily bundle the pointer. What you get then is not a build
-# error but fifteen red texture specs describing a product defect that does not
-# exist. Objects come from the shared .git/lfs, so this is offline.
+# error but a raft of red texture specs describing a product defect that does
+# not exist. Objects come from the shared .git/lfs, so this is offline.
 echo "==> git lfs checkout"
 if command -v git-lfs &>/dev/null; then
     git -C "$WORKTREE_ROOT" lfs checkout

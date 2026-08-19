@@ -16,10 +16,10 @@ RESET='\033[0m'
 echo -e "${CYAN}${BOLD}=== Deployed-only test suite ===${RESET}"
 
 # Both of these are load-bearing, and BASE_URL especially so: the deployed-only
-# modules guard on it themselves and self-skip when it is unset, so a run
-# without it exercises the dbt/storage half, skips the live-API half, and still
-# prints "All deployed-only checks passed". Requiring it up front is what stops
-# that vacuous green.
+# modules that drive the live API guard on it themselves and self-skip when it
+# is unset, so a run without it exercises the dbt/storage half, skips the
+# live-API half, and still prints "All deployed-only checks passed". Requiring
+# it up front is what stops that vacuous green.
 missing=()
 [[ -z "${DATABASE_URL:-}" ]] && missing+=("DATABASE_URL")
 [[ -z "${BASE_URL:-}" ]] && missing+=("BASE_URL")
