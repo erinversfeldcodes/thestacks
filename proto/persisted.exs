@@ -70,10 +70,13 @@
       field_overrides: %{
         user_id: %{ecto_type: :binary_id},
         resource_id: %{ecto_type: :binary_id},
-        # Ciphertext in a bytea column. The warehouse cannot read it and has no
-        # question that needs it; carrying it would only widen where the
-        # encrypted personal data sits.
-        metadata: %{ecto_type: :map, dbt_exclude: true},
+        # `:binary`, not `:map`: the column is bytea holding Cloak ciphertext
+        # (Stacks.Audit encrypts on write and decrypts on read). Declaring :map
+        # described a shape the column has never had — harmless only because no
+        # production code reads through this schema, which is not a property to
+        # rely on. Excluded from the warehouse too: it cannot be read there, and
+        # carrying it would only widen where the encrypted personal data sits.
+        metadata: %{ecto_type: :binary, dbt_exclude: true},
         # A keyed digest of a reader's address. Keyed is not anonymous, and the
         # warehouse has no question that a per-person network identifier answers.
         ip_address: %{dbt_exclude: true}

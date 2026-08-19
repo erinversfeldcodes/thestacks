@@ -274,4 +274,23 @@ defmodule Stacks.AuditTest do
       assert entry.operator_session_id == session_id
     end
   end
+
+  describe "Stacks.Audit.Entry (the generated schema)" do
+    test "reads back through the schema without lying about the metadata column's type" do
+      user_id = Ecto.UUID.generate()
+      Stacks.Audit.log(user_id, "probe.schema", resource_type: "probe", metadata: %{k: "v"})
+
+      row =
+        Repo.one(from(e in AuditEntry, where: e.user_id == ^user_id, limit: 1))
+
+      assert row, "expected the row to load through the generated schema"
+
+      # bytea holding Cloak ciphertext. The schema declared :map for a long time,
+      # which was survivable only because nothing production read through it —
+      # this test is what stops that being true again by accident.
+      assert is_binary(row.metadata)
+      assert {:ok, json} = Stacks.Vault.decrypt(row.metadata)
+      assert Jason.decode!(json) == %{"k" => "v"}
+    end
+  end
 end
