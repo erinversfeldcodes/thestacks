@@ -2111,7 +2111,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | Request a password-reset link by email, then set a new password via a tokened link. |
 | **Phase** | Phase 1 (extended) |
 | **Status** | Built |
-| **Implementation** | `POST /api/auth/forgot-password` → `StacksWeb.AuthController.forgot_password`; `POST /api/auth/reset-password` → `.reset_password`. Frontend `Page.ForgotPassword`, `Page.ResetPassword`. |
+| **Implementation** | `POST /api/auth/forgot-password` → `StacksWeb.AuthController.forgot_password`; `POST /api/auth/reset-password` → `.reset_password`. Frontend: the forgot-password screen is a MODE of `Page.Login` (`Login.init Login.ForgotPassword`), not a module of its own; the reset screen is `Page.ResetPassword`. |
 
 ---
 
@@ -2133,7 +2133,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | Gate registration behind an invite code during closed beta; the owner issues and revokes invites, and the SPA reflects invite-only mode via `/api/config`. |
 | **Phase** | Phase 1 (extended) |
 | **Status** | Built |
-| **Implementation** | `GET /api/invite/:code` → `StacksWeb.InviteController`; `GET/POST/DELETE /api/admin/invites` → `StacksWeb.InviteAdminController`; `Stacks.Accounts.Invites`; `Page.Admin.Invites`. Invite-gated registration builds on `Stacks.Accounts.register` and `/api/config`. |
+| **Implementation** | `GET /api/auth/invite/:code` → `StacksWeb.InviteController`; `GET/POST/DELETE /api/admin/invites` → `StacksWeb.InviteAdminController`; `Stacks.Accounts.Invites`; `Page.Admin.Invites`. Invite-gated registration builds on `Stacks.Accounts.register` and `/api/config`. |
 
 ---
 
