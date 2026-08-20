@@ -288,6 +288,28 @@ if mode == "--list":
         print(f"  >< {c}")
     sys.exit(0)
 
+# A var() naming a custom property that is never defined renders as nothing:
+# the declaration is invalid at computed-value time, so the property silently
+# falls back to inherited or initial. The rule LOOKS present and the class LOOKS
+# styled. A rule written against `--color-error` and `--space-xs` — neither of
+# which exists here; they are `--error` and `--space-2` — passed every gate.
+#
+# A var() with a fallback (`var(--x, var(--y))`) is deliberate and exempt.
+_defined = set(re.findall(r"^\s*(--[A-Za-z0-9_-]+)\s*:", css, re.M))
+_undefined = sorted(
+    {
+        name
+        for name, rest in re.findall(r"var\(\s*(--[A-Za-z0-9_-]+)\s*(,?)", css)
+        if not rest and name not in _defined
+    }
+)
+for _name in _undefined:
+    problems.append(
+        f"var({_name}) is used but {_name} is never defined — the declaration is "
+        "dropped at computed-value time, so the rule silently does nothing. Define "
+        f"it, use the token that exists, or give it a fallback: var({_name}, <value>)."
+    )
+
 print(
     f"CSS: {len(rules)} rule(s) checked, {len(problems)} problem(s), "
     f"{len(collisions)} modifier/pseudo collision(s) (budget {budget}), "

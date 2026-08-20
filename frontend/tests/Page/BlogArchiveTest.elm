@@ -13,6 +13,7 @@ is the layer where that was lost.
 
 import Expect
 import Json.Decode as Decode
+import Page.Blog.Archive as Archive
 import Test exposing (Test, describe, test)
 import Types.BlogPost exposing (blogPostSummaryDecoder)
 
@@ -74,4 +75,42 @@ suite =
 
                     Err e ->
                         Expect.fail (Decode.errorToString e)
+        , describe "the preview shown in the list"
+            [ test "is bounded, however long the first paragraph is" <|
+                \_ ->
+                    let
+                        -- Markdown does not hard-wrap: a paragraph is ONE line.
+                        -- Taking "the first two lines" therefore takes the first
+                        -- two paragraphs whole, so a long opening paragraph
+                        -- printed the entire thing into the list.
+                        wall =
+                            String.repeat 60 "sentence after sentence "
+                    in
+                    Archive.previewOf wall
+                        |> String.length
+                        |> Expect.atMost 220
+            , test "a short post is shown whole, with no ellipsis" <|
+                \_ ->
+                    Archive.previewOf "A short thought about shelves."
+                        |> Expect.equal "A short thought about shelves."
+            , test "a truncated preview says it was truncated" <|
+                \_ ->
+                    Archive.previewOf (String.repeat 60 "sentence after sentence ")
+                        |> String.endsWith "…"
+                        |> Expect.equal True
+            , test "does not cut a word in half" <|
+                \_ ->
+                    let
+                        preview =
+                            Archive.previewOf (String.repeat 60 "sentence after sentence ")
+                    in
+                    preview
+                        |> String.dropRight 1
+                        |> String.endsWith " "
+                        |> Expect.equal False
+            , test "collapses the blank line between paragraphs" <|
+                \_ ->
+                    Archive.previewOf "First paragraph.\n\nSecond paragraph."
+                        |> Expect.equal "First paragraph. Second paragraph."
+            ]
         ]

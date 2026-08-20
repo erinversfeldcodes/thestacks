@@ -39,6 +39,12 @@ type alias Model =
     , blockModals : Dict String BlockModal.Model
     , members : RemoteData Http.Error (List Api.GroupMember)
     , removingMemberId : Maybe String
+
+    -- A removal that failed. Kept apart from `members` because the two say
+    -- different things: `members` is whether the roster could be READ, and this
+    -- is whether one person could be removed. Folding the second into the first
+    -- repainted a perfectly good roster as "Could not load the members".
+    , removeError : Maybe Http.Error
     }
 
 
@@ -81,6 +87,7 @@ init groupId userId token =
       , blockModals = Dict.empty
       , members = Loading
       , removingMemberId = Nothing
+      , removeError = Nothing
       }
     , Cmd.batch
         [ Api.getGroup groupId token GroupLoaded
@@ -210,6 +217,7 @@ update msg model =
             -- agreed, and a refetch would blink the whole list for one removal.
             ( { model
                 | removingMemberId = Nothing
+                , removeError = Nothing
                 , members =
                     case model.members of
                         Success ms ->
@@ -227,7 +235,13 @@ update msg model =
                 ( model, Cmd.none, SessionExpired )
 
             else
-                ( { model | removingMemberId = Nothing, members = Failure e }, Cmd.none, NoOut )
+                -- The roster is still true — only the removal failed. Leaving
+                -- `members` alone keeps everyone on screen and reports the
+                -- failure next to the control that caused it.
+                ( { model | removingMemberId = Nothing, removeError = Just e }
+                , Cmd.none
+                , NoOut
+                )
 
         FeedLoaded (Ok resp) ->
             ( { model
@@ -432,6 +446,13 @@ viewMembers model group =
 
             Success members ->
                 div [] (List.map (viewMember model group) members)
+        , case model.removeError of
+            Just _ ->
+                p [ class "groups-detail__member-remove-error" ]
+                    [ text "That member could not be removed. Please try again." ]
+
+            Nothing ->
+                text ""
         ]
 
 

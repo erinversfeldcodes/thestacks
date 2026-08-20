@@ -759,16 +759,27 @@ updateWithEffect msg model maybeToken =
                                 Nothing ->
                                     List.head remaining
                     in
+                    let
+                        bookshelfName =
+                            primary
+                                |> Maybe.andThen .bookshelfName
+                                |> Maybe.withDefault model.currentBookshelf
+                    in
+                    -- The shelf-row state describes ONE placement, and the copy
+                    -- it described may be the one just removed. Nothing in the
+                    -- removal response says which row the surviving copy stands
+                    -- on, so the rows are forgotten and re-read for it — the
+                    -- same reasoning `forgetShelfRows` records for a failed
+                    -- read. Keeping them would leave the picker naming the row
+                    -- of a copy that is gone, and offering to move it there.
                     ( { model
                         | placements = remaining
                         , placement = primary
                         , removingPlacementId = Nothing
-                        , currentBookshelf =
-                            primary
-                                |> Maybe.andThen .bookshelfName
-                                |> Maybe.withDefault model.currentBookshelf
+                        , currentBookshelf = bookshelfName
                       }
-                    , Effect.none
+                        |> forgetShelfRows
+                    , fetchShelfRows primary bookshelfName maybeToken
                     , PlacementMutated
                     )
 

@@ -6306,6 +6306,15 @@ h4 {
     color: var(--text-muted);
 }
 
+/* A removal that failed, reported next to the roster rather than replacing it.
+   Warmer than the read error above because the list beside it is still good. */
+.groups-detail__member-remove-error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--error);
+    margin-top: var(--space-2);
+}
+
 .book-detail__availability-price,
 .book-detail__price-amount,
 .marketplace-detail__price,

@@ -23,6 +23,7 @@ import Http
 import Page.BookDetail as BookDetail
 import ProgramTest
 import Test exposing (Test, describe, test)
+import Test.Html.Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
@@ -30,6 +31,7 @@ import TestHelpers
         ( bookDetailProgramWithOut
         , simulateBookDetailResponse
         , simulateBookDetailResponseWithPlacement
+        , simulateBookDetailResponseWithPlacements
         , simulateMultiShelfResponse
         , simulatePlacementShelfResponse
         , testBook
@@ -125,6 +127,7 @@ suite =
         , someoneElsesShelfSaysSo
         , oneRowHidesThePicker
         , noPlacementAsksForNothing
+        , removingTheDescribedPlacementRereadsTheBookcase
         ]
 
 
@@ -290,3 +293,63 @@ noPlacementAsksForNothing =
                     , ProgramTest.expectViewHasNot
                         [ Selector.attribute (Html.Attributes.attribute "aria-label" "Target shelf row") ]
                     ]
+
+
+{-| Removing the placement the picker describes must not leave the picker
+describing it.
+
+The picker's state — which row the book is on, and which row to offer first —
+is read off the bookcase for ONE placement. Remove that placement while the
+book still sits elsewhere and the picker keeps naming the row of the copy that
+is gone, offering to move a book that is no longer there. `forgetShelfRows`
+already exists for precisely this reasoning, in the failed-read branch: its own
+comment says leaving stale rows "would offer the reader exactly the options
+that are guaranteed to fail". It simply was not applied here.
+
+Asserted on a second bookcase read being issued, because that is the only way
+the page can learn which row the SURVIVING placement stands on — the removal
+response says nothing about rows.
+
+-}
+removingTheDescribedPlacementRereadsTheBookcase : Test
+removingTheDescribedPlacementRereadsTheBookcase =
+    test "remove_rereads_rows: removing the described copy re-reads the bookcase" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "placement-test-001", bookshelfName = "library" }
+                        , { placementId = "placement-test-002", bookshelfName = "antilibrary" }
+                        ]
+                    )
+                |> ProgramTest.simulateHttpResponse "GET"
+                    bookshelfEndpoint
+                    (simulateMultiShelfResponse
+                        [ { id = "shelf-a", position = 0, placements = [ testPlacement ] }
+                        , { id = "shelf-b", position = 1, placements = [] }
+                        , { id = "shelf-c", position = 2, placements = [] }
+                        ]
+                    )
+                |> ProgramTest.simulateDomEvent
+                    (Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-remove-library") ])
+                    Test.Html.Event.click
+                |> ProgramTest.simulateHttpResponse "DELETE"
+                    "/api/placements/placement-test-001"
+                    (Http.GoodStatus_
+                        { url = "/api/placements/placement-test-001"
+                        , statusCode = 200
+                        , statusText = "OK"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                |> ProgramTest.ensureHttpRequests "GET"
+                    "/api/bookshelves/antilibrary"
+                    (List.length >> Expect.equal 1)
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.equal Nothing model.page.currentShelfId
+                    )

@@ -2,6 +2,7 @@ module Page.Blog.Archive exposing
     ( Model
     , Msg
     , init
+    , previewOf
     , update
     , view
     )
@@ -82,14 +83,56 @@ view model =
         ]
 
 
+{-| How much of a post the archive shows before asking the reader to open it.
+
+Bounded by characters, not by lines. Markdown does not hard-wrap, so a
+paragraph is a single line — taking "the first two lines" took the first two
+paragraphs entire, and a post that opened with a long paragraph printed the
+whole thing into the list.
+
+-}
+previewLimit : Int
+previewLimit =
+    200
+
+
+{-| A bounded, single-line excerpt of a post body, cut at a word boundary and
+marked with an ellipsis when there is more to read.
+-}
+previewOf : String -> String
+previewOf body =
+    let
+        flattened =
+            body
+                |> String.lines
+                |> List.map String.trim
+                |> List.filter (not << String.isEmpty)
+                |> String.join " "
+    in
+    if String.length flattened <= previewLimit then
+        flattened
+
+    else
+        let
+            cut =
+                String.left previewLimit flattened
+
+            atWordBoundary =
+                case List.reverse (String.indexes " " cut) of
+                    lastSpace :: _ ->
+                        String.left lastSpace cut
+
+                    [] ->
+                        cut
+        in
+        atWordBoundary ++ "…"
+
+
 viewPostSummary : BlogPostSummary -> Html Msg
 viewPostSummary post =
     let
         preview =
-            post.body
-                |> String.lines
-                |> List.take 2
-                |> String.join "\n"
+            previewOf post.body
     in
     li [ class "blog-archive__item" ]
         [ a [ href (Route.toPath (BlogPost post.id)), class "blog-archive__link" ]
