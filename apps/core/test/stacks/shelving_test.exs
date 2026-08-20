@@ -971,9 +971,9 @@ defmodule Stacks.ShelvingTest do
 
     test "updates the formats list for an owned placement", %{user: user, placement: placement} do
       assert {:ok, updated} =
-               Shelving.update_placement_formats(placement.id, user.id, ["hardcover"])
+               Shelving.update_placement_formats(placement.id, user.id, ["physical"])
 
-      assert updated.formats == ["hardcover"]
+      assert updated.formats == ["physical"]
     end
 
     test "returns :not_found for a missing placement", %{user: user} do

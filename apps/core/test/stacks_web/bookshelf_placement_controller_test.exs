@@ -490,19 +490,32 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
 
     test "returns 200 with updated formats", %{conn: conn, placement: placement} do
-      conn = put(conn, "/api/placements/#{placement.id}/formats", %{formats: ["hardcover"]})
-      assert %{"placement" => %{"formats" => ["hardcover"]}} = json_response(conn, 200)
+      conn = put(conn, "/api/placements/#{placement.id}/formats", %{formats: ["physical"]})
+      assert %{"placement" => %{"formats" => ["physical"]}} = json_response(conn, 200)
     end
 
     test "returns 200 with multiple formats", %{conn: conn, placement: placement} do
       conn =
         put(conn, "/api/placements/#{placement.id}/formats", %{
-          formats: ["hardcover", "ebook"]
+          formats: ["physical", "ebook"]
         })
 
       response = json_response(conn, 200)
-      assert "hardcover" in response["placement"]["formats"]
+      assert "physical" in response["placement"]["formats"]
       assert "ebook" in response["placement"]["formats"]
+    end
+
+    # These two tests used to send "hardcover" and assert a 200. The endpoint
+    # accepted it because nothing validated the field, and the reader's UI then
+    # could not parse it — the book rendered with every format toggle
+    # unselected. "hardcover" describes an EDITION; a placement records what the
+    # reader owns, where both bindings are `physical`.
+    test "refuses an edition word that the reader's UI cannot render", %{
+      conn: conn,
+      placement: placement
+    } do
+      conn = put(conn, "/api/placements/#{placement.id}/formats", %{formats: ["hardcover"]})
+      assert %{"errors" => %{"formats" => _}} = json_response(conn, 422)
     end
 
     test "returns 403 when user tries to update another user's placement formats", %{

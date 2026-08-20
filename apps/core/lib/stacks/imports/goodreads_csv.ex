@@ -124,16 +124,37 @@ defmodule Stacks.Imports.GoodreadsCsv do
       Goodreads bindings mapped onto the platform's format vocabulary; anything
       unrecognised is left off rather than guessed.
   """
+  # Goodreads' Binding vocabulary, as data rather than control flow — the list
+  # only grows, and every addition is one row rather than one branch.
+  @binding_formats %{
+    "paperback" => "physical",
+    "hardcover" => "physical",
+    "mass market paperback" => "physical",
+    "board book" => "physical",
+    "library binding" => "physical",
+    "spiral-bound" => "physical",
+    "kindle edition" => "ebook",
+    "ebook" => "ebook",
+    "audiobook" => "audiobook",
+    "audio cd" => "audiobook",
+    "audible audio" => "audiobook"
+  }
+
+  @doc """
+      A Goodreads Binding, mapped onto the vocabulary
+      `bookshelf_placements.formats` accepts (`Stacks.Shelving.placement_formats/0`).
+
+      Binding is an EDITION property and the target is an OWNERSHIP one, so the
+      mapping is deliberately lossy: hardcover, paperback and board book all
+      become `physical`, because the shelf toggles never ask which binding a
+      reader holds. Passing the Goodreads word through unchanged stored values
+      the reader's UI could not parse.
+
+      Returns `nil` for a binding with no sensible mapping, which the caller
+      drops rather than guessing at.
+  """
   @spec format_for(String.t()) :: String.t() | nil
   def format_for(binding) do
-    case String.downcase(to_string(binding)) do
-      "paperback" -> "paperback"
-      "hardcover" -> "hardcover"
-      "kindle edition" -> "ebook"
-      "ebook" -> "ebook"
-      "audiobook" -> "audiobook"
-      "audio cd" -> "audiobook"
-      _ -> nil
-    end
+    Map.get(@binding_formats, String.downcase(to_string(binding)))
   end
 end
