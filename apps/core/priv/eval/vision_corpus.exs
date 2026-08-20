@@ -22,7 +22,12 @@
     path: "images/barcode_isbn_clean.jpg",
     stratum: :clean_barcode,
     expect_book: true,
-    expect_isbn: "9780061470769"
+    # The Name of the Rose (Umberto Eco) — this fixture's actual subject, per
+    # `upload.spec.ts` ("identifies The Name of the Rose from
+    # barcode_isbn_clean.jpg"). NOT 9780061470769, which is Bird Lake Moon and
+    # appears only in the manual-ISBN-entry specs; the corpus plan conflated the
+    # two, and the model was right where this label was wrong.
+    expect_isbn: "9780156001311"
   },
   %{
     name: "not_a_book",

@@ -20,8 +20,11 @@ or synthetic.
 Six committed fixtures, already labelled twice over — class labels in
 `scripts/probe-production.sh:18-26` (`barcode`, `not_a_book`, `reversed`,
 `reversed_cutoff`, `obscured`, `mixed_text`) and identity ground truth in
-`e2e/tests/upload.spec.ts` (expected titles/authors per image, plus ISBN
-`9780061470769`).
+`e2e/tests/upload.spec.ts` (expected titles/authors per image; the barcode fixture is
+The Name of the Rose, ISBN `9780156001311`). ⚠️ This paragraph previously cited
+`9780061470769` as the fixture's ISBN. That is Bird Lake Moon, which appears only in the
+manual-ISBN-entry specs — the two were conflated, and the error was copied into the eval
+corpus before the first real run caught it.
 
 That is a real, legally clean seed set and it is enough to detect *breakage*. It is not
 enough to measure *accuracy*, for one arithmetic reason: **on six samples, every

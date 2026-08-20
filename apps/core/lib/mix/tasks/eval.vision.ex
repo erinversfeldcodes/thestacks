@@ -46,6 +46,7 @@ defmodule Mix.Tasks.Eval.Vision do
     {cli, _, _} = OptionParser.parse(argv, strict: @switches)
 
     corpus = load_corpus(Keyword.get(cli, :corpus))
+    point_client_at_configured_service()
 
     if skip?() do
       skip_or_fail()
@@ -53,6 +54,20 @@ defmodule Mix.Tasks.Eval.Vision do
       results = Enum.map(corpus, &score_image/1)
       report(results)
       gate(results, Keyword.get(cli, :record, false))
+    end
+  end
+
+  # `config/runtime.exs` only reads VISION_SERVICE_URL when PHX_SERVER is set, so
+  # outside a running server the compile-time default (`http://localhost:8000`)
+  # wins and every call dies on econnrefused against a service that was never
+  # there. Setting the env var is how you say "score THIS deployment", and this
+  # is the task that acts on it — otherwise the variable silently means nothing
+  # and the failures look like the model rather than the wiring.
+  defp point_client_at_configured_service do
+    case System.get_env("VISION_SERVICE_URL") do
+      nil -> :ok
+      "" -> :ok
+      url -> Application.put_env(:core, :vision_service_url, url)
     end
   end
 
@@ -89,39 +104,42 @@ defmodule Mix.Tasks.Eval.Vision do
       {:ok, bytes} ->
         b64 = Base.encode64(bytes)
 
-        classified = classify(b64)
-        isbn = if item.expect_isbn, do: extract(b64), else: :not_checked
+        case analyze(b64) do
+          {:error, reason} ->
+            Map.merge(item, %{ok: false, detail: "call failed: #{inspect(reason)}"})
 
-        book_ok = classified == item.expect_book
-        isbn_ok = isbn == :not_checked or isbn == item.expect_isbn
+          {classified, isbns} ->
+            book_ok = classified == item.expect_book
+            isbn_ok = is_nil(item.expect_isbn) or item.expect_isbn in isbns
 
-        Map.merge(item, %{
-          ok: book_ok and isbn_ok,
-          detail: "is_book=#{inspect(classified)} isbn=#{inspect(isbn)}"
-        })
+            Map.merge(item, %{
+              ok: book_ok and isbn_ok,
+              detail: "is_book=#{classified} isbns=#{inspect(Enum.take(isbns, 3))}"
+            })
+        end
     end
   end
 
-  # The sidecar contract, matched to how production already reads it in
-  # `Stacks.Moderation`: /classify answers with a CLASSIFICATION_RESULT_* enum
-  # rather than a boolean, and /extract answers with a list of candidate books
-  # each carrying `potential_isbns`. Anything AMBIGUOUS is deliberately scored as
-  # "not a book" — the upload path cannot shelve an ambiguous result either, so
-  # counting it as a hit would flatter the model against what a reader gets.
-  defp classify(b64) do
-    case Client.call_vision("is_book", %{image_b64: b64}) do
-      {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} -> true
-      {:ok, %{"classification" => _other}} -> false
-      other -> {:error, other}
-    end
-  end
+  # The production seam exactly: `Stacks.Moderation` posts `%{image: b64}` to
+  # /analyze and reads a CLASSIFICATION_RESULT_* enum plus a `books` list, each
+  # entry carrying `potential_isbns`. One call answers both questions this corpus
+  # asks. Scoring against a different endpoint or payload shape would measure
+  # something no reader ever exercises — an earlier draft called /classify with
+  # `%{image_b64: ...}` and got `malformed_request` from a perfectly healthy
+  # service, which reads as a model failure and is not one.
+  #
+  # AMBIGUOUS counts as "not a book": the upload path cannot shelve an ambiguous
+  # result either, so scoring it as a hit would flatter the model against what a
+  # reader actually gets.
+  defp analyze(b64) do
+    case Client.call_vision("analyze", %{image: b64}) do
+      {:ok, %{"classification" => classification} = resp} ->
+        isbns =
+          resp
+          |> Map.get("books", [])
+          |> Enum.flat_map(fn b -> Map.get(b, "potential_isbns") || [] end)
 
-  defp extract(b64) do
-    case Client.call_vision("extract_isbn", %{image_b64: b64}) do
-      {:ok, %{"books" => books}} when is_list(books) ->
-        books
-        |> Enum.flat_map(fn b -> Map.get(b, "potential_isbns") || [] end)
-        |> List.first()
+        {classification == "CLASSIFICATION_RESULT_BOOK", isbns}
 
       other ->
         {:error, other}
