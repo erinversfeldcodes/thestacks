@@ -933,6 +933,24 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 ---
 
+#### US-1.1.10 -- Notice When Book Recognition Gets Worse
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A scored, labelled corpus run against the real vision service, so that a regression in book recognition is caught by a failing gate rather than by readers noticing their uploads stopped working. Gates on **no regression against a recorded baseline** rather than an absolute accuracy threshold — on six fixtures one image changing its mind moves a percentage by 16.7 points, which reads as rigour and behaves as noise. |
+| **Phase** | Phase 1 (extended) |
+| **Phase note** | Corpus expansion to ~120 images (per `docs/vision-eval-corpus-plan.md`) is deferred to Phase 2, when per-stratum absolute thresholds become defensible. |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None — this protects the upload path (US-1.1.1, US-1.1.3) rather than adding a surface. |
+| **Backend (Phoenix)** | `mix eval.vision` calls the production seam `Stacks.AI.Client.call_vision/2` against `/analyze`, exactly as `Stacks.Moderation` does. Corpus at `priv/eval/vision_corpus.exs`; baseline at `priv/eval/vision_baseline.json`. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal — the deployed vision service. With no `VISION_SERVICE_URL` the task SKIPS and says so; `EVAL_VISION_REQUIRED=1` turns that skip into a failure for callers that need it enforced. |
+| **dbt Models** | None. |
+
 #### US-1.5.5 -- Browse the Whole Catalogue and Shelve What You Find
 
 | Dimension | Detail |
@@ -2258,6 +2276,75 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 ### 16. Error Handling
 
 ---
+
+#### US-15.6.1 -- Read What the Platform Is and Why
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A public page explaining what The Stacks is, what it refuses to do, and on what terms the source is available. It is the page a stranger lands on before deciding whether to trust anything else. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.About`, routed at `/about` via `Navigation.Route`. Static prose; no fetch. Links onward to the cost and metrics surfaces. |
+| **Backend (Phoenix)** | None — served by the SPA shell. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-15.6.2 -- See What the Platform Costs to Run
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A public page itemising what this platform actually costs its owner to operate, per provider, for the current period. Published because a reader deciding whether to trust a free service is entitled to know how it is paid for. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.CostTransparency`, routed at `/costs`. Fetches on init; `RemoteData` through Loading → Success/Failure. |
+| **Backend (Phoenix)** | `GET /api/costs` -> `StacksWeb.CostController`. Line items built by `Stacks.Costs`, refreshed by `Stacks.Workers.RefreshCostsJob`. |
+| **Database** | Read: the current period's cost line items. |
+| **Jobs (Oban)** | `Stacks.Workers.RefreshCostsJob` — recomputes the period's items from live usage counts. |
+| **External Services** | None at read time; the figures are derived from measured usage and provider rates rather than fetched per request. |
+| **dbt Models** | None. |
+
+#### US-15.6.3 -- Read What the Platform Measures About You
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | The data-transparency essay: what is collected, what is deliberately not, and the reasoning behind each choice. The companion to the metrics surface, which shows the numbers this page explains. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.DataTransparency`, routed at `/transparency`. Static prose; no fetch. Reached from the metrics page and from `Page.Architecture`. |
+| **Backend (Phoenix)** | None — served by the SPA shell. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-15.6.4 -- Read How the Platform Is Built
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | The architecture essay: the shape of the system, the decisions behind it, and why a decision without its reasoning is indistinguishable from an accident six months later. |
+| **Phase** | Phase 1 (extended) |
+| **Phase note** | Content is owner-authored; five editorial markers remain live on the page (RL-067). |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Architecture`, routed at `/architecture`. Static prose; no fetch. Links onward to `/metrics` and `/transparency`. |
+| **Backend (Phoenix)** | None — served by the SPA shell. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
 
 #### US-16.1.1 -- View the 404 Not Found Page
 
