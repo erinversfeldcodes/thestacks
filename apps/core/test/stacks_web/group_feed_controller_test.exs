@@ -38,7 +38,12 @@ defmodule StacksWeb.GroupFeedControllerTest do
       assert Map.has_key?(resp, "next_cursor")
     end
 
-    test "returns 403 for non-member", %{conn: conn} do
+    # 404 rather than 403: an invite-only group must not confirm its own
+    # existence to someone outside it. `GET /api/groups/:id` and the members
+    # list already answer this way and say so in their own comments; the feed
+    # answered 403, which told a stranger the group was real and that they were
+    # simply not in it.
+    test "returns 404 for non-member, not 403", %{conn: conn} do
       owner = insert(:user)
       outsider = insert(:user)
       {:ok, group} = Social.create_group(owner.id, %{name: "Private", type: "close_friends"})
@@ -46,7 +51,7 @@ defmodule StacksWeb.GroupFeedControllerTest do
       conn
       |> auth_conn(outsider)
       |> get("/api/groups/#{group.id}/feed")
-      |> json_response(403)
+      |> json_response(404)
     end
 
     test "returns 401 without auth", %{conn: conn} do

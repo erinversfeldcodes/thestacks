@@ -495,7 +495,15 @@ defmodule Stacks.Social do
         end
 
       _group ->
-        {:error, :unauthorized}
+        # A member who is not the owner already knows the group exists, so
+        # "you are not the owner" is an honest answer to them. A non-member must
+        # not learn it exists at all, and gets the same 404 the rest of the
+        # group surface gives.
+        if member?(group_id, caller_id) do
+          {:error, :unauthorized}
+        else
+          {:error, :not_found}
+        end
     end
   end
 
@@ -658,7 +666,10 @@ defmodule Stacks.Social do
         if member?(group_id, viewer_id) do
           build_feed(group_id, viewer_id, opts)
         else
-          {:error, :unauthorized}
+          # 404, not 403, to someone outside an invite-only group — the same
+          # answer `GET /api/groups/:id` and the members list already give. A 403
+          # confirms the group exists to a caller not entitled to know that.
+          {:error, :not_found}
         end
     end
   end

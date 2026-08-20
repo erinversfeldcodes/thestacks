@@ -592,6 +592,20 @@ defmodule Stacks.SocialTest do
       assert {:error, :unauthorized} = Social.remove_member(group.id, member.id, target.id)
     end
 
+    test ":not_found — not :unauthorized — when the caller is not in the group" do
+      # A member who is not the owner gets :unauthorized above, which is honest:
+      # they already know the group exists. A stranger must not learn that, so
+      # they get the same answer as for a group that does not exist.
+      owner = insert(:user)
+      stranger = insert(:user)
+      target = insert(:user)
+      {:ok, group} = Social.create_group(owner.id, %{name: "Group", type: "close_friends"})
+      {:ok, inv} = Social.invite_member(group.id, owner.id, target.email)
+      {:ok, _} = Social.accept_invitation(inv.id, target.id)
+
+      assert {:error, :not_found} = Social.remove_member(group.id, stranger.id, target.id)
+    end
+
     test ":not_found for non-member target" do
       owner = insert(:user)
       stranger = insert(:user)
