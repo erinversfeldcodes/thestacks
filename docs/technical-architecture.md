@@ -680,7 +680,7 @@ models/
 │   ├── stg_price_snapshots.sql       # Price snapshots per store
 │   ├── stg_event_log.sql             # All staging models are proto-generated
 │   ├── stg_source_health_checks.sql  # via `mix proto.sync`
-│   └── ... (30 total staging views)
+│   └── ... (41 total staging views)
 │
 ├── intermediate/                     # Semantic aggregates (domain-meaningful joins)
 │   ├── int_price_trends.sql          # Price over time per edition per store (incremental)
@@ -697,7 +697,7 @@ models/
     ├── mart_book_prices.sql          # Price comparison consumer
     ├── mart_data_quality_trend.sql   # Metrics dashboard: 12-week sparklines
     ├── mart_system_health.sql        # Metrics dashboard: uptime, latency
-    └── ... (16+ mart models)
+    └── ... (15 total mart models)
 ```
 
 **Materialisation strategy (ADR 010):**

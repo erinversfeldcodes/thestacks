@@ -7,6 +7,7 @@ bash "$REPO_ROOT/scripts/check-outbound-test-default.sh"
 bash "$REPO_ROOT/scripts/check-route-clients.sh"
 bash "$REPO_ROOT/scripts/check-mapping-truth.sh"
 bash "$REPO_ROOT/scripts/check-oban-queue-drift.sh"
+bash "$REPO_ROOT/scripts/check-dbt-model-drift.sh"
 
 mix format --check-formatted
 mix credo --strict
