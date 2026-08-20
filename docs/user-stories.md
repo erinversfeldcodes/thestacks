@@ -1,6 +1,6 @@
 # The Stacks — User Stories
 
-> An open-source, self-hosted book management and discovery platform.
+> A source-available, self-hosted book management and discovery platform.
 > Dark-academic-meets-cottage-core aesthetic, built in Elm.
 
 ---
