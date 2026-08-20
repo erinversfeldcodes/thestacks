@@ -263,6 +263,31 @@ defmodule StacksWeb.AdminControllerTest do
       assert Stacks.Accounts.get_user(target.id)
     end
 
+    test "the refused reason is not stored by the audit plug on the way out", %{conn: conn} do
+      {conn, admin, _session} = setup_full_admin(conn)
+      target = insert(:user)
+
+      post(conn, "/api/admin/gdpr_erase", %{
+        user_id: target.id,
+        reason: "erasing at the request of jane@example.com, ticket 4417"
+      })
+
+      # The controller refuses this reason precisely because an audit row
+      # outlives the erasure it authorises. The admin-call plug writes
+      # `conn.params["reason"]` into that same audit row from a
+      # `register_before_send` hook — which still runs on the 422. A guard that
+      # refuses the data and then stores it anyway has guarded nothing.
+      {entries, _total, _page, _per_page} = Stacks.Audit.list_for_user(admin.id)
+
+      leaked =
+        entries
+        |> Enum.flat_map(fn e -> [e.metadata[:reason], e.metadata["reason"]] end)
+        |> Enum.filter(&is_binary/1)
+
+      refute Enum.any?(leaked, &String.contains?(&1, "jane@example.com")),
+             "the audit metadata kept the address the guard refused: #{inspect(leaked)}"
+    end
+
     test "accepts a reason that references a ticket instead of a person", %{conn: conn} do
       {conn, _admin, _session} = setup_full_admin(conn)
       target = insert(:user)
