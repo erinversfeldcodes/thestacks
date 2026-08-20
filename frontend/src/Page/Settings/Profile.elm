@@ -39,6 +39,7 @@ import Html.Attributes exposing (class, href, placeholder, type_, value)
 import Html.Events exposing (onInput)
 import Http
 import Navigation.Route as Route
+import Set exposing (Set)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (User)
 
@@ -57,7 +58,7 @@ type alias Model =
     , savingProfile : RemoteData Api.ProfileError ()
     , savingLocation : RemoteData Http.Error ()
     , account : RemoteData Http.Error ()
-    , edited : Bool
+    , touched : Set String
     , pendingEmail : Maybe String
     }
 
@@ -116,7 +117,7 @@ seedFromSession user =
     , savingLocation = NotAsked
     , account = NotAsked
     , pendingEmail = Nothing
-    , edited = False
+    , touched = Set.empty
     }
 
 
@@ -175,24 +176,47 @@ than the stale field it was sent to fix.
 -}
 hydrate : Api.Account -> Model -> Model
 hydrate account model =
-    if model.edited then
-        -- A typed edit outranks the fetch for the FORM fields, but whether a
-        -- change is waiting on confirmation is server truth with no local
-        -- rival — the panel always follows the account.
-        { model | pendingEmail = account.pendingEmail }
+    let
+        -- A typed edit outranks the fetch for THAT field only.
+        --
+        -- This used to be a single `edited` flag that skipped hydration
+        -- wholesale, which quietly re-created the data loss this module exists
+        -- to prevent: one keystroke anywhere before the response landed left
+        -- every other field holding the boot blob — and the blob carries no
+        -- website at all (`websiteUrl = ""`) and a stale handle, country and
+        -- city. `AccountReceived` then set `account = Success ()` regardless, so
+        -- `savable` unlocked both Save buttons over those blanks and the reader
+        -- wrote them across values they had never seen.
+        --
+        -- Per-field means the reader keeps exactly what they typed and the
+        -- server fills everything else, so no save can carry an unseen blank.
+        keep field serverValue current =
+            if Set.member field model.touched then
+                current
 
-    else
-        { model
-            | displayName = account.displayName
-            , handle = account.handle
-            , initialHandle = account.handle
-            , email = account.email
-            , initialEmail = account.email
-            , websiteUrl = account.websiteUrl
-            , countryCode = account.countryCode
-            , city = account.city
-            , pendingEmail = account.pendingEmail
-        }
+            else
+                serverValue
+
+        newHandle =
+            keep "handle" account.handle model.handle
+
+        newEmail =
+            keep "email" account.email model.email
+    in
+    { model
+        | displayName = keep "displayName" account.displayName model.displayName
+        , handle = newHandle
+        , initialHandle = account.handle
+        , email = newEmail
+        , initialEmail = account.email
+        , websiteUrl = keep "websiteUrl" account.websiteUrl model.websiteUrl
+        , countryCode = keep "countryCode" account.countryCode model.countryCode
+        , city = keep "city" account.city model.city
+
+        -- Whether a change is waiting on confirmation is server truth with no
+        -- local rival — the panel always follows the account.
+        , pendingEmail = account.pendingEmail
+    }
 
 
 {-| May this form write? Only once it has read what it would be writing over.
@@ -242,25 +266,25 @@ update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetDisplayName val ->
-            ( { model | displayName = val, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | displayName = val, savingProfile = NotAsked, touched = Set.insert "displayName" model.touched }, Cmd.none, NoOut )
 
         SetHandle val ->
-            ( { model | handle = val, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | handle = val, savingProfile = NotAsked, touched = Set.insert "handle" model.touched }, Cmd.none, NoOut )
 
         SetEmail val ->
-            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked, touched = Set.insert "email" model.touched }, Cmd.none, NoOut )
 
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked, touched = Set.insert "currentPassword" model.touched }, Cmd.none, NoOut )
 
         SetWebsiteUrl val ->
-            ( { model | websiteUrl = val, savingProfile = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | websiteUrl = val, savingProfile = NotAsked, touched = Set.insert "websiteUrl" model.touched }, Cmd.none, NoOut )
 
         SetCountryCode val ->
-            ( { model | countryCode = val, savingLocation = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | countryCode = val, savingLocation = NotAsked, touched = Set.insert "countryCode" model.touched }, Cmd.none, NoOut )
 
         SetCity val ->
-            ( { model | city = val, savingLocation = NotAsked, edited = True }, Cmd.none, NoOut )
+            ( { model | city = val, savingLocation = NotAsked, touched = Set.insert "city" model.touched }, Cmd.none, NoOut )
 
         SaveProfile ->
             if emailChanged model && String.isEmpty (String.trim model.currentPassword) then

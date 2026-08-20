@@ -38,6 +38,7 @@ suite =
         , responseWinsOverBlob
         , responseRebaselinesTheEmailComparison
         , anEditIsNotClobbered
+        , typingOneFieldDoesNotBlankTheRest
         , failureSaysSoRatherThanLying
         , savesAreShutUntilTheAccountArrives
         , savesStayShutAfterAFailedRead
@@ -204,6 +205,36 @@ anEditIsNotClobbered =
                 |> ProgramTest.simulateHttpOk "GET" "/api/auth/me" serverJson
                 |> ProgramTest.expectModel
                     (\model -> model.city |> Expect.equal "Edinburgh")
+
+
+typingOneFieldDoesNotBlankTheRest : Test
+typingOneFieldDoesNotBlankTheRest =
+    test "typing in one field still lets the server fill the others" <|
+        \() ->
+            -- The reader types a city before the account lands. Every OTHER
+            -- field must still take the server's value.
+            --
+            -- This is the data-loss path: hydration used to be all-or-nothing on
+            -- a single `edited` flag, so one keystroke left the whole form on the
+            -- boot blob — which carries NO website at all — while
+            -- `AccountReceived` unlocked both Save buttons anyway. Saving then
+            -- wrote `websiteUrl = ""` and a stale handle over values the reader
+            -- had never seen. The website is the sharp assertion: the blob cannot
+            -- carry one, so `""` here means the blank would have been saved.
+            start
+                |> ProgramTest.update (SetCity "Edinburgh")
+                |> ProgramTest.simulateHttpOk "GET" "/api/auth/me" serverJson
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.all
+                            [ \m -> m.city |> Expect.equal "Edinburgh"
+                            , \m -> m.websiteUrl |> Expect.notEqual ""
+                            , \m -> m.websiteUrl |> Expect.equal "https://ada.dev"
+                            , \m -> m.handle |> Expect.equal "ada"
+                            , \m -> m.countryCode |> Expect.equal "GB"
+                            ]
+                            model
+                    )
 
 
 failureSaysSoRatherThanLying : Test
