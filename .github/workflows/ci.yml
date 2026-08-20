@@ -255,6 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: scripts/check-mapping-truth.sh
+      - run: scripts/check-public-route-metering.sh
       - run: scripts/check-oban-queue-drift.sh
       - run: scripts/check-dbt-model-drift.sh
       - run: scripts/check-phase-scheme.sh

@@ -108,8 +108,12 @@ defmodule CoreWeb.Router do
     get "/feeds/:user_id/:bookshelf_name", FeedController, :show
   end
 
+  # Anonymous reads, metered. This scope carried no rate limiter while every
+  # sibling public scope had one, so the catalogue, the listings and the blog
+  # archive were the endpoints anyone could poll without limit — the heaviest
+  # of them by a distance. Guarded by scripts/check-public-route-metering.sh.
   scope "/api", StacksWeb do
-    pipe_through [:api, :optional_auth]
+    pipe_through [:api, :optional_auth, :rate_limit_public]
     get "/third-spaces", ThirdSpaceController, :index
     get "/books/:id/availability", BookAvailabilityController, :show
     get "/books/:id/prices", BookPriceController, :show

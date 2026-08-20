@@ -708,7 +708,7 @@ defmodule Stacks.Social do
           book_id: b.id,
           book_title: b.title,
           user_id: u.id,
-          user_display_name: u.display_name,
+          user_display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
           occurred_at: p.placed_at
         }
       )
@@ -739,7 +739,7 @@ defmodule Stacks.Social do
           post_title: post.title,
           post_visibility: post.visibility,
           user_id: u.id,
-          user_display_name: u.display_name,
+          user_display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
           occurred_at: post.published_at
         }
       )

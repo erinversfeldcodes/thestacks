@@ -190,7 +190,7 @@ defmodule Stacks.Blog do
     query
     |> Repo.all()
     |> Repo.preload(:user)
-    |> Enum.filter(&Visibility.can_view?(&1, viewer))
+    |> Visibility.filter_visible(viewer)
   end
 
   @doc """
@@ -228,7 +228,7 @@ defmodule Stacks.Blog do
     )
     |> Repo.all()
     |> Repo.preload(:user)
-    |> Enum.filter(&Visibility.can_view?(&1, viewer))
+    |> Visibility.filter_visible(viewer)
   end
 
   @doc """
@@ -246,7 +246,7 @@ defmodule Stacks.Blog do
       distinct: true
     )
     |> Repo.all()
-    |> Enum.filter(&Visibility.can_view?(&1, viewer))
+    |> Visibility.filter_visible(viewer)
   end
 
   @doc """

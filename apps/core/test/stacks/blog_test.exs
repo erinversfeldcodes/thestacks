@@ -393,4 +393,64 @@ defmodule Stacks.BlogTest do
       assert Blog.book_ids_with_user_writing(user.id, []) == []
     end
   end
+
+  describe "public post listing — cost per request" do
+    # The public archive is anonymous and the list is capped at 50, so the
+    # per-request query count is the whole cost story. Filtering visibility one
+    # post at a time issues a block lookup PER POST for a signed-in viewer;
+    # Visibility already has a batch context that collapses those to one lookup
+    # per distinct author, and this pins that it is actually used.
+    test "issues a bounded number of queries regardless of how many posts there are" do
+      viewer = insert(:user)
+
+      authors = for _ <- 1..10, do: insert(:user, profile_visibility: "public")
+
+      for author <- authors, _ <- 1..2 do
+        insert(:post,
+          user: author,
+          visibility: "public",
+          published_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        )
+      end
+
+      count = count_queries(fn -> Blog.list_public_posts({:platform_user, viewer.id}) end)
+
+      # 20 posts by 10 authors. One post query, one preload, and block lookups
+      # that must be per-author at worst — not per-post.
+      assert count <= 13,
+             "#{count} queries for 20 posts by 10 authors — visibility is being " <>
+               "resolved per post rather than per author"
+    end
+
+    defp count_queries(fun) do
+      ref = make_ref()
+      test_pid = self()
+
+      # Count only the queries this process issues. A telemetry handler runs in
+      # the process that emitted the event, so comparing against the test pid
+      # filters out every other async test's queries — without this the count
+      # was 119 in a full run and 12 in a single-file run, i.e. it was measuring
+      # the suite rather than the function.
+      :telemetry.attach(
+        "query-counter-#{inspect(ref)}",
+        [:core, :repo, :query],
+        fn _, _, _, _ ->
+          if self() == test_pid, do: send(test_pid, {ref, :query})
+        end,
+        nil
+      )
+
+      fun.()
+      :telemetry.detach("query-counter-#{inspect(ref)}")
+      drain(ref, 0)
+    end
+
+    defp drain(ref, n) do
+      receive do
+        {^ref, :query} -> drain(ref, n + 1)
+      after
+        0 -> n
+      end
+    end
+  end
 end

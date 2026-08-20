@@ -287,6 +287,11 @@ defmodule Stacks.Visibility do
 
   defp get_resource_visibility(_), do: "owner"
 
+  # Use the association when the caller already preloaded it. Without this
+  # clause the profile-ceiling check re-fetched the author of every row even
+  # though the list query had just preloaded them — one query per post, on top
+  # of the block lookups.
+  defp load_user(%{user: %{profile_visibility: _} = user}), do: user
   defp load_user(%{user_id: user_id}), do: Accounts.get_user(user_id)
   defp load_user(_), do: nil
 
@@ -362,14 +367,31 @@ defmodule Stacks.Visibility do
     Enum.filter(placements, &(resolve_placement(&1, viewer, ctx) == :visible))
   end
 
-  defp build_batch_context(placements, viewer) do
+  @doc """
+      Filters any list of owned resources to those `viewer` may see, resolving
+      the shared lookups ONCE for the whole list rather than once per resource.
+
+      The per-resource path issues a block lookup for every row, so a 50-post
+      archive cost a signed-in reader 50 of them. `filter_visible_placements/2`
+      already had the batch context; this is the same thing for resources that
+      are not placements. Order is preserved and the result is unbounded —
+      callers cap.
+  """
+  @spec filter_visible([map()], term()) :: [map()]
+  def filter_visible(resources, viewer) when is_list(resources) do
+    ctx = build_batch_context(resources, viewer)
+    viewer_id = batch_viewer_id(viewer)
+    Enum.filter(resources, &(do_resolve(&1, viewer, viewer_id, ctx) == :visible))
+  end
+
+  defp build_batch_context(resources, viewer) do
     viewer_id = batch_viewer_id(viewer)
 
     blocks =
       if is_nil(viewer_id) do
         %{}
       else
-        placements
+        resources
         |> Enum.map(&get_owner_id/1)
         |> Enum.reject(&is_nil/1)
         |> Enum.uniq()
