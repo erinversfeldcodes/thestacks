@@ -52,6 +52,46 @@ defmodule Core.PromEx.Plugins.Stacks do
   def event_metrics(_opts) do
     [
       Event.build(:stacks_app_metrics, [
+        # These five were declared in `CoreWeb.Telemetry.metrics/0`, which has NO
+        # reporter — its supervisor's only child is the poller. So every one of
+        # them was emitted, counted by nothing, and on no dashboard: the prose
+        # written for them described series that did not exist. The plugin is
+        # where a metric becomes observable, so they are declared here too.
+        counter(
+          [:stacks, :auth, :password_reset, :count, :total],
+          event_name: [:stacks, :auth, :password_reset],
+          description:
+            "Password reset requests by outcome. The rate_limited series is the count of readers who asked for a link and were silently sent nothing.",
+          tags: [:outcome]
+        ),
+        counter(
+          [:stacks, :auth, :confirmation_resend, :count, :total],
+          event_name: [:stacks, :auth, :confirmation_resend],
+          description:
+            "Confirmation resend requests by outcome (sent/rate_limited/no_account/already_confirmed/past_renewal_ceiling).",
+          tags: [:outcome]
+        ),
+        counter(
+          [:stacks, :auth, :email_change, :count, :total],
+          event_name: [:stacks, :auth, :email_change],
+          description:
+            "Email change flow by outcome. The reverted series is readers saying a change to their account was not theirs.",
+          tags: [:outcome]
+        ),
+        counter(
+          [:stacks, :blog, :association, :count, :total],
+          event_name: [:stacks, :blog, :association],
+          description:
+            "Blog book-association job outcomes — no_consent counts the posts whose text was never sent to an external model.",
+          tags: [:outcome]
+        ),
+        last_value(
+          [:stacks, :accounts, :email_change_lapsed, :degraded],
+          event_name: [:stacks, :accounts, :email_change_lapsed],
+          measurement: :degraded,
+          description:
+            "Accounts the daily sweep degraded because neither address answered an email change inside the grace window."
+        ),
         counter(
           [:stacks, :events, :emitted, :count, :total],
           event_name: [:stacks, :events, :emitted],
@@ -321,6 +361,24 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :image, :orphan],
           measurement: :count,
           description: "Images past expiry still in the DB (retention-gap alarm)."
+        ),
+        # The export pair mirrors the image pair above. `:orphan` fires when a
+        # complete copy of one reader's personal data outlived its deletion
+        # deadline — the one number in that module that has to be visible, and
+        # it was being emitted into nothing: declared at the call site, reported
+        # by no plugin, so unobservable outside a log line.
+        sum(
+          [:stacks, :gdpr, :export, :expired, :count, :total],
+          event_name: [:stacks, :gdpr, :export, :expired],
+          measurement: :count,
+          description: "Export archives purged past their deadline by the TTL sweep."
+        ),
+        sum(
+          [:stacks, :gdpr, :export, :orphan, :count, :total],
+          event_name: [:stacks, :gdpr, :export, :orphan],
+          measurement: :count,
+          description:
+            "Export archives past expiry that could NOT be deleted — a copy of a reader's personal data outliving its deadline (retention-gap alarm)."
         ),
         counter(
           [:stacks, :gdpr, :audit, :write, :count, :total],
