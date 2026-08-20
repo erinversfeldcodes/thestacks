@@ -128,9 +128,13 @@ defmodule Mix.Tasks.Eval.Vision do
   # `%{image_b64: ...}` and got `malformed_request` from a perfectly healthy
   # service, which reads as a model failure and is not one.
   #
-  # AMBIGUOUS counts as "not a book": the upload path cannot shelve an ambiguous
-  # result either, so scoring it as a hit would flatter the model against what a
-  # reader actually gets.
+  # proto-enum-coverage: ClassificationResult ignore
+  #   CLASSIFICATION_RESULT_AMBIGUOUS, CLASSIFICATION_RESULT_NOT_BOOK
+  #   — this comparison answers one question, "did the model call this a book?",
+  #   and for both the answer is no. AMBIGUOUS counts as "not a book" because the
+  #   upload path cannot shelve an ambiguous result either, so scoring it as a
+  #   hit would flatter the model against what a reader actually gets. Naming
+  #   them separately would let the two agree in the enum and disagree here.
   defp analyze(b64) do
     case Client.call_vision("analyze", %{image: b64}) do
       {:ok, %{"classification" => classification} = resp} ->
