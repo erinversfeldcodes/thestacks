@@ -12,6 +12,7 @@ port module Main exposing
     , PendingLogout
     , StoredAuth(..)
     , StoredAuthResolution(..)
+    , adminGateAfterEnding
     , adoptExternalAuth
     , applyPendingUndo
     , arrivalForBoot
@@ -2845,12 +2846,7 @@ update msg model =
                     ( withChrome, Cmd.map AdminChromeMsg subCmd )
 
                 AdminChrome.SessionEnded ->
-                    ( { withChrome
-                        | adminAuth = Nothing
-                        , page = PageAdminGate model.route (AdminSession.initWithNotice adminSessionEndedNotice)
-                      }
-                    , Cmd.map AdminChromeMsg subCmd
-                    )
+                    ( endAdminSession withChrome, Cmd.map AdminChromeMsg subCmd )
 
         AdminRemovalRequestsMsg subMsg ->
             case model.page of
@@ -4471,9 +4467,37 @@ the operator to the admin login with a notice.
 -}
 handleAdminSessionExpiry : Model -> ( Model, Cmd Msg )
 handleAdminSessionExpiry model =
-    ( { model
+    ( endAdminSession model, Cmd.none )
+
+
+{-| Drop the admin token and put the operator back on the admin gate, told why.
+
+⛔ One construction site on purpose. There are two ways an admin session ends —
+the operator ends it from the chrome, or an admin call 401s mid-action — and
+they were built separately: the deliberate one passed the notice, and the
+expiry one passed a bare `AdminSession.init`. So the operator who chose to sign
+out got an explanation, and the one who was signed out mid-action got a login
+form with no account of what had happened to them. Both now go through here, so
+the two cannot drift apart again.
+
+-}
+endAdminSession : Model -> Model
+endAdminSession model =
+    { model
         | adminAuth = Nothing
-        , page = PageAdminGate model.route AdminSession.init
-      }
-    , Cmd.none
-    )
+        , page = adminGateAfterEnding model.route
+    }
+
+
+{-| The gate page an operator lands on once their admin session is over —
+carrying the notice that says which session ended.
+
+Split out from `endAdminSession` because a `Model` holds a `Nav.Key`, which no
+test can construct, so the whole updater is untestable by construction. This
+half — _which page, with what on it_ — is the half that was wrong, and it is
+testable.
+
+-}
+adminGateAfterEnding : Route -> Page
+adminGateAfterEnding route =
+    PageAdminGate route (AdminSession.initWithNotice adminSessionEndedNotice)
