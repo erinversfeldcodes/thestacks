@@ -528,4 +528,36 @@ suite =
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.tag "a", Selector.attribute (Attr.href "/u/") ]
             ]
+        , describe "telling the app the identity moved"
+            [ test "a saved profile reports the settled name and handle outward" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            initialModel
+                                |> apply (SetDisplayName "Ada Lovelace")
+                                |> (\m -> Profile.update (SaveProfileCompleted (Ok (savedAs "ada"))) m Nothing)
+                    in
+                    -- The nav renders the reader's name from the STORED session,
+                    -- not from this page's model, so saving here changed the
+                    -- account and left the corner of every page showing the old
+                    -- name until the reader signed out. The page cannot write
+                    -- that blob itself; it has to say so outward.
+                    Expect.equal
+                        (Profile.IdentityChanged { displayName = "Ada Lovelace", handle = "ada" })
+                        out
+            , test "the reported handle is the server's, not the typed one" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            initialModel
+                                |> apply (SetHandle "whatever_i_typed")
+                                |> (\m -> Profile.update (SaveProfileCompleted (Ok (savedAs "settled_by_server"))) m Nothing)
+                    in
+                    case out of
+                        Profile.IdentityChanged identity ->
+                            Expect.equal "settled_by_server" identity.handle
+
+                        _ ->
+                            Expect.fail "expected IdentityChanged"
+            ]
         ]

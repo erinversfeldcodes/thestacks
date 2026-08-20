@@ -2300,6 +2300,50 @@ update msg model =
                         Profile.SessionExpired ->
                             handleSessionExpiry model
 
+                        -- The nav renders the reader's name out of the stored
+                        -- session, and a profile save rewrote the account
+                        -- without rewriting that. So the corner of every page
+                        -- kept showing the old name until the reader signed out
+                        -- and back in. Re-persist through the same `saveAuth`
+                        -- port that login uses, so both paths write the blob the
+                        -- one decoder reads.
+                        Profile.IdentityChanged identity ->
+                            let
+                                withIdentity auth =
+                                    { auth
+                                        | user =
+                                            let
+                                                user =
+                                                    auth.user
+                                            in
+                                            { user
+                                                | displayName = identity.displayName
+                                                , handle = identity.handle
+                                            }
+                                    }
+
+                                ( newAuthState, persist ) =
+                                    case model.auth of
+                                        Anonymous ->
+                                            ( model.auth, Cmd.none )
+
+                                        Arriving auth ->
+                                            ( Arriving (withIdentity auth)
+                                            , saveAuth (encodeAuth (withIdentity auth))
+                                            )
+
+                                        Authenticated auth ->
+                                            ( Authenticated (withIdentity auth)
+                                            , saveAuth (encodeAuth (withIdentity auth))
+                                            )
+                            in
+                            ( { model
+                                | page = PageSettingsProfile newSubModel
+                                , auth = newAuthState
+                              }
+                            , Cmd.batch [ Cmd.map ProfileMsg subCmd, persist ]
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 

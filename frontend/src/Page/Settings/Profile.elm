@@ -86,10 +86,17 @@ Until this page had no `OutMsg`, so an expired session came back as
 Please try again." — over a form still holding the reader's current password,
 typed in to authorise an email change that can no longer happen.
 
+`IdentityChanged` carries the account's identity as the server settled it, so
+the app can refresh the stored session. The nav renders `displayName` out of
+that stored blob, and nothing rewrote the blob after a save — so a reader who
+renamed themselves kept seeing the old name in the corner of every page until
+they signed out and back in.
+
 -}
 type OutMsg
     = NoOut
     | SessionExpired
+    | IdentityChanged { displayName : String, handle : String }
 
 
 {-| The form as the stored session can describe it — an instant placeholder,
@@ -350,7 +357,8 @@ update msg model maybeToken =
                         , initialHandle = settledHandle
                       }
                     , Cmd.none
-                    , NoOut
+                    , IdentityChanged
+                        { displayName = model.displayName, handle = settledHandle }
                     )
 
                 Err err ->
