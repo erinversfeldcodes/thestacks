@@ -225,7 +225,9 @@ defmodule Stacks.Costs do
         service: "Modal GPU Inference",
         description:
           "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month " <>
-            "(~$0.03/each; Modal exposes no billing API, so this is our own count)",
+            "(~$0.03/each; Modal exposes no billing API, so this is our own count. " <>
+            "Counts inference only: a container also bills while idle for up to " <>
+            "its scaledown window after the last request, which this figure omits)",
         amount_cents: modal_cents
       }),
       together_item(base, Keyword.get(opts, :together_completions)),

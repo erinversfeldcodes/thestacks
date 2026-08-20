@@ -34,7 +34,13 @@ if [[ -n "${PROBE_CANARY_REAL_BOOK:-}" ]] || [[ -n "${PROBE_CANARY_NOT_A_BOOK:-}
     EXTRACTION_POOL_SIZE=${#EXTRACTION_POOL[@]}
 fi
 
-CANARIES_PER_ITERATION=6
+# Two, down from six. The probe runs 40 iterations (600s window / 15s interval),
+# so two per iteration is still 80 vision calls per run and cycles the
+# five-image extraction pool sixteen times over — coverage was never the
+# constraint. Six meant six A10G containers spun concurrently against a
+# max_containers=10 ceiling, on every production deploy, to re-prove a path the
+# first iteration has already proven warm.
+CANARIES_PER_ITERATION=2
 
 HEALTH_TIMEOUT=10
 CATALOGUE_TIMEOUT=10

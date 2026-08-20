@@ -150,7 +150,23 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     image=image,
     max_containers=10,
     timeout=300,
-    scaledown_window=1200,
+    # 300s, cut from 1200s against a measured gap rather than a guess.
+    #
+    # This is how long an idle A10G keeps billing after the last request, so the
+    # question is whether anything actually needs a container warm for longer.
+    # Two things drive this GPU and both are far tighter than 300s:
+    #
+    #   * a real upload batch — the `vision` Oban queue runs at concurrency 20
+    #     against max_containers=10, so a batch arrives back-to-back and the gap
+    #     between requests is effectively zero;
+    #   * the production probe — `scripts/probe-production.sh` fires every 15s
+    #     for a 600s window.
+    #
+    # 300s is twenty times the larger of those. What it does cost: a reader who
+    # uploads one image, walks away for 5-20 minutes, and comes back now pays one
+    # cold start (15-30s) that the old window would have absorbed. That is the
+    # trade being made, and it is deliberate.
+    scaledown_window=300,
 )
 class VisionModel:
     @modal.enter()
@@ -283,7 +299,11 @@ _fastapi_image = (
         modal.Secret.from_name("thestacks-vision"),
         modal.Secret.from_dict({"MODAL_APP_NAME": MODAL_APP_NAME}),
     ],
-    scaledown_window=1200,
+    # Matches the GPU class above. This one is CPU-only and so far cheaper to
+    # keep idle, but a longer window here would keep answering requests whose
+    # GPU has already scaled down, which is a slower first response, not a
+    # faster one.
+    scaledown_window=300,
 )
 @modal.asgi_app()
 def vision_api() -> Any:
