@@ -1,77 +1,91 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 /**
- * Arriving at a new page should put you at the top of it.
+ * Following a link puts you at the top of the next page.
  *
- * In a single-page app the browser does not reset the scroll position for you:
- * the document never changes, so a reader who scrolls halfway down the
- * catalogue and then follows a link lands halfway down the next page, usually
- * in the middle of a paragraph with the heading somewhere above them.
+ * ⛔ Nothing in the app makes this happen. There is no `Browser.Dom.setViewport`
+ * anywhere in `frontend/src`, and `Nav.pushUrl` does not reset scroll either.
+ * It holds because a route change swaps the page content, and the destination's
+ * DOM is briefly short enough that the browser clamps the carried offset to
+ * zero before the new content grows. That is incidental, not designed — which
+ * is exactly why it is worth pinning: the day someone makes the swap preserve
+ * height, a reader will start landing mid-page and no unit test would notice.
  *
- * This is asserted in a real browser rather than by counting `window.scroll`
- * calls. An earlier attempt at this measured the call count from the console
- * and read zero, which turned out to say nothing — the console-driven click was
- * performing a full page load, giving a fresh document and a fresh counter
- * every time. Reading the scroll position after a genuine in-app navigation is
- * the thing the reader actually experiences, and it cannot be faked by the
- * measurement.
+ * The residue ledger carried this as an open defect ("scroll is STILL not reset")
+ * on the strength of a console reading taken in a hidden Chrome tab, where the
+ * Elm view is frozen by suspended rAF and every measurement is meaningless. A
+ * real browser says otherwise. An earlier `setViewport` fix was written, shipped
+ * and reverted for "claiming a behaviour it did not deliver"; a second one was
+ * written while closing this out and deleted unshipped, because the behaviour
+ * was already there and the code would have taken credit for it.
  *
- * Note on how the reset currently happens: nothing in the app calls
- * `setViewport`. A routed page paints a short loading state first, which
- * collapses the document below the viewport, and the browser clamps the offset
- * to zero on its own. That is incidental rather than designed — it holds only
- * while every routed destination starts short. No navigation between two
- * instantly-rendered pages exists in the UI today (the static pages do not link
- * to each other), so there is nothing to assert about that case yet; if one is
- * ever added, this is the test that should grow a second case.
+ * ⚠️ Two ways this spec could pass while proving nothing, both guarded inline:
+ * a full page load (resets scroll natively, exercising none of the app), and a
+ * destination too short to hold the carried offset (clamps to 0 regardless).
+ * The first version of this spec had both.
+ *
+ * Public routes only — no auth needed, so it runs anywhere the app is served.
  */
+test.describe("scroll on navigation", () => {
+  test("following a link from deep in a long page lands at the top", async ({ page }) => {
+    await page.goto("/architecture");
 
-test.use({ storageState: { cookies: [], origins: [] } });
+    // The defect is only observable if the page is genuinely long: the browser
+    // clamps a carried-over offset to the destination's height, so on a short
+    // page the bug hides itself.
+    const height = await page.evaluate(() => document.body.scrollHeight);
+    expect(height, "the essay must be long enough for the carried offset to show").toBeGreaterThan(2000);
 
-/** Scroll far enough down that landing at this offset would be obvious. */
-async function scrollDown(page: import("@playwright/test").Page) {
-  await page.evaluate(() => window.scrollTo(0, 1200));
-  const y = await page.evaluate(() => window.scrollY);
-  expect(y, "the page must be scrollable for this test to mean anything").toBeGreaterThan(0);
-  return y;
-}
+    await page.evaluate(() => window.scrollTo(0, 1500));
+    await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(1500);
 
-test.describe("Scroll position on navigation", () => {
-  test("following a link lands at the top of the new page", async ({ page }) => {
-    await page.goto("/catalogue");
-    await expect(page.getByTestId("catalogue-grid")).toBeVisible({
-      timeout: 15000,
-    });
-
-    await scrollDown(page);
-
-    // Plant a marker on the window. If it survives the click, the navigation
-    // really was in-app; if it is gone, the browser reloaded the document and
-    // reset the scroll for us — which would make this whole test vacuous.
+    // Plant a marker on window. A FULL page load destroys it — and a full load
+    // resets scroll natively, which would make this test pass without the app
+    // doing anything. The first version of this spec did exactly that.
     await page.evaluate(() => {
-      (window as unknown as { __spaMarker?: number }).__spaMarker = 1;
+      (window as unknown as { __spa: boolean }).__spa = true;
     });
 
-    await page.getByRole("link", { name: "About", exact: true }).first().click();
-    await expect(page).toHaveURL(/\/about$/);
+    await page.getByRole("link", { name: /about/i }).first().click();
+    await page.waitForURL("**/about");
+
+    // Wait for the destination to actually render before reading the offset —
+    // reading too early measures the old page.
+    await expect(page.locator("h1")).not.toHaveText(/free lunch/i);
 
     const stayedInApp = await page.evaluate(
-      () => (window as unknown as { __spaMarker?: number }).__spaMarker === 1,
+      () => (window as unknown as { __spa?: boolean }).__spa === true,
     );
-    expect(stayedInApp, "navigation was a document load, not an SPA transition").toBe(true);
+    expect(stayedInApp, "this must be an in-app route change, not a full page load").toBe(true);
 
-    // And the destination has to be tall enough to HOLD a scroll offset,
-    // otherwise landing at 0 says nothing about any reset.
-    const room = await page.evaluate(
-      () => document.documentElement.scrollHeight - window.innerHeight,
-    );
-    expect(room, "destination is too short to preserve a scroll offset").toBeGreaterThan(600);
-    await expect(
-      page.getByRole("heading", { name: "About The Stacks" })
-    ).toBeVisible();
+    // And the destination must be tall enough to HOLD the carried offset,
+    // or the browser clamps it to 0 and the assertion below is vacuous.
+    const destHeight = await page.evaluate(() => document.body.scrollHeight - window.innerHeight);
+    expect(destHeight, "destination must be scrollable past the carried offset").toBeGreaterThan(1500);
 
     await expect
-      .poll(() => page.evaluate(() => window.scrollY), { timeout: 5000 })
+      .poll(() => page.evaluate(() => Math.round(window.scrollY)), {
+        message: "a new route should start at the top, not at the previous page's offset",
+      })
       .toBe(0);
+  });
+
+  test("an in-page anchor jump is left alone", async ({ page }) => {
+    // The reset must key on the ROUTE, not on every UrlChanged: the fragment
+    // moving is how in-page anchors work, and resetting there would fight them.
+    await page.goto("/architecture");
+    await page.evaluate(() => window.scrollTo(0, 1200));
+    await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(1200);
+
+    await page.evaluate(() => {
+      history.pushState({}, "", "/architecture#somewhere");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    await expect
+      .poll(() => page.evaluate(() => Math.round(window.scrollY)), {
+        message: "a fragment change is not a route change and must not reset scroll",
+      })
+      .toBe(1200);
   });
 });
