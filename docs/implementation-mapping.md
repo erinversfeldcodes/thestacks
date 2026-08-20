@@ -46,7 +46,7 @@
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3, US-2.6.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), automatic edition discovery (US-2.6.1), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
-| **Phase 5** | Marketplace (Classifieds) | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
+| **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-10.5.1, US-10.5.2, US-10.5.3, US-10.5.4, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, public handles/profiles (US-10.5.x), groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
 | **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-12.2.1, US-12.2.2, US-13.1.1, US-13.1.2, US-6.2.1 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering, and POSSE syndication of posts to Substack (US-6.2.1). The writing assistant (US-12.2.x) was designed and deferred to Phase 2, so it is NOT part of what this phase delivered. Requires Phase 6 visibility infrastructure. |
 | **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.1.3, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-14.4.1, US-14.4.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-15.4.1, US-15.5.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), invite-only registration for the closed beta (US-14.1.3), password reset (US-14.4.1/US-14.4.2), a platform FAQ (US-15.4.1) and beta feedback channel (US-15.5.1), and accessibility (US-19.x). |
@@ -489,7 +489,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | The person adding a book can mark it "adults only" (raise-only); the platform owner can override either way. Only 18+ verified users can view gated books. No automatic subject/BISAC classification — that classifier was removed as unreliable. |
-| **Phase** | Phase 1 (late) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Added late within Phase 1; cross-cutting in effect. |
 
 | Layer | Components |
 |-------|------------|
@@ -749,7 +750,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Searches beyond the user's own collection: other users' public shelves, marketplace listings, partner inventory, and Third Spaces events. Results surfaced in the search dropdown and enriched within the book detail overlay. |
-| **Phase** | Phase 1 (late MVP) / Phase 3 (partner results) |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Shipped late within Phase 1; the partner-results half lands in Phase 3 (Partner Integration). |
 
 | Layer | Components |
 |-------|------------|
@@ -1150,7 +1152,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | 4-step pipeline: (1) book check via vision, (2) ISBN resolution, (3) metadata lookup, (4) store book as `public`. Age-gating is NOT decided here — it is human-set afterward (see US-1.1.4). |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1170,7 +1173,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | KYC integration for age verification. Self-config for single-user. Proper verification for multi-user. |
-| **Phase** | Cross-cutting (Phase 1 for self-config, Phase 3 for full KYC) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Self-configuration lands in Phase 1 (MVP); full KYC in Phase 3 (Partner Integration). |
 
 | Layer | Components |
 |-------|------------|
@@ -1205,7 +1209,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | System health, job status, data freshness, source discovery stats, costs, GDPR compliance. Curator's desk aesthetic. NOT user reading analytics. |
-| **Phase** | Phase 4 (Polish) — **SUPERSEDED by Grafana (#267)** |
+| **Phase** | Phase 4 (Polish) |
+| **Phase note** | SUPERSEDED by Grafana (#267) — the ops-metrics surface is now the Grafana observability stack (ADR-021). |
 
 | Layer | Components |
 |-------|------------|
@@ -1249,7 +1254,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Publish Own Site, Syndicate Elsewhere: syndicate a native blog post to Substack (and record the syndication link), with the canonical URL remaining `/blog/:id`. Depends on the blog (Phase 7). |
-| **Phase** | Phase 7 (Blog) |
+| **Phase** | Phase 7 (Blog & Comments) |
 | **Status** | Built. Email-to-Substack leg deliberately deferred; canonical URL stays the post UUID (`/blog/:id`) — slugs deferred with the reasoning recorded in the story. |
 | **Implementation** | `GET /api/blog/posts/:id/syndication`, `POST /api/blog/posts/:id/syndications`, `PUT /api/blog/posts/:id/syndications/:sid` → `StacksWeb.BlogController`; `Stacks.Blog.Syndication`; `Components.Syndication`. Existing per-handle blog feed: `GET /api/feeds/u/:handle/blog`. |
 
@@ -1266,7 +1271,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Classifieds listing: photos, condition grading (new / like_new / good / fair / poor), pricing, and seller contact info for off-platform communication. No on-platform payments or messaging. |
-| **Phase** | Phase 5 (Marketplace) — **Implemented** |
+| **Phase** | Phase 5 (Marketplace) |
+| **Phase note** | Implemented. |
 
 | Layer | Components |
 |-------|------------|
@@ -1286,7 +1292,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | **Deferred per [ADR 013](decisions/013-marketplace-classifieds-first.md).** On-platform payments (Stitch Money, #054b) and shipping (Pargo, #054c) are deferred indefinitely. Buyers contact sellers directly using the contact info on the listing. The `transactions`, `offer_threads`, and `offer_messages` tables exist in DB but are unused. |
-| **Phase** | Future (was Phase 5) |
+| **Phase** | Future |
+| **Phase note** | Was Phase 5; deferred (see ADR-013). |
 
 ---
 
@@ -1295,7 +1302,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | **Deferred per [ADR 013](decisions/013-marketplace-classifieds-first.md).** Seller KYC becomes relevant when the platform facilitates financial transactions. Not needed for classifieds model. |
-| **Phase** | Future (was Phase 5) |
+| **Phase** | Future |
+| **Phase note** | Was Phase 5; deferred (see ADR-013). |
 
 ---
 
@@ -1308,7 +1316,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | User can export all personal data in JSON, CSV, or OPDS format. |
-| **Phase** | Phase 2 (Enrichment) / Cross-cutting |
+| **Phase** | Phase 2 (Enrichment) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1328,7 +1337,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Cascade delete all user data from operational DB. Anonymise records in warehouse. |
-| **Phase** | Phase 2 (Enrichment) / Cross-cutting |
+| **Phase** | Phase 2 (Enrichment) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1349,7 +1359,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Per-use consent with timestamps. User controls what data is collected and how it is used. |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1369,7 +1380,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Uploaded images auto-deleted after 30 days. Only thumbnails retained permanently. |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1390,7 +1402,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Immutable append-only log. Hashed IPs. Encrypted metadata. |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1410,7 +1423,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | A radical-transparency surface (ADR-019 §3a): show a user the inferences the platform can draw from their own reading data. Retro-story of record for the shipped Insights surface. |
-| **Phase** | Cross-cutting (GDPR / transparency, ADR-019 §3a) |
+| **Phase** | Cross-cutting |
+| **Phase note** | GDPR / transparency; see ADR-019 §3a. |
 | **Status** | Built (shipped in #242, no prior story file) |
 | **Implementation** | `Stacks.Insights`; `GET /api/me/inferences` → `StacksWeb.MeInferenceController.index`. Frontend `Page.Insights` (and `Page.CostTransparency`). Reads own `Shelving.Placement`/`PlacementHistory`/`Bookshelf`. Owner-only linked-accounts de-anonymisation view is explicitly NOT built. |
 
@@ -2142,7 +2156,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | An account that is never email-confirmed is fully erased within ~24h, so abandoned/unverified registrations do not accumulate personal data. Retro-story of record. |
-| **Phase** | Cross-cutting (auth hygiene / GDPR) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Auth hygiene / GDPR. |
 | **Status** | Built (shipped in #124 A2 / #179 / #373, no prior story file) |
 | **Implementation** | `Stacks.Workers.ExpiredUnverifiedAccountsJob` runs erasure through `Stacks.GDPR.Deletion.delete_user_data/1`; companion sweeps `Stacks.Workers.GuardianTokenSweepJob`, `Stacks.Workers.CacheSweepJob`, `Stacks.Workers.ImageRetentionJob`. Registration/confirmation via `StacksWeb.AuthController` (`POST /api/auth/register`, `.../resend-confirmation`), `Stacks.Accounts.Guardian`. |
 
@@ -2468,7 +2483,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Admin surfaces sit behind a dedicated admin login plus a TOTP second factor; a distinct admin session (not the ordinary user JWT) authorises admin actions. Retro-story of record for the shipped MFA gate. |
-| **Phase** | Cross-cutting (admin) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Admin surface — belongs to no single delivery phase. |
 | **Status** | Built (shipped in #237 / #303 / #332, no prior story file) |
 | **Implementation** | `POST /api/admin/auth/login`, `.../mfa/setup`, `.../mfa/confirm`, `.../verify_mfa`, `DELETE /api/admin/auth/logout` → admin auth; `Stacks.AdminSession`, `Stacks.MFA.UserMFA` (secret in `Stacks.EncryptedBinary`). Frontend `Page.Admin.Session`. Token hygiene via `Stacks.Workers.GuardianTokenSweepJob`. |
 
@@ -2479,7 +2495,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | The owner un-merges an edition that was wrongly merged into a work, splitting it back onto its own work, with a required reason and an audit trail. |
-| **Phase** | Cross-cutting (admin) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Admin surface — belongs to no single delivery phase. |
 | **Status** | Built |
 | **Implementation** | `Stacks.DataCorrection` framework (`data_correction/unmerge_edition.ex`, `data_correction/targeted.ex`); `GET /api/admin/data_corrections`, `POST /api/admin/data_corrections/:name/target`, `.../:name/apply` (reason required) → `StacksWeb.DataCorrectionController`. Audited via `Stacks.Audit`; cache invalidated via `Stacks.Books.BookDetailCache`; re-enriched via `Stacks.Workers.EnrichBookJob`. Frontend surfaced through the admin data-corrections view. |
 
