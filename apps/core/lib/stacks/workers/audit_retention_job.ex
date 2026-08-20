@@ -15,14 +15,28 @@ defmodule Stacks.Workers.AuditRetentionJob do
 
         * DELETE is refused unless `app.audit_gdpr_erasure` is set, so the sweep
           has to arm it inside its own transaction.
-        * A statement-level trigger disarms it the moment one DELETE completes.
-          So this is a single statement, not a batched loop — the second batch
-          would be blocked by the trigger the first batch disarmed.
+        * A statement-level trigger disarms it the moment one DELETE completes,
+          so the grant covers exactly ONE statement. It can be re-armed: a second
+          `SET LOCAL app.audit_gdpr_erasure = 'true'` authorises the next
+          statement in the same transaction.
 
-      That makes the delete unbounded in size on its first run against a long
-      backlog. It is a nightly job on an indexed timestamp, and the alternative
-      (batching) is not available to us, so the cost is accepted and named here
-      rather than discovered later.
+      ⚠️ Two earlier claims here were wrong. They are corrected rather than
+      quietly deleted, because both were load-bearing — the accepted cost below
+      rested on them:
+
+        * "the alternative (batching) is not available to us" — **false.**
+          Probed: two authorised DELETEs in one transaction, re-arming between
+          them, both succeed and both rows go. The grant is per-statement, not
+          per-transaction.
+        * "a nightly job on an indexed timestamp" — **false.** The only index
+          touching `occurred_at` is `(user_id, occurred_at)`, which cannot drive
+          `WHERE occurred_at < $1` when there is no `user_id` predicate. `EXPLAIN`
+          against the real table returns a **Seq Scan**.
+
+      So this is a single unbounded DELETE by choice rather than by constraint,
+      and it sequentially scans a table that grows forever. Survivable nightly at
+      today's volume; the wrong shape for a first run against a long backlog. The
+      fix is an `occurred_at` index plus a batched loop that re-arms per batch.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
