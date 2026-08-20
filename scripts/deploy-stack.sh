@@ -335,6 +335,32 @@ print(urls[0] if urls else '')
     fi
     echo "    Vision URL: ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
+
+    # Score the model that was just deployed, before anything else rolls forward.
+    #
+    # This is the only moment a vision regression can be caught cheaply: the new
+    # image is live, nothing depends on it yet, and the core app has not been
+    # deployed against it. `mix eval.vision` runs the labelled corpus through the
+    # production seam and fails on a drop against the recorded baseline.
+    #
+    # EVAL_VISION_REQUIRED=1 is the point of the exercise. Without it the task
+    # SKIPS when it cannot reach a service and exits 0, which is correct for a
+    # local run and useless as a gate — a deploy that quietly skips its own
+    # regression check is a deploy that has no regression check.
+    #
+    # No database is needed: the task boots the app, but Ecto retries a missing
+    # repo in the background rather than failing the boot, so this runs the same
+    # whether or not the deploying machine can reach Postgres.
+    echo ""
+    echo "==> Scoring the deployed vision model against the labelled corpus..."
+    if ! (cd "$REPO_ROOT" && \
+            VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
+            EVAL_VISION_REQUIRED=1 \
+            mix eval.vision); then
+        echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
+        exit 1
+    fi
+    echo "PASS deploy: vision model scored, no regression"
 elif [[ -n "${SKIP_VISION:-}" ]]; then
     echo "SKIP: SKIP_VISION set — skipping Modal vision deploy (no Modal spend). VISION_SERVICE_URL left empty."
 else

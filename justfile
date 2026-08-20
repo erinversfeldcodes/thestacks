@@ -289,6 +289,17 @@ check-licenses:
 check-route-clients *ARGS:
     @bash scripts/check-route-clients.sh {{ARGS}}
 
+# Score the deployed vision model against the labelled corpus.
+#
+# Needs a live vision service: pass the URL, or export VISION_SERVICE_URL. Without
+# one the task SKIPS and says so — which is honest locally and useless as a gate,
+# so the deploy path sets EVAL_VISION_REQUIRED=1 to turn that skip into a failure.
+#
+#   just eval-vision <url>            # score against the baseline
+#   just eval-vision <url> --record   # pin today's score as the new baseline
+eval-vision URL="" *ARGS:
+    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" mix eval.vision {{ARGS}}
+
 # Lint changed migrations with squawk
 squawk:
     scripts/security-squawk.sh
