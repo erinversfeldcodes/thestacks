@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "overrides": {
-    "brace-expansion": "5.0.8"
+    "brace-expansion": "^5.0.9"
   },
   "scripts": {
     "build": "elm make src/Main.elm --output=elm.js",
@@ -12,6 +12,7 @@
   "devDependencies": {
     "elm": "^0.19.1-6",
     "elm-format": "^0.8.8",
+    "elm-review": "^2.13.5",
     "elm-test": "^0.19.1-revision17"
   }
 }

@@ -24,10 +24,13 @@
 #
 #   Nothing in here may print SKIP. A gate that cannot run is a failure.
 #
-# KNOWN FRAGILITY (stated, not fixed here)
-#   elm-review is not a declared devDependency in frontend/package.json, so `npx --yes` resolves
-#   and downloads it from the registry on every run. That makes the gate network-dependent and
-#   unpinned — a new elm-review major changes what it enforces with no commit here.
+# elm-review is a declared, pinned devDependency, so `npx` runs the installed binary.
+#   It previously ran via `npx --yes`, which resolves and downloads it from the registry on
+#   every run: network-dependent, and unpinned, so a new major could change what this gate
+#   enforces with no commit here. Declaring it also brought its dependency tree under
+#   `npm audit`, which immediately reported three high-severity advisories — `npx --yes` had
+#   been running that same code all along, just where nothing could see it. The patched
+#   transitive version is forced by an `overrides` entry in frontend/package.json.
 
 set -uo pipefail
 
@@ -102,7 +105,7 @@ gate check-css-values.sh
 
 step "elm-format --validate" npx elm-format --validate src/
 step "npm audit" npm audit
-step "elm-review" npx --yes elm-review --config elm-review src/ tests/
+step "elm-review" npx elm-review --config elm-review src/ tests/
 
 printf '\n=== lint-elm summary (%s) ===\n' "$BASH_ID"
 if [[ ${#PASSED[@]} -gt 0 ]]; then
