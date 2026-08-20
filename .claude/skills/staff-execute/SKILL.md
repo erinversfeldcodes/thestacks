@@ -124,6 +124,24 @@ there, delete it and do the work.
    This is *in addition to* the `staff-review` already inside `finalize-pr`, which sees the cumulative
    branch. A per-issue review catches a design problem while the diff is still small enough to change
    cheaply; the branch-level one catches what only shows up when the pieces sit together.
+
+4b. ⛔ **Every wave gets its STACK reviewers too — `staff-review` is not a substitute for them.**
+   `staff-review` covers design and test-truthfulness and explicitly defers standards compliance,
+   idiom, schema design and contract shape to the stack reviewers in `docs/agents/reviewers/`
+   (routed per `AGENTS.md`). Defer to a reviewer that never runs and the axis simply vanishes.
+
+   That is not hypothetical. A 2026-08-20 audit of 43 issues from one campaign found **42 with a
+   staff-review and 1 naming any stack reviewer** — no Elixir, Elm, database, contract, protobuf,
+   python, rust or ux review happened at all, across 323 files and 26k insertions. The automated
+   gates (credo, sobelow, dialyzer, elm-review, the Elm gate suite) were green throughout, which is
+   exactly why nobody noticed: they cover the mechanical half and none of the judgement.
+
+   **Run them per WAVE over the cumulative diff, by stack — not per issue.** Forty-three per-issue
+   reviews is the wrong shape and will not happen; four-to-six stack reviews over what actually
+   ships is the right one. Compute the touched stacks from the diff
+   (`git diff --name-only <base>..HEAD`), invoke one reviewer per touched stack in parallel, and
+   record each verdict in the wave's epic issue AND in the campaign state under `domain_reviews`.
+   `just wave-status` refuses a completed wave whose touched stacks have no recorded verdict.
 5. **Keep the campaign state file current** as the layer above epic state: set the wave's item
    `issue` to the epic number, mirror status, update `updated_at`. The hierarchy is
    campaign state → `plans/<root>-<slug>-epic-state.json` → per-child `plans/NNN-*-state.json`;

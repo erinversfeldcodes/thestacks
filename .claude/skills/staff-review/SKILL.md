@@ -56,6 +56,18 @@ For a PR number, fetch the diff via `gh pr diff <number>`; for a branch, `git di
 - **Design + test-truthfulness axes only.** Don't re-check standards compliance or re-audit DoD —
   those gates own their axes; cite them if relevant. Your distinct question about tests is not
   "do they pass" but "does passing mean anything".
+
+  ⚠️ **"Don't re-check" means someone else checks it — not that it goes unchecked.** The axis you
+  are deferring is owned by the **stack reviewers** in `docs/agents/reviewers/` (elixir, elm,
+  database, contract, protobuf, platform, python, rust, ux), routed per `AGENTS.md`. Deferring to a
+  gate that never ran is how an axis disappears: a 2026-08-20 audit of 43 campaign issues found 42
+  carried a staff-review and **1 named any stack reviewer at all**, so per-stack standards,
+  idiom, schema design and contract shape had no review of any kind for the whole campaign.
+
+  So: **before you write your verdict, check whether the stack reviewers ran on this diff.** If
+  they did not, say so in the report as a finding — not as an aside — and name the stacks the diff
+  touches. A `LGTM` that silently rests on a review nobody performed is the failure this bullet
+  used to cause.
 - **Scope-lock:** concerns about pre-existing code the diff merely touches become ledger/follow-up
   candidates, not review findings — unless the diff actively deepens that debt.
 - **No taste escalation:** 🟦 findings are recorded, never actioned or argued.

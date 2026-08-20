@@ -73,14 +73,24 @@ disproven.
    became a no-op — the Summary must be edited to match, or the feature built. (The
    #124/US-14.3.2 hole.)
 
-7. **Dangling reviewer findings & dirty logs (completion-bar §3/§4).** P2/P3 fixed or
+7. **An axis deferred to a review that never ran.** `staff-review` covers design and
+   test-truthfulness and explicitly defers standards, idiom, schema design and contract shape to the
+   **stack reviewers** (`docs/agents/reviewers/`, routed per `AGENTS.md`). A deliverable carrying a
+   staff-review and no stack review has had that second axis checked by **nobody** — and the
+   automated gates will be green throughout, because they cover the mechanical half and none of the
+   judgement. Check which stacks the diff touches and demand a recorded verdict for each; treat a
+   missing one as **not done**, not as a nicety. An audit of one campaign found 42 of 43 issues
+   staff-reviewed and **one** naming any stack reviewer, across 323 files.
+   `just wave-status` now enforces this at campaign level via `domain_reviews`.
+
+8. **Dangling reviewer findings & dirty logs (completion-bar §3/§4).** P2/P3 fixed or
    de-scoped to a tracked issue with rationale — never silently dropped. The live
    drive's logs read and clean (no swallowed 500s under a green suite).
 
-8. **Integration, not just isolation (completion-bar §6).** For epics: `just verify`
+9. **Integration, not just isolation (completion-bar §6).** For epics: `just verify`
    green on the integration branch after every merge, PE gate on the cumulative diff.
 
-9. **Guard attestations and undischarged residue.** An absolute attestation ("NO further
+10. **Guard attestations and undischarged residue.** An absolute attestation ("NO further
    orphans", "all clean", "run_all.sh completes") cited as evidence is a claim to break:
    demand the planted-violation red run for any guard, and the caller for any runner — a
    guard once attested clean while structurally blind to the one violation that existed,
@@ -100,7 +110,7 @@ disproven.
 
 ## Scale
 - Epic with many children → fan out one agent per child for classes 1–6, then judge
-  integration (7–8) centrally. Spot-check cited artifacts (grep a sample of cited test
+  integration (8–9) centrally. Spot-check cited artifacts (grep a sample of cited test
   strings / re-run one gate) — do not trust the citations blind.
 
 ## Related skills
