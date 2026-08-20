@@ -6,6 +6,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 bash "$REPO_ROOT/scripts/check-outbound-test-default.sh"
 bash "$REPO_ROOT/scripts/check-route-clients.sh"
 bash "$REPO_ROOT/scripts/check-mapping-truth.sh"
+bash "$REPO_ROOT/scripts/check-oban-queue-drift.sh"
 
 mix format --check-formatted
 mix credo --strict

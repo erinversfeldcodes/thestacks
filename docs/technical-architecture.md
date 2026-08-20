@@ -625,14 +625,21 @@ Oban provides a PostgreSQL-backed job queue, eliminating the need for additional
 
 | Queue | Concurrency | Rationale |
 |-------|------------|-----------|
-| `vision` | 2 | Expensive GPU calls to Modal (Qwen2.5-VL inference) |
-| `price_scrape` | 5 | One concurrent job per bookshop |
-| `review_scrape` | 3 | Polite rate limiting for review sites |
-| `author_scrape` | 2 | Infrequent enrichment |
-| `source_discovery` | 2 | Search API budget management |
-| `geographic_discovery` | 2 | Location-triggered and quarterly geographic sweeps (US-2.5.2) |
+| `default` | 10 | Everything without a queue of its own |
+| `events` | 20 | Event-log fan-out to subscribers; many small jobs |
+| `vision` | 20 | Modal inference (Qwen2.5-VL). The ceiling that matters is Modal's `max_containers=10`, not this number — requests beyond it queue at Modal rather than here |
+| `scraper` | 5 | Price, review and author scraping share one queue — one concurrent job per bookshop |
 | `notifications` | 3 | Email notifications (WishList availability, marketplace, etc.) |
 | `dbt_refresh` | 1 | Sequential — one dbt run at a time |
+
+This table is checked against `apps/core/config/config.exs` by
+`scripts/check-oban-queue-drift.sh`; the config is the source of truth. It had
+drifted badly before that gate existed — five queues listed here had never been
+configured (`price_scrape`, `review_scrape`, `author_scrape`, `source_discovery`,
+`geographic_discovery`), `default` and `events` were missing, and `vision` was
+documented at 2 against a real 20. That last one is the reason the gate is worth
+its keep: vision concurrency is what you reach for when reasoning about how many
+images hit the GPU at once, and the documented figure was off by a factor of ten.
 
 **Features used:**
 
