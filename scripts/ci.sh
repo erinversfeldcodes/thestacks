@@ -304,9 +304,17 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                 jwt_out="$(jwt_tool "${_jwt}" \
                     -t "${_core_url}/api/auth/me" \
                     -rh "Authorization: Bearer *JWT*" \
-                    -X a 2>&1)" || true
+                    -X a 2>&1)"
+                jwt_rc=$?
                 echo "${jwt_out}"
-                if echo "${jwt_out}" | grep -qi "EXPLOIT"; then
+                # A scanner that did not run is not a clean scan. This grepped
+                # for "EXPLOIT" and called anything else clean, so when jwt_tool
+                # died on `ModuleNotFoundError: No module named 'ratelimit'` the
+                # lane reported "jwt_tool clean" — a green tick for a scan that
+                # never happened. Prove it ran before believing what it found.
+                if [[ ${jwt_rc} -ne 0 ]] || echo "${jwt_out}" | grep -q "Traceback (most recent call last)"; then
+                    fail "deploy: jwt_tool did not run (exit ${jwt_rc}) — this is NOT a clean scan"
+                elif echo "${jwt_out}" | grep -qi "EXPLOIT"; then
                     fail "deploy: jwt_tool found exploitable vulnerability"
                 else
                     pass "deploy: jwt_tool clean"
