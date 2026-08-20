@@ -78,8 +78,25 @@ specs. The corpus plan had conflated the two and the error was copied into the c
 was right and the label was wrong**, which is the failure mode an eval has to be able to survive:
 a baseline recorded against a bad label pins the wrong expectation forever.
 
-## Known gap
+## The caller
 
-The harness has **no caller**. It gates when run, and nothing runs it — the same criticism it
-answers for `mix eval.resolver`. It needs a live GPU, so its home is the vision deploy path with
-`EVAL_VISION_REQUIRED=1` set. Recorded here rather than left to be rediscovered.
+`scripts/deploy-stack.sh`, immediately after the Modal deploy succeeds and the service URL is
+resolved — with `EVAL_VISION_REQUIRED=1`, so a run that cannot happen fails rather than skipping.
+
+That moment is the cheap one: the new image is live, nothing depends on it yet, and the **core app
+has not been deployed against it**. A regression stops the pipeline before the rest of the stack
+rolls forward onto a model that got worse.
+
+No database is required. The task boots the app, but Ecto retries an unreachable repo in the
+background rather than failing the boot — verified by running the eval against a `DATABASE_URL`
+pointing at a dead port, which still scored 6/6. So the gate runs the same whether or not the
+deploying machine can reach Postgres.
+
+Both failure modes are proven:
+
+| Probe | Result |
+|---|---|
+| Baseline raised above what the model scores | exit **1** — `REGRESSION — scored 6/6, baseline is 7` |
+| No service reachable, as the deploy invokes it | exit **1** — the skip becomes a failure |
+
+For a manual run: `just eval-vision <url>`, or `just eval-vision <url> --record` to re-pin.
