@@ -277,6 +277,39 @@ defmodule StacksWeb.GroupControllerTest do
   end
 
   describe "GET /api/groups/:group_id/members" do
+    test "a member who never set a display name still has a name, not a null", %{conn: conn} do
+      # `op.users.display_name` is NULLABLE; `handle` is NOT NULL. The client
+      # decodes `display_name` as a required string, and `Decode.list` is
+      # all-or-nothing — so ONE member without a name would fail the decode for
+      # the entire roster and show a transport error instead of the group.
+      #
+      # Seed data always sets a display name, which is exactly why every other
+      # test here is green. This one removes it.
+      owner = insert(:user, display_name: "Ada")
+
+      {:ok, group} =
+        Stacks.Social.create_group(owner.id, %{
+          name: "Circle",
+          type: "close_friends",
+          visibility: "platform"
+        })
+
+      nameless = insert(:user, display_name: nil, handle: "grace_h")
+      insert(:group_member, group: group, user: nameless)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert %{"members" => members} = json_response(conn, 200)
+
+      refute Enum.any?(members, &is_nil(&1["display_name"])),
+             "a null display_name reaches the client and fails the whole roster: #{inspect(members)}"
+
+      assert "grace_h" in Enum.map(members, & &1["display_name"])
+    end
+
     test "lists the group's members with names, not raw ids", %{conn: conn} do
       # Build the group through the real path rather than hand-setting roles:
       # `create_group` stores the creator's own membership as role "member", so a

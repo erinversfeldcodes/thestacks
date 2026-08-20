@@ -515,7 +515,11 @@ defmodule Stacks.Social do
               select: %{
                 user_id: m.user_id,
                 role: m.role,
-                display_name: u.display_name,
+                # `display_name` is nullable; `handle` is NOT NULL. Coalescing
+                # here means no null ever leaves this endpoint, so one member who
+                # never set a name cannot decode-fail the whole roster on the
+                # client. A reader always has something to be called.
+                display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
                 joined_at: m.joined_at
               },
               order_by: [asc: m.joined_at]
