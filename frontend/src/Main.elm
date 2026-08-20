@@ -3822,6 +3822,12 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
                                     , navLink MarketplaceMyListings "My Listings"
                                     ]
                             }
+
+                        -- Groups is a built, routed page that nothing linked to:
+                        -- a reader could be invited to one, accept, and then have
+                        -- no way back to it short of keeping the URL. Signed-in
+                        -- only, because groups are not a thing a stranger browses.
+                        , navItem route Groups "Groups"
                         , navItem route About "About"
                         , if auth.user.role == "owner" then
                             navDisclosure

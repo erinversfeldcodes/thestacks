@@ -113,4 +113,35 @@ test.describe("Group membership", () => {
       page.locator(".groups-detail__member-name", { hasText: "Grace Member" }),
     ).toHaveCount(0);
   });
+
+  test("a signed-in reader can reach their groups from the nav", async ({
+    page,
+    request,
+  }) => {
+    const session = await mintSession(request, { displayName: "Reader" });
+    test.skip(session === null, "test-session helper is not enabled here");
+    await injectSession(page, session!);
+
+    await page.goto("/");
+
+    const overlay = page.getByTestId("onboarding-overlay");
+    const appeared = await overlay
+      .waitFor({ state: "visible", timeout: 3000 })
+      .then(() => true)
+      .catch(() => false);
+    if (appeared) {
+      await overlay.getByTestId("onboarding-skip-btn").click();
+      await expect(overlay).not.toBeVisible();
+    }
+
+    // Groups was a built, routed page with no inbound link anywhere: someone
+    // invited to a group could accept and then have no way back to it.
+    const groupsLink = page
+      .locator(".app-nav")
+      .getByRole("link", { name: "Groups", exact: true });
+    await expect(groupsLink).toBeVisible({ timeout: 15000 });
+
+    await groupsLink.click();
+    await expect(page).toHaveURL(/\/groups$/);
+  });
 });
