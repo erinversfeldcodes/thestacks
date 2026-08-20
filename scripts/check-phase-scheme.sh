@@ -61,12 +61,22 @@ for block in re.split(r"\n(?=#### US-)", text):
 # A stale dialect that predates the scheme; it named a sub-phase that no longer
 # exists anywhere, so it can only mislead.
 stale = []
-for path in ("docs/capacity-model.md", "docs/data-quality.md", MAPPING, "docs/technical-architecture.md"):
+# Sweep all of docs/ rather than a hand-listed few — the last two survivors were
+# hiding in an ADR and a capacity note, not in the files anyone thought to check.
+#
+# docs/agents/ is EXCLUDED deliberately: the orchestrator has its own gate-phase
+# vocabulary ("Phase 2C/2D") that is a different axis entirely, and sweeping it
+# would flag correct text.
+import glob as _glob
+
+for path in _glob.glob("docs/**/*.md", recursive=True):
+    if path.startswith("docs/agents/"):
+        continue
     try:
         body = open(path, encoding="utf-8").read()
     except OSError:
         continue
-    if re.search(r"Phase \d+[A-Z]\.\d+", body):
+    if re.search(r"Phase \d+[A-Z]\b", body):
         stale.append(path)
 
 if bad or stale:

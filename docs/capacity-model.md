@@ -42,7 +42,7 @@ The Elm frontend renders a continuous bookcase of spine components. Each spine i
 
 ### Measurement plan
 
-- During Phase 1F Wave 1: Generate a fixture of 500 books and 2,000 books. Run `elm-benchmark` against the `groupIntoRows` and spine-rendering logic.
+- During Phase 1 (extended): Generate a fixture of 500 books and 2,000 books. Run `elm-benchmark` against the `groupIntoRows` and spine-rendering logic.
 - Add `Performance.now()` timing in `Main.elm` for overlay open events. Send timing via a port to be surfaced on the metrics dashboard.
 - Lighthouse CI runs on every CI build against the production URL (or a preview URL). Budget defined in `lighthouse-budget.json`.
 
