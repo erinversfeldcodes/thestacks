@@ -44,6 +44,21 @@ defmodule Stacks.Workers.AuditRetentionJobTest do
       assert count("probe.recent") == 1, "a row inside the retention period must survive"
     end
 
+    test "keeps the retention period at the ruled twenty-four months" do
+      # Deliberately a constant assertion, and the only one here that is.
+      #
+      # Every other test derives its dates from `retention_months/0`, so the job
+      # and its tests move together — which is what makes them robust to the
+      # period changing, and also what makes them completely blind to it. Cutting
+      # the constant from 24 to 3 leaves all of them green while silently
+      # shortening how long the audit trail survives.
+      #
+      # The period is a decision, not an implementation detail. Pinning it means
+      # changing it requires changing this line, which puts the change in front of
+      # a reviewer instead of letting it pass as a tuning tweak.
+      assert AuditRetentionJob.retention_months() == 24
+    end
+
     test "succeeds when there is nothing to delete" do
       assert :ok = perform_job(AuditRetentionJob, %{})
     end
