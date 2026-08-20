@@ -446,7 +446,11 @@ viewMember model group member =
     in
     div [ class "groups-detail__member" ]
         [ span [ class "groups-detail__member-name" ] [ text member.displayName ]
-        , if member.role == "owner" then
+
+        -- Ownership comes from `group.ownerId`, NOT from the membership role:
+        -- `create_group` inserts the creator's own membership with role
+        -- "member", so keying the badge off the role would never show it.
+        , if member.userId == group.ownerId then
             span [ class "groups-detail__member-role" ] [ text "Owner" ]
 
           else

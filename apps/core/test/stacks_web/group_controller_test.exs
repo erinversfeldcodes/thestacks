@@ -278,9 +278,19 @@ defmodule StacksWeb.GroupControllerTest do
 
   describe "GET /api/groups/:group_id/members" do
     test "lists the group's members with names, not raw ids", %{conn: conn} do
+      # Build the group through the real path rather than hand-setting roles:
+      # `create_group` stores the creator's own membership as role "member", so a
+      # fixture that sets role: "owner" would assert something production never
+      # produces.
       owner = insert(:user, display_name: "Ada")
-      group = insert(:group, owner: owner, visibility: "platform")
-      insert(:group_member, group: group, user: owner, role: "owner")
+
+      {:ok, group} =
+        Stacks.Social.create_group(owner.id, %{
+          name: "Circle",
+          type: "close_friends",
+          visibility: "platform"
+        })
+
       member = insert(:user, display_name: "Grace")
       insert(:group_member, group: group, user: member)
 
@@ -295,7 +305,11 @@ defmodule StacksWeb.GroupControllerTest do
       # The whole point: the members tab could only ever show the owner's UUID
       # before, because this endpoint had no route.
       assert names == ["Ada", "Grace"]
-      assert Enum.any?(members, &(&1["role"] == "owner"))
+
+      # Ownership is carried by groups.owner_id, not by the membership role —
+      # every membership this path creates has role "member".
+      assert Enum.all?(members, &(&1["role"] == "member"))
+      assert group.owner_id == owner.id
     end
 
     test "an invite-only group is not readable by a non-member", %{conn: conn} do
