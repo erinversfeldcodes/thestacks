@@ -6218,6 +6218,59 @@ h4 {
     color: var(--text);
 }
 
+/* The members list. The row is a line per person: name on the left, the owner's
+   remove control on the right, so a long list still scans as a list of people
+   rather than a list of buttons. */
+.groups-detail__member {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.groups-detail__member-name {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+    flex: 1;
+}
+
+.groups-detail__member-role {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+}
+
+.groups-detail__member-remove {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.6rem;
+    cursor: pointer;
+}
+
+.groups-detail__member-remove:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.groups-detail__member-remove:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.groups-detail__members-loading,
+.groups-detail__members-empty,
+.groups-detail__members-error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
 .book-detail__availability-price,
 .book-detail__price-amount,
 .marketplace-detail__price,

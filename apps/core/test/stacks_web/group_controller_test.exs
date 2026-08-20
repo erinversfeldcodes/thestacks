@@ -276,6 +276,43 @@ defmodule StacksWeb.GroupControllerTest do
     end
   end
 
+  describe "GET /api/groups/:group_id/members" do
+    test "lists the group's members with names, not raw ids", %{conn: conn} do
+      owner = insert(:user, display_name: "Ada")
+      group = insert(:group, owner: owner, visibility: "platform")
+      insert(:group_member, group: group, user: owner, role: "owner")
+      member = insert(:user, display_name: "Grace")
+      insert(:group_member, group: group, user: member)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert %{"members" => members} = json_response(conn, 200)
+      names = Enum.map(members, & &1["display_name"]) |> Enum.sort()
+
+      # The whole point: the members tab could only ever show the owner's UUID
+      # before, because this endpoint had no route.
+      assert names == ["Ada", "Grace"]
+      assert Enum.any?(members, &(&1["role"] == "owner"))
+    end
+
+    test "an invite-only group is not readable by a non-member", %{conn: conn} do
+      owner = insert(:user)
+      group = insert(:group, owner: owner, visibility: "invite_only")
+      insert(:group_member, group: group, user: owner, role: "owner")
+      outsider = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(outsider)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert json_response(conn, 404)
+    end
+  end
+
   describe "DELETE /api/groups/:group_id/members/:user_id" do
     test "owner removes member (204)", %{conn: conn} do
       owner = insert(:user)

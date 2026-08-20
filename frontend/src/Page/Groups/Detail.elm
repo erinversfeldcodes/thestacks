@@ -4,7 +4,7 @@ import Api
 import Components.BlockUserModal as BlockModal
 import Components.FeedItem
 import Dict exposing (Dict)
-import Html exposing (Html, button, div, h1, input, p, text)
+import Html exposing (Html, button, div, h1, input, p, span, text)
 import Html.Attributes exposing (class, disabled, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
@@ -37,6 +37,8 @@ type alias Model =
     , feed : RemoteData Http.Error FeedResponse
     , loadingMoreFeed : Bool
     , blockModals : Dict String BlockModal.Model
+    , members : RemoteData Http.Error (List Api.GroupMember)
+    , removingMemberId : Maybe String
     }
 
 
@@ -52,6 +54,9 @@ type Msg
     | LoadMoreFeed
     | MoreFeedLoaded (Result Http.Error FeedResponse)
     | BlockModalMsg String BlockModal.Msg
+    | MembersLoaded (Result Http.Error (List Api.GroupMember))
+    | RemoveMember String
+    | MemberRemoved String (Result Http.Error ())
     | EscapePressed
 
 
@@ -74,8 +79,13 @@ init groupId userId token =
       , feed = NotAsked
       , loadingMoreFeed = False
       , blockModals = Dict.empty
+      , members = Loading
+      , removingMemberId = Nothing
       }
-    , Api.getGroup groupId token GroupLoaded
+    , Cmd.batch
+        [ Api.getGroup groupId token GroupLoaded
+        , Api.getGroupMembers groupId token MembersLoaded
+        ]
     )
 
 
@@ -178,6 +188,46 @@ update msg model =
 
         TabChanged MembersTab ->
             ( { model | activeTab = MembersTab }, Cmd.none, NoOut )
+
+        MembersLoaded (Ok members) ->
+            ( { model | members = Success members }, Cmd.none, NoOut )
+
+        MembersLoaded (Err e) ->
+            if Api.isUnauthorized e then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | members = Failure e }, Cmd.none, NoOut )
+
+        RemoveMember memberUserId ->
+            ( { model | removingMemberId = Just memberUserId }
+            , Api.removeGroupMember model.groupId memberUserId model.token (MemberRemoved memberUserId)
+            , NoOut
+            )
+
+        MemberRemoved memberUserId (Ok ()) ->
+            -- Drop the row locally rather than refetching: the server has already
+            -- agreed, and a refetch would blink the whole list for one removal.
+            ( { model
+                | removingMemberId = Nothing
+                , members =
+                    case model.members of
+                        Success ms ->
+                            Success (List.filter (\m -> m.userId /= memberUserId) ms)
+
+                        other ->
+                            other
+              }
+            , Cmd.none
+            , NoOut
+            )
+
+        MemberRemoved _ (Err e) ->
+            if Api.isUnauthorized e then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | removingMemberId = Nothing, members = Failure e }, Cmd.none, NoOut )
 
         FeedLoaded (Ok resp) ->
             ( { model
@@ -335,7 +385,7 @@ view model =
                 , case model.activeTab of
                     MembersTab ->
                         div []
-                            [ viewMembers group
+                            [ viewMembers model group
                             , if group.ownerId == model.currentUserId then
                                 viewInviteForm model
 
@@ -354,10 +404,73 @@ view model =
         )
 
 
-viewMembers : Group -> Html Msg
-viewMembers group =
+{-| The members list.
+
+This used to render `group.ownerId` — a raw UUID, and only the owner's — because
+the members endpoint had no client. The owner's remove control lives here too:
+the API has always supported removing a member and nothing in the app called it,
+so a group owner could invite people and then never remove them.
+
+-}
+viewMembers : Model -> Group -> Html Msg
+viewMembers model group =
     div [ class "groups-detail__members" ]
-        [ div [ class "groups-detail__member" ] [ text group.ownerId ]
+        [ case model.members of
+            NotAsked ->
+                text ""
+
+            Loading ->
+                div [ class "groups-detail__members-loading" ] [ text "Loading members…" ]
+
+            Failure _ ->
+                p [ class "groups-detail__members-error" ]
+                    [ text "Could not load the members. Please try again." ]
+
+            Success [] ->
+                p [ class "groups-detail__members-empty" ]
+                    [ text "No members yet — invite someone to get started." ]
+
+            Success members ->
+                div [] (List.map (viewMember model group) members)
+        ]
+
+
+viewMember : Model -> Group -> Api.GroupMember -> Html Msg
+viewMember model group member =
+    let
+        isOwnerViewing =
+            group.ownerId == model.currentUserId
+
+        isSelf =
+            member.userId == model.currentUserId
+    in
+    div [ class "groups-detail__member" ]
+        [ span [ class "groups-detail__member-name" ] [ text member.displayName ]
+        , if member.role == "owner" then
+            span [ class "groups-detail__member-role" ] [ text "Owner" ]
+
+          else
+            text ""
+
+        -- The owner can remove anyone but themselves; removing the owner would
+        -- leave the group without one, and leaving is the owner's own path out.
+        , if isOwnerViewing && not isSelf then
+            button
+                [ class "groups-detail__member-remove"
+                , onClick (RemoveMember member.userId)
+                , disabled (model.removingMemberId == Just member.userId)
+                ]
+                [ text
+                    (if model.removingMemberId == Just member.userId then
+                        "Removing…"
+
+                     else
+                        "Remove"
+                    )
+                ]
+
+          else
+            text ""
         ]
 
 

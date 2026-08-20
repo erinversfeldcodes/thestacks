@@ -26,6 +26,7 @@ module Api exposing
     , ConfirmOutcome(..)
     , ConfirmResponse
     , Deanonymisation
+    , GroupMember
     , ImportError(..)
     , ImportRow
     , InboxItem
@@ -136,6 +137,7 @@ module Api exposing
     , getCatalogueRequest
     , getGroup
     , getGroupFeed
+    , getGroupMembers
     , getImport
     , getImportRows
     , getInferences
@@ -191,6 +193,7 @@ module Api exposing
     , rejectIdentificationRequest
     , rejectSource
     , removeBookRequest
+    , removeGroupMember
     , reorderShelvesRequest
     , requestExport
     , requestExportRequest
@@ -5187,6 +5190,66 @@ declineInvitation groupId invitationId token toMsg =
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| A member of a reading group, as the members endpoint returns them.
+-}
+type alias GroupMember =
+    { userId : String
+    , role : String
+    , displayName : String
+    }
+
+
+groupMemberDecoder : Decoder GroupMember
+groupMemberDecoder =
+    Decode.map3 GroupMember
+        (Decode.field "user_id" Decode.string)
+        (Decode.field "role" Decode.string)
+        (Decode.field "display_name" Decode.string)
+
+
+{-| `GET /api/groups/:id/members` — who is in the group.
+-}
+getGroupMembers :
+    String
+    -> String
+    -> (Result Http.Error (List GroupMember) -> msg)
+    -> Cmd msg
+getGroupMembers groupId token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "members" (Decode.list groupMemberDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `DELETE /api/groups/:id/members/:user_id` — the owner removes someone.
+
+The endpoint shipped with groups and had no client, so a group owner could not
+remove a member from the app at all; only leaving was wired.
+
+-}
+removeGroupMember :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+removeGroupMember groupId memberUserId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members/" ++ memberUserId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout

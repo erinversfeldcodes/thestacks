@@ -236,6 +236,7 @@ defmodule CoreWeb.Router do
     post "/groups/:group_id/invitations", GroupMemberController, :invite
     post "/groups/:group_id/invitations/:id/accept", GroupMemberController, :accept
     post "/groups/:group_id/invitations/:id/decline", GroupMemberController, :decline
+    get "/groups/:group_id/members", GroupMemberController, :index
     delete "/groups/:group_id/members/:user_id", GroupMemberController, :remove
     delete "/groups/:group_id/leave", GroupMemberController, :leave
 
