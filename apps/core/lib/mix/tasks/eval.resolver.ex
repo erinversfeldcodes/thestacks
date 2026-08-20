@@ -13,8 +13,9 @@ defmodule Mix.Tasks.Eval.Resolver do
           mix eval.resolver --corpus path.exs  # alternative corpus
 
       Corpus: `priv/eval/corpus.exs`. Exits 1 on a regression against pinned
-      expectations, so it CAN gate — but nothing calls it yet, so today it gates
-      nothing. Wiring it to a caller is what turns that exit code into a gate.
+      expectations. Called by `scripts/lint-elixir.sh`, so that exit code is now
+      a gate rather than a capability — it went a while able to fail and never
+      asked to.
   """
 
   use Mix.Task

@@ -9,6 +9,13 @@ bash "$REPO_ROOT/scripts/check-mapping-truth.sh"
 
 mix format --check-formatted
 mix credo --strict
+
+# The resolver eval replays recorded cases through the real pick logic and exits
+# 1 on a regression against its pinned expectations. It has been able to gate
+# since it was written; until now nothing called it, so it gated nothing — the
+# same shape as a scanner that runs and whose result no one reads. It is offline
+# and sub-second, so there is no reason for it not to be here.
+mix eval.resolver
 # Build/refresh the PLT from the UMBRELLA ROOT before analysing the child.
 #
 # `mix dialyzer` inside an umbrella child prints "In an Umbrella child, not
