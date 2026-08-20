@@ -113,35 +113,15 @@ defmodule Stacks.DegradedAccountRecoveryTest do
                Accounts.restore_degraded_account(Ecto.UUID.generate())
     end
 
-    test "writes an audit row naming the operator and the account restored" do
-      degraded = degraded_user()
-      operator_id = Ecto.UUID.generate()
-
-      assert {:ok, restored} = Accounts.restore_degraded_account(degraded.id)
-
-      # The context does the restore; the endpoint writes the operator row. Assert
-      # the shape the endpoint depends on, so a change to Audit.log's contract
-      # surfaces here rather than in a silent gap in the trail.
-      Stacks.Audit.log(operator_id, "admin.account_restored",
-        resource_type: "user",
-        resource_id: restored.id
-      )
-
-      %{rows: rows} =
-        Repo.query!(
-          """
-          select resource_type, resource_id::text, user_id::text
-            from audit.audit_log
-           where action = 'admin.account_restored' and resource_id = $1
-          """,
-          [Ecto.UUID.dump!(restored.id)]
-        )
-
-      assert [[resource_type, resource_id, actor]] = rows
-      assert resource_type == "user"
-      assert resource_id == restored.id
-      assert actor == operator_id, "the row must name WHO reached into the account"
-    end
+    # The audit guarantee is asserted where it is actually produced: a conn-level
+    # test through the :admin pipeline in `admin_controller_test.exs`.
+    #
+    # A test lived here that called `Stacks.Audit.log` ITSELF and then asserted
+    # the row existed. Deleting the controller's audit call left it green, so the
+    # guarantee the runbook leans on — that un-degrading an account leaves a
+    # trace naming the operator — was enforced by nothing. Removed rather than
+    # patched: the context does not write that row, so this file is the wrong
+    # place to claim it does.
 
     test "the restored account is no longer listed as degraded" do
       degraded = degraded_user()

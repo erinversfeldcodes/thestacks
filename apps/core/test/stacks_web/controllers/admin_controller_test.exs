@@ -222,6 +222,47 @@ defmodule StacksWeb.AdminControllerTest do
     end
   end
 
+  describe "POST /api/admin/degraded_accounts/restore" do
+    test "restores the account and records WHO reached into it", %{conn: conn} do
+      # Through the real endpoint and the real :admin pipeline.
+      #
+      # The context-level test for this used to call `Stacks.Audit.log` ITSELF
+      # and then assert the row existed — so deleting the controller's audit call
+      # left it green. The guarantee the runbook depends on ("un-degrading an
+      # account without a trace would be worse than the lockout it fixes") was
+      # unenforced by anything.
+      {conn, admin, _session} = setup_full_admin(conn)
+
+      target =
+        insert(:user,
+          email_confirmed: false,
+          pending_email: "new@example.com",
+          pending_email_token: "tok",
+          pending_email_sent_at: DateTime.add(DateTime.utc_now(), -40, :day),
+          pending_email_revert_token: "revert-tok"
+        )
+
+      conn = post(conn, "/api/admin/degraded_accounts/restore", %{user_id: target.id})
+      assert %{"ok" => true} = json_response(conn, 200)
+
+      %{rows: rows} =
+        Core.Repo.query!(
+          "SELECT user_id, resource_id FROM audit.audit_log WHERE action = $1",
+          ["admin.account_restored"]
+        )
+
+      assert [[actor, subject]] = rows
+      assert Ecto.UUID.cast!(actor) == admin.id, "the audit row must name the OPERATOR"
+      assert Ecto.UUID.cast!(subject) == target.id, "and the account they reached into"
+    end
+
+    test "404s an unknown user", %{conn: conn} do
+      {conn, _admin, _session} = setup_full_admin(conn)
+      conn = post(conn, "/api/admin/degraded_accounts/restore", %{user_id: Ecto.UUID.generate()})
+      assert %{"error" => "user_not_found"} = json_response(conn, 404)
+    end
+  end
+
   describe "POST /api/admin/gdpr_erase" do
     test "erases user and returns 200", %{conn: conn} do
       {conn, _admin, _session} = setup_full_admin(conn)
