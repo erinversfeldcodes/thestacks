@@ -310,4 +310,25 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
       assert_no_email_sent()
     end
   end
+
+  describe "delivery counter" do
+    # The public cost page's email line is derived from this counter. It used to
+    # be derived by counting rows in `oban_jobs`, which the pruner deletes about
+    # a minute after a job completes, so the month-to-date figure only ever saw
+    # the last minute of sends.
+    test "a delivered email emits the counted event, tagged with its template" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:stacks, :email, :delivered]])
+      user = insert(:user, recipient_opts())
+
+      assert :ok =
+               perform_job(EmailDeliveryJob, %{
+                 "user_id" => user.id,
+                 "template" => "password_reset",
+                 "params" => %{"token" => "tok"}
+               })
+
+      assert_receive {[:stacks, :email, :delivered], ^ref, %{count: 1},
+                      %{template: :password_reset}}
+    end
+  end
 end

@@ -21,6 +21,7 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_auth_refresh_revoke_failed_count_total" => :public,
     "stacks_auth_registration_count_total" => :public,
     "stacks_auth_session_expired_count_total" => :public,
+    "stacks_email_delivered_count_total" => :public,
     "stacks_events_dispatch_duration_milliseconds" => :public,
     "stacks_events_emitted_count_total" => :public,
     "stacks_events_handler_error_count_total" => :public,

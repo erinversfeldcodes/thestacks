@@ -105,6 +105,13 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
     case Mailer.deliver(email) do
       {:ok, _} ->
+        # The billable unit for the email provider, counted where it actually
+        # happens. The cost page previously derived its send count from rows in
+        # `oban_jobs`, which the pruner deletes about a minute after the job
+        # finishes — so a "this month" figure only ever saw the last minute.
+        # The template is a bounded set (`@known_templates`), so it is safe as a
+        # label; no address, name or user id is attached.
+        :telemetry.execute([:stacks, :email, :delivered], %{count: 1}, %{template: template})
         :ok
 
       {:error, reason} ->

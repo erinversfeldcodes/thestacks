@@ -550,4 +550,63 @@ defmodule Stacks.CostsTest do
       assert length(costs) == 10
     end
   end
+
+  describe "counts that must outlive the Oban pruner" do
+    alias Stacks.Transparency.MockPrometheusClient
+    # Oban's Pruner runs with its default `max_age: 60`, so a completed job row
+    # is deleted about a minute after it finishes. Any month-to-date figure
+    # derived by counting rows in `oban_jobs` therefore reported roughly the
+    # last minute of activity — on the public cost page, whose whole claim is
+    # that the numbers are measured.
+    #
+    # These pin the requirement rather than the implementation: with the job
+    # table empty, both figures must still be right, which is only possible if
+    # they no longer read it.
+
+    setup do
+      MockPrometheusClient.reset()
+      on_exit(&MockPrometheusClient.reset/0)
+      :ok
+    end
+
+    test "emails sent are counted with no delivery job rows present" do
+      MockPrometheusClient.put_response(fn promql ->
+        if String.contains?(promql, "stacks_email_delivered_count_total"),
+          do: {:ok, 3.0},
+          else: {:ok, 0.0}
+      end)
+
+      assert Core.Repo.aggregate(Oban.Job, :count) == 0
+      assert Costs.emails_this_month() == {:ok, 3}
+    end
+
+    test "vision inferences are counted with no vision job rows present" do
+      MockPrometheusClient.put_response(fn promql ->
+        if String.contains?(promql, "stacks_vision_request_stop_duration_milliseconds_count"),
+          do: {:ok, 2.0},
+          else: {:ok, 0.0}
+      end)
+
+      assert Core.Repo.aggregate(Oban.Job, :count) == 0
+      assert Costs.vision_jobs_this_month() == {:ok, 2}
+    end
+
+    test "an unreachable metric store yields no count, and never a zero" do
+      MockPrometheusClient.put_response({:error, :unreachable})
+
+      assert Costs.emails_this_month() == :error
+      assert Costs.vision_jobs_this_month() == :error
+    end
+
+    test "an unavailable inference count is not priced as zero inferences" do
+      now = DateTime.utc_now()
+
+      [modal] =
+        Costs.build_cost_items(now, now, nil)
+        |> Enum.filter(&(&1.service == "Modal GPU Inference"))
+
+      assert modal.description =~ "temporarily unavailable"
+      refute modal.description =~ "0 inferences"
+    end
+  end
 end

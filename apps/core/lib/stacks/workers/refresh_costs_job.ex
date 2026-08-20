@@ -27,7 +27,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
     period_start = beginning_of_month(now)
     period_end = end_of_month(now)
 
-    vision_jobs = Costs.vision_jobs_this_month()
+    vision_jobs = unwrap(Costs.vision_jobs_this_month())
 
     core_awake_seconds =
       case Costs.core_awake_seconds(period_start, now) do
@@ -46,7 +46,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
         together_completions: metric_count("stacks_ai_together_completion_count_total"),
         brave_searches: metric_count("stacks_discovery_brave_search_count_total"),
         isbn_lookups: metric_count("stacks_moderation_isbn_resolution_count_total"),
-        emails_sent: Costs.emails_this_month()
+        emails_sent: unwrap(Costs.emails_this_month())
       )
 
     results =
@@ -95,11 +95,14 @@ defmodule Stacks.Workers.RefreshCostsJob do
   end
 
   defp metric_count(family) do
-    case Costs.metric_count_this_month(family) do
-      {:ok, count} -> count
-      :error -> nil
-    end
+    unwrap(Costs.metric_count_this_month(family))
   end
+
+  # A measurement we could not take is `nil`, never 0 — every cost item has a
+  # nil clause that says the figure is unavailable, because a transparency page
+  # printing "0" would be claiming the service went unused.
+  defp unwrap({:ok, count}), do: count
+  defp unwrap(:error), do: nil
 
   defp beginning_of_month(%DateTime{} = dt) do
     %{dt | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}

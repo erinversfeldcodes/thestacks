@@ -75,7 +75,11 @@ defmodule Stacks.Costs do
       placements: placement_count(),
       db_size_bytes: db_size_bytes(),
       avg_upload_payload_bytes: avg_upload_payload_bytes(),
-      vision_jobs_this_month: vision_jobs_this_month()
+      vision_jobs_this_month:
+        case vision_jobs_this_month() do
+          {:ok, n} -> n
+          :error -> 0
+        end
     }
   end
 
@@ -126,17 +130,22 @@ defmodule Stacks.Costs do
     result || 0
   end
 
-  @doc "Number of vision inference jobs completed this month."
-  @spec vision_jobs_this_month() :: non_neg_integer()
-  def vision_jobs_this_month do
-    month_start = beginning_of_month(DateTime.utc_now())
+  @doc """
+      Number of Modal vision inferences this month, counted from the per-call
+      request metric.
 
-    Repo.one(
-      from(j in Job,
-        where: j.queue == "vision" and j.inserted_at >= ^month_start,
-        select: count(j.id)
-      )
-    ) || 0
+      Not from `oban_jobs`: the pruner deletes a completed job row about a
+      minute after it finishes, so counting rows there reported the last minute
+      of inferences as the month's total — and this is the figure the largest
+      compute line on the public cost page is derived from. Counts the calls
+      that reached Modal and returned, which is what Modal bills for; a call
+      that raised before a response is counted separately as an exception.
+      Returns `:error` when the metric store cannot be reached, which the cost
+      item renders as an estimate rather than as zero.
+  """
+  @spec vision_jobs_this_month() :: {:ok, non_neg_integer()} | :error
+  def vision_jobs_this_month do
+    metric_count_this_month("stacks_vision_request_stop_duration_milliseconds_count")
   end
 
   @platform_cost_valid_categories ~w(hosting compute database domain services)
@@ -211,25 +220,15 @@ defmodule Stacks.Costs do
       and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
       `amount_cents: 0` and `"0 inferences this month"`.
   """
-  @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer(), keyword()) :: [map()]
+  @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer() | nil, keyword()) ::
+          [map()]
   def build_cost_items(period_start, period_end, vision_jobs, opts \\ []) do
     base = %{period_start: period_start, period_end: period_end, currency: "USD"}
-
-    modal_cents = vision_jobs * @modal_per_inference_cents
 
     [
       fly_core_item(base, Keyword.get(opts, :core_awake_seconds)),
       fly_services_item(base, Keyword.get(opts, :fly_services_cents)),
-      Map.merge(base, %{
-        category: "compute",
-        service: "Modal GPU Inference",
-        description:
-          "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month " <>
-            "(~$0.03/each; Modal exposes no billing API, so this is our own count. " <>
-            "Counts inference only: a container also bills while idle for up to " <>
-            "its scaledown window after the last request, which this figure omits)",
-        amount_cents: modal_cents
-      }),
+      modal_item(base, vision_jobs),
       together_item(base, Keyword.get(opts, :together_completions)),
       neon_item(base, Keyword.get(opts, :neon_cents)),
       resend_item(base, Keyword.get(opts, :emails_sent)),
@@ -248,6 +247,35 @@ defmodule Stacks.Costs do
         amount_cents: @domain_monthly_cents
       })
     ]
+  end
+
+  # Modal exposes no billing API, so the inference count is our own measurement.
+  # When the metric store cannot be reached we say the figure is unavailable
+  # rather than printing "0 inferences", which on a transparency page would read
+  # as a claim that nothing ran.
+  defp modal_item(base, nil) do
+    Map.merge(base, %{
+      category: "compute",
+      service: "Modal GPU Inference",
+      description:
+        "Qwen2.5-VL-7B on A10G (~$0.03/inference; Modal exposes no billing API, " <>
+          "so this is our own count) — this month's inference count is " <>
+          "temporarily unavailable, so no charge is shown",
+      amount_cents: 0
+    })
+  end
+
+  defp modal_item(base, vision_jobs) when is_integer(vision_jobs) do
+    Map.merge(base, %{
+      category: "compute",
+      service: "Modal GPU Inference",
+      description:
+        "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month " <>
+          "(~$0.03/each; Modal exposes no billing API, so this is our own count. " <>
+          "Counts inference only: a container also bills while idle for up to " <>
+          "its scaledown window after the last request, which this figure omits)",
+      amount_cents: vision_jobs * @modal_per_inference_cents
+    })
   end
 
   # Together bills per token with no billing API; we count our own successful
@@ -495,17 +523,19 @@ defmodule Stacks.Costs do
     end
   end
 
-  @doc "Emails handed to Resend this month, counted from the delivery jobs."
-  @spec emails_this_month() :: non_neg_integer()
-  def emails_this_month do
-    month_start = beginning_of_month(DateTime.utc_now())
+  @doc """
+      Emails handed to Resend this month, counted from the delivery counter.
 
-    Repo.one(
-      from(j in Job,
-        where: j.worker == "Stacks.Workers.EmailDeliveryJob" and j.inserted_at >= ^month_start,
-        select: count(j.id)
-      )
-    ) || 0
+      Not from `oban_jobs`: the pruner deletes a completed job row about a
+      minute after it finishes, so counting rows there reported the last minute
+      of sends under a "this month" heading — on the public cost page, whose
+      whole claim is that the figure is measured. Returns `:error` when the
+      metric store cannot be reached, which the cost item renders as the
+      free-tier line without a count rather than as zero.
+  """
+  @spec emails_this_month() :: {:ok, non_neg_integer()} | :error
+  def emails_this_month do
+    metric_count_this_month("stacks_email_delivered_count_total")
   end
 
   defp prometheus_client do

@@ -128,6 +128,17 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:worker, :source, :repo],
           reporter_options: [buckets: @query_duration_buckets]
         ),
+        # Emails handed to the provider, by template. Feeds the public cost
+        # page's free-tier line, which is why it is a metric and not a query
+        # over `oban_jobs`: job rows are pruned within a minute of completing.
+        counter(
+          [:stacks, :email, :delivered, :count, :total],
+          event_name: [:stacks, :email, :delivered],
+          measurement: :count,
+          tags: [:template],
+          description:
+            "Transactional emails handed to the email provider, by template — the billable send count."
+        ),
         counter(
           [:stacks, :upload, :terminal, :count, :total],
           event_name: [:stacks, :upload, :terminal],
