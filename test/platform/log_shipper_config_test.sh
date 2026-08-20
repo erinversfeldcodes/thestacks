@@ -19,6 +19,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/lib/python.sh"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 VECTOR_TOML="${REPO_ROOT}/deploy/log-shipper/vector.toml"
 FLY_TOML="${REPO_ROOT}/deploy/fly.log-shipper.toml"
@@ -43,28 +44,8 @@ except ModuleNotFoundError:  # Python < 3.11
 '
 
 _pick_toml_python() {
-    local candidates=(
-        "$REPO_ROOT/.venv-tools/bin/python3"
-        "$REPO_ROOT/scripts/mcp/.venv/bin/python3"
+    pick_python "$_TOML_PRELUDE" "stacks-log-shipper-test-venv" "tomli" \
         "$REPO_ROOT/apps/vision/.venv/bin/python3"
-        "python3"
-    )
-    local cand
-    for cand in "${candidates[@]}"; do
-        if command -v "$cand" >/dev/null 2>&1 \
-            && "$cand" -c "$_TOML_PRELUDE" >/dev/null 2>&1; then
-            echo "$cand"
-            return 0
-        fi
-    done
-    local fallback_venv="${TMPDIR:-/tmp}/stacks-log-shipper-test-venv"
-    if [[ ! -x "$fallback_venv/bin/python3" ]] \
-        || ! "$fallback_venv/bin/python3" -c "$_TOML_PRELUDE" >/dev/null 2>&1; then
-        python3 -m venv "$fallback_venv" >/dev/null 2>&1 || return 1
-        "$fallback_venv/bin/pip" install --quiet tomli >/dev/null 2>&1 || return 1
-    fi
-    echo "$fallback_venv/bin/python3"
-    return 0
 }
 
 TOML_PYTHON="$(_pick_toml_python || true)"

@@ -6,32 +6,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=lib/assert.sh
 source "$HERE/lib/assert.sh"
+source "$HERE/lib/python.sh"
 
 ACTION_DIR="$REPO_ROOT/.github/actions/rollback-production"
 ACTION_YML="$ACTION_DIR/action.yml"
 ACTION_README="$ACTION_DIR/README.md"
 
 _pick_yaml_python() {
-    local candidates=(
-        "$REPO_ROOT/.venv-tools/bin/python3"
-        "$REPO_ROOT/scripts/mcp/.venv/bin/python3"
-        "python3"
-    )
-    for cand in "${candidates[@]}"; do
-        if command -v "$cand" >/dev/null 2>&1 \
-            && "$cand" -c "import yaml" >/dev/null 2>&1; then
-            echo "$cand"
-            return 0
-        fi
-    done
-    local fallback_venv="${TMPDIR:-/tmp}/stacks-rollback-action-test-venv"
-    if [[ ! -x "$fallback_venv/bin/python3" ]] \
-        || ! "$fallback_venv/bin/python3" -c "import yaml" >/dev/null 2>&1; then
-        python3 -m venv "$fallback_venv" >/dev/null 2>&1 || return 1
-        "$fallback_venv/bin/pip" install --quiet pyyaml >/dev/null 2>&1 || return 1
-    fi
-    echo "$fallback_venv/bin/python3"
-    return 0
+    pick_python "import yaml" "stacks-rollback-action-test-venv" "pyyaml"
 }
 
 YAML_PYTHON="$(_pick_yaml_python || true)"
