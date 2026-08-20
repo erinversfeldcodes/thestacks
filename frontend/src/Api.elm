@@ -4084,15 +4084,32 @@ profileShelfSummaryDecoder =
 
 
 {-| Decodes a string field that may be absent or JSON null, defaulting to "".
-`Decode.nullable` handles a present-but-null value explicitly; an absent key
-falls through to "".
+
+⛔ Absent and _wrong_ are different answers. This was written as
+`oneOf [ field, Decode.succeed "" ]`, and `oneOf` falls through on ANY failure
+of the first branch — so a field arriving as a number, a list or an object
+decoded to `""` exactly as an unset one did. The reader saw a blank name or a
+blank city, and nothing reported that the server had sent something unreadable.
+
+So the key's PRESENCE is established first (`Decode.value` succeeds on any
+present value, and fails only when the key is missing). An absent key defaults;
+a present key must then be a string or null, and anything else fails the decode
+where it can be seen.
+
 -}
 optionalString : String -> Decoder String
 optionalString field =
-    Decode.oneOf
-        [ Decode.field field (Decode.nullable Decode.string) |> Decode.map (Maybe.withDefault "")
-        , Decode.succeed ""
-        ]
+    Decode.maybe (Decode.field field Decode.value)
+        |> Decode.andThen
+            (\present ->
+                case present of
+                    Nothing ->
+                        Decode.succeed ""
+
+                    Just _ ->
+                        Decode.field field (Decode.nullable Decode.string)
+                            |> Decode.map (Maybe.withDefault "")
+            )
 
 
 {-| GET /api/u/:handle. Optional auth — pass the viewer's token when signed in so
