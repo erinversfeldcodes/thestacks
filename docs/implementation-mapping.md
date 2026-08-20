@@ -46,11 +46,11 @@
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3, US-2.6.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), automatic edition discovery (US-2.6.1), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
-| **Phase 5** | Marketplace | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
+| **Phase 5** | Marketplace | US-7.1.1, US-7.2.1, US-7.3.1, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-10.5.1, US-10.5.2, US-10.5.3, US-10.5.4, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, public handles/profiles (US-10.5.x), groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
 | **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-12.2.1, US-12.2.2, US-13.1.1, US-13.1.2, US-6.2.1 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering, and POSSE syndication of posts to Substack (US-6.2.1). The writing assistant (US-12.2.x) was designed and deferred to Phase 2, so it is NOT part of what this phase delivered. Requires Phase 6 visibility infrastructure. |
 | **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.1.3, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-14.4.1, US-14.4.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-15.4.1, US-15.5.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), invite-only registration for the closed beta (US-14.1.3), password reset (US-14.4.1/US-14.4.2), a platform FAQ (US-15.4.1) and beta feedback channel (US-15.5.1), and accessibility (US-19.x). |
-| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5, US-8.6, US-14.5.1, US-20.1.1, US-20.2.1 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Also spans data insights/transparency (US-8.6), 24-hour erasure of unconfirmed accounts (US-14.5.1), and the admin/owner surfaces — MFA-gated admin access (US-20.1.1) and owner-only data corrections such as edition un-merge (US-20.2.1). |
+| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5, US-8.6.1, US-14.5.1, US-20.1.1, US-20.2.1 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Also spans data insights/transparency (US-8.6.1), 24-hour erasure of unconfirmed accounts (US-14.5.1), and the admin/owner surfaces — MFA-gated admin access (US-20.1.1) and owner-only data corrections such as edition un-merge (US-20.2.1). |
 
 ### Additional Features Under Consideration (per phase)
 
@@ -162,8 +162,8 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-5.1.1 _(in-app dashboard superseded by Grafana, #267)_ | -- (Grafana) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
 | US-6.1.1 | -- | RW (feed gen) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (listings, bookshelf_placements, uploaded_images) | -- | -- |
-| US-7.2 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
-| US-7.3 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
+| US-7.2.1 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
+| US-7.3.1 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
 | US-10.1.1 | RW (privacy settings) | RW (profile visibility) | -- | -- | RW (users) | -- | -- |
 | US-10.1.2 | RW (block UI) | RW (block) | -- | -- | RW (user_blocks) | -- | -- |
 | US-10.2.1 | RW (shelf settings) | RW (shelf visibility) | -- | -- | RW (bookshelves, groups) | -- | -- |
@@ -1418,7 +1418,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 ---
 
-#### US-8.6 -- See What Your Own Data Reveals About You
+#### US-8.6.1 -- See What Your Own Data Reveals About You
 
 | Dimension | Detail |
 |-----------|--------|
@@ -2640,7 +2640,7 @@ Which user stories touch each database table:
 | `PartnerMetricsSnapshotJob` | US-9.5.1 | Scheduled (daily) |
 | `GeographicDiscoveryJob` | US-2.5.2 | Event-driven (user.location_updated) + quarterly Oban.Cron |
 | `OptOutConfirmationJob` | US-2.5.3 | On-demand (opt-out request) |
-| `MarketplaceSaleWorker` | US-7.2 | Event-driven (book.sold — checks buyer WishList, prompts) — **DEFERRED** (ADR 013, relevant when payments are on-platform) |
+| `MarketplaceSaleWorker` | US-7.2.1 | Event-driven (book.sold — checks buyer WishList, prompts) — **DEFERRED** (ADR 013, relevant when payments are on-platform) |
 | `WishListAvailabilityJob` | US-17.3.1 | Event-driven (partner inventory ingested, classifieds listing activated) |
 | `EmailNotificationJob` | US-17.3.1 | On-demand (checks preferences before sending) |
 | `EventSubscriberWorker` | EDA (cross-cutting) | Event-driven (dispatches to subscriber modules) |
