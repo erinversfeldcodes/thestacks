@@ -300,8 +300,14 @@ def touched_stacks():
     return None
 
 
-if any((it.get("status") or "").lower() in DONE
-       for w in waves.values() for it in (w.get("items") or {}).values()):
+# Campaign-level, so it is not reported when the caller has filtered to one wave —
+# a single-wave view answering a campaign-wide question reads as a defect in that
+# wave, which it is not.
+if not wave_filter and any(
+    (it.get("status") or "").lower() in DONE
+    for w in waves.values()
+    for it in (w.get("items") or {}).values()
+):
     reviews = {k.lower() for k in (state.get("domain_reviews") or {})}
     stacks = touched_stacks()
     if stacks is None:
