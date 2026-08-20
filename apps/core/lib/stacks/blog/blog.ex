@@ -194,6 +194,44 @@ defmodule Stacks.Blog do
   end
 
   @doc """
+      Lists published posts across ALL authors that `viewer` may read, newest first.
+
+      This is the discovery feed — "what is there to read here" — as distinct from
+      `list_user_posts/2`, which answers "what has this author written". A reader
+      who has not signed in gets the `public` posts; signing in additionally
+      surfaces the `platform` ones, because that is what those two levels mean.
+
+      Two deliberate exclusions. Drafts (`owner`) never appear, for anyone,
+      including their own author: a discovery surface is not a drafts folder, and
+      the author's own archive already shows them. `group` posts are addressed to a
+      particular group rather than offered to be found, so they stay out even for a
+      member who could open one directly.
+
+      `Visibility.can_view?/2` remains the authority on the rest — the profile
+      ceiling, blocks and the age gate all resolve there. The query narrows what is
+      read from the database; it does not decide anything the visibility rules
+      would otherwise decide, so a change to those rules reaches this feed too.
+
+      The window is bounded (`:limit`, default 50) and applied BEFORE the visibility
+      filter, so a reader can receive fewer than `limit` posts. That is honest for a
+      feed — the alternative, over-fetching until the page is full, makes the cost
+      of a request depend on how much of the corpus the reader is excluded from.
+  """
+  @spec list_public_posts(term(), keyword()) :: [Post.t()]
+  def list_public_posts(viewer, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+
+    from(p in Post,
+      where: not is_nil(p.published_at) and p.visibility in ["public", "platform"],
+      order_by: [desc: p.published_at],
+      limit: ^limit
+    )
+    |> Repo.all()
+    |> Repo.preload(:user)
+    |> Enum.filter(&Visibility.can_view?(&1, viewer))
+  end
+
+  @doc """
       Lists posts associated with a given book (by book_id), visible to the viewer.
 
       Only returns published posts with visible associations.

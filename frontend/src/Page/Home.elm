@@ -189,6 +189,12 @@ viewPreview preview =
 {-| The onward actions, present in every state. Add-Book is the primary,
 persistent affordance; continue-reading routes back into the Reading
 Pile. Plain links — the home issues no call of its own beyond the glimpse read.
+
+The blog sits here because the home is where a signed-in reader starts, and
+until now the writing on this platform was reachable only by typing the URL.
+It is the quietest of the three: reading what others wrote is an invitation,
+not the errand someone came here to run.
+
 -}
 viewActions : Html Msg
 viewActions =
@@ -205,4 +211,10 @@ viewActions =
             , testId "home-continue-reading"
             ]
             [ text "Continue reading" ]
+        , a
+            [ href (Route.toPath BlogArchive)
+            , class "home-collection__blog"
+            , testId "home-blog"
+            ]
+            [ text "Read the blog" ]
         ]

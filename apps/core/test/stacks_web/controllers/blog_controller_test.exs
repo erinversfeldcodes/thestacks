@@ -93,9 +93,73 @@ defmodule StacksWeb.BlogControllerTest do
       assert length(posts) == 2
     end
 
-    test "returns 422 when user_id is missing", %{conn: conn} do
+    test "without user_id, a signed-out reader gets public posts from every author", %{
+      conn: conn
+    } do
+      one = insert(:user, profile_visibility: "public")
+      two = insert(:user, profile_visibility: "public")
+
+      a = insert(:post, user: one, visibility: "public", published_at: DateTime.utc_now())
+      b = insert(:post, user: two, visibility: "public", published_at: DateTime.utc_now())
+
       conn = get(conn, "/api/blog/posts")
-      assert %{"error" => _} = json_response(conn, 422)
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      ids = Enum.map(posts, & &1["id"])
+      assert a.id in ids
+      assert b.id in ids
+    end
+
+    test "the feed hides drafts, platform posts and ghost authors from a signed-out reader", %{
+      conn: conn
+    } do
+      author = insert(:user, profile_visibility: "public")
+      ghost = insert(:user, profile_visibility: "owner")
+
+      draft = insert(:post, user: author, visibility: "public", published_at: nil)
+
+      platform_only =
+        insert(:post, user: author, visibility: "platform", published_at: DateTime.utc_now())
+
+      hidden_author =
+        insert(:post, user: ghost, visibility: "public", published_at: DateTime.utc_now())
+
+      conn = get(conn, "/api/blog/posts")
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      ids = Enum.map(posts, & &1["id"])
+      refute draft.id in ids
+      refute platform_only.id in ids
+      refute hidden_author.id in ids
+    end
+
+    test "signing in adds the platform posts to the feed", %{conn: conn} do
+      author = insert(:user, profile_visibility: "platform")
+      reader = insert(:user)
+
+      platform_post =
+        insert(:post, user: author, visibility: "platform", published_at: DateTime.utc_now())
+
+      conn =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts")
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      assert platform_post.id in Enum.map(posts, & &1["id"])
+    end
+
+    test "an author's own drafts stay out of the feed — it is not a drafts folder", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      own_draft = insert(:post, user: author, visibility: "owner", published_at: nil)
+
+      conn =
+        conn
+        |> auth_conn(author)
+        |> get("/api/blog/posts")
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      refute own_draft.id in Enum.map(posts, & &1["id"])
     end
   end
 

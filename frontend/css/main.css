@@ -2068,6 +2068,24 @@ h4 {
     min-width: 12rem;
 }
 
+/* Deliberately not a button: the two buttons above are the errands someone
+   came to run, and a third competing for the same weight would make the row
+   read as a menu rather than a choice. This is an invitation, so it sits on
+   the same baseline in the body voice and earns its emphasis on hover. */
+.home-collection__blog {
+    align-self: center;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 0.25em;
+}
+
+.home-collection__blog:hover,
+.home-collection__blog:focus-visible {
+    color: var(--accent);
+}
+
 .page--not-found {
     text-align: center;
     padding: 4rem 2rem;
@@ -6010,6 +6028,7 @@ h4 {
 }
 
 .audit-log__when,
+.blog-archive__item-author,
 .blog-archive__item-date,
 .blog-post__byline,
 .blog-post__date,
@@ -6112,6 +6131,22 @@ h4 {
     padding-bottom: 0.75rem;
     margin-bottom: 1rem;
     border-bottom: 1px solid var(--border);
+}
+
+.blog-archive__item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+}
+
+/* The separator is decoration between two meta values, so it belongs to the
+   layout rather than the markup — and it must not appear when the byline is
+   absent, which is why it hangs off the date's preceding sibling. */
+.blog-archive__item-author + .blog-archive__item-date::before {
+    content: "·";
+    margin-right: var(--space-2);
 }
 
 .blog-archive__list,
