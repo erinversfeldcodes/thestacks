@@ -59,7 +59,13 @@ defmodule Stacks.Workers.DataExportJobTest do
 
       assert {:ok, [key]} = Storage.list_objects("exports/#{user.id}/")
       assert {:ok, deadline} = ExportDelivery.deadline(key)
-      assert DateTime.diff(deadline, before) in 86_395..86_400
+
+      # `before` is taken ahead of the job, and the stamp is 24 hours after the
+      # job RAN, so this difference is always at least 86_400 — never less. The
+      # window used to sit just below that (86_395..86_400) and so passed only
+      # while the job happened to finish inside the same wall-clock second; the
+      # first run that took a second over reported 86_401 and went red.
+      assert DateTime.diff(deadline, before) in 86_400..86_410
     end
 
     test "enqueues the export-ready email with a link to the stored object" do
