@@ -95,6 +95,7 @@ gate check-orphan-classes.sh
 gate check-admin-token-routing.sh
 gate check-session-expiry-coverage.sh
 gate check-component-dispatch.sh
+gate check-route-reachability.sh
 gate check-ports-wired.sh
 gate check-css.sh
 gate check-css-values.sh
