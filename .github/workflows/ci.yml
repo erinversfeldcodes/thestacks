@@ -122,6 +122,7 @@ jobs:
       lockfiles: ${{ steps.filter.outputs.lockfiles }}
       source: ${{ steps.filter.outputs.source }}
       vision_deps: ${{ steps.filter.outputs.vision_deps }}
+      doc_gates: ${{ steps.filter.outputs.doc_gates }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -190,6 +191,18 @@ jobs:
               - 'scripts/**'
               - 'proto/**'
               - 'dbt/**'
+            # The gates that check documentation against code read from BOTH
+            # sides, and lived only inside the elixir and elm lanes — whose
+            # filters are 'apps/core/**' and 'frontend/**'. Neither covers
+            # docs/, dbt/ or the gate scripts, so the one change most likely to
+            # break a doc-vs-code gate — editing the doc — ran none of them.
+            doc_gates:
+              - 'docs/**'
+              - 'dbt/models/**'
+              - 'apps/core/config/config.exs'
+              - 'apps/core/lib/core_web/router.ex'
+              - 'frontend/src/**'
+              - 'scripts/check-*.sh'
 
   lint-elixir:
     needs: [changes, versions]
@@ -228,6 +241,24 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
       - run: scripts/lint-elixir.sh
+
+  lint-doc-gates:
+    # The doc-vs-code gates, run on their own inputs rather than only as a
+    # side-effect of a source lane. They need bash and python3 and nothing else,
+    # so this lane is seconds, not minutes. They still run inside
+    # scripts/lint-elixir.sh and scripts/lint-elm.sh for local `just verify` and
+    # for source-only changes.
+    needs: changes
+    if: needs.changes.outputs.doc_gates == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/check-mapping-truth.sh
+      - run: scripts/check-oban-queue-drift.sh
+      - run: scripts/check-dbt-model-drift.sh
+      - run: scripts/check-phase-scheme.sh
+      - run: scripts/check-route-reachability.sh
 
   test-elixir:
     needs: [changes, versions]

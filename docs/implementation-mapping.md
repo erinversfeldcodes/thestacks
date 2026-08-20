@@ -434,7 +434,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Upload` module — multi-step state machine: `Uploading` → `Verifying IdentifiedBook` → `ChoosingShelf IdentifiedBook` → `Complete`. Drag-and-drop / file picker. Verification step shows uploaded image alongside identified book ("We think this is…"). Shelf picker defaults to WishList. Post-success: "Add another" / "View on shelf". Types: `UploadStep`, `IdentifiedBook`, `ShelfPicker`. Ports for file-input interop. |
-| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.identify/2` (`POST /api/upload/identify`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`. |
+| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.init/2` (`POST /api/upload/init`) then `commit/2` (`POST /api/upload/:image_id/commit`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`. |
 | **Database** | **Write:** `op.books` (work), `op.book_editions` (edition with ISBN, format, cover), `op.authors`, `op.uploaded_images`, `op.bookshelf_placements`, `op.audit_log`. **Read:** `op.book_editions` (dedup check by ISBN), `op.books` (fuzzy match for multi-format merge). |
 | **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` — sends base64 image to Modal vision service over HMAC-authenticated HTTPS. Returns candidates to caller. `Stacks.Workers.EnrichBookJob` — fetch metadata from Open Library / Google Books after ISBN resolved. |
 | **External Services** | **Modal** (Qwen2.5-VL-7B-Instruct on A10G GPU) for image classification and book extraction. Open Library API for ISBN lookup + work/edition metadata. Google Books API as fallback. |
@@ -534,7 +534,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.DuplicateDetected` — shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. For multi-format: shows both editions side-by-side with "Yes, same book" (merge) and "No, it's different" (create new). |
+| **Frontend (Elm)** | The `DuplicateDetected` variant of `Page.Upload`'s result type (there is no separate component module) — shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. For multi-format: shows both editions side-by-side with "Yes, same book" (merge) and "No, it's different" (create new). |
 | **Backend (Phoenix)** | `Stacks.Books.find_existing/1` — ISBN dedup check against `book_editions.isbn`. `Stacks.Books.find_same_work/2` — fuzzy match on title+author (Jaro-Winkler > 0.8) against existing `books` works. Returns existing book data or merge candidate. |
 | **Database** | **Read:** `op.book_editions` (ISBN lookup), `op.books` (fuzzy title+author match), `op.bookshelf_placements` (current shelf). |
 | **Jobs (Oban)** | None. |
@@ -554,7 +554,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.FormatMerge` — side-by-side view of existing and new edition covers. "You own [Title] as a [format]. Add the [new format] edition?" with merge/decline buttons. Reuses warm blue state from duplicate detection. |
+| **Frontend (Elm)** | The `SameWorkFound` / `EditionMerged` variants of `Page.Upload` and its `ConfirmMergeFormat` message (there is no separate component module) — side-by-side view of existing and new edition covers. "You own [Title] as a [format]. Add the [new format] edition?" with merge/decline buttons. Reuses warm blue state from duplicate detection. |
 | **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row under the existing `books` work. Links the new ISBN. Sets `is_primary = false` (existing edition remains primary). No new shelf placement created. `StacksWeb.BookController.merge_format/2` (`POST /api/books/:id/merge-format`). **Un-merge (#376)** is owner-side, not public UI (owner ruling 2026-07-30): `Stacks.DataCorrection.UnmergeEdition`, a `Stacks.DataCorrection.Targeted` correction reached by `POST /api/admin/data_corrections/unmerge_edition/target` behind `[:api, :admin, :require_owner, :rate_limit_admin]`. Splits the edition onto a newly minted work, promotes it to that work's primary, and inherits `visibility_tier` so a repair cannot un-gate content. **Placements are deliberately not moved** — `Shelving.place_book/3` always points a placement at its work's *primary* edition and a merged edition is never primary, so no placement has ever named the split-out edition and which readers acquired it is unrecorded; the plan reports the retained count instead of guessing. See [`runbooks/data-correction.md`](runbooks/data-correction.md). |
 | **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.books` (existing work), `op.book_editions` (existing editions). |
 | **Jobs (Oban)** | `EnrichBookJob` — fetch edition-specific metadata (page count, cover) for the new edition. `TriggerPriceScrapeJob` — scrape prices for the new ISBN. |
@@ -674,7 +674,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Navigation.ShelfRouter` module. Elm `Browser.application` with URL-driven routing. `Animation.SlideTransition` and `Animation.RoomTransition` modules using `elm-animator` or CSS keyframe ports. Swipe gesture detection via ports for mobile. |
+| **Frontend (Elm)** | `Navigation.Route` module. Elm `Browser.application` with URL-driven routing. `Animation.SlideTransition` and `Animation.RoomTransition` modules, CSS-driven. Swipe gesture detection in `Navigation.SwipeNavigation`, wired in `Main`. |
 | **Backend (Phoenix)** | None -- purely client-side routing. Phoenix handles initial page load and falls back to SSR for direct URL access. |
 | **Database** | None. |
 | **Jobs (Oban)** | None. |
@@ -756,7 +756,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `SearchScope` type gains `WholePlatform` variant. Search dropdown splits into "Your Collection" (instant local) and "On the Platform" (async API). External results show contextual labels ("Listed by [user] for R120", "In stock at [partner]", "On [user]'s shelf"). Shimmer placeholders while loading. |
-| **Backend (Phoenix)** | `Stacks.Books.search_platform/2` (`GET /api/search/platform`) — queries across `bookshelf_placements` (public visibility), `listings` (active), `partner_inventory` (approved partners), `partner_events` (related ISBNs). Applies `resolve_visibility/2` filtering and block filtering. Results grouped by type. |
+| **Backend (Phoenix)** | `Stacks.Books.search_platform/2` (`GET /api/search`) — queries across `bookshelf_placements` (public visibility), `listings` (active), `partner_inventory` (approved partners), `partner_events` (related ISBNs). Applies `resolve_visibility/2` filtering and block filtering. Results grouped by type. |
 | **Database** | **Read:** `op.books`, `op.book_editions`, `op.bookshelf_placements` (where visibility = 'platform'), `op.listings`, `op.partner_inventory`, `op.partner_events`, `op.user_blocks`. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
@@ -795,7 +795,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.AbandonModal` -- optional textarea for note, confirm/cancel. Triggered from Reading Pile or Book Detail. |
+| **Frontend (Elm)** | Abandoning is a status on `Components.PlacementCard` (an `Abandoned` option in its status picker), not a dedicated modal. No note is captured — the optional "why" this story asks for is unbuilt. |
 | **Backend (Phoenix)** | `Stacks.Shelving.abandon_book/2` -- special case of move with optional `abandon_note`. |
 | **Database** | **Write:** `op.bookshelf_placements`, `op.bookshelf_placement_history` (with note field). |
 | **Jobs (Oban)** | Wear recalculation. |
@@ -856,7 +856,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.EmptyShelf` -- per-shelf variant with themed illustration and message. Rendered when `bookshelf_placements` count is 0 for a shelf. Includes CTA button ("Add a book" → upload). |
+| **Frontend (Elm)** | `Components.EmptyBookshelf` -- per-bookshelf variant with themed illustration and message. Rendered when `bookshelf_placements` count is 0 for a shelf. Includes CTA button ("Add a book" → upload). |
 | **Backend (Phoenix)** | None additional (empty state is client-side based on empty shelf data). |
 | **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements` (count check). |
 | **Jobs (Oban)** | None. |
@@ -1382,7 +1382,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Settings.Consent` -- toggle switches per consent category. `Components.ConsentBanner` -- first-visit consent collection. Timestamps displayed per consent. |
+| **Frontend (Elm)** | `Page.Settings.Consent` -- toggle switches per consent category. There is no first-visit consent banner; consent is collected only from the settings page. Timestamps displayed per consent. |
 | **Backend (Phoenix)** | `Stacks.GDPR.Consent` -- `grant_consent/2`, `revoke_consent/2`, `check_consent/2`. Plug `StacksWeb.Plugs.ConsentCheck` for gating features on consent. |
 | **Database** | **Write:** Consent records (user_id, consent_type, granted_at, revoked_at) in `op.audit_log` or dedicated consent table. |
 | **Jobs (Oban)** | None. |
@@ -2269,7 +2269,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Phase** | Phase 1 (extended) |
 | **Status** | Built (minimal shape — one form, one table, one admin list). |
 | **Implementation** | `POST /api/feedback` (authed, `:feedback` rate-limit bucket) → `StacksWeb.FeedbackController.create` → `Stacks.Feedback.submit/3`; `GET /api/admin/feedback` (`:admin` pipeline, MFA + audited) → `StacksWeb.FeedbackAdminController.index` → `Stacks.Feedback.list_entries/1`. Table `op.feedback_entries` from `proto/stacks/common/v1/feedback.proto` (`FeedbackEntry`, `skip_dbt` — the body never reaches the warehouse). Event `feedback.submitted` carries a sender id and a character count, no body. Erasure deletes the rows (`GDPR.Deletion.delete_user_data/2`, `:delete_feedback_entries`); export gains a `feedback` key. Frontend `Page.Feedback` (account menu) and `Page.Admin.Feedback` (admin disclosure); page context is captured via `Route.toPattern`, never `Route.toPath`. |
-| **Deferred** | The story's wider shape: anonymous submission, the four categories, the optional contact email, `PUT /api/admin/feedback/:id/status` triage, `Stacks.Notifications.FeedbackHandler`, `Stacks.Workers.FeedbackRetentionJob` (180-day sweep), and the `stg_feedback_submissions` / `mart_feedback_volume` models. The retention sweep is the one with a standing obligation behind it — it only bites once anonymous submission exists, since every row today is erasure-reachable through its sender. |
+| **Deferred** | The story's wider shape: anonymous submission, the four categories, the optional contact email, `GET /api/admin/feedback` (read-only; there is no status-update endpoint) triage, `Stacks.Notifications.FeedbackHandler`, `Stacks.Workers.FeedbackRetentionJob` (180-day sweep), and the `stg_feedback_submissions` / `mart_feedback_volume` models. The retention sweep is the one with a standing obligation behind it — it only bites once anonymous submission exists, since every row today is erasure-reachable through its sender. |
 
 ---
 
@@ -2518,7 +2518,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | Attributes added to existing components: `Components.Spine` gets `aria-label` ("Book: [Title] by [Author], [Pages] pages, [wear state]"). `Components.Shelf` gets `role="list"`, `aria-label` ("[Shelf Name] — N books"). Book detail overlay gets `role="dialog"` with focus trapping. Upload states use `aria-live="polite"` for progress announcements. `Components.UserMenu` dropdown labelled "User menu". |
+| **Frontend (Elm)** | Attributes added to existing components: `Components.Spine` gets `aria-label` ("Book: [Title] by [Author], [Pages] pages, [wear state]"). the shelf row rendered by `Page.Bookshelf.Helpers` gets `role="list"`, `aria-label` ("[Shelf Name] — N books"). Book detail overlay gets `role="dialog"` with focus trapping. Upload states use `aria-live="polite"` for progress announcements. `Components.UserMenu` dropdown labelled "User menu". |
 | **Backend (Phoenix)** | API responses must include all data needed for labels: shelf name, book count per shelf, wear state as text, page count. No new endpoints — data already present in existing responses. |
 | **Database** | None additional. |
 | **Dependencies** | US-1.2.1–4 (shelves), US-1.3.1 (spines), US-1.3.2 (detail overlay). |
@@ -2534,7 +2534,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Navigation.Keyboard` module — keyboard event subscriptions. `tabindex` attributes on all interactive spine elements. Arrow key handlers for shelf grid navigation. Focus management: return focus to triggering spine when overlay closes. Skip link: hidden "Skip to main content" link before navigation. Visible focus indicators styled with platform aesthetic. |
+| **Frontend (Elm)** | `Page.Bookshelf.GridNav` — arrow-key grid navigation; per-module keyboard handlers elsewhere. There is no single keyboard module. `tabindex` attributes on all interactive spine elements. Arrow key handlers for shelf grid navigation. Focus management: return focus to triggering spine when overlay closes. Skip link: hidden "Skip to main content" link before navigation. Visible focus indicators styled with platform aesthetic. |
 | **Backend (Phoenix)** | None (purely client-side). |
 | **Database** | None. |
 | **Dependencies** | US-1.2.1–4 (shelves), US-1.3.2 (detail overlay), US-19.1.1 (ARIA labels). |
