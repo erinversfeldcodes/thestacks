@@ -843,12 +843,27 @@ defmodule Stacks.Accounts do
 
   defp abandoned_id_for_email(nil), do: []
 
+  # ⛔ The same two conditions `expired_unverified_ids/1` carries, and for the
+  # same reason: `email_confirmed == false` does NOT mean "never confirmed".
+  # An account whose email change outlived its grace window is degraded to
+  # exactly that flag while keeping every shelf, placement and post it ever had,
+  # and this function's caller ERASES what it returns via the GDPR deletion path.
+  #
+  # Matching on the flag alone meant a degraded reader's whole account could be
+  # destroyed by anyone attempting to register with their address — and the reap
+  # runs BEFORE the invite gate, so the attempt did not even have to succeed.
+  #
+  # A genuinely abandoned signup still holds the token registration minted
+  # (confirming nulls it, and nothing outside the renewal ceiling re-mints it)
+  # and has no email change in flight. A degraded account satisfies neither.
   defp abandoned_id_for_email(email) do
     normalised = email |> to_string() |> String.downcase() |> String.trim()
 
     Repo.all(
       from u in User,
-        where: fragment("lower(?)", u.email) == ^normalised and u.email_confirmed == false,
+        where:
+          fragment("lower(?)", u.email) == ^normalised and u.email_confirmed == false and
+            not is_nil(u.email_confirmation_token) and is_nil(u.pending_email),
         select: u.id
     )
   end

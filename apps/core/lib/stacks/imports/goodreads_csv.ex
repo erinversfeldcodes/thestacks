@@ -120,10 +120,6 @@ defmodule Stacks.Imports.GoodreadsCsv do
     end
   end
 
-  @doc """
-      Goodreads bindings mapped onto the platform's format vocabulary; anything
-      unrecognised is left off rather than guessed.
-  """
   # Goodreads' Binding vocabulary, as data rather than control flow — the list
   # only grows, and every addition is one row rather than one branch.
   @binding_formats %{
