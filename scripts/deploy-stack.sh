@@ -445,10 +445,17 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     trap '[[ -f "${SETTINGS_RENDERED:-/dev/null}" ]] && rm -f "${SETTINGS_RENDERED}"' EXIT
 
     _searxng_deploy_once() {
+        # --depot=false like every other service here. Without it this one call
+        # falls through to Fly's depot builder while the scraper, core and the
+        # rest use the remote builder — so a depot outage failed ONLY SearXNG,
+        # and did it behind the message "SearXNG deployment failed... aborting
+        # so the gate doesn't run on a polluted SearXNG signal", which reads as
+        # a SearXNG problem rather than a build-backend one.
         (cd "$REPO_ROOT/deploy/searxng" && fly deploy \
             --app "${SEARXNG_APP}" \
             --config "${REPO_ROOT}/deploy/fly.searxng.toml" \
-            --yes)
+            --yes \
+            --depot=false)
     }
 
     if ! deploy_with_retry "searxng" _searxng_deploy_once; then
@@ -980,10 +987,16 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
             --app "${LOG_SHIPPER_APP}" --stage
 
         _log_shipper_deploy_once() {
+            # --depot=false for the same reason as every other service: without
+            # it this falls through to the depot builder alone. Here the cost is
+            # quieter than elsewhere — this deploy is graceful-on-failure, so a
+            # depot outage would simply stop logs reaching Axiom rather than
+            # failing the release.
             (cd "$REPO_ROOT/deploy/log-shipper" && fly deploy \
                 --app "${LOG_SHIPPER_APP}" \
                 --config "${REPO_ROOT}/deploy/fly.log-shipper.toml" \
-                --yes)
+                --yes \
+                --depot=false)
         }
 
         if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then
