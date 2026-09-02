@@ -315,6 +315,32 @@ probe_deps_check() {
     _record_sample "$DEPS_CHECK_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
 }
 
+# The invite gate must be ON before anything else is worth measuring. A
+# codeless registration must be REFUSED — 403 with "invite_required" — because
+# a stack that answers anything else is either misconfigured (gate off: the
+# same request would have CREATED an account) or broken in a way that makes the
+# latency numbers below meaningless. One-shot assertion, not a sampled probe:
+# gate state is a fact, not a distribution.
+assert_invite_gate() {
+    local http_code body_file body
+    body_file="$WORK_DIR/invite_gate.body"
+    http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}'         --max-time "$HEALTH_TIMEOUT"         "$BASE_URL/api/auth/register"         -H "Content-Type: application/json"         -d '{"email":"invite-gate-probe@thestacks.test","password":"probe-never-lands"}'         2>/dev/null)" || true
+    body="$(cat "$body_file" 2>/dev/null || true)"
+    rm -f "$body_file"
+
+    if [[ "$http_code" == "403" ]] && printf '%s' "$body" | grep -q "invite_required"; then
+        echo "PASS assert: invite gate is ON (codeless register -> 403 invite_required)"
+        return 0
+    fi
+
+    echo "FATAL assert: invite gate is NOT enforcing — codeless register returned" >&2
+    echo "       HTTP $http_code: $(printf '%s' "$body" | head -c 200)" >&2
+    echo "       A 201 here means the probe just CREATED an account with no invite;" >&2
+    echo "       anything but 403/invite_required means the gate is off or broken." >&2
+    exit 1
+}
+assert_invite_gate
+
 START_TS="$(date +%s)"
 END_TS=$((START_TS + WINDOW))
 
