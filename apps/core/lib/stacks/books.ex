@@ -71,14 +71,14 @@ defmodule Stacks.Books do
   end
 
   @doc """
-      Returns the community read count for a book from the wh.mart_community_read_count
+      Returns the community read count for a book from the marts.mart_community_read_count
       analytics view. Returns 0 if the mart does not yet exist or the book has no entry.
   """
   @spec community_read_count(binary()) :: non_neg_integer()
   def community_read_count(book_id) do
     result =
       Repo.query(
-        "SELECT read_count FROM wh.mart_community_read_count WHERE book_id = $1 LIMIT 1",
+        "SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1",
         [book_id]
       )
 
