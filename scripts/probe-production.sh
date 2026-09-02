@@ -333,6 +333,15 @@ assert_invite_gate() {
         return 0
     fi
 
+    # No HTTP answer at all is an OUTAGE, not a gate verdict — and measuring
+    # outages is the probe's entire job. Claiming "gate not enforcing" against
+    # a black-holed server would be the second misleading message this script
+    # family has produced; warn and let the loop do the measuring.
+    if [[ -z "$http_code" || "$http_code" == "000" ]]; then
+        echo "WARN assert: gate state UNKNOWN — no HTTP answer from the server; continuing so the probe can measure the outage" >&2
+        return 0
+    fi
+
     echo "FATAL assert: invite gate is NOT enforcing — codeless register returned" >&2
     echo "       HTTP $http_code: $(printf '%s' "$body" | head -c 200)" >&2
     echo "       A 201 here means the probe just CREATED an account with no invite;" >&2
