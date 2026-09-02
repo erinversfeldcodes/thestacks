@@ -285,6 +285,14 @@ authErrorMessage err =
         AdminAuthTransport Http.NetworkError ->
             "No connection to the server. Check your network, then try again."
 
+        AdminAuthTransport (Http.BadStatus status) ->
+            -- The server ANSWERED — with a refusal we could not interpret.
+            -- Claiming unreachability here sent operators debugging their
+            -- network when the true story was their session.
+            "The server refused that request (HTTP "
+                ++ String.fromInt status
+                ++ "). Sign in again — if it repeats, the refusal is worth reading in the server logs."
+
         AdminAuthTransport _ ->
             "Could not reach the server. Please try again."
 

@@ -4502,6 +4502,14 @@ adminErrorFromBody body =
         Ok "invalid_session" ->
             InvalidSession
 
+        -- The admin pipeline's own refusal body. It reaches the operator when a
+        -- pipelined call fails session validation (revoked, expired, boot_id,
+        -- or an IP that no longer matches) — every one of which means "this
+        -- session is over", not "the network is down". Left unmapped, it fell
+        -- to the transport catch-all and rendered as a connectivity error.
+        Ok "unauthorized" ->
+            InvalidSession
+
         Ok "already_verified" ->
             AlreadyVerified
 
