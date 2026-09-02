@@ -70,8 +70,13 @@ defmodule StacksWeb.AuditIpDeployedTest do
         username: user,
         password: pass,
         database: database,
-        ssl: true,
-        ssl_opts: [verify: :verify_none]
+        # `ssl: true` + `ssl_opts:` is the pre-0.20 Postgrex API. 0.22 warns
+        # ":ssl_opts is deprecated, pass opts to :ssl instead" and IGNORES it,
+        # so the connection is attempted without TLS and Neon refuses it with
+        # "ssl not available" — which reads as a server problem, not a client
+        # one. These deployed-only tests could not reach Neon at all until this
+        # was changed, and nothing noticed because they are excluded by default.
+        ssl: [verify: :verify_none]
       )
 
     on_exit(fn -> if Process.alive?(conn), do: GenServer.stop(conn) end)
