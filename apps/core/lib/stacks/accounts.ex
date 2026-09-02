@@ -1419,25 +1419,6 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-      Resets all onboarding steps to false, allowing the user to re-enter the
-      onboarding flow from Settings.
-
-      Returns `{:ok, user}`.
-  """
-  @spec reset_onboarding(binary()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def reset_onboarding(user_id) do
-    empty = Map.new(@valid_onboarding_steps, fn step -> {step, false} end)
-
-    case user_id
-         |> get_user!()
-         |> onboarding_steps_changeset(%{onboarding_steps: empty})
-         |> Repo.update() do
-      {:ok, saved} -> {:ok, Repo.reload!(saved)}
-      error -> error
-    end
-  end
-
-  @doc """
       Opens a token family at login, or advances its live token on refresh
       rotation. Idempotent upsert on `family_id`: replaces `current_jti` /
       `previous_jti` / `rotated_at`, preserves `session_started_at`, `user_id`,

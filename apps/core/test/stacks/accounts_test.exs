@@ -989,49 +989,6 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "reset_onboarding/1" do
-    test "resets all steps to false" do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      assert {:ok, updated} = Accounts.reset_onboarding(user.id)
-      assert updated.onboarding_steps["profile"] == false
-      assert updated.onboarding_steps["privacy"] == false
-    end
-
-    test "reloaded user has onboarding_completed = false after reset" do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      {:ok, updated} = Accounts.reset_onboarding(user.id)
-      reloaded = Repo.reload!(updated)
-      assert reloaded.onboarding_completed == false
-    end
-
-    test "next_step returns profile after reset" do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      Accounts.reset_onboarding(user.id)
-      assert %{next_step: "profile"} = Accounts.onboarding_status(user.id)
-    end
-  end
-
   describe "onboarding_completed generated column" do
     test "empty onboarding_steps map produces onboarding_completed = false at DB level" do
       user = insert(:user, onboarding_steps: %{})

@@ -55,5 +55,4 @@
 /api/admin/partners/:id/approve                 known-defect: approving mints a one-time API key that has nowhere to be shown, because the approval UI does not exist
 /api/admin/partners/:id/reject                  known-defect: no partner approval queue means no reject affordance either
 /api/imports                                    known-defect: the import list is never fetched — the import page goes straight to a single import by id, so a user cannot find an earlier one
-/api/onboarding/reset                           known-defect: the endpoint exists to let someone re-enter onboarding from settings, and settings has no such control
 /api/health/ready                               known-defect: readiness is served and tested but nothing probes it; the deploy health check requests liveness only

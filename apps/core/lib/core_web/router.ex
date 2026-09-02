@@ -209,7 +209,6 @@ defmodule CoreWeb.Router do
 
     get "/onboarding/status", OnboardingController, :status
     put "/onboarding/step/:step", OnboardingController, :complete_step
-    post "/onboarding/reset", OnboardingController, :reset
 
     get "/me/inferences", MeInferenceController, :index
 
