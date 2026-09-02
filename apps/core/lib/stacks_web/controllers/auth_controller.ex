@@ -363,12 +363,7 @@ defmodule StacksWeb.AuthController do
     json(conn, %{user: ProtoJSON.user(user)})
   end
 
-  defp get_ip(conn) do
-    case get_req_header(conn, "fly-client-ip") do
-      [ip | _] when ip != "" -> ip
-      _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
-  end
+  defp get_ip(conn), do: StacksWeb.ClientIP.get(conn)
 
   defp invite_error_status(:invite_expired), do: 410
   defp invite_error_status(:invite_exhausted), do: 409

@@ -52,9 +52,11 @@ defmodule StacksWeb.Plugs.AdminAuthPipeline do
     end
   end
 
-  defp get_raw_ip(conn) do
-    conn.remote_ip |> :inet.ntoa() |> to_string()
-  end
+  # Via ClientIP, NOT bare remote_ip: behind Fly the peer is the proxy's own
+  # address and varies between requests, so an MFA-verified session minted at
+  # the password step answered :ip_mismatch on the very next request whenever
+  # it traversed a different proxy — shown to the operator as a network error.
+  defp get_raw_ip(conn), do: StacksWeb.ClientIP.get(conn)
 
   defp unauthorized(conn) do
     conn

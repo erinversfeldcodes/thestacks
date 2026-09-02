@@ -121,14 +121,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   end
 
   defp get_ip(conn) do
-    {ip, source} =
-      case get_req_header(conn, "fly-client-ip") do
-        [ip | _] when ip != "" ->
-          {ip, :trusted_proxy}
-
-        _ ->
-          {conn.remote_ip |> :inet.ntoa() |> to_string(), :remote_ip}
-      end
+    {ip, source} = StacksWeb.ClientIP.get_with_source(conn)
 
     :telemetry.execute([:stacks, :rate_limit, :client_ip], %{count: 1}, %{source: source})
 
