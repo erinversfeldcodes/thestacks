@@ -10,6 +10,17 @@ if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
+# Local E2E always uses the Swoosh LOCAL mail adapter, whatever .env says.
+# With .env's EMAIL_PROVIDER=resend inherited, runtime.exs swapped in the real
+# Resend adapter — so `/api/test/sent-emails` (which reads the Local in-memory
+# mailbox) returned nothing, the password-reset/confirm-email/email-change
+# full-flow specs silently SKIPPED themselves in every environment, and each
+# local run fired real mail at fake .test addresses on the Resend quota. A
+# deliberate real-delivery test can opt back in: E2E_REAL_EMAIL=1.
+if [[ -z "${E2E_REAL_EMAIL:-}" ]]; then
+    unset EMAIL_PROVIDER
+fi
+
 if [[ -z "${MODAL_APP_NAME:-}" ]]; then
     _BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
     _SANITISED="$(echo "$_BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\{2,\}/-/g' | cut -c1-28)"
