@@ -44,32 +44,32 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
     steps:
-      - name: Resolve the production connection URI
+      # One step for resolve + dump, so the connection URI lives and dies as a
+      # process-local shell variable — never GITHUB_ENV, never echoed, nothing
+      # to mask. (Even the masking workflow command is itself a leak vector: a
+      # copied workflow can stop command processing and print the value, which
+      # is why semgrep blocks that pattern outright.)
+      - name: Resolve the production URI and dump (pg_dump 17, custom format)
         run: |
           set -euo pipefail
-          BRANCH_ID=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
-            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
-            | python3 -c "
+          BRANCHES_JSON=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches")
+          BRANCH_ID=$(python3 -c "
           import json,sys
-          for b in json.load(sys.stdin).get('branches',[]):
-              if b.get('name')=='production' or b.get('default'): print(b['id']); break")
+          for b in json.loads(sys.argv[1]).get('branches',[]):
+              if b.get('name')=='production' or b.get('default'): print(b['id']); break" "$BRANCHES_JSON")
           test -n "$BRANCH_ID"
-          URI=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
-            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${BRANCH_ID}&database_name=neondb&role_name=neondb_owner" \
-            | python3 -c "import json,sys; print(json.load(sys.stdin).get('uri',''))")
-          test -n "$URI"
-          echo "::add-mask::$URI"
-          echo "DATABASE_URI=$URI" >> "$GITHUB_ENV"
+          URI_JSON=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${BRANCH_ID}&database_name=neondb&role_name=neondb_owner")
+          DATABASE_URI=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('uri',''))" "$URI_JSON")
+          test -n "$DATABASE_URI"
 
-      - name: Dump (pg_dump 17 via container, custom format)
-        run: |
-          set -euo pipefail
           STAMP="$(date -u '+%Y-%m-%dT%H%M%SZ')"
           echo "DUMP_STAMP=$STAMP" >> "$GITHUB_ENV"
           T0=$(date +%s)
           # postgres:17 matches the server major; custom format compresses and
           # restores selectively (pg_restore -t).
-          docker run --rm -e DATABASE_URI postgres:17-alpine \
+          docker run --rm -e DATABASE_URI="$DATABASE_URI" postgres:17-alpine \
             sh -c 'pg_dump "$DATABASE_URI" --format=custom --no-owner --no-privileges' \
             > "prod-${STAMP}.dump"
           T1=$(date +%s)
@@ -92,7 +92,9 @@ jobs:
             --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
             | grep -q "$DUMP_BYTES"
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Pinned to the same commit SHA every other workflow uses — a mutable
+      # tag can be repointed by the action owner (supply-chain vector).
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
         with:
           version: 0.4.67
 
