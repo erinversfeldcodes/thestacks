@@ -49,7 +49,13 @@ kill_timeout = "5s"
   timeout = "2s"
   grace_period = "10s"
   method = "GET"
-  path = "/api/health"
+  # /ready, not /health: liveness alone answered 200 while the database was
+  # unreachable, so Fly kept routing traffic to a machine that could serve
+  # nothing but errors. /api/health/ready checks the DB and answers 503 when
+  # degraded, which is what a router-facing check is for. The bare /api/health
+  # stays for the deploy script's warm-up and the probe, where "the BEAM is up"
+  # is the right question.
+  path = "/api/health/ready"
 
 [[vm]]
   size = "shared-cpu-1x"
