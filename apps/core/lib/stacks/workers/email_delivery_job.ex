@@ -15,10 +15,11 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   # Sender for all transactional email. Configurable (`:email_from`) so we can
   # use Resend's `onboarding@resend.dev` test sender until the `thestacks.app`
-  # domain is verified in Resend, then flip to `noreply@thestacks.app`. Overridable
+  # domain is verified in Resend, then flip to noreply@ the canonical domain. Overridable
   # at runtime via the EMAIL_FROM env var (see config/runtime.exs).
   defp from_address do
-    Application.get_env(:core, :email_from, {"The Stacks", "noreply@thestacks.app"})
+    default_domain = Application.get_env(:core, :canonical_domain, "readinginthestacks.com")
+    Application.get_env(:core, :email_from, {"The Stacks", "noreply@#{default_domain}"})
   end
 
   # Recipient for a transactional email.

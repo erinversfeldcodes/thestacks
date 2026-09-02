@@ -243,7 +243,7 @@ defmodule Stacks.Costs do
       Map.merge(base, %{
         category: "domain",
         service: "Domain Registration",
-        description: "thestacks.app — annual registration amortised monthly",
+        description: "#{canonical_domain()} — annual registration amortised monthly",
         amount_cents: @domain_monthly_cents
       })
     ]
@@ -536,6 +536,10 @@ defmodule Stacks.Costs do
   @spec emails_this_month() :: {:ok, non_neg_integer()} | :error
   def emails_this_month do
     metric_count_this_month("stacks_email_delivered_count_total")
+  end
+
+  defp canonical_domain do
+    Application.get_env(:core, :canonical_domain, "readinginthestacks.com")
   end
 
   defp prometheus_client do

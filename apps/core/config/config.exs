@@ -100,10 +100,20 @@ config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
 # the recipient has no display name (a `{name, addr}` "to" 403s). So real
 # verification/reset emails will NOT reach actual signups with this sender.
 # ACTION: once a domain is verified at resend.com/domains, flip this to
-# `{"The Stacks", "noreply@thestacks.app"}` (or set the EMAIL_FROM env var) — that
+# `{"The Stacks", "noreply@#{canonical_domain}"}` (or set the EMAIL_FROM env var) — that
 # is the ONLY remaining step to make prod email actually work. Overridable per-env
 # via EMAIL_FROM (config/runtime.exs).
 config :core, :email_from, {"The Stacks", "onboarding@resend.dev"}
+
+# The domain the platform is served on — the ONE place it is named. Everything
+# brand-bearing derives from this: the public cost page's registration line,
+# privacy@ in email templates, and the eventual noreply@ sender. The codebase
+# used to hardcode `thestacks.app` in those places while production actually
+# serves `readinginthestacks.com` (thestacks.app is a parked lander) — so the
+# public cost page named a domain the platform does not serve. Overridable at
+# runtime via CANONICAL_DOMAIN (config/runtime.exs); change it there and every
+# derived string follows.
+config :core, :canonical_domain, "readinginthestacks.com"
 
 config :swoosh, :api_client, Swoosh.ApiClient.Req
 

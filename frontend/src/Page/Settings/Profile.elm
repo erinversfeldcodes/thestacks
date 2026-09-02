@@ -45,7 +45,13 @@ import Types.User exposing (User)
 
 
 type alias Model =
-    { displayName : String
+    { -- The origin this page is served from ("https://host"), threaded in by
+      -- Main so the handle hint names the REAL address of the public profile.
+      -- The empty default renders a relative path — which can never name a
+      -- wrong domain, the way the old hardcoded `thestacks.app` did on a
+      -- platform actually served at readinginthestacks.com.
+      origin : String
+    , displayName : String
     , handle : String
     , initialHandle : String
     , email : String
@@ -110,7 +116,8 @@ and the flows with no network, under a name that says what it is worth.
 -}
 seedFromSession : User -> Model
 seedFromSession user =
-    { displayName = user.displayName
+    { origin = ""
+    , displayName = user.displayName
     , handle = user.handle
     , initialHandle = user.handle
     , email = user.email
@@ -136,13 +143,13 @@ one it hides. Only `Failure` speaks up, because then the fields on screen are
 the blob's and the reader deserves to know that.
 
 -}
-initWithToken : Maybe String -> User -> ( Model, Cmd Msg )
-initWithToken maybeToken user =
+initWithToken : Maybe String -> User -> String -> ( Model, Cmd Msg )
+initWithToken maybeToken user origin =
     let
         ( model, effect ) =
             initWithEffect maybeToken user
     in
-    ( model, Effect.perform effect )
+    ( { model | origin = origin }, Effect.perform effect )
 
 
 {-| `initWithToken`, with its effect as data.
@@ -432,7 +439,7 @@ view model =
                     ]
                     []
                 , p [ class "form-field__hint" ]
-                    (viewHandleHint model.handle)
+                    (viewHandleHint model.origin model.handle)
                 , viewHandleError model.savingProfile
                 ]
             , div [ class "form-field" ]
@@ -656,14 +663,29 @@ profile is a link to somebody ELSE's, so without this a reader cannot see what
 their profile looks like to other people without hand-typing the URL.
 
 -}
-viewHandleHint : String -> List (Html msg)
-viewHandleHint handle =
+viewHandleHint : String -> String -> List (Html msg)
+viewHandleHint origin handle =
     let
         trimmed =
             String.trim handle
+
+        -- The host the app is actually served from, scheme stripped for
+        -- display. Empty origin (tests, unforeseen boots) degrades to a
+        -- relative path — never to a domain that might be someone else's.
+        host =
+            origin
+                |> String.replace "https://" ""
+                |> String.replace "http://" ""
+
+        shown path =
+            if host == "" then
+                path
+
+            else
+                host ++ path
     in
     if trimmed == "" then
-        [ text "Choose a handle — others will find you at thestacks.app/u/your_handle" ]
+        [ text ("Choose a handle — others will find you at " ++ shown "/u/your_handle") ]
 
     else
         [ text "Your public profile lives at "
@@ -671,7 +693,7 @@ viewHandleHint handle =
             [ href (Route.toPath (Route.Profile trimmed))
             , class "form-field__hint-link"
             ]
-            [ text ("thestacks.app/u/" ++ trimmed) ]
+            [ text (shown ("/u/" ++ trimmed)) ]
         ]
 
 

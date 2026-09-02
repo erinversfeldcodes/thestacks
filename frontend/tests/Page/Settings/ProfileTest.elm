@@ -518,7 +518,7 @@ suite =
                         |> Query.has
                             [ Selector.tag "a"
                             , Selector.attribute (Attr.href "/u/ada")
-                            , Selector.text "thestacks.app/u/ada"
+                            , Selector.text "/u/ada"
                             ]
             , test "with no handle yet there is nothing to link to, so it stays guidance" <|
                 \_ ->
@@ -559,5 +559,17 @@ suite =
 
                         _ ->
                             Expect.fail "expected IdentityChanged"
+            ]
+        , describe "the handle hint names the host the app is served from"
+            [ test "with an origin threaded in, the hint shows that host, not a hardcoded brand" <|
+                \_ ->
+                    -- The old hint hardcoded `thestacks.app` — a parked lander,
+                    -- while production serves readinginthestacks.com. Deriving
+                    -- from the origin means the hint is correct on every deploy
+                    -- and can never name a domain the platform does not serve.
+                    { initialModel | origin = "https://readinginthestacks.com", handle = "ada" }
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "readinginthestacks.com/u/ada" ]
             ]
         ]

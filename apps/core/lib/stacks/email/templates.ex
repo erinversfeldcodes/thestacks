@@ -263,7 +263,7 @@ defmodule Stacks.Email.Templates do
       <div style="max-width: 600px; margin: 0 auto; background: #fff; padding: 40px; border: 1px solid #c9b89a;">
         <h1 style="color: #2c1810; font-size: 24px;">Removal request received</h1>
         <p>Your removal request has been received. Your data will be deleted within 30 days.</p>
-        <p>If you have any questions, please contact us at privacy@thestacks.app.</p>
+        <p>If you have any questions, please contact us at privacy@#{canonical_domain()}.</p>
       </div>
     </body>
     </html>
@@ -276,4 +276,8 @@ defmodule Stacks.Email.Templates do
 
   defp plural(1, unit), do: "1 #{unit}"
   defp plural(count, unit), do: "#{count} #{unit}s"
+
+  defp canonical_domain do
+    Application.get_env(:core, :canonical_domain, "readinginthestacks.com")
+  end
 end

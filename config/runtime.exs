@@ -121,6 +121,10 @@ end
 
 present? = fn name -> (System.get_env(name) || "") != "" end
 
+if domain = System.get_env("CANONICAL_DOMAIN") do
+  config :core, :canonical_domain, domain
+end
+
 resend_configured? = System.get_env("EMAIL_PROVIDER") == "resend" && present?.("RESEND_API_KEY")
 
 real_send? =

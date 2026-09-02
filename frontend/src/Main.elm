@@ -1170,6 +1170,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                             Nothing ->
                                 { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
                         )
+                        origin
             in
             ( PageSettingsProfile model, Cmd.map ProfileMsg cmd )
 
