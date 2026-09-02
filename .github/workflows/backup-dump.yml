@@ -1,0 +1,120 @@
+# Nightly logical backup of the production database.
+#
+# WHY THIS EXISTS  Neon's point-in-time restore is the primary recovery path,
+# but its history window is six hours on the current plan
+# (docs/runbooks/backup-restore.md) — damage noticed later than that is
+# unrecoverable by PITR. This dump is the answer beyond the window: a nightly
+# pg_dump to R2, so worst-case recoverable-data loss is bounded by the dump
+# cadence instead of by six hours of history.
+#
+# THE METRIC IS PART OF THE BACKUP  Every successful dump pushes
+# `stacks_backup_dump_last_success_timestamp_seconds` (plus size and duration)
+# to VictoriaMetrics. `now() - that gauge` IS the recoverability statement:
+# everything since the timestamp is protected only by the 6h PITR window. A
+# stale gauge means the safety net has quietly stopped — which is exactly the
+# failure mode #248 taught this project to surface as a far-end value rather
+# than infer from a green cron.
+#
+# All secrets used here already exist in the repository configuration.
+name: backup-dump
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, offset from the billing refresh at 04:43
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-dump
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+    steps:
+      - name: Resolve the production connection URI
+        run: |
+          set -euo pipefail
+          BRANCH_ID=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches" \
+            | python3 -c "
+          import json,sys
+          for b in json.load(sys.stdin).get('branches',[]):
+              if b.get('name')=='production' or b.get('default'): print(b['id']); break")
+          test -n "$BRANCH_ID"
+          URI=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${BRANCH_ID}&database_name=neondb&role_name=neondb_owner" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('uri',''))")
+          test -n "$URI"
+          echo "::add-mask::$URI"
+          echo "DATABASE_URI=$URI" >> "$GITHUB_ENV"
+
+      - name: Dump (pg_dump 17 via container, custom format)
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u '+%Y-%m-%dT%H%M%SZ')"
+          echo "DUMP_STAMP=$STAMP" >> "$GITHUB_ENV"
+          T0=$(date +%s)
+          # postgres:17 matches the server major; custom format compresses and
+          # restores selectively (pg_restore -t).
+          docker run --rm -e DATABASE_URI postgres:17-alpine \
+            sh -c 'pg_dump "$DATABASE_URI" --format=custom --no-owner --no-privileges' \
+            > "prod-${STAMP}.dump"
+          T1=$(date +%s)
+          SIZE=$(stat -c%s "prod-${STAMP}.dump")
+          echo "DUMP_SECONDS=$((T1 - T0))" >> "$GITHUB_ENV"
+          echo "DUMP_BYTES=$SIZE" >> "$GITHUB_ENV"
+          # An implausibly small dump is a failed dump wearing a green exit
+          # code — fail loud rather than upload an empty safety net.
+          test "$SIZE" -gt 100000
+          ls -lh "prod-${STAMP}.dump"
+
+      - name: Upload to R2 (backups/prod/ prefix)
+        run: |
+          set -euo pipefail
+          aws s3 cp "prod-${DUMP_STAMP}.dump" \
+            "s3://${R2_BUCKET_NAME}/backups/prod/prod-${DUMP_STAMP}.dump" \
+            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # Read-after-write: the object must be listable with the size we sent.
+          aws s3 ls "s3://${R2_BUCKET_NAME}/backups/prod/prod-${DUMP_STAMP}.dump" \
+            --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            | grep -q "$DUMP_BYTES"
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        with:
+          version: 0.4.67
+
+      # The metrics store is 6PN-internal; expose it locally for the push —
+      # the same mechanism refresh-billing-metrics.yml uses.
+      - name: Push the recoverability metrics
+        run: |
+          set -euo pipefail
+          flyctl proxy 18428:8428 thestacks-victoriametrics.flycast \
+            --app thestacks-victoriametrics &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -sf --max-time 2 "http://localhost:18428/health" >/dev/null 2>&1 && break
+            sleep 1
+          done
+          NOW=$(date +%s)
+          cat > metrics.prom <<EOF
+          stacks_backup_dump_last_success_timestamp_seconds{app="thestacks-core",target="prod"} ${NOW}
+          stacks_backup_dump_size_bytes{app="thestacks-core",target="prod"} ${DUMP_BYTES}
+          stacks_backup_dump_duration_seconds{app="thestacks-core",target="prod"} ${DUMP_SECONDS}
+          EOF
+          curl -sf --max-time 10 --data-binary @metrics.prom \
+            "http://localhost:18428/api/v1/import/prometheus"
+          echo "pushed: last_success=${NOW} size=${DUMP_BYTES}B duration=${DUMP_SECONDS}s"

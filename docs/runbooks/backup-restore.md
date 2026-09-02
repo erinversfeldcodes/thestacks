@@ -4,11 +4,12 @@
 **Owner:** Platform operator
 **Last reviewed:** 2026-09-02 (drill executed and transcribed below)
 
-The platform has **no external backup system**. Recovery is Neon's
-point-in-time restore: every branch keeps a write-ahead history, and a new
-branch can be created *from any moment inside that history*. Restoring is
-therefore branching-from-the-past, verifying, and repointing — not restoring a
-dump.
+Recovery has two layers. **Inside six hours**: Neon's point-in-time restore —
+every branch keeps a write-ahead history, and a new branch can be created
+*from any moment inside that history*, so restoring is
+branching-from-the-past, verifying, and repointing. **Beyond six hours**: the
+nightly `pg_dump` in R2 (the `backup-dump` workflow, below), restored with
+`pg_restore` into a fresh branch.
 
 ---
 
@@ -28,11 +29,28 @@ Two consequences worth stating plainly:
 1. **Detection latency is the real backup policy.** Anything that delays
    noticing corruption — a quiet weekend, an unmonitored deploy — consumes the
    only recovery window that exists.
-2. If the platform ever holds data whose loss would be unacceptable after a
-   sleepy Saturday, either the retention window must be bought up (Neon paid
-   plans extend it to days) or a periodic `pg_dump` to object storage must be
-   added. That decision is deliberately left open here; this runbook documents
-   what IS, not what ought to be.
+2. **Decided 2026-09-02: a nightly `pg_dump` backs the window up.** The
+   `backup-dump` workflow (`.github/workflows/backup-dump.yml`, 03:17 UTC
+   nightly + manual dispatch) dumps production to
+   `backups/prod/prod-<timestamp>.dump` in R2 and pushes three metrics to
+   VictoriaMetrics:
+
+   - `stacks_backup_dump_last_success_timestamp_seconds` — **the
+     recoverability statement itself**: everything written since this
+     timestamp is protected only by the 6-hour PITR window. Query
+     `time() - stacks_backup_dump_last_success_timestamp_seconds` to see the
+     current exposure; a value climbing past ~90000s (25h) means the nightly
+     net has quietly stopped.
+   - `stacks_backup_dump_size_bytes` — a shrinking dump is a failing dump.
+   - `stacks_backup_dump_duration_seconds`.
+
+   The workflow refuses an implausibly small dump (fail-loud) and verifies
+   the R2 object listable at the exact uploaded size before pushing success.
+
+   **The combined RPO:** damage noticed within 6h → RPO ≈ 0 (PITR). Damage
+   noticed later → RPO = time since the last dump, worst case ~24h.
+   Restore-from-dump: `pg_restore --format=custom` into a fresh Neon branch,
+   then repoint as in step 5.
 
 ---
 
@@ -137,7 +155,17 @@ verify → measure.
   drill branch deleted
 ```
 
-**Measured RTO: 9 seconds** from issuing the restore to a verified branch —
+A second run on 2026-09-02 extended the checklist to the event log — the
+immutability-sensitive table — and verified both directions:
+
+```
+  event_log:  T0=227  restored=227   ✅
+  post-T0 marker on restore: 0        ✅  (a row written AFTER T0 must not
+                                          appear on the restore — it did not)
+  RTO: 14s restore-to-verified
+```
+
+**Measured RTO: 9–14 seconds** from issuing the restore to a verified branch —
 excluding the repoint-production step (secret update + machine restart), which
 adds minutes, and excluding detection latency, which is unbounded and is the
 real risk (see the retention window above).
@@ -157,3 +185,5 @@ behaviour (same API, same mechanism, but executed on staging by owner ruling
 - `docs/runbooks/prod-data-access.md` — how prod's `DATABASE_URL` is composed
   and safely resolved.
 - `docs/runbooks/migration-recovery.md` — when the damage is a migration.
+- `docs/runbooks/r2-data-loss.md` — the object-storage side, including the
+  `backups/` prefix this runbook's dumps live under.
