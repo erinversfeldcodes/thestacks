@@ -37,7 +37,7 @@ jobs:
             --app thestacks-victoriametrics &
           proxy_pid=$!
           trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -sf --max-time 2 "http://localhost:18428/health" >/dev/null 2>&1; then
               break
             fi
