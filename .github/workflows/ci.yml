@@ -915,6 +915,13 @@ jobs:
           python3 scripts/gen_python_proto.py --language rust
           python3 scripts/gen_python_proto.py --language python
           scripts/gen-elm-proto.sh
+          # The Elixir pair as well: `mix eval.vision` runs mix ON THE RUNNER
+          # (not in Docker), and the gitignored generated schemas are the
+          # difference between the eval scoring the model and dying at compile
+          # with "Stacks.Accounts.User.__struct__/1 is undefined" — which the
+          # gate then mis-reported as a model regression.
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: playwright-cache
         with:

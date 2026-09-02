@@ -353,11 +353,26 @@ print(urls[0] if urls else '')
     # whether or not the deploying machine can reach Postgres.
     echo ""
     echo "==> Scoring the deployed vision model against the labelled corpus..."
-    if ! (cd "$REPO_ROOT" && \
+    # `&& || ` capture, not a bare assignment: under `set -e` a failing command
+    # substitution in an assignment aborts the whole script BEFORE the verdict
+    # logic below could run — the gate would die silently instead of speaking.
+    EVAL_RC=0
+    EVAL_OUT="$(cd "$REPO_ROOT" && \
             VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
             EVAL_VISION_REQUIRED=1 \
-            mix eval.vision); then
-        echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
+            mix eval.vision 2>&1)" || EVAL_RC=$?
+    printf '%s\n' "$EVAL_OUT"
+    if [[ "$EVAL_RC" -ne 0 ]]; then
+        # A regression and an eval that never ran are DIFFERENT failures, and
+        # naming the wrong one misdirects the responder: a compile error on the
+        # runner (missing generated schemas) was once reported as "model
+        # regressed", pointing the investigation at Modal when the defect was
+        # the checkout. Claim regression only when the eval itself said so.
+        if printf '%s' "$EVAL_OUT" | grep -q "REGRESSION"; then
+            echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
+        else
+            echo "FAIL deploy: the vision eval COULD NOT RUN (exit $EVAL_RC) — that is a broken gate, not a scored regression; see the output above. Stopping, because an unscored model must not roll forward under EVAL_VISION_REQUIRED." >&2
+        fi
         exit 1
     fi
     echo "PASS deploy: vision model scored, no regression"
