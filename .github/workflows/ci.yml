@@ -532,6 +532,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: semgrep scan --config auto --error --sarif --output semgrep.sarif
+      # Semgrep honours `# nosemgrep: <rule-id>` for its exit code and text
+      # output, but still writes those findings into the SARIF marked
+      # `suppressions: [{kind: inSource}]` — and GitHub code scanning ignores
+      # that field, raising an alert for every reviewed-and-annotated site.
+      # Drop suppressed results before upload so an open alert always means
+      # an UNREVIEWED finding.
+      - name: Drop in-source-suppressed results from the SARIF
+        run: |
+          jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' \
+            semgrep.sarif > semgrep.filtered.sarif
+          mv semgrep.filtered.sarif semgrep.sarif
       - name: Upload semgrep SARIF to code scanning
         if: always()
         uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
