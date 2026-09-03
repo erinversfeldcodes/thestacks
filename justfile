@@ -544,3 +544,19 @@ wave-status *ARGS:
 # was never the weak link, retention was.
 campaign-residue:
     @bash scripts/campaign-residue.sh
+
+# Run the project-tools MCP server's own test suite. These tests existed for
+# months with NO caller anywhere — green by definition, catching nothing.
+test-mcp:
+    @bash scripts/test-mcp.sh 2>&1 | tail -3
+
+# Lint ONE migration file through squawk with the project's config — the
+# manual sibling of the security-squawk CI gate, for trying a migration
+# before committing it.
+squawk-migration file:
+    @bash scripts/security-squawk-test-wrapper.sh {{file}}
+
+# Regenerate the WebGL bookshelf textures/concept art (writes into the repo;
+# needs Replicate credentials). Occasional art tooling, not a build step.
+gen-textures:
+    @python3 scripts/generate-textures.py

@@ -136,6 +136,15 @@ if has_group platform; then
     if ! run_group "platform: shell suites" bash test/platform/run_all.sh; then
         FAILED+=(platform)
     fi
+    # Every script in scripts/ has a caller (or an allowlisted reason), and the
+    # generated inventory in scripts/README.md is current.
+    if ! run_group "platform: script wiring" bash scripts/check-script-wiring.sh; then
+        FAILED+=(platform-script-wiring)
+    fi
+    # The project-tools MCP server's own suite — orphaned once, never again.
+    if ! run_group "platform: mcp server tests" bash scripts/test-mcp.sh; then
+        FAILED+=(platform-mcp)
+    fi
 fi
 
 if has_group e2e; then

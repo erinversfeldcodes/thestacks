@@ -115,7 +115,7 @@ class TestRunTestSuiteReturnKeys(unittest.TestCase):
         self.assertEqual(set(result.keys()), expected_keys)
         self.assertEqual(result["domain"], "elixir")
         self.assertTrue(result["passed"])
-        self.assertEqual(result["command"], "mix test")
+        self.assertEqual(result["command"], ["mix", "test"])
 
     @patch("project_tools.subprocess.run")
     def test_failure_keys(self, mock_run: MagicMock):
@@ -161,8 +161,13 @@ _HEADER = """\
 <!-- Entries below this line -->
 """
 
+# The heading below is FORMAT DATA for the parser, whose real-world input
+# carries an issue number — `heading_re` requires `Issue #N`. A sweep that
+# strips issue references from code once removed it from this fixture too,
+# and the parser tests silently began asserting on an unparseable heading.
+# `#014` here is a synthetic format token, not a tracker citation.
 _OPEN_ENTRY = """\
-## 2026-03-13 — , Phase 2
+## 2026-03-13 — Issue #014, Phase 2
 **Reviewer axis:** Code Quality
 **Finding:** Missing typespecs on 3 public functions
 **Root cause:** Prompt does not require typespecs
@@ -171,7 +176,7 @@ _OPEN_ENTRY = """\
 """
 
 _APPLIED_ENTRY = """\
-## 2026-03-10 — , Phase 1
+## 2026-03-10 — Issue #014, Phase 1
 **Reviewer axis:** Security
 **Finding:** Hardcoded secret in config
 **Root cause:** No secret-scanning reminder
@@ -180,7 +185,7 @@ _APPLIED_ENTRY = """\
 """
 
 _SECOND_OPEN_ENTRY = """\
-## 2026-03-12 — , Phase 3
+## 2026-03-12 — Issue #013, Phase 3
 **Reviewer axis:** Testing
 **Finding:** No property tests for parser
 **Root cause:** Prompt only mentions unit tests
