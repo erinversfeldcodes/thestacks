@@ -159,6 +159,7 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     AGE_GATING_ENABLED=""
     RATE_LIMIT_PUBLIC=""
     RATE_LIMIT_E2E_HELPER=""
+    RATE_LIMIT_AUTH=""
     SMOKE_TESTS_ENABLED=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
@@ -173,6 +174,11 @@ else
     INVITE_ONLY_REGISTRATION="true"
     RATE_LIMIT_PUBLIC="5000"
     RATE_LIMIT_E2E_HELPER="5000"
+    # The whole E2E suite arrives from ONE runner IP, and its fast opening
+    # specs are mostly register/login — they exhaust a 60/60s :auth budget
+    # inside the first minute, and every later form login 429s until the
+    # sliding window drains. Prod keeps the config default.
+    RATE_LIMIT_AUTH="5000"
     SMOKE_TESTS_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
@@ -661,7 +667,7 @@ fly secrets set \
     CLOAK_KEY="${CLOAK_KEY:-}" \
     VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
     PHX_HOST="${PHX_HOST_VALUE:-${CORE_APP}.fly.dev}" \
-    RATE_LIMIT_AUTH="60" \
+    ${RATE_LIMIT_AUTH:+RATE_LIMIT_AUTH="${RATE_LIMIT_AUTH}"} \
     ${EFFECTIVE_DATABASE_URL:+DATABASE_URL="${EFFECTIVE_DATABASE_URL}"} \
     ${R2_ACCOUNT_ID:+R2_ACCOUNT_ID="${R2_ACCOUNT_ID}"} \
     ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
