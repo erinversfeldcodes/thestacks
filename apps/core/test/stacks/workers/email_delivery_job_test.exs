@@ -187,6 +187,115 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
     end
   end
 
+  describe "perform/1 — the two letters an email change is made of" do
+    defp user_mid_change(attrs \\ []) do
+      user = insert(:user, [email: "old@thestacks.test"] ++ attrs)
+
+      {:ok, pending} =
+        user
+        |> Stacks.Accounts.pending_email_changeset(%{
+          pending_email: "new@thestacks.test",
+          pending_email_token: "confirm-token",
+          pending_email_sent_at: DateTime.utc_now(),
+          pending_email_revert_token: "revert-token"
+        })
+        |> Core.Repo.update()
+
+      pending
+    end
+
+    test "the confirmation goes to the PENDING address, not the account's" do
+      user = user_mid_change()
+
+      assert :ok =
+               perform_job(EmailDeliveryJob, %{
+                 "template" => "email_change_confirmation",
+                 "user_id" => user.id,
+                 "params" => %{"token" => "confirm-token"}
+               })
+
+      if Application.get_env(:core, Stacks.Email.Mailer)[:adapter] == Swoosh.Adapters.Test do
+        assert_email_sent(fn email ->
+          assert email.to == [{"", "new@thestacks.test"}]
+          assert email.subject == "Confirm your new email address — The Stacks"
+          assert email.html_body =~ "/api/auth/confirm-email-change/confirm-token"
+        end)
+      end
+    end
+
+    test "the notice goes to the account's address and names what it is being changed to" do
+      user = user_mid_change()
+
+      assert :ok =
+               perform_job(EmailDeliveryJob, %{
+                 "template" => "email_change_notice",
+                 "user_id" => user.id,
+                 "params" => %{"token" => "revert-token"}
+               })
+
+      if Application.get_env(:core, Stacks.Email.Mailer)[:adapter] == Swoosh.Adapters.Test do
+        assert_email_sent(fn email ->
+          assert [{_name, "old@thestacks.test"}] = email.to
+          assert email.html_body =~ "new@thestacks.test"
+          assert email.html_body =~ "/api/auth/revert-email-change/revert-token"
+        end)
+      end
+    end
+
+    test "a change settled before delivery discards its letters rather than mailing dead links" do
+      user = user_mid_change()
+
+      {:ok, _settled} =
+        user
+        |> Stacks.Accounts.pending_email_changeset(%{
+          pending_email: nil,
+          pending_email_token: nil,
+          pending_email_sent_at: nil,
+          pending_email_revert_token: nil
+        })
+        |> Core.Repo.update()
+
+      assert {:discard, _} =
+               perform_job(EmailDeliveryJob, %{
+                 "template" => "email_change_confirmation",
+                 "user_id" => user.id,
+                 "params" => %{"token" => "confirm-token"}
+               })
+
+      assert {:discard, _} =
+               perform_job(EmailDeliveryJob, %{
+                 "template" => "email_change_notice",
+                 "user_id" => user.id,
+                 "params" => %{"token" => "revert-token"}
+               })
+
+      assert_no_email_sent()
+    end
+
+    test "a superseded change discards the letters of the change it replaced" do
+      user = user_mid_change()
+
+      {:ok, _resupplied} =
+        user
+        |> Stacks.Accounts.pending_email_changeset(%{
+          pending_email: "newer@thestacks.test",
+          pending_email_token: "second-confirm-token",
+          pending_email_sent_at: DateTime.utc_now(),
+          pending_email_revert_token: "second-revert-token"
+        })
+        |> Core.Repo.update()
+
+      assert {:discard, _} =
+               perform_job(EmailDeliveryJob, %{
+                 "template" => "email_change_confirmation",
+                 "user_id" => user.id,
+                 "params" => %{"token" => "confirm-token"}
+               })
+
+      assert_no_email_sent()
+    end
+  end
+
   describe "perform/1 — unknown template" do
     test "discards the job immediately without retrying" do
       user = insert(:user)
@@ -199,6 +308,27 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
                })
 
       assert_no_email_sent()
+    end
+  end
+
+  describe "delivery counter" do
+    # The public cost page's email line is derived from this counter. It used to
+    # be derived by counting rows in `oban_jobs`, which the pruner deletes about
+    # a minute after a job completes, so the month-to-date figure only ever saw
+    # the last minute of sends.
+    test "a delivered email emits the counted event, tagged with its template" do
+      ref = :telemetry_test.attach_event_handlers(self(), [[:stacks, :email, :delivered]])
+      user = insert(:user, recipient_opts())
+
+      assert :ok =
+               perform_job(EmailDeliveryJob, %{
+                 "user_id" => user.id,
+                 "template" => "password_reset",
+                 "params" => %{"token" => "tok"}
+               })
+
+      assert_receive {[:stacks, :email, :delivered], ^ref, %{count: 1},
+                      %{template: :password_reset}}
     end
   end
 end

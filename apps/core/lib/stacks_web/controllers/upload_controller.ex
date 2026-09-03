@@ -145,6 +145,35 @@ defmodule StacksWeb.UploadController do
       excluded_isbns = resolve_excluded_isbns(rejected_ids)
       remove_placements_for_books(user.id, rejected_ids)
       invalidate_title_search_cache(rejected_ids)
+
+      # ⛔ The image must leave its terminal state BEFORE the retry exists.
+      # Two consumers read that state, and both made "No, try again" a lie
+      # while the row stayed `resolved`:
+      #
+      #   * the SSE stream's terminal branch sends a resolved row's payload
+      #     immediately and closes — so the client's re-opened stream replayed
+      #     the JUST-REJECTED candidate in under a second (measured 0.8s
+      #     against a 16.9s real identification);
+      #   * `IdentifyBookJob.mark_resolved/2` writes only
+      #     `where status == "pending"` — so the retry's fresh answer matched
+      #     zero rows and was silently discarded. Real GPU work, no broadcast,
+      #     the result visible nowhere but the inbox.
+      #
+      # Clearing the candidates matters as much as the status: any reader of
+      # `book_ids` on a still-resolved row would re-propose the book the reader
+      # just said it is not.
+      {1, _} =
+        Repo.update_all(
+          from(i in UploadedImage, where: i.id == ^image.id),
+          set: [
+            status: "pending",
+            book_id: nil,
+            book_ids: [],
+            rejection_reason: nil,
+            updated_at: DateTime.utc_now()
+          ]
+        )
+
       {:ok, _job} = enqueue_retry(user.id, image, excluded, excluded_isbns)
 
       conn

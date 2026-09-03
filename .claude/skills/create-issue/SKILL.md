@@ -43,6 +43,15 @@ is the easy part.
 6. **Write the DoD** from the template's defaults plus issue-specific, measurable criteria —
    including the "validation path per behaviour" and "test audit is GREEN" items.
 
+6a. **Add the cross-artefact propagation boxes the change shape demands** (the 2026-08 retro's
+   doc-rot class — a deleted job was documented as a live safety gate three days after deletion):
+   - deletes a module/symbol → "`grep -r <symbol> docs/` returns 0 refs or every citing doc updated"
+   - adds a route/page → "nav entry added, or the URL-only decision recorded in the mapping"
+   - builds/removes a storied feature → "`implementation-mapping.md` status flipped in this diff"
+   - adds a gate/guard/runner → "DoD quotes the red run of a planted violation; runner's caller named"
+   And label the issue **instance or class**: if it fixes an instance of a wider class, the DoD
+   names the class follow-up (issue number or `plans/residue-ledger.md` row) explicitly.
+
 7. **Create the file** via `mcp__project-tools__create_issue(...)` (or write `issues/NNN-slug.md`).
    The slug must match the intended branch name (lowercase, hyphens).
 

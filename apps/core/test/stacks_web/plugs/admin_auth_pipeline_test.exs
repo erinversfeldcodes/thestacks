@@ -116,6 +116,67 @@ defmodule StacksWeb.Plugs.AdminAuthPipelineTest do
       assert conn.status == 401
     end
 
+    test "a session survives the request arriving via a DIFFERENT proxy instance",
+         %{conn: conn} do
+      # Behind Fly, `conn.remote_ip` is the proxy's own peer address and varies
+      # between requests. The session must be pinned to the CLIENT
+      # (`fly-client-ip`, set authoritatively by Fly's edge), not to whichever
+      # proxy carried the password step — pinning to the peer made the very
+      # next request answer :ip_mismatch, shown to the operator as
+      # "Could not reach the server."
+      user = insert(:owner_user)
+      boot_id = Core.Application.boot_id()
+
+      # Session minted from a request whose PEER was proxy A but whose client
+      # header says 203.0.113.7 — mirroring what the mint site now stores.
+      {:ok, session} = SessionContext.create(user, "203.0.113.7", boot_id)
+      {:ok, session} = SessionContext.mark_mfa_verified(session)
+
+      {:ok, token, _claims} =
+        Guardian.encode_and_sign(user, %{},
+          token_type: "admin",
+          session_id: session.id,
+          boot_id: boot_id,
+          ttl: {30, :minute}
+        )
+
+      conn =
+        conn
+        # a different proxy instance this time…
+        |> Map.put(:remote_ip, {172, 16, 99, 42})
+        # …but the same human on the same connection
+        |> put_req_header("fly-client-ip", "203.0.113.7")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> AdminAuthPipeline.call([])
+
+      refute conn.halted, "the operator did not move; only Fly's routing did"
+      assert conn.assigns[:admin_session].id == session.id
+    end
+
+    test "a DIFFERENT client behind the trusted header is still refused", %{conn: conn} do
+      user = insert(:owner_user)
+      boot_id = Core.Application.boot_id()
+      {:ok, session} = SessionContext.create(user, "203.0.113.7", boot_id)
+      {:ok, session} = SessionContext.mark_mfa_verified(session)
+
+      {:ok, token, _claims} =
+        Guardian.encode_and_sign(user, %{},
+          token_type: "admin",
+          session_id: session.id,
+          boot_id: boot_id,
+          ttl: {30, :minute}
+        )
+
+      conn =
+        conn
+        |> put_req_header("fly-client-ip", "198.51.100.9")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> AdminAuthPipeline.call([])
+
+      assert conn.halted
+      assert conn.status == 401
+    end
+
     test "halts with 401 when IP does not match session", %{conn: conn} do
       user = insert(:owner_user)
 

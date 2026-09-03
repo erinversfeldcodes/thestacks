@@ -70,7 +70,16 @@
       field_overrides: %{
         user_id: %{ecto_type: :binary_id},
         resource_id: %{ecto_type: :binary_id},
-        metadata: %{ecto_type: :map}
+        # `:binary`, not `:map`: the column is bytea holding Cloak ciphertext
+        # (Stacks.Audit encrypts on write and decrypts on read). Declaring :map
+        # described a shape the column has never had — harmless only because no
+        # production code reads through this schema, which is not a property to
+        # rely on. Excluded from the warehouse too: it cannot be read there, and
+        # carrying it would only widen where the encrypted personal data sits.
+        metadata: %{ecto_type: :binary, dbt_exclude: true},
+        # A keyed digest of a reader's address. Keyed is not anonymous, and the
+        # warehouse has no question that a per-person network identifier answers.
+        ip_address: %{dbt_exclude: true}
       }
     },
     %{
@@ -249,9 +258,17 @@
         password_reset_token: %{dbt_exclude: true},
         password_reset_sent_at: %{dbt_exclude: true},
         email_confirmation_token: %{dbt_exclude: true},
+        # The pending-change quartet: one fact in four columns, none of which the
+        # warehouse has a question for. `pending_email` is an address the reader
+        # typed (personal data); the two tokens are credentials.
+        pending_email: %{dbt_exclude: true},
+        pending_email_token: %{dbt_exclude: true},
+        pending_email_sent_at: %{dbt_exclude: true},
+        pending_email_revert_token: %{dbt_exclude: true},
         failed_login_count: %{default: 0, null: false, dbt_exclude: true},
         failed_login_first_at: %{dbt_exclude: true},
-        locked_until: %{dbt_exclude: true}
+        locked_until: %{dbt_exclude: true},
+        lockout_duration_seconds: %{dbt_exclude: true}
       }
     },
     %{
@@ -758,6 +775,37 @@
       }
     },
     %{
+      proto_file: "stacks/common/v1/feedback.proto",
+      proto_message: "FeedbackEntry",
+      table_name: "feedback_entries",
+      schema_prefix: "op",
+      ecto_module: Stacks.Feedback.Entry,
+      ecto_path: "lib/stacks/gen/feedback/entry.ex",
+      dbt_path: "stg_feedback_entries.sql",
+      timestamps: false,
+      migration_exists: false,
+      dbt_grant: false,
+      # No staging model, deliberately: `body` is free text a reader wrote, and
+      # the wh schema has no erasure path — a copy there would outlive
+      # delete_user_data/1 permanently. Volume questions are answerable from
+      # the feedback.submitted event, which carries no body.
+      skip_dbt: true,
+      indexes: [
+        %{name: "feedback_entries_created_at_index", columns: [{:desc, :created_at}]},
+        %{name: "feedback_entries_user_id_index", columns: [:user_id]}
+      ],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        body: %{null: false},
+        created_at: %{ecto_type: :utc_datetime_usec, null: false, default: {:fragment, "NOW()"}}
+      }
+    },
+    %{
       proto_file: "stacks/common/v1/costs.proto",
       proto_message: "PlatformCost",
       table_name: "platform_costs",
@@ -792,7 +840,10 @@
       ],
       field_overrides: %{
         owner_id: %{belongs_to: Stacks.Accounts.User},
-        visibility: %{default: "invite_only"}
+        visibility: %{default: "invite_only"},
+        # User-authored free text that can carry a person's name — the
+        # placements.notes discipline applies; counts are enough for wh.
+        name: %{dbt_exclude: true}
       }
     },
     %{
@@ -922,6 +973,11 @@
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
         seller_id: %{belongs_to: Stacks.Accounts.User},
+        # Seller free text and a direct contact handle — the same class as a
+        # placement note or an upload's storage key: the warehouse has no
+        # question that needs them.
+        description: %{dbt_exclude: true},
+        contact_info: %{dbt_exclude: true},
         status: %{default: "draft"},
         currency: %{default: "ZAR"},
         photo_urls: %{ecto_type: {:array, :string}, default: []},
@@ -983,7 +1039,10 @@
       ],
       field_overrides: %{
         thread_id: %{belongs_to: Stacks.Marketplace.OfferThread},
-        sender_id: %{belongs_to: Stacks.Accounts.User}
+        sender_id: %{belongs_to: Stacks.Accounts.User},
+        # A private message between two readers. Offer analytics need the
+        # amount and the type, never what they said to each other.
+        body: %{dbt_exclude: true}
       }
     },
     %{
@@ -1019,6 +1078,11 @@
         offer_id: %{ecto_type: :binary_id},
         buyer_id: %{belongs_to: Stacks.Accounts.User},
         seller_id: %{belongs_to: Stacks.Accounts.User},
+        # Handles into the payment and shipping providers. They resolve to a
+        # named individual's payment or delivery record on the other side, and
+        # revenue analytics is served by the amount and the status.
+        payment_provider_ref: %{dbt_exclude: true},
+        shipping_provider_ref: %{dbt_exclude: true},
         currency: %{default: "ZAR"},
         payment_status: %{default: "pending"}
       }
@@ -1334,11 +1398,14 @@
       skip_fields: [
         :password_hash,
         :email_confirmation_token,
+        :pending_email_token,
+        :pending_email_revert_token,
         :password_reset_token,
         :password_reset_sent_at,
         :failed_login_count,
         :failed_login_first_at,
-        :locked_until
+        :locked_until,
+        :lockout_duration_seconds
       ],
       field_overrides: %{}
     },

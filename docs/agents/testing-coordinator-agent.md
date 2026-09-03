@@ -22,21 +22,25 @@ Coordinate and execute the 12-layer test strategy across all 4 execution environ
 
 ## Execution Environments (4)
 
-Controlled by `TEST_TARGET` (and `BASE_URL` for deployed targeting) — see `docs/agents/standards/testing.md` and `docs/technical-architecture.md` Section 16:
+Selected by `MIX_ENV` (mock vs real wiring) and `BASE_URL` (local vs deployed target) — see `docs/agents/standards/testing.md` and `docs/technical-architecture.md` Section 16:
 
-| Environment | TEST_TARGET | External Services | Database |
+| Environment | Selected by | External Services | Database |
 |-------------|-------------|-------------------|----------|
-| Fully local (offline) | `local` (default) | Mocked | Local Postgres |
-| Local -> deployed | `deployed` + `BASE_URL=…` | Real (Modal, Open Library, etc.) | Dev Neon PostgreSQL |
-| CI pipeline | `local` (default) | Mocked | CI Postgres (GitHub Actions service) |
-| CI -> deployed preview | `deployed` + `BASE_URL=…` | Real | Preview Neon PostgreSQL |
+| Fully local (offline) | `MIX_ENV=test`, no `BASE_URL` | Mocked | Local Postgres |
+| Local -> deployed | `BASE_URL=…` + `DATABASE_URL=…` | Real (Modal, Open Library, etc.) | Dev Neon PostgreSQL |
+| CI pipeline | `MIX_ENV=test`, no `BASE_URL` | Mocked | CI Postgres (GitHub Actions service) |
+| CI -> deployed preview | `BASE_URL=…` + `E2E_EXPECT_*=1` | Real | Preview Neon PostgreSQL |
 
 ### Wiring Pattern
+The mock roster is not runtime-selected — it is the contents of the test config,
+loaded whole by `MIX_ENV=test`:
 ```elixir
-# apps/core/config/test.exs — defaults to the mock client.
+# apps/core/config/test.exs — every external seam swapped at config load.
 config :core, :vision_client, Stacks.AI.MockClient
+config :core, :isbn_http_client, Stacks.Books.MockHttpClient
+config :core, :storage, Stacks.Storage.Mock
 ```
-Deployed runs (`TEST_TARGET=deployed` + `BASE_URL=…`) are driven by `scripts/test-deployed.sh`; Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` and bumps per-step timeout to 90 s.
+Deployed runs are driven by `scripts/test-deployed.sh`, which requires `BASE_URL` and `DATABASE_URL` — the `:deployed_only` modules that drive the live API additionally guard on `BASE_URL` and skip themselves without it. Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` and bumps per-step timeout to 90 s. In CI the `E2E_EXPECT_*` flags (`FULL_SEEDS`, `LIVE_METRICS`, `RATE_LIMITING`) turn a spec's precondition skip into a hard failure.
 
 ## Test-to-Story Mapping
 
@@ -130,10 +134,10 @@ just test-python     # scripts/test-python.sh
 just test-dbt        # scripts/test-dbt.sh
 just test-e2e        # Playwright against local just dev
 just test-e2e-ci     # scripts/test-e2e.sh — Playwright with service lifecycle
-just test-deployed   # scripts/test-deployed.sh (requires TEST_TARGET=deployed)
+just test-deployed   # scripts/test-deployed.sh (requires DATABASE_URL + BASE_URL)
 
 # Deployed targeting
-TEST_TARGET=deployed BASE_URL=https://stacks-core-preview-…fly.dev just test-deployed
+DATABASE_URL=postgres://… BASE_URL=https://stacks-core-preview-…fly.dev just test-deployed
 ```
 
 ---
@@ -175,7 +179,7 @@ Before submitting your completion report, load the relevant reviewer doc(s) for 
 | Test framework conventions | Tests follow stack conventions (ExUnit, elm-test, cargo test, pytest) |
 | No flaky patterns | No `Process.sleep`, no time-dependent assertions, no network calls in unit tests |
 | Coverage meaningful | Tests assert behaviour, not implementation details; no `assert true` |
-| Environment isolation | `TEST_TARGET` env var controls mock/real wiring; tests don't leak state |
+| Environment isolation | Mock wiring comes from `config/test.exs` under `MIX_ENV=test`; tests don't leak state |
 | All test layers present | Happy path, error paths, boundary conditions covered |
 | Tests passing | All relevant test suites pass with zero failures |
 

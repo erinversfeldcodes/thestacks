@@ -1,6 +1,6 @@
 # The Stacks — User Stories
 
-> An open-source, self-hosted book management and discovery platform.
+> A source-available, self-hosted book management and discovery platform.
 > Dark-academic-meets-cottage-core aesthetic, built in Elm.
 
 ---
@@ -11,7 +11,7 @@ Phase 1 user stories have been moved to individual documentation files in `docs/
 
 ## 3. Third Spaces
 
-#### US-3.1 Browse Third Spaces
+#### US-3.1.1 Browse Third Spaces
 
 **As a** user, **I want to** discover reading groups, cosy cafes, book festivals, and literary events in my area **so that** I can participate in the physical, community side of reading.
 
@@ -39,7 +39,7 @@ Phase 1 user stories have been moved to individual documentation files in `docs/
 
 ## 7. Marketplace — "Looking for a New Home" (Future)
 
-#### US-7.2 Browse and Buy a Second-Hand Book
+#### US-7.2.1 Browse and Buy a Second-Hand Book
 
 **As a** buyer, **I want to** browse second-hand books listed by other users **so that** I can find affordable copies of books I want.
 
@@ -78,7 +78,7 @@ Phase 1 user stories have been moved to individual documentation files in `docs/
 
 ---
 
-#### US-7.3 KYC Verification for Marketplace Sellers
+#### US-7.3.1 KYC Verification for Marketplace Sellers
 
 **As a** marketplace seller, **I want to** complete identity verification **so that** I can legally sell books and receive payouts.
 

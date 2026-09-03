@@ -2,11 +2,11 @@ module Page.Settings.Consent exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , analyticsDescription
     , init
     , update
     , view
     , viewSection
-    , writingAssistantOffDescription
     )
 
 import Api
@@ -39,12 +39,34 @@ type OutMsg
     | SessionExpired
 
 
-{-| The verbatim copy shown under the writing-assistant toggle when it is OFF.
-Kept as a named constant so tests can assert the exact wording.
+{-| The verbatim copy shown under the analytics toggle, in either position.
+
+The switch is real — the answer is stored, exported and erased with the rest of
+your record — but nothing on the platform reads it, so the old "allow us to
+collect anonymous usage data" was describing a collection that does not happen.
+Kept as a named constant so a test pins the wording: if analytics ever start
+being read, this sentence becomes false and the test is where that is noticed.
+
+-}
+analyticsDescription : String
+analyticsDescription =
+    "Reserved — nothing reads this yet. No usage data is collected about you, by us or by anyone else. Your answer is recorded now so that if that ever changes, it changes with your say-so already on file rather than assumed."
+
+
+{-| The verbatim copy shown under the AI book-linking toggle when it is OFF.
+A named constant so the off-state wording lives in one place; the assertion that
+a reader actually sees it is in the settings e2e spec, against the rendered page.
+
+This used to describe a writing assistant that draws on your shelf and writing
+history. No such feature exists — it was designed, never built, and the claim has
+been retired. What the switch actually controls is narrower and worth saying
+plainly: whether a published post may be sent to an AI model to work out which
+books it mentions.
+
 -}
 writingAssistantOffDescription : String
 writingAssistantOffDescription =
-    "Your shelf and writing history are used to personalise writing suggestions. Disabling this turns off the writing assistant and deletes your session history and embeddings."
+    "Your published posts are not sent to an AI model, so books you mention won't be linked automatically."
 
 
 {-| Seed the consent page from the current user's actual consent state so the
@@ -145,9 +167,7 @@ viewSection model =
         [ div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Analytics" ]
             , p [ class "settings-section__desc" ]
-                [ text
-                    "Allow us to collect anonymous usage data to improve The Stacks."
-                ]
+                [ text analyticsDescription ]
             , div [ class "toggle-row" ]
                 [ label [ class "toggle-row__label" ] [ text "Analytics" ]
                 , button
@@ -172,18 +192,18 @@ viewSection model =
                 ]
             ]
         , div [ class "settings-section" ]
-            [ h2 [ class "settings-section__title" ] [ text "Writing assistant" ]
+            [ h2 [ class "settings-section__title" ] [ text "Linking books in your writing" ]
             , p [ class "settings-section__desc" ]
                 [ text
                     (if model.writingAssistantConsent then
-                        "Your shelf and writing history are used to personalise writing suggestions."
+                        "When you publish a post, its text is sent to an AI model to work out which books you mentioned, so they can be linked to the catalogue."
 
                      else
                         writingAssistantOffDescription
                     )
                 ]
             , div [ class "toggle-row" ]
-                [ label [ class "toggle-row__label" ] [ text "Writing assistant" ]
+                [ label [ class "toggle-row__label" ] [ text "Link books automatically" ]
                 , button
                     [ class
                         (if model.writingAssistantConsent then

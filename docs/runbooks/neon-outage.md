@@ -10,6 +10,12 @@ branch and per-PR `preview/<pr>` copy-on-write clones) is structurally
 isolated — a staging-side incident does not touch prod, and vice versa.
 See `docs/deployment/NEON_BRANCH_TOPOLOGY.md` for the full topology.
 
+⚠️ This runbook covers the database being **unreachable**. If the database is
+up but the DATA is damaged — a bad migration, a destructive job, corruption —
+switch to `docs/runbooks/backup-restore.md`: recovery there is Neon
+point-in-time branching, and its window is **six hours**, so the switch is
+time-critical.
+
 ---
 
 ## Symptoms

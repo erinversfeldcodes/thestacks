@@ -23,7 +23,21 @@ defmodule StacksWeb.ProtoJSON do
     :age_verified,
     :consent_analytics
   ]
-  @user_auth_fields @user_core_fields ++ [:handle, :country_code, :city, :onboarding_completed]
+  # The caller's OWN record (login / refresh / me). The pending email-change pair
+  # belongs here and NOWHERE else: it is the reader's own address and their own
+  # clock, and `@user_embed_fields` is how a user appears inside somebody else's
+  # view. Adding it to the core list would put a private address on other
+  # people's pages.
+  @user_auth_fields @user_core_fields ++
+                      [
+                        :handle,
+                        :country_code,
+                        :city,
+                        :website_url,
+                        :onboarding_completed,
+                        :pending_email,
+                        :pending_email_sent_at
+                      ]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   @doc """

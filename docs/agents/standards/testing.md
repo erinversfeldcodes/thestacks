@@ -193,21 +193,64 @@ Screenshot comparisons for shelf rendering, spine sizing, cork board layout. Sep
 
 The 12 layers run across four execution contexts (see `docs/technical-architecture.md` Section 16 — Testing Strategy). The same test code targets all four; what changes is which services are real and which are mocked.
 
-| Environment | `TEST_TARGET` | Mocks | Use When |
-|-------------|---------------|-------|----------|
-| Fully local (offline) | `local` (default) | All external services mocked | Day-to-day development, offline |
-| Local -> deployed | `deployed` + `BASE_URL=…` | None — hits a deployed dev stack | Validating real integrations |
-| CI | `local` (default) | All external services mocked | Pull request checks |
-| CI -> preview | `deployed` + `BASE_URL=…` | None — hits the preview deployment | Pre-production validation |
+| Environment | Selected by | Mocks | Use When |
+|-------------|-------------|-------|----------|
+| Fully local (offline) | `MIX_ENV=test`, no `BASE_URL` | All external services mocked | Day-to-day development, offline |
+| Local -> deployed | `BASE_URL=…` (+ `DATABASE_URL`) | None — hits a deployed dev stack | Validating real integrations |
+| CI | `MIX_ENV=test`, no `BASE_URL` | All external services mocked | Pull request checks |
+| CI -> preview | `BASE_URL=…` + `E2E_EXPECT_*=1` | None — hits the preview deployment | Pre-production validation |
+
+There is no single "which environment am I in" variable, and no test-harness
+module that reads one. Mock-vs-real is decided at config load by `MIX_ENV`;
+local-vs-deployed is decided per runner by whether `BASE_URL` is set.
 
 ### Mock Wiring
-The default `MIX_ENV=test` configuration wires the mock client; deployed runs are driven by the `TEST_TARGET=deployed` / `BASE_URL` envelope checked in `scripts/test-deployed.sh`.
+`MIX_ENV=test` loads `apps/core/config/test.exs`, and that file *is* the mock
+roster — every external seam is swapped there, not selected at runtime:
+
 ```elixir
 # apps/core/config/test.exs
 config :core, :vision_client, Stacks.AI.MockClient
+config :core, :isbn_http_client, Stacks.Books.MockHttpClient
+config :core, :scraper_client, Stacks.Enrichment.MockScraperClient
+config :core, :storage, Stacks.Storage.Mock
+config :core, :geocoder, Stacks.Geocoding.Mock
+# …plus Brave/SearXNG/Together, the RSS fetcher, the dbt runner, and the
+# Prometheus client. `scripts/check-outbound-test-default.sh` gates the set.
 ```
 
-Playwright reads `BASE_URL` directly in `e2e/playwright.config.ts` — when set, it points the browser at the deployed stack and bumps the per-step timeout to 90 s for cold-start tolerance.
+Nothing un-mocks these in-process. A run that must hit real infrastructure
+targets a *deployed* stack instead, which is what `BASE_URL` selects.
+
+### Deployed Targeting
+`BASE_URL` is read in two places, and in both it is the real switch:
+
+- `e2e/playwright.config.ts` — `baseURL` falls back to `http://localhost:4000`;
+  when `BASE_URL` is set the browser drives the deployed stack and the per-step
+  timeout goes to 90 s for cold-start tolerance.
+- The `@moduletag :deployed_only` ExUnit modules — excluded by default in
+  `test_helper.exs`. The ones that drive the deployed API (the JWT-at-rest and
+  audit-IP modules) additionally guard on `System.get_env("BASE_URL")` and skip
+  themselves when it is unset; the dbt/storage ones need only `DATABASE_URL`.
+  `scripts/test-deployed.sh` therefore requires both: with `BASE_URL` missing
+  the live-API half self-skips and the run still reports green.
+
+### Hardening Conditionals in CI
+Specs that legitimately skip on a missing precondition locally must not stay
+skippable where the precondition is guaranteed. The `E2E_EXPECT_*` flags flip
+those skips into hard failures, and CI sets them:
+
+| Flag | Turns into a failure |
+|------|----------------------|
+| `E2E_EXPECT_FULL_SEEDS=1` | `assertSeedOrSkip` skipping for insufficient seed data |
+| `E2E_EXPECT_LIVE_METRICS=1` | the transparency spec skipping its frontend-render guarantee |
+| `E2E_EXPECT_RATE_LIMITING=1` | the rate-limit spec skipping when limiting looks disabled |
+
+`E2E_EXPECT_RATE_LIMITING` is the one that reads in both directions: it is
+explicit operator intent, so any value other than `1` asserts that this stack
+legitimately runs unlimited. Left unset it falls back to inference — a
+*non-loopback* `BASE_URL` already means enforcement, since only local Phoenix
+disables the limiter in config.
 
 ---
 
@@ -223,10 +266,10 @@ just test-e2e          # Playwright against a local `just dev` stack
 just test-e2e-ci       # scripts/test-e2e.sh — Playwright with service lifecycle management
 just test-dbt          # scripts/test-dbt.sh — dbt run + test (staging layer)
 just test-security     # all security scans
-just test-deployed     # scripts/test-deployed.sh — requires TEST_TARGET=deployed
+just test-deployed     # scripts/test-deployed.sh — requires DATABASE_URL + BASE_URL
 
 # Deployed targeting (preview/dev stack)
-TEST_TARGET=deployed BASE_URL=https://stacks-core-preview-…fly.dev just test-deployed
+DATABASE_URL=postgres://… BASE_URL=https://stacks-core-preview-…fly.dev just test-deployed
 E2E_SERVICES=none BASE_URL=https://stacks-core-preview-…fly.dev just test-e2e-ci
 ```
 

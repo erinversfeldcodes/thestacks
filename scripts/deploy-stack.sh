@@ -159,6 +159,7 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     AGE_GATING_ENABLED=""
     RATE_LIMIT_PUBLIC=""
     RATE_LIMIT_E2E_HELPER=""
+    RATE_LIMIT_AUTH=""
     SMOKE_TESTS_ENABLED=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
@@ -173,6 +174,11 @@ else
     INVITE_ONLY_REGISTRATION="true"
     RATE_LIMIT_PUBLIC="5000"
     RATE_LIMIT_E2E_HELPER="5000"
+    # The whole E2E suite arrives from ONE runner IP, and its fast opening
+    # specs are mostly register/login — they exhaust a 60/60s :auth budget
+    # inside the first minute, and every later form login 429s until the
+    # sliding window drains. Prod keeps the config default.
+    RATE_LIMIT_AUTH="5000"
     SMOKE_TESTS_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
@@ -335,6 +341,47 @@ print(urls[0] if urls else '')
     fi
     echo "    Vision URL: ${VISION_SERVICE_URL}"
     echo "PASS deploy: vision service deployed to Modal"
+
+    # Score the model that was just deployed, before anything else rolls forward.
+    #
+    # This is the only moment a vision regression can be caught cheaply: the new
+    # image is live, nothing depends on it yet, and the core app has not been
+    # deployed against it. `mix eval.vision` runs the labelled corpus through the
+    # production seam and fails on a drop against the recorded baseline.
+    #
+    # EVAL_VISION_REQUIRED=1 is the point of the exercise. Without it the task
+    # SKIPS when it cannot reach a service and exits 0, which is correct for a
+    # local run and useless as a gate — a deploy that quietly skips its own
+    # regression check is a deploy that has no regression check.
+    #
+    # No database is needed: the task boots the app, but Ecto retries a missing
+    # repo in the background rather than failing the boot, so this runs the same
+    # whether or not the deploying machine can reach Postgres.
+    echo ""
+    echo "==> Scoring the deployed vision model against the labelled corpus..."
+    # `&& || ` capture, not a bare assignment: under `set -e` a failing command
+    # substitution in an assignment aborts the whole script BEFORE the verdict
+    # logic below could run — the gate would die silently instead of speaking.
+    EVAL_RC=0
+    EVAL_OUT="$(cd "$REPO_ROOT" && \
+            VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
+            EVAL_VISION_REQUIRED=1 \
+            mix eval.vision 2>&1)" || EVAL_RC=$?
+    printf '%s\n' "$EVAL_OUT"
+    if [[ "$EVAL_RC" -ne 0 ]]; then
+        # A regression and an eval that never ran are DIFFERENT failures, and
+        # naming the wrong one misdirects the responder: a compile error on the
+        # runner (missing generated schemas) was once reported as "model
+        # regressed", pointing the investigation at Modal when the defect was
+        # the checkout. Claim regression only when the eval itself said so.
+        if printf '%s' "$EVAL_OUT" | grep -q "REGRESSION"; then
+            echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
+        else
+            echo "FAIL deploy: the vision eval COULD NOT RUN (exit $EVAL_RC) — that is a broken gate, not a scored regression; see the output above. Stopping, because an unscored model must not roll forward under EVAL_VISION_REQUIRED." >&2
+        fi
+        exit 1
+    fi
+    echo "PASS deploy: vision model scored, no regression"
 elif [[ -n "${SKIP_VISION:-}" ]]; then
     echo "SKIP: SKIP_VISION set — skipping Modal vision deploy (no Modal spend). VISION_SERVICE_URL left empty."
 else
@@ -346,7 +393,10 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 else
     SCRAPER_APP="${PREVIEW_SCRAPER_APP}"
 fi
-SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.internal:8080"
+# Flycast, not `.internal`: the scraper is a `[[services]]` app (scale-to-zero
+# via fly-proxy), and a services-exposed port is connection-refused on the
+# instance's 6PN address — the same trap the VM hit (see VM_HOST below).
+SCRAPER_INTERNAL_URL="http://${SCRAPER_APP}.flycast:8080"
 
 if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
     echo ""
@@ -355,6 +405,10 @@ if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
         fly apps destroy "${SCRAPER_APP}" --yes 2>&1 | grep -v "^Error" || true
     fi
     ensure_fly_app "${SCRAPER_APP}"
+
+    # Private Flycast IPv6 so `<app>.flycast` resolves; idempotent. Never
+    # allocate a public IP here — the scraper must stay 6PN-only.
+    fly ips allocate-v6 --private --app "${SCRAPER_APP}" 2>&1 | grep -v "^Error" || true
 
     fly secrets set \
         SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}" \
@@ -383,7 +437,9 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 else
     SEARXNG_APP="${PREVIEW_SEARXNG_APP}"
 fi
-SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.internal:8080"
+# Flycast for the same reason as the scraper above — and SearXNG must never
+# get a public IP: an internet-reachable metasearch instance is an open proxy.
+SEARXNG_INTERNAL_URL="http://${SEARXNG_APP}.flycast:8080"
 
 if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     echo ""
@@ -392,6 +448,8 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
         fly apps destroy "${SEARXNG_APP}" --yes 2>&1 | grep -v "^Error" || true
     fi
     ensure_fly_app "${SEARXNG_APP}"
+
+    fly ips allocate-v6 --private --app "${SEARXNG_APP}" 2>&1 | grep -v "^Error" || true
 
     if [[ "$PROD_MODE" -eq 1 ]]; then
         fly apps resume "${SEARXNG_APP}" 2>&1 | grep -v "^Error" || true
@@ -408,10 +466,17 @@ if [[ -n "${SEARXNG_SECRET_KEY:-}" ]]; then
     trap '[[ -f "${SETTINGS_RENDERED:-/dev/null}" ]] && rm -f "${SETTINGS_RENDERED}"' EXIT
 
     _searxng_deploy_once() {
+        # --depot=false like every other service here. Without it this one call
+        # falls through to Fly's depot builder while the scraper, core and the
+        # rest use the remote builder — so a depot outage failed ONLY SearXNG,
+        # and did it behind the message "SearXNG deployment failed... aborting
+        # so the gate doesn't run on a polluted SearXNG signal", which reads as
+        # a SearXNG problem rather than a build-backend one.
         (cd "$REPO_ROOT/deploy/searxng" && fly deploy \
             --app "${SEARXNG_APP}" \
             --config "${REPO_ROOT}/deploy/fly.searxng.toml" \
-            --yes)
+            --yes \
+            --depot=false)
     }
 
     if ! deploy_with_retry "searxng" _searxng_deploy_once; then
@@ -580,6 +645,14 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 # is never committed here. Runbook: docs/runbooks/email-delivery-failure.md.
 EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
 
+# The telemetry keepalive that wakes the log shipper (prod only — previews
+# don't ship logs). Set only when the shipper will actually be deployed, so
+# a shipper-less stack doesn't ping a nonexistent Flycast name every 10s.
+LOG_SHIPPER_KEEPALIVE_URL=""
+if [[ "$PROD_MODE" -eq 1 && -n "${LOG_SHIPPER_ACCESS_TOKEN:-}" ]]; then
+    LOG_SHIPPER_KEEPALIVE_URL="http://${LOG_SHIPPER_APP:-thestacks-log-shipper}.flycast:8686"
+fi
+
 if [[ "$PROD_MODE" -eq 1 && -z "${EMAIL_FROM:-}" ]]; then
     echo "WARN: EMAIL_FROM is not set — prod email keeps the onboarding@resend.dev"
     echo "      stopgap sender, which CANNOT deliver to real users. Set it via:"
@@ -594,7 +667,7 @@ fly secrets set \
     CLOAK_KEY="${CLOAK_KEY:-}" \
     VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
     PHX_HOST="${PHX_HOST_VALUE:-${CORE_APP}.fly.dev}" \
-    RATE_LIMIT_AUTH="60" \
+    ${RATE_LIMIT_AUTH:+RATE_LIMIT_AUTH="${RATE_LIMIT_AUTH}"} \
     ${EFFECTIVE_DATABASE_URL:+DATABASE_URL="${EFFECTIVE_DATABASE_URL}"} \
     ${R2_ACCOUNT_ID:+R2_ACCOUNT_ID="${R2_ACCOUNT_ID}"} \
     ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
@@ -611,6 +684,7 @@ fly secrets set \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
     ${METRICS_PUSH_URL:+STACKS_METRICS_PUSH_URL="${METRICS_PUSH_URL}"} \
+    ${LOG_SHIPPER_KEEPALIVE_URL:+LOG_SHIPPER_KEEPALIVE_URL="${LOG_SHIPPER_KEEPALIVE_URL}"} \
     ${PROD_OWNER_EMAIL:+PROD_OWNER_EMAIL="${PROD_OWNER_EMAIL}"} \
     ${PROD_OWNER_PASSWORD:+PROD_OWNER_PASSWORD="${PROD_OWNER_PASSWORD}"} \
     ${STACKS_PROBER_EMAIL:+STACKS_PROBER_EMAIL="${STACKS_PROBER_EMAIL}"} \
@@ -923,6 +997,10 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
 
         ensure_fly_app "${LOG_SHIPPER_APP}"
 
+        # Private Flycast IPv6 so the core keepalive can reach (and wake) the
+        # proxied vector health port. Never a public IP — 6PN-only.
+        fly ips allocate-v6 --private --app "${LOG_SHIPPER_APP}" 2>&1 | grep -v "^Error" || true
+
         fly secrets set \
             LOG_SHIPPER_ACCESS_TOKEN="${LOG_SHIPPER_ACCESS_TOKEN}" \
             AXIOM_TOKEN="${AXIOM_TOKEN:-}" \
@@ -930,10 +1008,16 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
             --app "${LOG_SHIPPER_APP}" --stage
 
         _log_shipper_deploy_once() {
+            # --depot=false for the same reason as every other service: without
+            # it this falls through to the depot builder alone. Here the cost is
+            # quieter than elsewhere — this deploy is graceful-on-failure, so a
+            # depot outage would simply stop logs reaching Axiom rather than
+            # failing the release.
             (cd "$REPO_ROOT/deploy/log-shipper" && fly deploy \
                 --app "${LOG_SHIPPER_APP}" \
                 --config "${REPO_ROOT}/deploy/fly.log-shipper.toml" \
-                --yes)
+                --yes \
+                --depot=false)
         }
 
         if deploy_with_retry "log-shipper" _log_shipper_deploy_once; then

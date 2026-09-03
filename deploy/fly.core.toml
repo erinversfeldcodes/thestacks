@@ -13,7 +13,11 @@ kill_timeout = "5s"
   PHX_HOST = "readinginthestacks.com"
   PORT = "4000"
   ECTO_IPV6 = "true"
-  SEARXNG_URL = "http://thestacks-searxng.internal:8080"
+  # Flycast: SearXNG is a [[services]] app (scale-to-zero via fly-proxy) and
+  # its port is connection-refused on the plain 6PN `.internal` address.
+  # The deploy script overrides this via the SEARXNG_URL secret; this default
+  # exists for hand deploys and must stay in sync with it.
+  SEARXNG_URL = "http://thestacks-searxng.flycast:8080"
 
 [http_service]
   internal_port = 4000
@@ -45,7 +49,13 @@ kill_timeout = "5s"
   timeout = "2s"
   grace_period = "10s"
   method = "GET"
-  path = "/api/health"
+  # /ready, not /health: liveness alone answered 200 while the database was
+  # unreachable, so Fly kept routing traffic to a machine that could serve
+  # nothing but errors. /api/health/ready checks the DB and answers 503 when
+  # degraded, which is what a router-facing check is for. The bare /api/health
+  # stays for the deploy script's warm-up and the probe, where "the BEAM is up"
+  # is the right question.
+  path = "/api/health/ready"
 
 [[vm]]
   size = "shared-cpu-1x"

@@ -5,9 +5,17 @@ defmodule Stacks.CircuitBreakers do
       as the service recovers (instead of waiting out the full reset timer).
 
       Fuses: `:vision_fuse`, `:together_ai_fuse`, `:open_library_fuse`,
-      `:google_books_fuse`, `:brave_fuse`, `:searxng_fuse`, `:r2_fuse`
+      `:google_books_fuse`, `:brave_fuse`, `:searxng_fuse`, `:r2_fuse`,
+      `:nominatim_fuse`, `:neon_fuse`, `:resend_fuse`
       (5 failures/60s, 5min reset) and `:scraper_fuse` (3/60s, 15min).
       Per-store scraper fuses are installed lazily via `store_fuse/1`.
+
+      `:neon_fuse` is special: most fuses melt only under real traffic, but
+      the database going away must be visible even when nobody is using the
+      app — `CoreWeb.Telemetry.poll_db_watchdog/0` pings it every poll tick
+      and melts this fuse on failure, so the fuse-state gauge (and the public
+      "circuit breakers healthy" signal derived from it) goes to 0 within
+      about a minute of a database outage.
   """
 
   use GenServer
@@ -36,7 +44,10 @@ defmodule Stacks.CircuitBreakers do
     brave_fuse: @standard_spec,
     searxng_fuse: @standard_spec,
     r2_fuse: @standard_spec,
-    nominatim_fuse: @standard_spec
+    nominatim_fuse: @standard_spec,
+    neon_fuse: @standard_spec,
+    resend_fuse: @standard_spec,
+    log_shipper_fuse: @standard_spec
   ]
 
   @probes %{
@@ -47,7 +58,11 @@ defmodule Stacks.CircuitBreakers do
     google_books_fuse: &__MODULE__.probe_google_books/0,
     brave_fuse: &__MODULE__.probe_brave/0,
     searxng_fuse: &__MODULE__.probe_searxng/0,
-    r2_fuse: &__MODULE__.probe_r2/0
+    r2_fuse: &__MODULE__.probe_r2/0,
+    nominatim_fuse: &__MODULE__.probe_nominatim/0,
+    neon_fuse: &__MODULE__.probe_neon/0,
+    resend_fuse: &__MODULE__.probe_resend/0,
+    log_shipper_fuse: &__MODULE__.probe_log_shipper/0
   }
 
   @doc "Start the circuit breaker installer as a supervised process."
@@ -289,6 +304,66 @@ defmodule Stacks.CircuitBreakers do
   @spec probe_google_books() :: :ok | {:error, term()}
   def probe_google_books do
     probe_http_get(google_books_probe_url())
+  end
+
+  @doc false
+  @spec probe_nominatim() :: :ok | {:error, term()}
+  def probe_nominatim do
+    probe_http_get("https://nominatim.openstreetmap.org/status")
+  end
+
+  @doc false
+  # The one non-HTTP probe: a SELECT 1 through the app's own pool, so the
+  # probe exercises exactly the path production queries take.
+  @spec probe_neon() :: :ok | {:error, term()}
+  def probe_neon do
+    case Core.Repo.query("SELECT 1", [], timeout: 2_000) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
+  end
+
+  @doc false
+  # Probe-auth audit: matches production — the same bearer key the Swoosh
+  # Resend adapter sends. Without it the fuse can't be meaningfully probed
+  # (Resend 401s keyless requests).
+  @spec probe_resend() :: :ok | {:error, term()}
+  def probe_resend do
+    case resend_api_key() do
+      key when is_binary(key) and byte_size(key) > 0 ->
+        probe_http_get("https://api.resend.com/domains", [
+          {"authorization", "Bearer #{key}"}
+        ])
+
+      _ ->
+        Logger.warning(
+          "CircuitBreakers: Resend api_key not configured — cannot probe :resend_fuse"
+        )
+
+        {:error, :api_key_not_configured}
+    end
+  end
+
+  @doc false
+  # Same endpoint the telemetry keepalive pings; the keepalive melts this
+  # fuse on failure (log-shipper analogue of the neon watchdog).
+  @spec probe_log_shipper() :: :ok | {:error, term()}
+  def probe_log_shipper do
+    case Application.get_env(:core, :log_shipper_keepalive_url) do
+      url when is_binary(url) and url != "" ->
+        probe_http_get(url <> "/health")
+
+      _ ->
+        {:error, :url_not_configured}
+    end
+  end
+
+  defp resend_api_key do
+    :core
+    |> Application.get_env(Stacks.Email.Mailer, [])
+    |> Keyword.get(:api_key)
   end
 
   @doc false

@@ -76,9 +76,14 @@ defmodule Stacks.SocialFeedTest do
       assert {:ok, []} = Social.feed_for_group(group.id, viewer.id)
     end
 
-    test "returns :unauthorized for non-member", %{group: group} do
+    # 404, not 403: an invite-only group must not confirm its existence to a
+    # stranger. `get_group/2` and `list_group_members/2` already answer this
+    # way; the feed answered 403, which told an outsider the group was real and
+    # that they were merely not in it. That it now matches the bad-group_id case
+    # below is the point, not a coincidence.
+    test "returns :not_found for non-member, so existence is not leaked", %{group: group} do
       outsider = insert(:user)
-      assert {:error, :unauthorized} = Social.feed_for_group(group.id, outsider.id)
+      assert {:error, :not_found} = Social.feed_for_group(group.id, outsider.id)
     end
 
     test "returns :not_found for bad group_id", %{viewer: viewer} do

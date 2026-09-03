@@ -11,7 +11,6 @@ import Api
 import Components.BlockUserModal as BlockModal
 import Components.BookAssociations as BookAssociations
 import Components.Syndication as Syndication
-import Components.WritingAssistant as WritingAssistant
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
 import Html.Attributes exposing (class, disabled, href, placeholder, value)
 import Html.Events exposing (onClick, onInput)
@@ -25,7 +24,6 @@ type alias Model =
     { postId : String
     , post : RemoteData Http.Error BlogPost
     , currentUserId : Maybe String
-    , writingAssistantConsent : Bool
     , actionResult : RemoteData Http.Error ()
     , comments : RemoteData Http.Error (List Comment)
     , commentDraft : String
@@ -63,12 +61,11 @@ type OutMsg
     | RequestCopy String
 
 
-init : String -> Maybe String -> Maybe String -> Bool -> String -> ( Model, Cmd Msg )
-init postId maybeToken currentUserId writingAssistantConsent origin =
+init : String -> Maybe String -> Maybe String -> String -> ( Model, Cmd Msg )
+init postId maybeToken currentUserId origin =
     ( { postId = postId
       , post = Loading
       , currentUserId = currentUserId
-      , writingAssistantConsent = writingAssistantConsent
       , actionResult = NotAsked
       , comments = Loading
       , commentDraft = ""
@@ -418,11 +415,6 @@ view model =
 
                         Nothing ->
                             text ""
-                    , if isOwner then
-                        WritingAssistant.view { hasConsent = model.writingAssistantConsent }
-
-                      else
-                        text ""
                     , viewComments model
                     ]
         ]

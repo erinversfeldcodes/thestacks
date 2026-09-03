@@ -276,6 +276,90 @@ defmodule StacksWeb.GroupControllerTest do
     end
   end
 
+  describe "GET /api/groups/:group_id/members" do
+    test "a member who never set a display name still has a name, not a null", %{conn: conn} do
+      # `op.users.display_name` is NULLABLE; `handle` is NOT NULL. The client
+      # decodes `display_name` as a required string, and `Decode.list` is
+      # all-or-nothing — so ONE member without a name would fail the decode for
+      # the entire roster and show a transport error instead of the group.
+      #
+      # Seed data always sets a display name, which is exactly why every other
+      # test here is green. This one removes it.
+      owner = insert(:user, display_name: "Ada")
+
+      {:ok, group} =
+        Stacks.Social.create_group(owner.id, %{
+          name: "Circle",
+          type: "close_friends",
+          visibility: "platform"
+        })
+
+      nameless = insert(:user, display_name: nil, handle: "grace_h")
+      insert(:group_member, group: group, user: nameless)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert %{"members" => members} = json_response(conn, 200)
+
+      refute Enum.any?(members, &is_nil(&1["display_name"])),
+             "a null display_name reaches the client and fails the whole roster: #{inspect(members)}"
+
+      assert "grace_h" in Enum.map(members, & &1["display_name"])
+    end
+
+    test "lists the group's members with names, not raw ids", %{conn: conn} do
+      # Build the group through the real path rather than hand-setting roles:
+      # `create_group` stores the creator's own membership as role "member", so a
+      # fixture that sets role: "owner" would assert something production never
+      # produces.
+      owner = insert(:user, display_name: "Ada")
+
+      {:ok, group} =
+        Stacks.Social.create_group(owner.id, %{
+          name: "Circle",
+          type: "close_friends",
+          visibility: "platform"
+        })
+
+      member = insert(:user, display_name: "Grace")
+      insert(:group_member, group: group, user: member)
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert %{"members" => members} = json_response(conn, 200)
+      names = Enum.map(members, & &1["display_name"]) |> Enum.sort()
+
+      # The whole point: the members tab could only ever show the owner's UUID
+      # before, because this endpoint had no route.
+      assert names == ["Ada", "Grace"]
+
+      # Ownership is carried by groups.owner_id, not by the membership role —
+      # every membership this path creates has role "member".
+      assert Enum.all?(members, &(&1["role"] == "member"))
+      assert group.owner_id == owner.id
+    end
+
+    test "an invite-only group is not readable by a non-member", %{conn: conn} do
+      owner = insert(:user)
+      group = insert(:group, owner: owner, visibility: "invite_only")
+      insert(:group_member, group: group, user: owner, role: "owner")
+      outsider = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(outsider)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert json_response(conn, 404)
+    end
+  end
+
   describe "DELETE /api/groups/:group_id/members/:user_id" do
     test "owner removes member (204)", %{conn: conn} do
       owner = insert(:user)

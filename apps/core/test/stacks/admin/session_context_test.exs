@@ -22,12 +22,18 @@ defmodule Stacks.Admin.SessionContextTest do
       assert session.revoked_at == nil
     end
 
-    test "hashes IP address" do
+    test "stores a KEYED digest of the IP, not a bare hash of it" do
       user = insert(:owner_user)
       {:ok, session} = SessionContext.create(user, @raw_ip, current_boot_id())
 
-      expected_hash = :crypto.hash(:sha256, @raw_ip) |> Base.encode16(case: :lower)
-      assert session.ip_hash == expected_hash
+      # Deterministic, so session pinning can still compare.
+      assert session.ip_hash == Stacks.IPDigest.hash(@raw_ip)
+
+      # But not the unkeyed digest this used to store. That value was invertible
+      # by exhausting the IPv4 space, so pinning came at the cost of holding a
+      # recoverable network identifier.
+      bare = :crypto.hash(:sha256, @raw_ip) |> Base.encode16(case: :lower)
+      refute session.ip_hash == bare
     end
 
     test "sets expires_at to 30 minutes from now" do

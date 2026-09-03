@@ -73,6 +73,11 @@ else
     config :core, :r2_bucket, System.get_env("R2_BUCKET_NAME", "stacks-images")
   end
 
+  # How long a mailed GDPR export link — and the stored copy behind it — lives.
+  if export_ttl = System.get_env("EXPORT_TTL_SECONDS") do
+    config :core, :export_ttl_seconds, String.to_integer(export_ttl)
+  end
+
   if scraper_hmac = System.get_env("SCRAPER_HMAC_SECRET") do
     config :core, :scraper_hmac_secret, scraper_hmac
   end
@@ -97,6 +102,10 @@ else
 
   config :core, :metrics_push_url, System.get_env("STACKS_METRICS_PUSH_URL")
 
+  # Flycast health URL of the log shipper; the telemetry keepalive pings it so
+  # the shipper wakes/sleeps with this app (unset = no shipper, ping disabled)
+  config :core, :log_shipper_keepalive_url, System.get_env("LOG_SHIPPER_KEEPALIVE_URL")
+
   grafana_host = System.get_env("GRAFANA_HOST")
   grafana_token = System.get_env("GRAFANA_AUTH_TOKEN")
 
@@ -111,6 +120,10 @@ else
 end
 
 present? = fn name -> (System.get_env(name) || "") != "" end
+
+if domain = System.get_env("CANONICAL_DOMAIN") do
+  config :core, :canonical_domain, domain
+end
 
 resend_configured? = System.get_env("EMAIL_PROVIDER") == "resend" && present?.("RESEND_API_KEY")
 
@@ -133,18 +146,23 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # Pool sizes are dimensioned for the real workload (a handful of users +
+  # probe traffic on a scale-to-zero app), and their sum must stay under the
+  # database's connection cap at the smallest compute size — Neon allows
+  # ~112 connections at 0.25 CU, and every boot opens all pools at once
+  # against a just-woken database.
   config :core, Core.Repo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "40"),
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6
 
   config :core, Core.ObanRepo,
     url: database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
-    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "80"),
+    pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "20"),
     socket_options: maybe_ipv6
 
   if System.get_env("PHX_SERVER") do

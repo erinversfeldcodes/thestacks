@@ -1,5 +1,5 @@
 # Chef stage — installs cargo-chef and musl toolchain once, reused by planner + builder
-FROM rust:1.97@sha256:1bcff4befb740599103a2c7cb51058e14479b2e35e3a34a3f0dc4ede09927488 AS chef
+FROM rust:1.98@sha256:271849e998ffce5776454bbf98c5dc21baafc854ff8e566197908d3aca9a81e8 AS chef
 
 # --locked pins cargo-chef's transitive deps (e.g. cargo-platform) to the
 # versions it was published with. Without this, cargo-platform 0.3.3 gets

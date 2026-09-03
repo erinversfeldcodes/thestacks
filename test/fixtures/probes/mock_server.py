@@ -84,6 +84,14 @@ def make_handler(mode: str, fail_ratio: float):
             length = int(self.headers.get("Content-Length", "0") or "0")
             if length:
                 self.rfile.read(length)
+            if self.path.startswith("/api/auth/register"):
+                # The probe's first act is asserting the invite gate is ON: a
+                # codeless registration must be refused. A healthy production
+                # answers 403 invite_required, so the healthy mock must too —
+                # without this route the mock's implicit 404 (or a 200) reads
+                # as "gate off or broken" and every scenario dies at the gate.
+                self._respond(403, b'{"error":"invite_required"}')
+                return
             if self.path.startswith("/api/auth/login"):
                 if mode == "auth-fail":
                     self._respond(401, b'{"error":"invalid"}')

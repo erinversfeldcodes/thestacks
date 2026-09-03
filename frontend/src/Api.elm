@@ -1,7 +1,9 @@
 module Api exposing
-    ( AdminAuthError(..)
+    ( Account
+    , AdminAuthError(..)
     , AdminBook
     , AdminBooksResponse
+    , AdminFeedbackEntry
     , AdminInvite
     , AdminMfaEnrolment
     , AdminSession
@@ -24,6 +26,7 @@ module Api exposing
     , ConfirmOutcome(..)
     , ConfirmResponse
     , Deanonymisation
+    , GroupMember
     , ImportError(..)
     , ImportRow
     , InboxItem
@@ -45,6 +48,7 @@ module Api exposing
     , PollStatus(..)
     , PrivacySettings
     , ProfileError(..)
+    , ProfileSaved
     , ProfileShelfSummary
     , Progress
     , ProgressError(..)
@@ -57,6 +61,7 @@ module Api exposing
     , RequestSpec
     , RiskInference
     , SearchSections
+    , ShelfMoveError(..)
     , ShelfVisibilitySetting
     , SourceHealth
     , SubjectCount
@@ -66,28 +71,34 @@ module Api exposing
     , TransparencyMetrics
     , UploadInit
     , acceptInvitation
+    , accountDecoder
     , activateListing
-    , adminBookDecoder
+    , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
     , adminListBooks
+    , adminListBooksRequest
     , adminLogin
+    , adminLogoutRequest
     , adminMfaConfirm
     , adminMfaSetup
     , adminSetBookAgeGate
+    , adminSetBookAgeGateRequest
     , adminVerifyMfa
     , approveSource
     , auditLogResponseDecoder
+    , authHeaders
     , authResponseDecoder
     , authed
+    , authorEventsDecoder
     , awaitingConfirmationCount
     , blockUser
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
-    , checkInvite
-    , commitUpload
+    , checkInviteRequest
+    , commitUploadDecoder
+    , commitUploadRequest
     , completeOnboardingStep
     , confirmAssociation
-    , confirmBook
     , confirmBookRequest
     , confirmResponseToResult
     , createAdminInvite
@@ -96,33 +107,41 @@ module Api exposing
     , createGoodreadsImport
     , createGroup
     , createListing
-    , createShelf
+    , createShelfRequest
     , deactivateListing
     , declineInvitation
     , declineRemovalRequest
+    , decodeUploadInit
     , deleteAccount
+    , deleteAccountRequest
     , deleteComment
-    , deleteShelf
+    , deleteShelfRequest
     , dismissAssociation
     , encodeProfileBody
     , fetchSyndicationExport
     , foldProgress
-    , forgotPassword
+    , forgotPasswordRequest
+    , getAccountRequest
+    , getAdminFeedback
     , getAdminInvites
     , getAdminSources
     , getAuditLog
-    , getAuthorEvents
+    , getAuditLogRequest
+    , getAuthorEventsRequest
     , getBlogPost
     , getBlogPosts
-    , getBook
     , getBookRequest
     , getBookshelf
+    , getBookshelfRequest
     , getCatalogue
+    , getCatalogueRequest
     , getGroup
     , getGroupFeed
+    , getGroupMembers
     , getImport
     , getImportRows
     , getInferences
+    , getInferencesRequest
     , getListings
     , getMyListings
     , getMyPlacements
@@ -131,30 +150,35 @@ module Api exposing
     , getPostComments
     , getPrivacySettings
     , getProfile
-    , getProfileShelf
+    , getProfileShelfRequest
     , getRemovalRequests
     , getSourceHealth
     , getTransparencyMetrics
     , getUploadInbox
     , getUserPlacements
+    , getUserPlacementsRequest
     , honourRemovalRequest
-    , initUpload
+    , initUploadRequest
     , interpretAuthed
+    , inviteStatusDecoder
     , inviteToGroup
     , isNotFound
     , isUnauthorized
     , leaveGroup
     , listBlockedUsers
-    , login
+    , loginRequest
     , logout
-    , mergeFormat
     , mergeFormatRequest
     , mergeFormatResponseDecoder
-    , moveBook
+    , moveBookRequest
+    , movePlacementToShelfRequest
     , moveResponseToResult
+    , peopleSearchDecoder
     , personalInferencesDecoder
     , placeBook
+    , placeBookRequest
     , placeResponseToResult
+    , placementFormatsDecoder
     , placementsMineDecoder
     , progressErrorMessage
     , progressResponseToResult
@@ -164,32 +188,42 @@ module Api exposing
     , putFileToR2
     , recordSyndication
     , refresh
-    , register
-    , rejectIdentification
+    , refreshRequest
+    , registerRequest
+    , rejectIdentificationRequest
     , rejectSource
-    , removeBook
-    , reorderShelves
+    , removeBookRequest
+    , removeGroupMember
+    , reorderShelvesRequest
     , requestExport
+    , requestExportRequest
     , requestListingRemoval
-    , resendConfirmation
+    , resendConfirmationRequest
     , resetPassword
     , resolveAuthResponse
+    , resolveJson
     , resolveNoContent
     , resolveProfile
     , resolveRegister
     , resolveWhatever
-    , restoreBook
+    , restoreBookRequest
     , retryAfterSeconds
     , revokeAdminInvite
     , saveConsent
     , saveWritingAssistantConsent
-    , searchBooks
+    , searchBooksRequest
     , searchResponseDecoder
-    , searchUsers
-    , setBookAgeGate
+    , searchUsersRequest
+    , sendFeedback
+    , sendFeedbackRequest
+    , setBookAgeGateRequest
     , setPostSyndicated
+    , shelfMoveErrorMessage
+    , shelfMoveResponseToResult
     , soldListing
+    , specHttpBody
     , standardTimeout
+    , storedVisibilityDecoder
     , streamEventDecoder
     , transparencyMetricsDecoder
     , unblockUser
@@ -197,10 +231,11 @@ module Api exposing
     , updateLocation
     , updateNotifications
     , updatePassword
-    , updatePlacementVisibility
+    , updatePlacementFormatsRequest
+    , updatePlacementVisibilityRequest
     , updateProfile
     , updateProfileVisibility
-    , updateProgress
+    , updateProgressRequest
     , updateShelfVisibility
     , updateSyndicationUrl
     , uploadTimeout
@@ -230,7 +265,7 @@ import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitati
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, ReadingStatus, parseReadingStatus, placementDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
-import Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
+import Types.Shelf exposing (BookshelfResponse, bookshelfResponseDecoder)
 import Url.Builder
 
 
@@ -252,6 +287,14 @@ type alias RequestSpec =
     }
 
 
+{-| Send a `RequestSpec` to an authenticated endpoint.
+
+The production twin of the program-test harness's `authedRequestFromSpec`. A page
+that decides WHICH request a Msg fires — as data, in a function its tests can
+call — dispatches the answer through this, so the decision and the sending are
+not two descriptions that can disagree.
+
+-}
 specHttpBody : RequestSpec -> Http.Body
 specHttpBody spec =
     case spec.body of
@@ -541,14 +584,22 @@ authorEventDecoder =
         (Decode.field "store_name" (Decode.nullable Decode.string))
 
 
-{-| `GET /api/authors/:id/events` — public, no token.
+{-| `GET /api/authors/:id/events` — an author's readings and signings. Public:
+no token, and none is sent even when the viewer has one.
 -}
-getAuthorEvents : String -> (Result Http.Error (List AuthorEvent) -> msg) -> Cmd msg
-getAuthorEvents authorId toMsg =
-    Http.get
-        { url = baseUrl ++ "/api/authors/" ++ authorId ++ "/events"
-        , expect = Http.expectJson toMsg (Decode.field "events" (Decode.list authorEventDecoder))
-        }
+getAuthorEventsRequest : String -> RequestSpec
+getAuthorEventsRequest authorId =
+    { method = "GET"
+    , url = baseUrl ++ "/api/authors/" ++ authorId ++ "/events"
+    , body = Nothing
+    }
+
+
+{-| The `{events: [...]}` envelope an author's event list arrives in.
+-}
+authorEventsDecoder : Decoder (List AuthorEvent)
+authorEventsDecoder =
+    Decode.field "events" (Decode.list authorEventDecoder)
 
 
 {-| An import's summary — the progress counters the reader watches while the
@@ -857,62 +908,41 @@ inviteStatusDecoder =
         (Decode.field "email_bound" Decode.bool)
 
 
-{-| Look an invitation code up before offering the Register form.
-The failure statuses arrive as `BadStatus` — the card maps
-them to copy; it never needs the body's error string because the status alone
-distinguishes the four refusals.
+{-| `GET /api/auth/invite/:code` — look an invitation code up before offering
+the Register form.
+
+The four refusals arrive as plain `BadStatus`; the status alone tells them
+apart, so the card maps status to copy and never reads the body.
+
 -}
-checkInvite : String -> (Result Http.Error InviteStatus -> msg) -> Cmd msg
-checkInvite code toMsg =
-    Http.request
-        { method = "GET"
-        , headers = []
-        , url = baseUrl ++ "/api/auth/invite/" ++ code
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg inviteStatusDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+checkInviteRequest : String -> RequestSpec
+checkInviteRequest code =
+    { method = "GET"
+    , url = baseUrl ++ "/api/auth/invite/" ++ code
+    , body = Nothing
+    }
 
 
-register :
+{-| `POST /api/auth/register`. The invite code travels with the credentials —
+registration is invite-only, and a code checked but not sent is a code not
+enforced.
+-}
+registerRequest :
     { email : String, password : String, displayName : String, inviteCode : String }
-    -> (Result RegisterError () -> msg)
-    -> Cmd msg
-register body toMsg =
-    Http.request
-        { method = "POST"
-        , headers = []
-        , url = baseUrl ++ "/api/auth/register"
-        , body =
-            Http.jsonBody
-                (Requests.encodeRegisterRequest
-                    { email = body.email
-                    , password = body.password
-                    , displayName = body.displayName
-                    , inviteCode = body.inviteCode
-                    }
-                )
-        , expect = expectRegister toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| `Http.expectJson` discards the response body on a non-2xx status, which
-would throw away the structured `{"errors":...}` payload a 422 carries. This
-custom expect keeps those field errors so the caller can surface the real
-reason a registration was rejected — and, since, the 429's `retry-after`
-for the same reason: it is the only place the number is still readable.
-
-The resolver is a named top-level function rather than a lambda so the
-program-test harness can run **this** function instead of the hand-written
-mirror of it that `TestHelpers` used to carry.
-
--}
-expectRegister : (Result RegisterError () -> msg) -> Http.Expect msg
-expectRegister toMsg =
-    Http.expectStringResponse toMsg resolveRegister
+    -> RequestSpec
+registerRequest body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/auth/register"
+    , body =
+        Just
+            (Requests.encodeRegisterRequest
+                { email = body.email
+                , password = body.password
+                , displayName = body.displayName
+                , inviteCode = body.inviteCode
+                }
+            )
+    }
 
 
 {-| Resolver for a registration response. Shared with the program-test harness.
@@ -958,71 +988,52 @@ resolveRegister response =
                     Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
-{-| POST /api/auth/login. Answers with `RequestError` rather than `Http.Error`
-so a 429 arrives with the wait the server named; this endpoint is
-in the `:auth` rate-limit bucket, which is the tightest one in the app, and a
-mistyped password is the commonest way a reader reaches it.
+{-| `POST /api/auth/login`. Answered with `RequestError` rather than
+`Http.Error` so a 429 arrives carrying the wait the server named: this endpoint
+is in the `:auth` rate-limit bucket, the tightest in the app, and a mistyped
+password is the commonest way a reader reaches it.
 -}
-login :
-    { email : String, password : String }
-    -> (Result RequestError AuthResponse -> msg)
-    -> Cmd msg
-login body toMsg =
-    Http.request
-        { method = "POST"
-        , headers = []
-        , url = baseUrl ++ "/api/auth/login"
-        , body =
-            Http.jsonBody
-                (Requests.encodeLoginRequest
-                    { email = body.email
-                    , password = body.password
-                    }
-                )
-        , expect = Http.expectStringResponse toMsg resolveAuthResponse
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+loginRequest : { email : String, password : String } -> RequestSpec
+loginRequest body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/auth/login"
+    , body =
+        Just
+            (Requests.encodeLoginRequest
+                { email = body.email
+                , password = body.password
+                }
+            )
+    }
 
 
-{-| Request a password-reset email. The backend always responds 200 (no user
-enumeration), so the caller only distinguishes a throttle from any other
-transport error — never one address from another.
--}
-forgotPassword : String -> (Result RequestError () -> msg) -> Cmd msg
-forgotPassword email toMsg =
-    Http.request
-        { method = "POST"
-        , headers = []
-        , url = baseUrl ++ "/api/auth/forgot-password"
-        , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
-        , expect = Http.expectStringResponse toMsg resolveNoContent
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `POST /api/auth/forgot-password` — request a password-reset email.
 
-
-{-| Ask for a fresh email-confirmation link.
-
-Same shape as `forgotPassword` and for the same reason: the backend answers
-identically for an address awaiting confirmation, an address already confirmed
-and an address with no account at all, so there is nothing here to decode. A
-`Result` with a \`\` in it is the honest type — the caller genuinely cannot learn
-which of the three happened, and giving it a richer type would be inventing an
-answer the server deliberately refused to give.
+The backend always answers 200 (no user enumeration), so a caller can tell a
+throttle from a transport failure and never one address from another.
 
 -}
-resendConfirmation : String -> (Result RequestError () -> msg) -> Cmd msg
-resendConfirmation email toMsg =
-    Http.request
-        { method = "POST"
-        , headers = []
-        , url = baseUrl ++ "/api/auth/resend-confirmation"
-        , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
-        , expect = Http.expectStringResponse toMsg resolveNoContent
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+forgotPasswordRequest : String -> RequestSpec
+forgotPasswordRequest email =
+    { method = "POST"
+    , url = baseUrl ++ "/api/auth/forgot-password"
+    , body = Just (Encode.object [ ( "email", Encode.string email ) ])
+    }
+
+
+{-| `POST /api/auth/resend-confirmation` — ask for a fresh confirmation link.
+
+Same shape as `forgotPasswordRequest` and for the same reason: the backend
+answers identically for an address awaiting confirmation, one already
+confirmed, and one with no account at all.
+
+-}
+resendConfirmationRequest : String -> RequestSpec
+resendConfirmationRequest email =
+    { method = "POST"
+    , url = baseUrl ++ "/api/auth/resend-confirmation"
+    , body = Just (Encode.object [ ( "email", Encode.string email ) ])
+    }
 
 
 {-| Set a new password using the signed token from a reset email. 400 =
@@ -1293,15 +1304,32 @@ refresh :
     -> (Result Http.Error AuthResponse -> msg)
     -> Cmd msg
 refresh token toMsg =
+    let
+        spec =
+            refreshRequest
+    in
     Http.request
-        { method = "POST"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/auth/refresh"
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg authResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| `POST /api/auth/refresh` — exchange a still-valid access token for a fresh
+one before it expires. The 200 body is byte-identical to login's, so
+`authResponseDecoder` reads it; a 401 means the session is no longer renewable
+and the caller falls through to the session-expiry interceptor.
+-}
+refreshRequest : RequestSpec
+refreshRequest =
+    { method = "POST"
+    , url = baseUrl ++ "/api/auth/refresh"
+    , body = Nothing
+    }
 
 
 {-| DELETE /api/auth/logout — invalidate the current session server-side
@@ -1430,29 +1458,18 @@ decodeUploadInit =
         (Decode.field "expires_in" Decode.int)
 
 
-{-| `POST /api/upload/init` — allocates an image\_id server-side and
-returns a Phoenix-served `upload_url` (`PUT /api/upload/:id/data`) the
-client PUTs the bytes to. Phoenix proxies them to the configured storage
-backend (R2 in production, Local in dev/preview); same-origin, so no R2
-CORS allowlisting is needed.
+{-| `POST /api/upload/init` — allocates an image\_id server-side and returns a
+Phoenix-served `upload_url` (`PUT /api/upload/:id/data`) the client PUTs the
+bytes to. Phoenix proxies them to the configured storage backend (R2 in
+production, Local in dev/preview); same-origin, so no R2 CORS allowlisting is
+needed.
 -}
-initUpload :
-    String
-    -> String
-    -> (Result Http.Error UploadInit -> msg)
-    -> Cmd msg
-initUpload contentType token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload/init"
-        , body =
-            Http.jsonBody
-                (Encode.object [ ( "content_type", Encode.string contentType ) ])
-        , expect = Http.expectJson toMsg decodeUploadInit
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+initUploadRequest : String -> RequestSpec
+initUploadRequest contentType =
+    { method = "POST"
+    , url = baseUrl ++ "/api/upload/init"
+    , body = Just (Encode.object [ ( "content_type", Encode.string contentType ) ])
+    }
 
 
 {-| PUT the file bytes to the presigned R2 URL. Sends the raw File body;
@@ -1483,52 +1500,42 @@ putFileToR2 url file toMsg =
         }
 
 
-{-| `POST /api/upload/:id/commit` — signals to the backend that the
-client's direct PUT to R2 succeeded. Backend HEADs R2, flips the row
-from awaiting\_upload → pending, and enqueues identification work.
-Returns the image\_id on success.
+{-| `POST /api/upload/:id/commit` — tells the backend the client's direct PUT
+succeeded. The backend HEADs the object, flips the row from awaiting\_upload to
+pending, and enqueues identification work.
 -}
-commitUpload :
-    String
-    -> String
-    -> (Result Http.Error String -> msg)
-    -> Cmd msg
-commitUpload imageId token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+commitUploadRequest : String -> RequestSpec
+commitUploadRequest imageId =
+    { method = "POST"
+    , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
+    , body = Nothing
+    }
 
 
-{-| POST /api/upload/:image\_id/reject-identification — tell the server the
-current identification was wrong; the server will delete any placement
-created from it and re-run the vision pipeline excluding the listed books.
-Returns 202 on accept; the SSE stream emits new events as the new
-IdentifyBookJob runs.
+{-| The commit response's `image_id`.
 -}
-rejectIdentification :
-    { imageId : String, rejectedBookIds : List String, token : String }
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-rejectIdentification { imageId, rejectedBookIds, token } toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/reject-identification"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
-                )
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+commitUploadDecoder : Decoder String
+commitUploadDecoder =
+    Decode.field "image_id" Decode.string
+
+
+{-| `POST /api/upload/:image_id/reject-identification` — the identification was
+wrong. The server deletes any placement made from it and re-runs the vision
+pipeline excluding the listed books; 202 means accepted, and the SSE stream
+carries the new run's events.
+-}
+rejectIdentificationRequest :
+    { imageId : String, rejectedBookIds : List String }
+    -> RequestSpec
+rejectIdentificationRequest { imageId, rejectedBookIds } =
+    { method = "POST"
+    , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/reject-identification"
+    , body =
+        Just
+            (Encode.object
+                [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
+            )
+    }
 
 
 {-| Response from GET /api/books/:id — book with the viewer's placement data.
@@ -1593,34 +1600,8 @@ fromProtoPlacementSummary proto =
     }
 
 
-getBook :
-    String
-    -> Maybe String
-    -> (Result Http.Error BookDetailResponse -> msg)
-    -> Cmd msg
-getBook bookId maybeToken toMsg =
-    let
-        spec =
-            getBookRequest bookId
-    in
-    Http.request
-        { method = spec.method
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
-        , url = spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg bookDetailResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| The data of `getBook`'s request — see `RequestSpec`.
+{-| `GET /api/books/:id` — a book with the viewer's placement data. Optional
+auth: an anonymous reader gets the book without the placements.
 -}
 getBookRequest : String -> RequestSpec
 getBookRequest bookId =
@@ -1630,32 +1611,26 @@ getBookRequest bookId =
     }
 
 
-searchBooks :
-    String
-    -> Bool
-    -> String
-    -> (Result Http.Error SearchSections -> msg)
-    -> Cmd msg
-searchBooks query deep token toMsg =
-    let
-        queryParams =
-            Url.Builder.string "q" query
+{-| `GET /api/search` — book search. Optional auth like `searchUsersRequest`:
+without a token the server answers with the catalogue slice alone, so an
+anonymous reader still gets results rather than a 401.
+-}
+searchBooksRequest : String -> Bool -> RequestSpec
+searchBooksRequest query deep =
+    { method = "GET"
+    , url =
+        Url.Builder.crossOrigin baseUrl
+            [ "api", "search" ]
+            (Url.Builder.string "q" query
                 :: (if deep then
                         [ Url.Builder.string "scope" "deep" ]
 
                     else
                         []
                    )
-    in
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] queryParams
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg searchResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+            )
+    , body = Nothing
+    }
 
 
 getBookshelf :
@@ -1664,15 +1639,29 @@ getBookshelf :
     -> (Result Http.Error BookshelfResponse -> msg)
     -> Cmd msg
 getBookshelf shelfName token toMsg =
+    let
+        spec =
+            getBookshelfRequest shelfName
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg bookshelfResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getBookshelf`'s request — see `RequestSpec`.
+-}
+getBookshelfRequest : String -> RequestSpec
+getBookshelfRequest shelfName =
+    { method = "GET"
+    , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
+    , body = Nothing
+    }
 
 
 {-| Error type for `moveBook`. The backend rejects a move that would
@@ -1717,79 +1706,46 @@ moveResponseToResult response =
             Ok ()
 
 
-expectMove : (Result MoveError () -> msg) -> Http.Expect msg
-expectMove toMsg =
-    Http.expectStringResponse toMsg moveResponseToResult
+{-| `PUT /api/placements/:id/move` — move a book between BOOKSHELVES (the five
+named collections). The 422 body's `reading_pile_full` code is a real answer,
+which is why the caller resolves the response rather than discarding it.
+-}
+moveBookRequest : String -> String -> RequestSpec
+moveBookRequest placementId targetBookshelf =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/move"
+    , body =
+        Just
+            (Requests.encodeMoveBookRequest
+                { bookshelf = targetBookshelf }
+            )
+    }
 
 
-moveBook :
-    String
-    -> String
-    -> String
-    -> (Result MoveError () -> msg)
-    -> Cmd msg
-moveBook placementId targetBookshelf token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/move"
-        , body =
-            Http.jsonBody
-                (Requests.encodeMoveBookRequest
-                    { bookshelf = targetBookshelf }
-                )
-        , expect = expectMove toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `DELETE /api/placements/:id` — take a book off the shelf it sits on.
+-}
+removeBookRequest : String -> RequestSpec
+removeBookRequest placementId =
+    { method = "DELETE"
+    , url = baseUrl ++ "/api/placements/" ++ placementId
+    , body = Nothing
+    }
 
 
-removeBook :
-    String
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-removeBook placementId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/" ++ placementId
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `POST /api/placements/:id/restore` — undo a removal.
 
-
-{-| `POST /api/placements/:id/restore` — undo a removal (extension).
-
-Takes the id `removeBook` was given, because the undo clears `removed_at` on
-that same row rather than placing the book again; see
-`Stacks.Shelving.restore_placement/2` for what a fresh placement would lose.
-
-The response body is the restored placement, and the caller deliberately does
-not decode it: `Page.Bookshelf` refetches the whole bookshelf afterwards for the
-reason `reloadShelves` documents — the server's answer about where a book sits
-is the only trustworthy one. `expectWhatever` still surfaces the status, which
-is what matters here, because **409 is a real answer**: the reader re-added the
-book before pressing Undo.
+Takes the id `removeBookRequest` was given: the undo clears `removed_at` on
+that same row rather than placing the book again, so nothing a fresh placement
+would lose is lost. **409 is a real answer** — the reader re-added the book
+before pressing Undo.
 
 -}
-restoreBook :
-    String
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-restoreBook placementId token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/restore"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+restoreBookRequest : String -> RequestSpec
+restoreBookRequest placementId =
+    { method = "POST"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/restore"
+    , body = Nothing
+    }
 
 
 {-| The reading-progress fields returned by `PUT /api/placements/:id/progress`
@@ -1912,26 +1868,19 @@ progressResponseToResult response =
                     Err (ProgressRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
-{-| PUT /api/placements/:id/progress — update a placement's reading status and
-(when reading) current page. `reading_status` is required; `current_page` is
-sent only when present.
+{-| `PUT /api/placements/:id/progress` — update a placement's reading status
+and, when reading, its current page. `reading_status` is required;
+`current_page` is sent only when there is one.
 -}
-updateProgress :
+updateProgressRequest :
     String
     -> { readingStatus : String, currentPage : Maybe Int }
-    -> String
-    -> (Result ProgressError Progress -> msg)
-    -> Cmd msg
-updateProgress placementId body token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
-        , body = Http.jsonBody (encodeProgressBody body)
-        , expect = Http.expectStringResponse toMsg progressResponseToResult
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+    -> RequestSpec
+updateProgressRequest placementId body =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
+    , body = Just (encodeProgressBody body)
+    }
 
 
 encodeProgressBody : { readingStatus : String, currentPage : Maybe Int } -> Encode.Value
@@ -1960,15 +1909,29 @@ requestExport :
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 requestExport token toMsg =
+    let
+        spec =
+            requestExportRequest
+    in
     Http.request
-        { method = "POST"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/gdpr/export"
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `requestExport`'s request — see `RequestSpec`.
+-}
+requestExportRequest : RequestSpec
+requestExportRequest =
+    { method = "POST"
+    , url = baseUrl ++ "/api/gdpr/export"
+    , body = Nothing
+    }
 
 
 {-| DELETE /api/gdpr/account — queue erasure of the user's account and personal
@@ -1984,15 +1947,29 @@ deleteAccount :
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 deleteAccount token toMsg =
+    let
+        spec =
+            deleteAccountRequest
+    in
     Http.request
-        { method = "DELETE"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/gdpr/account"
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `deleteAccount`'s request — see `RequestSpec`.
+-}
+deleteAccountRequest : RequestSpec
+deleteAccountRequest =
+    { method = "DELETE"
+    , url = baseUrl ++ "/api/gdpr/account"
+    , body = Nothing
+    }
 
 
 {-| POST /api/gdpr/consent — save the user's analytics consent preference.
@@ -2206,15 +2183,29 @@ getAuditLog :
     -> (Result Http.Error AuditLogResponse -> msg)
     -> Cmd msg
 getAuditLog token toMsg =
+    let
+        spec =
+            getAuditLogRequest
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/settings/audit-log?page=1"
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg auditLogResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getAuditLog`'s request — see `RequestSpec`.
+-}
+getAuditLogRequest : RequestSpec
+getAuditLogRequest =
+    { method = "GET"
+    , url = baseUrl ++ "/api/settings/audit-log?page=1"
+    , body = Nothing
+    }
 
 
 {-| A single subject with the number of the user's own books that carry it.
@@ -2366,23 +2357,37 @@ getInferences :
     -> (Result Http.Error PersonalInferences -> msg)
     -> Cmd msg
 getInferences revealRisk token toMsg =
+    let
+        spec =
+            getInferencesRequest revealRisk
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url =
-            baseUrl
-                ++ "/api/me/inferences"
-                ++ (if revealRisk then
-                        "?reveal_risk=true"
-
-                    else
-                        ""
-                   )
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg personalInferencesDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getInferences`'s request — see `RequestSpec`.
+-}
+getInferencesRequest : Bool -> RequestSpec
+getInferencesRequest revealRisk =
+    { method = "GET"
+    , url =
+        baseUrl
+            ++ "/api/me/inferences"
+            ++ (if revealRisk then
+                    "?reveal_risk=true"
+
+                else
+                    ""
+               )
+    , body = Nothing
+    }
 
 
 {-| Error type for `placeBook`. The direct-place path — Upload,
@@ -2450,40 +2455,45 @@ placeBook :
     -> (Result PlaceError Placement -> msg)
     -> Cmd msg
 placeBook bookshelfName bookId token toMsg =
+    let
+        spec =
+            placeBookRequest bookshelfName bookId
+    in
     Http.request
-        { method = "POST"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/placements"
-        , body =
-            Http.jsonBody
-                (Requests.encodePlaceBookRequest
-                    { bookId = bookId }
-                )
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = expectPlace toMsg
         , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-{-| PUT /api/books/:id/age-gate — the user who added a book marks it
-"adults only" (raise-only). Body `{"adults_only": true}`. The backend
-permits only raising the gate for the user path; lowering is owner-only.
+{-| The data of `placeBook`'s request — see `RequestSpec`.
 -}
-setBookAgeGate :
-    String
-    -> String
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-setBookAgeGate bookId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
-        , body = Http.jsonBody (Encode.object [ ( "adults_only", Encode.bool True ) ])
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+placeBookRequest : String -> String -> RequestSpec
+placeBookRequest bookshelfName bookId =
+    { method = "POST"
+    , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/placements"
+    , body =
+        Just
+            (Requests.encodePlaceBookRequest
+                { bookId = bookId }
+            )
+    }
+
+
+{-| `PUT /api/books/:id/age-gate` — the reader who added a book marks it adults
+only. Raise-only: the backend permits raising the gate on this path, and
+lowering it is owner-only.
+-}
+setBookAgeGateRequest : String -> RequestSpec
+setBookAgeGateRequest bookId =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
+    , body = Just (Encode.object [ ( "adults_only", Encode.bool True ) ])
+    }
 
 
 {-| GET /api/placements/mine — fetch summary of user's active placements.
@@ -2493,15 +2503,29 @@ getUserPlacements :
     -> (Result Http.Error (List PlacementSummary) -> msg)
     -> Cmd msg
 getUserPlacements token toMsg =
+    let
+        spec =
+            getUserPlacementsRequest
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/mine"
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg placementsMineDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getUserPlacements`'s request — see `RequestSpec`.
+-}
+getUserPlacementsRequest : RequestSpec
+getUserPlacementsRequest =
+    { method = "GET"
+    , url = baseUrl ++ "/api/placements/mine"
+    , body = Nothing
+    }
 
 
 {-| The `GET /api/placements/mine` body: `{"placements": [...]}`, built by
@@ -2652,34 +2676,8 @@ confirmOutcomeFromSource source =
             ConfirmCreated
 
 
-{-| POST /api/books/confirm — the manual-entry verb. One atomic round
-trip: resolve the ISBN against OL/GB, create work+edition if unseen,
-409 on a duplicate edition, and place it. Replaces the client-side
-GET-then-place assembly, which could only add books the catalogue
-already held and left a non-atomic gap between the two calls.
--}
-confirmBook :
-    { isbn : String, shelfName : String }
-    -> String
-    -> (Result ConfirmError ConfirmResponse -> msg)
-    -> Cmd msg
-confirmBook body token toMsg =
-    let
-        spec =
-            confirmBookRequest body
-    in
-    Http.request
-        { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectStringResponse toMsg confirmResponseToResult
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| The data of `confirmBook`'s request — see `RequestSpec`.
+{-| `POST /api/books/confirm` — file a manually entered ISBN on the chosen
+bookshelf.
 -}
 confirmBookRequest : { isbn : String, shelfName : String } -> RequestSpec
 confirmBookRequest body =
@@ -2707,23 +2705,104 @@ getCatalogue :
     -> Cmd msg
 getCatalogue params toMsg =
     let
-        queryParams =
-            [ Just (Url.Builder.string "sort" params.sort)
-            , Just (Url.Builder.int "page" params.page)
-            , params.search |> Maybe.map (Url.Builder.string "search")
-            , params.subject |> Maybe.map (Url.Builder.string "subject")
-            ]
-                |> List.filterMap identity
+        spec =
+            getCatalogueRequest params
     in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = []
-        , url = Url.Builder.absolute [ "api", "catalogue" ] queryParams
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg catalogueResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getCatalogue`'s request — see `RequestSpec`.
+-}
+getCatalogueRequest :
+    { search : Maybe String
+    , subject : Maybe String
+    , sort : String
+    , page : Int
+    }
+    -> RequestSpec
+getCatalogueRequest params =
+    { method = "GET"
+    , url =
+        Url.Builder.absolute [ "api", "catalogue" ]
+            (List.filterMap identity
+                [ Just (Url.Builder.string "sort" params.sort)
+                , Just (Url.Builder.int "page" params.page)
+                , params.search |> Maybe.map (Url.Builder.string "search")
+                , params.subject |> Maybe.map (Url.Builder.string "subject")
+                ]
+            )
+    , body = Nothing
+    }
+
+
+{-| The reader's own account, as the server holds it — the fields Settings →
+Profile edits.
+
+Deliberately not `Types.User`. That record is what the stored login blob can
+reconstruct; this one is the answer to "what did the server actually keep",
+which is a different question, and the difference is the whole point of asking.
+
+-}
+type alias Account =
+    { displayName : String
+    , handle : String
+    , email : String
+    , websiteUrl : String
+    , countryCode : String
+    , city : String
+    , pendingEmail : Maybe String
+    }
+
+
+{-| Decoder for `GET /api/auth/me`'s `user` object.
+
+`email` is required, so a body that is not an account — an error envelope, a
+captive portal's HTML, `{}` — comes back `Err` and the page can say so. The
+lenient alternative decodes those into six empty strings, which the form would
+then render as the reader's account: a wrong answer stated confidently, and
+indistinguishable from a reader who has filled nothing in.
+
+The rest default to `""` because they are genuinely optional columns. Someone
+who has never set a city is not a malformed response.
+
+-}
+accountDecoder : Decoder Account
+accountDecoder =
+    Decode.field "user"
+        (Decode.map7 Account
+            (optionalString "display_name")
+            (optionalString "handle")
+            (Decode.field "email" Decode.string)
+            (optionalString "website_url")
+            (optionalString "country_code")
+            (optionalString "city")
+            (Decode.maybe (Decode.field "pending_email" Decode.string))
+        )
+
+
+{-| GET /api/auth/me — the reader's own account. Sent through `Effect`, so
+there is no `Cmd` twin here; the caller pairs this spec with `accountDecoder`.
+
+Authenticated, and the one request whose 401 is least surprising: asking who you
+are is exactly what discovers the session is gone. A caller must route that (see
+`isUnauthorized`) rather than render "could not load your account", which tells
+the reader to retry something that cannot work.
+
+-}
+getAccountRequest : RequestSpec
+getAccountRequest =
+    { method = "GET"
+    , url = baseUrl ++ "/api/auth/me"
+    , body = Nothing
+    }
 
 
 {-| A profile-update failure.
@@ -2738,6 +2817,20 @@ than as a generic "could not save". Every other failure is a
 type ProfileError
     = ProfileValidationFailed (List ( String, List String ))
     | ProfileRequestFailed Http.Error
+
+
+{-| What a saved profile came back as.
+
+`email` is the address the account ANSWERS on, and `pendingEmail` the one waiting
+to prove itself — an email change moves the second, never the first, so the form
+must take both from the server rather than assuming the typed value landed.
+
+-}
+type alias ProfileSaved =
+    { handle : String
+    , email : String
+    , pendingEmail : Maybe String
+    }
 
 
 {-| PUT /api/settings/profile — update display name, email, website URL, and handle.
@@ -2756,7 +2849,7 @@ updateProfile :
     , emailChanged : Bool
     , handleChanged : Bool
     }
-    -> Authed ProfileError String msg
+    -> Authed ProfileError ProfileSaved msg
     -> Cmd msg
 updateProfile body request =
     Http.request
@@ -2808,6 +2901,27 @@ encodeProfileBody body =
         )
 
 
+{-| What the client falls back to when a 200 body cannot be read: the handle
+empty (the caller keeps what it had) and NO pending change. Claiming a pending
+change we did not read would put a panel on screen about a state we cannot see.
+-}
+emptyProfileSaved : ProfileSaved
+emptyProfileSaved =
+    { handle = "", email = "", pendingEmail = Nothing }
+
+
+profileSavedDecoder : Decoder ProfileSaved
+profileSavedDecoder =
+    Decode.map3 ProfileSaved
+        (Decode.oneOf [ Decode.field "handle" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "email" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf
+            [ Decode.field "pending_email" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
+
+
 {-| Keep the structured `{"errors":...}` payload a 422 carries so the caller
 can surface the real reason a profile save was rejected (mirrors
 `expectRegister`). On success it hands back the server-normalised handle (the
@@ -2819,7 +2933,7 @@ as `ProfileRequestFailed (BadStatus 401)` — which is precisely how the page
 came to render "Please try again" at it.
 
 -}
-resolveProfile : Http.Response String -> Result ProfileError String
+resolveProfile : Http.Response String -> Result ProfileError ProfileSaved
 resolveProfile response =
     case response of
         Http.BadUrl_ url ->
@@ -2844,12 +2958,7 @@ resolveProfile response =
                 Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
 
         Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
-                Ok handle ->
-                    Ok handle
-
-                Err _ ->
-                    Ok ""
+            Ok (Result.withDefault emptyProfileSaved (Decode.decodeString profileSavedDecoder bodyText))
 
 
 {-| PUT /api/settings/location — update the user's location.
@@ -2986,31 +3095,8 @@ mergeFormatResponseDecoder =
         ProtoBookResp.decodeMergeFormatResponse
 
 
-{-| POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book.
--}
-mergeFormat :
-    String
-    -> { isbn : String, formatLabel : String }
-    -> String
-    -> (Result Http.Error MergeFormatResponse -> msg)
-    -> Cmd msg
-mergeFormat bookId body token toMsg =
-    let
-        spec =
-            mergeFormatRequest bookId body
-    in
-    Http.request
-        { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg mergeFormatResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| The data of `mergeFormat`'s request — see `RequestSpec`.
+{-| `POST /api/books/:id/merge-format` — add a new edition to a book the reader
+already owns, rather than creating a second work for the same title.
 -}
 mergeFormatRequest : String -> { isbn : String, formatLabel : String } -> RequestSpec
 mergeFormatRequest bookId body =
@@ -3595,34 +3681,165 @@ updateShelfVisibility shelfName visibility token toMsg =
         }
 
 
-{-| PUT /api/placements/:id/visibility — update a single placement's visibility.
+{-| `PUT /api/placements/:id/visibility`.
 
-The server enforces the ceiling rule (a placement may not be more visible than
-its parent bookshelf) and returns 422 if violated. The 200 body is `{id,
-visibility}`; we decode the confirmed visibility string back so the caller can
-reconcile local state with what the server actually stored.
+The server enforces the ceiling rule — a placement may not be more visible than
+its parent bookshelf — and answers 422 when it is violated. The 200 body
+carries the visibility actually stored, which is what the caller adopts.
 
 -}
-updatePlacementVisibility :
-    String
-    -> String
-    -> String
-    -> (Result Http.Error String -> msg)
-    -> Cmd msg
-updatePlacementVisibility placementId visibility token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/visibility"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateShelfVisibilityRequest
-                    { visibility = visibility }
-                )
-        , expect = Http.expectJson toMsg (Decode.field "visibility" Decode.string)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updatePlacementVisibilityRequest : String -> String -> RequestSpec
+updatePlacementVisibilityRequest placementId visibility =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/visibility"
+    , body =
+        Just
+            (Requests.encodeUpdateShelfVisibilityRequest
+                { visibility = visibility }
+            )
+    }
+
+
+{-| The visibility the server actually stored.
+-}
+storedVisibilityDecoder : Decoder String
+storedVisibilityDecoder =
+    Decode.field "visibility" Decode.string
+
+
+{-| `PUT /api/placements/:id/formats` — replace the set of formats a reader owns
+for one placement.
+
+A whole-list replacement, not a delta, so the caller sends the set it wants to
+end up with. The 200 body carries the stored list, which is decoded back rather
+than assuming the optimistic set survived — a server that normalises or rejects
+a member stays visible.
+
+-}
+updatePlacementFormatsRequest : String -> List String -> RequestSpec
+updatePlacementFormatsRequest placementId formats =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/formats"
+    , body =
+        Just
+            (Encode.object
+                [ ( "formats", Encode.list Encode.string formats ) ]
+            )
+    }
+
+
+{-| The formats the server actually stored, out of the `update_formats` body.
+-}
+placementFormatsDecoder : Decoder (List String)
+placementFormatsDecoder =
+    Decode.at [ "placement", "formats" ] (Decode.list Decode.string)
+
+
+{-| Why a book would not move to the shelf row the reader picked.
+
+A shelf row belongs to exactly one bookshelf, so the interesting rejection is
+`wrong_bookshelf`: the row is real and the reader owns it, but it hangs in a
+different bookcase. Telling them "failed, try again" invites the same click
+forever, so it gets its own constructor and its own sentence.
+
+⛔ 422 is read as `wrong_bookshelf` on status alone, without parsing the body.
+The action answers 422 in two cases — a shelf on another bookshelf, and a
+missing `shelf_id` — but it distinguishes them only in English prose
+("shelf belongs to a different bookshelf" vs "shelf\_id is required"), and
+matching on prose makes a copy edit a client bug. The second case is
+unreachable from here: `movePlacementToShelfRequest` always writes the key.
+
+-}
+type ShelfMoveError
+    = ShelfMoveNotFound
+    | ShelfMoveForbidden
+    | ShelfMoveWrongBookshelf
+    | ShelfMoveHttpError Http.Error
+
+
+{-| The shelf the placement ended up on, or why it did not move.
+
+Success carries the server's `shelf_id` rather than `()`: the caller asked for a
+row, and the row it gets back is the only one worth painting. 401 stays an
+`Http.Error` so `isUnauthorized` still sees it and the session-expiry path runs.
+Pure so the elm-program-test simulated effect can reuse the exact mapping.
+
+-}
+shelfMoveResponseToResult : Http.Response String -> Result ShelfMoveError String
+shelfMoveResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ShelfMoveHttpError (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (ShelfMoveHttpError Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (ShelfMoveHttpError Http.NetworkError)
+
+        Http.BadStatus_ metadata _ ->
+            case metadata.statusCode of
+                403 ->
+                    Err ShelfMoveForbidden
+
+                404 ->
+                    Err ShelfMoveNotFound
+
+                422 ->
+                    Err ShelfMoveWrongBookshelf
+
+                code ->
+                    Err (ShelfMoveHttpError (Http.BadStatus code))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString placementShelfDecoder bodyText of
+                Ok shelfId ->
+                    Ok shelfId
+
+                Err err ->
+                    Err (ShelfMoveHttpError (Http.BadBody (Decode.errorToString err)))
+
+
+{-| The shelf the server put the placement on, out of the `move_to_shelf` body.
+-}
+placementShelfDecoder : Decoder String
+placementShelfDecoder =
+    Decode.at [ "placement", "shelf_id" ] Decode.string
+
+
+{-| The reader-facing sentence for a rejected shelf move.
+-}
+shelfMoveErrorMessage : ShelfMoveError -> String
+shelfMoveErrorMessage error =
+    case error of
+        ShelfMoveNotFound ->
+            "That shelf is no longer there. Reload the page and try again."
+
+        ShelfMoveForbidden ->
+            "That shelf isn't yours to rearrange."
+
+        ShelfMoveWrongBookshelf ->
+            "That shelf belongs to a different bookshelf — move the book to that bookshelf first."
+
+        ShelfMoveHttpError _ ->
+            "We couldn't move the book to that shelf. Please try again."
+
+
+{-| `PUT /api/placements/:id/shelf` — move a placement to a physical shelf row
+within the bookshelf it already sits on.
+
+⛔ This is not `moveBookRequest`. That one moves a book between BOOKSHELVES;
+this moves it between the ROWS of one bookcase, and the server rejects a row
+belonging to any other bookshelf rather than quietly performing the bookshelf
+move as well.
+
+-}
+movePlacementToShelfRequest : String -> String -> RequestSpec
+movePlacementToShelfRequest placementId shelfId =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/shelf"
+    , body = Just (Encode.object [ ( "shelf_id", Encode.string shelfId ) ])
+    }
 
 
 {-| A block failure.
@@ -3867,15 +4084,32 @@ profileShelfSummaryDecoder =
 
 
 {-| Decodes a string field that may be absent or JSON null, defaulting to "".
-`Decode.nullable` handles a present-but-null value explicitly; an absent key
-falls through to "".
+
+⛔ Absent and _wrong_ are different answers. This was written as
+`oneOf [ field, Decode.succeed "" ]`, and `oneOf` falls through on ANY failure
+of the first branch — so a field arriving as a number, a list or an object
+decoded to `""` exactly as an unset one did. The reader saw a blank name or a
+blank city, and nothing reported that the server had sent something unreadable.
+
+So the key's PRESENCE is established first (`Decode.value` succeeds on any
+present value, and fails only when the key is missing). An absent key defaults;
+a present key must then be a string or null, and anything else fails the decode
+where it can be seen.
+
 -}
 optionalString : String -> Decoder String
 optionalString field =
-    Decode.oneOf
-        [ Decode.field field (Decode.nullable Decode.string) |> Decode.map (Maybe.withDefault "")
-        , Decode.succeed ""
-        ]
+    Decode.maybe (Decode.field field Decode.value)
+        |> Decode.andThen
+            (\present ->
+                case present of
+                    Nothing ->
+                        Decode.succeed ""
+
+                    Just _ ->
+                        Decode.field field (Decode.nullable Decode.string)
+                            |> Decode.map (Maybe.withDefault "")
+            )
 
 
 {-| GET /api/u/:handle. Optional auth — pass the viewer's token when signed in so
@@ -3894,94 +4128,64 @@ getProfile maybeToken handle toMsg =
         }
 
 
-{-| Add a shelf to the bottom of a bookshelf.
+{-| `POST /api/bookshelves/:name/shelves` — add a shelf row to the bottom of a
+bookcase.
 
-`POST /api/bookshelves/:bookshelfName/shelves`. Takes no body: position is the server's
-to assign, and letting the client propose one invites two tabs choosing the same.
-
--}
-createShelf : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
-createShelf bookshelfName token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
-        , body = Http.jsonBody (Encode.object [])
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| Remove a shelf.
-
-`DELETE /api/shelves/:id`.
-
-⚠️ **422 means the shelf still has books on it** and the server refused. That is a real
-outcome a reader must be told about, not a transport failure to swallow — deleting a shelf
-out from under its books would strand them.
+No body: the position is the server's to assign, and letting the client propose
+one invites two tabs choosing the same.
 
 -}
-deleteShelf : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
-deleteShelf shelfId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/shelves/" ++ shelfId
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+createShelfRequest : String -> RequestSpec
+createShelfRequest bookshelfName =
+    { method = "POST"
+    , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+    , body = Just (Encode.object [])
+    }
 
 
-{-| Set the order of every shelf in a bookshelf.
+{-| `DELETE /api/shelves/:id` — remove a shelf row.
 
-`PUT /api/bookshelves/:bookshelfName/shelves/reorder` with the full ordered id list.
-
-Sends the **whole** order rather than "move shelf X to position N": the server then has no
-ambiguity to resolve, and two reorders racing produce one of the two orders rather than an
-interleaving neither reader asked for.
+⚠️ **422 means the row still has books on it** and the server refused. That is
+an outcome the reader must be told about, not a transport failure to swallow —
+deleting a row out from under its books would strand them.
 
 -}
-reorderShelves : String -> List String -> String -> (Result Http.Error () -> msg) -> Cmd msg
-reorderShelves bookshelfName shelfIds token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves/reorder"
-        , body =
-            Http.jsonBody
-                (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+deleteShelfRequest : String -> RequestSpec
+deleteShelfRequest shelfId =
+    { method = "DELETE"
+    , url = baseUrl ++ "/api/shelves/" ++ shelfId
+    , body = Nothing
+    }
 
 
-{-| Fetch another reader's bookshelf for read-only browsing.
+{-| `PUT /api/bookshelves/:name/shelves/reorder` — set the order of every row in
+a bookcase.
 
-`GET /api/u/:handle/bookshelves/:bookshelfName` (optional auth — the viewer's
-identity is threaded so the backend visibility-filters the placements). The
-payload shape matches the owner's own shelf, so it reuses `shelvesResponseDecoder`.
+Sends the WHOLE order rather than "move row X to position N": the server then
+has no ambiguity to resolve, and two reorders racing produce one of the two
+orders rather than an interleaving neither reader asked for.
 
 -}
-getProfileShelf :
-    Maybe String
-    -> String
-    -> String
-    -> (Result Http.Error (List Shelf) -> msg)
-    -> Cmd msg
-getProfileShelf maybeToken handle bookshelfName toMsg =
-    Http.request
-        { method = "GET"
-        , headers = authHeaders maybeToken
-        , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg shelvesResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+reorderShelvesRequest : String -> List String -> RequestSpec
+reorderShelvesRequest bookshelfName shelfIds =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves/reorder"
+    , body =
+        Just
+            (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
+    }
+
+
+{-| `GET /api/u/:handle/bookshelves/:name` — another reader's bookshelf, for
+read-only browsing. Optional auth: the viewer's identity is threaded so the
+backend visibility-filters the placements.
+-}
+getProfileShelfRequest : String -> String -> RequestSpec
+getProfileShelfRequest handle bookshelfName =
+    { method = "GET"
+    , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
+    , body = Nothing
+    }
 
 
 {-| A single people-search result — the redacted `public_profile_summary` shape
@@ -4005,25 +4209,23 @@ publicProfileSummaryDecoder =
         (optionalString "country_code")
 
 
-{-| GET /api/search/users?q=<term>. Optional auth — pass the viewer's token when
-signed in so the server can apply bidirectional block-exclusion; `Nothing` for
-an anonymous viewer (ghosts are still excluded server-side).
+{-| `GET /api/search/users` — people search. Optional auth: a signed-in
+viewer's token lets the server apply bidirectional block-exclusion, and ghosts
+are excluded server-side either way.
 -}
-searchUsers :
-    Maybe String
-    -> String
-    -> (Result Http.Error (List PublicProfileSummary) -> msg)
-    -> Cmd msg
-searchUsers maybeToken query toMsg =
-    Http.request
-        { method = "GET"
-        , headers = authHeaders maybeToken
-        , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+searchUsersRequest : String -> RequestSpec
+searchUsersRequest query =
+    { method = "GET"
+    , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
+    , body = Nothing
+    }
+
+
+{-| The people half of search: `{users: [...]}`.
+-}
+peopleSearchDecoder : Decoder (List PublicProfileSummary)
+peopleSearchDecoder =
+    Decode.field "users" (Decode.list publicProfileSummaryDecoder)
 
 
 authHeaders : Maybe String -> List Http.Header
@@ -4171,6 +4373,25 @@ adminVerifyMfa body toMsg =
         }
 
 
+{-| DELETE /api/admin/auth/logout — revoke THIS admin session server-side.
+
+Send it with the admin token (`Main.adminTokenFor`), never the ordinary one: the
+route reads the session off the admin pipeline, so the Guardian token 401s here
+exactly as it does on every other `/api/admin/*` path.
+
+A `RequestSpec` rather than a `Cmd`-returning function because the caller
+dispatches it through `Effect`, which is what lets a program test read the
+request instead of restating it.
+
+-}
+adminLogoutRequest : RequestSpec
+adminLogoutRequest =
+    { method = "DELETE"
+    , url = baseUrl ++ "/api/admin/auth/logout"
+    , body = Nothing
+    }
+
+
 {-| What enrolment hands back: the `otpauth://` URI for an authenticator app, and one-time
 recovery codes the operator must record before continuing.
 -}
@@ -4281,6 +4502,14 @@ adminErrorFromBody body =
         Ok "invalid_session" ->
             InvalidSession
 
+        -- The admin pipeline's own refusal body. It reaches the operator when a
+        -- pipelined call fails session validation (revoked, expired, boot_id,
+        -- or an IP that no longer matches) — every one of which means "this
+        -- session is over", not "the network is down". Left unmapped, it fell
+        -- to the transport catch-all and rendered as a connectivity error.
+        Ok "unauthorized" ->
+            InvalidSession
+
         Ok "already_verified" ->
             AlreadyVerified
 
@@ -4371,6 +4600,88 @@ adminInviteDecoder =
         |> andMap (Decode.field "revoked_at" (Decode.nullable Decode.string))
         |> andMap (Decode.field "redeemed_at" (Decode.nullable Decode.string))
         |> andMap (Decode.field "redeemed_by_handle" (Decode.nullable Decode.string))
+
+
+{-| One reader's message in the owner's queue.
+
+`body` is the reader's own free text, and this record is the only place in the
+SPA it exists. It is fetched by the admin page and rendered there; nothing
+caches it, and no other surface asks for it.
+
+-}
+type alias AdminFeedbackEntry =
+    { id : String
+    , body : String
+    , pageContext : Maybe String
+    , senderHandle : Maybe String
+    , createdAt : String
+    }
+
+
+adminFeedbackEntryDecoder : Decoder AdminFeedbackEntry
+adminFeedbackEntryDecoder =
+    Decode.succeed AdminFeedbackEntry
+        |> andMap (Decode.field "id" Decode.string)
+        |> andMap (Decode.field "body" Decode.string)
+        |> andMap (Decode.field "page_context" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "sender_handle" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "created_at" Decode.string)
+
+
+{-| GET /api/admin/feedback — the owner's queue, newest first.
+-}
+getAdminFeedback : String -> (Result Http.Error (List AdminFeedbackEntry) -> msg) -> Cmd msg
+getAdminFeedback token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/feedback"
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg (Decode.field "feedback" (Decode.list adminFeedbackEntryDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/feedback — send the reader's message.
+
+The 201 carries no body back, deliberately, so this resolves to `()`: there is
+nothing to render but the acknowledgement, and re-displaying what they just
+typed would be the server telling them what they already know.
+
+-}
+sendFeedback : { body : String, pageContext : String } -> Authed Http.Error () msg -> Cmd msg
+sendFeedback body request =
+    let
+        spec =
+            sendFeedbackRequest body
+    in
+    Http.request
+        { method = spec.method
+        , headers = authedHeaders request
+        , url = spec.url
+        , body = specHttpBody spec
+        , expect = authedExpect resolveWhatever request
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| The data of `sendFeedback`'s request — see `RequestSpec`.
+-}
+sendFeedbackRequest : { body : String, pageContext : String } -> RequestSpec
+sendFeedbackRequest body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/feedback"
+    , body =
+        Just
+            (Encode.object
+                [ ( "body", Encode.string body.body )
+                , ( "page_context", Encode.string body.pageContext )
+                ]
+            )
+    }
 
 
 {-| GET /api/admin/invites — every invitation, newest first.
@@ -4595,22 +4906,37 @@ adminListBooks :
     -> Cmd msg
 adminListBooks params token toMsg =
     let
-        queryParams =
-            [ Just (Url.Builder.int "page" params.page)
-            , params.tier |> Maybe.map (Url.Builder.string "tier")
-            , params.search |> Maybe.map (Url.Builder.string "search")
-            ]
-                |> List.filterMap identity
+        spec =
+            adminListBooksRequest params
     in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = Url.Builder.absolute [ "api", "admin", "books" ] queryParams
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg adminBooksResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `adminListBooks`'s request — see `RequestSpec`.
+-}
+adminListBooksRequest :
+    { tier : Maybe String, search : Maybe String, page : Int }
+    -> RequestSpec
+adminListBooksRequest params =
+    { method = "GET"
+    , url =
+        Url.Builder.absolute [ "api", "admin", "books" ]
+            (List.filterMap identity
+                [ Just (Url.Builder.int "page" params.page)
+                , params.tier |> Maybe.map (Url.Builder.string "tier")
+                , params.search |> Maybe.map (Url.Builder.string "search")
+                ]
+            )
+    , body = Nothing
+    }
 
 
 {-| PUT /api/admin/books/:id/age-gate — owner sets a book's age gate in either
@@ -4623,15 +4949,36 @@ adminSetBookAgeGate :
     -> (Result Http.Error AdminBook -> msg)
     -> Cmd msg
 adminSetBookAgeGate bookId ageGated token toMsg =
+    let
+        spec =
+            adminSetBookAgeGateRequest bookId ageGated
+    in
     Http.request
-        { method = "PUT"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
-        , body = Http.jsonBody (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
-        , expect = Http.expectJson toMsg (Decode.field "book" adminBookDecoder)
+        , url = spec.url
+        , body = specHttpBody spec
+        , expect = Http.expectJson toMsg adminBookEnvelopeDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `adminSetBookAgeGate`'s request — see `RequestSpec`.
+-}
+adminSetBookAgeGateRequest : String -> Bool -> RequestSpec
+adminSetBookAgeGateRequest bookId ageGated =
+    { method = "PUT"
+    , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
+    , body = Just (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
+    }
+
+
+{-| The `{book: ...}` envelope an admin book mutation answers with.
+-}
+adminBookEnvelopeDecoder : Decoder AdminBook
+adminBookEnvelopeDecoder =
+    Decode.field "book" adminBookDecoder
 
 
 {-| Source health record from GET /api/admin/source-health.
@@ -4868,6 +5215,66 @@ declineInvitation groupId invitationId token toMsg =
         { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| A member of a reading group, as the members endpoint returns them.
+-}
+type alias GroupMember =
+    { userId : String
+    , role : String
+    , displayName : String
+    }
+
+
+groupMemberDecoder : Decoder GroupMember
+groupMemberDecoder =
+    Decode.map3 GroupMember
+        (Decode.field "user_id" Decode.string)
+        (Decode.field "role" Decode.string)
+        (Decode.field "display_name" Decode.string)
+
+
+{-| `GET /api/groups/:id/members` — who is in the group.
+-}
+getGroupMembers :
+    String
+    -> String
+    -> (Result Http.Error (List GroupMember) -> msg)
+    -> Cmd msg
+getGroupMembers groupId token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "members" (Decode.list groupMemberDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `DELETE /api/groups/:id/members/:user_id` — the owner removes someone.
+
+The endpoint shipped with groups and had no client, so a group owner could not
+remove a member from the app at all; only leaving was wired.
+
+-}
+removeGroupMember :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+removeGroupMember groupId memberUserId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members/" ++ memberUserId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout

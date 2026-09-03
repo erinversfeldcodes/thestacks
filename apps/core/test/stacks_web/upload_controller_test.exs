@@ -214,6 +214,48 @@ defmodule StacksWeb.UploadControllerTest do
   end
 
   describe "POST /api/upload/:image_id/reject-identification" do
+    test "rejecting moves the image OUT of its terminal state, so the retry is real",
+         %{conn: conn, user: user} do
+      # Two consumers depend on this and both were broken while the row stayed
+      # `resolved`:
+      #
+      #   * the SSE stream's terminal branch replays a resolved row immediately
+      #     and closes — so the client's re-opened stream got the SAME rejected
+      #     candidate back in under a second, and "No, try again" visibly did
+      #     nothing (the retry's fresh answer landed nowhere the reader looked);
+      #   * `mark_resolved/2` only writes `where status == "pending"` — so the
+      #     retry job's result was silently DISCARDED: real GPU work, zero rows
+      #     updated, no broadcast.
+      author = insert(:author, name: "Wrong Author")
+      book = insert(:book, title: "The Wrong Book", author: author)
+      insert(:book_edition, book: book, isbn: "9780000000002")
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          user_id: user.id,
+          book_id: book.id,
+          book_ids: [book.id],
+          storage_path: "uploads/#{Ecto.UUID.generate()}"
+        )
+
+      post(conn, "/api/upload/#{image.id}/reject-identification", %{
+        "rejected_book_ids" => [book.id]
+      })
+
+      reloaded = Core.Repo.get!(Stacks.Books.UploadedImage, image.id)
+
+      assert reloaded.status == "pending",
+             "the image must leave its terminal state on reject — a `resolved` row is " <>
+               "replayed verbatim by the SSE stream and refused by mark_resolved's guard"
+
+      assert reloaded.book_ids in [nil, []],
+             "stale candidates must not survive the reject — any reader of book_ids " <>
+               "would re-propose the book just rejected"
+
+      assert is_nil(reloaded.book_id)
+    end
+
     test "returns 202, enqueues IdentifyBookJob with excluded_books, and removes the prior placement",
          %{conn: conn, user: user} do
       author = insert(:author, name: "F. Scott Fitzgerald")

@@ -5,6 +5,7 @@ module Page.ThirdSpaces exposing
     , ThirdSpace
     , ThirdSpaceEvent
     , init
+    , spacesRequest
     , thirdSpacesResponseDecoder
     , update
     , view
@@ -62,21 +63,25 @@ init maybeToken =
       , selectedSpace = Nothing
       }
     , Http.request
-        { method = "GET"
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
-        , url = "/api/third-spaces"
-        , body = Http.emptyBody
+        { method = spacesRequest.method
+        , headers = Api.authHeaders maybeToken
+        , url = spacesRequest.url
+        , body = Api.specHttpBody spacesRequest
         , expect = Http.expectJson SpacesLoaded thirdSpacesResponseDecoder
         , timeout = Api.standardTimeout
         , tracker = Nothing
         }
     )
+
+
+{-| The one read this page makes — see `Api.RequestSpec`.
+-}
+spacesRequest : Api.RequestSpec
+spacesRequest =
+    { method = "GET"
+    , url = "/api/third-spaces"
+    , body = Nothing
+    }
 
 
 thirdSpacesResponseDecoder : Decode.Decoder (List ThirdSpace)

@@ -93,9 +93,73 @@ defmodule StacksWeb.BlogControllerTest do
       assert length(posts) == 2
     end
 
-    test "returns 422 when user_id is missing", %{conn: conn} do
+    test "without user_id, a signed-out reader gets public posts from every author", %{
+      conn: conn
+    } do
+      one = insert(:user, profile_visibility: "public")
+      two = insert(:user, profile_visibility: "public")
+
+      a = insert(:post, user: one, visibility: "public", published_at: DateTime.utc_now())
+      b = insert(:post, user: two, visibility: "public", published_at: DateTime.utc_now())
+
       conn = get(conn, "/api/blog/posts")
-      assert %{"error" => _} = json_response(conn, 422)
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      ids = Enum.map(posts, & &1["id"])
+      assert a.id in ids
+      assert b.id in ids
+    end
+
+    test "the feed hides drafts, platform posts and ghost authors from a signed-out reader", %{
+      conn: conn
+    } do
+      author = insert(:user, profile_visibility: "public")
+      ghost = insert(:user, profile_visibility: "owner")
+
+      draft = insert(:post, user: author, visibility: "public", published_at: nil)
+
+      platform_only =
+        insert(:post, user: author, visibility: "platform", published_at: DateTime.utc_now())
+
+      hidden_author =
+        insert(:post, user: ghost, visibility: "public", published_at: DateTime.utc_now())
+
+      conn = get(conn, "/api/blog/posts")
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      ids = Enum.map(posts, & &1["id"])
+      refute draft.id in ids
+      refute platform_only.id in ids
+      refute hidden_author.id in ids
+    end
+
+    test "signing in adds the platform posts to the feed", %{conn: conn} do
+      author = insert(:user, profile_visibility: "platform")
+      reader = insert(:user)
+
+      platform_post =
+        insert(:post, user: author, visibility: "platform", published_at: DateTime.utc_now())
+
+      conn =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts")
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      assert platform_post.id in Enum.map(posts, & &1["id"])
+    end
+
+    test "an author's own drafts stay out of the feed — it is not a drafts folder", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      own_draft = insert(:post, user: author, visibility: "owner", published_at: nil)
+
+      conn =
+        conn
+        |> auth_conn(author)
+        |> get("/api/blog/posts")
+
+      assert %{"posts" => posts} = json_response(conn, 200)
+      refute own_draft.id in Enum.map(posts, & &1["id"])
     end
   end
 
@@ -411,58 +475,6 @@ defmodule StacksWeb.BlogControllerTest do
         |> put("/api/blog/posts/#{blog_post.id}/associations/#{Ecto.UUID.generate()}/dismiss")
 
       assert json_response(conn, 404)
-    end
-  end
-
-  describe "POST /api/blog/posts/:id/chat" do
-    alias Stacks.GDPR.Consent
-
-    test "returns 403 when writing_assistant consent is NOT granted", %{conn: conn} do
-      user = insert(:user, consent_writing_assistant: false)
-      post = insert(:post, user: user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/blog/posts/#{post.id}/chat", %{message: "help me write"})
-
-      assert %{"error" => "consent_required", "feature" => "writing_assistant"} =
-               json_response(conn, 403)
-    end
-
-    test "returns an under_construction response when consent IS granted", %{conn: conn} do
-      user = insert(:user)
-      {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
-      post = insert(:post, user: user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/blog/posts/#{post.id}/chat", %{message: "help me write"})
-
-      assert %{"status" => "under_construction", "message" => message} = json_response(conn, 200)
-      assert message =~ "coming soon"
-    end
-
-    test "returns 403 when chatting about another user's post (FF-2 ownership)", %{conn: conn} do
-      user = insert(:user)
-      {:ok, _} = Consent.grant_consent(user.id, "writing_assistant")
-      other_post = insert(:post, user: insert(:user))
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/blog/posts/#{other_post.id}/chat", %{message: "help me write"})
-
-      assert conn.status == 403
-    end
-
-    test "returns 401 when unauthenticated", %{conn: conn} do
-      user = insert(:user)
-      post = insert(:post, user: user)
-
-      conn = post(conn, "/api/blog/posts/#{post.id}/chat", %{message: "hi"})
-      assert conn.status == 401
     end
   end
 end

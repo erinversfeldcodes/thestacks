@@ -17,10 +17,19 @@ transaction:
   `{}`. What remains is the *trace* you're allowed to keep — the `user_id`
   (as `aggregate_id`), the `event_type`, and `occurred_at`: "this user_id
   existed and here are the actions they took", with no PII detail.
+- **Scrubs `audit.audit_log` in place, on the same principle**: the user's own
+  audit rows are kept — `user_id`, `action`, `resource_type`, `occurred_at`, so
+  the platform can still answer "who did what, when" — and the two fields that
+  carry the person are nulled: `metadata` (which holds free text and shelving
+  detail) and `ip_address`. The IP goes because its digest is unkeyed and so
+  recoverable: leaving it would keep the erased reader locatable through a
+  column that only looks anonymous.
 - **Writes a `user.data_deleted` audit row** (encrypted metadata carries your
-  `reason`). The `user_id` is a random UUIDv4 and is never reused, so the
-  audit row + scrubbed event rows are the permanent tombstone — no separate
-  table.
+  `reason`). This row is written *after* the scrub and carries `user_id = nil`,
+  so your justification survives the pass that erases — it is the operator's
+  accountability record, not the subject's data. The `user_id` is a random
+  UUIDv4 and is never reused, so the audit row + scrubbed event and audit rows
+  are the permanent tombstone — no separate table.
 
 **`user_id` is the ONLY key the erasure accepts.** It's a globally-unique
 UUIDv4; the erase workflow refuses anything that isn't a UUID, so it can never
@@ -97,6 +106,12 @@ full refresh manually after the erasure completes.
 - One `user.data_deleted` row exists in `audit.audit_log` with the user's id in
   `resource_id`, `user_id = nil`, and your reason in the (encrypted) metadata.
 - `op.event_log` rows for that `user_id` still exist but have `payload = {}`.
+- `audit.audit_log` rows for that `user_id` still exist but have `metadata` and
+  `ip_address` NULL. Note the asymmetry, which is deliberate: the trail is
+  retained past erasure on a different lawful basis, but it IS disclosed to the
+  person it describes — a subject-access export carries it under `audit_trail`. The counts map reports how many were scrubbed as
+  `audit_log_rows_scrubbed`, and the dry-run preview shows the same number
+  before you commit to anything.
 
 ## Failure modes
 

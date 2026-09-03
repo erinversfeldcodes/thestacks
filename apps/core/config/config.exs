@@ -20,6 +20,7 @@ config :core, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
+       {"15 * * * *", Stacks.Workers.ExportRetentionJob},
        {"30 2 * * *", Stacks.Workers.LibraryImportRowRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
@@ -35,7 +36,9 @@ config :core, Oban,
        {"30 3 * * *", Stacks.Workers.CacheSweepJob},
        {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob},
        {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob},
-       {"30 9 * * *", Stacks.Workers.ExpiredInvitesSweepJob}
+       {"30 9 * * *", Stacks.Workers.ExpiredInvitesSweepJob},
+       {"45 9 * * *", Stacks.Workers.ExpiredEmailChangesJob},
+       {"0 3 * * *", Stacks.Workers.AuditRetentionJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 20, scraper: 5, notifications: 3, dbt_refresh: 1]
@@ -97,10 +100,20 @@ config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Local
 # the recipient has no display name (a `{name, addr}` "to" 403s). So real
 # verification/reset emails will NOT reach actual signups with this sender.
 # ACTION: once a domain is verified at resend.com/domains, flip this to
-# `{"The Stacks", "noreply@thestacks.app"}` (or set the EMAIL_FROM env var) — that
+# `{"The Stacks", "noreply@#{canonical_domain}"}` (or set the EMAIL_FROM env var) — that
 # is the ONLY remaining step to make prod email actually work. Overridable per-env
 # via EMAIL_FROM (config/runtime.exs).
 config :core, :email_from, {"The Stacks", "onboarding@resend.dev"}
+
+# The domain the platform is served on — the ONE place it is named. Everything
+# brand-bearing derives from this: the public cost page's registration line,
+# privacy@ in email templates, and the eventual noreply@ sender. The codebase
+# used to hardcode `thestacks.app` in those places while production actually
+# serves `readinginthestacks.com` (thestacks.app is a parked lander) — so the
+# public cost page named a domain the platform does not serve. Overridable at
+# runtime via CANONICAL_DOMAIN (config/runtime.exs); change it there and every
+# derived string follows.
+config :core, :canonical_domain, "readinginthestacks.com"
 
 config :swoosh, :api_client, Swoosh.ApiClient.Req
 

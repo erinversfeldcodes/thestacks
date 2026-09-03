@@ -1,4 +1,4 @@
-# US-8.6 — See What Your Own Data Reveals About You
+# US-8.6.1 — See What Your Own Data Reveals About You
 
 ## 1. User Story
 

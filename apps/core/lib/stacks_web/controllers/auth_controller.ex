@@ -175,10 +175,27 @@ defmodule StacksWeb.AuthController do
 
   @doc """
       POST /api/auth/forgot-password — enqueue a password reset email.
-      Always returns 200 regardless of whether the email is registered.
+
+      ⛔ MIRROR, like `resend_confirmation/2`: sent, suppressed-by-the-limiter
+      and no-such-account all get the same status, body and headers, or this
+      unauthenticated endpoint becomes an account-existence oracle.
+
+      `Email.send_password_reset/1` still reports which of those happened. The
+      outcome is spent HERE — on a log line an operator can correlate to the
+      request id when a reader says the link never arrived — and is never
+      reflected into the response.
   """
   def forgot_password(conn, %{"email" => email}) do
-    Email.send_password_reset(email)
+    case Email.send_password_reset(email) do
+      :ok ->
+        :ok
+
+      {:error, :rate_limited} ->
+        Logger.warning(
+          "password reset suppressed by the email rate limiter — the reader who " <>
+            "asked was told a link was on its way and will not receive one"
+        )
+    end
 
     json(conn, %{message: "If that email exists, a reset link has been sent"})
   end
@@ -196,12 +213,25 @@ defmodule StacksWeb.AuthController do
       Unconfirmed, already-confirmed, past-the-cap, and no-account addresses
       all get the same status, body and headers — any observable difference
       makes an unauthenticated endpoint an account-existence oracle over the
-      whole user base. Hence `Email.send_confirmation_resend/1` returns a bare
-      `:ok` and this function does not case on it. Guessing cost is carried by
-      the shared `:auth` rate bucket.
+      whole user base. Guessing cost is carried by the shared `:auth` rate
+      bucket.
+
+      `Email.send_confirmation_resend/1` reports whether the link was actually
+      issued. That answer is spent HERE — the mirror is enforced by this
+      function returning the same reply for every branch, not by the context
+      being kept ignorant of what it did.
   """
   def resend_confirmation(conn, %{"email" => email}) do
-    Email.send_confirmation_resend(email)
+    case Email.send_confirmation_resend(email) do
+      :ok ->
+        :ok
+
+      {:error, :rate_limited} ->
+        Logger.warning(
+          "confirmation resend suppressed by the email rate limiter — the reader " <>
+            "who asked was told a link was on its way and will not receive one"
+        )
+    end
 
     json(conn, %{
       message: "If that address needs confirming, a fresh link is on its way"
@@ -333,12 +363,7 @@ defmodule StacksWeb.AuthController do
     json(conn, %{user: ProtoJSON.user(user)})
   end
 
-  defp get_ip(conn) do
-    case get_req_header(conn, "fly-client-ip") do
-      [ip | _] when ip != "" -> ip
-      _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
-  end
+  defp get_ip(conn), do: StacksWeb.ClientIP.get(conn)
 
   defp invite_error_status(:invite_expired), do: 410
   defp invite_error_status(:invite_exhausted), do: 409

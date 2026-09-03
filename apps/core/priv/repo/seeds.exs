@@ -693,7 +693,7 @@ e2e_placement_rows =
           shelf_id: library_shelf_id,
           position: i + 1,
           placed_at: jan_10,
-          formats: ["paperback"],
+          formats: ["physical"],
           visibility: "owner",
           created_at: jan_10,
           updated_at: jan_10
@@ -710,7 +710,7 @@ e2e_placement_rows =
           shelf_id: antilibrary_shelf_id,
           position: i + 1,
           placed_at: jan_15,
-          formats: ["paperback"],
+          formats: ["physical"],
           visibility: "owner",
           created_at: jan_15,
           updated_at: jan_15
@@ -727,7 +727,7 @@ e2e_placement_rows =
           shelf_id: reading_pile_shelf_id,
           position: i + 1,
           placed_at: mar_01,
-          formats: ["paperback"],
+          formats: ["physical"],
           visibility: "owner",
           created_at: mar_01,
           updated_at: mar_01
@@ -782,8 +782,8 @@ placement_groups = [
               format =
                 case rem(position, 3) do
                   0 -> ["ebook"]
-                  1 -> ["paperback"]
-                  2 -> ["hardcover"]
+                  1 -> ["physical"]
+                  2 -> ["audiobook"]
                 end
 
               rating = if rem(position, 4) == 0, do: rem(position, 5) + 1, else: nil
@@ -792,31 +792,31 @@ placement_groups = [
               Map.merge(base, %{formats: format, personal_rating: rating, notes: notes})
 
             "antilibrary" ->
-              Map.merge(base, %{formats: ["paperback"]})
+              Map.merge(base, %{formats: ["physical"]})
 
             "wishlist" ->
               Map.merge(base, %{formats: []})
 
             "reading_pile" ->
-              Map.merge(base, %{formats: ["paperback"]})
+              Map.merge(base, %{formats: ["physical"]})
 
             "looking_for_home" ->
               cond do
                 position == 1 ->
                   Map.merge(base, %{
-                    formats: ["paperback"],
+                    formats: ["physical"],
                     listing_mode: "open_bid"
                   })
 
                 position == 2 ->
                   Map.merge(base, %{
-                    formats: ["paperback"],
+                    formats: ["physical"],
                     listing_mode: "closed_bid",
                     listing_price_cents: 1500
                   })
 
                 true ->
-                  Map.merge(base, %{formats: ["paperback"]})
+                  Map.merge(base, %{formats: ["physical"]})
               end
           end
 
@@ -843,7 +843,7 @@ user2_placements =
       shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(307)),
       position: i + 1,
       placed_at: jan_05,
-      formats: ["paperback"],
+      formats: ["physical"],
       visibility: "owner",
       created_at: jan_05,
       updated_at: jan_05
@@ -858,7 +858,7 @@ user2_placements =
         shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(306)),
         position: 1,
         placed_at: jan_05,
-        formats: ["paperback"],
+        formats: ["physical"],
         visibility: "owner",
         created_at: jan_05,
         updated_at: jan_05

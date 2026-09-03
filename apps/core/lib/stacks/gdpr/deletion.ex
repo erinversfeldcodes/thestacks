@@ -9,6 +9,33 @@ defmodule Stacks.GDPR.Deletion do
       A schema-guard test walks every table naming `user_id` and fails when a
       new one is not covered here — free-text must be deleted/anonymised,
       never just author-nulled.
+
+      `audit.audit_log` is treated the same way as `op.event_log`, and for the
+      same reason: the trail is retained so the platform can still answer "who
+      did what, when", but it keeps no detail about a person who asked to be
+      forgotten. The user's own rows keep `user_id`, `action`, `resource_type`,
+      `occurred_at` and the request shape, and give up the two fields that carry
+      the person: `metadata` (free text an operator typed, plus shelving detail)
+      and `ip_address`. The IP matters as much as the text — it is an unkeyed
+      digest, so it is a recoverable network identifier rather than an anonymous
+      one, and retaining it would leave the erased reader locatable through a
+      column that merely looks hashed.
+
+      The `user.data_deleted` row written at the end is deliberately NOT scrubbed:
+      it is the operator's own accountability record, is written after the scrub,
+      and carries `user_id: nil`, so it falls outside the scrubbed scope by
+      construction rather than by an exception.
+
+      ⛔ The scrub authorisation is ONE STATEMENT. `app.audit_gdpr_erasure` is
+      armed once at the top of the transaction and a statement-level trigger
+      disarms it the moment any UPDATE on the table completes. So the scrub must
+      stay a single `update_all` covering every one of the user's rows; splitting
+      it into two passes would leave the second one blocked by the append-only
+      trigger and fail the erasure.
+
+      Outstanding GDPR export objects are erased too. They live only in object
+      storage, so no table names them and the schema guard cannot see them;
+      `Stacks.GDPR.ExportDelivery` finds them by key prefix instead.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -18,6 +45,8 @@ defmodule Stacks.GDPR.Deletion do
 
   import Ecto.Query
 
+  require Logger
+
   alias Core.Repo
   alias Ecto.Multi
   alias Stacks.Accounts.AuthTokenFamily
@@ -26,7 +55,9 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Blog.PostComment
   alias Stacks.Books.UploadedImage
   alias Stacks.Events.EventLog
+  alias Stacks.Feedback.Entry, as: FeedbackEntry
   alias Stacks.Feeds.FeedCacheEntry
+  alias Stacks.GDPR.ExportDelivery
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Imports.LibraryImport
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
@@ -62,8 +93,10 @@ defmodule Stacks.GDPR.Deletion do
            feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
            uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
            library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
+           feedback_entries: count(from f in FeedbackEntry, where: f.user_id == ^user_id),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
+           audit_log_rows_scrubbed: count(user_audit_log_query(user_id)),
            sessions_revoked: session_row_count(Repo, user_id)
          }}
     end
@@ -82,6 +115,14 @@ defmodule Stacks.GDPR.Deletion do
       )
 
     families + tokens
+  end
+
+  # The erased user's own audit rows. `user_id` is the whole scope on purpose:
+  # the `user.data_deleted` row is written with a nil user_id, so the record of
+  # the erasure is outside this query by construction and cannot be scrubbed by
+  # the pass that the erasure itself performs.
+  defp user_audit_log_query(user_id) do
+    from(a in "audit_log", prefix: "audit", where: a.user_id == type(^user_id, :binary_id))
   end
 
   defp user_event_log_query(user_id) do
@@ -148,6 +189,14 @@ defmodule Stacks.GDPR.Deletion do
       {count, _} = repo.delete_all(from bs in Bookshelf, where: bs.user_id == ^user_id)
       {:ok, count}
     end)
+    # DELETE, not author-null: the body is the reader's own words, and a row
+    # that survives with a null user_id is a message from someone who asked to
+    # be forgotten sitting in the owner's queue. Explicit rather than left to
+    # the FK cascade so the operator summary can report a count.
+    |> Multi.run(:delete_feedback_entries, fn repo, _ ->
+      {count, _} = repo.delete_all(from f in FeedbackEntry, where: f.user_id == ^user_id)
+      {:ok, count}
+    end)
     |> Multi.run(:erase_comments, fn repo, _ ->
       {count, _} =
         repo.update_all(
@@ -176,6 +225,21 @@ defmodule Stacks.GDPR.Deletion do
       {count, _} = repo.delete_all(from i in UploadedImage, where: i.id in ^ids)
       {:ok, count}
     end)
+    |> Multi.run(:delete_export_objects, fn _repo, _ ->
+      case ExportDelivery.delete_user_exports(user_id) do
+        {:ok, count} ->
+          {:ok, count}
+
+        {:error, reason} ->
+          # Storage being down must not strand the user's rows in the database.
+          # The deadline in each export key means the sweep still collects them.
+          Logger.error(
+            "Deletion: export objects for #{user_id} survived erasure: #{inspect(reason)}"
+          )
+
+          {:ok, 0}
+      end
+    end)
     |> Multi.run(:sessions_to_revoke, fn repo, _ ->
       {:ok, session_row_count(repo, user_id)}
     end)
@@ -191,6 +255,16 @@ defmodule Stacks.GDPR.Deletion do
     |> Multi.run(:scrub_event_log, fn repo, _ ->
       {count, _} =
         repo.update_all(user_event_log_query(user_id), set: [payload: %{}, metadata: %{}])
+
+      {:ok, count}
+    end)
+    |> Multi.run(:scrub_audit_log, fn repo, _ ->
+      # NULL rather than an encrypted empty map: `metadata` is ciphertext in a
+      # bytea column, and the reader already maps a null to `%{}`, so this lands
+      # on the same value a scrubbed event_log row reads back as — without
+      # writing a fresh ciphertext whose key would then outlive the erasure.
+      {count, _} =
+        repo.update_all(user_audit_log_query(user_id), set: [metadata: nil, ip_address: nil])
 
       {:ok, count}
     end)

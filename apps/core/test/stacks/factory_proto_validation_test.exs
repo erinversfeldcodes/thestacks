@@ -13,7 +13,7 @@ defmodule Stacks.FactoryProtoValidationTest do
   @factories %{
     user:
       {Stacks.Accounts.User,
-       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at consent_writing_assistant_at email_confirmation_token password_reset_token password_reset_sent_at onboarding_completed failed_login_first_at locked_until)a},
+       ~w(age_verified_at age_verification_provider city website_url consent_analytics_at consent_writing_assistant_at email_confirmation_token password_reset_token password_reset_sent_at onboarding_completed failed_login_first_at locked_until lockout_duration_seconds pending_email pending_email_token pending_email_sent_at pending_email_revert_token)a},
     author: {Stacks.Books.Author, ~w(website_url rss_feed_url open_library_id)a},
     book: {Stacks.Books.Book, ~w()a},
     book_edition:
@@ -27,6 +27,7 @@ defmodule Stacks.FactoryProtoValidationTest do
     placement_history: {Stacks.Shelving.PlacementHistory, ~w()a},
     post: {Stacks.Blog.Post, ~w(published_at visibility_group_id)a},
     post_comment: {Stacks.Blog.PostComment, ~w(parent_id created_at)a},
+    feedback_entry: {Stacks.Feedback.Entry, ~w(created_at)a},
     post_book_association: {Stacks.Blog.PostBookAssociation, ~w()a},
     platform_cost: {Stacks.Costs.PlatformCost, ~w()a},
     group: {Stacks.Social.Group, ~w()a},

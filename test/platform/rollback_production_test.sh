@@ -82,6 +82,17 @@ chmod +x "$STUB_DIR/fly" "$STUB_DIR/modal" "$STUB_DIR/curl"
 export PATH="$STUB_DIR:$PATH"
 export INVOCATION_LOG
 
+# Every case below states the variables it wants as prefix assignments, so
+# anything inherited from the caller is contamination. That matters now the
+# suite runs from `scripts/ci.sh`, which sources `.env` first: a developer with
+# a real NEON_API_KEY in `.env` would hand this suite a key the
+# missing-Neon-var cases assume is absent, and those cases would assert
+# fail-fast behaviour against an input that is not missing at all.
+unset CORE_PREV_IMAGE MODAL_PREV_COMMIT ROLLBACK_REASON PRE_MIGRATE_LSN
+unset NEON_API_KEY NEON_PROJECT_ID NEON_BRANCH_ID GITHUB_SHA
+unset CORE_APP MODAL_APP_NAME ORIGIN_REMOTE
+unset FLY_CURRENT_IMAGE_STUB FLY_STUB_EXIT MODAL_STUB_EXIT CURL_STUB_EXIT
+
 run_rollback() {
     : > "$INVOCATION_LOG"
     OUT="$("$ROLLBACK" "$@" 2>&1)"
@@ -196,6 +207,32 @@ assert_contains "$OUT" "PASS rollback: Neon prod branch restored" \
     "stdout shows PASS rollback: Neon prod branch restored"
 assert_contains "$OUT" "pre-rollback state preserved as branch:" \
     "stdout surfaces the preserved-branch name for operator inspection"
+
+test_case "lsn_restore_without_github_sha" \
+    "operator-run rollback (no GITHUB_SHA) still restores the DB — must not abort between the core and DB legs"
+CORE_PREV_IMAGE="registry.fly.io/stacks-core:deployment-01abc" \
+MODAL_PREV_COMMIT="deadbeefcafef00d" \
+ROLLBACK_REASON="operator-run rollback, no workflow context" \
+PRE_MIGRATE_LSN="0/16E8090" \
+NEON_PROJECT_ID="stale-cherry-12345" \
+NEON_API_KEY="neon_api_xxx" \
+NEON_BRANCH_ID="br-prod-default-uuid" \
+    run_rollback
+assert_exit_zero "$RC" "rollback exits 0 when GITHUB_SHA is unset (runbook path, not a workflow)"
+if grep -q ' curl ' "$INVOCATION_LOG"; then
+    _record_pass "Neon restore still ran without GITHUB_SHA (core and DB legs stay in step)"
+else
+    _record_fail "core was rolled back but the Neon restore never ran — production left on old code against new schema"
+fi
+if grep -q ' modal ' "$INVOCATION_LOG"; then
+    _record_pass "modal rollback still ran without GITHUB_SHA"
+else
+    _record_fail "modal rollback never ran without GITHUB_SHA"
+fi
+assert_not_contains "$OUT" "unbound variable" \
+    "no unbound-variable abort partway through the rollback"
+assert_contains "$(grep '^BODY: ' "$INVOCATION_LOG" | head -1 || true)" "pre-rollback-manual-" \
+    "preserve_under_name falls back to the 'manual' tag when there is no workflow sha"
 
 test_case "lsn_unset_skips_db_rollback" "PRE_MIGRATE_LSN empty → WARN, no curl, fly + modal still run"
 CORE_PREV_IMAGE="registry.fly.io/stacks-core:deployment-01abc" \

@@ -104,13 +104,56 @@ defmodule Stacks.Imports.GoodreadsCsvTest do
   end
 
   describe "format_for/1" do
-    test "maps Goodreads bindings onto the platform vocabulary" do
-      assert GoodreadsCsv.format_for("Paperback") == "paperback"
-      assert GoodreadsCsv.format_for("Hardcover") == "hardcover"
+    # The output goes into `bookshelf_placements.formats`, whose vocabulary is
+    # physical/ebook/audiobook — what a reader OWNS. Goodreads' Binding is an
+    # EDITION property (hardcover vs paperback), a distinction the shelf toggles
+    # do not make. Passing the edition word straight through produced values the
+    # UI cannot parse, so an imported book rendered with every format toggle
+    # unselected and the first click silently replaced the imported value.
+    #
+    # This test previously asserted `format_for("Paperback") == "paperback"`
+    # under the heading "maps onto the platform vocabulary" — naming the right
+    # invariant and pinning its violation.
+    test "maps every physical binding onto the placement vocabulary" do
+      for binding <- ["Paperback", "Hardcover", "Mass Market Paperback", "Board book"] do
+        assert GoodreadsCsv.format_for(binding) == "physical",
+               "#{binding} is a physical book a reader can hold"
+      end
+    end
+
+    test "maps digital and audio bindings" do
       assert GoodreadsCsv.format_for("Kindle Edition") == "ebook"
+      assert GoodreadsCsv.format_for("ebook") == "ebook"
       assert GoodreadsCsv.format_for("Audio CD") == "audiobook"
-      assert GoodreadsCsv.format_for("Board book") == nil
+      assert GoodreadsCsv.format_for("Audiobook") == "audiobook"
+    end
+
+    test "an unknown or absent binding maps to nothing" do
       assert GoodreadsCsv.format_for("") == nil
+      assert GoodreadsCsv.format_for("Papyrus Scroll") == nil
+    end
+
+    # The guarantee that matters: whatever this returns must survive the round
+    # trip to the reader's screen. Asserted against the vocabulary the changeset
+    # enforces, so the two cannot drift apart silently.
+    test "never emits a value the placement changeset would reject" do
+      bindings = [
+        "Paperback",
+        "Hardcover",
+        "Mass Market Paperback",
+        "Board book",
+        "Kindle Edition",
+        "ebook",
+        "Audio CD",
+        "Audiobook",
+        "Papyrus Scroll",
+        ""
+      ]
+
+      for binding <- bindings, fmt = GoodreadsCsv.format_for(binding), not is_nil(fmt) do
+        assert fmt in Stacks.Shelving.placement_formats(),
+               "#{binding} produced #{inspect(fmt)}, which is not a placement format"
+      end
     end
   end
 end

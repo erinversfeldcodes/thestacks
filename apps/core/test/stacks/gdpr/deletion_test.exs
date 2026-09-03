@@ -1,10 +1,12 @@
 defmodule Stacks.GDPR.DeletionTest do
   @moduledoc """
-      138 Phase 1: erasure must be able to modify the append-only audit log.
-      A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
-      audit cleanup; asserts the GUC works inside the transaction (an
-      audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
-      UPDATE outside the transaction is still refused).
+      Erasure must be able to modify the append-only audit log. A `Multi.run`
+      issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before audit cleanup;
+      these tests assert the GUC works inside the transaction (an audit-row
+      UPDATE succeeds under the trigger) and is LOCAL (the same UPDATE outside
+      the transaction is still refused), and that erasure reaches every row a
+      user owns — by cascade where there is an FK, by an explicit step where
+      the content is theirs to have deleted.
   """
   use Core.DataCase, async: false
 
@@ -23,6 +25,8 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.Events.EventLog
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.GDPR.Deletion
+  alias Stacks.GDPR.DeletionTest.RecordingStorage
+  alias Stacks.GDPR.DeletionTest.UnreachableStorage
   alias Stacks.MFA
   alias Stacks.MFA.UserMFA
 
@@ -118,6 +122,122 @@ defmodule Stacks.GDPR.DeletionTest do
       decrypted = metadata_bin |> Stacks.Vault.decrypt!() |> Jason.decode!()
       assert decrypted["reason"] == "verified DSAR ticket"
       assert decrypted["actor"] == "gh-actions"
+    end
+
+    test "scrubs metadata and ip from the erased user's audit rows but preserves the rows" do
+      user = insert(:user)
+      other = insert(:user)
+
+      Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        ip: "197.87.142.19",
+        metadata: %{book_id: Ecto.UUID.generate(), bookshelf: "library"}
+      )
+
+      Audit.log(other.id, "placement.created",
+        resource_type: "placement",
+        ip: "10.0.0.1",
+        metadata: %{book_id: Ecto.UUID.generate(), bookshelf: "wishlist"}
+      )
+
+      before_other =
+        Repo.one(
+          from(a in "audit_log",
+            where: a.user_id == type(^other.id, :binary_id),
+            select: %{metadata: a.metadata, ip_address: a.ip_address}
+          ),
+          prefix: "audit"
+        )
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+      assert Map.has_key?(result, :scrub_audit_log)
+
+      rows =
+        Repo.all(
+          from(a in "audit_log",
+            where: a.user_id == type(^user.id, :binary_id),
+            select: %{
+              action: a.action,
+              resource_type: a.resource_type,
+              occurred_at: a.occurred_at,
+              metadata: a.metadata,
+              ip_address: a.ip_address
+            }
+          ),
+          prefix: "audit"
+        )
+
+      # The trail survives — this is the half the retention decision keeps.
+      assert length(rows) == 1
+      assert Enum.all?(rows, &(&1.action == "placement.created"))
+      assert Enum.all?(rows, &(&1.resource_type == "placement"))
+      assert Enum.all?(rows, &(&1.occurred_at != nil))
+
+      # The detail does not. A retained IP digest is unkeyed, so leaving it would
+      # leave the erased reader locatable through a column that only looks hashed.
+      assert Enum.all?(rows, &(&1.metadata == nil))
+      assert Enum.all?(rows, &(&1.ip_address == nil))
+
+      # Another reader's rows are untouched — the scrub is scoped, not a sweep.
+      after_other =
+        Repo.one(
+          from(a in "audit_log",
+            where: a.user_id == type(^other.id, :binary_id),
+            select: %{metadata: a.metadata, ip_address: a.ip_address}
+          ),
+          prefix: "audit"
+        )
+
+      assert after_other == before_other
+      assert after_other.metadata != nil
+      assert after_other.ip_address != nil
+    end
+
+    test "the erasure's own audit row keeps its operator reason through the scrub" do
+      user = insert(:user)
+
+      Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        metadata: %{bookshelf: "library"}
+      )
+
+      assert {:ok, _result} =
+               Deletion.delete_user_data(user.id,
+                 reason: "verified DSAR ticket",
+                 actor: "gh-actions"
+               )
+
+      # The scrub is scoped by user_id and this row carries a nil one, so the
+      # record of WHO erased and WHY outlives the pass that erases — without an
+      # exception clause that a later scope change could silently drop.
+      metadata_bin =
+        Repo.one(
+          from(a in "audit_log", where: a.action == "user.data_deleted", select: a.metadata),
+          prefix: "audit"
+        )
+
+      decrypted = metadata_bin |> Stacks.Vault.decrypt!() |> Jason.decode!()
+      assert decrypted["reason"] == "verified DSAR ticket"
+      assert decrypted["actor"] == "gh-actions"
+    end
+
+    test "the scrubbed rows read back as an empty map, matching a scrubbed event row" do
+      user = insert(:user)
+
+      Audit.log(user.id, "placement.created",
+        resource_type: "placement",
+        metadata: %{bookshelf: "library"}
+      )
+
+      assert {:ok, _result} = Deletion.delete_user_data(user.id)
+
+      # Nulling the column rather than storing a fresh ciphertext of `{}` is only
+      # safe because the reader maps null to the same value a scrubbed event_log
+      # row shows. If that mapping ever goes, this is the test that says so.
+      {rows, _page, _total_pages, _per_page} = Audit.list_for_user(user.id)
+
+      assert rows != [], "expected the retained trail to still be listable after erasure"
+      assert Enum.all?(rows, &(&1.metadata == %{}))
     end
 
     test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
@@ -435,6 +555,25 @@ defmodule Stacks.GDPR.DeletionTest do
       assert_received {:storage_delete, "uploads/obj-b"}
       refute_received {:storage_delete, _other}
     end
+
+    test "deletes any outstanding data-export object for the user" do
+      user = insert(:user)
+      key = "exports/#{user.id}/#{DateTime.to_unix(DateTime.utc_now())}-abc.json"
+      RecordingStorage.seed_listing("exports/#{user.id}/", [key])
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      assert_received {:storage_delete, ^key}
+    end
+
+    test "erasure still completes when the export copy cannot be reached" do
+      user = insert(:user)
+      Application.put_env(:core, :storage, Stacks.GDPR.DeletionTest.UnreachableStorage)
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      refute Repo.get(Stacks.Accounts.User, user.id)
+    end
   end
 
   describe "erasure completeness — schema-level guard" do
@@ -444,6 +583,22 @@ defmodule Stacks.GDPR.DeletionTest do
       "post_comments" => "free-text body erased by :erase_comments step; nilify preserves thread",
       "invite_codes" =>
         "note/invited_email scrubbed by :settle_invites_naming_user step; nilify keeps beta history"
+    }
+
+    # A uuid column whose NAME reads like a user reference but which either does
+    # not point at a platform user, or points at rows that outlive erasure on
+    # purpose. Anything not listed here must carry a real FK — the name pattern
+    # is the only thing standing between a new user-scoping column and silent
+    # survival, because erasure reaches rows through the FK graph alone.
+    @fkless_user_column_allowlist %{
+      "op.books.author_id" => "op.authors — the writer of the book, not a platform user",
+      "op.bookstore_events.author_id" => "op.authors — an event's featured writer, not a user",
+      "audit.audit_log.user_id" =>
+        "the audit trail is retained past erasure by design, so it deliberately has no FK that " <>
+          "would cascade it away; the row keeps a now-dangling id and the shape of the request " <>
+          "(action, resource_type, occurred_at) so the platform can still say who did what and " <>
+          "when, while erasure scrubs the two fields that carry the person — metadata and the " <>
+          "ip digest — through the GUC, which is the only path permitted to mutate this table"
     }
 
     test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
@@ -476,18 +631,27 @@ defmodule Stacks.GDPR.DeletionTest do
                "on it is erased by a delete_user_data/1 step."
     end
 
-    test "every op.* user_id / *_user_id column has a foreign key to op.users" do
+    test "every user-referencing column in op and audit has a foreign key to op.users" do
       {:ok, %{rows: rows}} =
         Repo.query("""
-        SELECT c.relname, a.attname
+        SELECT n.nspname, c.relname, a.attname
         FROM pg_attribute a
         JOIN pg_class c ON c.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'op'
+        JOIN pg_type t ON t.oid = a.atttypid
+        WHERE n.nspname IN ('op', 'audit')
           AND c.relkind = 'r'
           AND a.attnum > 0
           AND NOT a.attisdropped
-          AND (a.attname = 'user_id' OR a.attname LIKE '%\\_user\\_id')
+          AND t.typname = 'uuid'
+          AND (a.attname = 'user_id'
+               OR a.attname LIKE '%\\_user\\_id'
+               OR a.attname LIKE '%\\_by\\_id'
+               OR a.attname LIKE '%\\_to\\_id'
+               OR a.attname IN ('author_id', 'actor_id', 'owner_id', 'seller_id',
+                                'buyer_id', 'sender_id', 'recipient_id', 'blocker_id',
+                                'blocked_id', 'follower_id', 'followed_id',
+                                'member_id', 'requester_id', 'reviewer_id'))
           AND NOT EXISTS (
             SELECT 1
             FROM pg_constraint con
@@ -499,18 +663,22 @@ defmodule Stacks.GDPR.DeletionTest do
               AND rn.nspname = 'op'
               AND rc.relname = 'users'
           )
-        ORDER BY c.relname, a.attname
+        ORDER BY n.nspname, c.relname, a.attname
         """)
 
-      offenders = for [table, col] <- rows, do: "#{table}.#{col}"
+      offenders =
+        for [schema, table, col] <- rows,
+            not Map.has_key?(@fkless_user_column_allowlist, "#{schema}.#{table}.#{col}"),
+            do: "#{schema}.#{table}.#{col}"
 
       assert offenders == [],
-             "op.* columns named user_id / *_user_id with NO foreign key to op.users. " <>
-               "Erasure reaches personal data via repo.delete(user) + FK CASCADE; a " <>
-               "user-scoping column with no FK is invisible to that path and to the CASCADE " <>
-               "audit above, so the user's rows survive erasure silently (the #353 " <>
-               "uploaded_images leak). Offenders: #{inspect(offenders)}. Add a CASCADE FK to " <>
-               "op.users (see migration 20260805100000)."
+             "columns that name a user but carry no foreign key to op.users. Erasure reaches " <>
+               "personal data via repo.delete(user) + FK CASCADE; a user-scoping column with " <>
+               "no FK is invisible to that path and to the CASCADE audit above, so the user's " <>
+               "rows survive erasure silently. Offenders: #{inspect(offenders)}. Add a CASCADE " <>
+               "FK to op.users, or — if the column does not name a platform user at all, or " <>
+               "the rows are deliberately retained past erasure — add it to " <>
+               "@fkless_user_column_allowlist WITH the reason."
     end
   end
 end
@@ -538,8 +706,42 @@ defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
   def head(_key), do: {:error, :not_found}
 
   @impl true
+  def list(prefix), do: {:ok, Process.get({__MODULE__, prefix}, [])}
+
+  @impl true
   def delete(key) do
     send(self(), {:storage_delete, key})
     :ok
   end
+
+  @doc "Make `list/1` answer `keys` for `prefix`."
+  def seed_listing(prefix, keys), do: Process.put({__MODULE__, prefix}, keys)
+end
+
+defmodule Stacks.GDPR.DeletionTest.UnreachableStorage do
+  @moduledoc """
+      Test-local storage backend that is simply down. Erasure of the user's rows
+      must not be held hostage to it — the deadline encoded in each export key
+      is what guarantees the unreachable copy still goes.
+  """
+
+  @behaviour Stacks.Storage.StorageBehaviour
+
+  @impl true
+  def put(_key, _data, _opts \\ []), do: {:error, :circuit_open}
+
+  @impl true
+  def presigned_url(_key, _ttl_seconds \\ 900), do: {:error, :circuit_open}
+
+  @impl true
+  def presigned_put_url(_key, _ttl_seconds \\ 900, _opts \\ []), do: {:error, :circuit_open}
+
+  @impl true
+  def head(_key), do: {:error, :circuit_open}
+
+  @impl true
+  def list(_prefix), do: {:error, :circuit_open}
+
+  @impl true
+  def delete(_key), do: {:error, :circuit_open}
 end

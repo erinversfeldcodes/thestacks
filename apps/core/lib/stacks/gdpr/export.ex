@@ -10,7 +10,10 @@ defmodule Stacks.GDPR.Export do
   alias Stacks.Accounts
   alias Stacks.Blog.{Post, PostComment}
   alias Stacks.Books.UploadedImage
+  alias Stacks.Feedback.Entry, as: FeedbackEntry
+  alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
+  alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
   @doc """
@@ -103,6 +106,14 @@ defmodule Stacks.GDPR.Export do
       })
       |> Repo.all()
 
+    # The reader's own words are theirs, so the body goes out in full.
+    feedback_entries =
+      FeedbackEntry
+      |> where([f], f.user_id == ^user_id)
+      |> order_by([f], desc: f.created_at)
+      |> select([f], %{body: f.body, page_context: f.page_context, created_at: f.created_at})
+      |> Repo.all()
+
     library_imports =
       Stacks.Imports.LibraryImport
       |> where([li], li.user_id == ^user_id)
@@ -117,16 +128,22 @@ defmodule Stacks.GDPR.Export do
       # test/stacks/gdpr_test.exs, whose exclusion list mirrors this rationale):
       #   Secrets — exporting them would defeat their purpose / leak credentials:
       #     password_hash, email_confirmation_token, password_reset_token,
+      #     pending_email_token, pending_email_revert_token,
       #     password (virtual, never persisted).
       #   Account-security mechanics — internal auth state, not user-provided
       #     personal data:
       #     email_confirmed, password_reset_sent_at, failed_login_count,
-      #     failed_login_first_at, locked_until.
+      #     failed_login_first_at, locked_until, lockout_duration_seconds.
       #   Internal UX progress flags — app state, not personal data:
       #     onboarding_completed, onboarding_steps.
       user: %{
         id: user.id,
         email: user.email,
+        # An address the reader typed, and the moment they typed it. Personal data
+        # even though the account does not answer on it (yet, or ever) — a change
+        # in flight is a fact about the reader that the platform is holding.
+        pending_email: user.pending_email,
+        pending_email_sent_at: user.pending_email_sent_at,
         display_name: user.display_name,
         handle: user.handle,
         role: user.role,
@@ -160,12 +177,223 @@ defmodule Stacks.GDPR.Export do
       blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
       invitations: invitations,
       library_imports: library_imports,
-      blog_syndications: blog_syndications
+      blog_syndications: blog_syndications,
+      feedback: feedback_entries,
+      marketplace_listings: marketplace_listings(user_id),
+      marketplace_offer_threads: marketplace_offer_threads(user_id),
+      marketplace_offer_messages: marketplace_offer_messages(user_id),
+      marketplace_transactions: marketplace_transactions(user_id),
+      reading_groups: reading_groups(user_id),
+      reading_group_memberships: reading_group_memberships(user_id),
+      reading_group_invitations: reading_group_invitations(user_id),
+      blocked_users: blocked_users(user_id),
+      visibility_grants: visibility_grants(user_id),
+      audit_trail: audit_trail(user_id)
     }
 
     {:ok, export}
   rescue
     error -> {:error, error}
+  end
+
+  @doc false
+  # The reader's own audit rows. `audit.audit_log` is retained past erasure on a
+  # different lawful basis to the rest of this export, but retention is not a
+  # reason to withhold it from the person it describes — a subject-access request
+  # asks what we hold, and we hold this.
+  #
+  # Scoped by `user_id`, which on this table means "the account that PERFORMED the
+  # action". So an operator exporting their own data receives their admin actions;
+  # a reader receives their own. Nobody receives a row describing someone else.
+  #
+  # `metadata` is decrypted here on purpose: it is stored as ciphertext to protect
+  # it at rest, not to keep it from its owner. `ip_address` is deliberately NOT
+  # exported — it is a digest of the reader's own IP, which tells them nothing they
+  # do not already know while handing anyone who intercepts the export a value that
+  # can be matched against the column. `operator_session_id` is likewise omitted:
+  # it identifies an admin session, and its only use to a reader would be
+  # correlating operator activity.
+  defp audit_trail(user_id) do
+    from(a in "audit_log",
+      prefix: "audit",
+      where: a.user_id == type(^user_id, :binary_id),
+      order_by: [desc: a.occurred_at],
+      select: %{
+        action: a.action,
+        resource_type: a.resource_type,
+        resource_id: a.resource_id,
+        occurred_at: a.occurred_at,
+        endpoint: a.endpoint,
+        success: a.success,
+        metadata: a.metadata
+      }
+    )
+    |> Repo.all()
+    |> Enum.map(fn row -> %{row | metadata: decrypt_audit_metadata(row.metadata)} end)
+  end
+
+  defp decrypt_audit_metadata(nil), do: %{}
+
+  defp decrypt_audit_metadata(bin) when is_binary(bin) do
+    case Stacks.Vault.decrypt(bin) do
+      {:ok, json} -> Jason.decode!(json)
+      _ -> %{}
+    end
+  rescue
+    _ -> %{}
+  end
+
+  defp marketplace_listings(user_id) do
+    Listing
+    |> where([l], l.seller_id == ^user_id)
+    |> order_by([l], desc: l.created_at)
+    |> select([l], %{
+      id: l.id,
+      book_id: l.book_id,
+      status: l.status,
+      pricing_mode: l.pricing_mode,
+      price_cents: l.price_cents,
+      currency: l.currency,
+      condition: l.condition,
+      description: l.description,
+      contact_info: l.contact_info,
+      photo_urls: l.photo_urls,
+      listed_at: l.listed_at,
+      expires_at: l.expires_at,
+      sold_at: l.sold_at,
+      created_at: l.created_at
+    })
+    |> Repo.all()
+  end
+
+  defp marketplace_offer_threads(user_id) do
+    OfferThread
+    |> where([t], t.buyer_id == ^user_id)
+    |> order_by([t], desc: t.created_at)
+    |> select([t], %{
+      id: t.id,
+      placement_id: t.placement_id,
+      status: t.status,
+      created_at: t.created_at
+    })
+    |> Repo.all()
+  end
+
+  # Only the messages this user WROTE. The counterparty's words on the same
+  # thread are their personal data, not the subject's, and a portability export
+  # is not a licence to walk off with someone else's half of the conversation.
+  defp marketplace_offer_messages(user_id) do
+    OfferMessage
+    |> where([m], m.sender_id == ^user_id)
+    |> order_by([m], asc: m.created_at)
+    |> select([m], %{
+      id: m.id,
+      thread_id: m.thread_id,
+      type: m.type,
+      body: m.body,
+      amount_cents: m.amount_cents,
+      created_at: m.created_at
+    })
+    |> Repo.all()
+  end
+
+  # `payment_provider_ref` / `shipping_provider_ref` are deliberately absent:
+  # they are integration handles into third-party systems, and putting them in
+  # a file the user downloads adds lookup risk without portability value.
+  defp marketplace_transactions(user_id) do
+    Transaction
+    |> where([t], t.buyer_id == ^user_id or t.seller_id == ^user_id)
+    |> order_by([t], desc: t.created_at)
+    |> Repo.all()
+    |> Enum.map(
+      &%{
+        id: &1.id,
+        listing_id: &1.listing_id,
+        role: if(&1.buyer_id == user_id, do: "buyer", else: "seller"),
+        amount_cents: &1.amount_cents,
+        currency: &1.currency,
+        payment_status: &1.payment_status,
+        shipping_status: &1.shipping_status,
+        shipping_cost_cents: &1.shipping_cost_cents,
+        completed_at: &1.completed_at,
+        created_at: &1.created_at
+      }
+    )
+  end
+
+  # Groups the user OWNS. The member roster is not exported with them — who
+  # else is in a reading group is those readers' data.
+  defp reading_groups(user_id) do
+    Group
+    |> where([g], g.owner_id == ^user_id)
+    |> order_by([g], desc: g.created_at)
+    |> select([g], %{
+      id: g.id,
+      name: g.name,
+      type: g.type,
+      visibility: g.visibility,
+      created_at: g.created_at
+    })
+    |> Repo.all()
+  end
+
+  defp reading_group_memberships(user_id) do
+    GroupMember
+    |> where([m], m.user_id == ^user_id)
+    |> order_by([m], desc: m.created_at)
+    |> select([m], %{
+      id: m.id,
+      group_id: m.group_id,
+      role: m.role,
+      joined_at: m.joined_at
+    })
+    |> Repo.all()
+  end
+
+  defp reading_group_invitations(user_id) do
+    GroupInvitation
+    |> where([i], i.invited_user_id == ^user_id or i.invited_by_id == ^user_id)
+    |> order_by([i], desc: i.created_at)
+    |> Repo.all()
+    |> Enum.map(
+      &%{
+        id: &1.id,
+        group_id: &1.group_id,
+        direction: if(&1.invited_by_id == user_id, do: "sent", else: "received"),
+        status: &1.status,
+        responded_at: &1.responded_at,
+        created_at: &1.created_at
+      }
+    )
+  end
+
+  # The user's own block list only. Rows where they are the BLOCKED party are
+  # someone else's decision about them — exporting those would hand the subject
+  # a list of who has blocked them.
+  defp blocked_users(user_id) do
+    UserBlock
+    |> where([b], b.blocker_id == ^user_id)
+    |> order_by([b], desc: b.created_at)
+    |> select([b], %{id: b.id, blocked_id: b.blocked_id, created_at: b.created_at})
+    |> Repo.all()
+  end
+
+  defp visibility_grants(user_id) do
+    VisibilityGrant
+    |> where([g], g.granted_by_id == ^user_id or g.granted_to_id == ^user_id)
+    |> order_by([g], desc: g.created_at)
+    |> Repo.all()
+    |> Enum.map(
+      &%{
+        id: &1.id,
+        direction: if(&1.granted_by_id == user_id, do: "granted", else: "received"),
+        resource_type: &1.resource_type,
+        resource_id: &1.resource_id,
+        granted_to_id: &1.granted_to_id,
+        granted_by_id: &1.granted_by_id,
+        created_at: &1.created_at
+      }
+    )
   end
 
   defp library_import_to_map(import) do

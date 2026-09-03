@@ -17,7 +17,9 @@ defmodule Core.PromEx.DiscoveryDriftTest do
     "stacks_search_people",
     "stacks_profile_view",
     "stacks_shelf_browse_capped",
-    "stacks_handle_claimed"
+    "stacks_handle_claimed",
+    "stacks_discovery_brave_search",
+    "stacks_ai_together_completion"
   ]
 
   defp dashboard_path,

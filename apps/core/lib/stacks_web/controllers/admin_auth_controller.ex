@@ -186,7 +186,5 @@ defmodule StacksWeb.AdminAuthController do
   defp verify_mfa_code(user, %{"recovery_code" => code}), do: MFA.verify_recovery_code(user, code)
   defp verify_mfa_code(_user, _params), do: {:error, :invalid_code}
 
-  defp get_raw_ip(conn) do
-    conn.remote_ip |> :inet.ntoa() |> to_string()
-  end
+  defp get_raw_ip(conn), do: StacksWeb.ClientIP.get(conn)
 end

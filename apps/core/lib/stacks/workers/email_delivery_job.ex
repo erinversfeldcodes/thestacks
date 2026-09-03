@@ -15,10 +15,11 @@ defmodule Stacks.Workers.EmailDeliveryJob do
 
   # Sender for all transactional email. Configurable (`:email_from`) so we can
   # use Resend's `onboarding@resend.dev` test sender until the `thestacks.app`
-  # domain is verified in Resend, then flip to `noreply@thestacks.app`. Overridable
+  # domain is verified in Resend, then flip to noreply@ the canonical domain. Overridable
   # at runtime via the EMAIL_FROM env var (see config/runtime.exs).
   defp from_address do
-    Application.get_env(:core, :email_from, {"The Stacks", "noreply@thestacks.app"})
+    default_domain = Application.get_env(:core, :canonical_domain, "readinginthestacks.com")
+    Application.get_env(:core, :email_from, {"The Stacks", "noreply@#{default_domain}"})
   end
 
   # Recipient for a transactional email.
@@ -40,6 +41,8 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   @known_templates %{
     "registration_confirmation" => :registration_confirmation,
     "password_reset" => :password_reset,
+    "email_change_confirmation" => :email_change_confirmation,
+    "email_change_notice" => :email_change_notice,
     "marketplace_sale" => :marketplace_sale,
     "gdpr_export_ready" => :gdpr_export_ready,
     "wishlist_availability" => :wishlist_availability,
@@ -52,6 +55,8 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   @bypass_prefs [
     :registration_confirmation,
     :password_reset,
+    :email_change_confirmation,
+    :email_change_notice,
     :gdpr_export_ready,
     :opt_out_confirmation
   ]
@@ -72,15 +77,49 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   defp deliver(template, user_id, params) do
     user = Repo.get!(User, user_id)
 
-    if should_send?(user, template) do
-      email = build_email(user, template, params)
+    cond do
+      stale_email_change?(user, template, params) ->
+        {:discard, "email change already settled or superseded — its #{template} is a dead link"}
 
-      case Mailer.deliver(email) do
-        {:ok, _} -> :ok
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      :ok
+      should_send?(user, template) ->
+        send_email(user, template, params)
+
+      true ->
+        :ok
+    end
+  end
+
+  # An email change can be confirmed, undone, or re-requested between enqueue and
+  # delivery. In all three the row no longer holds this job's token, and the link
+  # in the email would resolve to nothing — so the job is dropped rather than
+  # delivering a letter whose only affordance is already dead.
+  defp stale_email_change?(user, :email_change_confirmation, %{"token" => token}),
+    do: user.pending_email_token != token
+
+  defp stale_email_change?(user, :email_change_notice, %{"token" => token}),
+    do: user.pending_email_revert_token != token
+
+  defp stale_email_change?(_user, _template, _params), do: false
+
+  defp send_email(user, template, params) do
+    email = build_email(user, template, params)
+
+    case Mailer.deliver(email) do
+      {:ok, _} ->
+        # The billable unit for the email provider, counted where it actually
+        # happens. The cost page previously derived its send count from rows in
+        # `oban_jobs`, which the pruner deletes about a minute after the job
+        # finishes — so a "this month" figure only ever saw the last minute.
+        # The template is a bounded set (`@known_templates`), so it is safe as a
+        # label; no address, name or user id is attached.
+        :telemetry.execute([:stacks, :email, :delivered], %{count: 1}, %{template: template})
+        :ok
+
+      {:error, reason} ->
+        # feeds the :resend_fuse state gauge — delivery failures are the
+        # only real-traffic signal that the email provider is down
+        Stacks.CircuitBreakers.melt(:resend_fuse)
+        {:error, reason}
     end
   end
 
@@ -114,6 +153,28 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.html_body(Templates.password_reset(reset_url))
   end
 
+  defp build_email(user, :email_change_confirmation, %{"token" => token}) do
+    confirmation_url = CoreWeb.Endpoint.url() <> "/api/auth/confirm-email-change/#{token}"
+
+    # The one email in this system NOT addressed to the account's own address:
+    # it is asking an address that is not yet the account's to prove it can read.
+    Swoosh.Email.new()
+    |> Swoosh.Email.to(user.pending_email)
+    |> Swoosh.Email.from(from_address())
+    |> Swoosh.Email.subject("Confirm your new email address — The Stacks")
+    |> Swoosh.Email.html_body(Templates.email_change_confirmation(confirmation_url))
+  end
+
+  defp build_email(user, :email_change_notice, %{"token" => token}) do
+    revert_url = CoreWeb.Endpoint.url() <> "/api/auth/revert-email-change/#{token}"
+
+    Swoosh.Email.new()
+    |> Swoosh.Email.to(recipient(user))
+    |> Swoosh.Email.from(from_address())
+    |> Swoosh.Email.subject("Your email address is being changed — The Stacks")
+    |> Swoosh.Email.html_body(Templates.email_change_notice(user.pending_email, revert_url))
+  end
+
   defp build_email(user, :marketplace_sale, %{"role" => role, "book_title" => book_title}) do
     Swoosh.Email.new()
     |> Swoosh.Email.to(recipient(user))
@@ -122,12 +183,14 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.html_body(Templates.marketplace_sale(role, book_title))
   end
 
-  defp build_email(user, :gdpr_export_ready, %{"download_url" => download_url}) do
+  defp build_email(user, :gdpr_export_ready, %{"download_url" => download_url} = params) do
+    expires_in_seconds = Map.get(params, "expires_in_seconds", 86_400)
+
     Swoosh.Email.new()
     |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())
     |> Swoosh.Email.subject("Your data export is ready — The Stacks")
-    |> Swoosh.Email.html_body(Templates.gdpr_export_ready(download_url))
+    |> Swoosh.Email.html_body(Templates.gdpr_export_ready(download_url, expires_in_seconds))
   end
 
   defp build_email(user, :wishlist_availability, %{"book_title" => book_title}) do

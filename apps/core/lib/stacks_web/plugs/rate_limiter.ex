@@ -3,7 +3,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
       ETS-backed sliding-window rate limiter. Buckets: global 1000/60s per
       IP; `:auth` 60/60s per IP; `:upload` 120/60s per user; `:social` 20/60s
       per user; `:public` 200/60s per IP (`RATE_LIMIT_PUBLIC`);
-      `:password_change` 20/60s per IP.
+      `:password_change` 20/60s per IP; `:feedback` 10/60s per user.
 
       Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
       rotate IPs; NATs share them), so auth values slow naive scripts without
@@ -28,6 +28,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @public_limit 200
   @admin_limit 30
   @e2e_helper_limit 10
+  @feedback_limit 10
 
   def init(opts), do: opts
 
@@ -79,9 +80,11 @@ defmodule StacksWeb.Plugs.RateLimiter do
   defp get_limit(:e2e_helper),
     do: Application.get_env(:core, :rate_limit_e2e_helper, @e2e_helper_limit)
 
+  defp get_limit(:feedback), do: Application.get_env(:core, :rate_limit_feedback, @feedback_limit)
+
   defp get_limit(_), do: @global_limit
 
-  defp get_key(conn, bucket) when bucket in [:upload, :social] do
+  defp get_key(conn, bucket) when bucket in [:upload, :social, :feedback] do
     case conn.assigns[:guardian_default_resource] do
       nil -> get_ip(conn)
       user -> "user:#{user.id}"
@@ -118,14 +121,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   end
 
   defp get_ip(conn) do
-    {ip, source} =
-      case get_req_header(conn, "fly-client-ip") do
-        [ip | _] when ip != "" ->
-          {ip, :trusted_proxy}
-
-        _ ->
-          {conn.remote_ip |> :inet.ntoa() |> to_string(), :remote_ip}
-      end
+    {ip, source} = StacksWeb.ClientIP.get_with_source(conn)
 
     :telemetry.execute([:stacks, :rate_limit, :client_ip], %{count: 1}, %{source: source})
 

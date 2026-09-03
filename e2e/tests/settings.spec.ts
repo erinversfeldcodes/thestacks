@@ -6,6 +6,8 @@ import {
   uniqueEmail,
   mintOrSkip,
   injectSession,
+  fetchSentEmails,
+  extractLink,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
@@ -103,7 +105,7 @@ test.describe("Settings — Privacy & Consent", () => {
     );
   });
 
-  test("writing-assistant consent grants, flips the off-copy, and persists server-side", async ({
+  test("book-linking consent grants, flips the off-copy, and persists server-side", async ({
     page,
   }) => {
     await page.goto("/settings/consent");
@@ -113,7 +115,7 @@ test.describe("Settings — Privacy & Consent", () => {
     await expect(toggle).toBeVisible();
 
     const offCopy = page.getByText(
-      "Disabling this turns off the writing assistant and deletes your session history and embeddings."
+      "Your published posts are not sent to an AI model, so books you mention won't be linked automatically."
     );
 
     const waConsentPost = () =>
@@ -589,6 +591,46 @@ test.describe("Settings — Profile UI flow", () => {
     await field(page, "Current Password").fill(E2E_PASSWORD);
     await page.getByRole("button", { name: "Save Profile" }).click();
     await expect(page.getByText("Profile saved.")).toBeVisible();
+
+    // The typed address does NOT land: it parks as pending, and the account
+    // answers on the old address until the new one confirms itself. The form
+    // snaps back to the settled address and announces the wait.
+    await expect(field(page, "Email")).toHaveValue(session.email);
+    await expect(page.locator(".pending-email")).toContainText(newEmail);
+
+    // "Profile saved." is the form telling itself the news, so the account has
+    // to be read back to know anything was written.
+    //
+    // Read it back the way the reader does: reload, and look at the form. The
+    // page fetches the account on open, so the fields are the server's answer
+    // — including the pending change, which a login-time blob never carried.
+    await page.reload();
+    await expect(field(page, "Display Name")).toHaveValue("E2E Renamed User", {
+      timeout: 10000,
+    });
+    await expect(field(page, "Email")).toHaveValue(session.email);
+    await expect(page.locator(".pending-email")).toContainText(newEmail);
+
+    // Confirm from the new address's mailbox; only now does the change land.
+    const emails = await fetchSentEmails(request, newEmail);
+    test.skip(emails === null, "sent-emails helper unavailable");
+    const confirm = emails!.find((e) =>
+      /confirm-email-change/.test(`${e.html_body ?? ""} ${e.text_body ?? ""}`),
+    );
+    expect(confirm, "expected a confirm-your-new-address email").toBeTruthy();
+    const link = extractLink(
+      confirm!,
+      /\/api\/auth\/confirm-email-change\/[^"'\s]+/,
+    );
+    expect(link).toBeTruthy();
+    await page.goto(link!);
+    await expect(page).toHaveURL(/\/confirm-email\/change-confirmed/);
+
+    await page.goto("/settings/profile");
+    await expect(field(page, "Email")).toHaveValue(newEmail, {
+      timeout: 10000,
+    });
+    await expect(page.locator(".pending-email")).toHaveCount(0);
   });
 });
 
@@ -614,6 +656,18 @@ test.describe("Settings — Location UI flow", () => {
     await field(page, "City").fill("London");
     await page.getByRole("button", { name: "Save Location" }).click();
     await expect(page.getByText("Location saved.")).toBeVisible();
+
+    // Reload and read the form, for the same reason as the profile save above.
+    // This is the whole point of the location fields: a reader who sets a city
+    // and comes back tomorrow should see the city. (The stored session carries
+    // no location at all, so before the page fetched the account this reload
+    // came back blank whether or not the save had landed — which is why this
+    // assertion used to go through the API.)
+    await page.reload();
+    await expect(field(page, "Country Code")).toHaveValue("GB", {
+      timeout: 10000,
+    });
+    await expect(field(page, "City")).toHaveValue("London");
   });
 });
 
@@ -703,6 +757,28 @@ test.describe("Settings — Password UI flow", () => {
     await expect(field(page, "Current Password")).toHaveValue("");
     await expect(field(page, "New Password")).toHaveValue("");
     await expect(field(page, "Confirm New Password")).toHaveValue("");
+
+    // A password has no field to reload into, so the only honest question is
+    // which password now opens the account. Asking BOTH matters: a change that
+    // never landed leaves the old one working, and asserting only the new one
+    // would miss that.
+    const withNew = await retryOn503(
+      () =>
+        request.post("/api/auth/login", {
+          data: { email: session.email, password: "brand-new-password" },
+        }),
+      (r) => r.status()
+    );
+    expect(withNew.status(), "the new password signs in").toBe(200);
+
+    const withOld = await retryOn503(
+      () =>
+        request.post("/api/auth/login", {
+          data: { email: session.email, password: E2E_PASSWORD },
+        }),
+      (r) => r.status()
+    );
+    expect(withOld.status(), "the old password no longer signs in").toBe(401);
   });
 });
 
@@ -740,5 +816,64 @@ test.describe("Settings — Notifications UI flow", () => {
 
     await page.reload();
     await expect(toggle(page, "Price Drops")).toHaveText("On");
+  });
+});
+
+/**
+ * Analytics consent — the persistence leg the interactivity tests above cannot
+ * supply. Those assert that the toggle's label changes and that a "Saved!"
+ * button appears; both are painted from the page's own state, so they read
+ * identically whether the POST landed or was thrown away. The consent page
+ * seeds its toggles from the user's stored consent on open, so a reload is what
+ * asks the server what it kept.
+ *
+ * A minted user, because this WRITES consent: the shared `settings` suite user
+ * is read by the parallel consent tests above, and flipping its stored consent
+ * from here would race them.
+ */
+test.describe("Settings — Analytics consent persistence", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test("granting analytics consent survives a reload", async ({
+    page,
+    request,
+  }) => {
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-settings-consent"),
+    });
+    await injectSession(page, session);
+    await page.goto("/settings/consent");
+    await dismissOnboarding(page);
+
+    const analytics = page.getByTestId("analytics-consent-toggle");
+    await expect(analytics).toHaveText("Off");
+
+    const consent = page.locator(".settings-consent");
+    const saved = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/gdpr/consent") && r.request().method() === "POST",
+      { timeout: 15000 }
+    );
+    await analytics.click();
+    await consent.locator(".settings-actions button").click();
+    expect((await saved).status(), "POST /api/gdpr/consent").toBe(200);
+    await expect(
+      consent.getByRole("button", { name: "Saved!" })
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.reload();
+    await expect(page.getByTestId("analytics-consent-toggle")).toHaveText("On", {
+      timeout: 10000,
+    });
+
+    // The reloaded toggle is seeded from the session blob the app keeps in
+    // localStorage, which the app itself wrote — so the account has to be read
+    // back too, or a consent the server never stored would still show as "On"
+    // to the only reader who checks.
+    const stored = await request.get("/api/auth/me", {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    expect(stored.status(), "GET /api/auth/me").toBe(200);
+    expect((await stored.json()).user.consent_analytics).toBe(true);
   });
 });

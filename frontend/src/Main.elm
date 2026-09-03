@@ -12,6 +12,7 @@ port module Main exposing
     , PendingLogout
     , StoredAuth(..)
     , StoredAuthResolution(..)
+    , adminGateAfterEnding
     , adoptExternalAuth
     , applyPendingUndo
     , arrivalForBoot
@@ -30,6 +31,7 @@ port module Main exposing
     , parkPending
     , reconnectShouldRefetch
     , redirectAfterNavigation
+    , refreshShelfBehindOverlay
     , renewAuthToken
     , requiresAuth
     , resetPasswordDestination
@@ -51,6 +53,7 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
+import Components.AdminChrome as AdminChrome
 import Components.OnboardingOverlay as OnboardingOverlay
 import Components.Syndication as Syndication
 import Components.UserMenu as UserMenu
@@ -65,11 +68,13 @@ import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSetti
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
+import Page.Admin.Feedback as AdminFeedback
 import Page.Admin.Invites as AdminInvites
 import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.Session as AdminSession
 import Page.Admin.SourceApproval as AdminSourceApproval
+import Page.Architecture as ArchitecturePage
 import Page.Blog.Archive as BlogArchive
 import Page.Blog.Editor as BlogEditor
 import Page.Blog.Post as BlogPostPage
@@ -79,6 +84,9 @@ import Page.Bookshelf.LookingForHome as LookingForHome
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
+import Page.DataTransparency as DataTransparencyPage
+import Page.Faq as FaqPage
+import Page.Feedback as FeedbackPage
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Home as Home
@@ -245,6 +253,9 @@ type Page
     | PageCostTransparency CostTransparency.Model
     | PageMetrics MetricsPage.Model
     | PageAbout
+    | PageFaq
+    | PageDataTransparency
+    | PageArchitecture
     | PageListingRemoval ListingRemoval.Model
     | PageCatalogue Catalogue.Model
     | PageMarketplaceBrowse MarketplaceBrowse.Model
@@ -255,7 +266,9 @@ type Page
     | PageBlogArchive BlogArchive.Model
     | PageBlogEditor BlogEditor.Model
     | PageBlogPost BlogPostPage.Model
+    | PageFeedback FeedbackPage.Model
     | PageAdminSourceApproval AdminSourceApproval.Model
+    | PageAdminFeedback AdminFeedback.Model
     | PageAdminInvites AdminInvites.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminBookModeration AdminBookModeration.Model
@@ -441,6 +454,7 @@ type alias Model =
     , route : Route
     , auth : AuthState
     , adminAuth : Maybe String
+    , adminChrome : AdminChrome.Model
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
@@ -544,6 +558,7 @@ init flags url key =
       , auth =
             maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
       , adminAuth = Nothing
+      , adminChrome = AdminChrome.init
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
@@ -799,6 +814,15 @@ requiresAuth route =
         About ->
             False
 
+        Faq ->
+            False
+
+        DataTransparency ->
+            False
+
+        Architecture ->
+            False
+
         ListingRemoval ->
             False
 
@@ -944,6 +968,20 @@ initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
         initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival
 
 
+{-| What the feedback form records about where the reader was.
+
+`Route.toPattern`, never `Route.toPath`: the reader may have walked here from
+someone else's profile, and `/u/:handle` is all a bug report needs. Empty when
+they arrived directly, which is honest — nothing is invented to fill the field.
+
+-}
+feedbackContextFor : Maybe Route -> String
+feedbackContextFor maybePreviousRoute =
+    maybePreviousRoute
+        |> Maybe.map Route.toPattern
+        |> Maybe.withDefault ""
+
+
 {-| The routes behind the `:admin` pipeline. Exhaustive on purpose — a `_ -> False` catch-all would
 silently leave a newly added admin route ungated, which is the bug this whole change is fixing.
 -}
@@ -954,6 +992,9 @@ isAdminRoute route =
             True
 
         Route.AdminInvites ->
+            True
+
+        Route.AdminFeedback ->
             True
 
         Route.AdminScraperConfig ->
@@ -1099,6 +1140,15 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
         About ->
             ( PageAbout, Cmd.none )
 
+        Faq ->
+            ( PageFaq, Cmd.none )
+
+        DataTransparency ->
+            ( PageDataTransparency, Cmd.none )
+
+        Architecture ->
+            ( PageArchitecture, Cmd.none )
+
         ListingRemoval ->
             ( PageListingRemoval ListingRemoval.init, Cmd.none )
 
@@ -1111,15 +1161,18 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         SettingsProfile ->
             let
-                profileModel =
-                    case maybeAuth of
-                        Just auth ->
-                            Profile.init auth.user
+                ( model, cmd ) =
+                    Profile.initWithToken maybeToken
+                        (case maybeAuth of
+                            Just auth ->
+                                auth.user
 
-                        Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                            Nothing ->
+                                { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
+                        )
+                        origin
             in
-            ( PageSettingsProfile profileModel, Cmd.none )
+            ( PageSettingsProfile model, Cmd.map ProfileMsg cmd )
 
         SettingsPassword ->
             ( PageSettingsPassword Password.init, Cmd.none )
@@ -1207,15 +1260,13 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                 currentUserId =
                     Maybe.map (.user >> .id) maybeAuth
 
-                writingAssistantConsent =
-                    maybeAuth
-                        |> Maybe.map (.user >> .consentWritingAssistant)
-                        |> Maybe.withDefault False
-
                 ( postModel, postCmd ) =
-                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent origin
+                    BlogPostPage.init postId maybeToken currentUserId origin
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
+
+        Route.Feedback ->
+            ( PageFeedback (FeedbackPage.init (feedbackContextFor maybePreviousRoute)), Cmd.none )
 
         Route.AdminSourceApproval ->
             if isOwner maybeAuth then
@@ -1224,6 +1275,17 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                         AdminSourceApproval.init adminToken
                 in
                 ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminFeedback ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminFeedback.init adminToken
+                in
+                ( PageAdminFeedback subModel, Cmd.map AdminFeedbackMsg subCmd )
 
             else
                 ( PageNotFound, Cmd.none )
@@ -1763,7 +1825,9 @@ type Msg
     | BlogArchiveMsg BlogArchive.Msg
     | BlogEditorMsg BlogEditor.Msg
     | BlogPostMsg BlogPostPage.Msg
+    | FeedbackMsg FeedbackPage.Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
+    | AdminFeedbackMsg AdminFeedback.Msg
     | AdminInvitesMsg AdminInvites.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
@@ -1779,6 +1843,7 @@ type Msg
     | SwipeIgnored
     | OverlayBookDetailMsg BookDetail.Msg
     | EscapePressed
+    | AdminChromeMsg AdminChrome.Msg
     | OnboardingMsg OnboardingOverlay.Msg
     | OnboardingStatusReceived Bool
     | FocusResult
@@ -2051,6 +2116,11 @@ update msg model =
                         BookDetail.NoOut ->
                             ( baseModel, baseCmd )
 
+                        -- The routed page fills the window: the mutation signal
+                        -- has no covered page to correct.
+                        BookDetail.PlacementMutated ->
+                            ( baseModel, baseCmd )
+
                         BookDetail.SessionExpired ->
                             handleSessionExpiry model
 
@@ -2231,6 +2301,50 @@ update msg model =
 
                         Profile.SessionExpired ->
                             handleSessionExpiry model
+
+                        -- The nav renders the reader's name out of the stored
+                        -- session, and a profile save rewrote the account
+                        -- without rewriting that. So the corner of every page
+                        -- kept showing the old name until the reader signed out
+                        -- and back in. Re-persist through the same `saveAuth`
+                        -- port that login uses, so both paths write the blob the
+                        -- one decoder reads.
+                        Profile.IdentityChanged identity ->
+                            let
+                                withIdentity auth =
+                                    { auth
+                                        | user =
+                                            let
+                                                user =
+                                                    auth.user
+                                            in
+                                            { user
+                                                | displayName = identity.displayName
+                                                , handle = identity.handle
+                                            }
+                                    }
+
+                                ( newAuthState, persist ) =
+                                    case model.auth of
+                                        Anonymous ->
+                                            ( model.auth, Cmd.none )
+
+                                        Arriving auth ->
+                                            ( Arriving (withIdentity auth)
+                                            , saveAuth (encodeAuth (withIdentity auth))
+                                            )
+
+                                        Authenticated auth ->
+                                            ( Authenticated (withIdentity auth)
+                                            , saveAuth (encodeAuth (withIdentity auth))
+                                            )
+                            in
+                            ( { model
+                                | page = PageSettingsProfile newSubModel
+                                , auth = newAuthState
+                              }
+                            , Cmd.batch [ Cmd.map ProfileMsg subCmd, persist ]
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -2563,6 +2677,47 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        FeedbackMsg subMsg ->
+            case model.page of
+                PageFeedback subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            FeedbackPage.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        FeedbackPage.NoOut ->
+                            ( { model | page = PageFeedback newSubModel }
+                            , Cmd.map FeedbackMsg subCmd
+                            )
+
+                        FeedbackPage.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminFeedbackMsg subMsg ->
+            case model.page of
+                PageAdminFeedback subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminFeedback.update subMsg subModel
+                    in
+                    case outMsg of
+                        AdminFeedback.NoOut ->
+                            ( { model | page = PageAdminFeedback newSubModel }
+                            , Cmd.map AdminFeedbackMsg subCmd
+                            )
+
+                        AdminFeedback.SessionExpired ->
+                            handleAdminSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
         AdminSourceApprovalMsg subMsg ->
             case model.page of
                 PageAdminSourceApproval subModel ->
@@ -2678,6 +2833,21 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+        AdminChromeMsg subMsg ->
+            let
+                ( newChrome, subCmd, outMsg ) =
+                    AdminChrome.update subMsg model.adminChrome (adminTokenFor model)
+
+                withChrome =
+                    { model | adminChrome = newChrome }
+            in
+            case outMsg of
+                AdminChrome.NoOut ->
+                    ( withChrome, Cmd.map AdminChromeMsg subCmd )
+
+                AdminChrome.SessionEnded ->
+                    ( endAdminSession withChrome, Cmd.map AdminChromeMsg subCmd )
 
         AdminRemovalRequestsMsg subMsg ->
             case model.page of
@@ -2815,6 +2985,19 @@ update msg model =
                                 [ Nav.pushUrl model.key (Route.toPath route)
                                 , focusMainContent
                                 ]
+                            )
+
+                        BookDetail.PlacementMutated ->
+                            let
+                                ( refreshedPage, refreshCmd ) =
+                                    refreshShelfBehindOverlay model.page
+                                        |> Maybe.withDefault ( model.page, Cmd.none )
+                            in
+                            ( { model
+                                | bookDetailOverlay = Just updatedOverlay
+                                , page = refreshedPage
+                              }
+                            , Cmd.batch [ Cmd.map OverlayBookDetailMsg subCmd, refreshCmd ]
                             )
 
                         BookDetail.NoOut ->
@@ -3066,6 +3249,45 @@ update msg model =
 
         SwipeIgnored ->
             ( model, Cmd.none )
+
+
+{-| Re-read the page the overlay is covering, after a placement write the
+overlay reports as done.
+
+The overlay is a layer over a page that is still mounted and still rendering
+what it read on arrival, so a successful write leaves a page behind it telling
+the reader something untrue — a book on the shelf it just left. The pages named
+here are the ones whose content IS placements; a page not named keeps what it
+has, which is correct for pages a placement write does not change.
+
+The refetch is asked for as a `Msg` rather than reached for as a `Cmd` so each
+page stays the only thing that decides how to re-read itself — the read-only
+profile shelf reads from a different endpoint than the reader's own.
+
+`Nothing` is "there is nothing behind this that a placement write makes untrue",
+which is a different answer from handing back the page and an empty command:
+the caller leaves `model.page` alone rather than rewriting it with itself.
+
+-}
+refreshShelfBehindOverlay : Page -> Maybe ( Page, Cmd Msg )
+refreshShelfBehindOverlay page =
+    case page of
+        PageBookshelf shelf ->
+            let
+                ( refreshed, cmd, _ ) =
+                    Bookshelf.update Bookshelf.ReloadRequested shelf
+            in
+            Just ( PageBookshelf refreshed, Cmd.map BookshelfMsg cmd )
+
+        PageReadingPile pile ->
+            let
+                ( refreshed, cmd, _ ) =
+                    ReadingPile.update ReadingPile.ReloadRequested pile
+            in
+            Just ( PageReadingPile refreshed, Cmd.map ReadingPileMsg cmd )
+
+        _ ->
+            Nothing
 
 
 {-| Open the book detail overlay for a given book ID.
@@ -3436,6 +3658,15 @@ pageTitle page =
         PageAbout ->
             titled "About"
 
+        PageFaq ->
+            titled "Questions, Answered"
+
+        PageDataTransparency ->
+            titled "On Data Transparency"
+
+        PageArchitecture ->
+            titled "No Such Thing as a Free Lunch"
+
         PageListingRemoval _ ->
             titled "Remove a listing"
 
@@ -3486,6 +3717,12 @@ pageTitle page =
         PageAdminRemovalRequests _ ->
             titled "Removal Requests"
 
+        PageFeedback _ ->
+            titled "Tell us"
+
+        PageAdminFeedback _ ->
+            titled "Feedback"
+
         PageAdminGate _ _ ->
             titled "Admin Sign-In"
 
@@ -3503,6 +3740,15 @@ pageTitle page =
 
         PageConfirmEmail EmailConfirmFailed ->
             titled "Confirmation Failed"
+
+        PageConfirmEmail EmailChangeConfirmed ->
+            titled "Email Address Updated"
+
+        PageConfirmEmail EmailChangeReverted ->
+            titled "Change Undone"
+
+        PageConfirmEmail EmailChangeFailed ->
+            titled "Link No Longer Valid"
 
         PageResetPassword _ ->
             titled "Reset Password"
@@ -3617,6 +3863,12 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
                                     , navLink MarketplaceMyListings "My Listings"
                                     ]
                             }
+
+                        -- Groups is a built, routed page that nothing linked to:
+                        -- a reader could be invited to one, accept, and then have
+                        -- no way back to it short of keeping the URL. Signed-in
+                        -- only, because groups are not a thing a stranger browses.
+                        , navItem route Groups "Groups"
                         , navItem route About "About"
                         , if auth.user.role == "owner" then
                             navDisclosure
@@ -3630,6 +3882,8 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
                                         , navLink Route.AdminScraperConfig "Scrapers"
                                         , navLink Route.AdminBookModeration "Book Moderation"
                                         , navLink Route.AdminRemovalRequests "Removal Requests"
+                                        , navLink Route.AdminInvites "Invites"
+                                        , navLink Route.AdminFeedback "Feedback"
                                         ]
                                 }
 
@@ -3666,6 +3920,7 @@ settingsLinks =
     , { label = "Password", path = Route.toPath SettingsPassword }
     , { label = "Activity Log", path = Route.toPath SettingsAuditLog }
     , { label = "Reading Insights", path = Route.toPath Insights }
+    , { label = "Tell us", path = Route.toPath Route.Feedback }
     ]
 
 
@@ -3918,7 +4173,7 @@ viewPage model =
             Html.map ImportPageMsg (ImportPage.view subModel)
 
         PageSearch subModel ->
-            Html.map SearchMsg (Search.view subModel)
+            Html.map SearchMsg (Search.view (currentAuth model.auth /= Nothing) subModel)
 
         PageSettingsAuditLog subModel ->
             viewSettingsHub model.route
@@ -3948,6 +4203,15 @@ viewPage model =
 
         PageAbout ->
             AboutPage.view
+
+        PageFaq ->
+            FaqPage.view { inviteOnly = model.config.inviteOnly }
+
+        PageDataTransparency ->
+            DataTransparencyPage.view
+
+        PageArchitecture ->
+            ArchitecturePage.view
 
         PageListingRemoval subModel ->
             Html.map ListingRemovalMsg (ListingRemoval.view subModel)
@@ -3981,19 +4245,31 @@ viewPage model =
             Html.map BlogPostMsg (BlogPostPage.view subModel)
 
         PageAdminSourceApproval subModel ->
-            Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel)
+            viewAdminSurface model
+                (Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel))
 
         PageAdminInvites subModel ->
-            Html.map AdminInvitesMsg (AdminInvites.view subModel)
+            viewAdminSurface model
+                (Html.map AdminInvitesMsg (AdminInvites.view subModel))
 
         PageAdminScraperConfig subModel ->
-            Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)
+            viewAdminSurface model
+                (Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel))
 
         PageAdminBookModeration subModel ->
-            Html.map AdminBookModerationMsg (AdminBookModeration.view subModel)
+            viewAdminSurface model
+                (Html.map AdminBookModerationMsg (AdminBookModeration.view subModel))
 
         PageAdminRemovalRequests subModel ->
-            Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel)
+            viewAdminSurface model
+                (Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel))
+
+        PageFeedback subModel ->
+            Html.map FeedbackMsg (FeedbackPage.view subModel)
+
+        PageAdminFeedback subModel ->
+            viewAdminSurface model
+                (Html.map AdminFeedbackMsg (AdminFeedback.view subModel))
 
         PageAdminGate _ subModel ->
             Html.map AdminSessionMsg (AdminSession.view subModel)
@@ -4015,6 +4291,17 @@ viewPage model =
 
         PageNotFound ->
             viewNotFound
+
+
+{-| Every admin surface, in its chrome. Applied at the ONE place the admin
+pages already have in common — this dispatch — so a new admin page gets the
+sign-out affordance by being routed here, not by remembering to add it.
+`PageAdminGate` is deliberately not wrapped: there is no session to end on the
+page that exists because there isn't one.
+-}
+viewAdminSurface : Model -> Html Msg -> Html Msg
+viewAdminSurface model content =
+    AdminChrome.view AdminChromeMsg model.adminChrome content
 
 
 viewSettingsHub : Route -> Html Msg -> Html Msg
@@ -4097,6 +4384,30 @@ viewConfirmEmailCard status =
             , a [ class "btn btn--secondary", href (Route.toPath Login) ] [ text "Back to sign in" ]
             ]
 
+        EmailChangeConfirmed ->
+            [ h1 [ class "login-card__title" ] [ text "Email address updated" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "This is your account's address from now on — it's what you'll sign in with, and where we'll write. The link we sent to your old address no longer does anything." ]
+            , a [ class "btn btn--primary", href (Route.toPath SettingsProfile) ] [ text "Back to settings" ]
+            ]
+
+        EmailChangeReverted ->
+            [ h1 [ class "login-card__title" ] [ text "Change undone" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "Your address is unchanged and the confirmation link we sent to the new one no longer works. Every signed-in device has been signed out." ]
+            , p [ class "login-card__subtitle" ]
+                [ text "If you didn't ask for this change, change your password now — whoever asked for it could sign in as you." ]
+            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Sign in" ]
+            , a [ class "btn btn--secondary", href (Route.toPath ForgotPassword) ] [ text "Change my password" ]
+            ]
+
+        EmailChangeFailed ->
+            [ h1 [ class "login-card__title" ] [ text "This link no longer works" ]
+            , p [ class "login-card__subtitle" ]
+                [ text "Email-change links stop working once the change is settled one way or the other — confirmed, undone, or replaced by a newer request. Sign in and check your profile settings to see where your account stands." ]
+            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Sign in" ]
+            ]
+
 
 viewNotFound : Html Msg
 viewNotFound =
@@ -4111,7 +4422,7 @@ viewFooter : Html Msg
 viewFooter =
     footer [ class "app-footer" ]
         [ p [ class "app-footer__text" ]
-            [ text "The Stacks — open source book management" ]
+            [ text "The Stacks — source-available book management" ]
         ]
 
 
@@ -4139,6 +4450,16 @@ viewConnectivity connectivity =
                 ]
 
 
+{-| What the gate says to an operator who ended their own session. It names the
+thing that did NOT happen, because "signed out" on a product where the ordinary
+session and the admin session are different things would read as both being
+gone.
+-}
+adminSessionEndedNotice : String
+adminSessionEndedNotice =
+    "Your admin session has ended. Your ordinary session is untouched — sign in again to reopen the admin surfaces."
+
+
 {-| An admin API call came back unauthorised. All four admin pages used to
 call `handleSessionExpiry`, signing the operator out of the WHOLE product
 when only the deliberately short-lived admin session had lapsed.
@@ -4147,9 +4468,37 @@ the operator to the admin login with a notice.
 -}
 handleAdminSessionExpiry : Model -> ( Model, Cmd Msg )
 handleAdminSessionExpiry model =
-    ( { model
+    ( endAdminSession model, Cmd.none )
+
+
+{-| Drop the admin token and put the operator back on the admin gate, told why.
+
+⛔ One construction site on purpose. There are two ways an admin session ends —
+the operator ends it from the chrome, or an admin call 401s mid-action — and
+they were built separately: the deliberate one passed the notice, and the
+expiry one passed a bare `AdminSession.init`. So the operator who chose to sign
+out got an explanation, and the one who was signed out mid-action got a login
+form with no account of what had happened to them. Both now go through here, so
+the two cannot drift apart again.
+
+-}
+endAdminSession : Model -> Model
+endAdminSession model =
+    { model
         | adminAuth = Nothing
-        , page = PageAdminGate model.route AdminSession.init
-      }
-    , Cmd.none
-    )
+        , page = adminGateAfterEnding model.route
+    }
+
+
+{-| The gate page an operator lands on once their admin session is over —
+carrying the notice that says which session ended.
+
+Split out from `endAdminSession` because a `Model` holds a `Nav.Key`, which no
+test can construct, so the whole updater is untestable by construction. This
+half — _which page, with what on it_ — is the half that was wrong, and it is
+testable.
+
+-}
+adminGateAfterEnding : Route -> Page
+adminGateAfterEnding route =
+    PageAdminGate route (AdminSession.initWithNotice adminSessionEndedNotice)

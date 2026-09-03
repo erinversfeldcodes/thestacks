@@ -224,6 +224,14 @@ sources:
             description: Primary key (UUID).
           - name: email
             description: User email address (personal data, GDPR-protected).
+          - name: pending_email
+            description: Address a proposed email change is waiting on (personal data; excluded from staging).
+          - name: pending_email_token
+            description: Confirmation token for the pending change (secret, never exposed).
+          - name: pending_email_sent_at
+            description: When the confirmation/undo pair was sent; starts the seven-day window.
+          - name: pending_email_revert_token
+            description: Undo token mailed to the settled address (secret, never exposed).
           - name: password_hash
             description: Argon2 password hash (sensitive data, never exposed).
           - name: display_name
@@ -286,6 +294,8 @@ sources:
             description: Timestamp of the first failure in the current rolling window.
           - name: locked_until
             description: When non-null and in the future, the account is locked.
+          - name: lockout_duration_seconds
+            description: Length in seconds of the lock ending at locked_until; the next lock doubles it.
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.

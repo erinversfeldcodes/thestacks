@@ -2,10 +2,12 @@ defmodule Stacks.Workers.RefreshCostsJob do
   @moduledoc """
       Daily Oban worker that refreshes platform cost data.
 
-      Computes costs from known infrastructure pricing and actual usage metrics.
-      Pricing is derived from published rate cards (Fly.io, Modal, Neon) and the
-      actual VM specs in `deploy/fly.core.toml`. Usage-proportional costs (Modal
-      inference) are estimated from the number of vision jobs this month.
+      Prefers measured figures over estimates: the core app's own awake time
+      from its pushed metrics, and the whole-account Fly/Neon month-to-date
+      gauges a scheduled workflow computes from provider billing inputs and
+      pushes into VictoriaMetrics. Each measurement falls back independently
+      to a flat rate-card estimate when unavailable. Modal inference stays
+      estimated from the vision-job count (Modal exposes no billing API).
 
       The worker emits a `costs.refreshed` event on success.
   """
@@ -25,8 +27,27 @@ defmodule Stacks.Workers.RefreshCostsJob do
     period_start = beginning_of_month(now)
     period_end = end_of_month(now)
 
-    vision_jobs = Costs.vision_jobs_this_month()
-    cost_items = Costs.build_cost_items(period_start, period_end, vision_jobs)
+    vision_jobs = unwrap(Costs.vision_jobs_this_month())
+
+    core_awake_seconds =
+      case Costs.core_awake_seconds(period_start, now) do
+        {:ok, seconds} -> seconds
+        :error -> nil
+      end
+
+    fly_services_cents = billing_gauge("fly")
+    neon_cents = billing_gauge("neon")
+
+    cost_items =
+      Costs.build_cost_items(period_start, period_end, vision_jobs,
+        core_awake_seconds: core_awake_seconds,
+        fly_services_cents: fly_services_cents,
+        neon_cents: neon_cents,
+        together_completions: metric_count("stacks_ai_together_completion_count_total"),
+        brave_searches: metric_count("stacks_discovery_brave_search_count_total"),
+        isbn_lookups: metric_count("stacks_moderation_isbn_resolution_count_total"),
+        emails_sent: unwrap(Costs.emails_this_month())
+      )
 
     results =
       Enum.map(cost_items, fn item ->
@@ -65,6 +86,23 @@ defmodule Stacks.Workers.RefreshCostsJob do
       {:error, "#{length(failures)} cost items failed to upsert"}
     end
   end
+
+  defp billing_gauge(provider) do
+    case Costs.billing_gauge_cents(provider) do
+      {:ok, cents} -> cents
+      :error -> nil
+    end
+  end
+
+  defp metric_count(family) do
+    unwrap(Costs.metric_count_this_month(family))
+  end
+
+  # A measurement we could not take is `nil`, never 0 — every cost item has a
+  # nil clause that says the figure is unavailable, because a transparency page
+  # printing "0" would be claiming the service went unused.
+  defp unwrap({:ok, count}), do: count
+  defp unwrap(:error), do: nil
 
   defp beginning_of_month(%DateTime{} = dt) do
     %{dt | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}

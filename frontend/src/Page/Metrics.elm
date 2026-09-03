@@ -58,7 +58,11 @@ view model =
     div [ class "page page--metrics curator-desk" ]
         [ h1 [ class "page__title metrics__title" ] [ text "What we measure" ]
         , p [ class "metrics__subtitle" ]
-            [ text "A plain, honest look at what this platform observes, how it runs, and what it costs. Placeholder copy — the owner will refine this." ]
+            [ text "Everything we measure about ourselves (The Stacks platform) and you (our users) is made visible here, with the exception of anything that can be used to identify folks. That data is made visible to its owners (the users who took the actions that resulted in the metric being produced) only via their personal metrics page, available on login. The reason for this level of transparency is discussed in greater detail in "
+            , a [ class "metrics__rights-link", href "/transparency", testId "metrics-transparency-essay-link" ]
+                [ text "this piece" ]
+            , text "."
+            ]
         , case model.metrics of
             NotAsked ->
                 text ""
@@ -103,7 +107,11 @@ viewCostsWidget durable =
                     , span [ class "metrics__costs-caption" ] [ text cost.label ]
                     ]
                 , p [ class "metrics__costs-prose" ]
-                    [ text "Running a platform costs real money. Here is what it costs — and why we charge or self-host instead of the alternative: we don't sell your data. (Placeholder prose; the owner will refine this.)" ]
+                    [ text "Running a platform costs real money, so here is what it costs to run. This is currently all self-funded, so if you're not on the invite-list: read the code, take inspiration, and build something similar for yourself — but be a mensch and don't fork this one, or I'll have to come find you every time I fix a bug of my own :) For a full discussion of why all of these expenses are incurred and what the trade offs are, please see "
+                    , a [ class "metrics__rights-link", href "/architecture", testId "metrics-architecture-essay-link" ]
+                        [ text "this essay on the system's architecture" ]
+                    , text ". I hope it helps you understand why there's no such thing as a free lunch in software, and makes you push for answers from anyone claiming they're offering you something truly free of charge (no nasty terms of service turning you into a data harvesting machine)."
+                    ]
                 , viewTeaching cost
                 ]
 
@@ -116,7 +124,17 @@ viewLiveSection live =
     section [ class "metrics__section metrics__section--live", testId "metrics-live-section" ]
         [ h2 [ class "metrics__section-title" ] [ text "Live signals" ]
         , p [ class "metrics__section-lede" ]
-            [ text "The same real-time signals operators watch — shown here, not hidden." ]
+            [ text "These are the dashboards I use to monitor the health of the site, how it's performing, and to do deep dives to understand why things might have gone wrong when they inevitably do. Feel free to take a look and let me know "
+            , a
+                [ class "metrics__rights-link"
+                , href "https://github.com/erinversfeldcodes/thestacks/discussions"
+                , target "_blank"
+                , rel "noopener noreferrer"
+                , testId "metrics-discussions-link"
+                ]
+                [ text "on the repo's discussion board" ]
+            , text " if anything looks fishy or interesting to you."
+            ]
         , case live of
             LiveSignals entries ->
                 div [ class "metrics__grid" ] (List.map viewPanel entries)
@@ -132,7 +150,7 @@ viewDurableSection durable =
     section [ class "metrics__section metrics__section--durable", testId "metrics-durable-section" ]
         [ h2 [ class "metrics__section-title" ] [ text "Durable statistics" ]
         , p [ class "metrics__section-lede" ]
-            [ text "Anonymised corpus and cost totals — always aggregates, never a single reader." ]
+            [ text "Some more metrics, nerds love numbers." ]
         , div [ class "metrics__grid" ] (List.map viewPanel durable)
         ]
 
@@ -170,7 +188,7 @@ viewObserveSection =
     section [ class "metrics__section metrics__section--observe", testId "metrics-observe-section" ]
         [ h2 [ class "metrics__section-title" ] [ text "What we observe about you" ]
         , p [ class "metrics__observe-prose" ]
-            [ text "Everything above is an aggregate. Your own data is yours: you can export or erase it at any time. (Placeholder copy; the owner will refine this.)" ]
+            [ text "Everything above is an aggregate. Your own data is yours: you can export or erase it at any time." ]
         , div [ class "metrics__rights" ]
             [ h3 [ class "metrics__rights-title" ] [ text "Your data rights" ]
             , a [ class "metrics__rights-link", href "/settings/privacy" ]

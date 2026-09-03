@@ -203,7 +203,7 @@ defmodule Stacks.CostsTest do
     end
   end
 
-  describe "build_cost_items/3" do
+  describe "build_cost_items/4" do
     setup do
       now = DateTime.utc_now()
       period_start = %{now | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}
@@ -221,14 +221,16 @@ defmodule Stacks.CostsTest do
       %{period_start: period_start, period_end: period_end}
     end
 
-    test "with vision_jobs 0 yields the 5 seeded line items summing to 1168", ctx do
+    test "with vision_jobs 0 yields the 10 seeded line items summing to 1660", ctx do
       items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0)
 
-      assert length(items) == 5
+      assert length(items) == 10
 
-      assert Enum.map(items, & &1.category) == ~w(hosting hosting compute database domain)
-      assert Enum.map(items, & &1.amount_cents) == [534, 534, 0, 0, 100]
-      assert Enum.reduce(items, 0, fn i, acc -> acc + i.amount_cents end) == 1168
+      assert Enum.map(items, & &1.category) ==
+               ~w(hosting hosting compute compute database services services services services domain)
+
+      assert Enum.map(items, & &1.amount_cents) == [534, 1026, 0, 0, 0, 0, 0, 0, 0, 100]
+      assert Enum.reduce(items, 0, fn i, acc -> acc + i.amount_cents end) == 1660
 
       for item <- items do
         assert item.period_start == ctx.period_start
@@ -247,6 +249,160 @@ defmodule Stacks.CostsTest do
       modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
       assert modal.amount_cents == 21
       assert modal.description =~ "7 inferences this month"
+    end
+
+    test "without a measurement the Fly core line is the flat estimate and says so", ctx do
+      items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0, core_awake_seconds: nil)
+
+      core = Enum.find(items, &(&1.service == "Fly.io Core"))
+      assert core.amount_cents == 534
+      assert core.description =~ "estimated flat-rate"
+    end
+
+    test "with measured awake seconds the Fly core line is proportional to awake time", ctx do
+      # 42_120s awake = 11.7h; 534¢ × 42_120 / (730h × 3600) rounds to 9¢
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 0, core_awake_seconds: 42_120)
+
+      core = Enum.find(items, &(&1.service == "Fly.io Core"))
+      assert core.amount_cents == 9
+      assert core.description =~ "measured: awake 11.7h this period"
+      refute core.description =~ "estimated flat-rate"
+    end
+
+    test "a full month awake measures back to the flat monthly rate", ctx do
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 0,
+          core_awake_seconds: 730 * 3600
+        )
+
+      core = Enum.find(items, &(&1.service == "Fly.io Core"))
+      assert core.amount_cents == 534
+    end
+
+    test "third-party usage counts price their lines and land in descriptions", ctx do
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 0,
+          together_completions: 250,
+          brave_searches: 2500,
+          emails_sent: 42,
+          isbn_lookups: 87
+        )
+
+      together = Enum.find(items, &(&1.service == "Together AI"))
+      assert together.amount_cents == 25
+      assert together.description =~ "250 completions this month"
+
+      brave = Enum.find(items, &(&1.service == "Brave Search API"))
+      assert brave.amount_cents == 150
+      assert brave.description =~ "2500 of 2,000 free-tier"
+      assert brave.description =~ "500 over"
+
+      resend = Enum.find(items, &(&1.service == "Resend"))
+      assert resend.amount_cents == 0
+      assert resend.description =~ "42 of 3,000 free-tier sends"
+
+      metadata = Enum.find(items, &(&1.service == "Google Books & Open Library"))
+      assert metadata.amount_cents == 0
+      assert metadata.description =~ "87 lookups this month"
+    end
+
+    test "usage within every free tier stays at zero cents", ctx do
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 0,
+          together_completions: 0,
+          brave_searches: 1999,
+          emails_sent: 3000,
+          isbn_lookups: 0
+        )
+
+      for service <- ["Together AI", "Brave Search API", "Resend", "Axiom"] do
+        item = Enum.find(items, &(&1.service == service))
+        assert item.amount_cents == 0, "#{service} should be free at this volume"
+      end
+    end
+
+    test "usage over the resend free tier prices the paid plan", ctx do
+      items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0, emails_sent: 3001)
+
+      resend = Enum.find(items, &(&1.service == "Resend"))
+      assert resend.amount_cents == 2000
+      assert resend.description =~ "requires the $20/month plan"
+    end
+  end
+
+  describe "metric_count_this_month/1" do
+    alias Stacks.Transparency.MockPrometheusClient
+
+    setup do
+      MockPrometheusClient.reset()
+      :ok
+    end
+
+    test "rounds the month-to-date increase of the family" do
+      MockPrometheusClient.put_response({:ok, 42.7})
+
+      assert {:ok, 43} =
+               Costs.metric_count_this_month("stacks_discovery_brave_search_count_total")
+
+      query = MockPrometheusClient.last_query()
+      assert query =~ "sum(increase(stacks_discovery_brave_search_count_total{"
+    end
+
+    test "a family with no samples yet counts as zero, not an error" do
+      MockPrometheusClient.put_response({:error, :no_data})
+
+      assert {:ok, 0} = Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
+    end
+
+    test "an unreachable store is an error so callers fall back" do
+      MockPrometheusClient.put_response({:error, :nxdomain})
+
+      assert :error = Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
+    end
+  end
+
+  describe "core_awake_seconds/2" do
+    alias Stacks.Transparency.MockPrometheusClient
+
+    setup do
+      MockPrometheusClient.reset()
+      period_start = ~U[2026-08-01 00:00:00.000000Z]
+      now = ~U[2026-08-13 12:00:00.000000Z]
+      %{period_start: period_start, now: now}
+    end
+
+    test "multiplies the sample count by the push interval", ctx do
+      MockPrometheusClient.put_response({:ok, 2799.0})
+
+      assert {:ok, 41_985} = Costs.core_awake_seconds(ctx.period_start, ctx.now)
+
+      query = MockPrometheusClient.last_query()
+      assert query =~ "sum(count_over_time(stacks_fuse_state_state{"
+      assert query =~ ~s|fuse_name="vision_fuse"|
+      # the window is the elapsed period, not a fixed lookback
+      window_s = DateTime.diff(ctx.now, ctx.period_start, :second)
+      assert query =~ "[#{window_s}s]))"
+    end
+
+    test "returns :error when the metrics store is unreachable" do
+      MockPrometheusClient.put_response({:error, :nxdomain})
+
+      assert :error =
+               Costs.core_awake_seconds(
+                 ~U[2026-08-01 00:00:00.000000Z],
+                 ~U[2026-08-13 12:00:00.000000Z]
+               )
+    end
+
+    test "returns :error when the store holds no samples for the series" do
+      MockPrometheusClient.put_response({:ok, 0.0})
+
+      assert :error =
+               Costs.core_awake_seconds(
+                 ~U[2026-08-01 00:00:00.000000Z],
+                 ~U[2026-08-13 12:00:00.000000Z]
+               )
     end
   end
 
@@ -269,10 +425,10 @@ defmodule Stacks.CostsTest do
 
       costs = Costs.current_period_costs()
       assert costs != []
-      assert length(costs) == 5
+      assert length(costs) == 10
     end
 
-    test "seeded items sum to a positive total (1168 cents with Modal at 0)" do
+    test "seeded items sum to a positive total (1660 cents with Modal at 0)" do
       Costs.seed_current_period_costs()
 
       total_cents =
@@ -280,7 +436,7 @@ defmodule Stacks.CostsTest do
         |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end)
 
       assert total_cents > 0
-      assert total_cents == 1168
+      assert total_cents == 1660
     end
 
     test "every seeded row's period lies inside the current calendar month" do
@@ -290,7 +446,7 @@ defmodule Stacks.CostsTest do
       month_end = end_of_current_month()
 
       seeded_rows = Core.Repo.all(PlatformCost)
-      assert length(seeded_rows) == 5
+      assert length(seeded_rows) == 10
 
       for cost <- seeded_rows do
         assert DateTime.compare(cost.period_start, month_start) == :eq
@@ -302,7 +458,7 @@ defmodule Stacks.CostsTest do
       Costs.seed_current_period_costs()
       Costs.seed_current_period_costs()
 
-      assert length(Costs.current_period_costs()) == 5
+      assert length(Costs.current_period_costs()) == 10
     end
   end
 
@@ -312,8 +468,8 @@ defmodule Stacks.CostsTest do
 
       Costs.seed_current_period_costs()
 
-      events = collect_costs_events(5)
-      assert length(events) == 5
+      events = collect_costs_events(10)
+      assert length(events) == 10
 
       refute_receive {:telemetry_event, [:stacks, :costs, :recorded], _, _}, 50
 
@@ -328,9 +484,14 @@ defmodule Stacks.CostsTest do
       assert Enum.sort(services) ==
                Enum.sort([
                  "Fly.io Core",
-                 "Fly.io Vision Sidecar",
+                 "Fly.io Services",
                  "Modal GPU Inference",
+                 "Together AI",
                  "Neon PostgreSQL",
+                 "Resend",
+                 "Brave Search API",
+                 "Google Books & Open Library",
+                 "Axiom",
                  "Domain Registration"
                ])
     end
@@ -386,7 +547,66 @@ defmodule Stacks.CostsTest do
       refute Enum.any?(costs, &(&1.id == prior_row.id))
 
       assert "Fly.io Core" in services
-      assert length(costs) == 5
+      assert length(costs) == 10
+    end
+  end
+
+  describe "counts that must outlive the Oban pruner" do
+    alias Stacks.Transparency.MockPrometheusClient
+    # Oban's Pruner runs with its default `max_age: 60`, so a completed job row
+    # is deleted about a minute after it finishes. Any month-to-date figure
+    # derived by counting rows in `oban_jobs` therefore reported roughly the
+    # last minute of activity — on the public cost page, whose whole claim is
+    # that the numbers are measured.
+    #
+    # These pin the requirement rather than the implementation: with the job
+    # table empty, both figures must still be right, which is only possible if
+    # they no longer read it.
+
+    setup do
+      MockPrometheusClient.reset()
+      on_exit(&MockPrometheusClient.reset/0)
+      :ok
+    end
+
+    test "emails sent are counted with no delivery job rows present" do
+      MockPrometheusClient.put_response(fn promql ->
+        if String.contains?(promql, "stacks_email_delivered_count_total"),
+          do: {:ok, 3.0},
+          else: {:ok, 0.0}
+      end)
+
+      assert Core.Repo.aggregate(Oban.Job, :count) == 0
+      assert Costs.emails_this_month() == {:ok, 3}
+    end
+
+    test "vision inferences are counted with no vision job rows present" do
+      MockPrometheusClient.put_response(fn promql ->
+        if String.contains?(promql, "stacks_vision_request_stop_duration_milliseconds_count"),
+          do: {:ok, 2.0},
+          else: {:ok, 0.0}
+      end)
+
+      assert Core.Repo.aggregate(Oban.Job, :count) == 0
+      assert Costs.vision_jobs_this_month() == {:ok, 2}
+    end
+
+    test "an unreachable metric store yields no count, and never a zero" do
+      MockPrometheusClient.put_response({:error, :unreachable})
+
+      assert Costs.emails_this_month() == :error
+      assert Costs.vision_jobs_this_month() == :error
+    end
+
+    test "an unavailable inference count is not priced as zero inferences" do
+      now = DateTime.utc_now()
+
+      [modal] =
+        Costs.build_cost_items(now, now, nil)
+        |> Enum.filter(&(&1.service == "Modal GPU Inference"))
+
+      assert modal.description =~ "temporarily unavailable"
+      refute modal.description =~ "0 inferences"
     end
   end
 end

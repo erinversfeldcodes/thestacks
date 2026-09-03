@@ -8,7 +8,8 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       - locked accounts skip ArgonPool entirely and return:account_locked
       - successful logins reset the counter and clear the lock
       - expired `locked_until` auto-clears
-      - repeat lockouts within the backoff window double the duration up to a cap
+      - repeat lockouts within the backoff window double the duration, each one
+        twice the last, until they reach the cap
       - unknown emails go through the constant-time dummy-hash path
   """
 
@@ -52,6 +53,37 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       password_hash: Argon2.hash_pwd_salt(@password),
       email_confirmed: true
     )
+  end
+
+  # Drive one lockout and return the length it was set for, exactly. The
+  # statement that applies a lock writes `updated_at` from the same clock
+  # reading it adds the duration to, so the difference is the duration with no
+  # test-runtime skew in it — read back from columns the backoff calculation
+  # does not itself consult.
+  defp lock_and_measure(user) do
+    Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
+
+    locked = Repo.get!(User, user.id)
+    assert %DateTime{} = locked.locked_until
+    DateTime.diff(locked.locked_until, locked.updated_at, :second)
+  end
+
+  # The state a repeat offender actually comes back in: the lock has expired
+  # AND the failure window that earned it has elapsed, so the next round of
+  # failures opens a fresh window. Only `locked_until` and the length beside it
+  # survive as history — which is the whole reason the length is stored rather
+  # than inferred from the window.
+  defp expire_lock_and_roll_window(user) do
+    now = DateTime.utc_now()
+
+    {1, nil} =
+      Repo.update_all(
+        User |> Ecto.Query.where([u], u.id == ^user.id),
+        set: [
+          locked_until: DateTime.add(now, -1, :second),
+          failed_login_first_at: DateTime.add(now, -3_600, :second)
+        ]
+      )
   end
 
   describe "failure counter" do
@@ -173,10 +205,20 @@ defmodule Stacks.Accounts.LoginLockoutTest do
 
       past = DateTime.add(DateTime.utc_now(), -60, :second)
 
+      # The shape a real expired lock has: the window that reached the
+      # threshold opened one duration before the lock did, and the lock carries
+      # the length it was set for. A count without its window start, or a lock
+      # without its length, is not a state authenticate/2 can produce, and the
+      # lockout CHECK on op.users now rejects both.
       {1, nil} =
         Repo.update_all(
           User |> Ecto.Query.where([u], u.id == ^user.id),
-          set: [locked_until: past, failed_login_count: 3]
+          set: [
+            locked_until: past,
+            lockout_duration_seconds: 120,
+            failed_login_count: 3,
+            failed_login_first_at: DateTime.add(past, -120, :second)
+          ]
         )
 
       assert {:ok, _} = Accounts.authenticate(user.email, @password)
@@ -194,16 +236,16 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       first = Repo.get!(User, user.id)
       first_lock_seconds = DateTime.diff(first.locked_until, DateTime.utc_now())
 
+      # Age the lock out WITHOUT touching the counters. Only a successful login
+      # clears them, and it clears `locked_until` in the same statement, so a
+      # lock standing over a zeroed counter is a state no login can reach — and
+      # the lockout CHECK on op.users now says so.
       just_expired = DateTime.add(DateTime.utc_now(), -1, :second)
 
       {1, nil} =
         Repo.update_all(
           User |> Ecto.Query.where([u], u.id == ^user.id),
-          set: [
-            locked_until: just_expired,
-            failed_login_count: 0,
-            failed_login_first_at: nil
-          ]
+          set: [locked_until: just_expired]
         )
 
       Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
@@ -213,35 +255,21 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       assert second_lock_seconds > first_lock_seconds
     end
 
-    test "lockout duration is capped at max_duration_seconds" do
-      user = insert_user("cap@example.com")
+    test "each lockout doubles the one before it until it reaches the cap" do
+      user = insert_user("growth@example.com")
 
-      # Force a very recent prior lock with a duration already at the cap by
-      # placing `locked_until` just in the past with a long failed_login_first_at
-      # window — the backoff calculation should clamp at the configured cap.
-      # We test this by setting up a long-lived "history" implicitly: drive 6
-      # consecutive lockouts and assert the final duration <= max.
-      max = Application.get_env(:core, :login_lockout_max_duration_seconds)
+      durations =
+        Enum.map(1..5, fn _ ->
+          duration = lock_and_measure(user)
+          expire_lock_and_roll_window(user)
+          duration
+        end)
 
-      Enum.each(1..6, fn _ ->
-        Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
-
-        just_expired = DateTime.add(DateTime.utc_now(), -1, :second)
-
-        Repo.update_all(
-          User |> Ecto.Query.where([u], u.id == ^user.id),
-          set: [
-            locked_until: just_expired,
-            failed_login_count: 0,
-            failed_login_first_at: nil
-          ]
-        )
-      end)
-
-      Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
-      reloaded = Repo.get!(User, user.id)
-      seconds = DateTime.diff(reloaded.locked_until, DateTime.utc_now())
-      assert seconds <= max
+      # 120, doubling, clamped at the 600 configured above. An assertion on the
+      # whole sequence rather than on the last value, because a backoff that
+      # doubles once and then plateaus satisfies "the duration is at most the
+      # cap" forever without ever escalating or reaching it.
+      assert durations == [120, 240, 480, 600, 600]
     end
   end
 

@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
-# scripts/cleanup-preview.sh — destroy ephemeral preview resources for a branch.
+# scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates
+# for a branch: all five Fly apps (core included — a kept core app is how
+# suspended husks accumulated), the Modal preview app, and the Neon preview
+# branch. Safe to run multiple times; missing resources are silently skipped.
 #
-# Deletes the two Fly apps and the Neon DB branch created by deploy-preview.sh.
-# Safe to run multiple times; missing resources are silently skipped.
+# Teardown ORDER matters: the Fly apps (and with them every pooled Postgrex
+# connection) are destroyed BEFORE the Neon preview branch, so no client is
+# still pointing at the endpoint when it disappears.
 #
-# Teardown ORDER matters (D): Fly machines are stopped BEFORE the
-# Neon preview branch is deleted. The core app's pooled Postgrex connections
-# otherwise keep pointing at the deleted Neon endpoint until autostop kicks
-# in, spraying `Postgrex ... The requested endpoint could not be found`
-# errors into the core logs — harmless, but noisy enough to mask real DB
-# errors. Stopping the machines first drains the pool before the endpoint
-# disappears.
-#
-# Manual verification (2026-07-08 procedure, re-run after any reorder):
-#   1. Deploy a preview (scripts/deploy-preview.sh).
-#   2. In a second terminal: `fly logs --app stacks-core-pr-<branch>`.
-#   3. Run this script and watch the log tail through the Neon deletion —
-#      zero Postgrex "endpoint could not be found" errors after the machine
-#      stop completes.
+# The scheduled orphan sweep (scripts/sweep-preview-orphans.sh) is the
+# backstop for previews this script never ran against (manual deploys,
+# crashed CI runs).
 #
 # Required env vars:
 #   FLY_API_TOKEN   — Fly.io API token
@@ -79,22 +72,7 @@ echo "    Grafana app: ${GRAFANA_APP}"
 echo "    Modal app:   ${MODAL_APP}"
 
 if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
-    echo "    Keeping ${CORE_APP} (auto_stop_machines handles idle cost, preserves DNS)."
-
-    echo "    Stopping ${CORE_APP} machines (drain DB pool before Neon branch deletion)..."
-    { fly machines list --app "${CORE_APP}" --json 2>/dev/null || echo "[]"; } \
-        | python3 -c "
-import json,sys
-for m in json.load(sys.stdin):
-    print(m['id'])
-" 2>/dev/null \
-        | while read -r mid; do
-            [[ -z "$mid" ]] && continue
-            fly machine stop "$mid" --app "${CORE_APP}" 2>/dev/null \
-                && echo "    Stopped machine ${mid}." \
-                || echo "    Machine ${mid} already stopped (or stop failed — non-fatal)."
-        done
-
+    fly apps destroy "${CORE_APP}" --yes 2>/dev/null && echo "    Destroyed ${CORE_APP}." || echo "    ${CORE_APP} not found (already gone)."
     fly apps destroy "${SCRAPER_APP}" --yes 2>/dev/null && echo "    Destroyed ${SCRAPER_APP}." || echo "    ${SCRAPER_APP} not found (already gone)."
     fly apps destroy "${SEARXNG_APP}" --yes 2>/dev/null && echo "    Destroyed ${SEARXNG_APP}." || echo "    ${SEARXNG_APP} not found (already gone)."
     fly apps destroy "${VM_APP}" --yes 2>/dev/null && echo "    Destroyed ${VM_APP}." || echo "    ${VM_APP} not found (already gone)."

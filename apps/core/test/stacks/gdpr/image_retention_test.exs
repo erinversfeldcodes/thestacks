@@ -137,6 +137,9 @@ defmodule Stacks.GDPR.ImageRetentionTest.RecordingStorage do
   def head(_key), do: {:error, :not_found}
 
   @impl true
+  def list(_prefix), do: {:ok, []}
+
+  @impl true
   def delete(key) do
     send(self(), {:storage_delete, key})
     :ok
@@ -162,6 +165,9 @@ defmodule Stacks.GDPR.ImageRetentionTest.FailingStorage do
 
   @impl true
   def head(_key), do: {:error, :not_found}
+
+  @impl true
+  def list(_prefix), do: {:ok, []}
 
   @impl true
   def delete(_key), do: {:error, :simulated_storage_outage}

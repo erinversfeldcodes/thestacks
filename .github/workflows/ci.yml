@@ -115,12 +115,14 @@ jobs:
       e2e: ${{ steps.filter.outputs.e2e }}
       migrations: ${{ steps.filter.outputs.migrations }}
       licenses: ${{ steps.filter.outputs.licenses }}
+      platform: ${{ steps.filter.outputs.platform }}
       workflows: ${{ steps.filter.outputs.workflows }}
       docker: ${{ steps.filter.outputs.docker }}
       iac: ${{ steps.filter.outputs.iac }}
       lockfiles: ${{ steps.filter.outputs.lockfiles }}
       source: ${{ steps.filter.outputs.source }}
       vision_deps: ${{ steps.filter.outputs.vision_deps }}
+      doc_gates: ${{ steps.filter.outputs.doc_gates }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -148,6 +150,11 @@ jobs:
               - 'e2e/**'
             migrations:
               - 'apps/core/priv/repo/migrations/**'
+            platform:
+              - 'test/platform/**'
+              - 'scripts/**'
+              - 'deploy/**'
+              - '.github/actions/**'
             licenses:
               - 'mix.lock'
               - 'frontend/package-lock.json'
@@ -184,6 +191,18 @@ jobs:
               - 'scripts/**'
               - 'proto/**'
               - 'dbt/**'
+            # The gates that check documentation against code read from BOTH
+            # sides, and lived only inside the elixir and elm lanes — whose
+            # filters are 'apps/core/**' and 'frontend/**'. Neither covers
+            # docs/, dbt/ or the gate scripts, so the one change most likely to
+            # break a doc-vs-code gate — editing the doc — ran none of them.
+            doc_gates:
+              - 'docs/**'
+              - 'dbt/models/**'
+              - 'apps/core/config/config.exs'
+              - 'apps/core/lib/core_web/router.ex'
+              - 'frontend/src/**'
+              - 'scripts/check-*.sh'
 
   lint-elixir:
     needs: [changes, versions]
@@ -222,6 +241,25 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
       - run: scripts/lint-elixir.sh
+
+  lint-doc-gates:
+    # The doc-vs-code gates, run on their own inputs rather than only as a
+    # side-effect of a source lane. They need bash and python3 and nothing else,
+    # so this lane is seconds, not minutes. They still run inside
+    # scripts/lint-elixir.sh and scripts/lint-elm.sh for local `just verify` and
+    # for source-only changes.
+    needs: changes
+    if: needs.changes.outputs.doc_gates == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/check-mapping-truth.sh
+      - run: scripts/check-public-route-metering.sh
+      - run: scripts/check-oban-queue-drift.sh
+      - run: scripts/check-dbt-model-drift.sh
+      - run: scripts/check-phase-scheme.sh
+      - run: scripts/check-route-reachability.sh
 
   test-elixir:
     needs: [changes, versions]
@@ -471,13 +509,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: hadolint/hadolint-action@2a66e89f53d0771bb131a7fa31f3136336094aa6 # v3.4.0
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: deploy/Dockerfile.core
-      - uses: hadolint/hadolint-action@2a66e89f53d0771bb131a7fa31f3136336094aa6 # v3.4.0
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: deploy/Dockerfile.vision
-      - uses: hadolint/hadolint-action@2a66e89f53d0771bb131a7fa31f3136336094aa6 # v3.4.0
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: deploy/Dockerfile.scraper
 
@@ -494,9 +532,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: semgrep scan --config auto --error --sarif --output semgrep.sarif
+      # Semgrep honours `# nosemgrep: <rule-id>` for its exit code and text
+      # output, but still writes those findings into the SARIF marked
+      # `suppressions: [{kind: inSource}]` — and GitHub code scanning ignores
+      # that field, raising an alert for every reviewed-and-annotated site.
+      # Drop suppressed results before upload so an open alert always means
+      # an UNREVIEWED finding.
+      - name: Drop in-source-suppressed results from the SARIF
+        run: |
+          jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' \
+            semgrep.sarif > semgrep.filtered.sarif
+          mv semgrep.filtered.sarif semgrep.sarif
       - name: Upload semgrep SARIF to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -540,7 +589,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: bridgecrewio/checkov-action@9b70310bcd306d11740313070b940167d6b23085 # v12.3115.0
+      - uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12.3119.0
         with:
           directory: deploy/
 
@@ -604,6 +653,22 @@ jobs:
       - name: Check licences
         run: scripts/check-licenses.sh
 
+  platform-suites:
+    needs: changes
+    if: needs.changes.outputs.platform == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install suite dependencies
+        run: |
+          pip3 install --quiet pyyaml
+          mkdir -p "$HOME/.local/bin"
+          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/5db9d9cde2f3deb5035dea3e45f0a9fff2f29448/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Platform shell suites
+        run: bash test/platform/run_all.sh
+
   trufflehog:
     needs: changes
     runs-on: ubuntu-latest
@@ -612,7 +677,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0
+      - uses: trufflesecurity/trufflehog@20652fbbdefffcdaa493a5bf57ab2ac6b1db715b # v3.97.1
         with:
           path: '.'
           base: main
@@ -861,6 +926,13 @@ jobs:
           python3 scripts/gen_python_proto.py --language rust
           python3 scripts/gen_python_proto.py --language python
           scripts/gen-elm-proto.sh
+          # The Elixir pair as well: `mix eval.vision` runs mix ON THE RUNNER
+          # (not in Docker), and the gitignored generated schemas are the
+          # difference between the eval scoring the model and dying at compile
+          # with "Stacks.Accounts.User.__struct__/1 is undefined" — which the
+          # gate then mis-reported as a model regression.
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: playwright-cache
         with:

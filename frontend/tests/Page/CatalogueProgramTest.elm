@@ -18,6 +18,7 @@ import SimulatedEffect.Process
 import SimulatedEffect.Task
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 suite : Test
@@ -68,24 +69,10 @@ catalogueInitEffects maybeToken =
     case maybeToken of
         Just token ->
             SimulatedEffect.Cmd.batch
-                [ SimulatedEffect.Http.request
-                    { method = "GET"
-                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                    , url = "/api/catalogue?sort=title&page=1"
-                    , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived Api.catalogueResponseDecoder
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
-                , SimulatedEffect.Http.request
-                    { method = "GET"
-                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                    , url = "/api/placements/mine"
-                    , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson Catalogue.UserPlacementsLoaded Api.placementsMineDecoder
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
+                [ fetchSimulated (Tuple.first (Catalogue.init (Just token))) maybeToken
+                , TestHelpers.authedRequestFromSpec Api.getUserPlacementsRequest
+                    token
+                    (SimulatedEffect.Http.expectJson Catalogue.UserPlacementsLoaded Api.placementsMineDecoder)
                 ]
 
         Nothing ->
@@ -127,17 +114,12 @@ catalogueEffects msg model maybeToken =
         Catalogue.PlaceOnShelf shelfName bookId ->
             case maybeToken of
                 Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/bookshelves/" ++ shelfName ++ "/placements"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object [ ( "book_id", Encode.string bookId ) ])
-                        , expect = SimulatedEffect.Http.expectStringResponse (Catalogue.PlaceBookCompleted shelfName bookId) Api.placeResponseToResult
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
+                    TestHelpers.authedRequestFromSpec (Api.placeBookRequest shelfName bookId)
+                        token
+                        (SimulatedEffect.Http.expectStringResponse
+                            (Catalogue.PlaceBookCompleted shelfName bookId)
+                            Api.placeResponseToResult
+                        )
 
                 Nothing ->
                     SimulatedEffect.Cmd.none
@@ -150,31 +132,9 @@ fetchSimulated : Catalogue.Model -> Maybe String -> SimulatedEffect Catalogue.Ms
 fetchSimulated model maybeToken =
     case maybeToken of
         Just token ->
-            let
-                searchParam =
-                    if String.isEmpty model.search then
-                        ""
-
-                    else
-                        "&search=" ++ model.search
-
-                subjectParam =
-                    case model.activeSubject of
-                        Just subject ->
-                            "&subject=" ++ subject
-
-                        Nothing ->
-                            ""
-            in
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/catalogue?sort=" ++ model.sort ++ "&page=" ++ String.fromInt model.page ++ searchParam ++ subjectParam
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived Api.catalogueResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec (Catalogue.catalogueRequest model)
+                token
+                (SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived Api.catalogueResponseDecoder)
 
         Nothing ->
             SimulatedEffect.Cmd.none

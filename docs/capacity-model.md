@@ -42,7 +42,7 @@ The Elm frontend renders a continuous bookcase of spine components. Each spine i
 
 ### Measurement plan
 
-- During Phase 1F Wave 1: Generate a fixture of 500 books and 2,000 books. Run `elm-benchmark` against the `groupIntoRows` and spine-rendering logic.
+- During Phase 1 (extended): Generate a fixture of 500 books and 2,000 books. Run `elm-benchmark` against the `groupIntoRows` and spine-rendering logic.
 - Add `Performance.now()` timing in `Main.elm` for overlay open events. Send timing via a port to be surfaced on the metrics dashboard.
 - Lighthouse CI runs on every CI build against the production URL (or a preview URL). Budget defined in `lighthouse-budget.json`.
 
@@ -89,7 +89,7 @@ endpoints, not just the auth routes.
 
 ### Enforcement
 
-Latency is measured via Phoenix Telemetry events (`[:phoenix, :endpoint, :stop]`) and exported via PromEx. The metrics dashboard (Phase 1E.3) surfaces:
+Latency is measured via Phoenix Telemetry events (`[:phoenix, :endpoint, :stop]`) and exported via PromEx. The metrics dashboard (US-5.1.1, Phase 4 (Polish) — since superseded by the Grafana stack, ADR-021) surfaces:
 - P50/P95/P99 per endpoint over rolling 1h / 24h windows
 - Alert badges when thresholds are exceeded
 

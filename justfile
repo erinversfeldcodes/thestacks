@@ -63,11 +63,12 @@ setup:
     bash setup.sh
 
 # Make a fresh git worktree buildable (idempotent). Run it from INSIDE the
-# worktree. Copies the untracked state a worktree does not inherit — .env, the
-# proto-generated gen/ tree, the esbuild index.html — then runs deps.get and all
-# FIVE codegen targets, and verifies there is no drift. A no-op in the main
-# checkout. Agents building in worktrees should run this first, instead of
-# rediscovering the steps by hand.
+# worktree. Materialises the LFS textures (pointer files otherwise get bundled
+# into the assets), copies the untracked state a worktree does not inherit —
+# .env, the proto-generated gen/ tree, the esbuild index.html — then runs
+# deps.get, seeds e2e/node_modules, and runs all FIVE codegen targets, and
+# verifies there is no drift. A no-op in the main checkout. Agents building in
+# worktrees should run this first, instead of rediscovering the steps by hand.
 bootstrap-worktree *ARGS:
     bash scripts/bootstrap-worktree.sh {{ARGS}}
 
@@ -282,11 +283,28 @@ test-e2e-ci:
 check-licenses:
     scripts/check-licenses.sh
 
+# Does every API route have a client that calls it? Runs inside lint-elixir too.
+#   just check-route-clients             # the gate, as CI runs it
+#   just check-route-clients --report    # every route, its call site, and how it matched
+check-route-clients *ARGS:
+    @bash scripts/check-route-clients.sh {{ARGS}}
+
+# Score the deployed vision model against the labelled corpus.
+#
+# Needs a live vision service: pass the URL, or export VISION_SERVICE_URL. Without
+# one the task SKIPS and says so — which is honest locally and useless as a gate,
+# so the deploy path sets EVAL_VISION_REQUIRED=1 to turn that skip into a failure.
+#
+#   just eval-vision <url>            # score against the baseline
+#   just eval-vision <url> --record   # pin today's score as the new baseline
+eval-vision URL="" *ARGS:
+    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" mix eval.vision {{ARGS}}
+
 # Lint changed migrations with squawk
 squawk:
     scripts/security-squawk.sh
 
-# Run deployed-only tests against a preview stack (requires TEST_TARGET=deployed)
+# Run deployed-only tests against a preview stack (requires DATABASE_URL + BASE_URL)
 test-deployed:
     bash scripts/test-deployed.sh
 
@@ -472,6 +490,35 @@ observe:
 observe-down:
     docker compose -f infra/local-observability/docker-compose.yml down
 
+# On the same images/Dockerfiles prod runs, so the pipeline mechanisms can be
+# proven on a laptop — a pushed metric reaching the public /metrics page, a
+# scrape reaching a database row. Ingestion is PUSH here, matching prod, which
+# is what makes it a proof rather than a demo; `just observe` scrapes instead,
+# and the two cannot run together because both bind 8428.
+#
+# Phoenix and the Rust scraper run natively beside it — see docs/local-full-stack.md.
+# Grafana (no login): http://localhost:3010 · VictoriaMetrics: http://localhost:8428
+#
+# Bring up the local full-stack profile: VictoriaMetrics + Grafana + SearXNG.
+local-stack-up:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # SearXNG's Dockerfile COPYs a rendered settings file that never lands in
+    # git (it carries the secret). Prod renders it in deploy-stack.sh; render it
+    # here too, or the build fails on a missing COPY source.
+    sed "s|__SEARXNG_SECRET_KEY__|${SEARXNG_SECRET_KEY:-local-dev-searxng-secret}|g" \
+        deploy/searxng/settings.yml > deploy/searxng/settings.rendered.yml
+    trap 'rm -f deploy/searxng/settings.rendered.yml' EXIT
+    docker compose -f deploy/local/docker-compose.yml up -d --build
+    docker compose -f deploy/local/docker-compose.yml ps
+
+# Keeps the vm-data volume, so a metric pushed before lunch is still queryable
+# after it.
+#
+# Stop + remove the local full-stack profile.
+local-stack-down:
+    docker compose -f deploy/local/docker-compose.yml down
+
 # Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement): evaluates
 # EVERY dashboard panel's real PromQL against a live VictoriaMetrics (seeded with
 # synthesized well-formed data) and fails on any blank panel or malformed query.
@@ -489,3 +536,27 @@ render-gate:
 #   just wave-status staff-campaign-2026-07-27 --next
 wave-status *ARGS:
     @bash scripts/wave-status.sh {{ARGS}}
+
+# Residual-findings sweep: open residue-ledger rows, not_started campaign items,
+# and DoD residue phrases citing no follow-up number. Reading aid for a campaign's
+# Stage 0 (the frame must absorb any row whose due_when is satisfied). Exists
+# because the 2026-08 retro showed findings recorded as prose get lost — detection
+# was never the weak link, retention was.
+campaign-residue:
+    @bash scripts/campaign-residue.sh
+
+# Run the project-tools MCP server's own test suite. These tests existed for
+# months with NO caller anywhere — green by definition, catching nothing.
+test-mcp:
+    @bash scripts/test-mcp.sh 2>&1 | tail -3
+
+# Lint ONE migration file through squawk with the project's config — the
+# manual sibling of the security-squawk CI gate, for trying a migration
+# before committing it.
+squawk-migration file:
+    @bash scripts/security-squawk-test-wrapper.sh {{file}}
+
+# Regenerate the WebGL bookshelf textures/concept art (writes into the repo;
+# needs Replicate credentials). Occasional art tooling, not a build step.
+gen-textures:
+    @python3 scripts/generate-textures.py

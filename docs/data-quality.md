@@ -188,7 +188,7 @@ The distinction between "scraper config broken" (config issue) and "source block
 
 ## 4. Metrics Dashboard Requirements
 
-The metrics dashboard (Phase 1E.3 / Wave 4) must include the following data quality panels:
+The metrics dashboard (US-5.1.1, Phase 4 (Polish) — since superseded by the Grafana stack, ADR-021) must include the following data quality panels:
 
 ### Panel: Data Freshness Overview
 

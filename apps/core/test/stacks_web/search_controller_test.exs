@@ -87,9 +87,13 @@ defmodule StacksWeb.SearchControllerTest do
       assert hit["book"]["author"]["name"] == "Ursula K. Le Guin"
     end
 
-    test "returns 401 without authentication" do
-      conn = build_conn() |> get("/api/search", q: "test")
-      assert json_response(conn, 401)
+    test "answers an anonymous caller instead of walling them out" do
+      insert_book_with_edition(title: "Open Stack Primer", isbn: "9780000000255")
+
+      response = build_conn() |> get("/api/search", q: "Open Stack Primer") |> json_response(200)
+
+      titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
+      assert "Open Stack Primer" in titles
     end
   end
 
@@ -348,6 +352,68 @@ defmodule StacksWeb.SearchControllerTest do
       assert Map.has_key?(hit, "owner_handle")
       assert Map.has_key?(hit, "price")
       assert Map.has_key?(hit, "bookshelf_name")
+    end
+  end
+
+  describe "GET /api/search — anonymous callers" do
+    test "an age-restricted book is absent from an anonymous caller's hits" do
+      insert_book_with_edition(title: "Cellar Ledger", isbn: "9780000000262")
+
+      insert(:book,
+        title: "Cellar Ledger Unabridged",
+        visibility_tier: "age_gated",
+        editions: [build(:primary_book_edition, isbn: "9780000000279")]
+      )
+
+      response = build_conn() |> get("/api/search", q: "Cellar Ledger") |> json_response(200)
+      titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
+
+      assert "Cellar Ledger" in titles
+      refute "Cellar Ledger Unabridged" in titles
+    end
+
+    test "the same query returns a shelf section to its owner and none to an anonymous caller",
+         %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Reading Room Register", isbn: "9780000000286")
+      place(user, book, "library")
+
+      owner_response =
+        conn |> get("/api/search", q: "Reading Room Register") |> json_response(200)
+
+      anon_response =
+        build_conn() |> get("/api/search", q: "Reading Room Register") |> json_response(200)
+
+      assert Enum.map(owner_response["collection"], & &1["book"]["id"]) == [book.id]
+      assert anon_response["collection"] == []
+      assert book.id in Enum.map(anon_response["platform_hits"], & &1["book"]["id"])
+    end
+
+    test "another reader's handle and asking price never reach an anonymous caller",
+         %{conn: conn} do
+      seller = insert(:user, handle: "quiet_dealer")
+      offered = insert_book_with_edition(title: "Foxed Endpapers", isbn: "9780000000293")
+      place(seller, offered, "looking_for_home", listing_status: "active")
+
+      listed = insert_book_with_edition(title: "Foxed Marginalia", isbn: "9780000000309")
+      insert(:listing, book: listed, seller: seller, status: "active", price_cents: 9_500)
+
+      anon_response = build_conn() |> get("/api/search", q: "Foxed") |> json_response(200)
+      hits = anon_response["platform_hits"]
+      hit_ids = hits |> Enum.map(& &1["book"]["id"]) |> Enum.sort()
+
+      assert hit_ids == Enum.sort([offered.id, listed.id])
+      assert Enum.map(hits, & &1["owner_handle"]) == ["", ""]
+      assert Enum.map(hits, & &1["source"]) == ["", ""]
+      assert Enum.map(hits, & &1["price"]) == ["", ""]
+
+      authed_response = conn |> get("/api/search", q: "Foxed") |> json_response(200)
+
+      authed_handles =
+        authed_response["platform_hits"]
+        |> Enum.map(& &1["owner_handle"])
+        |> Enum.sort()
+
+      assert authed_handles == ["quiet_dealer", "quiet_dealer"]
     end
   end
 

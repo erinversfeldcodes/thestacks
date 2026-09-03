@@ -170,7 +170,7 @@ test.describe("Home page — unauthenticated", () => {
 });
 
 test.describe("Platform footer", () => {
-  const FOOTER_TEXT = "The Stacks — open source book management";
+  const FOOTER_TEXT = "The Stacks — source-available book management";
 
   test("footer renders on the home page (unauthenticated)", async ({ page }) => {
     await page.goto("/");
@@ -197,7 +197,7 @@ test.describe("Platform footer — authenticated", () => {
     const footer = page.locator("footer.app-footer");
     await expect(footer).toBeVisible();
     await expect(footer.locator("p.app-footer__text")).toHaveText(
-      "The Stacks — open source book management"
+      "The Stacks — source-available book management"
     );
   });
 });

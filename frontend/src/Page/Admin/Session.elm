@@ -4,6 +4,7 @@ module Page.Admin.Session exposing
     , OutMsg(..)
     , enrolmentSecret
     , init
+    , initWithNotice
     , update
     , view
     )
@@ -74,6 +75,15 @@ init =
     , notice = Nothing
     , busy = False
     }
+
+
+{-| The gate, opened with something to say — the operator arrived here on
+purpose (they ended their session) rather than by being turned away, and a form
+with no explanation would read as the sign-in having failed.
+-}
+initWithNotice : String -> Model
+initWithNotice notice =
+    { init | notice = Just notice }
 
 
 {-| The `secret=` parameter from an `otpauth://` provisioning URI, **base32, unmodified**.
@@ -274,6 +284,14 @@ authErrorMessage err =
 
         AdminAuthTransport Http.NetworkError ->
             "No connection to the server. Check your network, then try again."
+
+        AdminAuthTransport (Http.BadStatus status) ->
+            -- The server ANSWERED — with a refusal we could not interpret.
+            -- Claiming unreachability here sent operators debugging their
+            -- network when the true story was their session.
+            "The server refused that request (HTTP "
+                ++ String.fromInt status
+                ++ "). Sign in again — if it repeats, the refusal is worth reading in the server logs."
 
         AdminAuthTransport _ ->
             "Could not reach the server. Please try again."

@@ -45,17 +45,17 @@ co-owners of.
 > *(Source material for user-facing copy.)*
 
 If you opt in, some of the data you generate on The Stacks — your reading
-history, your writing, the way you interact with the writing assistant, your
-marketplace activity — becomes part of a dataset we license to other
-organisations who want to train AI models or study reading behaviour.
+history, your writing, your marketplace activity — becomes part of a dataset we
+license to other organisations who want to train AI models or study reading
+behaviour.
 
 You get paid. You can turn it off at any time. When you do, your data is
 removed from the dataset we hold, and every organisation that bought a copy
 is contractually required to delete your contributions from theirs too.
 
 This is not the only way your data is used — the normal features of the
-platform (your library, the writing assistant, search) use your data to make
-those features work. This is a separate, opt-in program on top.
+platform (your library, search) use your data to make those features work. This
+is a separate, opt-in program on top.
 
 You should read Section 4 before deciding. It explains honestly what can and
 can't be guaranteed once data leaves our systems.
@@ -72,8 +72,8 @@ per tier — opting into one does not opt you into any other.
 | **T1 — Shelf behaviour** | Placements, moves, abandons, rereads, format choices | High (preference trajectories) | Medium | Per-user events OK with k-anon |
 | **T2 — Marketplace signals** | Condition grades, price-at-sale, time-to-sell, listing outcomes | High (scarce: second-hand with outcome) | High for individual rows | Aggregate to per-ISBN distributions |
 | **T3 — Third-space venues & events** | Venue metadata, event metadata, author links | Medium (novel: literary geography) | Low (public entities, opt-out flag already exists) | Per-row OK |
-| **T4 — Writing assistant interaction metadata** | Prompt IDs, retrieved books, feedback signals, session depth, mode distribution, time-to-revision | Very high (prompt-effectiveness, retrieval quality, behavioural RLHF) | Medium (retrieval-set fingerprinting) | Per-session w/ k-anon, or aggregate to book/prompt |
-| **T5 — Writing assistant dialogue prose** | Actual turn text (user + assistant) | Highest (Socratic dialogue pairs with feedback labels — nearly nonexistent publicly) | Very high (style fingerprint) | Per-turn with strong consent gate |
+| ~~**T4 — Writing assistant interaction metadata**~~ | — | — | — | **Not available. Retired 2026-08-19 with the writing-assistant claim: the feature was designed and never built, so it produces no interactions to license. If it is ever built, this tier has to be re-argued from what it actually generates, not from what was once imagined.** |
+| ~~**T5 — Writing assistant dialogue prose**~~ | — | — | — | **Not available, same reason as T4. There is no dialogue.** |
 | **T6 — Blog post prose** | Published and/or private post text | Highest (long-form grounded prose) | Very high (style fingerprint + public cross-link) | Per-post with strong consent gate |
 
 ### 3.1 Current Design Decision: Prose Included (T5, T6)

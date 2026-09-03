@@ -764,4 +764,91 @@ defmodule Stacks.CircuitBreakersTest do
              "expected [:stacks, :fuse, :probe_failed] with reason :no_probe, got: #{inspect(events)}"
     end
   end
+
+  defmodule RecordingProbeClient do
+    @moduledoc false
+    @behaviour Stacks.CircuitBreakers.ProbeHttpClientBehaviour
+
+    @impl true
+    def get(url, headers) do
+      send(Process.whereis(:probe_recording_test), {:probe_get, url, headers})
+      {:ok, 200}
+    end
+  end
+
+  describe "third-party probes (neon / resend / nominatim)" do
+    setup do
+      Process.register(self(), :probe_recording_test)
+      original = Application.get_env(:core, :circuit_breaker_probe_http_client)
+      Application.put_env(:core, :circuit_breaker_probe_http_client, RecordingProbeClient)
+
+      original_mailer = Application.get_env(:core, Stacks.Email.Mailer)
+
+      on_exit(fn ->
+        Application.put_env(:core, :circuit_breaker_probe_http_client, original)
+
+        if original_mailer do
+          Application.put_env(:core, Stacks.Email.Mailer, original_mailer)
+        else
+          Application.delete_env(:core, Stacks.Email.Mailer)
+        end
+      end)
+
+      :ok
+    end
+
+    test "probe_resend without an api key cannot probe and says so" do
+      Application.put_env(:core, Stacks.Email.Mailer, [])
+
+      assert {:error, :api_key_not_configured} = CircuitBreakers.probe_resend()
+      refute_receive {:probe_get, _, _}, 50
+    end
+
+    test "probe_resend authenticates exactly like the production mailer" do
+      Application.put_env(:core, Stacks.Email.Mailer, api_key: "probe-resend-key")
+
+      assert :ok = CircuitBreakers.probe_resend()
+
+      assert_receive {:probe_get, "https://api.resend.com/domains", headers}
+      assert {"authorization", "Bearer probe-resend-key"} in headers
+    end
+
+    test "probe_nominatim hits the public status endpoint" do
+      assert :ok = CircuitBreakers.probe_nominatim()
+      assert_receive {:probe_get, "https://nominatim.openstreetmap.org/status", _headers}
+    end
+
+    test "every registered fuse has a probe except the store-fuse family" do
+      # a fuse without a probe stays blown until the reset backstop — every
+      # named third party must be probeable
+      for {fuse, _spec} <- [
+            vision_fuse: nil,
+            together_ai_fuse: nil,
+            open_library_fuse: nil,
+            google_books_fuse: nil,
+            scraper_fuse: nil,
+            brave_fuse: nil,
+            searxng_fuse: nil,
+            r2_fuse: nil,
+            nominatim_fuse: nil,
+            neon_fuse: nil,
+            resend_fuse: nil,
+            log_shipper_fuse: nil
+          ] do
+        assert function_exported?(
+                 CircuitBreakers,
+                 String.to_atom("probe_" <> probe_base(fuse)),
+                 0
+               ),
+               "no probe function for #{fuse}"
+      end
+    end
+
+    defp probe_base(fuse) do
+      fuse |> Atom.to_string() |> String.replace_suffix("_fuse", "") |> probe_alias()
+    end
+
+    defp probe_alias("together_ai"), do: "together_ai"
+    defp probe_alias(other), do: other
+  end
 end

@@ -379,10 +379,6 @@ models:
         description: Resource type.
       - name: resource_id
         description: Resource id.
-      - name: ip_address
-        description: Ip address.
-      - name: metadata
-        description: Metadata.
       - name: occurred_at
         description: Occurred at.
       - name: endpoint
@@ -463,8 +459,6 @@ models:
           - unique
       - name: owner_id
         description: Owner id.
-      - name: name
-        description: Name.
       - name: type
         description: Type.
       - name: visibility
@@ -645,8 +639,6 @@ models:
         description: Sender id.
       - name: type
         description: Type.
-      - name: body
-        description: Body.
       - name: amount_cents
         description: Amount cents.
       - name: created_at
@@ -669,10 +661,6 @@ models:
         description: Pricing mode.
       - name: price_cents
         description: Price cents.
-      - name: contact_info
-        description: Contact info.
-      - name: description
-        description: Description.
       - name: status
         description: Status.
       - name: currency
@@ -719,12 +707,8 @@ models:
         description: Amount cents.
       - name: currency
         description: Currency.
-      - name: payment_provider_ref
-        description: Payment provider ref.
       - name: payment_status
         description: Payment status.
-      - name: shipping_provider_ref
-        description: Shipping provider ref.
       - name: shipping_status
         description: Shipping status.
       - name: shipping_cost_cents

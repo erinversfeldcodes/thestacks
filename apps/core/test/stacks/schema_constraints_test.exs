@@ -14,7 +14,10 @@ defmodule Stacks.SchemaConstraintsTest do
 
   alias Core.Repo
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Accounts.User
   alias Stacks.Shelving.Placement
+
+  @password "schema-constraints-test-password"
 
   defp raw_edition(book_id, overrides) do
     now = DateTime.utc_now()
@@ -311,6 +314,158 @@ defmodule Stacks.SchemaConstraintsTest do
       assert library.book_edition_id == edition.id
       assert wishlist.book_edition_id == edition.id
     end
+  end
+
+  describe "op.users password reset pair CHECK (20260819120000)" do
+    test "an out-of-band write cannot leave a token with no issue time" do
+      user = insert(:user)
+
+      error = assert_raise Postgrex.Error, fn -> set_user!(user, password_reset_token: "tok") end
+
+      assert error.postgres.code == :check_violation
+      assert error.postgres.constraint == "users_password_reset_pair_consistent"
+    end
+
+    test "an out-of-band write cannot leave an issue time with no token" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user, password_reset_sent_at: DateTime.utc_now())
+        end
+
+      assert error.postgres.constraint == "users_password_reset_pair_consistent"
+    end
+
+    test "the ordinary reset path sets both halves, and spending the link clears both" do
+      user = insert(:user)
+
+      assert :ok = Stacks.Email.send_password_reset(user.email)
+
+      issued = Repo.reload!(user)
+      assert is_binary(issued.password_reset_token)
+      assert %DateTime{} = issued.password_reset_sent_at
+
+      assert {:ok, _} = Stacks.Email.reset_password(issued.password_reset_token, "a new password")
+
+      spent = Repo.reload!(user)
+      assert is_nil(spent.password_reset_token)
+      assert is_nil(spent.password_reset_sent_at)
+    end
+  end
+
+  describe "op.users login lockout state CHECK (20260819120000, 20260819154412)" do
+    test "a failure count with no window start is rejected" do
+      user = insert(:user)
+
+      error = assert_raise Postgrex.Error, fn -> set_user!(user, failed_login_count: 3) end
+
+      assert error.postgres.code == :check_violation
+      assert error.postgres.constraint == "users_login_lockout_state_consistent"
+    end
+
+    test "a window start with no failures counted in it is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user, failed_login_first_at: DateTime.utc_now())
+        end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent"
+    end
+
+    test "a lock standing over a cleared failure history is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user,
+            locked_until: DateTime.add(DateTime.utc_now(), 900, :second),
+            lockout_duration_seconds: 900
+          )
+        end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent",
+             "only a successful login zeroes the counter, and it clears the lock in " <>
+               "the same statement — a lock with no history behind it is unreachable"
+    end
+
+    test "a lock with no recorded length is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user,
+            locked_until: DateTime.add(DateTime.utc_now(), 900, :second),
+            failed_login_count: 3,
+            failed_login_first_at: DateTime.utc_now()
+          )
+        end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent",
+             "the escalation reads the previous lock's length off the row — a lock " <>
+               "that did not record its own length cannot be doubled"
+    end
+
+    test "a recorded lock length with no lock is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn -> set_user!(user, lockout_duration_seconds: 900) end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent"
+    end
+
+    test "a lock length of zero is rejected" do
+      user = insert(:user)
+
+      error =
+        assert_raise Postgrex.Error, fn ->
+          set_user!(user,
+            locked_until: DateTime.add(DateTime.utc_now(), 900, :second),
+            lockout_duration_seconds: 0,
+            failed_login_count: 3,
+            failed_login_first_at: DateTime.utc_now()
+          )
+        end
+
+      assert error.postgres.constraint == "users_login_lockout_state_consistent",
+             "a lock of zero seconds is one nobody was ever held by"
+    end
+
+    test "an expired lock may outlive its window, because a later failure rolls the count to 1" do
+      user = insert(:user)
+      past = DateTime.add(DateTime.utc_now(), -60, :second)
+
+      assert {1, _} =
+               set_user!(user,
+                 locked_until: past,
+                 lockout_duration_seconds: 900,
+                 failed_login_count: 1,
+                 failed_login_first_at: DateTime.utc_now()
+               )
+    end
+
+    test "every state authenticate/2 produces is accepted" do
+      user = insert(:user, password_hash: Argon2.hash_pwd_salt(@password), email_confirmed: true)
+
+      assert {:error, :invalid_credentials} = Stacks.Accounts.authenticate(user.email, "wrong")
+      counting = Repo.reload!(user)
+      assert counting.failed_login_count == 1
+      assert %DateTime{} = counting.failed_login_first_at
+
+      assert {:ok, _} = Stacks.Accounts.authenticate(user.email, @password)
+      cleared = Repo.reload!(user)
+      assert cleared.failed_login_count == 0
+      assert is_nil(cleared.failed_login_first_at)
+      assert is_nil(cleared.locked_until)
+      assert is_nil(cleared.lockout_duration_seconds)
+    end
+  end
+
+  defp set_user!(user, changes) do
+    Repo.update_all(from(u in User, where: u.id == ^user.id), set: changes)
   end
 
   defp family_count(user_id) do

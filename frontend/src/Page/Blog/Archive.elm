@@ -2,13 +2,14 @@ module Page.Blog.Archive exposing
     ( Model
     , Msg
     , init
+    , previewOf
     , update
     , view
     )
 
 import Api
 import Components.VisibilityBadge as VisibilityBadge
-import Html exposing (Html, a, div, h1, h2, li, p, text, ul)
+import Html exposing (Html, a, div, h1, h2, li, p, span, text, ul)
 import Html.Attributes exposing (class, href)
 import Http
 import Navigation.Route as Route exposing (Route(..))
@@ -82,14 +83,56 @@ view model =
         ]
 
 
+{-| How much of a post the archive shows before asking the reader to open it.
+
+Bounded by characters, not by lines. Markdown does not hard-wrap, so a
+paragraph is a single line — taking "the first two lines" took the first two
+paragraphs entire, and a post that opened with a long paragraph printed the
+whole thing into the list.
+
+-}
+previewLimit : Int
+previewLimit =
+    200
+
+
+{-| A bounded, single-line excerpt of a post body, cut at a word boundary and
+marked with an ellipsis when there is more to read.
+-}
+previewOf : String -> String
+previewOf body =
+    let
+        flattened =
+            body
+                |> String.lines
+                |> List.map String.trim
+                |> List.filter (not << String.isEmpty)
+                |> String.join " "
+    in
+    if String.length flattened <= previewLimit then
+        flattened
+
+    else
+        let
+            cut =
+                String.left previewLimit flattened
+
+            atWordBoundary =
+                case List.reverse (String.indexes " " cut) of
+                    lastSpace :: _ ->
+                        String.left lastSpace cut
+
+                    [] ->
+                        cut
+        in
+        atWordBoundary ++ "…"
+
+
 viewPostSummary : BlogPostSummary -> Html Msg
 viewPostSummary post =
     let
         preview =
-            post.body
-                |> String.lines
-                |> List.take 2
-                |> String.join "\n"
+            previewOf post.body
     in
     li [ class "blog-archive__item" ]
         [ a [ href (Route.toPath (BlogPost post.id)), class "blog-archive__link" ]
@@ -97,7 +140,18 @@ viewPostSummary post =
                 [ h2 [ class "blog-archive__item-title" ] [ text post.title ]
                 , VisibilityBadge.view (visibilityToString post.visibility)
                 ]
-            , p [ class "blog-archive__item-date" ] [ text post.insertedAt ]
+            , p [ class "blog-archive__item-meta" ]
+                [ case post.authorDisplayName of
+                    -- The byline is plain text inside the post link rather than a
+                    -- second link to the author: an anchor nested in an anchor is
+                    -- invalid, and the post is what the reader came to open.
+                    Just name ->
+                        span [ class "blog-archive__item-author" ] [ text name ]
+
+                    Nothing ->
+                        text ""
+                , span [ class "blog-archive__item-date" ] [ text post.insertedAt ]
+                ]
             , p [ class "blog-archive__item-preview" ] [ text preview ]
             ]
         ]

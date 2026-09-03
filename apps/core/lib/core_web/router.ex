@@ -18,10 +18,6 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.OptionalAuthPipeline
   end
 
-  pipeline :writing_assistant_consent do
-    plug StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"
-  end
-
   pipeline :rate_limit_auth do
     plug StacksWeb.Plugs.RateLimiter, bucket: :auth
   end
@@ -36,6 +32,10 @@ defmodule CoreWeb.Router do
 
   pipeline :rate_limit_social do
     plug StacksWeb.Plugs.RateLimiter, bucket: :social
+  end
+
+  pipeline :rate_limit_feedback do
+    plug StacksWeb.Plugs.RateLimiter, bucket: :feedback
   end
 
   pipeline :rate_limit_public do
@@ -79,6 +79,7 @@ defmodule CoreWeb.Router do
   scope "/api", CoreWeb do
     pipe_through :api
     get "/health", HealthController, :index
+    get "/health/ready", HealthController, :ready
   end
 
   scope "/api", StacksWeb do
@@ -107,8 +108,12 @@ defmodule CoreWeb.Router do
     get "/feeds/:user_id/:bookshelf_name", FeedController, :show
   end
 
+  # Anonymous reads, metered. This scope carried no rate limiter while every
+  # sibling public scope had one, so the catalogue, the listings and the blog
+  # archive were the endpoints anyone could poll without limit — the heaviest
+  # of them by a distance. Guarded by scripts/check-public-route-metering.sh.
   scope "/api", StacksWeb do
-    pipe_through [:api, :optional_auth]
+    pipe_through [:api, :optional_auth, :rate_limit_public]
     get "/third-spaces", ThirdSpaceController, :index
     get "/books/:id/availability", BookAvailabilityController, :show
     get "/books/:id/prices", BookPriceController, :show
@@ -122,6 +127,7 @@ defmodule CoreWeb.Router do
 
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth, :rate_limit_public]
+    get "/search", SearchController, :index
     get "/search/users", UserSearchController, :index
     get "/u/:handle", ProfileController, :show
     get "/u/:handle/bookshelves/:bookshelf_name", ProfileController, :shelf
@@ -139,6 +145,8 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through :api
     get "/auth/confirm/:token", EmailVerificationController, :confirm
+    get "/auth/confirm-email-change/:token", EmailVerificationController, :confirm_change
+    get "/auth/revert-email-change/:token", EmailVerificationController, :revert_change
   end
 
   scope "/api", StacksWeb do
@@ -174,9 +182,6 @@ defmodule CoreWeb.Router do
     post "/books/confirm", BookController, :confirm
     post "/books/:id/merge-format", BookController, :merge_format
     put "/books/:id/age-gate", BookController, :set_age_gate
-    resources "/books", BookController, only: [:create]
-
-    get "/search", SearchController, :index
 
     post "/imports/goodreads", ImportController, :create
     get "/imports", ImportController, :index
@@ -204,7 +209,6 @@ defmodule CoreWeb.Router do
 
     get "/onboarding/status", OnboardingController, :status
     put "/onboarding/step/:step", OnboardingController, :complete_step
-    post "/onboarding/reset", OnboardingController, :reset
 
     get "/me/inferences", MeInferenceController, :index
 
@@ -235,6 +239,7 @@ defmodule CoreWeb.Router do
     post "/groups/:group_id/invitations", GroupMemberController, :invite
     post "/groups/:group_id/invitations/:id/accept", GroupMemberController, :accept
     post "/groups/:group_id/invitations/:id/decline", GroupMemberController, :decline
+    get "/groups/:group_id/members", GroupMemberController, :index
     delete "/groups/:group_id/members/:user_id", GroupMemberController, :remove
     delete "/groups/:group_id/leave", GroupMemberController, :leave
 
@@ -254,11 +259,6 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api", StacksWeb do
-    pipe_through [:api, :authenticated, :writing_assistant_consent]
-    post "/blog/posts/:id/chat", BlogController, :chat
-  end
-
-  scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :view_as]
     get "/bookshelves/:bookshelf_name", BookshelfController, :show
   end
@@ -272,6 +272,11 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :authenticated, :rate_limit_social]
     post "/users/:id/block", SocialController, :block
     delete "/users/:id/block", SocialController, :unblock
+  end
+
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :rate_limit_feedback]
+    post "/feedback", FeedbackController, :create
   end
 
   scope "/api/admin", StacksWeb do
@@ -290,6 +295,8 @@ defmodule CoreWeb.Router do
     get "/partners", PartnerController, :index
     put "/partners/:id/approve", PartnerController, :approve
     put "/partners/:id/reject", PartnerController, :reject
+
+    get "/feedback", FeedbackAdminController, :index
   end
 
   scope "/api/partner", StacksWeb do
@@ -341,6 +348,8 @@ defmodule CoreWeb.Router do
     get "/platform_stats", AdminController, :platform_stats
     get "/gdpr_export", AdminController, :gdpr_export
     post "/gdpr_erase", AdminController, :gdpr_erase
+    get "/degraded_accounts", AdminController, :degraded_accounts
+    post "/degraded_accounts/restore", AdminController, :restore_degraded_account
   end
 
   scope "/api/admin", StacksWeb do
