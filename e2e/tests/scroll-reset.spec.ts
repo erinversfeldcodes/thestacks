@@ -28,13 +28,15 @@ import { expect, test } from "@playwright/test";
  */
 test.describe("scroll on navigation", () => {
   test("following a link from deep in a long page lands at the top", async ({ page }) => {
-    await page.goto("/architecture");
+    // /faq, not /architecture: the architecture route serves a one-paragraph
+    // placeholder while the essay is drafted, and this spec needs real length.
+    await page.goto("/faq");
 
     // The defect is only observable if the page is genuinely long: the browser
     // clamps a carried-over offset to the destination's height, so on a short
     // page the bug hides itself.
     const height = await page.evaluate(() => document.body.scrollHeight);
-    expect(height, "the essay must be long enough for the carried offset to show").toBeGreaterThan(2000);
+    expect(height, "the source page must be long enough for the carried offset to show").toBeGreaterThan(2000);
 
     await page.evaluate(() => window.scrollTo(0, 1500));
     await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(1500);
@@ -51,7 +53,7 @@ test.describe("scroll on navigation", () => {
 
     // Wait for the destination to actually render before reading the offset —
     // reading too early measures the old page.
-    await expect(page.locator("h1")).not.toHaveText(/free lunch/i);
+    await expect(page.locator("h1")).not.toHaveText(/questions, answered/i);
 
     const stayedInApp = await page.evaluate(
       () => (window as unknown as { __spa?: boolean }).__spa === true,
@@ -73,12 +75,12 @@ test.describe("scroll on navigation", () => {
   test("an in-page anchor jump is left alone", async ({ page }) => {
     // The reset must key on the ROUTE, not on every UrlChanged: the fragment
     // moving is how in-page anchors work, and resetting there would fight them.
-    await page.goto("/architecture");
+    await page.goto("/faq");
     await page.evaluate(() => window.scrollTo(0, 1200));
     await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(1200);
 
     await page.evaluate(() => {
-      history.pushState({}, "", "/architecture#somewhere");
+      history.pushState({}, "", "/faq#somewhere");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
