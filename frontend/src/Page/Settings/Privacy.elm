@@ -24,6 +24,15 @@ import Util.TestId exposing (testId)
 type alias Model =
     { profileVisibility : String
     , shelfVisibilities : List ShelfVisibility
+
+    -- The stored-settings fetch itself. The controls open from defaults and
+    -- are re-seeded wholesale when this answers, so until it has, any edit is
+    -- one the answer will silently undo — and a Save that followed wrote the
+    -- default back with a 200 and a "Saved!". Locally that fetch wins the race
+    -- by milliseconds; on a cold deployed stack it lost it three runs running.
+    -- Loading and Failure both hold the controls inert; NotAsked (no session,
+    -- or a test that never fetches) leaves them live.
+    , settings : RemoteData Http.Error ()
     , savingProfile : RemoteData Http.Error ()
     , savingShelf : RemoteData Http.Error ()
     , exporting : RemoteData Http.Error ()
@@ -149,6 +158,7 @@ init =
     , unblocking = Nothing
     , unblockError = False
     , consent = Consent.init { analytics = False, writingAssistant = False }
+    , settings = NotAsked
     }
 
 
@@ -166,7 +176,7 @@ initWithToken maybeToken consentSeed =
     in
     case maybeToken of
         Just token ->
-            ( { seeded | blockedUsers = Loading }
+            ( { seeded | blockedUsers = Loading, settings = Loading }
             , Cmd.batch
                 [ Api.getPrivacySettings token GotPrivacySettings
                 , Api.listBlockedUsers token 1 GotBlockedUsers
@@ -326,7 +336,8 @@ update msg model maybeToken =
             case result of
                 Ok settings ->
                     ( { model
-                        | profileVisibility = settings.profileVisibility
+                        | settings = Success ()
+                        , profileVisibility = settings.profileVisibility
                         , shelfVisibilities = seedShelves settings.shelves
 
                         -- hydrate consent from the SERVER, overwriting the
@@ -350,7 +361,9 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( model, Cmd.none, NoOut )
+                        -- Editing on top of defaults we could not replace would
+                        -- let a Save overwrite real settings with them.
+                        ( { model | settings = Failure err }, Cmd.none, NoOut )
 
         GotBlockedUsers result ->
             case result of
@@ -458,6 +471,7 @@ view model =
                 [ label [ class "form-field__label" ] [ text "Profile" ]
                 , select
                     [ class "form-field__select"
+                    , disabled (controlsLocked model)
                     , onInput SetProfileVisibility
                     ]
                     [ option [ value "owner", selected (model.profileVisibility == "owner") ] [ text "Only me" ]
@@ -475,14 +489,32 @@ view model =
             , p [ class "settings-section__desc" ]
                 [ text "Override visibility per shelf. Each shelf's visibility is capped by your profile visibility (the ceiling rule)." ]
             , div [ class "privacy__shelves" ]
-                (List.map (viewShelfRow model.profileVisibility) model.shelfVisibilities)
+                (List.map (viewShelfRow (controlsLocked model) model.profileVisibility) model.shelfVisibilities)
             , viewFeedback model.savingShelf
             ]
-        , viewConsentSection model.consent
+        , viewConsentSection (controlsLocked model) model.consent
         , viewExportSection model.exporting
         , viewBlockedUsersSection model
         , viewDangerZone model
         ]
+
+
+{-| Every editable control waits for the stored settings. See the `settings`
+field: an edit the hydration answer would overwrite is not an edit the reader
+can rely on, so none is accepted until the answer is in (or has failed, where
+editing defaults would be worse than waiting).
+-}
+controlsLocked : Model -> Bool
+controlsLocked model =
+    case model.settings of
+        Loading ->
+            True
+
+        Failure _ ->
+            True
+
+        _ ->
+            False
 
 
 viewBlockedUsersSection : Model -> Html Msg
@@ -574,9 +606,9 @@ viewBlockedRow unblocking user =
 page showed; its messages are mapped up through `ConsentMsg` and delegated
 straight back to `Consent.update`, so the recorded consent is unchanged.
 -}
-viewConsentSection : Consent.Model -> Html Msg
-viewConsentSection consent =
-    Html.map ConsentMsg (Consent.viewSection consent)
+viewConsentSection : Bool -> Consent.Model -> Html Msg
+viewConsentSection locked consent =
+    Html.map ConsentMsg (Consent.viewSection locked consent)
 
 
 viewExportSection : RemoteData Http.Error () -> Html Msg
@@ -737,8 +769,8 @@ visibilityExposure v =
         |> Maybe.withDefault 0
 
 
-viewShelfRow : String -> ShelfVisibility -> Html Msg
-viewShelfRow profileVisibility sv =
+viewShelfRow : Bool -> String -> ShelfVisibility -> Html Msg
+viewShelfRow locked profileVisibility sv =
     let
         shelfOption optionValue optionLabel =
             option
@@ -753,6 +785,7 @@ viewShelfRow profileVisibility sv =
             [ label [ class "form-field__label" ] [ text sv.label ]
             , select
                 [ class "form-field__select"
+                , disabled locked
                 , onInput (SetShelfVisibility sv.name)
                 ]
                 [ shelfOption "owner" "Only me"

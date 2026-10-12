@@ -12,7 +12,7 @@ module Page.Settings.Consent exposing
 import Api
 import Components.SaveButton as SaveButton
 import Html exposing (Html, button, div, h1, h2, label, p, text)
-import Html.Attributes exposing (attribute, class)
+import Html.Attributes exposing (attribute, class, disabled)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
@@ -153,16 +153,22 @@ view : Model -> Html Msg
 view model =
     div [ class "page page--settings" ]
         [ h1 [ class "page__title" ] [ text "Privacy & Consent" ]
-        , viewSection model
+        , viewSection False model
         ]
 
 
 {-| The consent controls with no page chrome, so the Privacy page can fold them
 in as a section (TR-4). Identical markup to the standalone page minus its
 `page`/`h1` wrapper.
+
+`locked` holds the toggles inert while the host page is still learning the
+stored state. A flip made before that answer landed used to be overwritten by
+it — the reader saw their click, then saw it undone — because this model is
+re-seeded wholesale from the server. The host decides when the answer is in.
+
 -}
-viewSection : Model -> Html Msg
-viewSection model =
+viewSection : Bool -> Model -> Html Msg
+viewSection locked model =
     div [ class "settings-consent" ]
         [ div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Analytics" ]
@@ -179,6 +185,7 @@ viewSection model =
                             "toggle toggle--off"
                         )
                     , attribute "data-testid" "analytics-consent-toggle"
+                    , disabled locked
                     , onClick ToggleAnalytics
                     ]
                     [ text
@@ -213,6 +220,7 @@ viewSection model =
                             "toggle toggle--off"
                         )
                     , attribute "data-testid" "writing-assistant-consent-toggle"
+                    , disabled locked
                     , onClick ToggleWritingAssistant
                     ]
                     [ text

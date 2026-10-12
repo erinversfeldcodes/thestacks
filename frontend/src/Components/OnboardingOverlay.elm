@@ -557,7 +557,7 @@ viewConsent model =
         , p [ class "onboarding-overlay__tagline" ]
             [ text "Both default to off. You can change either any time in Settings › Privacy." ]
         , div [ class "onboarding-overlay__embed", testId "onboarding-consent-embed" ]
-            [ Html.map ConsentMsg (Consent.viewSection model.consent) ]
+            [ Html.map ConsentMsg (Consent.viewSection False model.consent) ]
         , div [ class "onboarding-overlay__actions" ]
             [ primaryButton "Continue" ConfirmConsent
             , skipButton
