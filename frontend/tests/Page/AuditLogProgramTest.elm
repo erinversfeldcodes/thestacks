@@ -16,6 +16,7 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 suite : Test
@@ -59,15 +60,9 @@ initEffects : Maybe String -> SimulatedEffect AuditLog.Msg
 initEffects maybeToken =
     case maybeToken of
         Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/settings/audit-log?page=1"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson AuditLog.AuditLogReceived Api.auditLogResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec Api.getAuditLogRequest
+                token
+                (SimulatedEffect.Http.expectJson AuditLog.AuditLogReceived Api.auditLogResponseDecoder)
 
         Nothing ->
             SimulatedEffect.Cmd.none

@@ -249,6 +249,83 @@ if next_only:
         print("NEXT: nothing actionable — every item is done or blocked.")
     sys.exit(0)
 
+# ---------------------------------------------------------------------------
+# Stack reviews. `staff-review` deliberately covers design and test-truthfulness
+# and defers standards, idiom, schema design and contract shape to the stack
+# reviewers in docs/agents/reviewers/. Deferring to a reviewer that never runs is
+# how an axis disappears silently: an audit of 43 issues from one campaign found
+# 42 with a staff-review and ONE naming any stack reviewer, across 323 files.
+# The automated gates were green the whole time, which is exactly why nobody
+# noticed — they cover the mechanical half and none of the judgement.
+#
+# So: once anything in the campaign is complete, every stack the branch actually
+# TOUCHES must carry a recorded verdict under state["domain_reviews"].
+STACK_PATHS = {
+    "elixir": ("apps/core/lib", "apps/core/test"),
+    "elm": ("frontend/src", "frontend/tests"),
+    "database": ("apps/core/priv/repo", "dbt/"),
+    "contract": ("proto/",),
+    "platform": ("scripts/", ".github/", "justfile", "test/platform"),
+    "python": ("apps/vision",),
+    "rust": ("apps/scraper",),
+}
+
+
+def touched_stacks():
+    """Stacks the branch diff actually touches, or None if git cannot say."""
+    import subprocess
+
+    for base_ref in ("origin/main", "main"):
+        try:
+            base = subprocess.run(
+                ["git", "merge-base", "HEAD", base_ref],
+                capture_output=True, text=True, timeout=20,
+            )
+            if base.returncode != 0:
+                continue
+            files = subprocess.run(
+                ["git", "diff", "--name-only", f"{base.stdout.strip()}..HEAD"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if files.returncode != 0:
+                continue
+            changed = [f for f in files.stdout.splitlines() if f.strip()]
+            return {
+                stack
+                for stack, prefixes in STACK_PATHS.items()
+                if any(f.startswith(pre) for f in changed for pre in prefixes)
+            }
+        except Exception:
+            continue
+    return None
+
+
+# Campaign-level, so it is not reported when the caller has filtered to one wave —
+# a single-wave view answering a campaign-wide question reads as a defect in that
+# wave, which it is not.
+if not wave_filter and any(
+    (it.get("status") or "").lower() in DONE
+    for w in waves.values()
+    for it in (w.get("items") or {}).values()
+):
+    reviews = {k.lower() for k in (state.get("domain_reviews") or {})}
+    stacks = touched_stacks()
+    if stacks is None:
+        # Never silently pass: an unanswerable check is not a satisfied one.
+        violations.append(
+            "  campaign: could not determine the branch diff, so stack-review coverage is "
+            "UNKNOWN — not satisfied. Run from a git checkout with main reachable."
+        )
+    else:
+        for stack in sorted(stacks - reviews):
+            violations.append(
+                f"  campaign: the branch touches {stack} and no {stack} review is recorded. "
+                f"`staff-review` does not cover this axis — it defers standards, idiom, schema "
+                f"design and contract shape to docs/agents/reviewers/{stack}-reviewer.md. Run it "
+                f"over the cumulative diff for that stack and record the verdict under "
+                f"\"domain_reviews\" in the campaign state."
+            )
+
 if violations:
     print("=" * 78)
     print(f"{len(violations)} UNBACKED COMPLETION CLAIM(S) — the campaign is not where it says it is:\n")

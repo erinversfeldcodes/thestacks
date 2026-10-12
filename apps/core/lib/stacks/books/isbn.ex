@@ -81,18 +81,15 @@ defmodule Stacks.Books.ISBN do
       |> String.replace(~r/[\s-]/, "")
       |> String.upcase()
 
-    if valid_isbn10?(normalised) do
-      to_isbn13(normalised)
-    else
-      normalised
+    case to_isbn13(normalised) do
+      {:ok, isbn13} -> isbn13
+      {:error, :invalid_isbn10_checksum} -> normalised
     end
   end
 
   def canonical_isbn13(_isbn), do: nil
 
-  defp valid_isbn10?(isbn) do
-    isbn =~ ~r/^\d{9}[\dX]$/ and isbn10_check_digit_ok?(isbn)
-  end
+  defp isbn10_shaped?(isbn), do: isbn =~ ~r/^\d{9}[\dXx]$/
 
   defp isbn10_check_digit_ok?(<<first_nine::binary-size(9), check>>) do
     sum =
@@ -103,33 +100,47 @@ defmodule Stacks.Books.ISBN do
       |> Enum.reduce(0, fn {d, i}, acc -> acc + d * (10 - i) end)
 
     expected = rem(11 - rem(sum, 11), 11)
-    actual = if check == ?X, do: 10, else: check - ?0
+    actual = if check in [?X, ?x], do: 10, else: check - ?0
     expected == actual
   end
 
   @doc """
       Normalises an ISBN-10 to its ISBN-13 equivalent so DB lookups always use
-      the canonical form. ISBN-13s (and anything else) are returned unchanged.
+      the canonical form: `{:ok, "978" <> the nine digits <> a recomputed EAN-13
+      check digit}`. ISBN-13s — and anything not shaped like an ISBN-10 — come
+      back unchanged as `{:ok, isbn}`.
 
-      Unlike `canonical_isbn13/1` this neither strips separators nor checks the
-      ISBN-10's own check digit — it rewrites any 10-byte binary. `Stacks.Books`
-      uses it on already-shape-validated input (the edition changeset, after
-      `validate_format/3` and the checksum validation) and on lookup keys in
-      `find_existing/1`; anywhere else, `canonical_isbn13/1` is the safer choice.
+      An ISBN-10 whose OWN check digit is wrong is REFUSED with
+      `{:error, :invalid_isbn10_checksum}`. It must never be converted: the
+      EAN-13 check digit is recomputed from the first nine digits, so the result
+      of converting a bad ISBN-10 is a structurally perfect ISBN-13 that nothing
+      downstream — not the changeset's checksum validation, not the database's
+      EAN-13 CHECK constraint — can tell from a real one. Conversion is the last
+      moment the original check digit exists to be judged, so it is where the
+      judgement has to happen.
+
+      Unlike `canonical_isbn13/1` this does not strip separators or upcase.
   """
-  @spec to_isbn13(term()) :: term()
-  def to_isbn13(<<a, b, c, d, e, f, g, h, i, _check>>) do
-    nine = [a - ?0, b - ?0, c - ?0, d - ?0, e - ?0, f - ?0, g - ?0, h - ?0, i - ?0]
-    prefix = [9, 7, 8 | nine]
+  @spec to_isbn13(term()) :: {:ok, term()} | {:error, :invalid_isbn10_checksum}
+  def to_isbn13(isbn) when is_binary(isbn) do
+    cond do
+      not isbn10_shaped?(isbn) -> {:ok, isbn}
+      isbn10_check_digit_ok?(isbn) -> {:ok, ean13_from_isbn10(isbn)}
+      true -> {:error, :invalid_isbn10_checksum}
+    end
+  end
+
+  def to_isbn13(isbn), do: {:ok, isbn}
+
+  defp ean13_from_isbn10(<<first_nine::binary-size(9), _check>>) do
     weights = [1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3]
 
     sum =
-      Enum.zip(prefix, weights)
+      [9, 7, 8 | Enum.map(String.graphemes(first_nine), &String.to_integer/1)]
+      |> Enum.zip(weights)
       |> Enum.reduce(0, fn {d, w}, acc -> acc + d * w end)
 
     check = rem(10 - rem(sum, 10), 10)
-    "978" <> <<a, b, c, d, e, f, g, h, i>> <> Integer.to_string(check)
+    "978" <> first_nine <> Integer.to_string(check)
   end
-
-  def to_isbn13(isbn), do: isbn
 end

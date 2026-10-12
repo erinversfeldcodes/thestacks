@@ -235,113 +235,11 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  describe "POST /api/books" do
-    test "returns 201 with book when ISBN resolves (mocked)", %{conn: conn} do
-      user = insert(:user)
-
-      {_book, _edition} =
-        insert_book_with_edition(isbn: "9780743273565", title: "The Great Gatsby")
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/books", %{"isbn" => "9780743273565"})
-
-      assert conn.status in [201, 422]
-    end
-
-    test "returns 422 when ISBN has invalid checksum", %{conn: conn} do
-      user = insert(:user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/books", %{"isbn" => "9780743273560"})
-
-      assert %{"error" => _} = json_response(conn, 422)
-    end
-
-    test "returns 401 without auth token", %{conn: conn} do
-      conn = post(conn, "/api/books", %{"isbn" => "9780743273565"})
-      assert json_response(conn, 401)
-    end
-  end
-
-  describe "POST /api/books — mocked ISBN resolver" do
-    setup do
-      original = Application.get_env(:core, :isbn_http_client)
-      Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
-      on_exit(fn -> Application.put_env(:core, :isbn_http_client, original) end)
-      :ok
-    end
-
-    test "returns 201 with book data when valid ISBN resolves via mock Open Library", %{
-      conn: conn
-    } do
-      user = insert(:user)
-
-      MockHttpClient.put_response(
-        "openlibrary.org/api/books",
-        {:ok,
-         %{
-           "ISBN:9780743273565" => %{
-             "title" => "The Great Gatsby",
-             "authors" => [%{"name" => "F. Scott Fitzgerald"}],
-             "publish_date" => "1925",
-             "number_of_pages" => 180,
-             "subjects" => ["American fiction"],
-             "key" => "/works/OL468431W"
-           }
-         }}
-      )
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/books", %{"isbn" => "9780743273565"})
-
-      assert %{"book" => book} = json_response(conn, 201)
-      assert book["title"] == "The Great Gatsby"
-      assert is_binary(book["id"])
-    end
-
-    test "returns 422 when both Open Library and Google Books return no results", %{conn: conn} do
-      user = insert(:user)
-
-      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
-      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/books", %{"isbn" => "9780743273565"})
-
-      assert %{"error" => _} = json_response(conn, 422)
-    end
-  end
-
   describe "a resolver outage is a 503, not 'isbn_not_found'" do
     setup do
       MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
       MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
       :ok
-    end
-
-    test "POST /api/books answers 503 resolver_unavailable", %{conn: conn} do
-      user = insert(:user)
-
-      conn =
-        conn
-        |> auth_conn(user)
-        |> post("/api/books", %{"isbn" => "9780743273565"})
-
-      body = json_response(conn, 503)
-
-      refute body["error"] == "isbn_not_found",
-             "a 5xx from Open Library says nothing about whether 9780743273565 is a book"
-
-      assert body["error"] == "resolver_unavailable"
-      assert get_resp_header(conn, "retry-after") == ["30"]
     end
 
     test "POST /api/books/confirm answers 503 resolver_unavailable", %{conn: conn} do
@@ -352,7 +250,13 @@ defmodule StacksWeb.BookControllerTest do
         |> auth_conn(user)
         |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
 
-      assert %{"error" => "resolver_unavailable"} = json_response(conn, 503)
+      body = json_response(conn, 503)
+
+      refute body["error"] == "isbn_not_found",
+             "a 5xx from Open Library says nothing about whether 9780743273565 is a book"
+
+      assert body["error"] == "resolver_unavailable"
+      assert get_resp_header(conn, "retry-after") == ["30"]
     end
 
     test "POST /api/books/:id/merge-format answers 503 resolver_unavailable", %{conn: conn} do
@@ -374,7 +278,7 @@ defmodule StacksWeb.BookControllerTest do
 
       conn
       |> auth_conn(user)
-      |> post("/api/books", %{"isbn" => "9780743273565"})
+      |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
       |> json_response(503)
 
       assert Core.Repo.aggregate(Stacks.Books.Book, :count) == before
@@ -548,6 +452,77 @@ defmodule StacksWeb.BookControllerTest do
       after
         Application.put_env(:core, :isbn_http_client, original)
       end
+    end
+
+    test "returns 201 with the resolved book when Open Library is the source", %{conn: conn} do
+      user = insert(:user)
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
+
+        MockHttpClient.put_response(
+          "openlibrary.org/api/books",
+          {:ok,
+           %{
+             "ISBN:9780743273565" => %{
+               "title" => "The Great Gatsby",
+               "authors" => [%{"name" => "F. Scott Fitzgerald"}],
+               "publish_date" => "1925",
+               "number_of_pages" => 180,
+               "subjects" => ["American fiction"],
+               "key" => "/works/OL468431W"
+             }
+           }}
+        )
+
+        conn =
+          conn
+          |> auth_conn(user)
+          |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "library"})
+
+        assert %{"book" => book} = json_response(conn, 201)
+        assert book["title"] == "The Great Gatsby"
+        assert is_binary(book["id"])
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
+    end
+
+    test "returns 422 when the ISBN has an invalid checksum", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273560"})
+
+      assert %{"error" => "validation_failed", "details" => details} = json_response(conn, 422)
+      assert %{"isbn" => ["has an invalid checksum"]} = details
+    end
+
+    test "an ISBN that fails the checksum is refused without asking the catalogues", %{conn: conn} do
+      user = insert(:user)
+
+      MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+
+      reachable =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565"})
+
+      assert %{"error" => "resolver_unavailable"} = json_response(reachable, 503),
+             "the outage stubs must be in force, or the next assertion proves nothing"
+
+      refused =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273560"})
+
+      assert %{"error" => "validation_failed"} = json_response(refused, 422),
+             "the same outage answered 503 for a well-formed ISBN, so a 422 here can " <>
+               "only mean 9780743273560 was refused before either catalogue was asked"
     end
 
     test "returns 401 without auth token", %{conn: conn} do

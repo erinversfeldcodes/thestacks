@@ -1,4 +1,4 @@
-module Components.SaveButton exposing (Config, Variant(..), primary, view)
+module Components.SaveButton exposing (Config, Variant(..), primary, primaryWhenReady, view)
 
 {-| The save button every form wrote out by hand: six modules cased a
 `RemoteData` save state into a button, five made the same three
@@ -52,6 +52,27 @@ primary state onSave label =
         , savedLabel = "Saved!"
         , variant = Primary
         }
+
+
+{-| `primary`, held shut until the form is allowed to save.
+
+A form seeded with placeholder values can submit them before it has read what
+they are placeholders _for_, and the save then writes the placeholder over the
+real record. `ready` is the page's answer to "may this form write yet"; while it
+is False the button takes the same disabled shape a save-in-flight does, so
+"not yet" reads as one thing rather than two.
+
+The label stays the action label, not the busy one — nothing is happening, and
+saying "Saving…" when nothing is would be the wrong kind of quiet.
+
+-}
+primaryWhenReady : Bool -> RemoteData e () -> msg -> String -> Html msg
+primaryWhenReady ready state onSave label =
+    if ready then
+        primary state onSave label
+
+    else
+        button [ busyClass Primary, disabled True ] [ text label ]
 
 
 view : Config e msg -> Html msg

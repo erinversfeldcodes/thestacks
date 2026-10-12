@@ -145,4 +145,61 @@ suite =
                     in
                     outMsg |> Expect.equal (GroupsDetail.NavigateTo Groups)
             ]
+        , describe "Page.Groups.Detail member removal"
+            [ test "a failed removal keeps the member list that loaded fine" <|
+                \_ ->
+                    let
+                        roster =
+                            [ { userId = "user-1", role = "member", displayName = "Ada" }
+                            , { userId = "user-2", role = "member", displayName = "Grace" }
+                            ]
+
+                        loaded =
+                            { detailInit | members = Success roster }
+
+                        ( model, _, _ ) =
+                            GroupsDetail.update
+                                (GroupsDetail.MemberRemoved "user-2" (Err Http.NetworkError))
+                                loaded
+                    in
+                    -- The roster loaded successfully and is still true: only the
+                    -- removal failed. Replacing `members` with Failure repaints
+                    -- the whole list as "Could not load the members", so a
+                    -- transient failure to remove ONE person makes every member
+                    -- disappear from the owner's screen.
+                    Expect.equal (Success roster) model.members
+            , test "a failed removal reports the failure rather than swallowing it" <|
+                \_ ->
+                    let
+                        loaded =
+                            { detailInit
+                                | members =
+                                    Success
+                                        [ { userId = "user-2", role = "member", displayName = "Grace" } ]
+                            }
+
+                        ( model, _, _ ) =
+                            GroupsDetail.update
+                                (GroupsDetail.MemberRemoved "user-2" (Err Http.NetworkError))
+                                loaded
+                    in
+                    Expect.notEqual Nothing model.removeError
+            , test "a successful removal clears any earlier failure" <|
+                \_ ->
+                    let
+                        loaded =
+                            { detailInit
+                                | members =
+                                    Success
+                                        [ { userId = "user-2", role = "member", displayName = "Grace" } ]
+                                , removeError = Just Http.NetworkError
+                            }
+
+                        ( model, _, _ ) =
+                            GroupsDetail.update
+                                (GroupsDetail.MemberRemoved "user-2" (Ok ()))
+                                loaded
+                    in
+                    Expect.equal Nothing model.removeError
+            ]
         ]

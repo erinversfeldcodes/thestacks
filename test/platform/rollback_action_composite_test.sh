@@ -6,32 +6,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=lib/assert.sh
 source "$HERE/lib/assert.sh"
+source "$HERE/lib/python.sh"
 
 ACTION_DIR="$REPO_ROOT/.github/actions/rollback-production"
 ACTION_YML="$ACTION_DIR/action.yml"
 ACTION_README="$ACTION_DIR/README.md"
 
 _pick_yaml_python() {
-    local candidates=(
-        "$REPO_ROOT/.venv-tools/bin/python3"
-        "$REPO_ROOT/scripts/mcp/.venv/bin/python3"
-        "python3"
-    )
-    for cand in "${candidates[@]}"; do
-        if command -v "$cand" >/dev/null 2>&1 \
-            && "$cand" -c "import yaml" >/dev/null 2>&1; then
-            echo "$cand"
-            return 0
-        fi
-    done
-    local fallback_venv="${TMPDIR:-/tmp}/stacks-rollback-action-test-venv"
-    if [[ ! -x "$fallback_venv/bin/python3" ]] \
-        || ! "$fallback_venv/bin/python3" -c "import yaml" >/dev/null 2>&1; then
-        python3 -m venv "$fallback_venv" >/dev/null 2>&1 || return 1
-        "$fallback_venv/bin/pip" install --quiet pyyaml >/dev/null 2>&1 || return 1
-    fi
-    echo "$fallback_venv/bin/python3"
-    return 0
+    pick_python "import yaml" "stacks-rollback-action-test-venv" "pyyaml"
 }
 
 YAML_PYTHON="$(_pick_yaml_python || true)"
@@ -172,7 +154,13 @@ done
 
 test_case "step_ids_and_gating" "validate-inputs, run-rollback, log-audit, emit-outputs in order with correct if: gating"
 STEP_IDS_JSON="$(yaml_query '[.runs.steps[]?.id // empty]' "$ACTION_YML")"
-mapfile -t STEP_IDS < <(printf '%s' "$STEP_IDS_JSON" | jq -r '.[]?')
+# Read into the array by hand: `mapfile` is bash 4+, and a bare shell on macOS
+# is bash 3.2, where it is simply not found — STEP_IDS stays empty and all four
+# step ids are reported missing from an action.yml that declares every one.
+STEP_IDS=()
+while IFS= read -r _step_id; do
+    [[ -n "$_step_id" ]] && STEP_IDS+=("$_step_id")
+done < <(printf '%s' "$STEP_IDS_JSON" | jq -r '.[]?')
 
 _idx_of() {
     local target="$1"

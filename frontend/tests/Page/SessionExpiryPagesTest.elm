@@ -208,7 +208,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.PostLoaded (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False "https://thestacks.test"))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") "https://thestacks.test"))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -218,7 +218,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.CommentsLoaded (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False "https://thestacks.test"))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") "https://thestacks.test"))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -228,7 +228,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.AssociationActionCompleted (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False "https://thestacks.test"))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") "https://thestacks.test"))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -238,7 +238,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.CommentSubmitted (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False "https://thestacks.test"))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") "https://thestacks.test"))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -248,7 +248,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.CommentDeleted (Err unauthorized))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False "https://thestacks.test"))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") "https://thestacks.test"))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.SessionExpired
@@ -258,7 +258,7 @@ suite =
                         ( _, _, outMsg ) =
                             Post.update
                                 (Post.PostLoaded (Err nonAuth))
-                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") False "https://thestacks.test"))
+                                (Tuple.first (Post.init "post-1" (Just "tok") (Just "user-1") "https://thestacks.test"))
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Post.NoOut
@@ -442,10 +442,38 @@ suite =
                         ( _, _, outMsg ) =
                             Profile.update
                                 Profile.SessionExpiryDetected
-                                (Profile.init settingsUser)
+                                (Profile.seedFromSession settingsUser)
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Profile.SessionExpired
+            , test "profile_hydration_401_bubbles: the account read's 401 → SessionExpired" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Profile.update
+                                (Profile.AccountReceived (Err unauthorized))
+                                (Profile.seedFromSession settingsUser)
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Profile.SessionExpired
+            , test "profile_hydration_non401_stays_local: the account read's network error → NoOut" <|
+                \() ->
+                    let
+                        ( newModel, _, outMsg ) =
+                            Profile.update
+                                (Profile.AccountReceived (Err nonAuth))
+                                (Profile.seedFromSession settingsUser)
+                                (Just "tok")
+                    in
+                    Expect.all
+                        [ \_ -> outMsg |> Expect.equal Profile.NoOut
+                        , \_ ->
+                            Profile.view newModel
+                                |> Query.fromHtml
+                                |> Query.has
+                                    [ Selector.text "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
+                        ]
+                        ()
             , test "profile_validation_failure_stays_local: a 422 → NoOut" <|
                 \() ->
                     let
@@ -454,7 +482,7 @@ suite =
                                 (Profile.SaveProfileCompleted
                                     (Err (Api.ProfileValidationFailed [ ( "handle", [ "has already been taken" ] ) ]))
                                 )
-                                (Profile.init settingsUser)
+                                (Profile.seedFromSession settingsUser)
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Profile.NoOut
@@ -464,7 +492,7 @@ suite =
                         ( _, _, outMsg ) =
                             Profile.update
                                 (Profile.SaveLocationCompleted (Err nonAuth))
-                                (Profile.init settingsUser)
+                                (Profile.seedFromSession settingsUser)
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Profile.NoOut
@@ -474,7 +502,7 @@ suite =
                         ( typed, _, _ ) =
                             Profile.update
                                 (Profile.SetCurrentPassword "hunter2")
-                                (Profile.init settingsUser)
+                                (Profile.seedFromSession settingsUser)
                                 (Just "tok")
 
                         ( afterExpiry, _, _ ) =

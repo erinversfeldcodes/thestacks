@@ -14,29 +14,6 @@ defmodule StacksWeb.BookController do
 
   import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
 
-  @doc "POST /api/books — resolve an ISBN and create the book (manual entry)."
-  def create(conn, %{"isbn" => isbn}) do
-    case Books.create_from_isbn(isbn) do
-      {:ok, book} ->
-        conn
-        |> put_status(201)
-        |> json(%{book: ProtoJSON.book(book)})
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: "validation_failed", details: format_errors(changeset)})
-
-      {:error, :resolver_unavailable} ->
-        resolver_unavailable(conn)
-
-      {:error, _} ->
-        conn
-        |> put_status(422)
-        |> json(%{error: "isbn_not_found"})
-    end
-  end
-
   defp resolver_unavailable(conn) do
     conn
     |> put_resp_header("retry-after", "30")

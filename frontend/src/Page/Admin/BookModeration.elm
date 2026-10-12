@@ -2,6 +2,7 @@ module Page.Admin.BookModeration exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , booksRequest
     , init
     , update
     , view
@@ -164,16 +165,26 @@ fetchBooks : Model -> Maybe String -> Cmd Msg
 fetchBooks model maybeToken =
     case maybeToken of
         Just token ->
-            Api.adminListBooks
-                { tier = tierFilterToString model.tierFilter
-                , search = searchToMaybe model.search
-                , page = model.page
-                }
-                token
-                BooksReceived
+            Api.adminListBooks (booksParams model) token BooksReceived
 
         Nothing ->
             Cmd.none
+
+
+{-| The book list this model asks for, as request data — filters, search and
+page are all in the URL, so this is where they are decided.
+-}
+booksRequest : Model -> Api.RequestSpec
+booksRequest model =
+    Api.adminListBooksRequest (booksParams model)
+
+
+booksParams : Model -> { tier : Maybe String, search : Maybe String, page : Int }
+booksParams model =
+    { tier = tierFilterToString model.tierFilter
+    , search = searchToMaybe model.search
+    , page = model.page
+    }
 
 
 tierFilterToString : TierFilter -> Maybe String

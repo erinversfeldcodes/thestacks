@@ -2,7 +2,16 @@ import { test, expect, APIRequestContext } from "@playwright/test";
 
 const WRONG_PASSWORD = "wrong-password-xyz";
 
-const MAX_FLOOD_ATTEMPTS = 65;
+// The :auth bucket size the TARGET stack runs, not a constant of this spec.
+// Prod parity is 60/min, but a preview deliberately runs a higher ceiling so
+// the suite's own opening burst of real form logins (two workers ripping
+// through register/login specs) cannot eat the budget out from under the
+// specs behind it — which once 429'd every owner sign-in for a 90-second
+// window and failed three runs straight. The deploy step exports the value it
+// set (E2E_AUTH_RATE_LIMIT) so this flood always overshoots the real ceiling;
+// a hardcoded 65 against a raised ceiling proves nothing and fails honestly.
+const AUTH_BUCKET_LIMIT = Number(process.env.E2E_AUTH_RATE_LIMIT || 60);
+const MAX_FLOOD_ATTEMPTS = AUTH_BUCKET_LIMIT + 10;
 
 function floodEmail(i: number): string {
   return `flood-${i}-${Date.now()}@ratelimit.test`;

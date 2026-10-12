@@ -23,7 +23,14 @@ defmodule CoreWeb.TelemetryFuseStateTest do
     :together_ai_fuse,
     :open_library_fuse,
     :google_books_fuse,
-    :scraper_fuse
+    :scraper_fuse,
+    :brave_fuse,
+    :searxng_fuse,
+    :r2_fuse,
+    :nominatim_fuse,
+    :neon_fuse,
+    :resend_fuse,
+    :log_shipper_fuse
   ]
 
   defp attach_state_handler do
@@ -160,6 +167,79 @@ defmodule CoreWeb.TelemetryFuseStateTest do
 
       assert measurements.state == 0,
              "expected blown :scraper_fuse to report state=0, got: #{inspect(measurements)}"
+    end
+  end
+
+  describe "poll_db_watchdog/0" do
+    setup do
+      CircuitBreakers.install_all()
+      :fuse.reset(:neon_fuse)
+
+      on_exit(fn ->
+        Application.delete_env(:core, :db_watchdog_enabled)
+        Application.delete_env(:core, :db_watchdog_ping)
+        :fuse.reset(:neon_fuse)
+      end)
+
+      :ok
+    end
+
+    test "a healthy ping leaves :neon_fuse closed" do
+      Application.put_env(:core, :db_watchdog_enabled, true)
+      Application.put_env(:core, :db_watchdog_ping, fn -> :ok end)
+
+      Enum.each(1..6, fn _ -> CoreWeb.Telemetry.poll_db_watchdog() end)
+
+      assert :ok = :fuse.ask(:neon_fuse, :sync)
+    end
+
+    test "repeated ping failures blow :neon_fuse so the gauge shows the outage" do
+      Application.put_env(:core, :db_watchdog_enabled, true)
+      Application.put_env(:core, :db_watchdog_ping, fn -> {:error, :connection_refused} end)
+
+      Enum.each(1..6, fn _ -> CoreWeb.Telemetry.poll_db_watchdog() end)
+
+      assert :blown = :fuse.ask(:neon_fuse, :sync)
+    end
+
+    test "does nothing when disabled, even with a failing ping" do
+      Application.put_env(:core, :db_watchdog_enabled, false)
+      Application.put_env(:core, :db_watchdog_ping, fn -> {:error, :connection_refused} end)
+
+      Enum.each(1..6, fn _ -> CoreWeb.Telemetry.poll_db_watchdog() end)
+
+      assert :ok = :fuse.ask(:neon_fuse, :sync)
+    end
+  end
+
+  describe "poll_log_shipper_keepalive/0" do
+    setup do
+      CircuitBreakers.install_all()
+      :fuse.reset(:log_shipper_fuse)
+
+      on_exit(fn ->
+        Application.delete_env(:core, :log_shipper_keepalive_url)
+        :fuse.reset(:log_shipper_fuse)
+      end)
+
+      :ok
+    end
+
+    test "is a no-op when no shipper URL is configured" do
+      Application.delete_env(:core, :log_shipper_keepalive_url)
+
+      Enum.each(1..6, fn _ -> CoreWeb.Telemetry.poll_log_shipper_keepalive() end)
+
+      assert :ok = :fuse.ask(:log_shipper_fuse, :sync)
+    end
+
+    test "an unreachable shipper never raises but melts the fuse to blown" do
+      # nothing listens here; the request must fail, be swallowed, and melt
+      Application.put_env(:core, :log_shipper_keepalive_url, "http://127.0.0.1:1")
+
+      Enum.each(1..6, fn _ -> assert :ok = CoreWeb.Telemetry.poll_log_shipper_keepalive() end)
+
+      assert :blown = :fuse.ask(:log_shipper_fuse, :sync)
     end
   end
 end

@@ -3,7 +3,6 @@ defmodule StacksWeb.OnboardingControllerTest do
       Tests for:
       - GET  /api/onboarding/status
       - PUT  /api/onboarding/step/:step
-      - POST /api/onboarding/reset
   """
 
   use CoreWeb.ConnCase, async: true
@@ -117,81 +116,6 @@ defmodule StacksWeb.OnboardingControllerTest do
     test "returns 401 when unauthenticated", %{conn: conn} do
       conn = put(conn, "/api/onboarding/step/profile")
       assert json_response(conn, 401)
-    end
-  end
-
-  describe "POST /api/onboarding/reset — reset" do
-    test "resets all steps to false", %{conn: conn} do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      conn = conn |> auth_conn(user) |> post("/api/onboarding/reset")
-      body = json_response(conn, 200)
-
-      assert body["steps"]["profile"] == false
-      assert body["steps"]["privacy"] == false
-      assert body["completed"] == false
-      assert body["next_step"] == "profile"
-    end
-
-    test "returns 401 when unauthenticated", %{conn: conn} do
-      conn = post(conn, "/api/onboarding/reset")
-      assert json_response(conn, 401)
-    end
-  end
-
-  describe "GET /api/auth/me — onboarding fields" do
-    test "includes onboarding_completed and next_onboarding_step", %{conn: conn} do
-      user = insert(:user)
-      conn = conn |> auth_conn(user) |> get("/api/auth/me")
-      body = json_response(conn, 200)
-
-      assert Map.has_key?(body["user"], "onboarding_completed")
-      assert Map.has_key?(body["user"], "next_onboarding_step")
-      assert body["user"]["next_onboarding_step"] == "profile"
-    end
-
-    test "fresh user has onboarding_completed = false", %{conn: conn} do
-      user = insert(:user)
-      conn = conn |> auth_conn(user) |> get("/api/auth/me")
-      body = json_response(conn, 200)
-
-      assert body["user"]["onboarding_completed"] == false
-    end
-
-    test "next_onboarding_step is nil when all steps done", %{conn: conn} do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      conn = conn |> auth_conn(user) |> get("/api/auth/me")
-      body = json_response(conn, 200)
-
-      assert body["user"]["next_onboarding_step"] == nil
-    end
-
-    test "fully-completed user has onboarding_completed = true", %{conn: conn} do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      conn = conn |> auth_conn(user) |> get("/api/auth/me")
-      body = json_response(conn, 200)
-
-      assert body["user"]["onboarding_completed"] == true
     end
   end
 end

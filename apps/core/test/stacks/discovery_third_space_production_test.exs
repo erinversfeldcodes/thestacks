@@ -62,6 +62,11 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       assert space.website_url == "https://readingroom.test"
       assert space.latitude == -33.9249
       assert space.longitude == 18.4241
+
+      assert MockGeocoder.queries() == ["The Reading Room"],
+             "approval asked the geocoder for #{inspect(MockGeocoder.queries())} — the place " <>
+               "description is composed from the space's own fields, and a bare URL or type " <>
+               "would position the listing somewhere nobody established"
     end
 
     test "the space starts unverified — approval of a source is not verification of a business" do
@@ -142,16 +147,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       assert near == [],
              "an unpositioned space appeared in a geo query — it would render at a " <>
                "location nobody established"
-    end
-
-    test "the geocoding query carries the city, not just the name" do
-      MockGeocoder.put_point("Cape Town", -33.9249, 18.4241)
-      source = pending_source()
-
-      assert {:ok, _} = Discovery.approve_source(source.id)
-
-      assert Enum.any?(MockGeocoder.queries(), &String.contains?(&1, "The Reading Room")),
-             "the geocoder was never asked: #{inspect(MockGeocoder.queries())}"
     end
   end
 

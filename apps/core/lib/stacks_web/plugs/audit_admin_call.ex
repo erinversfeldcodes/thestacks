@@ -45,7 +45,7 @@ defmodule StacksWeb.Plugs.AuditAdminCall do
         success: success,
         row_count: row_count,
         operator_session_id: operator_session_id,
-        metadata: %{reason: reason, method: conn.method}
+        metadata: %{reason: safe_reason(reason), method: conn.method}
       )
     rescue
       e ->
@@ -54,5 +54,27 @@ defmodule StacksWeb.Plugs.AuditAdminCall do
     end
 
     conn
+  end
+
+  @redacted "[redacted: the reason carried personal data]"
+
+  @doc false
+  # The erasure endpoint refuses a reason that names a person, because the audit
+  # row outlives the erasure it authorises. This hook writes the same parameter
+  # into the same row from `register_before_send`, which still runs on that 422 —
+  # so without this, the guard refused the address and then stored it anyway.
+  #
+  # It calls the controller's predicate rather than restating the rule, so the
+  # two cannot drift: widening what counts as personal data widens both at once.
+  #
+  # Redacted rather than dropped. An operator reading the trail should be able to
+  # see that a reason was supplied and withheld; a missing key reads as "no reason
+  # given", which is a different and untrue story.
+  defp safe_reason(reason) do
+    if Stacks.Audit.reason_carries_personal_data?(reason) do
+      @redacted
+    else
+      reason
+    end
   end
 end

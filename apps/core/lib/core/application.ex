@@ -72,11 +72,12 @@ defmodule Core.Application do
     searxng_url = Application.get_env(:core, :searxng_url, "http://localhost:8888")
     metrics_push_url = Application.get_env(:core, :metrics_push_url)
     metrics_query_url = Application.get_env(:core, :metrics_query_url)
+    log_shipper_url = Application.get_env(:core, :log_shipper_keepalive_url)
 
     inet6_pool = [conn_opts: [transport_opts: [inet6: true, timeout: @connect_timeout_ms]]]
 
     pools =
-      [vision_url, scraper_url, searxng_url, metrics_push_url, metrics_query_url]
+      [vision_url, scraper_url, searxng_url, metrics_push_url, metrics_query_url, log_shipper_url]
       |> Enum.filter(&sixpn_url?/1)
       |> Map.new(&{pool_key(&1), inet6_pool})
       |> Map.put(:default, conn_opts: [transport_opts: [timeout: @connect_timeout_ms]])

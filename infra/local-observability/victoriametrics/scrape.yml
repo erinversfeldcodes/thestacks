@@ -10,4 +10,11 @@ scrape_configs:
     static_configs:
       - targets: ["host.docker.internal:4000"]
         labels:
-          app: thestacks-local
+          # MUST match what the app itself queries for, not the environment it
+          # runs in. Stacks.Transparency substitutes `$app` with
+          # `FLY_APP_NAME || "thestacks-core"`, and FLY_APP_NAME is unset on a
+          # laptop — so a distinctive `thestacks-local` label made every
+          # transparency query miss, and the public page this stack exists to
+          # demonstrate rendered empty while Grafana looked fine (its own $app
+          # is `label_values(app)`, so it picks up whatever is there).
+          app: thestacks-core

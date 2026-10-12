@@ -2,7 +2,9 @@ module Types.Placement exposing
     ( Format(..)
     , Placement
     , ReadingStatus(..)
+    , formatToString
     , isHidden
+    , parseFormat
     , parseReadingStatus
     , placementDecoder
     , placementSummaryDecoder
@@ -61,6 +63,24 @@ parseFormat s =
 
         _ ->
             Nothing
+
+
+{-| The wire spelling of a format — the inverse of `parseFormat`, and the only
+thing `op.bookshelf_placements.formats` stores. The column is a free
+`{:array, :string}`, so a spelling these two disagree on round-trips as silence:
+the server stores it and `parseFormat` drops it on the way back.
+-}
+formatToString : Format -> String
+formatToString format =
+    case format of
+        Physical ->
+            "physical"
+
+        EBook ->
+            "ebook"
+
+        Audiobook ->
+            "audiobook"
 
 
 parseReadingStatus : String -> Maybe ReadingStatus

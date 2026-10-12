@@ -13,8 +13,14 @@ kill_timeout = "30s"                 # allow VM to flush its in-memory buffer on
   internal_port = 8428
   protocol = "tcp"
   processes = ["vm"]
-  auto_stop_machines = false
-  min_machines_running = 1
+  # Scale-to-zero: awake exactly when something pushes or reads — core's
+  # 15s metrics pushes hold it up while core is up, Grafana/billing queries
+  # wake it on demand, and it sleeps ~5min after core does. The first push
+  # after a wake may drop a sample or two during cold start; the 2h
+  # last_over_time lookbacks tolerate that.
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
 
   [[services.ports]]
     port = 8428

@@ -126,7 +126,22 @@
 
 html {
     font-size: 16px;
-    scroll-behavior: smooth;
+}
+
+/* `scroll-behavior: smooth` used to sit on `html` unconditionally, and it made
+   every PROGRAMMATIC scroll a no-op — `window.scrollTo(0, 0)` moved nothing, and
+   so did Elm's `Browser.Dom.setViewport`, because both respect this property and
+   the animation never survived the next render. That is why arriving on a new
+   page left you at the old page's scroll offset: not because nothing tried to
+   reset it, but because the reset was silently swallowed.
+
+   Smooth is kept for what actually wanted it — jumping to an in-page anchor,
+   like the skip link — and only for readers who have not asked for less motion,
+   which the unconditional version ignored. */
+@media (prefers-reduced-motion: no-preference) {
+    html:focus-within {
+        scroll-behavior: smooth;
+    }
 }
 
 body {
@@ -239,9 +254,22 @@ h4 {
     text-decoration: none;
 }
 
+/* Active and hover used to differ only by 0.04 alpha on the same translucent
+   white, with identical text colour — so a cursor resting on the last-clicked
+   pill was indistinguishable from the current page, and read as two active
+   pills at once. The current page now carries the accent: a bottom rule, the
+   accent text colour, and more weight. None of those is something hover does,
+   so the two states can no longer be confused for one another. */
 .app-nav__item--active .app-nav__link {
     background-color: rgba(255, 255, 255, 0.1);
-    color: var(--text);
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.app-nav__item--active .app-nav__link:hover {
+    color: var(--accent-hover);
+    box-shadow: inset 0 -2px 0 0 var(--accent-hover);
 }
 
 .app-nav__dropdown {
@@ -925,6 +953,29 @@ h4 {
     color: var(--text);
 }
 
+.search-anon-note {
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    line-height: 1.5;
+}
+
+.search-anon-note__link {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.search-anon-note__link:hover,
+.search-anon-note__link:focus-visible {
+    color: var(--text);
+}
+
 .search-hint,
 .search-empty {
     text-align: center;
@@ -1179,6 +1230,41 @@ h4 {
     cursor: pointer;
     font-size: var(--size-sm);
     font-weight: 600;
+}
+
+.shelf-row-picker {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    margin-top: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.shelf-row-picker__select {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    padding: 0.4rem 0.6rem;
+    font-size: var(--size-sm);
+    cursor: pointer;
+}
+
+.shelf-row-picker__btn {
+    padding: 0.4rem 0.8rem;
+    background-color: var(--accent);
+    border: none;
+    border-radius: var(--radius-md);
+    color: #fff;
+    cursor: pointer;
+    font-size: var(--size-sm);
+    font-weight: 600;
+}
+
+.shelf-row-picker__select:disabled,
+.shelf-row-picker__btn:disabled {
+    opacity: 0.55;
+    cursor: progress;
 }
 
 .isbn-input-wrapper {
@@ -1720,6 +1806,46 @@ h4 {
     color: #fff;
 }
 
+.shelf-row-picker__label {
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
+.book-detail__shelf-rows {
+    padding: var(--space-5) 0 0;
+    border-top: 1px solid var(--parchment-border);
+}
+
+.book-detail__shelf-rows-note {
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted, var(--text-muted));
+    margin-bottom: var(--space-3);
+}
+
+.book-detail__shelf-rows .shelf-row-picker__label {
+    font-family: var(--font-heading);
+    font-size: var(--size-sm);
+    color: var(--parchment-muted);
+    font-style: italic;
+}
+
+.book-detail__shelf-rows .shelf-row-picker__select {
+    background-color: var(--parchment-cream);
+    border: 1px solid var(--parchment-border);
+    color: var(--parchment-text);
+    font-family: var(--font-heading);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--size-sm);
+    box-shadow: 1px 2px 4px rgba(44, 31, 14, 0.1);
+}
+
+.book-detail__shelf-rows .shelf-row-picker__btn {
+    background-color: var(--parchment-accent);
+    color: #fff;
+}
+
 .book-detail__parchment .btn--secondary {
     border-color: var(--parchment-accent);
     color: var(--parchment-accent);
@@ -1940,6 +2066,24 @@ h4 {
 .home-collection__add,
 .home-collection__continue {
     min-width: 12rem;
+}
+
+/* Deliberately not a button: the two buttons above are the errands someone
+   came to run, and a third competing for the same weight would make the row
+   read as a menu rather than a choice. This is an invitation, so it sits on
+   the same baseline in the body voice and earns its emphasis on hover. */
+.home-collection__blog {
+    align-self: center;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 0.25em;
+}
+
+.home-collection__blog:hover,
+.home-collection__blog:focus-visible {
+    color: var(--accent);
 }
 
 .page--not-found {
@@ -4187,12 +4331,14 @@ h4 {
 }
 
 .page--metrics,
-.page--about {
+.page--about,
+.page--faq {
     padding-bottom: 4rem;
 }
 
 .metrics__title,
-.about__title {
+.about__title,
+.faq__title {
     font-size: var(--size-4xl);
     font-family: var(--font-heading);
     letter-spacing: 0.01em;
@@ -4200,7 +4346,8 @@ h4 {
 }
 
 .metrics__subtitle,
-.about__lede {
+.about__lede,
+.faq__lede {
     color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
@@ -4285,7 +4432,8 @@ h4 {
 }
 
 .metrics__section-title,
-.about__section-title {
+.about__section-title,
+.faq__section-title {
     font-family: var(--font-heading);
     font-size: var(--size-xxl);
     margin-bottom: 0.5rem;
@@ -4446,6 +4594,17 @@ h4 {
     margin-bottom: 1.25rem;
 }
 
+/* Inline link inside prose — distinct from .about__link, which is a block card. */
+.about__prose-link {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.about__prose-link:hover {
+    color: var(--text);
+}
+
 .about__link {
     display: block;
     background: linear-gradient(145deg, rgba(61, 43, 31, 0.6), rgba(42, 31, 20, 0.8));
@@ -4513,6 +4672,132 @@ h4 {
     color: var(--text);
     line-height: 1.7;
     max-width: 640px;
+}
+
+/* The FAQ reference page. Shares About's measure and heading scale (see the
+   grouped .faq__title / .faq__lede / .faq__section-title selectors above) so
+   the two public pages read as one surface; what is local to it is the
+   section-jump row and the question expanders. */
+
+.faq__jumps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.25rem;
+    max-width: 640px;
+    margin-bottom: 2.5rem;
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--border);
+}
+
+.faq__jump {
+    font-family: var(--font-heading);
+    font-size: var(--size-xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+
+.faq__jump:hover {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.faq__section {
+    max-width: 640px;
+    margin-bottom: var(--space-7);
+    scroll-margin-top: var(--space-5);
+}
+
+/* Ships with `open`. The reader may collapse a question; nothing re-renders
+   this page, so the browser's own state is the only state there is. */
+.faq__question {
+    border-top: 1px solid var(--border);
+    padding: var(--space-4) 0 var(--space-1);
+    scroll-margin-top: var(--space-5);
+}
+
+.faq__question-summary {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+    line-height: 1.4;
+}
+
+.faq__question-summary::-webkit-details-marker {
+    display: none;
+}
+
+.faq__question-summary::before {
+    content: "▸ ";
+    color: var(--accent);
+    font-size: var(--size-sm);
+}
+
+.faq__question[open] .faq__question-summary::before {
+    content: "▾ ";
+}
+
+.faq__question-summary:hover {
+    color: var(--accent);
+}
+
+.faq__answer {
+    font-size: var(--size-base);
+    color: var(--text-muted);
+    line-height: 1.7;
+    margin: var(--space-3) 0 0;
+}
+
+.faq__answer-link {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease-in;
+}
+
+.faq__answer-link:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent-hover);
+}
+
+.faq__list {
+    list-style: none;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.faq__list-item {
+    font-size: var(--size-base);
+    color: var(--text-muted);
+    line-height: 1.7;
+    padding-left: 0.9rem;
+    border-left: 2px solid var(--border);
+}
+
+.faq__closing {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    font-style: italic;
+    color: var(--text);
+    line-height: 1.7;
+    max-width: 640px;
+    margin-top: var(--space-4);
+}
+
+/* The quiet third affordance on the signed-out landing — deliberately not a
+   third button, so the two CTAs above it keep their weight. */
+.home__questions {
+    margin-top: var(--space-5);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    line-height: 1.6;
 }
 
 @media (max-width: 768px) {
@@ -5566,7 +5851,66 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
+/* The strip every admin page wears. Quiet by design — it sits above the page's
+   own title rather than competing with it — but present on all of them, so the
+   way out of an admin session is never somewhere else. */
+
+.admin-surface__bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    /* No width of its own: the bar spans whatever the page's container gives
+       it, so the label lines up with the page title and the button with the
+       right edge of the page's own content. A max-width here would centre the
+       strip inside a wider page and read as a misalignment. */
+    padding: 0 0 var(--space-3);
+}
+
+.admin-surface__label {
+    font-family: var(--font-heading);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-right: auto;
+}
+
+.admin-surface__end {
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-heading);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.admin-surface__end:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+}
+
+.admin-surface__end:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.admin-surface__error {
+    flex-basis: 100%;
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--error);
+    text-align: right;
+}
+
 .about__link--costs,
+.about__link--faq,
 .about__link--metrics,
 .blog-archive__link,
 .book-detail__author-rss-link,
@@ -5684,6 +6028,7 @@ h4 {
 }
 
 .audit-log__when,
+.blog-archive__item-author,
 .blog-archive__item-date,
 .blog-post__byline,
 .blog-post__date,
@@ -5788,6 +6133,22 @@ h4 {
     border-bottom: 1px solid var(--border);
 }
 
+.blog-archive__item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+}
+
+/* The separator is decoration between two meta values, so it belongs to the
+   layout rather than the markup — and it must not appear when the byline is
+   absent, which is why it hangs off the date's preceding sibling. */
+.blog-archive__item-author + .blog-archive__item-date::before {
+    content: "·";
+    margin-right: var(--space-2);
+}
+
 .blog-archive__list,
 .blog-post__comments,
 .book-associations__list,
@@ -5890,6 +6251,68 @@ h4 {
     font-family: var(--font-body);
     font-size: var(--size-sm);
     color: var(--text);
+}
+
+/* The members list. The row is a line per person: name on the left, the owner's
+   remove control on the right, so a long list still scans as a list of people
+   rather than a list of buttons. */
+.groups-detail__member {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.groups-detail__member-name {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+    flex: 1;
+}
+
+.groups-detail__member-role {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+}
+
+.groups-detail__member-remove {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.6rem;
+    cursor: pointer;
+}
+
+.groups-detail__member-remove:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.groups-detail__member-remove:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.groups-detail__members-loading,
+.groups-detail__members-empty,
+.groups-detail__members-error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
+/* A removal that failed, reported next to the roster rather than replacing it.
+   Warmer than the read error above because the list beside it is still good. */
+.groups-detail__member-remove-error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--error);
+    margin-top: var(--space-2);
 }
 
 .book-detail__availability-price,
@@ -6000,6 +6423,44 @@ h4 {
     font-size: var(--size-xs);
     color: var(--text-muted);
     margin-top: 0.3rem;
+}
+
+/* The reader's own public address, inside the muted hint. Underlined rather than
+   recoloured: it sits in deliberately quiet text, and an accent here would pull
+   more attention than a hint deserves. */
+.form-field__hint-link {
+    color: var(--text);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.form-field__hint-link:hover {
+    color: var(--accent);
+}
+
+.pending-email {
+    font-family: var(--font-body);
+    background: rgba(184, 134, 11, 0.12);
+    border-left: 2px solid var(--warning);
+    padding: 0.7rem 0.9rem;
+    margin-top: 0.6rem;
+    border-radius: var(--radius-sm);
+}
+
+.pending-email__lede {
+    font-size: var(--size-sm);
+    color: var(--text);
+    margin: 0 0 0.4rem;
+}
+
+.pending-email__detail {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    margin: 0 0 0.35rem;
+}
+
+.pending-email__detail:last-child {
+    margin-bottom: 0;
 }
 
 .groups-detail__invite-form,
@@ -6137,6 +6598,7 @@ h4 {
 .page--blog-editor,
 .page--blog-post,
 .page--bookshelf,
+.page--feedback,
 .page--groups,
 .page--groups-detail,
 .page--insights,
@@ -6189,6 +6651,7 @@ h4 {
 }
 
 .about__link--costs:hover,
+.about__link--faq:hover,
 .about__link--metrics:hover,
 .blog-archive__link:hover,
 .book-detail__author-rss-link:hover,
@@ -6485,6 +6948,7 @@ h4 {
 .privacy__blocked-load-more,
 .blog-post__author-link,
 .home__link--about,
+.home__link--faq,
 .home__link--marketplace {
     color: var(--accent);
     background: none;
@@ -6501,6 +6965,7 @@ h4 {
 .privacy__blocked-load-more:hover,
 .blog-post__author-link:hover,
 .home__link--about:hover,
+.home__link--faq:hover,
 .home__link--marketplace:hover {
     border-bottom-color: var(--accent);
     color: var(--accent-hover);
@@ -7005,4 +7470,159 @@ h4 {
 
 .book-detail__author-event-link {
     font-size: var(--size-xs);
+}
+
+/* Beta feedback channel — the reader's form and the owner's queue.
+
+   The two states after a send are deliberately different colours: sent borrows
+   the accent used elsewhere for a completed action, failed borrows the error
+   treatment. A failed send keeps the draft in the textarea above, so the
+   message has to read as "still here", not as "gone". */
+
+.feedback__lede {
+    color: var(--text-muted);
+    font-family: var(--font-body);
+    max-width: 40rem;
+    margin: 0 0 var(--space-4);
+}
+
+.feedback__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    max-width: 40rem;
+}
+
+.feedback__label {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+}
+
+.feedback__message {
+    width: 100%;
+    min-height: 10rem;
+    padding: 0.6rem var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    resize: vertical;
+}
+
+.feedback__count {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    margin: 0;
+}
+
+/* Two classes, so it outranks any single-class state rule on the same
+   element rather than losing to one. */
+.feedback__count.feedback__count--over {
+    color: var(--error);
+}
+
+.feedback__send {
+    align-self: flex-start;
+    padding: 0.6rem 1.25rem;
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    font-weight: 600;
+    color: #fff;
+    background-color: var(--accent);
+    cursor: pointer;
+}
+
+.feedback__send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.feedback__outcome {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    padding: 0.6rem 0.85rem;
+    border-radius: var(--radius-sm);
+    margin: 0;
+}
+
+.feedback__outcome.feedback__outcome--sent {
+    color: var(--accent);
+    background: rgba(74, 124, 89, 0.15);
+    border-left: 2px solid var(--accent);
+}
+
+.feedback__outcome.feedback__outcome--failed {
+    color: var(--error);
+    background: rgba(224, 80, 80, 0.12);
+    border-left: 2px solid var(--error);
+}
+
+.admin-feedback__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.admin-feedback__entry {
+    padding: var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.admin-feedback__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    margin-bottom: var(--space-2);
+}
+
+.admin-feedback__sender {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.admin-feedback__context {
+    font-style: italic;
+}
+
+.admin-feedback__when {
+    margin-left: auto;
+}
+
+.admin-feedback__body {
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    white-space: pre-wrap;
+    margin: 0;
+}
+
+/* The business opt-out link. Sits at the foot of any block that names a shop
+   we found rather than one that asked to be here. Quiet on purpose — the reader
+   browsing for a book is not its audience — but never hidden, because an
+   opt-out nobody can see is not one. */
+.business-claim {
+    display: inline-block;
+    margin-top: var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+.business-claim:hover,
+.business-claim:focus-visible {
+    color: var(--accent);
 }

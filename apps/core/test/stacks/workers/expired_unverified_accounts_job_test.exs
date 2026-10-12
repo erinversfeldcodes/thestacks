@@ -39,11 +39,8 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJobTest do
   end
 
   test "erases expired unverified accounts and preserves confirmed + recent ones" do
-    expired =
-      insert(:user, email: "expired@thestacks.test", email_confirmed: false)
-      |> backdate!(2 * @day)
-
-    recent = insert(:user, email: "recent@thestacks.test", email_confirmed: false)
+    expired = abandoned_signup!("expired@thestacks.test", 2 * @day)
+    recent = insert(:unconfirmed_user, email: "recent@thestacks.test")
 
     confirmed_old =
       insert(:user, email: "confirmed@thestacks.test", email_confirmed: true)
@@ -56,9 +53,30 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJobTest do
     assert Accounts.get_user(confirmed_old.id), "confirmed account must survive"
   end
 
+  test "an account degraded by an unanswered email change is not an abandoned signup" do
+    # The two states share a flag and nothing else: this account confirmed once
+    # (so it holds no signup token), has all its data, and is waiting on a change.
+    # The reaper ERASES what it selects, so getting this wrong is unrecoverable.
+    degraded =
+      insert(:user,
+        email: "degraded@thestacks.test",
+        email_confirmed: false,
+        email_confirmation_token: nil,
+        pending_email: "wanted@thestacks.test",
+        pending_email_token: "tok",
+        pending_email_sent_at: DateTime.utc_now(),
+        pending_email_revert_token: "revtok"
+      )
+      |> backdate!(30 * @day)
+
+    assert :ok = perform_job(ExpiredUnverifiedAccountsJob, %{})
+
+    assert Accounts.get_user(degraded.id),
+           "the email-change degradation fed a live account into GDPR erasure"
+  end
+
   test "writes a GDPR erasure audit row for each reaped account" do
-    insert(:user, email: "reaped-audit@thestacks.test", email_confirmed: false)
-    |> backdate!(2 * @day)
+    abandoned_signup!("reaped-audit@thestacks.test", 2 * @day)
 
     assert :ok = perform_job(ExpiredUnverifiedAccountsJob, %{})
 
@@ -73,8 +91,7 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJobTest do
   end
 
   test "emits telemetry with the erased count" do
-    insert(:user, email: "reaped-telemetry@thestacks.test", email_confirmed: false)
-    |> backdate!(2 * @day)
+    abandoned_signup!("reaped-telemetry@thestacks.test", 2 * @day)
 
     ref = make_ref()
     parent = self()
@@ -94,7 +111,7 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJobTest do
   end
 
   test "is a no-op when there are no expired unverified accounts" do
-    insert(:user, email: "fresh@thestacks.test", email_confirmed: false)
+    insert(:unconfirmed_user, email: "fresh@thestacks.test")
 
     assert :ok = perform_job(ExpiredUnverifiedAccountsJob, %{})
     assert Accounts.get_user_by_email("fresh@thestacks.test")

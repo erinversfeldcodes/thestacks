@@ -106,6 +106,8 @@ defmodule Stacks.AI.TogetherClient do
   defp parse_success_response(resp_body) do
     case Jason.decode(resp_body) do
       {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]}} ->
+        # one billable completion — the cost page counts these
+        :telemetry.execute([:stacks, :ai, :together_completion], %{count: 1}, %{})
         {:ok, String.slice(String.trim(content), 0, 500)}
 
       {:ok, other} ->

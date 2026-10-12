@@ -12,6 +12,7 @@ defmodule Stacks.Factory do
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
+  alias Stacks.Feedback.Entry, as: FeedbackEntry
 
   alias Stacks.Enrichment.{
     Bookstore,
@@ -27,6 +28,7 @@ defmodule Stacks.Factory do
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
   alias Stacks.Monitoring.SourceHealthCheck
   alias Stacks.Partners.{InventoryItem, Partner}
+  alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
@@ -129,7 +131,28 @@ defmodule Stacks.Factory do
     %{book_factory() | author: build(:author)}
   end
 
-  def book_edition_factory do
+  @doc """
+      An edition OF a work — by default a second one, hung off a work the factory
+      builds for it.
+
+      Two things follow the work rather than being fixed here. Which work: naming
+      it as `book:` (a struct) or `book_id:` (an id) attaches the edition to THAT
+      work instead of minting another, and only one of the two is ever set on the
+      struct — setting both makes Ecto refuse the insert outright ("cannot change
+      belongs_to association `book` because there is already a change setting its
+      foreign key").
+
+      And whether it is primary: `Books.create/1` writes a work's FIRST edition
+      with `is_primary: true` and every later merge with `false`
+      (books.ex:197-211, books.ex:787-800), so a work whose only edition is
+      secondary is a state no write path produces. Hanging this off an
+      `:editionless_book` therefore yields the primary edition; hanging it off a
+      work that already has one yields a secondary, which is what keeps the
+      `book_editions_one_primary_per_book` partial index satisfied.
+  """
+  def book_edition_factory(attrs) do
+    {work, attrs} = pop_work(attrs)
+
     %BookEdition{
       id: Ecto.UUID.generate(),
       isbn: next_isbn(),
@@ -137,11 +160,39 @@ defmodule Stacks.Factory do
       page_count: 300,
       publisher: "Test Publisher",
       publication_year: 2020,
-      is_primary: false,
-      verification_source: "open_library",
-      book: build(:book)
+      is_primary: work_has_no_editions?(work),
+      verification_source: "open_library"
     }
+    |> attach_work(work)
+    |> merge_attributes(attrs)
   end
+
+  defp pop_work(attrs) do
+    cond do
+      Map.has_key?(attrs, :book) -> {Map.fetch!(attrs, :book), Map.drop(attrs, [:book, :book_id])}
+      Map.has_key?(attrs, :book_id) -> Map.pop!(attrs, :book_id)
+      true -> {build(:book), attrs}
+    end
+  end
+
+  defp attach_work(edition, %Book{} = book), do: %{edition | book: book}
+  defp attach_work(edition, book_id) when is_binary(book_id), do: %{edition | book_id: book_id}
+  defp attach_work(edition, _work), do: edition
+
+  # A work carrying its editions in memory answers for itself; one known only by
+  # id has to be asked. Order matters — a *built* `:book` already holds an unsaved
+  # primary edition that no query can see yet, and calling this one primary too
+  # would insert two.
+  defp work_has_no_editions?(%Book{editions: editions}) when is_list(editions), do: editions == []
+
+  defp work_has_no_editions?(%Book{id: book_id}) when is_binary(book_id),
+    do: work_has_no_editions?(book_id)
+
+  defp work_has_no_editions?(book_id) when is_binary(book_id) do
+    not Core.Repo.exists?(from e in BookEdition, where: e.book_id == type(^book_id, Ecto.UUID))
+  end
+
+  defp work_has_no_editions?(_work), do: true
 
   @doc """
       The primary edition a work is created WITH — never on its own.
@@ -189,13 +240,73 @@ defmodule Stacks.Factory do
     body <> Integer.to_string(rem(10 - rem(sum, 10), 10))
   end
 
-  def bookshelf_factory do
+  @doc """
+      ONE of a user's bookshelves — not their whole set.
+
+      A real account does not start with five bookshelves and does not
+      necessarily end with them either: `Shelving.get_or_create_bookshelf/2`
+      mints each one lazily, the first time that account places a book on it or
+      sets its visibility (shelving.ex:1210). So a user owning nothing but a
+      `library` is a state the write path really produces, and this factory is
+      free to hand out one shelf. What it is not free to do is name it something
+      `bookshelf_changeset/2` would reject — hence the check below. A test that
+      means "the user's bookshelves" wants `insert_user_with_bookshelves/1`.
+  """
+  def bookshelf_factory(attrs) do
+    {user, attrs} = Map.pop_lazy(attrs, :user, fn -> build(:user) end)
+
     %Bookshelf{
       id: Ecto.UUID.generate(),
       name: "library",
-      visibility: "owner",
-      user: build(:user)
+      visibility: "owner"
     }
+    |> merge_attributes(attrs)
+    |> assert_shelvable(user)
+    |> Map.put(:user, user)
+  end
+
+  # The five names and the audience ladder belong to the write path, so ask it
+  # rather than restating it. `op.bookshelf_name` and `op.visibility_level` are
+  # postgres enums, so an insert would be refused anyway — but only on insert,
+  # and only as `invalid input value for enum`, which names neither the factory
+  # nor the rule. `build/2` gets no such refusal at all, which is how a struct
+  # carrying a bookshelf no account can own reaches a test that never persists it.
+  defp assert_shelvable(%Bookshelf{} = bookshelf, user) do
+    changeset =
+      Shelving.bookshelf_changeset(%Bookshelf{}, %{
+        user_id: user.id,
+        name: bookshelf.name,
+        visibility: bookshelf.visibility
+      })
+
+    if changeset.valid? do
+      bookshelf
+    else
+      raise ArgumentError,
+            "no write path can create this bookshelf: " <>
+              inspect(changeset.errors) <> " — see Shelving.bookshelf_changeset/2"
+    end
+  end
+
+  @doc """
+      A user who owns all five named bookshelves, accumulated the way an account
+      accumulates them.
+
+      Registration does not create them (accounts.ex never mentions a bookshelf);
+      each appears the first time the account reaches for it. So this walks that
+      same lazy path once per name through `Shelving.set_bookshelf_visibility/3`,
+      leaving rows the write path wrote rather than rows shaped to look like it.
+      Returns the user; reach the shelves through `Shelving.get_bookshelf/2` or
+      `Shelving.list_user_bookshelves/1`.
+  """
+  def insert_user_with_bookshelves(attrs \\ []) do
+    user = insert(:user, attrs)
+
+    Enum.each(Shelving.bookshelf_names(), fn name ->
+      {:ok, _bookshelf} = Shelving.set_bookshelf_visibility(user.id, name, "owner")
+    end)
+
+    user
   end
 
   def shelf_factory do
@@ -205,6 +316,31 @@ defmodule Stacks.Factory do
     }
   end
 
+  @doc """
+      A book on a bookshelf, in a reading state that bookshelf could hold.
+
+      Two rules, and they are separate. The dates are not independent of the
+      status: `Shelving.update_reading_progress/3` stamps `started_at` on the
+      first move to `"reading"` and `finished_at` on `"completed"`
+      (shelving.ex:865-873), so `"reading"` with a nil `started_at`, or
+      `"completed"` with a nil `finished_at`, are rows no reader could produce,
+      whatever bookshelf they sit on. Those two are unconditional, and they
+      apply to the status the placement ENDS with — ask for `reading_status:
+      "completed"` on a wishlist and the `finished_at` follows. A started_at on
+      a completed or abandoned book is the weaker claim that you read some of
+      what you finished or gave up on, and only a default.
+
+      The status itself is only a default, chosen from the bookshelf: a reading
+      pile holds what is being read, a library what has been finished, and the
+      rest what has not been started. It is a default rather than a rule because
+      `place_book/5` never writes the column at all — every placement lands on
+      the `op.bookshelf_placements.reading_status` default of `"to_read"` and
+      moves only when the reader says so, so a `to_read` library book is real
+      too. Say `reading_status:` when the test depends on which one it is.
+
+      The timeline collapses onto `placed_at`, since that is the only moment the
+      factory knows about; pass `started_at:`/`finished_at:` to spread it out.
+  """
   def placement_factory(attrs) do
     {bookshelf, attrs} = Map.pop_lazy(attrs, :bookshelf, fn -> build(:bookshelf) end)
     {shelf, attrs} = Map.pop_lazy(attrs, :shelf, fn -> default_shelf_for(bookshelf) end)
@@ -215,10 +351,8 @@ defmodule Stacks.Factory do
       placed_at: DateTime.utc_now(),
       formats: [],
       visibility: "owner",
-      reading_status: "to_read",
+      reading_status: reading_status_on(bookshelf),
       current_page: nil,
-      started_at: nil,
-      finished_at: nil,
       book: book,
       book_edition_id: primary_edition_id_of(book),
       bookshelf_id: bookshelf.id,
@@ -226,7 +360,34 @@ defmodule Stacks.Factory do
       shelf: shelf
     }
     |> merge_attributes(attrs)
+    |> stamp_reading_dates(attrs)
   end
+
+  defp reading_status_on(%Bookshelf{name: "reading_pile"}), do: "reading"
+  defp reading_status_on(%Bookshelf{name: "library"}), do: "completed"
+  defp reading_status_on(%Bookshelf{}), do: "to_read"
+
+  defp stamp_reading_dates(%Placement{} = placement, attrs) do
+    started_at = pinned_or(attrs, :started_at, placement, &started_at_for/1)
+    finished_at = pinned_or(attrs, :finished_at, placement, &finished_at_for/1)
+
+    %{placement | started_at: started_at, finished_at: finished_at}
+  end
+
+  defp pinned_or(attrs, field, placement, derive) do
+    if Map.has_key?(attrs, field), do: Map.fetch!(attrs, field), else: derive.(placement)
+  end
+
+  defp started_at_for(%Placement{reading_status: status, placed_at: placed_at})
+       when status in ["reading", "completed", "abandoned"],
+       do: placed_at
+
+  defp started_at_for(%Placement{}), do: nil
+
+  defp finished_at_for(%Placement{reading_status: "completed", placed_at: placed_at}),
+    do: placed_at
+
+  defp finished_at_for(%Placement{}), do: nil
 
   defp primary_edition_id_of(%Book{editions: editions}) when is_list(editions) do
     editions
@@ -260,14 +421,55 @@ defmodule Stacks.Factory do
     build(:shelf, bookshelf: bookshelf)
   end
 
-  def uploaded_image_factory do
+  @doc """
+      An image somebody uploaded — so it has an uploader, and a place the bytes
+      went.
+
+      Both write paths take the `user_id` from the authenticated session and
+      derive the storage key from the row's own id
+      (`Uploads.store_upload/2`/`init_upload/2` → `insert_uploaded_image/4`,
+      uploads.ex:51-125), so an ownerless row is not something a user can
+      produce — it is what erasure used to LEAVE BEHIND before
+      `uploaded_images_user_id_fkey` was added with `ON DELETE CASCADE`. That
+      makes the default load-bearing rather than cosmetic: an image with no
+      owner is an image no erasure query reaches. Tests that want that state
+      say so with `:orphaned_uploaded_image`.
+  """
+  def uploaded_image_factory(attrs) do
+    {owner, attrs} = pop_owner(attrs)
+    id = Ecto.UUID.generate()
+    now = DateTime.utc_now()
+
     %UploadedImage{
+      id: id,
+      storage_path: "uploads/#{id}",
       status: "pending",
-      uploaded_at: DateTime.utc_now(),
-      expires_at: DateTime.add(DateTime.utc_now(), 30, :day),
-      user_id: nil
+      uploaded_at: now,
+      expires_at: DateTime.add(now, 30, :day)
     }
+    |> attach_owner(owner)
+    |> merge_attributes(attrs)
   end
+
+  @doc """
+      An uploaded image with nobody attached — the pre-cascade leftover, and the
+      only thing `:uploaded_image` will not build for you.
+  """
+  def orphaned_uploaded_image_factory do
+    uploaded_image_factory(%{user_id: nil})
+  end
+
+  defp pop_owner(attrs) do
+    cond do
+      Map.has_key?(attrs, :user) -> {Map.fetch!(attrs, :user), Map.drop(attrs, [:user, :user_id])}
+      Map.has_key?(attrs, :user_id) -> Map.pop!(attrs, :user_id)
+      true -> {build(:user), attrs}
+    end
+  end
+
+  defp attach_owner(image, %User{} = user), do: %{image | user: user}
+  defp attach_owner(image, user_id) when is_binary(user_id), do: %{image | user_id: user_id}
+  defp attach_owner(image, _owner), do: image
 
   def placement_history_factory do
     %PlacementHistory{
@@ -343,6 +545,14 @@ defmodule Stacks.Factory do
       post: build(:post),
       author: build(:user),
       body: sequence(:comment_body, &"Comment #{&1}")
+    }
+  end
+
+  def feedback_entry_factory do
+    %FeedbackEntry{
+      user: build(:user),
+      body: sequence(:feedback_body, &"Something I noticed #{&1}."),
+      page_context: "/library"
     }
   end
 

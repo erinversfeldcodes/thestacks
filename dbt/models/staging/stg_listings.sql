@@ -7,8 +7,6 @@ select
     condition,
     pricing_mode,
     price_cents,
-    contact_info,
-    description,
     status,
     currency,
     photo_urls,

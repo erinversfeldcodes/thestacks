@@ -1433,62 +1433,23 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 6 — MockClient classification responses" do
+  # Every test in this describe has the MOCK as its subject: it pins the steering
+  # seam's own API — the contract the rest of the suite leans on whenever it steers
+  # vision. None of it asserts production behaviour. The vision verdicts themselves
+  # (not-a-book, ambiguous, no-ISBN, service down, breaker open) are asserted where
+  # they are acted on: Suites 4 and 5 above, the describe below, and the transient /
+  # deterministic branch sweep in identify_book_job_terminal_test.exs.
+  describe "Suite 6 — MockClient steering seam (the harness's own contract)" do
     @tag suite: :external
-    test "default MockClient returns book classification" do
-      result = MockClient.call_vision("is_book", %{})
-      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} = result
-    end
+    test "the unsteered default is a BOOK carrying an ISBN — the baseline every unsteered test inherits" do
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
 
-    @tag suite: :external
-    test "steered not-a-book response replaces the default classification" do
-      MockClient.put_response("analyze", not_a_book())
-      result = MockClient.call_vision("analyze", %{})
-      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}} = result
-    end
-
-    @tag suite: :external
-    test "steered ambiguous response replaces the default classification" do
-      MockClient.put_response("analyze", ambiguous())
-      result = MockClient.call_vision("analyze", %{})
-
-      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => 0.5}} =
-               result
-    end
-
-    @tag suite: :external
-    test "steered service_unavailable error replaces the default success" do
-      MockClient.put_response("analyze", service_error())
-      assert {:error, :service_unavailable} = MockClient.call_vision("analyze", %{})
-    end
-  end
-
-  describe "Suite 6 — MockClient extraction responses" do
-    @tag suite: :external
-    test "default MockClient returns book extraction with ISBN" do
-      {:ok, resp} = MockClient.call_vision("analyze", %{})
+      assert {:ok, resp} = MockClient.call_vision("analyze", %{})
       assert [book | _] = resp["books"]
       assert [_ | _] = book["potential_isbns"]
     end
 
-    @tag suite: :external
-    test "steered no-ISBN response replaces the default non-empty books array" do
-      MockClient.put_response("analyze", no_isbn())
-      {:ok, resp} = MockClient.call_vision("analyze", %{})
-      assert resp["books"] == []
-    end
-  end
-
-  describe "Suite 6 — circuit breaker" do
-    @tag suite: :external
-    test "steered :circuit_open error is returned for every endpoint" do
-      MockClient.put_response(:any, circuit_open())
-      assert {:error, :circuit_open} = MockClient.call_vision("analyze", %{})
-      assert {:error, :circuit_open} = MockClient.call_vision("is_book", %{})
-    end
-  end
-
-  describe "Suite 6 — MockClient steering seam" do
     @tag suite: :external
     test "put_response/2 steers is_book, and clear/0 restores the default" do
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
@@ -1554,7 +1515,9 @@ defmodule Stacks.UploadPipelineTest do
 
       assert {:error, :steered_in_parent} = result
     end
+  end
 
+  describe "Suite 6 — a steered verdict crosses into production" do
     @tag suite: :external
     test "a steered response is consumed by the IdentifyBookJob pipeline, not just echoed" do
       image = insert(:uploaded_image, status: "pending")

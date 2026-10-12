@@ -1,0 +1,58 @@
+# API routes that scripts/check-route-clients.sh will not fail the build over.
+#
+# One route path per line, then whitespace, then "<tag>: <why>". The reason is
+# the point of the file — it must name the caller that stands in for the missing
+# client, or the decision that made the absence deliberate. "It's fine" is not a
+# reason. An entry whose route grows a client, or whose route is deleted, fails
+# the gate until the line is removed, so this file cannot quietly rot.
+#
+#   server-route-not-SPA  something other than the first-party clients calls it:
+#                         an operator with curl, a partner system, a shell script.
+#   server-issued-url     the client does call it, but the path arrives in a
+#                         server response at runtime, so it is never a literal.
+#   webhook               an external service calls in.
+#   deliberate-dark       built ahead of its surface on purpose; the reason says
+#                         what it is waiting for.
+#   test-helper-only      only the Playwright suite calls it, by design.
+#   known-defect          NOT a justification. The client is missing and that is
+#                         a bug; the line keeps the build green while the bug is
+#                         tracked, and every run prints these back as a warning.
+#                         Fix or delete the route — do not let one settle here.
+
+# --- Operator surfaces: admin with curl, behind admin auth + MFA + audit ---
+/api/admin/audit_log                            server-route-not-SPA: break-glass operator read, driven by curl behind admin MFA and audited by the admin-call plug
+/api/admin/gdpr_export                          server-route-not-SPA: break-glass operator export for a subject request that arrives outside the app
+/api/admin/gdpr_erase                           server-route-not-SPA: break-glass operator erasure for a subject request that arrives outside the app
+/api/admin/degraded_accounts                    server-route-not-SPA: operator lookup for readers locked out by a lapsed email change; they cannot reach the app to self-serve, which is the whole reason the endpoint exists (docs/runbooks/degraded-account-recovery.md)
+/api/admin/degraded_accounts/restore            server-route-not-SPA: the recovery itself, driven by curl from the runbook; the reader is by definition unable to sign in and trigger it
+/api/admin/platform_stats                       server-route-not-SPA: break-glass operator read; the public metrics page reads the transparency endpoint instead
+/api/admin/users/by_email                       server-route-not-SPA: break-glass operator lookup when answering a support or subject request
+/api/admin/users/by_id                          server-route-not-SPA: break-glass operator lookup when answering a support or subject request
+/api/admin/data_corrections                     server-route-not-SPA: the owner's reviewed-repair surface, deliberately HTTP-and-curl because a running stack has no shell
+/api/admin/data_corrections/:name/apply         server-route-not-SPA: same reviewed-repair surface; the targeted variant is the one the end-to-end suite drives
+
+# --- Partner integration: partners are the clients, and they are not us ---
+/api/partner/inventory                          server-route-not-SPA: partner systems push and read their own inventory with their own API key; data flows partner to platform only
+/api/partner/inventory/import                   server-route-not-SPA: partner systems submit bulk inventory with their own API key
+/api/partner/events                             server-route-not-SPA: partner systems publish and list their own events with their own API key
+/api/partner/events/:id                         server-route-not-SPA: partner systems retract an event they published
+
+# --- Called, but not through a path the gate can see ---
+/api/upload/:image_id/data                      server-issued-url: the SPA PUTs file bytes to the upload_url that the init response hands back, so the path is never a literal in client code
+/api/internal/smoke/circuit_breakers            server-route-not-SPA: the circuit-breaker smoke script drives it against a deployed stack
+/api/internal/vision/associate                  webhook: the vision sidecar POSTs identification results back to the platform, HMAC-signed
+/api/auth/confirm-email-change/:token           server-route-not-SPA: the reader opens it from a link in the email sent to the address they are moving TO — proving they can read that inbox is the whole point, so a call from the signed-in SPA would prove nothing
+/api/auth/revert-email-change/:token            server-route-not-SPA: the reader opens it from a link in the email sent to the address they are moving AWAY from, possibly on a device that is not signed in and possibly because the session that asked for the change was not theirs
+
+# --- Built ahead of the surface, on purpose ---
+/api/third-spaces                               deliberate-dark: the venue map waits on real partner-sourced venue data; its page exists but is deliberately left off the router until there is something to map
+/api/bookshelves/:bookshelf_id/grants           deliberate-dark: specific-people grants stay unexposed until the unified audience ladder lands, so the product never ships two visibility vocabularies at once
+/api/bookshelves/:bookshelf_id/grants/:user_id  deliberate-dark: same, the revoke half of the specific-people grant surface
+
+# --- Known defects: the client is missing and it should not be ---
+/api/partners/register                          known-defect: bookshops and reading groups cannot apply from the app — the registration form was never built, so the only way in is a hand-made request
+/api/admin/partners                             known-defect: the owner has no partner approval queue in the app
+/api/admin/partners/:id/approve                 known-defect: approving mints a one-time API key that has nowhere to be shown, because the approval UI does not exist
+/api/admin/partners/:id/reject                  known-defect: no partner approval queue means no reject affordance either
+/api/imports                                    known-defect: the import list is never fetched — the import page goes straight to a single import by id, so a user cannot find an earlier one
+/api/health/ready                               known-defect: readiness is served and tested but nothing probes it; the deploy health check requests liveness only

@@ -12,8 +12,10 @@ defmodule Mix.Tasks.Eval.Resolver do
           mix eval.resolver --w-<component> N  # any scorer weight
           mix eval.resolver --corpus path.exs  # alternative corpus
 
-      Corpus: `priv/eval/resolver_corpus.exs`. Exit 0 always — it reports, it
-      does not gate.
+      Corpus: `priv/eval/corpus.exs`. Exits 1 on a regression against pinned
+      expectations. Called by `scripts/lint-elixir.sh`, so that exit code is now
+      a gate rather than a capability — it went a while able to fail and never
+      asked to.
   """
 
   use Mix.Task

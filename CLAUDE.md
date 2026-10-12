@@ -1,6 +1,6 @@
 # The Stacks — Claude Code Project Configuration
 
-> An open-source, self-hosted book management and discovery platform.
+> A source-available, self-hosted book management and discovery platform.
 > Dark-academic-meets-cottage-core aesthetic.
 
 ## Quick Reference
@@ -45,7 +45,7 @@ Partners (bookshops, reading groups, cafes) push data via JSON API validated aga
 **Any change touching migrations, Ecto schemas, event emitters, user-data endpoints/routes, workers, or dbt models MUST pass the `gdpr-review` skill** (`.claude/skills/gdpr-review/`) — a per-diff lens proving each new piece of personal data is reachable by erasure (`GDPR.Deletion.delete_user_data/1` + the schema-guard — free-text must be deleted/anonymised, not just author-nulled), included in export (`GDPR.Export.export_user_data/2`), gated where required (`ConsentCheck`), and kept out of event_log/audit/warehouse. Run it as a lens during code-review for data-touching PRs.
 
 ### Testing Philosophy
-12-layer test strategy across 4 execution environments (local offline, local->deployed, CI, CI->deployed). `TEST_TARGET` env var controls mock/real service wiring. See `docs/technical-architecture.md` section 16.
+12-layer test strategy across 4 execution environments (local offline, local->deployed, CI, CI->deployed). Two switches select the environment: `MIX_ENV=test` loads the mock roster in `apps/core/config/test.exs` (vision, ISBN, scraper, storage, geocoder, Brave/SearXNG, dbt runner…), and `BASE_URL` points Playwright and the `:deployed_only` ExUnit tests at a real stack instead. `E2E_EXPECT_*` flags turn a spec's skip-on-missing-precondition into a hard failure in CI. See `docs/technical-architecture.md` section 16.
 
 ## Project Tools MCP Server
 

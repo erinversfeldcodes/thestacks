@@ -16,7 +16,14 @@ defmodule StacksWeb.BlogController do
   alias Stacks.Blog.Syndication
   alias StacksWeb.ProtoJSON
 
-  @doc "GET /api/blog/posts — list published posts for a user (query param: user_id)."
+  @doc """
+  GET /api/blog/posts — one author's posts with `user_id`, otherwise the
+  cross-author discovery feed.
+
+  The bare call used to be a 422 demanding `user_id`, which left the platform
+  with no answer to "what is written here" for a reader who does not already
+  know whose blog they want. It now answers with what that reader may read.
+  """
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, %{"user_id" => user_id}) do
     viewer = build_viewer(conn)
@@ -25,9 +32,9 @@ defmodule StacksWeb.BlogController do
   end
 
   def index(conn, _params) do
-    conn
-    |> put_status(422)
-    |> json(%{error: "user_id is required"})
+    viewer = build_viewer(conn)
+    posts = Blog.list_public_posts(viewer)
+    json(conn, %{posts: Enum.map(posts, &ProtoJSON.blog_post/1)})
   end
 
   @doc "GET /api/blog/posts/:id — show a single post."
@@ -219,27 +226,6 @@ defmodule StacksWeb.BlogController do
          :ok <- check_ownership(post, user),
          {:ok, association} <- Blog.dismiss_association(post, id) do
       json(conn, %{association: ProtoJSON.association_action(association)})
-    end
-  end
-
-  @doc """
-      POST /api/blog/posts/:id/chat — writing-assistant chat for a post.
-
-      Gated by `StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"` in the
-      router pipeline: reaching this action means the user has granted consent (a
-      403 is returned upstream otherwise). The assistant itself is not built yet —
-      this is an honest "under construction" surface, NOT real AI.
-  """
-  @spec chat(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def chat(conn, %{"id" => id}) do
-    user = Guardian.Plug.current_resource(conn)
-
-    with {:ok, post} <- fetch_post(id),
-         :ok <- check_ownership(post, user) do
-      json(conn, %{
-        status: "under_construction",
-        message: "The writing assistant is coming soon."
-      })
     end
   end
 

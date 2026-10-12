@@ -34,7 +34,7 @@ suite =
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "A quiet place for the books you own, the pieces you've read, and the knowledge you're still circling." ]
+                        [ Selector.text "A quiet place for the books you own, the pieces you've read, and the knowledge you've yet to map." ]
         , test "'What The Stacks is' names the antilibrary conviction" <|
             \() ->
                 rendered
@@ -58,11 +58,11 @@ suite =
                 rendered
                     |> Query.find [ Selector.class "about__do-list" ]
                     |> Query.has [ Selector.text "Add a book by its cover." ]
-        , test "'Built to be yours' states the open-source / self-host framing" <|
+        , test "'Built to be yours' states the source-available, build-your-own framing" <|
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "The Stacks is open source and privately hosted, though you are also welcome to self-host." ]
+                        [ Selector.text "The Stacks is source-available and privately hosted. Read the code, take inspiration from it, and build something similar for yourself — but be a mensch and don't fork this one, or I'll have to come find you every time I fix a bug of my own." ]
         , test "'The wider shelf' is PRESENT-TENSE (owner ruling) — no 'coming soon' hedge" <|
             \() ->
                 rendered
@@ -85,4 +85,9 @@ suite =
                         , Query.find [ Selector.attribute (Attr.attribute "data-testid" "about-costs-link") ]
                             >> Query.has [ Selector.attribute (Attr.href "/costs") ]
                         ]
+        , test "reaches the FAQ — the reference companion is linked, not URL-only" <|
+            \() ->
+                rendered
+                    |> Query.find [ Selector.attribute (Attr.attribute "data-testid" "about-faq-link") ]
+                    |> Query.has [ Selector.attribute (Attr.href "/faq") ]
         ]

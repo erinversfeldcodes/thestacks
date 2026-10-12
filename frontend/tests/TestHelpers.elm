@@ -1,13 +1,15 @@
 module TestHelpers exposing
-    ( BookDetailTestModel
+    ( AdminChromeTestModel
+    , BookDetailTestModel
     , ReadingPileTestModel
+    , adminChromeProgram
+    , authedRequestFromSpec
     , bookDetailOverlayProgramWithOut
     , bookDetailProgram
     , bookDetailProgramWithOut
     , bookshelfProgram
     , bookshelfUndoProgram
     , libraryProgram
-    , loginEffects
     , loginProgram
     , loginProgramFrom
     , namedPlacement
@@ -18,6 +20,7 @@ module TestHelpers exposing
     , simulateAuthErrorResponse
     , simulateAuthResponse
     , simulateBookDetailResponse
+    , simulateBookDetailResponseWithFormats
     , simulateBookDetailResponseWithPlacement
     , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
@@ -27,9 +30,12 @@ module TestHelpers exposing
     , simulateBookshelfResponse
     , simulateConfirmMergeRequiredResponse
     , simulateConfirmResponse
+    , simulateEffect
     , simulateEmptyBookPricesResponse
     , simulateMergeFormatResponse
     , simulateMultiShelfResponse
+    , simulatePlacementFormatsResponse
+    , simulatePlacementShelfResponse
     , simulatePlacementVisibilityResponse
     , simulateRegisterResponse
     , simulateRegisterValidationResponse
@@ -46,12 +52,12 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (PollStatus(..), streamEventDecoder)
-import Components.ISBNInput
-import Components.ShelfOrganiser as ShelfOrganiser
+import Api
+import Components.AdminChrome as AdminChrome
 import Dict
+import Effect
+import Html
 import Http
-import Json.Decode as Decode
 import Json.Encode as Encode
 import Navigation.Route exposing (Route)
 import Page.BookDetail as BookDetail
@@ -68,7 +74,6 @@ import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement, readingStatusToString)
 import Types.RemoteData
-import Types.Shelf exposing (Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
 
 
@@ -812,6 +817,91 @@ simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibil
         json
 
 
+{-| A book-detail response carrying a placement that already owns `formats`.
+Drives the format picker, whose starting state decides which way a click
+toggles.
+-}
+simulateBookDetailResponseWithFormats : String -> Book -> List String -> Http.Response String
+simulateBookDetailResponseWithFormats bookId book formats =
+    let
+        placementJson =
+            Encode.object
+                [ ( "id", Encode.string "placement-fmt-001" )
+                , ( "formats", Encode.list Encode.string formats )
+                , ( "bookshelf_name", Encode.string "library" )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", placementJson )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| A successful `PUT /api/placements/:id/formats` response:
+`{placement: {id, formats}}`.
+-}
+simulatePlacementFormatsResponse : String -> List String -> Http.Response String
+simulatePlacementFormatsResponse placementId formats =
+    Http.GoodStatus_
+        { url = "/api/placements/" ++ placementId ++ "/formats"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "placement"
+                  , Encode.object
+                        [ ( "id", Encode.string placementId )
+                        , ( "formats", Encode.list Encode.string formats )
+                        ]
+                  )
+                ]
+            )
+        )
+
+
+{-| A successful `PUT /api/placements/:id/shelf` response, in the shape
+`ProtoJSON.placement_ref/1` emits: `{placement: {id, shelf_id, …}}`.
+
+The `shelf_id` is a parameter rather than a copy of what was asked for, so a
+test can hand back a DIFFERENT row and see whether the page believes the server
+or itself.
+
+-}
+simulatePlacementShelfResponse : String -> String -> Http.Response String
+simulatePlacementShelfResponse placementId shelfId =
+    Http.GoodStatus_
+        { url = "/api/placements/" ++ placementId ++ "/shelf"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "placement"
+                  , Encode.object
+                        [ ( "id", Encode.string placementId )
+                        , ( "shelf_id", Encode.string shelfId )
+                        , ( "position", Encode.int 0 )
+                        ]
+                  )
+                ]
+            )
+        )
+
+
 {-| A successful `PUT /api/placements/:id/visibility` response: `{id, visibility}`.
 -}
 simulatePlacementVisibilityResponse : String -> String -> Http.Response String
@@ -847,9 +937,62 @@ authedRequestFromSpec :
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
 authedRequestFromSpec spec token expect =
+    requestFromSpec spec (Just token) expect
+
+
+{-| Run a page's `Effect` in the simulated runtime — the twin of
+`Effect.perform`, and the reason a harness no longer decides for itself which
+request a Msg fires.
+
+`Effect.Custom` holds a real `Cmd` (a file picker, a focus task) that no
+simulated runtime can run; it becomes no effect here, which is exactly what
+these harnesses did with those before.
+
+-}
+simulateEffect : Effect.Effect msg -> SimulatedEffect msg
+simulateEffect effect =
+    case effect of
+        Effect.None ->
+            SimulatedEffect.Cmd.none
+
+        Effect.Batch effects ->
+            SimulatedEffect.Cmd.batch (List.map simulateEffect effects)
+
+        Effect.Request plan ->
+            requestFromSpec plan.spec
+                plan.token
+                (SimulatedEffect.Http.expectStringResponse
+                    (\result ->
+                        case result of
+                            Ok msg ->
+                                msg
+
+                            Err impossible ->
+                                never impossible
+                    )
+                    (Ok << plan.onResponse)
+                )
+
+        Effect.Sleep millis msg ->
+            SimulatedEffect.Task.perform (\_ -> msg) (SimulatedEffect.Process.sleep millis)
+
+        Effect.Custom _ ->
+            SimulatedEffect.Cmd.none
+
+
+{-| `authedRequestFromSpec` for an optional-auth endpoint: the `Authorization`
+header appears only when the viewer has a token, which is what
+`Api.authHeaders` does on the production side.
+-}
+requestFromSpec :
+    Api.RequestSpec
+    -> Maybe String
+    -> SimulatedEffect.Http.Expect msg
+    -> SimulatedEffect msg
+requestFromSpec spec maybeToken expect =
     SimulatedEffect.Http.request
         { method = spec.method
-        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authHeaderList maybeToken
         , url = spec.url
         , body =
             case spec.body of
@@ -864,504 +1007,6 @@ authedRequestFromSpec spec token expect =
         }
 
 
-{-| Translate Upload page Cmds into SimulatedEffects.
--}
-uploadEffects : Upload.Msg -> Upload.Model -> Maybe String -> SimulatedEffect Upload.Msg
-uploadEffects msg model maybeToken =
-    case msg of
-        Upload.UploadAccepted (Ok _) ->
-            SimulatedEffect.Cmd.none
-
-        Upload.ResumeInboxItem item ->
-            uploadEffects
-                (Upload.StatusReceived (Ok (Upload.replayFrame item)))
-                model
-                maybeToken
-
-        Upload.StatusReceived (Ok response) ->
-            case response.status of
-                Pending ->
-                    SimulatedEffect.Cmd.none
-
-                Resolved ->
-                    let
-                        ids =
-                            if List.isEmpty response.bookIds then
-                                case response.bookId of
-                                    Just bid ->
-                                        [ bid ]
-
-                                    Nothing ->
-                                        []
-
-                            else
-                                response.bookIds
-                    in
-                    case ( ids, maybeToken ) of
-                        ( [], _ ) ->
-                            SimulatedEffect.Cmd.none
-
-                        ( bookIds, Just token ) ->
-                            if response.isDuplicate then
-                                case bookIds of
-                                    [ singleId ] ->
-                                        authedRequestFromSpec (Api.getBookRequest singleId)
-                                            token
-                                            (SimulatedEffect.Http.expectJson Upload.GotDuplicateBook Api.bookDetailResponseDecoder)
-
-                                    _ ->
-                                        SimulatedEffect.Cmd.none
-
-                            else
-                                SimulatedEffect.Cmd.batch
-                                    (List.map
-                                        (\bid ->
-                                            authedRequestFromSpec (Api.getBookRequest bid)
-                                                token
-                                                (SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) Api.bookDetailResponseDecoder)
-                                        )
-                                        bookIds
-                                    )
-
-                        _ ->
-                            SimulatedEffect.Cmd.none
-
-                Rejected ->
-                    SimulatedEffect.Cmd.none
-
-                TimedOut ->
-                    SimulatedEffect.Cmd.none
-
-        Upload.SubmitManualIsbn ->
-            if Components.ISBNInput.isValidISBN model.manualIsbn then
-                case maybeToken of
-                    Just token ->
-                        authedRequestFromSpec
-                            (Api.confirmBookRequest
-                                { isbn = model.manualIsbn
-                                , shelfName = model.selectedShelf
-                                }
-                            )
-                            token
-                            (SimulatedEffect.Http.expectStringResponse
-                                Upload.ConfirmCompleted
-                                Api.confirmResponseToResult
-                            )
-
-                    Nothing ->
-                        SimulatedEffect.Cmd.none
-
-            else
-                SimulatedEffect.Cmd.none
-
-        Upload.ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
-            case maybeToken of
-                Just token ->
-                    authedRequestFromSpec (Api.getBookRequest workId)
-                        token
-                        (SimulatedEffect.Http.expectJson Upload.GotSameWorkBook Api.bookDetailResponseDecoder)
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
-        Upload.ConfirmMergeFormat bookId ->
-            case maybeToken of
-                Just token ->
-                    authedRequestFromSpec
-                        (Api.mergeFormatRequest bookId
-                            { isbn = model.mergeIsbn
-                            , formatLabel = model.mergeFormatLabel
-                            }
-                        )
-                        token
-                        (SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted Api.mergeFormatResponseDecoder)
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
-        Upload.StreamEvent rawJson ->
-            case Decode.decodeString streamEventDecoder rawJson of
-                Ok response ->
-                    uploadEffects (Upload.StatusReceived (Ok response)) model maybeToken
-
-                Err _ ->
-                    SimulatedEffect.Cmd.none
-
-        Upload.RejectIdentification ->
-            case ( model.step, model.uploadState, maybeToken ) of
-                ( Upload.Verifying book, Types.RemoteData.Success imageId, Just token ) ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/upload/" ++ imageId ++ "/reject-identification"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object
-                                    [ ( "rejected_book_ids"
-                                      , Encode.list Encode.string (model.rejectedBookIds ++ [ book.id ])
-                                      )
-                                    ]
-                                )
-                        , expect = SimulatedEffect.Http.expectWhatever Upload.RejectIdentificationCompleted
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        Upload.GotFile _ ->
-            case maybeToken of
-                Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/upload"
-                        , body = SimulatedEffect.Http.stringBody "multipart/form-data" "simulated-file-upload"
-                        , expect = SimulatedEffect.Http.expectJson Upload.UploadAccepted (Decode.field "image_id" Decode.string)
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
-        Upload.ConfirmPlacement ->
-            case ( model.step, maybeToken ) of
-                ( Upload.ChoosingShelf book, Just token ) ->
-                    let
-                        placementEffect =
-                            SimulatedEffect.Http.request
-                                { method = "POST"
-                                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                , url = "/api/bookshelves/" ++ model.selectedShelf ++ "/placements"
-                                , body =
-                                    SimulatedEffect.Http.jsonBody
-                                        (Encode.object [ ( "book_id", Encode.string book.id ) ])
-                                , expect = SimulatedEffect.Http.expectStringResponse Upload.PlacementCompleted Api.placeResponseToResult
-                                , timeout = Nothing
-                                , tracker = Nothing
-                                }
-
-                        ageGateEffect =
-                            if model.ageGatingEnabled && model.markAdultsOnly then
-                                [ SimulatedEffect.Http.request
-                                    { method = "PUT"
-                                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                    , url = "/api/books/" ++ book.id ++ "/age-gate"
-                                    , body =
-                                        SimulatedEffect.Http.jsonBody
-                                            (Encode.object [ ( "adults_only", Encode.bool True ) ])
-                                    , expect = SimulatedEffect.Http.expectWhatever Upload.AgeGateSet
-                                    , timeout = Nothing
-                                    , tracker = Nothing
-                                    }
-                                ]
-
-                            else
-                                []
-                    in
-                    SimulatedEffect.Cmd.batch (placementEffect :: ageGateEffect)
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        _ ->
-            SimulatedEffect.Cmd.none
-
-
-{-| Translate Bookshelf page Cmds into SimulatedEffects.
-
-⚠️ This used to be `case msg of _ -> Cmd.none` — a total black hole
-shared by every bookshelf harness, which silently disarmed the
-read-only SECURITY assertion (it counted POSTs the harness could never
-produce). Every mutating Msg must be translated here or its tests
-assert against nothing.
-
--}
-libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> SimulatedEffect Bookshelf.Msg
-libraryEffects msg model =
-    case ( msg, Bookshelf.mutationToken model, model.token ) of
-        ( Bookshelf.OrganiserMsg ShelfOrganiser.AddShelf, Just token, _ ) ->
-            shelfCreateEffect model.config.apiName token
-
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.RemoveShelf id), Just token, _ ) ->
-            shelfDeleteEffect id token
-
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveUp id), Just token, _ ) ->
-            reorderEffect model token (ShelfOrganiser.moveUp id)
-
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveDown id), Just token, _ ) ->
-            reorderEffect model token (ShelfOrganiser.moveDown id)
-
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.DropOn targetId), Just token, _ ) ->
-            case model.organiser.dragging of
-                Just draggedId ->
-                    reorderEffect model token (moveShelfToId draggedId targetId)
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
-        ( Bookshelf.UndoRemove, Just token, _ ) ->
-            case model.undoToast of
-                Bookshelf.ToastOffered removal ->
-                    restoreEffect removal.placementId token
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        ( Bookshelf.UndoCompleted (Ok ()), _, Just token ) ->
-            bookshelfInitEffects model.config (Just token)
-
-        ( Bookshelf.ShelfMutated _, _, Just token ) ->
-            bookshelfInitEffects model.config (Just token)
-
-        _ ->
-            SimulatedEffect.Cmd.none
-
-
-{-| Mirror of `Api.createShelf` — `POST /api/bookshelves/:name/shelves`.
--}
-shelfCreateEffect : String -> String -> SimulatedEffect Bookshelf.Msg
-shelfCreateEffect bookshelfName token =
-    SimulatedEffect.Http.request
-        { method = "POST"
-        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
-        , body = SimulatedEffect.Http.jsonBody (Encode.object [])
-        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Mirror of `Api.restoreBook` — `POST /api/placements/:id/restore`.
--}
-restoreEffect : String -> String -> SimulatedEffect Bookshelf.Msg
-restoreEffect placementId token =
-    SimulatedEffect.Http.request
-        { method = "POST"
-        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = "/api/placements/" ++ placementId ++ "/restore"
-        , body = SimulatedEffect.Http.emptyBody
-        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.UndoCompleted
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Mirror of `Api.deleteShelf` — `DELETE /api/shelves/:id`.
--}
-shelfDeleteEffect : String -> String -> SimulatedEffect Bookshelf.Msg
-shelfDeleteEffect shelfId token =
-    SimulatedEffect.Http.request
-        { method = "DELETE"
-        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = "/api/shelves/" ++ shelfId
-        , body = SimulatedEffect.Http.emptyBody
-        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Mirror of `Api.reorderShelves` — `PUT /api/bookshelves/:name/shelves/reorder`
-with the whole ordered id list. Applies the same pure reorder `Page.Bookshelf`
-applies, so the harness sends the order production would send rather than a
-plausible-looking one.
--}
-reorderEffect :
-    Bookshelf.Model
-    -> String
-    -> (List Shelf -> List Shelf)
-    -> SimulatedEffect Bookshelf.Msg
-reorderEffect model token reorder =
-    case model.shelves of
-        Types.RemoteData.Success shelves ->
-            SimulatedEffect.Http.request
-                { method = "PUT"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/bookshelves/" ++ model.config.apiName ++ "/shelves/reorder"
-                , body =
-                    SimulatedEffect.Http.jsonBody
-                        (Encode.object
-                            [ ( "shelf_ids"
-                              , Encode.list Encode.string
-                                    (ShelfOrganiser.orderedIds (reorder shelves))
-                              )
-                            ]
-                        )
-                , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        _ ->
-            SimulatedEffect.Cmd.none
-
-
-{-| Mirror of `Page.Bookshelf.moveToId` (private there): resolve a drop onto
-`targetId` to the same index move the up/down buttons perform.
--}
-moveShelfToId : String -> String -> List Shelf -> List Shelf
-moveShelfToId draggedId targetId shelves =
-    let
-        indexOf id =
-            shelves
-                |> List.indexedMap (\i shelf -> ( i, shelf.id ))
-                |> List.filter (\( _, shelfId ) -> shelfId == id)
-                |> List.head
-                |> Maybe.map Tuple.first
-    in
-    case ( indexOf draggedId, indexOf targetId ) of
-        ( Just from, Just to ) ->
-            ShelfOrganiser.moveTo from to shelves
-
-        _ ->
-            shelves
-
-
-{-| Translate the owner-mode `Page.Bookshelf.init` Cmd into a SimulatedEffect.
-
-Mirrors `Page.Bookshelf.init`'s own structure: with no token there is no
-request at all, and with a token the GET targets `config.apiName` and tags the
-response with `requestKey config`. Keyed off the config so the
-Library / Antilibrary / Wish List harnesses all share one mirror.
-
--}
-bookshelfInitEffects : Bookshelf.Config -> Maybe String -> SimulatedEffect Bookshelf.Msg
-bookshelfInitEffects config maybeToken =
-    case maybeToken of
-        Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/bookshelves/" ++ config.apiName
-                , body = SimulatedEffect.Http.emptyBody
-                , expect =
-                    SimulatedEffect.Http.expectJson
-                        (Bookshelf.ShelvesLoaded (Bookshelf.requestKey config))
-                        bookshelfResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            SimulatedEffect.Cmd.none
-
-
-{-| Translate the read-only profile-shelf init Cmd into a SimulatedEffect.
-
-Mirrors `Api.getProfileShelf`: an optional-auth GET to the profile endpoint
-(`/api/u/:handle/bookshelves/:name`), decoding into `Bookshelf.ShelvesLoaded`.
-
--}
-profileShelfInitEffects : Maybe String -> String -> String -> SimulatedEffect Bookshelf.Msg
-profileShelfInitEffects maybeToken handle bookshelfName =
-    let
-        headers =
-            case maybeToken of
-                Just token ->
-                    [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
-    in
-    SimulatedEffect.Http.request
-        { method = "GET"
-        , headers = headers
-        , url = "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
-        , body = SimulatedEffect.Http.emptyBody
-        , expect =
-            SimulatedEffect.Http.expectJson
-                (Bookshelf.ShelvesLoaded
-                    (Bookshelf.requestKey (Bookshelf.profileConfig handle bookshelfName))
-                    << Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
-                )
-                shelvesResponseDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
-{-| Translate Search page Cmds into SimulatedEffects.
--}
-searchEffects : Search.Msg -> Search.Model -> Maybe String -> SimulatedEffect Search.Msg
-searchEffects msg model maybeToken =
-    case msg of
-        Search.QueryChanged _ ->
-            let
-                newCount =
-                    model.debounceCount + 1
-            in
-            SimulatedEffect.Task.perform (\_ -> Search.DebounceExpired newCount) (SimulatedEffect.Process.sleep 300)
-
-        Search.DebounceExpired count ->
-            if count == model.debounceCount && not (String.isEmpty model.query) then
-                let
-                    booksEffect =
-                        searchBooksEffect model.query model.deepSearch maybeToken
-
-                    readersEffect =
-                        SimulatedEffect.Http.request
-                            { method = "GET"
-                            , headers = authHeaderList maybeToken
-                            , url = "/api/search/users?q=" ++ model.query
-                            , body = SimulatedEffect.Http.emptyBody
-                            , expect =
-                                SimulatedEffect.Http.expectJson Search.ReadersCompleted
-                                    (Decode.field "users" (Decode.list Api.publicProfileSummaryDecoder))
-                            , timeout = Nothing
-                            , tracker = Nothing
-                            }
-                in
-                SimulatedEffect.Cmd.batch [ booksEffect, readersEffect ]
-
-            else
-                SimulatedEffect.Cmd.none
-
-        Search.DeepSearchToggled deep ->
-            if String.isEmpty model.query then
-                SimulatedEffect.Cmd.none
-
-            else
-                searchBooksEffect model.query deep maybeToken
-
-        _ ->
-            SimulatedEffect.Cmd.none
-
-
-{-| The book-search SimulatedEffect, shared by the debounce and deep-toggle paths
-so the mirror URL (`/api/search?q=…` + optional `&scope=deep`) and the reused
-`Api.searchResponseDecoder` can never drift from the real wire. Fires
-nothing without a token (book search is authenticated-only).
--}
-searchBooksEffect : String -> Bool -> Maybe String -> SimulatedEffect Search.Msg
-searchBooksEffect query deep maybeToken =
-    case maybeToken of
-        Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url =
-                    "/api/search?q="
-                        ++ query
-                        ++ (if deep then
-                                "&scope=deep"
-
-                            else
-                                ""
-                           )
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            SimulatedEffect.Cmd.none
-
-
 authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
 authHeaderList maybeToken =
     case maybeToken of
@@ -1372,189 +1017,44 @@ authHeaderList maybeToken =
             []
 
 
-{-| Translate BookDetail page Cmds into SimulatedEffects.
+{-| Harness model for the admin chrome: the chrome's own model plus the most
+recent `OutMsg`, which is the only way "the session actually ended" is
+observable — `Main` owns the admin token, so the chrome cannot show its own
+removal.
 -}
-bookDetailEffects : BookDetail.Msg -> BookDetail.Model -> Maybe String -> SimulatedEffect BookDetail.Msg
-bookDetailEffects msg model maybeToken =
-    case msg of
-        BookDetail.ConfirmMove ->
-            case ( model.placement, maybeToken ) of
-                ( Just placement, Just token ) ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placement.id ++ "/move"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object [ ( "bookshelf", Encode.string model.selectedBookshelf ) ])
-                        , expect =
-                            SimulatedEffect.Http.expectStringResponse
-                                BookDetail.MoveCompleted
-                                Api.moveResponseToResult
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        BookDetail.ConfirmRemove ->
-            case ( model.placement, maybeToken ) of
-                ( Just placement, Just token ) ->
-                    SimulatedEffect.Http.request
-                        { method = "DELETE"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placement.id
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect = SimulatedEffect.Http.expectWhatever BookDetail.RemoveCompleted
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        BookDetail.RemovePlacement placementId ->
-            case maybeToken of
-                Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "DELETE"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placementId
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect =
-                            SimulatedEffect.Http.expectWhatever
-                                (BookDetail.PlacementRemoved placementId)
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Nothing ->
-                    SimulatedEffect.Cmd.none
-
-        BookDetail.ConfirmPlace ->
-            case ( model.book, maybeToken ) of
-                ( Types.RemoteData.Success book, Just token ) ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/bookshelves/" ++ model.selectedBookshelf ++ "/placements"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object [ ( "book_id", Encode.string book.id ) ])
-                        , expect = SimulatedEffect.Http.expectStringResponse (BookDetail.PlaceCompleted model.selectedBookshelf) Api.placeResponseToResult
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        BookDetail.ProgressCardMsg _ ->
-            case ( model.placement, maybeToken, model.progressSaveState ) of
-                ( Just placement, Just token, Types.RemoteData.Loading ) ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placement.id ++ "/progress"
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect =
-                            SimulatedEffect.Http.expectStringResponse
-                                BookDetail.ProgressSaved
-                                Api.progressResponseToResult
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        BookDetail.RecordReadRequested ->
-            case ( model.placement, maybeToken ) of
-                ( Just placement, Just token ) ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placement.id ++ "/move"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object [ ( "bookshelf", Encode.string "library" ) ])
-                        , expect =
-                            SimulatedEffect.Http.expectStringResponse
-                                BookDetail.MoveCompleted
-                                Api.moveResponseToResult
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        BookDetail.PlacementVisibilitySelected _ ->
-            case ( model.placement, maybeToken, model.visibilityState ) of
-                ( Just placement, Just token, Types.RemoteData.Loading ) ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placement.id ++ "/visibility"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object
-                                    [ ( "visibility"
-                                      , Encode.string (Types.Visibility.toString model.placementVisibility)
-                                      )
-                                    ]
-                                )
-                        , expect = SimulatedEffect.Http.expectJson BookDetail.PlacementVisibilityUpdated (Decode.field "visibility" Decode.string)
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        _ ->
-            SimulatedEffect.Cmd.none
+type alias AdminChromeTestModel =
+    { chrome : AdminChrome.Model
+    , lastOut : AdminChrome.OutMsg
+    }
 
 
-{-| Translate BookDetail init Cmds into SimulatedEffects.
+{-| Create a ProgramTest harness for the admin chrome, holding the admin token
+the surfaces would have.
+
+It renders production's own `AdminChrome.view` around an empty page, so the
+button a test clicks is the button an operator clicks; and the request that
+click produces comes from `AdminChrome.updateWithEffect` through
+`simulateEffect`, so nothing here restates which endpoint sign-out calls.
+
 -}
-bookDetailInitEffects : String -> Maybe String -> SimulatedEffect BookDetail.Msg
-bookDetailInitEffects bookId maybeToken =
-    case maybeToken of
-        Just token ->
-            SimulatedEffect.Cmd.batch
-                [ SimulatedEffect.Http.request
-                    { method = "GET"
-                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                    , url = "/api/books/" ++ bookId
-                    , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded Api.bookDetailResponseDecoder
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
-                , SimulatedEffect.Http.request
-                    { method = "GET"
-                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                    , url = "/api/books/" ++ bookId ++ "/availability"
-                    , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded BookDetail.availabilityDecoder
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
-                , SimulatedEffect.Http.request
-                    { method = "GET"
-                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                    , url = "/api/books/" ++ bookId ++ "/prices"
-                    , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.PricesLoaded BookDetail.pricesDecoder
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
-                ]
-
-        Nothing ->
-            SimulatedEffect.Cmd.none
+adminChromeProgram : Maybe String -> ProgramDefinition () AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
+adminChromeProgram adminToken =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                ( { chrome = AdminChrome.init, lastOut = AdminChrome.NoOut }
+                , SimulatedEffect.Cmd.none
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newChrome, effect, out ) =
+                        AdminChrome.updateWithEffect msg model.chrome adminToken
+                in
+                ( { chrome = newChrome, lastOut = out }, simulateEffect effect )
+        , view = \model -> AdminChrome.view identity model.chrome (Html.text "")
+        }
+        |> ProgramTest.withSimulatedEffects identity
 
 
 {-| Create a ProgramTest harness for the Upload page. `ageGatingEnabled`
@@ -1594,10 +1094,10 @@ uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        Upload.update msg model maybeToken
+                    ( newModel, effect, _ ) =
+                        Upload.updateWithEffect msg model maybeToken
                 in
-                ( newModel, uploadEffects msg model maybeToken )
+                ( newModel, simulateEffect effect )
         , view = \model -> Upload.view model maybeToken inbox
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1622,17 +1122,17 @@ bookshelfProgram config maybeToken =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        Bookshelf.init config maybeToken "test-user-id"
+                    ( model, effect ) =
+                        Bookshelf.initWithEffect config maybeToken "test-user-id"
                 in
-                ( model, bookshelfInitEffects config maybeToken )
+                ( model, simulateEffect effect )
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        Bookshelf.update msg model
+                    ( newModel, effect, _ ) =
+                        Bookshelf.updateWithEffect msg model
                 in
-                ( newModel, libraryEffects msg model )
+                ( newModel, simulateEffect effect )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1661,101 +1161,22 @@ readingPileProgram maybeToken =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        ReadingPile.init maybeToken
+                    ( model, effect ) =
+                        ReadingPile.initWithEffect maybeToken
                 in
                 ( { page = model, lastOut = ReadingPile.NoOut }
-                , readingPileInitEffects maybeToken
+                , simulateEffect effect
                 )
         , update =
             \msg model ->
                 let
-                    ( newPage, _, out ) =
-                        ReadingPile.update msg model.page
+                    ( newPage, effect, out ) =
+                        ReadingPile.updateWithEffect msg model.page
                 in
-                ( { page = newPage, lastOut = out }, readingPileEffects msg newPage maybeToken )
+                ( { page = newPage, lastOut = out }, simulateEffect effect )
         , view = \model -> ReadingPile.view model.page
         }
         |> ProgramTest.withSimulatedEffects identity
-
-
-{-| Translate Reading Pile page Cmds into SimulatedEffects.
-
-Mirrors `ReadingPile.update`'s progress + record-read paths: a `CardMsg` that
-left `saveState = Loading` issues the `PUT /progress`; `RecordReadRequested`
-issues the `PUT /move` to the library. The request bodies are placeholders —
-tests supply the response, and the expect mapping (reused from `Api`) is what
-routes it back into the page.
-
--}
-readingPileEffects : ReadingPile.Msg -> ReadingPile.Model -> Maybe String -> SimulatedEffect ReadingPile.Msg
-readingPileEffects msg newPage maybeToken =
-    case ( msg, maybeToken ) of
-        ( ReadingPile.CardMsg placementId _, Just token ) ->
-            case newPage.saveState of
-                Types.RemoteData.Loading ->
-                    SimulatedEffect.Http.request
-                        { method = "PUT"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/placements/" ++ placementId ++ "/progress"
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect =
-                            SimulatedEffect.Http.expectStringResponse
-                                (ReadingPile.ProgressSaved placementId)
-                                Api.progressResponseToResult
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                _ ->
-                    SimulatedEffect.Cmd.none
-
-        ( ReadingPile.RecordReadRequested placementId, Just token ) ->
-            SimulatedEffect.Http.request
-                { method = "PUT"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/placements/" ++ placementId ++ "/move"
-                , body =
-                    SimulatedEffect.Http.jsonBody
-                        (Encode.object [ ( "bookshelf", Encode.string "library" ) ])
-                , expect =
-                    SimulatedEffect.Http.expectStringResponse
-                        (ReadingPile.RecordReadDone placementId)
-                        Api.moveResponseToResult
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        _ ->
-            SimulatedEffect.Cmd.none
-
-
-{-| Translate the Reading Pile init Cmd into a SimulatedEffect.
-
-Mirrors `ReadingPile.init`: `GET /api/bookshelves/reading_pile`, dropping the
-response's `visibility` (the pile has no RSS affordance) so only the shelves
-reach `BooksLoaded`.
-
--}
-readingPileInitEffects : Maybe String -> SimulatedEffect ReadingPile.Msg
-readingPileInitEffects maybeToken =
-    case maybeToken of
-        Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/bookshelves/reading_pile"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect =
-                    SimulatedEffect.Http.expectJson
-                        (ReadingPile.BooksLoaded << Result.map .shelves)
-                        bookshelfResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
-
-        Nothing ->
-            SimulatedEffect.Cmd.none
 
 
 {-| A bookshelf harness for a reader who has just removed a book and been
@@ -1780,20 +1201,20 @@ bookshelfUndoProgram config maybeToken removal =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        Bookshelf.init config maybeToken "test-user-id"
+                    ( model, effect ) =
+                        Bookshelf.initWithEffect config maybeToken "test-user-id"
 
                     ( seeded, _ ) =
                         Bookshelf.withPendingUndo (Just removal) ( model, Cmd.none )
                 in
-                ( seeded, bookshelfInitEffects config maybeToken )
+                ( seeded, simulateEffect effect )
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        Bookshelf.update msg model
+                    ( newModel, effect, _ ) =
+                        Bookshelf.updateWithEffect msg model
                 in
-                ( newModel, libraryEffects msg model )
+                ( newModel, simulateEffect effect )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1812,17 +1233,17 @@ profileShelfProgram maybeToken handle bookshelfName =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        Bookshelf.init config maybeToken "viewer-user-id"
+                    ( model, effect ) =
+                        Bookshelf.initWithEffect config maybeToken "viewer-user-id"
                 in
-                ( model, profileShelfInitEffects maybeToken handle bookshelfName )
+                ( model, simulateEffect effect )
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        Bookshelf.update msg model
+                    ( newModel, effect, _ ) =
+                        Bookshelf.updateWithEffect msg model
                 in
-                ( newModel, libraryEffects msg model )
+                ( newModel, simulateEffect effect )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1837,104 +1258,13 @@ searchProgram maybeToken =
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        Search.update msg model maybeToken
+                    ( newModel, effect, _ ) =
+                        Search.updateWithEffect msg model maybeToken
                 in
-                ( newModel, searchEffects msg model maybeToken )
-        , view = Search.view
+                ( newModel, simulateEffect effect )
+        , view = Search.view (maybeToken /= Nothing)
         }
         |> ProgramTest.withSimulatedEffects identity
-
-
-{-| Translate Login page Cmds into SimulatedEffects.
--}
-loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
-loginEffects msg model =
-    case msg of
-        Login.ForgotSubmitted ->
-            if Login.isForgotDisabled model then
-                SimulatedEffect.Cmd.none
-
-            else
-                SimulatedEffect.Http.request
-                    { method = "POST"
-                    , headers = []
-                    , url = "/api/auth/forgot-password"
-                    , body =
-                        SimulatedEffect.Http.jsonBody
-                            (Encode.object [ ( "email", Encode.string model.email ) ])
-                    , expect = SimulatedEffect.Http.expectStringResponse Login.GotForgotResponse Api.resolveNoContent
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
-
-        Login.FormSubmitted ->
-            case model.mode of
-                Login.LoginMode ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = []
-                        , url = "/api/auth/login"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object
-                                    [ ( "email", Encode.string model.email )
-                                    , ( "password", Encode.string model.password )
-                                    ]
-                                )
-                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotAuthResponse Api.resolveAuthResponse
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Login.RegisterMode ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = []
-                        , url = "/api/auth/register"
-                        , body =
-                            SimulatedEffect.Http.jsonBody
-                                (Encode.object
-                                    [ ( "email", Encode.string model.email )
-                                    , ( "password", Encode.string model.password )
-                                    , ( "display_name", Encode.string model.displayName )
-                                    ]
-                                )
-                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotRegisterResponse Api.resolveRegister
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
-
-                Login.RegistrationPending _ ->
-                    SimulatedEffect.Cmd.none
-
-                Login.ForgotPasswordMode ->
-                    SimulatedEffect.Cmd.none
-
-                Login.ResendConfirmationMode ->
-                    SimulatedEffect.Cmd.none
-
-        Login.ResendRequested ->
-            if Login.isResendDisabled model then
-                SimulatedEffect.Cmd.none
-
-            else
-                SimulatedEffect.Http.request
-                    { method = "POST"
-                    , headers = []
-                    , url = "/api/auth/resend-confirmation"
-                    , body =
-                        SimulatedEffect.Http.jsonBody
-                            (Encode.object
-                                [ ( "email", Encode.string (Login.resendTarget model) ) ]
-                            )
-                    , expect = SimulatedEffect.Http.expectStringResponse Login.GotResendResponse Api.resolveNoContent
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
-
-        _ ->
-            SimulatedEffect.Cmd.none
 
 
 {-| Create a ProgramTest harness for the Login page.
@@ -1959,10 +1289,10 @@ loginProgramFrom arrival =
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        Login.update msg model
+                    ( newModel, effect, _ ) =
+                        Login.updateWithEffect msg model
                 in
-                ( newModel, loginEffects msg model )
+                ( newModel, simulateEffect effect )
         , view = Login.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1978,17 +1308,17 @@ bookDetailProgram bookId maybeToken =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        BookDetail.init bookId maybeToken Nothing
+                    ( model, effect ) =
+                        BookDetail.initWithEffect bookId maybeToken Nothing
                 in
-                ( model, bookDetailInitEffects bookId maybeToken )
+                ( model, simulateEffect effect )
         , update =
             \msg model ->
                 let
-                    ( newModel, _, _ ) =
-                        BookDetail.update msg model maybeToken
+                    ( newModel, effect, _ ) =
+                        BookDetail.updateWithEffect msg model maybeToken
                 in
-                ( newModel, bookDetailEffects msg newModel maybeToken )
+                ( newModel, simulateEffect effect )
         , view = BookDetail.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -2018,19 +1348,19 @@ bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        BookDetail.init bookId maybeToken maybePreviousRoute
+                    ( model, effect ) =
+                        BookDetail.initWithEffect bookId maybeToken maybePreviousRoute
                 in
                 ( { page = model, lastOut = BookDetail.NoOut }
-                , bookDetailInitEffects bookId maybeToken
+                , simulateEffect effect
                 )
         , update =
             \msg model ->
                 let
-                    ( newModel, _, out ) =
-                        BookDetail.update msg model.page maybeToken
+                    ( newModel, effect, out ) =
+                        BookDetail.updateWithEffect msg model.page maybeToken
                 in
-                ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
+                ( { page = newModel, lastOut = out }, simulateEffect effect )
         , view = \model -> BookDetail.view model.page
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -2047,19 +1377,19 @@ bookDetailOverlayProgramWithOut bookId maybeToken maybePreviousRoute =
         { init =
             \() ->
                 let
-                    ( model, _ ) =
-                        BookDetail.init bookId maybeToken maybePreviousRoute
+                    ( model, effect ) =
+                        BookDetail.initWithEffect bookId maybeToken maybePreviousRoute
                 in
                 ( { page = model, lastOut = BookDetail.NoOut }
-                , bookDetailInitEffects bookId maybeToken
+                , simulateEffect effect
                 )
         , update =
             \msg model ->
                 let
-                    ( newModel, _, out ) =
-                        BookDetail.update msg model.page maybeToken
+                    ( newModel, effect, out ) =
+                        BookDetail.updateWithEffect msg model.page maybeToken
                 in
-                ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
+                ( { page = newModel, lastOut = out }, simulateEffect effect )
         , view = \model -> BookDetail.overlayView model.page
         }
         |> ProgramTest.withSimulatedEffects identity

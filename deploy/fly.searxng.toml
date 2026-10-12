@@ -9,6 +9,22 @@ kill_timeout = "5s"
 [env]
   SEARXNG_SETTINGS_PATH = "/etc/searxng/settings.yml"
 
+# 6PN-only via Flycast — no public IPs are ever allocated (a publicly reachable
+# SearXNG would be an open proxy). Proxy routing enables scale-to-zero: core's
+# discovery calls wake it on demand; it sleeps ~5min after core goes quiet.
+# NOTE: with this stanza the port stops answering on the instance's 6PN address,
+# so clients MUST use `<app>.flycast` — `.internal` is connection-refused (same
+# trap the metrics store hit; see scripts/deploy-stack.sh).
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.ports]]
+    port = 8080
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"

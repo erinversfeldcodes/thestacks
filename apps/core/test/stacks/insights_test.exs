@@ -73,7 +73,16 @@ defmodule Stacks.InsightsTest do
         finished_at: now
       )
 
-      shelve(user, bookshelf: bs, reading_status: "completed")
+      # The second finished book states its own span rather than leaving it to
+      # the factory: `median_days_to_finish` is the middle of the two, so a book
+      # finished the day it was shelved would pull the median off 10.
+      shelve(user,
+        bookshelf: bs,
+        reading_status: "completed",
+        started_at: earlier,
+        finished_at: now
+      )
+
       shelve(user, bookshelf: bs, reading_status: "abandoned")
       shelve(user, bookshelf: bs, reading_status: "to_read")
 

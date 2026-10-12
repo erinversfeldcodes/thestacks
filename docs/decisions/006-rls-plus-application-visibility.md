@@ -52,7 +52,7 @@ The function returns `:visible | :hidden` (see `Stacks.Visibility.resolve_visibi
 
 **Database layer: Row-Level Security**
 
-RLS policies are designed in Phase 1A alongside the migrations and enforced after Phase 1B.3 (visibility contexts pass tests). They enforce the coarsest access rules:
+RLS policies are designed early in Phase 1 (MVP) alongside the migrations, and enforced once the visibility contexts pass their tests. They enforce the coarsest access rules:
 
 | Table | RLS policy |
 |-------|-----------|
@@ -93,6 +93,6 @@ RLS policies are documented in `docs/rls-design.md` and enabled by migration `ap
 - RLS policies must be tested with database-level role switching in integration tests.
 
 **Known gap at time of writing:**
-- RLS policies are designed in Phase 1A but not yet activated. Activation is gated on Phase 1B.3 (visibility contexts) passing tests. During Phase 1A and 1B, only `resolve_visibility/2` is enforced.
+- RLS policies are designed but not yet activated. Activation is gated on the visibility contexts passing their tests; until then only `resolve_visibility/2` is enforced.
 
 **Update (2026-03-19):** RLS policies were activated by migration `20260319000008_enable_rls_policies.exs`, alongside Issue #047 (`issues/complete/047-visibility-infrastructure.md`). Both layers are now in force.

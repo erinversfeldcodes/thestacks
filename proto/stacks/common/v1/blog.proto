@@ -207,4 +207,15 @@ message BlogPostSummary {
   // When the blog post was first created.
   // Named created_at to match controller output (not inserted_at).
   string created_at = 5 [json_name = "created_at"];
+
+  // The post's text. A list needs it to show a preview; without it the
+  // archive renders a title and an empty paragraph for every entry.
+  string body = 6 [json_name = "body"];
+
+  // Who wrote it. The archive spans authors, so a summary that cannot name
+  // one leaves the reader a wall of anonymous posts.
+  string author_display_name = 7 [json_name = "author_display_name"];
+
+  // The author's handle, for linking the byline to their profile.
+  string author_handle = 8 [json_name = "author_handle"];
 }

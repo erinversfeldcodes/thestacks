@@ -22,11 +22,18 @@ defmodule Stacks.Transparency.MockPrometheusClient do
 
     case Process.get({__MODULE__, :response}) do
       nil -> {:ok, 0.0}
+      fun when is_function(fun, 1) -> fun.(promql)
       response -> response
     end
   end
 
-  @doc "Register the response returned for every subsequent query call."
+  @doc """
+      Register the response returned for every subsequent query call.
+
+      A one-arity function is called with the PromQL string instead, so a test can
+      answer each allowlisted signal with a DIFFERENT value — the only way to prove a
+      rendered entry carries the value of its own query rather than another signal's.
+  """
   def put_response(response), do: Process.put({__MODULE__, :response}, response)
 
   @doc "How many times `query/1` has been called in this process."

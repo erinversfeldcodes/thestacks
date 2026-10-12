@@ -544,7 +544,8 @@ defmodule StacksWeb.ProtoJSONTest do
           age_verified: true,
           consent_analytics: true,
           country_code: "ZA",
-          city: "Cape Town"
+          city: "Cape Town",
+          website_url: "https://alice.example"
         )
 
       result = ProtoJSON.user(u)
@@ -560,9 +561,34 @@ defmodule StacksWeb.ProtoJSONTest do
                consent_analytics: true,
                country_code: "ZA",
                city: "Cape Town",
+               website_url: "https://alice.example",
                onboarding_completed: nil,
+               pending_email: nil,
+               pending_email_sent_at: nil,
                next_onboarding_step: "profile"
              }
+    end
+
+    test "carries a pending email change but neither of its credentials" do
+      u = insert(:user, email: "moving@example.com")
+
+      {:ok, pending} =
+        u
+        |> Stacks.Accounts.pending_email_changeset(%{
+          pending_email: "somewhere-else@example.com",
+          pending_email_token: "confirm-credential",
+          pending_email_sent_at: DateTime.utc_now(),
+          pending_email_revert_token: "undo-credential"
+        })
+        |> Core.Repo.update()
+
+      result = ProtoJSON.user(pending)
+
+      assert result.email == "moving@example.com"
+      assert result.pending_email == "somewhere-else@example.com"
+      assert result.pending_email_sent_at
+      refute Map.has_key?(result, :pending_email_token)
+      refute Map.has_key?(result, :pending_email_revert_token)
     end
 
     test "handles nil optional fields" do

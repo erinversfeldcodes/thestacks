@@ -6,15 +6,16 @@ module Page.Upload exposing
     , UploadResult(..)
     , UploadStep(..)
     , init
-    , replayFrame
     , sendError
     , tickSeconds
     , update
+    , updateWithEffect
     , view
     )
 
 import Api exposing (BookDetailResponse, MergeFormatResponse, PollResponse, PollStatus(..))
 import Components.ISBNInput exposing (isValidISBN, isbnInput)
+import Effect exposing (Effect)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, a, button, div, h1, h2, img, input, label, li, p, span, text, ul)
@@ -354,12 +355,29 @@ terminal model result =
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effect as data.
+
+The program-test harness runs THIS one and interprets the effect, so the
+request the page decides to make and the request the tests assert against are
+the same value. `update` is this composed with `Effect.perform`; nothing else
+differs between them.
+
+-}
+updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         GotFile file ->
             case maybeToken of
                 Nothing ->
                     ( { model | file = Just file, isDragging = False }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
@@ -370,43 +388,46 @@ update msg model maybeToken =
                         , isDragging = False
                         , step = Uploading
                       }
-                    , Api.initUpload
-                        (File.mime file)
+                    , Effect.authed (Api.initUploadRequest (File.mime file))
                         token
-                        (UploadInitialised file token)
+                        (Api.resolveJson Api.decodeUploadInit >> UploadInitialised file token)
                     , NoOut
                     )
 
         UploadInitialised _ _ (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.none, SessionExpired )
 
             else
-                ( { model | uploadState = Failure err }, Cmd.none, NoOut )
+                ( { model | uploadState = Failure err }, Effect.none, NoOut )
 
         UploadInitialised file token (Ok init_) ->
+            -- A file body cannot be described as an `Api.RequestSpec` (JSON only),
+            -- so this one request stays opaque to the simulated runtime.
             ( model
-            , Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token)
+            , Effect.Custom (Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token))
             , NoOut
             )
 
         R2PutCompleted _ _ (Err err) ->
-            ( { model | uploadState = Failure err }, Cmd.none, NoOut )
+            ( { model | uploadState = Failure err }, Effect.none, NoOut )
 
         R2PutCompleted imageId token (Ok ()) ->
             ( model
-            , Api.commitUpload imageId token UploadAccepted
+            , Effect.authed (Api.commitUploadRequest imageId)
+                token
+                (Api.resolveJson Api.commitUploadDecoder >> UploadAccepted)
             , NoOut
             )
 
         DragOver ->
-            ( { model | isDragging = True }, Cmd.none, NoOut )
+            ( { model | isDragging = True }, Effect.none, NoOut )
 
         DragLeave ->
-            ( { model | isDragging = False }, Cmd.none, NoOut )
+            ( { model | isDragging = False }, Effect.none, NoOut )
 
         FilepickerRequested ->
-            ( model, Select.files [ "image/*" ] (\f _ -> GotFile f), NoOut )
+            ( model, Effect.Custom (Select.files [ "image/*" ] (\f _ -> GotFile f)), NoOut )
 
         UploadAccepted result ->
             case result of
@@ -414,49 +435,28 @@ update msg model maybeToken =
                     case maybeToken of
                         Just token ->
                             ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
-                            , Cmd.none
+                            , Effect.none
                             , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
                             )
 
                         Nothing ->
-                            ( { model | uploadState = Success imageId }, Cmd.none, NoOut )
+                            ( { model | uploadState = Success imageId }, Effect.none, NoOut )
 
                 Err err ->
-                    ( { model | uploadState = Failure err }, Cmd.none, NoOut )
+                    ( { model | uploadState = Failure err }, Effect.none, NoOut )
 
         StatusReceived result ->
             case result of
                 Ok response ->
                     case response.status of
                         Resolved ->
-                            let
-                                ids =
-                                    if List.isEmpty response.bookIds then
-                                        case response.bookId of
-                                            Just bid ->
-                                                [ bid ]
-
-                                            Nothing ->
-                                                []
-
-                                    else
-                                        response.bookIds
-                            in
-                            case ( ids, maybeToken ) of
+                            case ( resolvedBookIds response, maybeToken ) of
                                 ( [], _ ) ->
-                                    ( { model | result = NotABook }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook }, Effect.none, NoOut )
 
-                                ( [ singleId ], Just token ) ->
-                                    let
-                                        callback =
-                                            if response.isDuplicate then
-                                                GotDuplicateBook
-
-                                            else
-                                                GotIdentifiedBook singleId
-                                    in
+                                ( [ _ ], Just token ) ->
                                     ( { model | pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }
-                                    , Api.getBook singleId (Just token) callback
+                                    , bookReadEffect token response
                                     , NoOut
                                     )
 
@@ -467,33 +467,29 @@ update msg model maybeToken =
                                         , failedBookIds = []
                                         , sseTerminalReceived = True
                                       }
-                                    , Cmd.batch
-                                        (List.map
-                                            (\bid -> Api.getBook bid (Just token) (GotIdentifiedBook bid))
-                                            multiIds
-                                        )
+                                    , bookReadEffect token response
                                     , NoOut
                                     )
 
                                 _ ->
-                                    ( { model | result = NotABook, sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( { model | result = NotABook, sseTerminalReceived = True }, Effect.none, NoOut )
 
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( terminal model NotABook, Cmd.none, NoOut )
+                                    ( terminal model NotABook, Effect.none, NoOut )
 
                                 reason ->
-                                    ( terminal model (IdentificationFailed (failureFromRejection reason)), Cmd.none, NoOut )
+                                    ( terminal model (IdentificationFailed (failureFromRejection reason)), Effect.none, NoOut )
 
                         TimedOut ->
-                            ( terminal model (IdentificationFailed TookTooLong), Cmd.none, NoOut )
+                            ( terminal model (IdentificationFailed TookTooLong), Effect.none, NoOut )
 
                         Pending ->
-                            ( model, Cmd.none, NoOut )
+                            ( model, Effect.none, NoOut )
 
                 Err err ->
-                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Effect.none, NoOut )
 
         StreamEvent rawJson ->
             let
@@ -502,17 +498,17 @@ update msg model maybeToken =
             in
             case Decode.decodeString Api.streamEventDecoder rawJson of
                 Ok pollResponse ->
-                    update (StatusReceived (Ok pollResponse)) heard maybeToken
+                    updateWithEffect (StatusReceived (Ok pollResponse)) heard maybeToken
 
                 Err _ ->
-                    ( heard, Cmd.none, NoOut )
+                    ( heard, Effect.none, NoOut )
 
         StreamError ->
             if model.sseTerminalReceived then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
             else
-                ( { model | result = IdentificationFailed ConnectionLost }, Cmd.none, NoOut )
+                ( { model | result = IdentificationFailed ConnectionLost }, Effect.none, NoOut )
 
         GotIdentifiedBook bookId result ->
             case result of
@@ -538,7 +534,7 @@ update msg model maybeToken =
                                     , existingShelves =
                                         List.filterMap .bookshelfName response.placements
                                   }
-                                , Cmd.none
+                                , Effect.none
                                 , NoOut
                                 )
 
@@ -549,7 +545,7 @@ update msg model maybeToken =
                                     , pendingBookIds = []
                                     , existingShelves = []
                                   }
-                                , Cmd.none
+                                , Effect.none
                                 , NoOut
                                 )
 
@@ -558,7 +554,7 @@ update msg model maybeToken =
                             | collectedBooks = newCollected
                             , pendingBookIds = remaining
                           }
-                        , Cmd.none
+                        , Effect.none
                         , NoOut
                         )
 
@@ -573,7 +569,7 @@ update msg model maybeToken =
                     if List.isEmpty remaining then
                         case model.collectedBooks of
                             [] ->
-                                ( { model | result = IdentificationFailed (failureFromHttpError err), failedBookIds = newFailed }, Cmd.none, NoOut )
+                                ( { model | result = IdentificationFailed (failureFromHttpError err), failedBookIds = newFailed }, Effect.none, NoOut )
 
                             books ->
                                 ( { model
@@ -582,12 +578,12 @@ update msg model maybeToken =
                                     , pendingBookIds = []
                                     , failedBookIds = newFailed
                                   }
-                                , Cmd.none
+                                , Effect.none
                                 , NoOut
                                 )
 
                     else
-                        ( { model | pendingBookIds = remaining, failedBookIds = newFailed }, Cmd.none, NoOut )
+                        ( { model | pendingBookIds = remaining, failedBookIds = newFailed }, Effect.none, NoOut )
 
         GotDuplicateBook result ->
             case result of
@@ -608,33 +604,35 @@ update msg model maybeToken =
                         , mergeIsbn = isbn
                         , mergeFormatLabel = formatLabel
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 Err err ->
-                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Effect.none, NoOut )
 
         ManualIsbnChanged isbn ->
-            ( { model | manualIsbn = isbn, showIsbnError = False }, Cmd.none, NoOut )
+            ( { model | manualIsbn = isbn, showIsbnError = False }, Effect.none, NoOut )
 
         SubmitManualIsbn ->
             if isValidISBN model.manualIsbn then
                 case maybeToken of
                     Just token ->
                         ( { model | confirmState = Loading, existingShelves = [] }
-                        , Api.confirmBook
-                            { isbn = model.manualIsbn, shelfName = model.selectedShelf }
+                        , Effect.authed
+                            (Api.confirmBookRequest
+                                { isbn = model.manualIsbn, shelfName = model.selectedShelf }
+                            )
                             token
-                            ConfirmCompleted
+                            (Api.confirmResponseToResult >> ConfirmCompleted)
                         , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.none, NoOut )
 
             else
-                ( { model | showIsbnError = True }, Cmd.none, NoOut )
+                ( { model | showIsbnError = True }, Effect.none, NoOut )
 
         ConfirmCompleted (Ok response) ->
             ( { model
@@ -644,7 +642,7 @@ update msg model maybeToken =
                 , step = Complete response.book model.selectedShelf
                 , existingShelves = otherShelves model.selectedShelf response.placements
               }
-            , Cmd.none
+            , Effect.none
             , RefreshInbox
             )
 
@@ -657,50 +655,54 @@ update msg model maybeToken =
               }
             , case maybeToken of
                 Just token ->
-                    Api.getBook workId (Just token) GotSameWorkBook
+                    Effect.authed (Api.getBookRequest workId)
+                        token
+                        (Api.resolveJson Api.bookDetailResponseDecoder >> GotSameWorkBook)
 
                 Nothing ->
-                    Cmd.none
+                    Effect.none
             , NoOut
             )
 
         ConfirmCompleted (Err (Api.ConfirmHttpError err)) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.none, SessionExpired )
 
             else
-                ( { model | confirmState = Failure (Api.ConfirmHttpError err) }, Cmd.none, NoOut )
+                ( { model | confirmState = Failure (Api.ConfirmHttpError err) }, Effect.none, NoOut )
 
         ConfirmCompleted (Err confirmError) ->
-            ( { model | confirmState = Failure confirmError }, Cmd.none, NoOut )
+            ( { model | confirmState = Failure confirmError }, Effect.none, NoOut )
 
         GotSameWorkBook result ->
             case ( result, model.result ) of
                 ( Ok response, SameWorkFound workId _ ) ->
                     ( { model | result = SameWorkFound workId (Just response.book) }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         EnterManualMode ->
-            ( { model | result = ManualISBNEntry, confirmState = NotAsked }, Cmd.none, NoOut )
+            ( { model | result = ManualISBNEntry, confirmState = NotAsked }, Effect.none, NoOut )
 
         ConfirmMergeFormat bookId ->
             case maybeToken of
                 Just token ->
                     ( { model | mergeFormatState = Loading }
-                    , Api.mergeFormat bookId
-                        { isbn = model.mergeIsbn, formatLabel = model.mergeFormatLabel }
+                    , Effect.authed
+                        (Api.mergeFormatRequest bookId
+                            { isbn = model.mergeIsbn, formatLabel = model.mergeFormatLabel }
+                        )
                         token
-                        MergeFormatCompleted
+                        (Api.resolveJson Api.mergeFormatResponseDecoder >> MergeFormatCompleted)
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         SkipMerge ->
             case model.result of
@@ -709,12 +711,12 @@ update msg model maybeToken =
                         | result = Identified [ book ]
                         , step = Verifying book
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         MergeFormatCompleted result ->
             case result of
@@ -723,27 +725,27 @@ update msg model maybeToken =
                         | mergeFormatState = Success response
                         , result = mergeCompletionFor response.edition model.result
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | mergeFormatState = Failure err }, Cmd.none, NoOut )
+                        ( { model | mergeFormatState = Failure err }, Effect.none, NoOut )
 
         Reset ->
-            ( init, Cmd.none, NoOut )
+            ( init, Effect.none, NoOut )
 
         ConfirmIdentification ->
             case model.step of
                 Verifying book ->
-                    ( { model | step = ChoosingShelf book }, Cmd.none, NoOut )
+                    ( { model | step = ChoosingShelf book }, Effect.none, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         RejectIdentification ->
             case ( model.step, model.uploadState, maybeToken ) of
@@ -762,62 +764,67 @@ update msg model maybeToken =
                         , placementState = NotAsked
                         , sseTerminalReceived = False
                       }
-                    , Api.rejectIdentification
-                        { imageId = imageId
-                        , rejectedBookIds = newRejected
-                        , token = token
-                        }
-                        RejectIdentificationCompleted
+                    , Effect.authed
+                        (Api.rejectIdentificationRequest
+                            { imageId = imageId, rejectedBookIds = newRejected }
+                        )
+                        token
+                        (Api.resolveWhatever >> RejectIdentificationCompleted)
                     , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
                     )
 
                 _ ->
-                    ( init, Cmd.none, NoOut )
+                    ( init, Effect.none, NoOut )
 
         RejectIdentificationCompleted result ->
             case result of
                 Ok () ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
                 Err err ->
-                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Effect.none, NoOut )
 
         ShelfSelected shelf ->
-            ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
+            ( { model | selectedShelf = shelf }, Effect.none, NoOut )
 
         ToggleAdultsOnly ->
-            ( { model | markAdultsOnly = not model.markAdultsOnly }, Cmd.none, NoOut )
+            ( { model | markAdultsOnly = not model.markAdultsOnly }, Effect.none, NoOut )
 
         ConfirmPlacement ->
             case ( model.step, maybeToken ) of
                 ( ChoosingShelf book, Just token ) ->
                     let
-                        ageGateCmd =
+                        ageGateEffect =
                             if model.ageGatingEnabled && model.markAdultsOnly then
-                                [ Api.setBookAgeGate book.id token AgeGateSet ]
+                                [ Effect.authed (Api.setBookAgeGateRequest book.id)
+                                    token
+                                    (Api.resolveWhatever >> AgeGateSet)
+                                ]
 
                             else
                                 []
                     in
                     ( { model | placementState = Loading, ageGateError = Nothing }
-                    , Cmd.batch
-                        (Api.placeBook model.selectedShelf book.id token PlacementCompleted
-                            :: ageGateCmd
+                    , Effect.batch
+                        (Effect.authed (Api.placeBookRequest model.selectedShelf book.id)
+                            token
+                            (Api.placeResponseToResult >> PlacementCompleted)
+                            :: ageGateEffect
                         )
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         AgeGateSet result ->
             case result of
                 Ok () ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
                 Err _ ->
                     ( { model | ageGateError = Just "We couldn't mark this book as adults only. You can change it later from the book's page." }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
@@ -829,25 +836,25 @@ update msg model maybeToken =
                         , placementState = Success placementStub
                         , rejectedBookIds = []
                       }
-                    , Cmd.none
+                    , Effect.none
                     , RefreshInbox
                     )
 
                 ( Err Api.PlaceReadingPileFull, _ ) ->
-                    ( { model | placementState = Failure Api.PlaceReadingPileFull }, Cmd.none, NoOut )
+                    ( { model | placementState = Failure Api.PlaceReadingPileFull }, Effect.none, NoOut )
 
                 ( Err (Api.PlaceHttpError err), _ ) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | placementState = Failure (Api.PlaceHttpError err) }, Cmd.none, NoOut )
+                        ( { model | placementState = Failure (Api.PlaceHttpError err) }, Effect.none, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         GoToShelf shelfName ->
-            ( model, Cmd.none, NavigateTo (shelfRoute shelfName) )
+            ( model, Effect.none, NavigateTo (shelfRoute shelfName) )
 
         WaitTick ->
             if isWaiting model then
@@ -855,21 +862,80 @@ update msg model maybeToken =
                     | waitedSeconds = model.waitedSeconds + tickSeconds
                     , silentSeconds = model.silentSeconds + tickSeconds
                   }
-                , Cmd.none
+                , Effect.none
                 , NoOut
                 )
 
             else
-                ( { model | waitedSeconds = 0, silentSeconds = 0 }, Cmd.none, NoOut )
+                ( { model | waitedSeconds = 0, silentSeconds = 0 }, Effect.none, NoOut )
 
         ResumeInboxItem item ->
-            update
+            updateWithEffect
                 (StatusReceived (Ok (replayFrame item)))
                 { init
                     | ageGatingEnabled = model.ageGatingEnabled
                     , uploadState = Success item.imageId
                 }
                 maybeToken
+
+
+{-| The books a resolved status frame is about.
+
+The stream reports one book in `book_id` and several in `book_ids`; a frame
+carrying the singular form alone still means one identified book.
+
+-}
+resolvedBookIds : PollResponse -> List String
+resolvedBookIds response =
+    if List.isEmpty response.bookIds then
+        case response.bookId of
+            Just bid ->
+                [ bid ]
+
+            Nothing ->
+                []
+
+    else
+        response.bookIds
+
+
+{-| Which book-read each identified book gets, and what its answer means: the
+same photo resolving to a book the reader already owns is a duplicate to
+reconcile, not a new arrival to place.
+
+The page reads this to build its requests and a program test reads it to build
+its simulated ones, so the two cannot disagree about which of the two callbacks
+a duplicate produces.
+
+-}
+resolvedBookReads : PollResponse -> List ( String, Result Http.Error BookDetailResponse -> Msg )
+resolvedBookReads response =
+    case resolvedBookIds response of
+        [ singleId ] ->
+            [ ( singleId
+              , if response.isDuplicate then
+                    GotDuplicateBook
+
+                else
+                    GotIdentifiedBook singleId
+              )
+            ]
+
+        ids ->
+            List.map (\bid -> ( bid, GotIdentifiedBook bid )) ids
+
+
+bookReadEffect : String -> PollResponse -> Effect Msg
+bookReadEffect token response =
+    Effect.batch
+        (List.map
+            (\( bookId, toMsg ) ->
+                Effect.authed (Api.getBookRequest bookId)
+                    token
+                    (Api.resolveJson Api.bookDetailResponseDecoder >> toMsg)
+            )
+            (resolvedBookReads response)
+        )
 
 
 {-| Minimal placement stub — only used to track success state.

@@ -40,7 +40,7 @@ Develop and maintain the Phoenix/Elixir core: API endpoints, Oban job workers, e
 - Vision + ISBN: `IdentifyBookJob`, `EnrichBookJob`, `PostBookAssociationWorker`
 - Enrichment: `FetchReviewsJob`, `TriggerPriceScrapeJob`, `DiscoverAuthorSourcesJob`, `FetchAuthorRSSJob`, `RecalculateWearJob`
 - Discovery: `SourceDiscoveryJob`, `ScoreSourceJob`, `DiscoverBookstoreEventsJob`, `GeographicDiscoveryJob`, `RssLivenessJob`
-- GDPR: `DataExportJob`, `AccountDeletionJob`, `ConfirmDeletionJob`, `ImageRetentionJob`
+- GDPR: `DataExportJob`, `AccountDeletionJob`, `ImageRetentionJob`
 - Feeds & social: `RegenerateFeedJob`, `VisibilityRecapJob`
 - Marketplace: `ListingExpiryJob`
 - Ops: `CacheSweepJob`, `RefreshCostsJob`, `EmailDeliveryJob`, `DbtRefreshJob`, `DbtRefreshHandler`

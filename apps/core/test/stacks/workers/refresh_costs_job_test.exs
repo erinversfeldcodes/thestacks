@@ -14,11 +14,16 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       assert :ok = perform_job(RefreshCostsJob, %{})
 
       costs = Stacks.Costs.current_period_costs()
-      assert length(costs) == 5
+      assert length(costs) == 10
 
       services = Enum.map(costs, & &1.service)
       assert "Fly.io Core" in services
-      assert "Fly.io Vision Sidecar" in services
+      assert "Fly.io Services" in services
+      assert "Together AI" in services
+      assert "Resend" in services
+      assert "Brave Search API" in services
+      assert "Google Books & Open Library" in services
+      assert "Axiom" in services
       assert "Modal GPU Inference" in services
       assert "Neon PostgreSQL" in services
       assert "Domain Registration" in services
@@ -29,7 +34,7 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       assert :ok = perform_job(RefreshCostsJob, %{})
 
       costs = Stacks.Costs.current_period_costs()
-      assert length(costs) == 5
+      assert length(costs) == 10
     end
 
     test "emits costs.refreshed event" do

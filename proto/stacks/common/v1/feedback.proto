@@ -1,0 +1,38 @@
+// feedback.proto — the beta feedback channel: a reader's message to the person
+// who built this, and the context they were in when they wrote it.
+// JSON on the wire. Field numbers are forever — never reuse a number.
+syntax = "proto3";
+
+package stacks.common.v1;
+
+option java_package = "com.thestacks.common.v1";
+option java_outer_classname = "FeedbackProto";
+option java_multiple_files = true;
+
+// FeedbackEntry is one message a signed-in reader sent from inside the app.
+//
+// ⚠️ `body` is free-text personal data and may name third parties the reader
+// wrote about. It is contained rather than validated: it never enters
+// op.event_log (feedback.submitted carries an id and a length only), never
+// reaches the warehouse (this table is skip_dbt), and is reachable only
+// through the MFA-gated, audited admin endpoint. Erasure DELETES the row —
+// author-nulling would leave the reader's own words behind after they asked
+// to be forgotten.
+message FeedbackEntry {
+  // UUID of the feedback entry.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the reader who sent it. The FK cascades, so deleting the user
+  // deletes their messages.
+  string user_id = 2 [json_name = "user_id"];
+
+  // What the reader wrote.
+  string body = 3 [json_name = "body"];
+
+  // Where they were when they wrote it — a short client-supplied label used to
+  // reproduce the problem, not a URL. Never carries another reader's handle.
+  string page_context = 4 [json_name = "page_context"];
+
+  // When it arrived (ISO 8601 string on the wire).
+  string created_at = 5 [json_name = "created_at"];
+}

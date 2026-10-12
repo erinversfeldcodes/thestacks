@@ -34,7 +34,13 @@ if [[ -n "${PROBE_CANARY_REAL_BOOK:-}" ]] || [[ -n "${PROBE_CANARY_NOT_A_BOOK:-}
     EXTRACTION_POOL_SIZE=${#EXTRACTION_POOL[@]}
 fi
 
-CANARIES_PER_ITERATION=6
+# Two, down from six. The probe runs 40 iterations (600s window / 15s interval),
+# so two per iteration is still 80 vision calls per run and cycles the
+# five-image extraction pool sixteen times over — coverage was never the
+# constraint. Six meant six A10G containers spun concurrently against a
+# max_containers=10 ceiling, on every production deploy, to re-prove a path the
+# first iteration has already proven warm.
+CANARIES_PER_ITERATION=2
 
 HEALTH_TIMEOUT=10
 CATALOGUE_TIMEOUT=10
@@ -308,6 +314,41 @@ probe_deps_check() {
     kind="$(_classify "$exit_code" "${http_code:-000}")"
     _record_sample "$DEPS_CHECK_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
 }
+
+# The invite gate must be ON before anything else is worth measuring. A
+# codeless registration must be REFUSED — 403 with "invite_required" — because
+# a stack that answers anything else is either misconfigured (gate off: the
+# same request would have CREATED an account) or broken in a way that makes the
+# latency numbers below meaningless. One-shot assertion, not a sampled probe:
+# gate state is a fact, not a distribution.
+assert_invite_gate() {
+    local http_code body_file body
+    body_file="$WORK_DIR/invite_gate.body"
+    http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}'         --max-time "$HEALTH_TIMEOUT"         "$BASE_URL/api/auth/register"         -H "Content-Type: application/json"         -d '{"email":"invite-gate-probe@thestacks.test","password":"probe-never-lands"}'         2>/dev/null)" || true
+    body="$(cat "$body_file" 2>/dev/null || true)"
+    rm -f "$body_file"
+
+    if [[ "$http_code" == "403" ]] && printf '%s' "$body" | grep -q "invite_required"; then
+        echo "PASS assert: invite gate is ON (codeless register -> 403 invite_required)"
+        return 0
+    fi
+
+    # No HTTP answer at all is an OUTAGE, not a gate verdict — and measuring
+    # outages is the probe's entire job. Claiming "gate not enforcing" against
+    # a black-holed server would be the second misleading message this script
+    # family has produced; warn and let the loop do the measuring.
+    if [[ -z "$http_code" || "$http_code" == "000" ]]; then
+        echo "WARN assert: gate state UNKNOWN — no HTTP answer from the server; continuing so the probe can measure the outage" >&2
+        return 0
+    fi
+
+    echo "FATAL assert: invite gate is NOT enforcing — codeless register returned" >&2
+    echo "       HTTP $http_code: $(printf '%s' "$body" | head -c 200)" >&2
+    echo "       A 201 here means the probe just CREATED an account with no invite;" >&2
+    echo "       anything but 403/invite_required means the gate is off or broken." >&2
+    exit 1
+}
+assert_invite_gate
 
 START_TS="$(date +%s)"
 END_TS=$((START_TS + WINDOW))

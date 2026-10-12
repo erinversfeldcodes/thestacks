@@ -4,15 +4,27 @@ module Navigation.Route exposing
     , fromUrl
     , isSettingsRoute
     , toPath
+    , toPattern
     )
 
 import Url exposing (Url)
 import Url.Parser as Parser exposing ((</>), Parser, s, string)
 
 
+{-| Which "you clicked a link in an email" page the reader landed on.
+
+The three `EmailChange*` variants are the email-change flow's landing pages. They
+are separate from the registration pair because the reader arrives with a
+different question: not "am I in?" but "which address does my account have now?" —
+and after a revert, "why was I signed out?".
+
+-}
 type ConfirmStatus
     = EmailConfirmed
     | EmailConfirmFailed
+    | EmailChangeConfirmed
+    | EmailChangeReverted
+    | EmailChangeFailed
 
 
 type Route
@@ -35,6 +47,9 @@ type Route
     | CostTransparency
     | Metrics
     | About
+    | Faq
+    | DataTransparency
+    | Architecture
     | ListingRemoval
     | Catalogue
     | MarketplaceBrowse
@@ -46,11 +61,13 @@ type Route
     | BlogNew
     | BlogEdit String
     | BlogPost String
+    | Feedback
     | AdminSourceApproval
     | AdminInvites
     | AdminScraperConfig
     | AdminBookModeration
     | AdminRemovalRequests
+    | AdminFeedback
     | Groups
     | GroupDetail String
     | Profile String
@@ -87,6 +104,9 @@ parser =
         , Parser.map CostTransparency (s "costs")
         , Parser.map Metrics (s "metrics")
         , Parser.map About (s "about")
+        , Parser.map Faq (s "faq")
+        , Parser.map DataTransparency (s "transparency")
+        , Parser.map Architecture (s "architecture")
         , Parser.map ListingRemoval (s "listing-removal")
         , Parser.map Catalogue (s "catalogue")
         , Parser.map MarketplaceCreate (s "marketplace" </> s "create")
@@ -98,7 +118,9 @@ parser =
         , Parser.map BlogEdit (s "blog" </> string </> s "edit")
         , Parser.map BlogPost (s "blog" </> string)
         , Parser.map BlogArchive (s "blog")
+        , Parser.map Feedback (s "feedback")
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
+        , Parser.map AdminFeedback (s "admin" </> s "feedback")
         , Parser.map AdminInvites (s "admin" </> s "invites")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
@@ -109,6 +131,9 @@ parser =
         , Parser.map Profile (s "u" </> string)
         , Parser.map (ConfirmEmail EmailConfirmed) (s "confirm-email" </> s "success")
         , Parser.map (ConfirmEmail EmailConfirmFailed) (s "confirm-email" </> s "error")
+        , Parser.map (ConfirmEmail EmailChangeConfirmed) (s "confirm-email" </> s "change-confirmed")
+        , Parser.map (ConfirmEmail EmailChangeReverted) (s "confirm-email" </> s "change-reverted")
+        , Parser.map (ConfirmEmail EmailChangeFailed) (s "confirm-email" </> s "change-error")
         , Parser.map ForgotPassword (s "forgot-password")
         , Parser.map ResendConfirmation (s "resend-confirmation")
         , Parser.map ResetPassword (s "reset-password" </> string)
@@ -181,6 +206,15 @@ toPath route =
         About ->
             "/about"
 
+        Faq ->
+            "/faq"
+
+        DataTransparency ->
+            "/transparency"
+
+        Architecture ->
+            "/architecture"
+
         ListingRemoval ->
             "/listing-removal"
 
@@ -214,8 +248,14 @@ toPath route =
         BlogPost postId ->
             "/blog/" ++ postId
 
+        Feedback ->
+            "/feedback"
+
         AdminSourceApproval ->
             "/admin/sources"
+
+        AdminFeedback ->
+            "/admin/feedback"
 
         AdminInvites ->
             "/admin/invites"
@@ -247,6 +287,15 @@ toPath route =
         ConfirmEmail EmailConfirmFailed ->
             "/confirm-email/error"
 
+        ConfirmEmail EmailChangeConfirmed ->
+            "/confirm-email/change-confirmed"
+
+        ConfirmEmail EmailChangeReverted ->
+            "/confirm-email/change-reverted"
+
+        ConfirmEmail EmailChangeFailed ->
+            "/confirm-email/change-error"
+
         ForgotPassword ->
             "/forgot-password"
 
@@ -258,6 +307,169 @@ toPath route =
 
         NotFound ->
             "/not-found"
+
+
+{-| The shape of a route's path, with every argument replaced by its name.
+
+⚠️ **This is not a cosmetic variant of `toPath`.** `toPath (Profile "mara")` is
+`/u/mara` — another reader's handle, and a bug report that captured it would be
+putting a person who was never involved into a support record. `toPattern`
+gives `/u/:handle`, which is everything a bug report actually needs.
+
+The case has **no wildcard**, deliberately. A new route with an argument is a
+compile error here until someone writes its pattern, which is the only reliable
+way to stop the next parameterised route from quietly leaking its argument.
+
+-}
+toPattern : Route -> String
+toPattern route =
+    case route of
+        BookDetail _ ->
+            "/books/:id"
+
+        MarketplaceDetail _ ->
+            "/marketplace/:id"
+
+        BlogEdit _ ->
+            "/blog/:id/edit"
+
+        BlogPost _ ->
+            "/blog/:id"
+
+        GroupDetail _ ->
+            "/groups/:id"
+
+        Profile _ ->
+            "/u/:handle"
+
+        ProfileShelf _ _ ->
+            "/u/:handle/:bookshelf"
+
+        ConfirmEmail _ ->
+            "/confirm-email"
+
+        ResetPassword _ ->
+            "/reset-password/:token"
+
+        Home ->
+            toPath Home
+
+        Login ->
+            toPath Login
+
+        Library ->
+            toPath Library
+
+        AntiLibrary ->
+            toPath AntiLibrary
+
+        WishList ->
+            toPath WishList
+
+        ReadingPile ->
+            toPath ReadingPile
+
+        LookingForHome ->
+            toPath LookingForHome
+
+        Upload ->
+            toPath Upload
+
+        Import ->
+            toPath Import
+
+        Search ->
+            toPath Search
+
+        SettingsProfile ->
+            toPath SettingsProfile
+
+        SettingsPassword ->
+            toPath SettingsPassword
+
+        SettingsNotifications ->
+            toPath SettingsNotifications
+
+        SettingsAuditLog ->
+            toPath SettingsAuditLog
+
+        Insights ->
+            toPath Insights
+
+        CostTransparency ->
+            toPath CostTransparency
+
+        Metrics ->
+            toPath Metrics
+
+        Faq ->
+            toPath Faq
+
+        About ->
+            toPath About
+
+        DataTransparency ->
+            toPath DataTransparency
+
+        Architecture ->
+            toPath Architecture
+
+        ListingRemoval ->
+            toPath ListingRemoval
+
+        Catalogue ->
+            toPath Catalogue
+
+        MarketplaceBrowse ->
+            toPath MarketplaceBrowse
+
+        MarketplaceCreate ->
+            toPath MarketplaceCreate
+
+        MarketplaceMyListings ->
+            toPath MarketplaceMyListings
+
+        SettingsPrivacy ->
+            toPath SettingsPrivacy
+
+        BlogArchive ->
+            toPath BlogArchive
+
+        BlogNew ->
+            toPath BlogNew
+
+        Feedback ->
+            toPath Feedback
+
+        AdminSourceApproval ->
+            toPath AdminSourceApproval
+
+        AdminInvites ->
+            toPath AdminInvites
+
+        AdminScraperConfig ->
+            toPath AdminScraperConfig
+
+        AdminBookModeration ->
+            toPath AdminBookModeration
+
+        AdminRemovalRequests ->
+            toPath AdminRemovalRequests
+
+        AdminFeedback ->
+            toPath AdminFeedback
+
+        Groups ->
+            toPath Groups
+
+        ForgotPassword ->
+            toPath ForgotPassword
+
+        ResendConfirmation ->
+            toPath ResendConfirmation
+
+        NotFound ->
+            toPath NotFound
 
 
 isSettingsRoute : Route -> Bool

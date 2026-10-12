@@ -47,5 +47,10 @@ watch the panels fill in. VictoriaMetrics' own UI is at http://localhost:8428.
 - **A `401` on the target:** the token in your shell doesn't match `victoriametrics/scrape.yml`.
 - **Panels load but empty even with data:** the datasource `uid` must be `prometheus` (it is, in
   the provisioning file) to match the uid the dashboard JSON hard-codes.
-- **`$app` variable empty:** the scrape labels the target `app: thestacks-local`; pick that value
+- **`$app` variable empty:** the scrape labels the target `app: thestacks-core`; pick that value
   in the dashboard's App dropdown.
+- **Grafana fills in but the app's own `/data-transparency` page is empty:** that page is not
+  Grafana. `Stacks.Transparency` builds its own PromQL and substitutes `$app` with
+  `FLY_APP_NAME || "thestacks-core"`, and `FLY_APP_NAME` is unset on a laptop — so the scrape
+  label has to be `thestacks-core` for the page to match. It used to be `thestacks-local`, which
+  Grafana coped with (its `$app` is `label_values(app)`) and the transparency page could not.

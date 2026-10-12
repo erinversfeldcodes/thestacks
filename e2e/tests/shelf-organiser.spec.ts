@@ -69,6 +69,16 @@ test.describe("Shelf organiser — a mutation must not lose the books", () => {
       spines,
       "the books vanished from the bookcase after adding a shelf: the reload path is repainting from a payload that carries no placements",
     ).toHaveCount(spinesBefore);
+
+    // The new row could be a row this page drew for itself. Reloading builds
+    // the organiser from the shelves the server holds, so a row still here is
+    // one that was actually created.
+    await page.reload();
+    await page.waitForSelector(".bookcase", { timeout: 15000 });
+    await expect(page.getByTestId("shelf-row")).toHaveCount(rowsBefore + 1, {
+      timeout: 15000,
+    });
+    await expect(spines).toHaveCount(spinesBefore, { timeout: 15000 });
   });
 
   test("a shelf holding books still reports them after a mutation", async ({
@@ -137,6 +147,17 @@ test.describe("Shelf organiser — a mutation must not lose the books", () => {
       page.getByTestId("book-spine"),
       "the books vanished after a reorder",
     ).toHaveCount(spinesBefore);
+
+    // Row order is the whole point of the arrows, and the arrows can reorder a
+    // list the page is holding without the server ever agreeing. Reload and ask
+    // which order came back.
+    await page.reload();
+    await page.waitForSelector(".bookcase", { timeout: 15000 });
+    await expect(page.getByTestId("shelf-row").first()).toContainText("empty", {
+      timeout: 15000,
+    });
+    await expect(page.getByTestId("shelf-row").nth(1)).toContainText("book");
+    await expect(page.getByTestId("book-spine")).toHaveCount(spinesBefore);
   });
 
   test("dragging a row reorders it", async ({ page, request }) => {

@@ -32,7 +32,7 @@ defmodule StacksWeb.UserSettingsControllerTest do
                json_response(conn, 200)
     end
 
-    test "updates email when current_password is correct", %{conn: conn} do
+    test "an email change answers with the UNCHANGED email and the pending address", %{conn: conn} do
       user = insert(:user, email: "old@example.com")
 
       conn =
@@ -43,7 +43,10 @@ defmodule StacksWeb.UserSettingsControllerTest do
           current_password: "password123"
         })
 
-      assert %{"email" => "new@example.com"} = json_response(conn, 200)
+      # echoing the typed address back as "email" would tell the client the change
+      # had landed, and settle the settings form on an address nobody has proven
+      assert %{"email" => "old@example.com", "pending_email" => "new@example.com"} =
+               json_response(conn, 200)
     end
 
     test "returns 422 when changing email with wrong current_password", %{conn: conn} do

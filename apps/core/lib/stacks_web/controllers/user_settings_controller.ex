@@ -15,7 +15,16 @@ defmodule StacksWeb.UserSettingsController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
 
-  @doc "PUT /api/settings/profile — update display_name, website_url, and optionally email (requires current_password)."
+  @doc """
+      PUT /api/settings/profile — update display_name, website_url, and optionally
+      email (requires current_password).
+
+      `email` in the response is the address the account ANSWERS on, which an email
+      change does not move: the new address is reported separately as
+      `pending_email` until it confirms itself. A response that echoed the typed
+      address back as `email` would tell the client the change had landed, and the
+      settings form would settle on an address the account does not have.
+  """
   def update_profile(conn, params) do
     user = Guardian.Plug.current_resource(conn)
 
@@ -25,12 +34,22 @@ defmodule StacksWeb.UserSettingsController do
           display_name: updated.display_name,
           website_url: updated.website_url,
           email: updated.email,
+          pending_email: updated.pending_email,
           handle: updated.handle,
           syndication_default: updated.syndication_default
         })
 
       {:error, :invalid_password} ->
         conn |> put_status(422) |> json(%{error: "invalid_current_password"})
+
+      # The change could not be recorded because the two letters it is made of
+      # could not be sent. Recording it anyway would leave a pending change nobody
+      # holds a link to, so this is a refusal, not a partial success.
+      {:error, :rate_limited} ->
+        conn
+        |> put_status(429)
+        |> put_resp_header("retry-after", "3600")
+        |> json(%{error: "email_rate_limited"})
 
       {:error, :argon2_busy} ->
         conn

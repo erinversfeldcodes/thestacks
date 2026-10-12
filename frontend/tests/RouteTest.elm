@@ -47,8 +47,12 @@ allRoutes =
     , SettingsAuditLog
     , Insights
     , CostTransparency
+    , DataTransparency
+    , Architecture
     , Metrics
     , About
+    , Faq
+    , Feedback
     , ListingRemoval
     , Catalogue
     , MarketplaceBrowse
@@ -64,12 +68,17 @@ allRoutes =
     , AdminScraperConfig
     , AdminBookModeration
     , AdminRemovalRequests
+    , AdminInvites
+    , AdminFeedback
     , Groups
     , GroupDetail "group-1"
     , Profile "handle"
     , ProfileShelf "handle" "library"
     , ConfirmEmail EmailConfirmed
     , ConfirmEmail EmailConfirmFailed
+    , ConfirmEmail EmailChangeConfirmed
+    , ConfirmEmail EmailChangeReverted
+    , ConfirmEmail EmailChangeFailed
     , ForgotPassword
     , ResetPassword "tok-abc123"
     , NotFound
@@ -136,8 +145,17 @@ routeLabel route =
         Metrics ->
             "Metrics"
 
+        DataTransparency ->
+            "DataTransparency"
+
         About ->
             "About"
+
+        Faq ->
+            "Faq"
+
+        Feedback ->
+            "Feedback"
 
         ListingRemoval ->
             "ListingRemoval"
@@ -187,6 +205,9 @@ routeLabel route =
         AdminRemovalRequests ->
             "AdminRemovalRequests"
 
+        AdminFeedback ->
+            "AdminFeedback"
+
         Groups ->
             "Groups"
 
@@ -205,6 +226,15 @@ routeLabel route =
         ConfirmEmail EmailConfirmFailed ->
             "ConfirmEmail EmailConfirmFailed"
 
+        ConfirmEmail EmailChangeConfirmed ->
+            "ConfirmEmail EmailChangeConfirmed"
+
+        ConfirmEmail EmailChangeReverted ->
+            "ConfirmEmail EmailChangeReverted"
+
+        ConfirmEmail EmailChangeFailed ->
+            "ConfirmEmail EmailChangeFailed"
+
         ForgotPassword ->
             "ForgotPassword"
 
@@ -213,6 +243,9 @@ routeLabel route =
 
         ResetPassword _ ->
             "ResetPassword"
+
+        Architecture ->
+            "Architecture"
 
         NotFound ->
             "NotFound"
@@ -309,10 +342,22 @@ suite =
                 \_ ->
                     fromPath "/metrics"
                         |> Expect.equal Metrics
+            , test "DataTransparency" <|
+                \_ ->
+                    fromPath "/transparency"
+                        |> Expect.equal DataTransparency
             , test "About" <|
                 \_ ->
                     fromPath "/about"
                         |> Expect.equal About
+            , test "Faq" <|
+                \_ ->
+                    fromPath "/faq"
+                        |> Expect.equal Faq
+            , test "a /faq fragment still parses to Faq" <|
+                \_ ->
+                    fromPath "/faq#erasure"
+                        |> Expect.equal Faq
             , test "Insights" <|
                 \_ ->
                     fromPath "/me/insights"
@@ -321,6 +366,14 @@ suite =
                 \_ ->
                     fromPath "/admin/book-moderation"
                         |> Expect.equal AdminBookModeration
+            , test "Feedback" <|
+                \_ ->
+                    fromPath "/feedback"
+                        |> Expect.equal Feedback
+            , test "AdminFeedback" <|
+                \_ ->
+                    fromPath "/admin/feedback"
+                        |> Expect.equal AdminFeedback
             , test "unknown path returns NotFound" <|
                 \_ ->
                     fromPath "/does-not-exist"
@@ -375,6 +428,10 @@ suite =
                 \_ ->
                     Route.toPath About
                         |> Expect.equal "/about"
+            , test "Faq path" <|
+                \_ ->
+                    Route.toPath Faq
+                        |> Expect.equal "/faq"
             , test "Insights path" <|
                 \_ ->
                     Route.toPath Insights

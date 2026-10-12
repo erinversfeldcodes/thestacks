@@ -3,7 +3,9 @@ module Page.Bookshelf.ReadingPile exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , initWithEffect
     , update
+    , updateWithEffect
     , view
     )
 
@@ -12,6 +14,7 @@ import Browser.Dom
 import Components.AgeGate exposing (ageGate)
 import Components.PlacementCard as Card
 import Components.Spine exposing (WearLevel(..))
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, p, text)
 import Html.Attributes exposing (attribute, class, id, style)
 import Html.Events exposing (onClick, onMouseEnter, stopPropagationOn)
@@ -23,7 +26,7 @@ import Task
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement as Placement exposing (Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
-import Types.Shelf exposing (Shelf)
+import Types.Shelf exposing (Shelf, bookshelfResponseDecoder)
 import Util.TestId exposing (testId)
 
 
@@ -46,6 +49,7 @@ type OutMsg
 
 type Msg
     = BooksLoaded (Result Http.Error (List Shelf))
+    | ReloadRequested
     | DismissAgeGate
     | BookHovered String
     | BookClicked Book
@@ -58,16 +62,48 @@ type Msg
     | FocusReturned
 
 
+{-| The one read of the pile: `init` and every refetch go through it, so a
+refetch cannot end up asking for something other than what the page shows.
+-}
+fetchPile : Maybe String -> Effect Msg
+fetchPile maybeToken =
+    case maybeToken of
+        Just token ->
+            Effect.authed (Api.getBookshelfRequest "reading_pile")
+                token
+                (Api.resolveJson bookshelfResponseDecoder
+                    >> Result.map .shelves
+                    >> BooksLoaded
+                )
+
+        Nothing ->
+            Effect.none
+
+
+cardProgressWrite : Card.Model -> Api.RequestSpec
+cardProgressWrite card =
+    Api.updateProgressRequest card.placement.id
+        { readingStatus = readingStatusToString card.draftStatus
+        , currentPage = String.toInt card.draftPage
+        }
+
+
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     let
-        cmd =
-            case maybeToken of
-                Just token ->
-                    Api.getBookshelf "reading_pile" token (BooksLoaded << Result.map .shelves)
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
 
-                Nothing ->
-                    Cmd.none
+
+{-| `init`, with its effect as data — see `updateWithEffect`.
+-}
+initWithEffect : Maybe String -> ( Model, Effect Msg )
+initWithEffect maybeToken =
+    let
+        effect =
+            fetchPile maybeToken
     in
     ( { books = Loading
       , showAgeGate = False
@@ -77,12 +113,28 @@ init maybeToken =
       , saveState = NotAsked
       , finishedPrompt = Nothing
       }
-    , cmd
+    , effect
     )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effect as data.
+
+The program-test harness runs THIS one and interprets the effect, so the write
+a progress card asks for — including the draft values in its body — is the one
+the tests see. `update` is this composed with `Effect.perform`.
+
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
         BooksLoaded result ->
             case result of
@@ -91,33 +143,36 @@ update msg model =
                         placements =
                             List.concatMap .placements shelves
                     in
-                    ( { model | books = Success placements, cards = List.map Card.init placements }, Cmd.none, NoOut )
+                    ( { model | books = Success placements, cards = List.map Card.init placements }, Effect.none, NoOut )
 
                 Err (Http.BadStatus 403) ->
-                    ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+                    ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Effect.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | books = Failure err }, Cmd.none, NoOut )
+                        ( { model | books = Failure err }, Effect.none, NoOut )
+
+        ReloadRequested ->
+            ( model, fetchPile model.token, NoOut )
 
         DismissAgeGate ->
-            ( { model | showAgeGate = False }, Cmd.none, NoOut )
+            ( { model | showAgeGate = False }, Effect.none, NoOut )
 
         BookHovered bookId ->
-            ( { model | selectedBookId = Just bookId }, Cmd.none, NoOut )
+            ( { model | selectedBookId = Just bookId }, Effect.none, NoOut )
 
         BookClicked bk ->
             if model.selectedBookId == Just bk.id then
-                ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
+                ( model, Effect.none, NavigateTo (BookDetail bk.id) )
 
             else
-                ( { model | selectedBookId = Just bk.id }, Cmd.none, NoOut )
+                ( { model | selectedBookId = Just bk.id }, Effect.none, NoOut )
 
         Deselect ->
-            ( { model | selectedBookId = Nothing }, Cmd.none, NoOut )
+            ( { model | selectedBookId = Nothing }, Effect.none, NoOut )
 
         CardMsg placementId cardMsg ->
             let
@@ -142,23 +197,20 @@ update msg model =
                 case ( requestedCard, model.token ) of
                     ( Just c, Just token ) ->
                         ( { model | cards = updatedCards, saveState = Loading }
-                        , Api.updateProgress c.placement.id
-                            { readingStatus = readingStatusToString c.draftStatus
-                            , currentPage = String.toInt c.draftPage
-                            }
+                        , Effect.authed (cardProgressWrite c)
                             token
-                            (ProgressSaved c.placement.id)
+                            (Api.progressResponseToResult >> ProgressSaved c.placement.id)
                         , NoOut
                         )
 
                     _ ->
-                        ( { model | cards = updatedCards }, Cmd.none, NoOut )
+                        ( { model | cards = updatedCards }, Effect.none, NoOut )
 
             else if List.member Card.EditClosed outMsgs then
                 ( { model | cards = updatedCards }, focusBadge placementId, NoOut )
 
             else
-                ( { model | cards = updatedCards }, Cmd.none, NoOut )
+                ( { model | cards = updatedCards }, Effect.none, NoOut )
 
         ProgressSaved placementId result ->
             case result of
@@ -189,21 +241,26 @@ update msg model =
 
                 Err (Api.ProgressRequestFailed err) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | cards = clearSaving placementId model.cards, saveState = Failure (Api.ProgressRequestFailed err) }, Cmd.none, NoOut )
+                        ( { model | cards = clearSaving placementId model.cards, saveState = Failure (Api.ProgressRequestFailed err) }, Effect.none, NoOut )
 
                 Err other ->
-                    ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Cmd.none, NoOut )
+                    ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Effect.none, NoOut )
 
         RecordReadRequested placementId ->
             case model.token of
                 Just token ->
-                    ( model, Api.moveBook placementId "library" token (RecordReadDone placementId), NoOut )
+                    ( model
+                    , Effect.authed (Api.moveBookRequest placementId "library")
+                        token
+                        (Api.moveResponseToResult >> RecordReadDone placementId)
+                    , NoOut
+                    )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         RecordReadDone placementId result ->
             case result of
@@ -213,31 +270,33 @@ update msg model =
                         , books = removeFromBooks placementId model.books
                         , finishedPrompt = Nothing
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 Err (Api.MoveHttpError err) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
+                        ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )
 
                 Err Api.ReadingPileFull ->
-                    ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
+                    ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )
 
         FinishedPromptDismissed ->
-            ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
+            ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )
 
         FocusReturned ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.none, NoOut )
 
 
-focusBadge : String -> Cmd Msg
+focusBadge : String -> Effect Msg
 focusBadge placementId =
-    Browser.Dom.focus ("reading-status-badge-" ++ placementId)
-        |> Task.attempt (\_ -> FocusReturned)
+    Effect.Custom
+        (Browser.Dom.focus ("reading-status-badge-" ++ placementId)
+            |> Task.attempt (\_ -> FocusReturned)
+        )
 
 
 {-| Clear the in-flight save flag on the matching card, keeping its edit form

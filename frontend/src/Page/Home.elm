@@ -118,6 +118,16 @@ viewLanding =
             , a [ href (Route.toPath MarketplaceBrowse), class "btn btn--secondary home__link--marketplace" ]
                 [ text "Browse the Marketplace" ]
             ]
+        , p [ class "home__questions" ]
+            [ text "Wondering how any of this works, or what happens to your data? "
+            , a
+                [ href (Route.toPath Faq)
+                , class "home__link--faq"
+                , testId "home-faq-link"
+                ]
+                [ text "Questions, answered" ]
+            , text "."
+            ]
         ]
 
 
@@ -179,6 +189,12 @@ viewPreview preview =
 {-| The onward actions, present in every state. Add-Book is the primary,
 persistent affordance; continue-reading routes back into the Reading
 Pile. Plain links — the home issues no call of its own beyond the glimpse read.
+
+The blog sits here because the home is where a signed-in reader starts, and
+until now the writing on this platform was reachable only by typing the URL.
+It is the quietest of the three: reading what others wrote is an invitation,
+not the errand someone came here to run.
+
 -}
 viewActions : Html Msg
 viewActions =
@@ -195,4 +211,10 @@ viewActions =
             , testId "home-continue-reading"
             ]
             [ text "Continue reading" ]
+        , a
+            [ href (Route.toPath BlogArchive)
+            , class "home-collection__blog"
+            , testId "home-blog"
+            ]
+            [ text "Read the blog" ]
         ]

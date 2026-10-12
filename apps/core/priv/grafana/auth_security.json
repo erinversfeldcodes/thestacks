@@ -3,7 +3,10 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -19,12 +22,26 @@
   "liveNow": false,
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["stacks", "auth", "security", "session", "issue-237", "issue-231"],
+  "tags": [
+    "stacks",
+    "auth",
+    "security",
+    "session",
+    "issue-237",
+    "issue-231"
+  ],
   "templating": {
     "list": [
       {
-        "current": { "selected": false, "text": "thestacks-core", "value": "thestacks-core" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "current": {
+          "selected": false,
+          "text": "thestacks-core",
+          "value": "thestacks-core"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "definition": "label_values(app)",
         "hide": 0,
         "includeAll": false,
@@ -41,10 +58,13 @@
       }
     ]
   },
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
-  "title": "The Stacks — Auth & Session Security",
+  "title": "The Stacks \u2014 Auth & Session Security",
   "uid": "stacks-auth-security",
   "version": 1,
   "panels": [
@@ -53,28 +73,53 @@
       "type": "row",
       "title": "Session security",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "panels": []
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Refresh-token reuse detected (ALERT-WORTHY)",
-      "description": "WHAT: rate of refresh-token REUSE detections — a rotated/superseded refresh token replayed after it was already exchanged. HOW: rate over the counter stacks_auth_refresh_reuse_detected_count_total, emitted by Stacks.Accounts.check_token_family/3 on the family-burn branch when the presented jti is neither the family's current token nor a within-grace predecessor. MEANS: this should sit flat at ZERO in healthy operation — the reuse gate only fires on a genuinely stale/forged token, and every hit burns the whole token family. WATCH: ANY non-zero value is alert-worthy — it means a refresh token was replayed (possible theft/replay attack); investigate the affected user, confirm the burned family, and treat a sustained rise as an active credential-compromise incident.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "description": "WHAT: rate of refresh-token REUSE detections \u2014 a rotated/superseded refresh token replayed after it was already exchanged. HOW: rate over the counter stacks_auth_refresh_reuse_detected_count_total, emitted by Stacks.Accounts.check_token_family/3 on the family-burn branch when the presented jti is neither the family's current token nor a within-grace predecessor. MEANS: this should sit flat at ZERO in healthy operation \u2014 the reuse gate only fires on a genuinely stale/forged token, and every hit burns the whole token family. WATCH: ANY non-zero value is alert-worthy \u2014 it means a refresh token was replayed (possible theft/replay attack); investigate the affected user, confirm the burned family, and treat a sustained rise as an active credential-compromise incident.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(rate(stacks_auth_refresh_reuse_detected_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "reuse detected/s"
         }
@@ -84,21 +129,46 @@
       "id": 3,
       "type": "timeseries",
       "title": "Session absolute-cap expiries",
-      "description": "WHAT: rate of sessions force-expired by the absolute 7-day lifetime cap, tagged by reason (currently only lifetime_cap). HOW: rate over stacks_auth_session_expired_count_total, emitted by AuthController.refresh/2 when a refresh is refused because the session has exceeded its window measured from ORIGINAL issue (the presented token is revoked and the client is bounced to /login). MEANS: a low, steady background rate is normal — it is simply users whose 7-day session finally aged out and who must re-authenticate. WATCH: a sharp spike means many sessions hit the cap at once (e.g. a cohort that all logged in ~7 days ago) and will produce a matching re-login / login surge; a change to the cap config will visibly shift this series.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "description": "WHAT: rate of sessions force-expired by the absolute 7-day lifetime cap, tagged by reason (currently only lifetime_cap). HOW: rate over stacks_auth_session_expired_count_total, emitted by AuthController.refresh/2 when a refresh is refused because the session has exceeded its window measured from ORIGINAL issue (the presented token is revoked and the client is bounced to /login). MEANS: a low, steady background rate is normal \u2014 it is simply users whose 7-day session finally aged out and who must re-authenticate. WATCH: a sharp spike means many sessions hit the cap at once (e.g. a cohort that all logged in ~7 days ago) and will produce a matching re-login / login surge; a change to the cap config will visibly shift this series.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (reason) (rate(stacks_auth_session_expired_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{reason}}"
         }
@@ -107,9 +177,14 @@
     {
       "id": 4,
       "type": "row",
-      "title": "Auth lifecycle (login · registration · JWT · MFA)",
+      "title": "Auth lifecycle (login \u00b7 registration \u00b7 JWT \u00b7 MFA)",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
       "panels": []
     },
     {
@@ -117,20 +192,45 @@
       "type": "timeseries",
       "title": "Login failures by type",
       "description": "WHAT: rate of failed login attempts, split by type (invalid_credentials / email_unconfirmed / missing_params / account_locked / service_busy). HOW: rate over stacks_auth_login_failure_count_total, emitted by AuthController.login/2 with a bounded whitelisted failure-type atom (never the submitted email/password). MEANS: a low invalid_credentials trickle is normal user error; the shape tells you WHY logins fail. WATCH: an invalid_credentials spike concentrated in time is a brute-force / credential-stuffing signal (cross-check the auth rate-limit 429s); a service_busy climb points to Argon2 pool saturation, and an email_unconfirmed climb points to a broken confirmation-email flow.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (type) (rate(stacks_auth_login_failure_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{type}}"
         }
@@ -140,21 +240,46 @@
       "id": 6,
       "type": "timeseries",
       "title": "Registrations by result",
-      "description": "WHAT: rate of user-registration attempts, split by result (ok / error). HOW: rate over stacks_auth_registration_count_total, emitted by AuthController.register/2 with a bounded result atom. MEANS: the account-creation (right-to-account) throughput — a steady ok rate is healthy signup flow, and some error background is normal (duplicate email, weak password). WATCH: an error rate that dominates ok means registration is broken for real users (validation regression, DB fault) or is under abuse (bot signups probing taken emails); a sudden ok spike can indicate a signup campaign or automated account creation worth correlating with the login panels.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "description": "WHAT: rate of user-registration attempts, split by result (ok / error). HOW: rate over stacks_auth_registration_count_total, emitted by AuthController.register/2 with a bounded result atom. MEANS: the account-creation (right-to-account) throughput \u2014 a steady ok rate is healthy signup flow, and some error background is normal (duplicate email, weak password). WATCH: an error rate that dominates ok means registration is broken for real users (validation regression, DB fault) or is under abuse (bot signups probing taken emails); a sudden ok spike can indicate a signup campaign or automated account creation worth correlating with the login panels.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (result) (rate(stacks_auth_registration_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{result}}"
         }
@@ -164,21 +289,46 @@
       "id": 7,
       "type": "timeseries",
       "title": "JWT issued by context (login vs refresh)",
-      "description": "WHAT: rate of Guardian JWTs actually handed to a client, split by context (login = interactive sign-in issuance / refresh = silent-renewal rotation issuance). HOW: rate over stacks_auth_jwt_issued_count_total, emitted once per minted token in AuthController.login/2 and refresh/2. MEANS: the refresh:login ratio is the health indicator — in steady state refresh should dominate (clients silently renew far more often than they log in fresh). WATCH: a collapse of the refresh series toward zero while login stays flat means the SPA's silent-renewal interceptor is failing and users are being pushed back to interactive login; a login spike without a matching prior refresh drop suggests mass re-authentication (correlate with the session-cap panel).",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "description": "WHAT: rate of Guardian JWTs actually handed to a client, split by context (login = interactive sign-in issuance / refresh = silent-renewal rotation issuance). HOW: rate over stacks_auth_jwt_issued_count_total, emitted once per minted token in AuthController.login/2 and refresh/2. MEANS: the refresh:login ratio is the health indicator \u2014 in steady state refresh should dominate (clients silently renew far more often than they log in fresh). WATCH: a collapse of the refresh series toward zero while login stays flat means the SPA's silent-renewal interceptor is failing and users are being pushed back to interactive login; a login spike without a matching prior refresh drop suggests mass re-authentication (correlate with the session-cap panel).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (context) (rate(stacks_auth_jwt_issued_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{context}}"
         }
@@ -188,21 +338,41 @@
       "id": 8,
       "type": "timeseries",
       "title": "Refresh-revoke failures",
-      "description": "WHAT: rate of failures to revoke the OLD token during a refresh rotation. HOW: rate over stacks_auth_refresh_revoke_failed_count_total, emitted by AuthController.refresh/2 when Guardian.revoke of the presented token fails (the action still mints a fresh token, so rotation degrades rather than breaks). MEANS: this should be flat at ZERO — every rotation is expected to revoke its predecessor cleanly. WATCH: any sustained non-zero value means old refresh tokens are being left live past rotation (a weakened-rotation / lingering-credential security concern); investigate Guardian/guardian_tokens DB health, and treat it as adjacent to the reuse-detected panel since un-revoked old tokens widen the replay window.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "description": "WHAT: rate of failures to revoke the OLD token during a refresh rotation. HOW: rate over stacks_auth_refresh_revoke_failed_count_total, emitted by AuthController.refresh/2 when Guardian.revoke of the presented token fails (the action still mints a fresh token, so rotation degrades rather than breaks). MEANS: this should be flat at ZERO \u2014 every rotation is expected to revoke its predecessor cleanly. WATCH: any sustained non-zero value means old refresh tokens are being left live past rotation (a weakened-rotation / lingering-credential security concern); investigate Guardian/guardian_tokens DB health, and treat it as adjacent to the reuse-detected panel since un-revoked old tokens widen the replay window.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum(rate(stacks_auth_refresh_revoke_failed_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "revoke failures/s"
         }
@@ -213,22 +383,243 @@
       "type": "timeseries",
       "title": "MFA verify (success vs failure)",
       "description": "WHAT: rate of MFA verification attempts (TOTP codes and recovery codes), split by outcome (success / failure). HOW: rate over stacks_auth_mfa_verify_count_total, emitted by Stacks.MFA.verify_totp/2 and verify_recovery_code/2 with a bounded outcome atom (never the code or secret). MEANS: mostly-success with an occasional failure is normal MFA friction (a mistyped or clock-skewed code). WATCH: a failure series that spikes or dominates success is either brute-forcing of a second factor (especially against admin/owner accounts) or a systemic problem such as TOTP clock drift; a total drop to zero after MFA is in use can mean the verification path is broken and legitimate users cannot complete sign-in.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "expr": "sum by (outcome) (rate(stacks_auth_mfa_verify_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Password reset requests by outcome",
+      "description": "WHAT: rate of password-reset requests split by outcome (sent / rate_limited / no_account). HOW: rate over stacks_auth_password_reset_count_total{outcome}. MEANS: rate_limited is the count of readers who asked for a link and were silently sent nothing \u2014 the endpoint answers identically either way so as not to disclose whether an account exists, which makes this series the ONLY way to see it happening. WATCH: rate_limited rising means locked-out readers are being turned away; no_account rising sharply can indicate address enumeration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(stacks_auth_password_reset_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Confirmation resends by outcome",
+      "description": "WHAT: rate of confirmation-email resend requests by outcome (sent / rate_limited / no_account / already_confirmed / past_renewal_ceiling). HOW: rate over stacks_auth_confirmation_resend_count_total{outcome}. MEANS: past_renewal_ceiling is a reader who can no longer self-rescue and needs the operator runbook; rate_limited is a reader silently sent nothing. WATCH: past_renewal_ceiling above zero is a support signal, not noise \u2014 those accounts cannot recover without an operator.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(stacks_auth_confirmation_resend_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Email change flow by outcome",
+      "description": "WHAT: rate of email-change events by outcome (requested / rate_limited / confirmed / reverted / invalid_confirm / invalid_revert). HOW: rate over stacks_auth_email_change_count_total{outcome}. MEANS: reverted is readers saying a change to their account was not theirs \u2014 the closest thing here to an account-takeover signal. WATCH: any sustained reverted rate deserves investigation; invalid_confirm/invalid_revert rising suggests stale or replayed links.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(stacks_auth_email_change_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Accounts degraded by a lapsed email change",
+      "description": "WHAT: number of accounts the daily sweep degraded because neither the old nor the new address answered an email change inside the grace window. HOW: last_value of stacks_accounts_email_change_lapsed_degraded, set by the daily sweep. MEANS: each one is a reader locked out of their own account by a change they started and did not finish; recovery is the operator runbook, not self-service. WATCH: any non-zero value is a person waiting on support; a step change means the sweep found a batch and the runbook should be run.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "stacks_accounts_email_change_lapsed_degraded{app=\"$app\"}",
+          "legendFormat": "degraded"
         }
       ]
     }

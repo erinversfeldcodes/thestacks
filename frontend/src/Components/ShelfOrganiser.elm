@@ -23,7 +23,7 @@ import Html exposing (Html, button, div, li, span, text, ul)
 import Html.Attributes exposing (attribute, class, disabled, draggable, title)
 import Html.Events exposing (on, onClick)
 import Json.Decode as Decode
-import Types.Shelf exposing (Shelf)
+import Types.Shelf exposing (Shelf, rowLabel)
 import Util.TestId exposing (testId)
 
 
@@ -167,7 +167,7 @@ viewRow shelves state busy index shelf =
         ]
         [ span [ class "shelf-organiser__handle", attribute "aria-hidden" "true" ] [ text "⠿" ]
         , span [ class "shelf-organiser__label" ]
-            [ text ("Shelf " ++ String.fromInt (index + 1))
+            [ text (rowLabel index)
             , span [ class "shelf-organiser__count" ] [ text (bookLabel bookCount) ]
             ]
         , button

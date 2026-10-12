@@ -154,6 +154,15 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     test "a resolved events page produces persisted events" do
       store = insert(:bookstore, scraper_module: "za/test_store", events_path: nil)
 
+      # Relative, not absolute. These were `2026-09-01` and `2026-09-15`, and
+      # `Events.upcoming_events/1` filters `event_date >= now` — so on
+      # 2026-09-02 the first row was written but no longer "upcoming", and the
+      # assertion below failed claiming "no row reached the database" when both
+      # rows were in fact there. A date literal in a fixture that an upcoming
+      # filter reads is a test with an expiry date on it.
+      soon = Date.utc_today() |> Date.add(30) |> Date.to_iso8601()
+      later = Date.utc_today() |> Date.add(60) |> Date.to_iso8601()
+
       MockScraperClient.put_sitemap(
         "za/test_store",
         {:ok,
@@ -175,9 +184,9 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
            body: """
            <div>
              <h2>An Evening with Ada Lovelace</h2>
-             <p>Date: 2026-09-01</p>
+             <p>Date: #{soon}</p>
              <h2>Poetry Night</h2>
-             <p>Date: 2026-09-15</p>
+             <p>Date: #{later}</p>
            </div>
            """
          }}
@@ -240,7 +249,10 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         insert(:bookstore_event,
           store: store,
           title: "An Evening with Ada Lovelace",
-          event_date: ~U[2026-09-01 00:00:00Z]
+          # Relative for the same reason: read back through `upcoming_events/1`,
+          # so a fixed past date makes the row invisible and the assertion reads
+          # as "an unchanged page wiped the store's events" when nothing was.
+          event_date: DateTime.utc_now() |> DateTime.add(30, :day) |> DateTime.truncate(:second)
         )
 
       MockScraperClient.put_page(

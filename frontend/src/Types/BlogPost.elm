@@ -18,6 +18,7 @@ module Types.BlogPost exposing
 
 import Json.Decode as Decode exposing (Decoder)
 import Stacks.Common.V1.Blog as Proto
+import Types.ProtoHelpers exposing (emptyToNothing)
 
 
 type Visibility
@@ -49,6 +50,8 @@ type alias BlogPostSummary =
     , visibility : Visibility
     , published : Bool
     , insertedAt : String
+    , authorDisplayName : Maybe String
+    , authorHandle : Maybe String
     }
 
 
@@ -195,10 +198,12 @@ fromProtoBlogPostSummary : Proto.BlogPostSummary -> BlogPostSummary
 fromProtoBlogPostSummary ps =
     { id = ps.id
     , title = ps.title
-    , body = ""
+    , body = ps.body
     , visibility = fromProtoVisibility ps.visibility
     , published = False
     , insertedAt = ps.createdAt
+    , authorDisplayName = emptyToNothing ps.authorDisplayName
+    , authorHandle = emptyToNothing ps.authorHandle
     }
 
 
@@ -245,8 +250,11 @@ commentDecoder =
 
 Delegates to the proto BlogPostSummary decoder, then derives the published
 flag from the published\_at timestamp (non-empty means published).
-The proto BlogPostSummary has no body or published fields -- published is a
-reserved field in the proto and is never sent by the controller.
+
+`published` stays outside the proto message — it is a reserved field there and
+the controller never sends it, so it is derived here rather than decoded. The
+body and the author, by contrast, ARE on the message: a list that cannot show a
+preview or say who wrote a post is not a summary of anything.
 
 -}
 blogPostSummaryDecoder : Decoder BlogPostSummary

@@ -2,6 +2,7 @@ module Page.Catalogue exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , catalogueRequest
     , init
     , update
     , view
@@ -269,18 +270,31 @@ update msg model maybeToken =
 
 fetchCatalogue : Model -> Cmd Msg
 fetchCatalogue model =
-    Api.getCatalogue
-        { search =
-            if String.isEmpty model.search then
-                Nothing
+    Api.getCatalogue (catalogueParams model) CatalogueReceived
 
-            else
-                Just model.search
-        , subject = model.activeSubject
-        , sort = model.sort
-        , page = model.page
-        }
-        CatalogueReceived
+
+{-| The catalogue page this model asks for, as request data — search, subject,
+sort and page are all in the URL, so this is where they are decided.
+-}
+catalogueRequest : Model -> Api.RequestSpec
+catalogueRequest model =
+    Api.getCatalogueRequest (catalogueParams model)
+
+
+catalogueParams :
+    Model
+    -> { search : Maybe String, subject : Maybe String, sort : String, page : Int }
+catalogueParams model =
+    { search =
+        if String.isEmpty model.search then
+            Nothing
+
+        else
+            Just model.search
+    , subject = model.activeSubject
+    , sort = model.sort
+    , page = model.page
+    }
 
 
 view : Model -> Html Msg

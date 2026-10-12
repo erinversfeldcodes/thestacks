@@ -37,7 +37,43 @@ sampleUser =
 
 initialModel : Profile.Model
 initialModel =
-    Profile.init sampleUser
+    Profile.seedFromSession sampleUser
+
+
+{-| A 200 from `PUT /api/settings/profile` with no change in flight: the account
+answers on the address it already had.
+-}
+savedAs : String -> Api.ProfileSaved
+savedAs handle =
+    { handle = handle, email = "ada@example.com", pendingEmail = Nothing }
+
+
+{-| The same 200 for an email change: the account's address has NOT moved, and a
+second address is waiting to prove itself.
+-}
+pendingSave : Api.ProfileSaved
+pendingSave =
+    { handle = "ada", email = "ada@example.com", pendingEmail = Just "new@example.com" }
+
+
+{-| The account as `/api/auth/me` reports it mid-change: address unmoved, a
+second one waiting.
+-}
+accountPending : Api.Account
+accountPending =
+    { displayName = "Ada"
+    , handle = "ada"
+    , email = "ada@example.com"
+    , websiteUrl = ""
+    , countryCode = ""
+    , city = ""
+    , pendingEmail = Just "new@example.com"
+    }
+
+
+accountSettled : Api.Account
+accountSettled =
+    { accountPending | pendingEmail = Nothing }
 
 
 {-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
@@ -65,7 +101,7 @@ handleInputValue model =
         |> Query.first
 
 
-validationFailure : List ( String, List String ) -> Result Api.ProfileError String
+validationFailure : List ( String, List String ) -> Result Api.ProfileError Api.ProfileSaved
 validationFailure errors =
     Err (Api.ProfileValidationFailed errors)
 
@@ -136,13 +172,13 @@ suite =
             \_ ->
                 initialModel
                     |> apply (SetHandle "AdaLovelace")
-                    |> apply (SaveProfileCompleted (Ok "adalovelace"))
+                    |> apply (SaveProfileCompleted (Ok (savedAs "adalovelace")))
                     |> handleInputValue
                     |> Query.has [ Selector.attribute (Attr.value "adalovelace") ]
         , test "a successful save shows the saved confirmation" <|
             \_ ->
                 initialModel
-                    |> apply (SaveProfileCompleted (Ok "ada"))
+                    |> apply (SaveProfileCompleted (Ok (savedAs "ada")))
                     |> Profile.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Profile saved." ]
@@ -256,6 +292,69 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Current password is incorrect." ]
             ]
+        , describe "a change in flight"
+            [ test "the email field snaps back to the address the account still answers on" <|
+                \_ ->
+                    let
+                        after =
+                            initialModel
+                                |> apply (SetEmail "new@example.com")
+                                |> apply (SetCurrentPassword "hunter2")
+                                |> applyWithToken SaveProfile
+                                |> apply (SaveProfileCompleted (Ok pendingSave))
+                    in
+                    Expect.all
+                        [ \_ -> after.email |> Expect.equal "ada@example.com"
+                        , \_ -> after.initialEmail |> Expect.equal "ada@example.com"
+                        , \_ -> after.pendingEmail |> Expect.equal (Just "new@example.com")
+                        ]
+                        ()
+            , test "the panel names the address being waited on and the one holding the undo link" <|
+                \_ ->
+                    initialModel
+                        |> apply (SaveProfileCompleted (Ok pendingSave))
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "new@example.com" ]
+                            , Query.has [ Selector.class "pending-email" ]
+                            , Query.has [ Selector.text "We sent a confirmation link there, and a link to undo this change to ada@example.com. Your account still uses ada@example.com until the new address confirms itself." ]
+                            ]
+            , test "the panel warns that ignoring both letters signs you out" <|
+                \_ ->
+                    initialModel
+                        |> apply (SaveProfileCompleted (Ok pendingSave))
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "If neither is used within seven days, you'll be signed out until an address is confirmed — the undo link will still work." ]
+            , test "no panel when nothing is pending" <|
+                \_ ->
+                    initialModel
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.class "pending-email" ]
+            , test "the account record answers the panel on load, so a reload does not lose it" <|
+                \_ ->
+                    initialModel
+                        |> apply (AccountReceived (Ok accountPending))
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.class "pending-email" ]
+            , test "a settled change clears the panel" <|
+                \_ ->
+                    initialModel
+                        |> apply (AccountReceived (Ok accountPending))
+                        |> apply (AccountReceived (Ok accountSettled))
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.class "pending-email" ]
+            , test "an unreadable account record claims no pending change rather than inventing one" <|
+                \_ ->
+                    initialModel
+                        |> apply (AccountReceived (Err Http.NetworkError))
+                        |> .pendingEmail
+                        |> Expect.equal Nothing
+            ]
         , describe "handle omission (CG-1 follow-up — NOT NULL handle 500)"
             [ test "an unchanged real handle is omitted from the payload" <|
                 \_ ->
@@ -271,14 +370,14 @@ suite =
                 \_ ->
                     let
                         model =
-                            Profile.init sampleUser
+                            Profile.seedFromSession sampleUser
                     in
                     model.handle |> Expect.equal model.initialHandle
             , test "init baselines initialHandle for a handle-less (injected) session" <|
                 \_ ->
                     let
                         model =
-                            Profile.init { sampleUser | handle = "" }
+                            Profile.seedFromSession { sampleUser | handle = "" }
                     in
                     Expect.all
                         [ \_ -> model.handle |> Expect.equal ""
@@ -298,7 +397,7 @@ suite =
                         saved =
                             initialModel
                                 |> apply (SetHandle "AdaLovelace")
-                                |> apply (SaveProfileCompleted (Ok "adalovelace"))
+                                |> apply (SaveProfileCompleted (Ok (savedAs "adalovelace")))
                     in
                     Expect.all
                         [ \_ -> saved.handle |> Expect.equal "adalovelace"
@@ -312,7 +411,7 @@ suite =
                     let
                         edited =
                             initialModel
-                                |> apply (SaveProfileCompleted (Ok "ada"))
+                                |> apply (SaveProfileCompleted (Ok (savedAs "ada")))
                                 |> apply (SetDisplayName "Ada Lovelace")
                     in
                     Expect.all
@@ -331,7 +430,7 @@ suite =
                     let
                         edited =
                             initialModel
-                                |> apply (SaveProfileCompleted (Ok "ada"))
+                                |> apply (SaveProfileCompleted (Ok (savedAs "ada")))
                                 |> apply (SetWebsiteUrl "https://ada.dev")
                     in
                     Expect.all
@@ -408,5 +507,69 @@ suite =
                         |> Profile.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Could not save location. Please try again." ]
+            ]
+        , describe "the reader's own public profile"
+            [ test "the handle hint links to it — the only route to your own profile in the app" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetHandle "ada")
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has
+                            [ Selector.tag "a"
+                            , Selector.attribute (Attr.href "/u/ada")
+                            , Selector.text "/u/ada"
+                            ]
+            , test "with no handle yet there is nothing to link to, so it stays guidance" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetHandle "")
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.tag "a", Selector.attribute (Attr.href "/u/") ]
+            ]
+        , describe "telling the app the identity moved"
+            [ test "a saved profile reports the settled name and handle outward" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            initialModel
+                                |> apply (SetDisplayName "Ada Lovelace")
+                                |> (\m -> Profile.update (SaveProfileCompleted (Ok (savedAs "ada"))) m Nothing)
+                    in
+                    -- The nav renders the reader's name from the STORED session,
+                    -- not from this page's model, so saving here changed the
+                    -- account and left the corner of every page showing the old
+                    -- name until the reader signed out. The page cannot write
+                    -- that blob itself; it has to say so outward.
+                    Expect.equal
+                        (Profile.IdentityChanged { displayName = "Ada Lovelace", handle = "ada" })
+                        out
+            , test "the reported handle is the server's, not the typed one" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            initialModel
+                                |> apply (SetHandle "whatever_i_typed")
+                                |> (\m -> Profile.update (SaveProfileCompleted (Ok (savedAs "settled_by_server"))) m Nothing)
+                    in
+                    case out of
+                        Profile.IdentityChanged identity ->
+                            Expect.equal "settled_by_server" identity.handle
+
+                        _ ->
+                            Expect.fail "expected IdentityChanged"
+            ]
+        , describe "the handle hint names the host the app is served from"
+            [ test "with an origin threaded in, the hint shows that host, not a hardcoded brand" <|
+                \_ ->
+                    -- The old hint hardcoded `thestacks.app` — a parked lander,
+                    -- while production serves readinginthestacks.com. Deriving
+                    -- from the origin means the hint is correct on every deploy
+                    -- and can never name a domain the platform does not serve.
+                    { initialModel | origin = "https://readinginthestacks.com", handle = "ada" }
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "readinginthestacks.com/u/ada" ]
             ]
         ]

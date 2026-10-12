@@ -9,6 +9,7 @@ RSS or event data, those sections show "Coming soon" stubs.
 -}
 
 import Api exposing (AuthorEvent)
+import Components.BusinessClaim as BusinessClaim
 import Html exposing (Html, a, div, h3, li, p, section, span, text, ul)
 import Html.Attributes exposing (attribute, class, href, id, rel, target)
 import Types.Book exposing (Author)
@@ -150,6 +151,7 @@ viewEvents maybeEvents =
             div [ class "book-detail__author-events", testId "author-events" ]
                 [ ul [ class "book-detail__author-events-list" ]
                     (List.map viewEvent events)
+                , BusinessClaim.view
                 ]
 
         Nothing ->

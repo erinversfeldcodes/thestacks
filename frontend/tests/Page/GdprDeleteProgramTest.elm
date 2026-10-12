@@ -6,6 +6,7 @@ the request lifecycle, the single-flight invariant (mid-flight edits
 neither cancel nor re-enable), and the queued acknowledgement copy.
 -}
 
+import Api
 import Expect
 import Http
 import Page.Settings.Privacy as Privacy exposing (Msg(..))
@@ -14,6 +15,7 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -90,15 +92,9 @@ effectFor msg before after =
     case msg of
         UserClicksDeleteAccount ->
             if isLoading after.deleting && not (isLoading before.deleting) then
-                SimulatedEffect.Http.request
-                    { method = "DELETE"
-                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                    , url = "/api/gdpr/account"
-                    , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectWhatever GotDeleteResponse
-                    , timeout = Nothing
-                    , tracker = Nothing
-                    }
+                TestHelpers.authedRequestFromSpec Api.deleteAccountRequest
+                    token
+                    (SimulatedEffect.Http.expectWhatever GotDeleteResponse)
 
             else
                 SimulatedEffect.Cmd.none

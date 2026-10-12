@@ -6,6 +6,8 @@ defmodule Stacks.Storage do
       Storage keys follow these conventions:
       - User uploads: `uploads/{image_id}`
       - Book covers:  `covers/{isbn}-cover.jpg`
+      - GDPR exports: `exports/{user_id}/{unix_expiry}-{token}.json`
+        (owned by `Stacks.GDPR.ExportDelivery`, which builds the key)
 
       Presigned URLs have a 15 minute (900 second) TTL by default.
   """
@@ -35,6 +37,19 @@ defmodule Stacks.Storage do
   @spec get_image_url(String.t(), pos_integer()) ::
           {:ok, String.t()} | {:error, term()}
   def get_image_url(storage_key, ttl_seconds \\ @default_ttl) do
+    signed_download_url(storage_key, ttl_seconds)
+  end
+
+  @doc """
+      Generate a signed GET URL for any object.
+
+      The signature is what stands between the object and the world — nothing
+      in the bucket is reachable without one — so the TTL passed here is the
+      access window, not a hint.
+  """
+  @spec signed_download_url(String.t(), pos_integer()) ::
+          {:ok, String.t()} | {:error, term()}
+  def signed_download_url(storage_key, ttl_seconds \\ @default_ttl) do
     backend().presigned_url(storage_key, ttl_seconds)
   end
 
@@ -63,13 +78,43 @@ defmodule Stacks.Storage do
   end
 
   @doc """
+      Store a serialised GDPR data export at a caller-supplied key.
+
+      The key encodes the object's own deadline, so
+      `Stacks.GDPR.ExportDelivery` — not this context — decides it.
+  """
+  @spec put_export(String.t(), binary()) :: {:ok, String.t()} | {:error, term()}
+  def put_export(storage_key, json) do
+    backend().put(storage_key, json, content_type: "application/json")
+  end
+
+  @doc """
+      List the keys of every object under a prefix. Used by the retention
+      sweeps; the trailing slash is the caller's to supply.
+  """
+  @spec list_objects(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list_objects(prefix) do
+    backend().list(prefix)
+  end
+
+  @doc """
+      Delete any object from storage by key.
+
+      Returns `:ok` on success.
+  """
+  @spec delete_object(String.t()) :: :ok | {:error, term()}
+  def delete_object(storage_key) do
+    backend().delete(storage_key)
+  end
+
+  @doc """
       Delete an image from object storage.
 
       Returns `:ok` on success.
   """
   @spec delete_image(String.t()) :: :ok | {:error, term()}
   def delete_image(storage_key) do
-    backend().delete(storage_key)
+    delete_object(storage_key)
   end
 
   @doc """

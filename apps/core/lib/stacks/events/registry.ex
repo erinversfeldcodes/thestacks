@@ -126,6 +126,16 @@ defmodule Stacks.Events.Registry do
     "social.user_unblocked",
     "user.profile_updated",
     "user.profile_visibility_changed",
+    # The four moments of an email change — asked for, proven, undone, or left
+    # unanswered until the platform stopped trusting the account. Nothing acts on
+    # them: every effect they could trigger (the two emails, the session revoke,
+    # the degrade) is done inline by the flow itself, because each one has to
+    # happen inside the transaction that makes the change real or not at all.
+    # What they are is the audit trail of an account's identity moving.
+    "user.email_change_requested",
+    "user.email_change_confirmed",
+    "user.email_change_reverted",
+    "user.email_change_expired",
     "user.password_changed",
     "user.notifications_updated",
     "user.visibility_recap_completed",
@@ -136,15 +146,33 @@ defmodule Stacks.Events.Registry do
     "enrichment.author_sources_discovered",
     "third_space.created",
     "third_space.delisted",
+    # The admin decision on a discovered source. Approval already creates the
+    # third space inline in the same call and a rejection ends the source's
+    # life, so nothing downstream has work to do — these are the audit record of
+    # who decided what. Both are emitted with the type passed down as an
+    # argument (approve_source/1 and reject_source/1 → transition_source/3 →
+    # after_transition/3), so neither string appears at its own emit call.
+    "source.approved",
+    "source.rejected",
     "costs.refreshed",
     "invite.issued",
     "invite.redeemed",
     "library_import.started",
     "library_import.completed",
-    "invite.revoked"
+    "invite.revoked",
+    # The admin queue is the system of record and the owner reads it directly;
+    # nothing downstream acts on a submission. A notification handler is the
+    # obvious future subscriber, and this line is where it will attach.
+    "feedback.submitted"
   ]
 
   @pending %{
+    "offer.opened" =>
+      "the marketplace offer flow is deferred (owner ruling 2026-08-19): the " <>
+        "offer_threads and offer_messages tables, their schemas and their changesets " <>
+        "are built, but no context function opens a thread and no route reaches one, " <>
+        "so nothing can emit this yet. OfferNotificationHandler stays registered so " <>
+        "the flow lands with its consumer already wired",
     "enrichment.reviews_scraped" =>
       "reviews are planned, not deleted (owner ruling 2026-08-07): " <>
         "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>

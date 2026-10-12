@@ -110,7 +110,9 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
       assert placement.source == "goodreads_import"
       assert placement.personal_rating == 5
       assert placement.notes == "Bleak and necessary.\n\nLent to Sam."
-      assert placement.formats == ["paperback"]
+      # The CSV says "Paperback", an edition binding; the placement records what
+      # the reader owns, and both bindings are physical there.
+      assert placement.formats == ["physical"]
       assert placement.reading_status == "completed"
       assert DateTime.compare(placement.finished_at, ~U[2023-06-14 00:00:00Z]) == :eq
       assert DateTime.compare(placement.placed_at, ~U[2023-01-02 00:00:00Z]) == :eq

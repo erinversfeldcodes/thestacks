@@ -10,7 +10,6 @@ a row's age gate (which must fire the admin PUT).
 import Api
 import Dict
 import Http
-import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.Admin.BookModeration as BM
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
@@ -18,21 +17,16 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
-bmInitEffect : Maybe String -> SimulatedEffect BM.Msg
-bmInitEffect maybeToken =
+bmInitEffect : BM.Model -> Maybe String -> SimulatedEffect BM.Msg
+bmInitEffect model maybeToken =
     case maybeToken of
         Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/admin/books?page=1"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson BM.BooksReceived Api.adminBooksResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec (BM.booksRequest model)
+                token
+                (SimulatedEffect.Http.expectJson BM.BooksReceived Api.adminBooksResponseDecoder)
 
         Nothing ->
             SimulatedEffect.Cmd.none
@@ -42,19 +36,12 @@ bmEffects : BM.Msg -> Maybe String -> SimulatedEffect BM.Msg
 bmEffects msg maybeToken =
     case ( msg, maybeToken ) of
         ( BM.ToggleAgeGate bookId newAgeGated, Just token ) ->
-            SimulatedEffect.Http.request
-                { method = "PUT"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/admin/books/" ++ bookId ++ "/age-gate"
-                , body =
-                    SimulatedEffect.Http.jsonBody
-                        (Encode.object [ ( "age_gated", Encode.bool newAgeGated ) ])
-                , expect =
-                    SimulatedEffect.Http.expectJson (BM.AgeGateCompleted bookId)
-                        (Decode.field "book" Api.adminBookDecoder)
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec
+                (Api.adminSetBookAgeGateRequest bookId newAgeGated)
+                token
+                (SimulatedEffect.Http.expectJson (BM.AgeGateCompleted bookId)
+                    Api.adminBookEnvelopeDecoder
+                )
 
         _ ->
             SimulatedEffect.Cmd.none
@@ -69,7 +56,7 @@ program maybeToken =
                     ( model, _ ) =
                         BM.init maybeToken
                 in
-                ( model, bmInitEffect maybeToken )
+                ( model, bmInitEffect model maybeToken )
         , update =
             \msg model ->
                 let

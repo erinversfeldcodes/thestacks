@@ -61,6 +61,8 @@ defmodule Stacks.Discovery.BraveClient do
       case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 20_000) do
         {:ok, %Finch.Response{status: 200, body: body, headers: headers}} ->
           increment_daily_counter()
+          # one quota-consuming query — the cost page counts these
+          :telemetry.execute([:stacks, :discovery, :brave_search], %{count: 1}, %{})
           parse_results(maybe_gunzip(body, headers))
 
         {:ok, %Finch.Response{status: 429}} ->

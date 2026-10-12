@@ -77,11 +77,25 @@ expectedAuth route =
         CostTransparency ->
             False
 
+        DataTransparency ->
+            False
+
+        Architecture ->
+            False
+
         Metrics ->
             False
 
         About ->
             False
+
+        Faq ->
+            False
+
+        -- Signed in: the minimal channel records who wrote it, so the owner
+        -- can write back.
+        Feedback ->
+            True
 
         ListingRemoval ->
             False
@@ -129,6 +143,9 @@ expectedAuth route =
             True
 
         AdminRemovalRequests ->
+            True
+
+        AdminFeedback ->
             True
 
         Groups ->
@@ -180,8 +197,12 @@ allRoutes =
     , ( "SettingsAuditLog", SettingsAuditLog )
     , ( "Insights", Insights )
     , ( "CostTransparency", CostTransparency )
+    , ( "DataTransparency", DataTransparency )
+    , ( "Architecture", Architecture )
     , ( "Metrics", Metrics )
     , ( "About", About )
+    , ( "Faq", Faq )
+    , ( "Feedback", Feedback )
     , ( "Catalogue", Catalogue )
     , ( "MarketplaceBrowse", MarketplaceBrowse )
     , ( "MarketplaceCreate", MarketplaceCreate )
@@ -196,6 +217,7 @@ allRoutes =
     , ( "AdminScraperConfig", AdminScraperConfig )
     , ( "AdminBookModeration", AdminBookModeration )
     , ( "AdminRemovalRequests", AdminRemovalRequests )
+    , ( "AdminFeedback", AdminFeedback )
     , ( "Groups", Groups )
     , ( "GroupDetail", GroupDetail "g1" )
     , ( "Profile", Profile "handle" )
@@ -240,6 +262,16 @@ isPageLogin page =
             False
 
 
+isPageFaq : Main.Page -> Bool
+isPageFaq page =
+    case page of
+        Main.PageFaq ->
+            True
+
+        _ ->
+            False
+
+
 isPageAdminGate : Main.Page -> Bool
 isPageAdminGate page =
     case page of
@@ -276,12 +308,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "19 public routes and 22 protected routes are enumerated" <|
+            [ test "22 public routes and 24 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 19, 22 )
+                        |> Expect.equal ( 22, 24 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|
@@ -332,5 +364,11 @@ suite =
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal False
+            , test "an anonymous visitor lands on the FAQ itself, not a sign-in wall" <|
+                \() ->
+                    Main.initPage config Faq "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
+                        |> Tuple.first
+                        |> isPageFaq
+                        |> Expect.equal True
             ]
         ]

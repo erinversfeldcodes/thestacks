@@ -52,6 +52,13 @@ defmodule Stacks.Events.PayloadContract do
     "user.profile_visibility_changed" => %{version: 1, keys: ~w(visibility)},
     "user.location_updated" => %{version: 1, keys: ~w()},
     "user.password_changed" => %{version: 1, keys: ~w()},
+    # Empty by construction, not by omission: the only facts these events could
+    # carry beyond the aggregate id are two email addresses, and event_log is
+    # append-only — erasure blanks a payload where it can delete a row.
+    "user.email_change_requested" => %{version: 1, keys: ~w()},
+    "user.email_change_confirmed" => %{version: 1, keys: ~w()},
+    "user.email_change_reverted" => %{version: 1, keys: ~w()},
+    "user.email_change_expired" => %{version: 1, keys: ~w()},
     "invite.issued" => %{version: 1, keys: ~w(max_uses expires_at email_bound)},
     "invite.redeemed" => %{version: 1, keys: ~w(user_id use_count)},
     "invite.revoked" => %{version: 1, keys: ~w()},
@@ -86,6 +93,9 @@ defmodule Stacks.Events.PayloadContract do
     "enrichment.prices_scraped" => %{version: 1, keys: ~w(book_ids count)},
     "enrichment.reviews_scraped" => %{version: 1, keys: ~w(book_count)},
     "costs.refreshed" => %{version: 1, keys: ~w(item_count period vision_jobs)},
+    # No body, deliberately. op.event_log is immutable outside GDPR redaction,
+    # so a reader's words written here would outlive every erasure request.
+    "feedback.submitted" => %{version: 1, keys: ~w(user_id character_count)},
     "source_health.recorded" => %{
       version: 1,
       keys: ~w(consecutive_failures source_name source_type status)

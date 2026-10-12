@@ -13,8 +13,8 @@ module Page.Login exposing
     , isResendDisabled
     , isSessionExpiry
     , isSubmitDisabled
-    , resendTarget
     , update
+    , updateWithEffect
     , validateDisplayName
     , validateEmail
     , validatePassword
@@ -24,6 +24,7 @@ module Page.Login exposing
     )
 
 import Api exposing (AuthResponse, RegisterError(..), RequestError(..))
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h3, input, label, p, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -310,9 +311,25 @@ validatePasswordConfirm password confirm =
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effect as data.
+
+The program-test harness runs THIS one and interprets the effect, so which
+request a submit fires — and, on this page, whether one fires at all — is
+decided once. `update` is this composed with `Effect.perform`.
+
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
         EmailChanged email ->
-            ( { model | email = email, submitState = NotAsked, emailValidation = validateEmail email }, Cmd.none, NoOut )
+            ( { model | email = email, submitState = NotAsked, emailValidation = validateEmail email }, Effect.none, NoOut )
 
         PasswordChanged password ->
             ( { model
@@ -321,7 +338,7 @@ update msg model =
                 , passwordValidation = validatePassword password
                 , passwordConfirmValidation = validatePasswordConfirm password model.passwordConfirm
               }
-            , Cmd.none
+            , Effect.none
             , NoOut
             )
 
@@ -331,12 +348,12 @@ update msg model =
                 , submitState = NotAsked
                 , passwordConfirmValidation = validatePasswordConfirm model.password confirm
               }
-            , Cmd.none
+            , Effect.none
             , NoOut
             )
 
         DisplayNameChanged name ->
-            ( { model | displayName = name, submitState = NotAsked, displayNameValidation = validateDisplayName name }, Cmd.none, NoOut )
+            ( { model | displayName = name, submitState = NotAsked, displayNameValidation = validateDisplayName name }, Effect.none, NoOut )
 
         ModeSwitched mode ->
             ( { model
@@ -350,108 +367,130 @@ update msg model =
                 , forgotState = NotAsked
                 , resendState = NotAsked
               }
-            , Cmd.none
+            , Effect.none
             , NoOut
             )
 
         ForgotSubmitted ->
             if isForgotDisabled model then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
             else
                 ( { model | forgotState = Loading }
-                , Api.forgotPassword model.email GotForgotResponse
+                , Effect.public (Api.forgotPasswordRequest model.email)
+                    Nothing
+                    (Api.resolveNoContent >> GotForgotResponse)
                 , NoOut
                 )
 
         GotForgotResponse result ->
             case result of
                 Ok () ->
-                    ( { model | forgotState = Success () }, Cmd.none, NoOut )
+                    ( { model | forgotState = Success () }, Effect.none, NoOut )
 
                 Err err ->
-                    ( { model | forgotState = Failure err }, Cmd.none, NoOut )
+                    ( { model | forgotState = Failure err }, Effect.none, NoOut )
 
         ResendRequested ->
             if isResendDisabled model then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
             else
                 ( { model | resendState = Loading }
-                , Api.resendConfirmation (resendTarget model) GotResendResponse
+                , Effect.public (Api.resendConfirmationRequest (resendTarget model))
+                    Nothing
+                    (Api.resolveNoContent >> GotResendResponse)
                 , NoOut
                 )
 
         GotResendResponse result ->
             case result of
                 Ok () ->
-                    ( { model | resendState = Success () }, Cmd.none, NoOut )
+                    ( { model | resendState = Success () }, Effect.none, NoOut )
 
                 Err err ->
-                    ( { model | resendState = Failure err }, Cmd.none, NoOut )
+                    ( { model | resendState = Failure err }, Effect.none, NoOut )
 
         FormSubmitted ->
-            let
-                cmd =
-                    case model.mode of
-                        LoginMode ->
-                            Api.login
-                                { email = model.email, password = model.password }
-                                GotAuthResponse
-
-                        RegisterMode ->
-                            Api.register
-                                { email = model.email
-                                , password = model.password
-                                , displayName = model.displayName
-                                , inviteCode = model.inviteCode
-                                }
-                                GotRegisterResponse
-
-                        RegistrationPending _ ->
-                            Cmd.none
-
-                        ForgotPasswordMode ->
-                            Cmd.none
-
-                        ResendConfirmationMode ->
-                            Cmd.none
-            in
-            ( { model | submitState = Loading, arrival = Fresh }, cmd, NoOut )
+            ( { model | submitState = Loading, arrival = Fresh }
+            , submitEffect model
+            , NoOut
+            )
 
         GotAuthResponse (Ok authResponse) ->
             ( { model | submitState = Success authResponse }
-            , Cmd.none
+            , Effect.none
             , LoggedIn authResponse
             )
 
         GotAuthResponse (Err err) ->
-            ( { model | submitState = Failure (fromRequestError err) }, Cmd.none, NoOut )
+            ( { model | submitState = Failure (fromRequestError err) }, Effect.none, NoOut )
 
         GotRegisterResponse (Ok ()) ->
             ( { model | mode = RegistrationPending model.email, submitState = NotAsked }
-            , Cmd.none
+            , Effect.none
             , RegistrationSucceeded model.email
             )
 
         GotRegisterResponse (Err registerError) ->
-            ( { model | submitState = Failure (fromRegisterError registerError) }, Cmd.none, NoOut )
+            ( { model | submitState = Failure (fromRegisterError registerError) }, Effect.none, NoOut )
 
         InviteCodeChanged code ->
-            ( { model | inviteCode = code, inviteCheck = NotAsked }, Cmd.none, NoOut )
+            ( { model | inviteCode = code, inviteCheck = NotAsked }, Effect.none, NoOut )
 
         InviteSubmitted ->
             if String.trim model.inviteCode == "" then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
             else
                 ( { model | inviteCheck = Loading }
-                , Api.checkInvite (String.trim model.inviteCode) GotInviteCheck
+                , Effect.public (Api.checkInviteRequest (String.trim model.inviteCode))
+                    Nothing
+                    (Api.resolveJson Api.inviteStatusDecoder >> GotInviteCheck)
                 , NoOut
                 )
 
         GotInviteCheck result ->
-            ( { model | inviteCheck = Types.RemoteData.fromResult result }, Cmd.none, NoOut )
+            ( { model | inviteCheck = Types.RemoteData.fromResult result }, Effect.none, NoOut )
+
+
+{-| The request a submit sends, if it sends one.
+
+Two of the five modes are stops on the way rather than forms — a registration
+awaiting its confirmation email, and the two single-field cards that have their
+own buttons — so submitting from them is not a request the reader is missing,
+it is a request that does not exist.
+
+-}
+submitEffect : Model -> Effect Msg
+submitEffect model =
+    case model.mode of
+        LoginMode ->
+            Effect.public
+                (Api.loginRequest { email = model.email, password = model.password })
+                Nothing
+                (Api.resolveAuthResponse >> GotAuthResponse)
+
+        RegisterMode ->
+            Effect.public
+                (Api.registerRequest
+                    { email = model.email
+                    , password = model.password
+                    , displayName = model.displayName
+                    , inviteCode = model.inviteCode
+                    }
+                )
+                Nothing
+                (Api.resolveRegister >> GotRegisterResponse)
+
+        RegistrationPending _ ->
+            Effect.none
+
+        ForgotPasswordMode ->
+            Effect.none
+
+        ResendConfirmationMode ->
+            Effect.none
 
 
 view : Model -> Html Msg

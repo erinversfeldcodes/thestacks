@@ -28,9 +28,9 @@ startSearch =
     ProgramTest.start () (searchProgram (Just "test-token"))
 
 
-{-| Helper to start a search program for an anonymous visitor (no token). Book
-search is authenticated-only, so it must fire no request; people search is
-optional-auth and still runs.
+{-| Helper to start a search program for an anonymous visitor (no token). Both
+searches are optional-auth, so both still fire — what changes is what the
+server sends back, and what the page says about itself.
 -}
 startSearchNoToken : ProgramTest.ProgramTest Search.Model Search.Msg (ProgramTest.SimulatedEffect Search.Msg)
 startSearchNoToken =
@@ -47,7 +47,10 @@ suite =
         , searchFilterPanelToggle
         , searchFailure
         , searchStaleDebounce
-        , searchNoTokenFiresNoBookRequest
+        , searchNoTokenFiresBookRequest
+        , anonNoteRendersForAnonymousVisitor
+        , anonNoteAbsentWhenSignedIn
+        , anonSeesCatalogueResultsOnly
         , sortDefaultRelevance
         , sortByTitleSelected
         , sortByAuthor
@@ -293,23 +296,80 @@ searchStaleDebounce =
                     (\requests -> Expect.equal 1 (List.length requests))
 
 
-{-| With no auth token the authenticated-only book search must fire no request
-(results stay `NotAsked` → the entry hint remains), while the optional-auth
-people search still runs (`Page.Search.update`, `DebounceExpired`).
+{-| Book search is optional-auth, so an anonymous visitor fires the SAME request
+an authenticated one does — the server decides what comes back. Asserting the
+request is made (not merely that the page doesn't crash) is what would catch a
+regression to the old token-guarded `Cmd.none` (`Page.Search.update`,
+`DebounceExpired`).
 -}
-searchNoTokenFiresNoBookRequest : Test
-searchNoTokenFiresNoBookRequest =
-    test "search_no_token: anonymous visitor fires no book-search request; readers search unaffected" <|
+searchNoTokenFiresBookRequest : Test
+searchNoTokenFiresBookRequest =
+    test "search_no_token: anonymous visitor fires the book-search request; readers search unaffected" <|
         \() ->
             startSearchNoToken
                 |> ProgramTest.update (QueryChanged "habit")
                 |> ProgramTest.advanceTime 300
                 |> ProgramTest.ensureHttpRequests "GET"
                     "/api/search?q=habit"
-                    (\requests -> Expect.equal 0 (List.length requests))
+                    (\requests -> Expect.equal 1 (List.length requests))
                 |> ProgramTest.ensureHttpRequestWasMade "GET" "/api/search/users?q=habit"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Type a title, author, or ISBN to search the stacks." ]
+                    [ Selector.text "Searching the stacks…" ]
+
+
+{-| The anonymous visitor's strip: what the page does for them now, and the one
+thing an account adds. It is present before a query is typed — the signposting
+has to answer "why is this page showing me anything at all" on arrival, not
+only once results land.
+-}
+anonNoteRendersForAnonymousVisitor : Test
+anonNoteRendersForAnonymousVisitor =
+    test "anon_note: an anonymous visitor is told the catalogue is open and what signing in adds" <|
+        \() ->
+            startSearchNoToken
+                |> ProgramTest.ensureViewHas [ Selector.class "search-anon-note" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "You're searching the open catalogue — every book on the shelves here." ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text " and your own shelves are searched alongside it." ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "search-anon-note__link"
+                    , Selector.attribute (Html.Attributes.href "/login")
+                    , Selector.text "Sign in"
+                    ]
+
+
+{-| The same strip is ABSENT for a signed-in reader — it describes a limit that
+does not apply to them, and a permanent "sign in to get more" banner on a page
+that is already searching their shelves would be a lie.
+-}
+anonNoteAbsentWhenSignedIn : Test
+anonNoteAbsentWhenSignedIn =
+    test "anon_note_absent: a signed-in reader is not told to sign in" <|
+        \() ->
+            startSearch
+                |> ProgramTest.expectViewHasNot [ Selector.class "search-anon-note" ]
+
+
+{-| An anonymous visitor's catalogue results render exactly as a signed-in
+reader's platform section does. The server sends them no `collection`, so the
+"Your Collection" heading must not appear — the page is not to invent a shelf
+section for someone who has no shelves here.
+-}
+anonSeesCatalogueResultsOnly : Test
+anonSeesCatalogueResultsOnly =
+    test "anon_results: an anonymous visitor gets the platform section and no collection section" <|
+        \() ->
+            startSearchNoToken
+                |> ProgramTest.update (QueryChanged "book")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/search?q=book"
+                    (sectionedResponseJson [] [ plainPlatformHit (fixtureBook "Out There" "Zoe Quill" 1999) ])
+                |> ProgramTest.ensureViewHas [ Selector.text "On the Platform" ]
+                |> ProgramTest.ensureViewHas [ Selector.text "Out There" ]
+                |> ProgramTest.ensureViewHas [ Selector.class "search-anon-note" ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "Your Collection" ]
 
 
 {-| Three books whose server (insertion) order is Zebra, Middle, Alpha, chosen

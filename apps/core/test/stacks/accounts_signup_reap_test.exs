@@ -15,14 +15,25 @@ defmodule Stacks.AccountsSignupReapTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.User
 
+  # An abandoned signup as registration actually leaves one: unconfirmed AND
+  # holding the token registration minted for it, signed when the account was
+  # created. Without the token this is not a signup at all — it is the shape an
+  # account takes when its email change lapsed, which the reaper must never touch.
   defp unconfirmed(email, created_at) do
+    id = Ecto.UUID.generate()
+
     Core.Repo.insert!(%User{
+      id: id,
       email: email,
       display_name: "Abandoned",
       handle: "abandoned_#{System.unique_integer([:positive])}",
       password_hash: Argon2.hash_pwd_salt("whatever"),
       role: "user",
       email_confirmed: false,
+      email_confirmation_token:
+        Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", id,
+          signed_at: DateTime.to_unix(created_at)
+        ),
       created_at: created_at,
       updated_at: created_at
     })

@@ -38,6 +38,16 @@ defmodule Stacks.Storage.StorageBehaviour do
   @callback head(key :: String.t()) ::
               {:ok, non_neg_integer()} | {:error, :not_found | term()}
 
+  @doc """
+      List the keys of every object under a prefix. Used by the retention
+      sweeps to find objects whose deadline has passed without keeping a
+      database row that points at them.
+
+      Returns `{:ok, keys}` — an empty list when nothing matches — or
+      `{:error, reason}` for transport failures.
+  """
+  @callback list(prefix :: String.t()) :: {:ok, [String.t()]} | {:error, term()}
+
   @doc "Delete an object by key. Returns `:ok` or `{:error, reason}`."
   @callback delete(key :: String.t()) :: :ok | {:error, term()}
 end

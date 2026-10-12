@@ -41,7 +41,7 @@ run_group() {
 }
 
 if [[ $# -eq 0 ]]; then
-    CI_GROUPS=(elixir elm rust python proto dbt security squawk licenses)
+    CI_GROUPS=(elixir elm rust python proto dbt security squawk platform licenses)
 else
     CI_GROUPS=("$@")
 fi
@@ -126,6 +126,25 @@ if has_group squawk; then
         2) skip "squawk: migration lint — 0 migrations inspected (nothing was checked)" ;;
         *) fail "squawk: migration lint"; FAILED+=(squawk) ;;
     esac
+fi
+
+if has_group platform; then
+    # The shell suites over the deploy/rollback/migration-safety scripts. They
+    # run their own per-suite watchdog, which needs a timeout binary — present
+    # in the pinned shell, absent from a bare macOS one, where run_all.sh says
+    # so on stdout.
+    if ! run_group "platform: shell suites" bash test/platform/run_all.sh; then
+        FAILED+=(platform)
+    fi
+    # Every script in scripts/ has a caller (or an allowlisted reason), and the
+    # generated inventory in scripts/README.md is current.
+    if ! run_group "platform: script wiring" bash scripts/check-script-wiring.sh; then
+        FAILED+=(platform-script-wiring)
+    fi
+    # The project-tools MCP server's own suite — orphaned once, never again.
+    if ! run_group "platform: mcp server tests" bash scripts/test-mcp.sh; then
+        FAILED+=(platform-mcp)
+    fi
 fi
 
 if has_group e2e; then
@@ -261,6 +280,7 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                 pass "deploy: ZAP baseline"
             else
                 fail "deploy: ZAP baseline found new failures"
+                FAILED+=(deploy-security)
             fi
         else
             echo "SKIP: docker not available — skipping OWASP ZAP"
@@ -271,10 +291,22 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             nuclei_out="$(nuclei -u "${_core_url}" \
                 -tags jwt,misconfiguration \
                 -severity medium,high,critical \
-                -no-color -silent 2>&1)" || true
+                -no-color -silent 2>&1)"
+            nuclei_rc=$?
             echo "${nuclei_out}"
-            if echo "${nuclei_out}" | grep -qiE "\[critical\]|\[high\]"; then
+            # Same shape the jwt_tool lane had: this grepped for BADNESS, and a
+            # scanner that never ran prints no "[high]" lines, so a crash or a
+            # missing template directory reported clean. Prove it ran first.
+            #
+            # (ZAP above is the safe polarity — it greps for the SUCCESS marker
+            # "FAIL-NEW: 0", so a crash yields no match and fails. Do not
+            # "harmonise" these by copying the wrong one.)
+            if [[ ${nuclei_rc} -ne 0 ]]; then
+                fail "deploy: Nuclei did not run (exit ${nuclei_rc}) — this is NOT a clean scan"
+                FAILED+=(deploy-security)
+            elif echo "${nuclei_out}" | grep -qiE "\[critical\]|\[high\]"; then
                 fail "deploy: Nuclei found high/critical vulnerabilities"
+                FAILED+=(deploy-security)
             else
                 pass "deploy: Nuclei scan clean"
             fi
@@ -294,10 +326,20 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                 jwt_out="$(jwt_tool "${_jwt}" \
                     -t "${_core_url}/api/auth/me" \
                     -rh "Authorization: Bearer *JWT*" \
-                    -X a 2>&1)" || true
+                    -X a 2>&1)"
+                jwt_rc=$?
                 echo "${jwt_out}"
-                if echo "${jwt_out}" | grep -qi "EXPLOIT"; then
+                # A scanner that did not run is not a clean scan. This grepped
+                # for "EXPLOIT" and called anything else clean, so when jwt_tool
+                # died on `ModuleNotFoundError: No module named 'ratelimit'` the
+                # lane reported "jwt_tool clean" — a green tick for a scan that
+                # never happened. Prove it ran before believing what it found.
+                if [[ ${jwt_rc} -ne 0 ]] || echo "${jwt_out}" | grep -q "Traceback (most recent call last)"; then
+                    fail "deploy: jwt_tool did not run (exit ${jwt_rc}) — this is NOT a clean scan"
+                    FAILED+=(deploy-security)
+                elif echo "${jwt_out}" | grep -qi "EXPLOIT"; then
                     fail "deploy: jwt_tool found exploitable vulnerability"
+                    FAILED+=(deploy-security)
                 else
                     pass "deploy: jwt_tool clean"
                 fi
@@ -331,10 +373,21 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                 _idor_code="$(curl -o /dev/null -s -w "%{http_code}" \
                     -X DELETE "${_core_url}/api/placements/${_placement}" \
                     -H "Authorization: Bearer ${_u2}")"
-                if [[ "${_idor_code}" == "200" ]]; then
-                    fail "deploy: IDOR — user2 deleted user1's placement (HTTP 200)"
-                else
+                # Fail on anything that is not an explicit denial.
+                #
+                # This used to fail only on 200 — and a successful placement
+                # DELETE returns **204** (`bookshelf_placement_controller.ex`),
+                # so a genuine cross-user deletion printed
+                # "IDOR cross-user DELETE blocked (HTTP 204)": a green tick for a
+                # working exploit that had just destroyed the other reader's
+                # placement. A connection failure (`000`) passed too.
+                #
+                # Only 403 and 404 mean "denied". Everything else is a finding.
+                if [[ "${_idor_code}" == "403" || "${_idor_code}" == "404" ]]; then
                     pass "deploy: IDOR cross-user DELETE blocked (HTTP ${_idor_code})"
+                else
+                    fail "deploy: IDOR — cross-user DELETE returned HTTP ${_idor_code}, expected a denial"
+                    FAILED+=(deploy-security)
                 fi
             else
                 echo "SKIP: IDOR — user1 has no placements in library"

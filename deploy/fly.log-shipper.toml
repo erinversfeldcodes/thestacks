@@ -9,6 +9,24 @@ kill_timeout = "5s"
 [env]
   ORG = "personal"
 
+# 6PN-only via Flycast (no public IPs — the vector API is not for the
+# internet). The proxied port is vector's own API/health endpoint; exposing
+# it lets fly-proxy AUTO-START the shipper, and the core app's 10s keepalive
+# ping to it is the wake signal: the shipper runs exactly while core runs —
+# which is when the org's logs happen — and sleeps ~5min after core does.
+# Honest limits: the first ~10s of each core wake (vector boot + NATS
+# subscribe) are not captured, nor is a core release that never boots far
+# enough to ping — deploys start the shipper explicitly to cover the latter.
+[[services]]
+  internal_port = 8686
+  protocol = "tcp"
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.ports]]
+    port = 8686
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"

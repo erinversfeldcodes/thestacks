@@ -16,7 +16,11 @@ defmodule CoreWeb.Telemetry do
     :scraper_fuse,
     :brave_fuse,
     :searxng_fuse,
-    :r2_fuse
+    :r2_fuse,
+    :nominatim_fuse,
+    :neon_fuse,
+    :resend_fuse,
+    :log_shipper_fuse
   ]
 
   @route_group_handler_id "stacks-route-group-router-dispatch-stop"
@@ -132,6 +136,13 @@ defmodule CoreWeb.Telemetry do
         tags: [:outcome],
         description: "Blog posts capped by the visibility recap job"
       ),
+      counter("stacks.blog.association.count",
+        event_name: [:stacks, :blog, :association],
+        tags: [:outcome],
+        description:
+          "Blog book-association job outcomes — no_consent counts the posts whose " <>
+            "text was never sent to Together AI"
+      ),
       counter("stacks.visibility.ceiling_rejection.count",
         event_name: [:stacks, :visibility, :ceiling_rejection],
         tags: [:resource_type],
@@ -156,6 +167,36 @@ defmodule CoreWeb.Telemetry do
         tags: [:bucket],
         description: "Rate-limit rejections tagged by bucket (incl. :social, :auth)"
       ),
+      counter("stacks.auth.password_reset.count",
+        event_name: [:stacks, :auth, :password_reset],
+        tags: [:outcome],
+        description:
+          "Password reset requests by outcome (sent/rate_limited/no_account). " <>
+            "The rate_limited series is the count of readers who asked for a " <>
+            "link and were silently sent nothing"
+      ),
+      counter("stacks.auth.confirmation_resend.count",
+        event_name: [:stacks, :auth, :confirmation_resend],
+        tags: [:outcome],
+        description:
+          "Confirmation resend requests by outcome (sent/rate_limited/" <>
+            "no_account/already_confirmed/past_renewal_ceiling)"
+      ),
+      counter("stacks.auth.email_change.count",
+        event_name: [:stacks, :auth, :email_change],
+        tags: [:outcome],
+        description:
+          "Email change flow by outcome (requested/rate_limited/confirmed/" <>
+            "reverted/invalid_confirm/invalid_revert). The reverted series is " <>
+            "readers saying a change to their account was not theirs"
+      ),
+      last_value("stacks.accounts.email_change_lapsed.degraded",
+        event_name: [:stacks, :accounts, :email_change_lapsed],
+        measurement: :degraded,
+        description:
+          "Accounts the daily sweep degraded because neither address answered " <>
+            "an email change inside the grace window"
+      ),
       counter("stacks.view_as.usage.count",
         event_name: [:stacks, :view_as, :usage],
         tags: [:perspective],
@@ -175,8 +216,107 @@ defmodule CoreWeb.Telemetry do
 
   defp periodic_measurements do
     [
-      {__MODULE__, :poll_fuse_state, []}
+      {__MODULE__, :poll_fuse_state, []},
+      {__MODULE__, :poll_db_watchdog, []},
+      {__MODULE__, :poll_log_shipper_keepalive, []}
     ]
+  end
+
+  @doc """
+      Keepalive ping that keeps the log shipper's lifecycle coupled to ours.
+
+      The shipper subscribes to Fly's log stream, which has no replay — logs
+      emitted while it sleeps are gone — and Fly only auto-starts machines on
+      proxied traffic, which a log tailer never receives on its own. This GET
+      against its Flycast health endpoint IS that traffic: the first ping
+      after our boot wakes the shipper, each 10s tick resets its idle timer,
+      and ~5min after we go quiet it sleeps again. Fire-and-forget: a dead
+      shipper must never affect us (the daily billing sweep reports it).
+
+      No-op unless `:log_shipper_keepalive_url` is configured (prod only).
+  """
+  @spec poll_log_shipper_keepalive() :: :ok
+  def poll_log_shipper_keepalive do
+    case Application.get_env(:core, :log_shipper_keepalive_url) do
+      url when is_binary(url) and url != "" ->
+        case ping_log_shipper(url) do
+          :ok ->
+            :ok
+
+          {:error, _reason} ->
+            # log-shipper analogue of the db watchdog: a shipper we cannot
+            # reach while we are awake means logs are being lost right now —
+            # melt so the fuse gauge (and the public breakers signal) shows
+            # it. One cold-start miss per wake stays under the blow
+            # threshold; a dead shipper blows it within a minute.
+            Stacks.CircuitBreakers.melt(:log_shipper_fuse)
+        end
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp ping_log_shipper(url) do
+    case log_shipper_http_client().get(url <> "/health", []) do
+      {:ok, 200} -> :ok
+      {:ok, status} -> {:error, {:http_status, status}}
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
+  end
+
+  defp log_shipper_http_client do
+    Application.get_env(
+      :core,
+      :log_shipper_probe_http_client,
+      Stacks.CircuitBreakers.ProbeHttpClient
+    )
+  end
+
+  @doc """
+      Active database watchdog: pings the database every poll tick and melts
+      `:neon_fuse` on failure.
+
+      Every other fuse melts under real traffic, but a database outage on a
+      scale-to-zero app with no visitors produces NO traffic — nothing would
+      melt, the fuse-state gauge would keep reporting healthy, and the outage
+      would be invisible on every dashboard (exactly what happened when the
+      free-tier compute quota was exhausted). The melt threshold (5/60s at a
+      10s poll) blows the fuse within about a minute of the database going
+      away; the standard probe loop closes it again on recovery.
+
+      Disabled via `:db_watchdog_enabled` in test — the SQL sandbox would
+      report ownership errors as outages.
+  """
+  @spec poll_db_watchdog() :: :ok
+  def poll_db_watchdog do
+    if Application.get_env(:core, :db_watchdog_enabled, true) do
+      case db_ping().() do
+        :ok -> :ok
+        {:error, _reason} -> Stacks.CircuitBreakers.melt(:neon_fuse)
+      end
+    end
+
+    :ok
+  end
+
+  defp db_ping do
+    Application.get_env(:core, :db_watchdog_ping, &__MODULE__.default_db_ping/0)
+  end
+
+  @doc false
+  @spec default_db_ping() :: :ok | {:error, term()}
+  def default_db_ping do
+    case Core.Repo.query("SELECT 1", [], timeout: 2_000) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
   end
 
   @doc """

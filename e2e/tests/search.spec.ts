@@ -48,6 +48,26 @@ async function renderedTitles(page: Page): Promise<string[]> {
   return page.locator(".search-result__title").allInnerTexts();
 }
 
+/** Nth catalogue book (id + title) via the API — a deterministic anchor.
+ * The listing test and the dedupe test MUST anchor on different books: the
+ * listing test leaves a permanently active listing on its anchor, which would
+ * put the dedupe test's anchor under On the Platform forever on any
+ * persistent database. */
+async function catalogueBookAt(
+  request: APIRequestContext,
+  index: number,
+): Promise<{ id: string; title: string }> {
+  const resp = await request.get(`/api/catalogue?per_page=${index + 1}`);
+  expect(resp.ok(), "catalogue fetch for sectioned-search anchor").toBeTruthy();
+  const data = await resp.json();
+  const book = ((data.books ?? []) as Array<{ id: string; title: string }>)[index];
+  assertSeedOrSkip(
+    book !== undefined,
+    "catalogue has no books to anchor a sectioned-search spec",
+  );
+  return { id: book.id, title: book.title };
+}
+
 test.describe("Search page", () => {
   test("search page renders with input field and title", async ({ page }) => {
     await page.goto("/search");
@@ -320,35 +340,145 @@ test.describe("Search page", () => {
   });
 });
 
-test.describe("Sectioned search", () => {
+test.describe("Anonymous search", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
-  /** First catalogue book (id + title) via the API — the deterministic anchor. */
-  async function firstCatalogueBook(
-    request: APIRequestContext,
-  ): Promise<{ id: string; title: string }> {
-    const resp = await request.get("/api/catalogue?per_page=1");
-    expect(
-      resp.ok(),
-      "catalogue fetch for sectioned-search anchor",
-    ).toBeTruthy();
-    const data = await resp.json();
-    const book = (
-      (data.books ?? []) as Array<{ id: string; title: string }>
-    )[0];
-    assertSeedOrSkip(
-      book !== undefined,
-      "catalogue has no books to anchor a sectioned-search spec",
+  test("a visitor with no account reaches Search from the nav, gets catalogue results, and is told what an account adds", async ({
+    page,
+  }) => {
+    await page.goto("/");
+
+    await page
+      .locator(".app-nav")
+      .getByRole("link", { name: "Search", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/search$/);
+    await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+
+    const note = page.getByTestId("search-anon-note");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("You're searching the open catalogue");
+    await expect(note).toContainText(
+      "your own shelves are searched alongside it",
     );
-    return { id: book.id, title: book.title };
-  }
+    await expect(note.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login",
+    );
+
+    await assertBookSeedSufficient(page);
+
+    await page.getByTestId("search-input").fill(BOOK_QUERY);
+
+    await expect(page.getByTestId("search-results")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("search-platform")).toBeVisible();
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 10000,
+    });
+
+    await expect(page.getByTestId("search-collection")).toHaveCount(0);
+    await expect(note).toBeVisible();
+  });
+
+  /**
+   * The provenance labels are derived from someone's shelf — a seller's handle
+   * and asking price. Planting a real active listing, then reading the SAME
+   * query as the seller and as an anonymous caller, proves the anonymous
+   * response is stripped rather than merely empty: the authed leg shows the
+   * label the anonymous leg must not carry.
+   */
+  test("a seller's handle and asking price never reach an anonymous caller", async ({
+    page,
+    request,
+  }) => {
+    const seller = await mintOrSkip(request);
+    const book = await catalogueBookAt(request, 1);
+
+    const place = await request.post("/api/bookshelves/library/placements", {
+      headers: { Authorization: `Bearer ${seller.token}` },
+      data: { book_id: book.id },
+    });
+    expect(place.status(), "seller places the book").toBe(201);
+
+    const created = await request.post("/api/listings", {
+      headers: { Authorization: `Bearer ${seller.token}` },
+      data: {
+        book_id: book.id,
+        pricing_mode: "fixed",
+        price_cents: 12000,
+        currency: "ZAR",
+        condition: "good",
+      },
+    });
+    expect(created.status(), "create draft listing").toBe(201);
+    const listingId = (await created.json()).listing.id as string;
+
+    const activated = await request.put(`/api/listings/${listingId}/activate`, {
+      headers: { Authorization: `Bearer ${seller.token}` },
+    });
+    expect(activated.status(), "activate listing").toBe(200);
+
+    const query = `/api/search?q=${encodeURIComponent(book.title)}`;
+    type Hit = {
+      book: { title: string };
+      source: string;
+      owner_handle: string;
+      price: string;
+    };
+    const hitFor = (hits: Hit[]) =>
+      hits.find((h) => h.book.title === book.title);
+
+    // Read the authed leg as someone OTHER than the seller: a seller's own
+    // listing is deduped into their `collection`, so their view would never
+    // show the platform label this test is about.
+    const reader = await mintOrSkip(request);
+    const authed = await request.get(query, {
+      headers: { Authorization: `Bearer ${reader.token}` },
+    });
+    expect(authed.status(), "signed-in search").toBe(200);
+    const authedHit = hitFor(
+      ((await authed.json()).platform_hits ?? []) as Hit[],
+    );
+    expect(
+      authedHit,
+      "the listed book is on the platform for a signed-in caller",
+    ).toBeTruthy();
+    expect(authedHit!.owner_handle.length).toBeGreaterThan(0);
+    expect(authedHit!.price).toBe("R120");
+
+    await page.goto("/search");
+    await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+    const anon = await apiCallFromPage(page, "GET", query);
+    expect(anon.status, "anonymous search is answered, not walled").toBe(200);
+
+    const anonData = anon.data as {
+      collection?: unknown[];
+      platform_hits?: Hit[];
+    };
+    expect(anonData.collection ?? []).toEqual([]);
+
+    const anonHit = hitFor(anonData.platform_hits ?? []);
+    expect(
+      anonHit,
+      "the same book is still discoverable anonymously",
+    ).toBeTruthy();
+    expect(anonHit!.owner_handle).toBe("");
+    expect(anonHit!.source).toBe("");
+    expect(anonHit!.price).toBe("");
+  });
+});
+
+test.describe("Sectioned search", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
 
   test("a placed book renders under Your Collection with its shelf, is deduped off the platform, and opens its overlay", async ({
     page,
     request,
   }) => {
     const owner = await mintOrSkip(request);
-    const book = await firstCatalogueBook(request);
+    const book = await catalogueBookAt(request, 0);
 
     const place = await request.post("/api/bookshelves/library/placements", {
       headers: { Authorization: `Bearer ${owner.token}` },
@@ -393,7 +523,7 @@ test.describe("Sectioned search", () => {
     request,
   }) => {
     const seller = await mintOrSkip(request);
-    const book = await firstCatalogueBook(request);
+    const book = await catalogueBookAt(request, 2);
 
     const place = await request.post("/api/bookshelves/library/placements", {
       headers: { Authorization: `Bearer ${seller.token}` },
@@ -490,6 +620,10 @@ test.describe("Sectioned search", () => {
     });
     await expect(page.getByTestId("search-collection")).toHaveCount(0);
 
+    // An empty collection is not the same as having no account: this reader is
+    // signed in, so the anonymous strip must not appear alongside their results.
+    await expect(page.getByTestId("search-anon-note")).toHaveCount(0);
+
     const platformTitles = platform.locator(".search-result__title");
 
     await page.getByTestId("sort-selector").selectOption("title");
@@ -560,9 +694,10 @@ test.describe("Deep search", () => {
       headers: { Authorization: `Bearer ${token}` },
       data: { book_id: book.id },
     });
-    expect(place.status(), "place a book to suppress the onboarding overlay").toBe(
-      201,
-    );
+    expect(
+      place.status(),
+      "place a book to suppress the onboarding overlay",
+    ).toBe(201);
   }
 
   test("a description-only match surfaces only under deep search, with a highlighted snippet and 'via deep search' label", async ({

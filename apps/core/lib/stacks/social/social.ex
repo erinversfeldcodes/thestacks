@@ -495,7 +495,15 @@ defmodule Stacks.Social do
         end
 
       _group ->
-        {:error, :unauthorized}
+        # A member who is not the owner already knows the group exists, so
+        # "you are not the owner" is an honest answer to them. A non-member must
+        # not learn it exists at all, and gets the same 404 the rest of the
+        # group surface gives.
+        if member?(group_id, caller_id) do
+          {:error, :unauthorized}
+        else
+          {:error, :not_found}
+        end
     end
   end
 
@@ -515,7 +523,11 @@ defmodule Stacks.Social do
               select: %{
                 user_id: m.user_id,
                 role: m.role,
-                display_name: u.display_name,
+                # `display_name` is nullable; `handle` is NOT NULL. Coalescing
+                # here means no null ever leaves this endpoint, so one member who
+                # never set a name cannot decode-fail the whole roster on the
+                # client. A reader always has something to be called.
+                display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
                 joined_at: m.joined_at
               },
               order_by: [asc: m.joined_at]
@@ -654,7 +666,10 @@ defmodule Stacks.Social do
         if member?(group_id, viewer_id) do
           build_feed(group_id, viewer_id, opts)
         else
-          {:error, :unauthorized}
+          # 404, not 403, to someone outside an invite-only group — the same
+          # answer `GET /api/groups/:id` and the members list already give. A 403
+          # confirms the group exists to a caller not entitled to know that.
+          {:error, :not_found}
         end
     end
   end
@@ -704,7 +719,7 @@ defmodule Stacks.Social do
           book_id: b.id,
           book_title: b.title,
           user_id: u.id,
-          user_display_name: u.display_name,
+          user_display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
           occurred_at: p.placed_at
         }
       )
@@ -735,7 +750,7 @@ defmodule Stacks.Social do
           post_title: post.title,
           post_visibility: post.visibility,
           user_id: u.id,
-          user_display_name: u.display_name,
+          user_display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
           occurred_at: post.published_at
         }
       )

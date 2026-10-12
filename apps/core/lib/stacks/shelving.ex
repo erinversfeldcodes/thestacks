@@ -28,6 +28,12 @@ defmodule Stacks.Shelving do
 
   @valid_reading_statuses ~w(to_read reading completed abandoned)
 
+  # What a reader OWNS a book in — deliberately coarser than the edition's
+  # format. A hardcover and a paperback are both `physical` here; the shelf
+  # toggles do not ask which binding. Kept as a list because `formats` is an
+  # array: someone can own the physical copy AND the audiobook.
+  @valid_formats ~w(physical ebook audiobook)
+
   @reading_pile_limit 50
 
   @placement_optional_fields [
@@ -50,6 +56,17 @@ defmodule Stacks.Shelving do
     :book_edition_id,
     :source
   ]
+
+  @doc """
+      The five bookshelf names an account may own, in no particular order.
+      `bookshelf_changeset/2` validates against this list.
+  """
+  @spec bookshelf_names() :: [String.t()]
+  def bookshelf_names, do: @valid_bookshelf_names
+
+  @doc "The vocabulary `bookshelf_placements.formats` accepts."
+  @spec placement_formats() :: [String.t()]
+  def placement_formats, do: @valid_formats
 
   @doc "Changeset for creating or updating a bookshelf."
   def bookshelf_changeset(bookshelf, attrs) do
@@ -75,6 +92,11 @@ defmodule Stacks.Shelving do
     |> foreign_key_constraint(:book_id, message: "book does not exist")
     |> validate_inclusion(:reading_status, @valid_reading_statuses)
     |> validate_number(:current_page, greater_than_or_equal_to: 0)
+    |> validate_subset(:formats, @valid_formats)
+    # Every other constrained field here was validated and this one was not, so
+    # any writer could put a word in `formats` that the reader's UI cannot parse
+    # — which is how the Goodreads importer stored "paperback" and rendered the
+    # imported book with no format selected at all.
     |> put_placed_at()
   end
 

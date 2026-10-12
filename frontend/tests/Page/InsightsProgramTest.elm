@@ -24,6 +24,7 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 token : String
@@ -79,28 +80,16 @@ program =
 
 initEffects : SimulatedEffect Insights.Msg
 initEffects =
-    SimulatedEffect.Http.request
-        { method = "GET"
-        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = "/api/me/inferences"
-        , body = SimulatedEffect.Http.emptyBody
-        , expect = SimulatedEffect.Http.expectJson Insights.InferencesReceived Api.personalInferencesDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
+    TestHelpers.authedRequestFromSpec (Api.getInferencesRequest False)
+        token
+        (SimulatedEffect.Http.expectJson Insights.InferencesReceived Api.personalInferencesDecoder)
 
 
 revealEffects : SimulatedEffect Insights.Msg
 revealEffects =
-    SimulatedEffect.Http.request
-        { method = "GET"
-        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = "/api/me/inferences?reveal_risk=true"
-        , body = SimulatedEffect.Http.emptyBody
-        , expect = SimulatedEffect.Http.expectJson Insights.RiskRevealReceived Api.personalInferencesDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
+    TestHelpers.authedRequestFromSpec (Api.getInferencesRequest True)
+        token
+        (SimulatedEffect.Http.expectJson Insights.RiskRevealReceived Api.personalInferencesDecoder)
 
 
 defaultPayload : String

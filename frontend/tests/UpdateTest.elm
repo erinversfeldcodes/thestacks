@@ -44,8 +44,14 @@ bookDetailInit =
     , currentBookshelf = ""
     , selectedBookshelf = "antilibrary"
     , selectedFormats = []
+    , previousFormats = []
+    , formatsState = NotAsked
     , moveState = NotAsked
     , removeState = NotAsked
+    , shelfRowIds = []
+    , currentShelfId = Nothing
+    , selectedShelfId = ""
+    , shelfMoveState = NotAsked
     , selectedEdition = Nothing
     , previousRoute = Nothing
     , authorEvents = NotAsked
@@ -60,6 +66,7 @@ bookDetailInit =
     , progressCard = Nothing
     , progressSaveState = NotAsked
     , finishedReadPrompt = False
+    , coverFailed = False
     , undoableRemoval = Nothing
     }
 

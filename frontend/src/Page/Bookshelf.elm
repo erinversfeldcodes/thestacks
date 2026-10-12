@@ -4,15 +4,18 @@ module Page.Bookshelf exposing
     , Msg(..)
     , OutMsg(..)
     , Removal
+    , ShelvesSource(..)
     , UndoToast(..)
     , antiLibraryConfig
     , init
+    , initWithEffect
     , libraryConfig
-    , mutationToken
     , profileConfig
     , requestKey
+    , shelvesSource
     , undoToastMillis
     , update
+    , updateWithEffect
     , view
     , wishListConfig
     , withPendingUndo
@@ -26,6 +29,7 @@ import Components.RSSLink as RSSLink
 import Components.ShelfOrganiser as ShelfOrganiser
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h2, p, text)
 import Html.Attributes exposing (attribute, class, disabled, href)
 import Html.Events exposing (onClick)
@@ -47,7 +51,7 @@ import Process
 import Task
 import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
-import Types.Shelf exposing (BookshelfResponse, Shelf)
+import Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
 import Util.TestId exposing (testId)
 
 
@@ -227,6 +231,61 @@ requestKey config =
             config.apiName
 
 
+{-| Which read answers "what is on this bookshelf", as data rather than as a
+`Cmd` nobody can look at.
+
+The distinction is not cosmetic: `/library` and `/u/ada/library` are different
+shelves belonging to different people, and both arrive here under the same
+`apiName`. Naming the source in one place is what stops a second dispatch from
+being written slightly differently from the first — which is how a refetch ends
+up painting the VIEWER's own books onto the page of the profile they are
+browsing, tagged with the profile's `requestKey` so nothing downstream can tell.
+
+-}
+type ShelvesSource
+    = OwnShelf String String
+    | ProfileShelf (Maybe String) String String
+    | NoShelvesRequest
+
+
+shelvesSource : Config -> Maybe String -> ShelvesSource
+shelvesSource config maybeToken =
+    case ( config.readOnly, config.profileHandle ) of
+        ( True, Just handle ) ->
+            ProfileShelf maybeToken handle config.apiName
+
+        _ ->
+            case maybeToken of
+                Just token ->
+                    OwnShelf token config.apiName
+
+                Nothing ->
+                    NoShelvesRequest
+
+
+{-| The one shelf read in this module. `init` and every refetch go through it,
+so there is no second place for the read-only dispatch above to be got wrong.
+-}
+fetchShelves : Config -> Maybe String -> Effect Msg
+fetchShelves config maybeToken =
+    case shelvesSource config maybeToken of
+        ProfileShelf token handle bookshelfName ->
+            Effect.public (Api.getProfileShelfRequest handle bookshelfName)
+                token
+                (Api.resolveJson shelvesResponseDecoder
+                    >> Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
+                    >> ShelvesLoaded (requestKey config)
+                )
+
+        OwnShelf token bookshelfName ->
+            Effect.authed (Api.getBookshelfRequest bookshelfName)
+                token
+                (Api.resolveJson bookshelfResponseDecoder >> ShelvesLoaded (requestKey config))
+
+        NoShelvesRequest ->
+            Effect.none
+
+
 type Msg
     = ShelvesLoaded String (Result Http.Error BookshelfResponse)
     | DismissAgeGate
@@ -236,6 +295,7 @@ type Msg
     | SortColumnClicked BookList.SortColumn
     | OrganiserMsg ShelfOrganiser.Msg
     | ShelfMutated (Result Http.Error ())
+    | ReloadRequested
     | UndoRemove
     | UndoCompleted (Result Http.Error ())
     | ToastExpired
@@ -246,25 +306,27 @@ type Msg
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
-        ( apiCmd, initialShelves ) =
-            case ( config.readOnly, config.profileHandle ) of
-                ( True, Just handle ) ->
-                    ( Api.getProfileShelf maybeToken
-                        handle
-                        config.apiName
-                        (ShelvesLoaded (requestKey config) << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
-                    , Loading
-                    )
+        ( model, effect ) =
+            initWithEffect config maybeToken userId
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its effect as data — see `updateWithEffect`.
+-}
+initWithEffect : Config -> Maybe String -> String -> ( Model, Effect Msg )
+initWithEffect config maybeToken userId =
+    let
+        apiEffect =
+            fetchShelves config maybeToken
+
+        initialShelves =
+            case shelvesSource config maybeToken of
+                NoShelvesRequest ->
+                    NotAsked
 
                 _ ->
-                    case maybeToken of
-                        Just token ->
-                            ( Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
-                            , Loading
-                            )
-
-                        Nothing ->
-                            ( Cmd.none, NotAsked )
+                    Loading
     in
     ( { shelves = initialShelves
       , showAgeGate = False
@@ -285,7 +347,7 @@ init config maybeToken userId =
       , undoToast = ToastHidden
       , focusedSpine = Nothing
       }
-    , apiCmd
+    , apiEffect
     )
 
 
@@ -325,10 +387,26 @@ expireToastAfterDelay =
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effect as data.
+
+The program-test harness runs THIS one and interprets the effect, so the read
+this page performs after a mutation — the one whose refetch used to be
+reconstructed by hand in the harness — is the read the tests see.
+
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
         ShelvesLoaded key result ->
             if key /= requestKey model.config then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
             else
                 case result of
@@ -337,35 +415,35 @@ update msg model =
                             | shelves = Success response.shelves
                             , visibility = response.visibility
                           }
-                        , Cmd.none
+                        , Effect.none
                         , NoOut
                         )
 
                     Err (Http.BadStatus 403) ->
-                        ( { model | shelves = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+                        ( { model | shelves = Failure (Http.BadStatus 403), showAgeGate = True }, Effect.none, NoOut )
 
                     Err err ->
                         if Api.isUnauthorized err then
-                            ( model, Cmd.none, SessionExpired )
+                            ( model, Effect.none, SessionExpired )
 
                         else
-                            ( { model | shelves = Failure err }, Cmd.none, NoOut )
+                            ( { model | shelves = Failure err }, Effect.none, NoOut )
 
         DismissAgeGate ->
-            ( { model | showAgeGate = False }, Cmd.none, NoOut )
+            ( { model | showAgeGate = False }, Effect.none, NoOut )
 
         BookClicked bk ->
             if model.config.readOnly then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.none, NoOut )
 
             else
-                ( model, Cmd.none, NavigateTo (BookDetail bk.id) )
+                ( model, Effect.none, NavigateTo (BookDetail bk.id) )
 
         RSSLinkMsg subMsg ->
-            ( { model | rssLink = RSSLink.update subMsg model.rssLink }, Cmd.none, NoOut )
+            ( { model | rssLink = RSSLink.update subMsg model.rssLink }, Effect.none, NoOut )
 
         ViewModeChanged mode ->
-            ( { model | viewMode = mode }, Cmd.none, NoOut )
+            ( { model | viewMode = mode }, Effect.none, NoOut )
 
         SortColumnClicked column ->
             let
@@ -381,7 +459,7 @@ update msg model =
                     else
                         BookList.Asc
             in
-            ( { model | sortState = { column = column, direction = newDirection } }, Cmd.none, NoOut )
+            ( { model | sortState = { column = column, direction = newDirection } }, Effect.none, NoOut )
 
         OrganiserMsg subMsg ->
             handleOrganiser subMsg model
@@ -394,7 +472,7 @@ update msg model =
 
         ShelfMutated (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.none, SessionExpired )
 
             else
                 ( { model | organiserBusy = False, organiserError = Just (mutationError err) }
@@ -402,16 +480,21 @@ update msg model =
                 , NoOut
                 )
 
+        ReloadRequested ->
+            ( model, reloadShelves model, NoOut )
+
         UndoRemove ->
             case ( model.undoToast, mutationToken model ) of
                 ( ToastOffered removal, Just token ) ->
                     ( { model | undoToast = ToastRestoring removal }
-                    , Api.restoreBook removal.placementId token UndoCompleted
+                    , Effect.authed (Api.restoreBookRequest removal.placementId)
+                        token
+                        (Api.resolveWhatever >> UndoCompleted)
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         UndoCompleted (Ok ()) ->
             ( { model | undoToast = ToastHidden }
@@ -421,21 +504,21 @@ update msg model =
 
         UndoCompleted (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.none, SessionExpired )
 
             else
                 ( { model | undoToast = ToastFailed (undoError model.config err) }
-                , Cmd.none
+                , Effect.none
                 , NoOut
                 )
 
         ToastExpired ->
             case model.undoToast of
                 ToastOffered _ ->
-                    ( { model | undoToast = ToastHidden }, Cmd.none, NoOut )
+                    ( { model | undoToast = ToastHidden }, Effect.none, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         SpineNavKey originId key ->
             case model.shelves of
@@ -443,19 +526,21 @@ update msg model =
                     case GridNav.nextFocus key originId (navRows shelves) of
                         Just nextId ->
                             ( { model | focusedSpine = Just nextId }
-                            , Task.attempt (\_ -> SpineFocusAttempted)
-                                (Browser.Dom.focus ("spine-" ++ nextId))
+                            , Effect.Custom
+                                (Task.attempt (\_ -> SpineFocusAttempted)
+                                    (Browser.Dom.focus ("spine-" ++ nextId))
+                                )
                             , NoOut
                             )
 
                         Nothing ->
-                            ( model, Cmd.none, NoOut )
+                            ( model, Effect.none, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         SpineFocusAttempted ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.none, NoOut )
 
 
 {-| The packed rows as `GridNav` reasons about them: the SAME grouping the
@@ -508,18 +593,22 @@ mid-drag is local bookkeeping, not a mutation — a read-only page may hold a dr
 can never complete, because `DropOn` needs the credential it does not have.
 
 -}
-handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Effect Msg, OutMsg )
 handleOrganiser subMsg model =
     case ( subMsg, mutationToken model, model.shelves ) of
         ( ShelfOrganiser.AddShelf, Just token, _ ) ->
             ( { model | organiserBusy = True }
-            , Api.createShelf model.config.apiName token ShelfMutated
+            , Effect.authed (Api.createShelfRequest model.config.apiName)
+                token
+                (Api.resolveWhatever >> ShelfMutated)
             , NoOut
             )
 
         ( ShelfOrganiser.RemoveShelf id, Just token, _ ) ->
             ( { model | organiserBusy = True }
-            , Api.deleteShelf id token ShelfMutated
+            , Effect.authed (Api.deleteShelfRequest id)
+                token
+                (Api.resolveWhatever >> ShelfMutated)
             , NoOut
             )
 
@@ -530,13 +619,13 @@ handleOrganiser subMsg model =
             persistOrder (ShelfOrganiser.moveDown id shelves) token model
 
         ( ShelfOrganiser.DragStart id, _, _ ) ->
-            ( { model | organiser = { dragging = Just id } }, Cmd.none, NoOut )
+            ( { model | organiser = { dragging = Just id } }, Effect.none, NoOut )
 
         ( ShelfOrganiser.DragEnd, _, _ ) ->
-            ( { model | organiser = { dragging = Nothing } }, Cmd.none, NoOut )
+            ( { model | organiser = { dragging = Nothing } }, Effect.none, NoOut )
 
         ( ShelfOrganiser.DragOver, _, _ ) ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.none, NoOut )
 
         ( ShelfOrganiser.DropOn targetId, Just token, Success shelves ) ->
             case model.organiser.dragging of
@@ -547,22 +636,21 @@ handleOrganiser subMsg model =
                         { model | organiser = { dragging = Nothing } }
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         _ ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.none, NoOut )
 
 
 {-| Apply an already-computed order locally and persist the whole list.
 -}
-persistOrder : List Shelf -> String -> Model -> ( Model, Cmd Msg, OutMsg )
+persistOrder : List Shelf -> String -> Model -> ( Model, Effect Msg, OutMsg )
 persistOrder reordered token model =
     ( { model | shelves = Success reordered, organiserBusy = True, organiserError = Nothing }
-    , Api.reorderShelves
-        model.config.apiName
-        (ShelfOrganiser.orderedIds reordered)
+    , Effect.authed
+        (Api.reorderShelvesRequest model.config.apiName (ShelfOrganiser.orderedIds reordered))
         token
-        ShelfMutated
+        (Api.resolveWhatever >> ShelfMutated)
     , NoOut
     )
 
@@ -587,21 +675,20 @@ moveToId draggedId targetId shelves =
             shelves
 
 
-{-| Refetch after a shelf mutation — via `getBookshelf`, the SAME call as
-the initial load, which is the point: the old `Api.getShelves` payload
-carried a hardcoded empty `placements` per shelf, so every shelf
-mutation repainted the bookcase placement-less (nineteen books vanished;
-the organiser called a full shelf "empty"). One endpoint, one shape,
-no lying refetch.
--}
-reloadShelves : Model -> Cmd Msg
-reloadShelves model =
-    case model.token of
-        Just token ->
-            Api.getBookshelf model.config.apiName token (ShelvesLoaded (requestKey model.config))
+{-| Refetch after a mutation — through `fetchShelves`, the SAME call as the
+initial load, which is the point: the old `Api.getShelves` payload carried a
+hardcoded empty `placements` per shelf, so every shelf mutation repainted the
+bookcase placement-less (nineteen books vanished; the organiser called a full
+shelf "empty"). One endpoint, one shape, no lying refetch.
 
-        Nothing ->
-            Cmd.none
+Sharing `fetchShelves` rather than re-issuing `Api.getBookshelf` also carries
+the read-only dispatch across: this used to re-read the viewer's OWN bookshelf
+while browsing someone else's profile shelf.
+
+-}
+reloadShelves : Model -> Effect Msg
+reloadShelves model =
+    fetchShelves model.config model.token
 
 
 {-| A load failure in the reader's terms. The two cases split from

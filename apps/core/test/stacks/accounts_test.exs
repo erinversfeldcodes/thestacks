@@ -374,7 +374,7 @@ defmodule Stacks.AccountsTest do
       assert %{website_url: [_]} = errors_on(changeset)
     end
 
-    test "updates email when current_password is correct" do
+    test "records a PENDING address when current_password is correct — the account's email does not move" do
       user =
         insert(:user, email: "old@example.com", password_hash: Argon2.hash_pwd_salt("pass123"))
 
@@ -384,7 +384,15 @@ defmodule Stacks.AccountsTest do
                  "current_password" => "pass123"
                })
 
-      assert updated.email == "new@example.com"
+      assert updated.email == "old@example.com"
+      assert updated.pending_email == "new@example.com"
+      assert is_binary(updated.pending_email_token)
+      assert is_binary(updated.pending_email_revert_token)
+      assert updated.pending_email_sent_at
+
+      # the grace: an unproven address must not leave the account looking verified
+      assert updated.email_confirmed == user.email_confirmed
+      assert Repo.get!(User, user.id).email == "old@example.com"
     end
 
     test "returns :invalid_password when current_password is wrong for email change" do
@@ -539,7 +547,7 @@ defmodule Stacks.AccountsTest do
                  "handle" => ""
                })
 
-      assert updated.email == "new@example.com"
+      assert updated.pending_email == "new@example.com"
       assert updated.handle == original_handle
     end
   end
@@ -981,49 +989,6 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "reset_onboarding/1" do
-    test "resets all steps to false" do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      assert {:ok, updated} = Accounts.reset_onboarding(user.id)
-      assert updated.onboarding_steps["profile"] == false
-      assert updated.onboarding_steps["privacy"] == false
-    end
-
-    test "reloaded user has onboarding_completed = false after reset" do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      {:ok, updated} = Accounts.reset_onboarding(user.id)
-      reloaded = Repo.reload!(updated)
-      assert reloaded.onboarding_completed == false
-    end
-
-    test "next_step returns profile after reset" do
-      user =
-        insert(:user,
-          onboarding_steps: %{
-            "profile" => true,
-            "privacy" => true
-          }
-        )
-
-      Accounts.reset_onboarding(user.id)
-      assert %{next_step: "profile"} = Accounts.onboarding_status(user.id)
-    end
-  end
-
   describe "onboarding_completed generated column" do
     test "empty onboarding_steps map produces onboarding_completed = false at DB level" do
       user = insert(:user, onboarding_steps: %{})
@@ -1078,11 +1043,32 @@ defmodule Stacks.AccountsTest do
   end
 
   describe "expired_unverified_ids/1" do
+    # A signup whose confirmation LINK is dead — the reaper's actual target. The
+    # token has to be aged by its own signature: a `now` argument moves the SQL
+    # prefilter's clock but not `Phoenix.Token.verify/4`'s, and the decision is the
+    # verify.
+    defp signup_with_dead_link(email) do
+      user = insert(:unconfirmed_user, email: email)
+
+      dead =
+        Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id,
+          signed_at:
+            System.system_time(:second) - (Accounts.unverified_account_ttl_seconds() + 60)
+        )
+
+      {:ok, aged} =
+        user
+        |> Accounts.email_confirmation_changeset(%{email_confirmation_token: dead})
+        |> Repo.update()
+
+      aged
+    end
+
     test "returns only unverified accounts older than the TTL" do
       future = DateTime.add(DateTime.utc_now(), 2 * 24 * 60 * 60, :second)
 
-      unverified_a = insert(:user, email: "unv-a@thestacks.test", email_confirmed: false)
-      unverified_b = insert(:user, email: "unv-b@thestacks.test", email_confirmed: false)
+      unverified_a = signup_with_dead_link("unv-a@thestacks.test")
+      unverified_b = signup_with_dead_link("unv-b@thestacks.test")
       confirmed = insert(:user, email: "conf@thestacks.test", email_confirmed: true)
 
       ids = Accounts.expired_unverified_ids(future)
@@ -1093,9 +1079,45 @@ defmodule Stacks.AccountsTest do
     end
 
     test "excludes unverified accounts still within the TTL" do
-      fresh = insert(:user, email: "fresh-unv@thestacks.test", email_confirmed: false)
+      fresh = insert(:unconfirmed_user, email: "fresh-unv@thestacks.test")
 
       refute fresh.id in Accounts.expired_unverified_ids(DateTime.utc_now())
+    end
+
+    test "an account degraded by a lapsed email change is NOT an abandoned signup" do
+      # The dangerous overlap: the window sweep leaves exactly the flag the reaper
+      # keys on — and the reaper's callers ERASE what this returns. A degraded
+      # account differs in holding no signup token (confirming nulled it) and a
+      # change still in flight; either alone must keep it out.
+      future = DateTime.add(DateTime.utc_now(), 2 * 24 * 60 * 60, :second)
+
+      degraded =
+        insert(:user,
+          email: "degraded@thestacks.test",
+          email_confirmed: false,
+          email_confirmation_token: nil,
+          pending_email: "wanted@thestacks.test",
+          pending_email_token: "tok",
+          pending_email_sent_at: DateTime.utc_now(),
+          pending_email_revert_token: "revtok"
+        )
+
+      refute degraded.id in Accounts.expired_unverified_ids(future),
+             "the email-change degradation must not feed an account into GDPR erasure"
+    end
+
+    test "an account that was confirmed once is never reaped, change in flight or not" do
+      future = DateTime.add(DateTime.utc_now(), 2 * 24 * 60 * 60, :second)
+
+      once_confirmed =
+        insert(:user,
+          email: "once@thestacks.test",
+          email_confirmed: false,
+          email_confirmation_token: nil
+        )
+
+      refute once_confirmed.id in Accounts.expired_unverified_ids(future),
+             "a nulled confirmation token is the mark of an account that HAS confirmed"
     end
   end
 end

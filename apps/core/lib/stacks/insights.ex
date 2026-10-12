@@ -227,7 +227,7 @@ defmodule Stacks.Insights do
 
   defp community_read_counts(book_ids) do
     sql =
-      "SELECT book_id::text, read_count FROM wh.mart_community_read_count WHERE book_id = ANY($1::uuid[])"
+      "SELECT book_id::text, read_count FROM marts.mart_community_read_count WHERE book_id = ANY($1::uuid[])"
 
     case Repo.query(sql, [book_ids]) do
       {:ok, %{rows: rows}} -> Map.new(rows, fn [id, count] -> {id, count} end)

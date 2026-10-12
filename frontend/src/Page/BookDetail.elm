@@ -3,14 +3,15 @@ module Page.BookDetail exposing
     , Model
     , Msg(..)
     , OutMsg(..)
-    , availabilityDecoder
     , cardFocusId
     , firstFocusableId
     , init
+    , initWithEffect
     , lastFocusableId
     , overlayView
     , pricesDecoder
     , update
+    , updateWithEffect
     , view
     )
 
@@ -23,6 +24,8 @@ import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal as RemoveBookModal exposing (removeBookModal)
 import Components.ShelfMover exposing (shelfMover)
+import Components.ShelfRowPicker exposing (shelfRowPicker)
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
 import Html.Events exposing (on, onClick, onInput, preventDefaultOn, targetValue)
@@ -31,8 +34,9 @@ import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Task
 import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isUnidentified)
-import Types.Placement exposing (Format, Placement, ReadingStatus(..), readingStatusToString)
+import Types.Placement exposing (Format, Placement, ReadingStatus(..), formatToString, parseFormat, readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
+import Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, rowLabel)
 import Types.Visibility as Visibility exposing (Visibility)
 import Util.TestId exposing (testId)
 
@@ -57,8 +61,20 @@ type alias Model =
     , currentBookshelf : String
     , selectedBookshelf : String
     , selectedFormats : List Format
+    , previousFormats : List Format
+    , formatsState : RemoteData Http.Error ()
     , moveState : RemoteData Api.MoveError ()
     , removeState : RemoteData Http.Error ()
+
+    -- The physical shelf rows of the bookcase the placement sits in, in the
+    -- order the reader sees them, so an id's index is the row's name. Held as
+    -- bare ids rather than `Shelf` records: the books on the other rows are the
+    -- bookshelf page's business, and keeping them here would be a second copy
+    -- of the shelf going stale behind the overlay.
+    , shelfRowIds : List String
+    , currentShelfId : Maybe String
+    , selectedShelfId : String
+    , shelfMoveState : RemoteData Api.ShelfMoveError ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
     , authorEvents : RemoteData Http.Error (List Api.AuthorEvent)
@@ -74,13 +90,26 @@ type alias Model =
     , progressCard : Maybe Card.Model
     , progressSaveState : RemoteData Api.ProgressError ()
     , finishedReadPrompt : Bool
+    , coverFailed : Bool
     , undoableRemoval : Maybe { placementId : String, bookTitle : String }
     }
 
 
+{-| What the page needs from whoever is hosting it.
+
+`PlacementMutated` is the stale-read signal: a placement write has SUCCEEDED on
+the server, so any placement-bearing page this one is sitting in front of is now
+showing something that is no longer true. It deliberately carries no payload —
+the destination bookshelf would be a lie for a format or shelf-row write, and
+the host cannot repaint from a diff anyway; it re-reads. Every branch that
+completes a placement write emits it, and the host stays open, unlike
+`NavigateTo`, which is the removal path leaving the page behind entirely.
+
+-}
 type OutMsg
     = NoOut
     | NavigateTo Route
+    | PlacementMutated
     | RequestCloseOverlay
     | SessionExpired
 
@@ -101,7 +130,12 @@ type Msg
     | RemoveCompleted (Result Http.Error ())
     | RemovePlacement String
     | PlacementRemoved String (Result Http.Error ())
+    | ShelfRowsLoaded (Result Http.Error BookshelfResponse)
+    | SelectShelfRow String
+    | ConfirmShelfMove
+    | ShelfMoveCompleted (Result Api.ShelfMoveError String)
     | ToggleFormat Format
+    | FormatsUpdated (Result Http.Error (List String))
     | EditionSelected String
     | DismissAgeGate
     | CloseOverlay
@@ -114,6 +148,7 @@ type Msg
     | RecordReadRequested
     | FinishedReadDismissed
     | ProgressFocusReturned
+    | CoverFailed
     | EscapePressed
     | FocusWrapToFirst
     | FocusWrapToLast
@@ -124,15 +159,16 @@ type Msg
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
 init bookId maybeToken maybePreviousRoute =
     let
-        bookCmd =
-            Api.getBook bookId maybeToken BookLoaded
-
-        availabilityCmd =
-            fetchAvailability bookId maybeToken
-
-        pricesCmd =
-            fetchPrices bookId maybeToken
+        ( model, effect ) =
+            initWithEffect bookId maybeToken maybePreviousRoute
     in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its effects as data — see `updateWithEffect`.
+-}
+initWithEffect : String -> Maybe String -> Maybe Route -> ( Model, Effect Msg )
+initWithEffect bookId maybeToken maybePreviousRoute =
     ( { book = Loading
       , placement = Nothing
       , placements = []
@@ -143,8 +179,14 @@ init bookId maybeToken maybePreviousRoute =
       , currentBookshelf = routeToBookshelf maybePreviousRoute
       , selectedBookshelf = firstAvailableBookshelf (routeToBookshelf maybePreviousRoute)
       , selectedFormats = []
+      , previousFormats = []
+      , formatsState = NotAsked
       , moveState = NotAsked
       , removeState = NotAsked
+      , shelfRowIds = []
+      , currentShelfId = Nothing
+      , selectedShelfId = ""
+      , shelfMoveState = NotAsked
       , selectedEdition = Nothing
       , previousRoute = maybePreviousRoute
       , authorEvents = NotAsked
@@ -164,32 +206,31 @@ init bookId maybeToken maybePreviousRoute =
       , progressCard = Nothing
       , progressSaveState = NotAsked
       , finishedReadPrompt = False
+      , coverFailed = False
       , undoableRemoval = Nothing
       }
-    , Cmd.batch [ bookCmd, availabilityCmd, pricesCmd ]
+    , Effect.batch
+        [ Effect.public (Api.getBookRequest bookId)
+            maybeToken
+            (Api.resolveJson Api.bookDetailResponseDecoder >> BookLoaded)
+        , Effect.public (availabilityRequest bookId)
+            maybeToken
+            (Api.resolveJson availabilityDecoder >> AvailabilityLoaded)
+        , Effect.public (pricesRequest bookId)
+            maybeToken
+            (Api.resolveJson pricesDecoder >> PricesLoaded)
+        ]
     )
 
 
-fetchAvailability : String -> Maybe String -> Cmd Msg
-fetchAvailability bookId maybeToken =
-    let
-        headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
-    in
-    Http.request
-        { method = "GET"
-        , headers = headers
-        , url = "/api/books/" ++ bookId ++ "/availability"
-        , body = Http.emptyBody
-        , expect = Http.expectJson AvailabilityLoaded availabilityDecoder
-        , timeout = Api.standardTimeout
-        , tracker = Nothing
-        }
+{-| Where a copy of this book can be bought right now — see `Api.RequestSpec`.
+-}
+availabilityRequest : String -> Api.RequestSpec
+availabilityRequest bookId =
+    { method = "GET"
+    , url = "/api/books/" ++ bookId ++ "/availability"
+    , body = Nothing
+    }
 
 
 availabilityDecoder : Decode.Decoder (List AvailabilityItem)
@@ -206,26 +247,83 @@ availabilityDecoder =
         )
 
 
-fetchPrices : String -> Maybe String -> Cmd Msg
-fetchPrices bookId maybeToken =
-    let
-        headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+{-| What this book sells for at the shops we track — see `Api.RequestSpec`.
+-}
+pricesRequest : String -> Api.RequestSpec
+pricesRequest bookId =
+    { method = "GET"
+    , url = "/api/books/" ++ bookId ++ "/prices"
+    , body = Nothing
+    }
 
-                Nothing ->
-                    []
-    in
-    Http.request
-        { method = "GET"
-        , headers = headers
-        , url = "/api/books/" ++ bookId ++ "/prices"
-        , body = Http.emptyBody
-        , expect = Http.expectJson PricesLoaded pricesDecoder
-        , timeout = Api.standardTimeout
-        , tracker = Nothing
-        }
+
+{-| Read the shelf rows of the bookcase a placement sits in.
+
+The bookshelf's own endpoint is the source: it is the only one that answers both
+halves of the question at once — which rows the bookcase has, and which of them
+this book is on. `GET /api/bookshelves/:name/shelves` lists the rows but not
+their contents, so it could not tell the picker which row to leave out.
+
+A book with no placement is on no shelf at all, and a signed-out reader cannot
+be shown their own rows, so both send nothing rather than an unusable request.
+
+-}
+fetchShelfRows : Maybe Placement -> String -> Maybe String -> Effect Msg
+fetchShelfRows maybePlacement bookshelfName maybeToken =
+    case ( maybePlacement, maybeToken ) of
+        ( Just _, Just token ) ->
+            if String.isEmpty bookshelfName then
+                Effect.none
+
+            else
+                Effect.authed (Api.getBookshelfRequest bookshelfName)
+                    token
+                    (Api.resolveJson bookshelfResponseDecoder >> ShelfRowsLoaded)
+
+        _ ->
+            Effect.none
+
+
+{-| Drop the rows on the way to a different bookcase.
+
+Rows belong to one bookshelf, and the server rejects a move to a row hanging in
+another. Leaving the old bookcase's rows on screen while the new read is in
+flight would offer the reader exactly the options that are guaranteed to fail.
+
+-}
+forgetShelfRows : Model -> Model
+forgetShelfRows model =
+    { model | shelfRowIds = [], currentShelfId = Nothing, selectedShelfId = "" }
+
+
+{-| Which row a placement is on — the row whose books include it.
+
+`GET /api/books/:id` describes the placement without naming its shelf row, so
+the answer is read off the bookcase instead.
+
+-}
+shelfRowHolding : Maybe Placement -> List Shelf -> Maybe String
+shelfRowHolding maybePlacement shelves =
+    case maybePlacement of
+        Nothing ->
+            Nothing
+
+        Just placement ->
+            shelves
+                |> List.filter (\shelf -> List.any (\p -> p.id == placement.id) shelf.placements)
+                |> List.head
+                |> Maybe.map .id
+
+
+{-| The row the picker should offer first — any row but the one the book is
+already on, since moving a book to where it already is does nothing.
+-}
+firstRowOtherThan : Maybe String -> List String -> String
+firstRowOtherThan currentRowId rowIds =
+    rowIds
+        |> List.filter (\rowId -> Just rowId /= currentRowId)
+        |> List.head
+        |> Maybe.withDefault ""
 
 
 {-| One flat row per (edition, store), as the API returns it.
@@ -352,6 +450,23 @@ firstAvailableBookshelf current =
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effect as data.
+
+The program-test harness runs THIS one and interprets the effect, so the
+request the page decides to make and the request the tests assert against are
+the same value. `update` is this composed with `Effect.perform`; nothing else
+differs between them.
+
+-}
+updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         BookLoaded result ->
             case result of
@@ -404,44 +519,50 @@ update msg model maybeToken =
                         , currentBookshelf = bookshelf
                         , selectedBookshelf = firstAvailableBookshelf bookshelf
                         , selectedFormats = formats
+                        , previousFormats = formats
                         , selectedEdition = response.book.primaryEdition
                         , placementVisibility = placementVisibility
                         , previousVisibility = placementVisibility
                         , shelfCeiling = shelfCeiling
                         , progressCard = progressCard
                       }
-                    , case response.book.author of
-                        Just author ->
-                            Api.getAuthorEvents author.id GotAuthorEvents
+                    , Effect.batch
+                        [ case response.book.author of
+                            Just author ->
+                                Effect.public (Api.getAuthorEventsRequest author.id)
+                                    Nothing
+                                    (Api.resolveJson Api.authorEventsDecoder >> GotAuthorEvents)
 
-                        Nothing ->
-                            Cmd.none
+                            Nothing ->
+                                Effect.none
+                        , fetchShelfRows response.placement bookshelf maybeToken
+                        ]
                     , NoOut
                     )
 
                 Err (Http.BadStatus 403) ->
-                    ( { model | book = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+                    ( { model | book = Failure (Http.BadStatus 403), showAgeGate = True }, Effect.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | book = Failure err }, Cmd.none, NoOut )
+                        ( { model | book = Failure err }, Effect.none, NoOut )
 
         GotAuthorEvents result ->
             case result of
                 Ok events ->
-                    ( { model | authorEvents = Success events }, Cmd.none, NoOut )
+                    ( { model | authorEvents = Success events }, Effect.none, NoOut )
 
                 Err err ->
-                    ( { model | authorEvents = Failure err }, Cmd.none, NoOut )
+                    ( { model | authorEvents = Failure err }, Effect.none, NoOut )
 
         DismissAgeGate ->
-            ( { model | showAgeGate = False }, Cmd.none, NoOut )
+            ( { model | showAgeGate = False }, Effect.none, NoOut )
 
         CloseOverlay ->
-            ( model, Cmd.none, RequestCloseOverlay )
+            ( model, Effect.none, RequestCloseOverlay )
 
         EscapePressed ->
             if model.removeModalOpen then
@@ -458,19 +579,19 @@ update msg model maybeToken =
                             ( { model | progressCard = Just closedCard }, focusProgressBadge closedCard, NoOut )
 
                         else
-                            ( model, Cmd.none, RequestCloseOverlay )
+                            ( model, Effect.none, RequestCloseOverlay )
 
                     Nothing ->
-                        ( model, Cmd.none, RequestCloseOverlay )
+                        ( model, Effect.none, RequestCloseOverlay )
 
         OpenBookshelfMover ->
-            ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
+            ( { model | bookshelfMoverOpen = True }, Effect.none, NoOut )
 
         CloseBookshelfMover ->
-            ( { model | bookshelfMoverOpen = False }, Cmd.none, NoOut )
+            ( { model | bookshelfMoverOpen = False }, Effect.none, NoOut )
 
         SelectBookshelf bookshelf ->
-            ( { model | selectedBookshelf = bookshelf }, Cmd.none, NoOut )
+            ( { model | selectedBookshelf = bookshelf }, Effect.none, NoOut )
 
         EditionSelected editionId ->
             case model.book of
@@ -480,21 +601,23 @@ update msg model maybeToken =
                             List.filter (\e -> e.id == editionId) book.editions
                                 |> List.head
                     in
-                    ( { model | selectedEdition = found }, Cmd.none, NoOut )
+                    ( { model | selectedEdition = found }, Effect.none, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         ConfirmMove ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
                     ( { model | bookshelfMoverOpen = False, moveState = Loading }
-                    , Api.moveBook placement.id model.selectedBookshelf token MoveCompleted
+                    , Effect.authed (Api.moveBookRequest placement.id model.selectedBookshelf)
+                        token
+                        (Api.moveResponseToResult >> MoveCompleted)
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         MoveCompleted result ->
             case result of
@@ -514,30 +637,33 @@ update msg model maybeToken =
                         , placement = updatedPlacement
                         , bookshelfMoverOpen = False
                       }
-                    , Cmd.none
-                    , NoOut
+                        |> forgetShelfRows
+                    , fetchShelfRows updatedPlacement newBookshelf maybeToken
+                    , PlacementMutated
                     )
 
                 Err Api.ReadingPileFull ->
-                    ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
+                    ( { model | moveState = Failure Api.ReadingPileFull }, Effect.none, NoOut )
 
                 Err (Api.MoveHttpError err) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
+                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Effect.none, NoOut )
 
         ConfirmPlace ->
             case ( model.book, maybeToken ) of
                 ( Success book, Just token ) ->
                     ( { model | bookshelfMoverOpen = False, moveState = Loading }
-                    , Api.placeBook model.selectedBookshelf book.id token (PlaceCompleted model.selectedBookshelf)
+                    , Effect.authed (Api.placeBookRequest model.selectedBookshelf book.id)
+                        token
+                        (Api.placeResponseToResult >> PlaceCompleted model.selectedBookshelf)
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         PlaceCompleted shelfName result ->
             case result of
@@ -549,19 +675,20 @@ update msg model maybeToken =
                         , selectedBookshelf = firstAvailableBookshelf shelfName
                         , bookshelfMoverOpen = False
                       }
-                    , Cmd.none
-                    , NoOut
+                        |> forgetShelfRows
+                    , fetchShelfRows (Just placement) shelfName maybeToken
+                    , PlacementMutated
                     )
 
                 Err Api.PlaceReadingPileFull ->
-                    ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
+                    ( { model | moveState = Failure Api.ReadingPileFull }, Effect.none, NoOut )
 
                 Err (Api.PlaceHttpError err) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
+                        ( { model | moveState = Failure (Api.MoveHttpError err) }, Effect.none, NoOut )
 
         OpenRemoveModal ->
             ( { model | removeModalOpen = True }, focusElement RemoveBookModal.cancelButtonId, NoOut )
@@ -573,12 +700,14 @@ update msg model maybeToken =
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
                     ( { model | removeModalOpen = False, removeState = Loading }
-                    , Api.removeBook placement.id token RemoveCompleted
+                    , Effect.authed (Api.removeBookRequest placement.id)
+                        token
+                        (Api.resolveWhatever >> RemoveCompleted)
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         RemoveCompleted result ->
             case result of
@@ -587,27 +716,29 @@ update msg model maybeToken =
                         | removeState = Success ()
                         , undoableRemoval = undoableRemovalFor model
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NavigateTo (Maybe.withDefault Route.Library model.previousRoute)
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
-                        ( { model | removeState = Failure err }, Cmd.none, NoOut )
+                        ( { model | removeState = Failure err }, Effect.none, NoOut )
 
         RemovePlacement placementId ->
             case maybeToken of
                 Just token ->
                     ( { model | removingPlacementId = Just placementId }
-                    , Api.removeBook placementId token (PlacementRemoved placementId)
+                    , Effect.authed (Api.removeBookRequest placementId)
+                        token
+                        (Api.resolveWhatever >> PlacementRemoved placementId)
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         PlacementRemoved placementId result ->
             case result of
@@ -628,40 +759,121 @@ update msg model maybeToken =
                                 Nothing ->
                                     List.head remaining
                     in
+                    let
+                        bookshelfName =
+                            primary
+                                |> Maybe.andThen .bookshelfName
+                                |> Maybe.withDefault model.currentBookshelf
+                    in
+                    -- The shelf-row state describes ONE placement, and the copy
+                    -- it described may be the one just removed. Nothing in the
+                    -- removal response says which row the surviving copy stands
+                    -- on, so the rows are forgotten and re-read for it — the
+                    -- same reasoning `forgetShelfRows` records for a failed
+                    -- read. Keeping them would leave the picker naming the row
+                    -- of a copy that is gone, and offering to move it there.
                     ( { model
                         | placements = remaining
                         , placement = primary
                         , removingPlacementId = Nothing
-                        , currentBookshelf =
-                            primary
-                                |> Maybe.andThen .bookshelfName
-                                |> Maybe.withDefault model.currentBookshelf
+                        , currentBookshelf = bookshelfName
                       }
-                    , Cmd.none
-                    , NoOut
+                        |> forgetShelfRows
+                    , fetchShelfRows primary bookshelfName maybeToken
+                    , PlacementMutated
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
                         ( { model | removingPlacementId = Nothing, removeState = Failure err }
-                        , Cmd.none
+                        , Effect.none
                         , NoOut
                         )
 
         AvailabilityLoaded (Ok items) ->
-            ( { model | availability = Success items }, Cmd.none, NoOut )
+            ( { model | availability = Success items }, Effect.none, NoOut )
 
         AvailabilityLoaded (Err err) ->
-            ( { model | availability = Failure err }, Cmd.none, NoOut )
+            ( { model | availability = Failure err }, Effect.none, NoOut )
 
         PricesLoaded (Ok priceData) ->
-            ( { model | prices = Success priceData }, Cmd.none, NoOut )
+            ( { model | prices = Success priceData }, Effect.none, NoOut )
 
         PricesLoaded (Err err) ->
-            ( { model | prices = Failure err }, Cmd.none, NoOut )
+            ( { model | prices = Failure err }, Effect.none, NoOut )
+
+        ShelfRowsLoaded (Ok response) ->
+            let
+                rowIds =
+                    List.map .id response.shelves
+
+                current =
+                    shelfRowHolding model.placement response.shelves
+            in
+            ( { model
+                | shelfRowIds = rowIds
+                , currentShelfId = current
+                , selectedShelfId = firstRowOtherThan current rowIds
+              }
+            , Effect.none
+            , NoOut
+            )
+
+        ShelfRowsLoaded (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Effect.none, SessionExpired )
+
+            else
+                -- The picker is an addition to a page that works without it, so
+                -- a failed read leaves no rows and therefore no picker, rather
+                -- than an error the reader can do nothing about.
+                ( forgetShelfRows model, Effect.none, NoOut )
+
+        SelectShelfRow rowId ->
+            ( { model | selectedShelfId = rowId }, Effect.none, NoOut )
+
+        ConfirmShelfMove ->
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    if model.shelfMoveState == Loading || String.isEmpty model.selectedShelfId then
+                        ( model, Effect.none, NoOut )
+
+                    else
+                        ( { model | shelfMoveState = Loading }
+                        , Effect.authed (Api.movePlacementToShelfRequest placement.id model.selectedShelfId)
+                            token
+                            (Api.shelfMoveResponseToResult >> ShelfMoveCompleted)
+                        , NoOut
+                        )
+
+                _ ->
+                    ( model, Effect.none, NoOut )
+
+        ShelfMoveCompleted (Ok storedShelfId) ->
+            -- The row the server says the book is on, not the one that was
+            -- asked for: they agree today, and the moment they stop agreeing
+            -- the reader should see the truth rather than their own request.
+            ( { model
+                | shelfMoveState = Success ()
+                , currentShelfId = Just storedShelfId
+                , selectedShelfId = firstRowOtherThan (Just storedShelfId) model.shelfRowIds
+              }
+            , Effect.none
+            , PlacementMutated
+            )
+
+        ShelfMoveCompleted (Err (Api.ShelfMoveHttpError err)) ->
+            if Api.isUnauthorized err then
+                ( model, Effect.none, SessionExpired )
+
+            else
+                ( { model | shelfMoveState = Failure (Api.ShelfMoveHttpError err) }, Effect.none, NoOut )
+
+        ShelfMoveCompleted (Err err) ->
+            ( { model | shelfMoveState = Failure err }, Effect.none, NoOut )
 
         ToggleFormat format ->
             let
@@ -672,16 +884,66 @@ update msg model maybeToken =
                     else
                         format :: model.selectedFormats
             in
-            ( { model | selectedFormats = newFormats }, Cmd.none, NoOut )
+            case ( model.placement, maybeToken ) of
+                ( Just placement, Just token ) ->
+                    if model.formatsState == Loading then
+                        ( model, Effect.none, NoOut )
+
+                    else
+                        ( { model
+                            | selectedFormats = newFormats
+                            , previousFormats = model.selectedFormats
+                            , formatsState = Loading
+                          }
+                        , Effect.authed
+                            (Api.updatePlacementFormatsRequest placement.id
+                                (List.map formatToString newFormats)
+                            )
+                            token
+                            (Api.resolveJson Api.placementFormatsDecoder >> FormatsUpdated)
+                        , NoOut
+                        )
+
+                _ ->
+                    ( model, Effect.none, NoOut )
+
+        FormatsUpdated result ->
+            case result of
+                Ok stored ->
+                    let
+                        confirmed =
+                            List.filterMap parseFormat stored
+                    in
+                    ( { model
+                        | formatsState = Success ()
+                        , selectedFormats = confirmed
+                        , previousFormats = confirmed
+                      }
+                    , Effect.none
+                    , PlacementMutated
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Effect.none, SessionExpired )
+
+                    else
+                        ( { model
+                            | formatsState = Failure err
+                            , selectedFormats = model.previousFormats
+                          }
+                        , Effect.none
+                        , NoOut
+                        )
 
         PlacementVisibilitySelected raw ->
             case ( Visibility.fromString raw, model.placement, maybeToken ) of
                 ( Just vis, Just placement, Just token ) ->
                     if model.visibilityState == Loading then
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.none, NoOut )
 
                     else if Visibility.exceedsCeiling model.shelfCeiling vis then
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.none, NoOut )
 
                     else
                         ( { model
@@ -689,12 +951,15 @@ update msg model maybeToken =
                             , previousVisibility = model.placementVisibility
                             , visibilityState = Loading
                           }
-                        , Api.updatePlacementVisibility placement.id (Visibility.toString vis) token PlacementVisibilityUpdated
+                        , Effect.authed
+                            (Api.updatePlacementVisibilityRequest placement.id (Visibility.toString vis))
+                            token
+                            (Api.resolveJson Api.storedVisibilityDecoder >> PlacementVisibilityUpdated)
                         , NoOut
                         )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         PlacementVisibilityUpdated result ->
             case result of
@@ -709,20 +974,20 @@ update msg model maybeToken =
                         , placementVisibility = confirmed
                         , previousVisibility = confirmed
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
                         ( { model
                             | visibilityState = Failure err
                             , placementVisibility = model.previousVisibility
                           }
-                        , Cmd.none
+                        , Effect.none
                         , NoOut
                         )
 
@@ -736,12 +1001,14 @@ update msg model maybeToken =
                     case ( out, maybeToken ) of
                         ( Card.ProgressUpdateRequested, Just token ) ->
                             ( { model | progressCard = Just newCard, progressSaveState = Loading }
-                            , Api.updateProgress newCard.placement.id
-                                { readingStatus = readingStatusToString newCard.draftStatus
-                                , currentPage = String.toInt newCard.draftPage
-                                }
+                            , Effect.authed
+                                (Api.updateProgressRequest newCard.placement.id
+                                    { readingStatus = readingStatusToString newCard.draftStatus
+                                    , currentPage = String.toInt newCard.draftPage
+                                    }
+                                )
                                 token
-                                ProgressSaved
+                                (Api.progressResponseToResult >> ProgressSaved)
                             , NoOut
                             )
 
@@ -749,10 +1016,10 @@ update msg model maybeToken =
                             ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )
 
                         _ ->
-                            ( { model | progressCard = Just newCard }, Cmd.none, NoOut )
+                            ( { model | progressCard = Just newCard }, Effect.none, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         ProgressSaved result ->
             case result of
@@ -772,14 +1039,14 @@ update msg model maybeToken =
 
                 Err (Api.ProgressRequestFailed err) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.none, SessionExpired )
 
                     else
                         ( { model
                             | progressCard = Maybe.map Card.stopSaving model.progressCard
                             , progressSaveState = Failure (Api.ProgressRequestFailed err)
                           }
-                        , Cmd.none
+                        , Effect.none
                         , NoOut
                         )
 
@@ -788,26 +1055,35 @@ update msg model maybeToken =
                         | progressCard = Maybe.map Card.stopSaving model.progressCard
                         , progressSaveState = Failure other
                       }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
         ProgressFocusReturned ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.none, NoOut )
+
+        CoverFailed ->
+            -- A cover URL that 404s leaves the browser's broken-image glyph in a
+            -- frame the catalogue fills with a styled initial. Falling back to
+            -- the placeholder that already exists keeps the two surfaces telling
+            -- the same story about a book with no usable cover.
+            ( { model | coverFailed = True }, Effect.none, NoOut )
 
         RecordReadRequested ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
                     ( { model | finishedReadPrompt = False, selectedBookshelf = "library", moveState = Loading }
-                    , Api.moveBook placement.id "library" token MoveCompleted
+                    , Effect.authed (Api.moveBookRequest placement.id "library")
+                        token
+                        (Api.moveResponseToResult >> MoveCompleted)
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         FinishedReadDismissed ->
-            ( { model | finishedReadPrompt = False }, Cmd.none, NoOut )
+            ( { model | finishedReadPrompt = False }, Effect.none, NoOut )
 
         FocusWrapToFirst ->
             ( model, focusElement firstFocusableId, NoOut )
@@ -819,23 +1095,25 @@ update msg model maybeToken =
             ( model, focusElement elementId, NoOut )
 
         FocusWrapNoOp ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.none, NoOut )
 
 
-focusProgressBadge : Card.Model -> Cmd Msg
+focusProgressBadge : Card.Model -> Effect Msg
 focusProgressBadge card =
-    Browser.Dom.focus (Card.badgeDomId card.placement)
-        |> Task.attempt (\_ -> ProgressFocusReturned)
+    Effect.Custom
+        (Browser.Dom.focus (Card.badgeDomId card.placement)
+            |> Task.attempt (\_ -> ProgressFocusReturned)
+        )
 
 
-focusProgressBadgeFromModel : Model -> Cmd Msg
+focusProgressBadgeFromModel : Model -> Effect Msg
 focusProgressBadgeFromModel model =
     case model.progressCard of
         Just card ->
             focusProgressBadge card
 
         Nothing ->
-            Cmd.none
+            Effect.none
 
 
 {-| The DOM id of the dialog card — the element focused when the overlay opens
@@ -899,10 +1177,12 @@ undoableRemovalFor model =
 
 {-| Move DOM focus to the given element id, discarding the (ignorable) result.
 -}
-focusElement : String -> Cmd Msg
+focusElement : String -> Effect Msg
 focusElement elementId =
-    Browser.Dom.focus elementId
-        |> Task.attempt (\_ -> FocusWrapNoOp)
+    Effect.Custom
+        (Browser.Dom.focus elementId
+            |> Task.attempt (\_ -> FocusWrapNoOp)
+        )
 
 
 {-| Keydown decoder for the overlay card implementing the Tab focus trap.
@@ -1010,6 +1290,7 @@ viewBook model book =
                         , viewFormatsOnShelf model
                         , viewVisibilityControl model
                         , viewShelfActions model
+                        , viewShelfRows model
                         , viewDangerZone model
                         ]
 
@@ -1046,13 +1327,21 @@ viewHero model book =
             [ div [ class "book-detail__cover" ]
                 [ case Maybe.andThen .coverImageUrl edition of
                     Just url ->
-                        img
-                            [ src url
-                            , alt ("Cover of " ++ book.title)
-                            , class "book-detail__cover-img"
-                            , testId "book-cover"
-                            ]
-                            []
+                        if model.coverFailed then
+                            div [ class "book-detail__cover-placeholder" ]
+                                [ span [ class "book-detail__cover-placeholder-text" ]
+                                    [ text (String.left 1 book.title) ]
+                                ]
+
+                        else
+                            img
+                                [ src url
+                                , alt ("Cover of " ++ book.title)
+                                , class "book-detail__cover-img"
+                                , testId "book-cover"
+                                , on "error" (Decode.succeed CoverFailed)
+                                ]
+                                []
 
                     Nothing ->
                         div [ class "book-detail__cover-placeholder" ]
@@ -1374,7 +1663,31 @@ viewFormatsOnShelf model =
             { selected = model.selectedFormats
             , onToggle = ToggleFormat
             }
+        , viewFormatsState model.formatsState
         ]
+
+
+{-| The save state of the format picker. The failure copy names the rollback,
+because the buttons have already snapped back: without it the reader sees their
+click undo itself and is left to guess whether that was the save or the failure.
+-}
+viewFormatsState : RemoteData Http.Error () -> Html Msg
+viewFormatsState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Saving formats…" ]
+
+        Success _ ->
+            div [ class "book-detail__status book-detail__status--success" ]
+                [ text "Formats saved." ]
+
+        Failure _ ->
+            div [ class "book-detail__status book-detail__status--error" ]
+                [ text "We couldn't save your formats, so we've put them back as they were." ]
 
 
 {-| "Who can see this book" — per-placement visibility override.
@@ -1468,7 +1781,9 @@ viewAboutSection book =
 
 
 {-| Price info section — delegates to the PriceInfo component.
-Currently passes NotAsked since the API does not yet provide per-book prices.
+`init` issues `pricesRequest` alongside the book and availability fetches, so
+this renders Loading first and then the server's answer; the component owns the
+empty and failed cases.
 -}
 viewPricesSection : Model -> Html Msg
 viewPricesSection model =
@@ -1618,6 +1933,93 @@ viewShelfActions model =
                 [ text "Choose Bookshelf" ]
         , viewMoveState model.moveState
         ]
+
+
+{-| Which physical row of the bookcase this book stands on.
+
+Hidden below two rows, and that is the whole rule: a bookcase with one shelf has
+nowhere to move the book to, so the picker would be a control whose only
+outcome is the state the reader is already in.
+
+-}
+viewShelfRows : Model -> Html Msg
+viewShelfRows model =
+    if List.length model.shelfRowIds < 2 then
+        text ""
+
+    else
+        section
+            [ class "book-detail__section book-detail__shelf-rows"
+            , attribute "role" "region"
+            , attribute "aria-labelledby" "section-shelf-rows"
+            ]
+            [ h3 [ class "book-detail__section-title", id "section-shelf-rows" ]
+                [ text "Which Shelf It Sits On" ]
+            , p [ class "book-detail__shelf-rows-note" ]
+                [ text (currentRowSentence model) ]
+            , shelfRowPicker
+                { rowIds = model.shelfRowIds
+                , currentRowId = model.currentShelfId
+                , selectedRowId = model.selectedShelfId
+                , busy = model.shelfMoveState == Loading
+                , onSelectRow = SelectShelfRow
+                , onMove = ConfirmShelfMove
+                }
+            , viewShelfMoveState model.shelfMoveState
+            ]
+
+
+{-| Where the book stands now, named in the same words as the picker's options.
+
+A placement can sit on no row at all — a book placed before the reader ever
+divided the bookcase up — and that is worth saying, because it explains why the
+picker offers every row instead of all but one.
+
+-}
+currentRowSentence : Model -> String
+currentRowSentence model =
+    case rowIndexOf model.currentShelfId model.shelfRowIds of
+        Just index ->
+            "On " ++ rowLabel index ++ " right now."
+
+        Nothing ->
+            "Not on any shelf in this bookcase yet."
+
+
+rowIndexOf : Maybe String -> List String -> Maybe Int
+rowIndexOf maybeRowId rowIds =
+    case maybeRowId of
+        Nothing ->
+            Nothing
+
+        Just rowId ->
+            rowIds
+                |> List.indexedMap Tuple.pair
+                |> List.filter (\( _, id ) -> id == rowId)
+                |> List.head
+                |> Maybe.map Tuple.first
+
+
+viewShelfMoveState : RemoteData Api.ShelfMoveError () -> Html Msg
+viewShelfMoveState state =
+    case state of
+        NotAsked ->
+            text ""
+
+        Loading ->
+            div [ class "book-detail__status book-detail__status--loading" ]
+                [ text "Moving to that shelf…" ]
+
+        Success _ ->
+            div [ class "book-detail__status book-detail__status--success" ]
+                [ text "Moved to that shelf." ]
+
+        Failure err ->
+            div
+                [ class "book-detail__status book-detail__status--error"
+                , testId "shelf-row-move-error"
+                ]
+                [ text (Api.shelfMoveErrorMessage err) ]
 
 
 viewMoveState : RemoteData Api.MoveError () -> Html Msg

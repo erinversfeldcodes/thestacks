@@ -8,8 +8,6 @@ select
     action,
     resource_type,
     resource_id,
-    ip_address,
-    metadata,
     occurred_at,
     endpoint,
     latency_ms,

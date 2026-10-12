@@ -9,7 +9,7 @@ use_default_settings:
       - google_books
 
 server:
-  secret_key: "__SEARXNG_SECRET_KEY__"  # checkov:skip=CKV_SECRET_6: deploy-time template placeholder, replaced by deploy-searxng.sh
+  secret_key: "__SEARXNG_SECRET_KEY__"  # checkov:skip=CKV_SECRET_6: deploy-time template placeholder, replaced by deploy-stack.sh
   bind_address: "0.0.0.0"
   port: 8080
   public_instance: false

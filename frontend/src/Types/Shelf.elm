@@ -1,4 +1,4 @@
-module Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
+module Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, rowLabel, shelvesResponseDecoder)
 
 import Json.Decode as Decode
 import Types.Placement exposing (Placement, placementDecoder)
@@ -20,6 +20,20 @@ type alias BookshelfResponse =
     { shelves : List Shelf
     , visibility : String
     }
+
+
+{-| What a reader calls the shelf at `index` in an ordered bookcase.
+
+A shelf row has no `name` column — it is the second one down, and nothing else.
+Both places that show rows (the organiser, and the book-detail row picker) have
+to say the same number for the same row, so the sentence lives once. The index
+is the row's place in the ordered list, not its `position` value, because
+`position` is a sort key the server is free to leave gapped.
+
+-}
+rowLabel : Int -> String
+rowLabel index =
+    "Shelf " ++ String.fromInt (index + 1)
 
 
 shelfDecoder : Decode.Decoder Shelf

@@ -78,18 +78,33 @@ test.describe("Syndication (POSSE)", () => {
     const toggle = page.getByTestId("syndication-include-toggle");
     await expect(toggle).toBeChecked();
 
-    await toggle.click();
-    await expect(toggle).not.toBeChecked();
-
     const me = await request.get("/api/auth/me", {
       headers: { Authorization: `Bearer ${session.token}` },
     });
     const handle = (await me.json()).user.handle as string;
+    const feedText = async () =>
+      (await request.get(`/api/feeds/u/${handle}/blog`)).text();
+
+    // The feed must be shown to CARRY the post before its absence can mean
+    // anything: a feed that never listed it — or a request that failed — would
+    // satisfy the absence check below on its own.
     await expect
-      .poll(async () => (await (await request.get(`/api/feeds/u/${handle}/blog`)).text()), {
-        timeout: 10_000,
-      })
+      .poll(feedText, { timeout: 10_000 })
+      .toContain("The Annotated Shelf");
+
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+
+    await expect
+      .poll(feedText, { timeout: 10_000 })
       .not.toContain("The Annotated Shelf");
+
+    // The checkbox is drawn from the panel's own state; reload and ask the
+    // panel what the server told it on a fresh load.
+    await page.reload();
+    await expect(page.getByTestId("syndication-include-toggle")).not.toBeChecked(
+      { timeout: 10_000 },
+    );
   });
 
   test("copying the markdown export records a syndication; pasting the URL back closes the loop", async ({
@@ -117,7 +132,28 @@ test.describe("Syndication (POSSE)", () => {
     const input = page.getByTestId("syndication-also-at-input");
     await expect(input).toBeVisible();
     await input.fill("https://erin.substack.com/p/on-marginalia");
+
+    // The rendered backlink is the panel showing back what was just typed, so
+    // it says nothing about storage. The PUT's own body is what the server
+    // wrote — and it is the only read available: nothing loads a post's
+    // syndications, so a reloaded panel shows neither the backlink nor the
+    // field, however well the write landed.
+    const saved = page.waitForResponse(
+      (r) =>
+        /^\/api\/blog\/posts\/[^/]+\/syndications\/[^/]+$/.test(
+          new URL(r.url()).pathname,
+        ) && r.request().method() === "PUT",
+      { timeout: 15_000 },
+    );
     await input.press("Enter");
+    const savedResp = await saved;
+    expect(
+      savedResp.status(),
+      "PUT /api/blog/posts/:id/syndications/:sid",
+    ).toBe(200);
+    expect((await savedResp.json()).syndication.syndicated_url).toBe(
+      "https://erin.substack.com/p/on-marginalia",
+    );
 
     await expect(page.getByTestId("syndication-backlink")).toHaveText(
       "https://erin.substack.com/p/on-marginalia",

@@ -211,15 +211,9 @@ renewEffects : RenewMsg -> Maybe Main.Auth -> SimulatedEffect RenewMsg
 renewEffects msg model =
     case ( msg, model ) of
         ( TriggerRenewal, Just auth ) ->
-            SimulatedEffect.Http.request
-                { method = "POST"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ auth.token) ]
-                , url = "/api/auth/refresh"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson RefreshResult Api.authResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec Api.refreshRequest
+                auth.token
+                (SimulatedEffect.Http.expectJson RefreshResult Api.authResponseDecoder)
 
         _ ->
             SimulatedEffect.Cmd.none

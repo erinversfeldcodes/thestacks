@@ -56,7 +56,19 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
     const exportBtn = page.getByRole("button", { name: "Export My Data" });
     await expect(exportBtn).toBeVisible({ timeout: 10000 });
 
+    // "Export queued" is copy this page can render on its own. The 202 is the
+    // server saying it took the request — and it is as far as this journey can
+    // be followed from a browser: the queued DataExportJob builds the export in
+    // memory and neither stores nor sends it, so there is nothing for a reader
+    // to come back and find.
+    const queued = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/gdpr/export" &&
+        r.request().method() === "POST",
+      { timeout: 15000 }
+    );
     await exportBtn.click();
+    expect((await queued).status(), "POST /api/gdpr/export").toBe(202);
 
     await expect(page.getByText("Export queued")).toBeVisible({ timeout: 10000 });
     await expect(page.locator(".error")).toHaveCount(0);

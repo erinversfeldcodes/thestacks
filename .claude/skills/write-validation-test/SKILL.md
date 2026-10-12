@@ -17,7 +17,7 @@ the way a real user would.
 | Pure logic, parsing, a plug's decision | unit | `apps/core/test/**`, `frontend/tests/**`, `apps/scraper` cargo, `apps/vision/tests` |
 | A service boundary / context function / controller action | integration | `apps/core/test/stacks_web/**`, context tests |
 | A whole user-story journey (the user's goal, start to finish) | **acceptance** | `apps/core/test/acceptance/us_X_Y_Z_*.exs` — one per US |
-| The same journey against **real infrastructure** (real DB, Modal, R2, external APIs) | **live-stack** | acceptance/E2E run under `TEST_TARGET=deployed BASE_URL=…` via `scripts/test-deployed.sh` |
+| The same journey against **real infrastructure** (real DB, Modal, R2, external APIs) | **live-stack** | acceptance/E2E run under `BASE_URL=… DATABASE_URL=…` via `scripts/test-deployed.sh` |
 | A browser/UI flow (rendering, clicks, redirects) | Playwright E2E | `e2e/tests/*.spec.ts` (reads `BASE_URL`) |
 | A data-shape / referential-integrity guarantee | dbt test | `dbt/**/schema.yml`, `dbt/tests/**` |
 
@@ -26,7 +26,7 @@ it proves something the lower one can't (real integration, real user journey, re
 
 ## 2. Live-stack tests must reflect realistic user behaviour
 
-A test that runs against a live stack (`TEST_TARGET=deployed` / preview `BASE_URL`) earns its cost
+A test that runs against a live stack (preview `BASE_URL`) earns its cost
 only if it reaches the state the way a real user does. Rules:
 
 - **Drive the public surface, not the internals.** Hit the real API/UI a user would (`POST
@@ -38,7 +38,7 @@ only if it reaches the state the way a real user does. Rules:
   that's a signal the behaviour may be untestable-as-specified — say so, don't fake it.
 - **Assert what the user observes** (status codes, response bodies, redirects, rendered state, the
   audit/event row that results), plus the durable side effect where it matters.
-- **No mocks on a deployed run.** `TEST_TARGET=deployed` means real Modal/Open Library/R2/Neon —
+- **No mocks on a deployed run.** A `BASE_URL` run means real Modal/Open Library/R2/Neon —
   the point is to catch the integration failures mocks hide. Tolerate real-world latency (cold
   starts) with the deployed timeouts already wired (`e2e/playwright.config.ts` bumps to 90 s;
   acceptance runs get the deployed envelope).
@@ -53,11 +53,13 @@ only if it reaches the state the way a real user does. Rules:
   password, a rotated IP. Cover the abuse path, not just the happy path.
 
 ## 4. Wire-up reference
-- Local (mocked, default): `MIX_ENV=test`, `TEST_TARGET=local` — `just test` / `mix test`.
-- Live stack: `TEST_TARGET=deployed BASE_URL=https://<preview>.fly.dev just test-deployed`
-  (`scripts/test-deployed.sh` — needs `.env`: `set -a; source .env; set +a`).
+- Local (mocked, default): `MIX_ENV=test` — `just test` / `mix test`. The mock roster is the whole
+  of `apps/core/config/test.exs`; there is no runtime switch that un-mocks a seam in-process.
+- Live stack: `DATABASE_URL=postgres://… BASE_URL=https://<preview>.fly.dev just test-deployed`
+  (`scripts/test-deployed.sh` — needs `.env`: `set -a; source .env; set +a`; it requires both vars
+  because the `:deployed_only` modules skip themselves without `BASE_URL`).
 - Browser against a preview: `E2E_SERVICES=none BASE_URL=https://<preview>.fly.dev just test-e2e-ci`.
-- See `docs/agents/standards/testing.md` (the 12-layer strategy + `TEST_TARGET` matrix) and the
+- See `docs/agents/standards/testing.md` (the 12-layer strategy + the environment matrix) and the
   `testing-coordinator` agent for cross-cutting coverage.
 
 ## 5. Deployed Elixir tests (`@tag :deployed_only`) — hard-won gotchas

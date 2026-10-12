@@ -15,6 +15,10 @@ defmodule StacksWeb.Plugs.ConsentCheck do
   def init(opts), do: opts
 
   def call(conn, opts) do
+    # The "analytics" default is reserved, not live: no route uses it, and no
+    # code path reads `consent_analytics`. Nothing is collected under it, so
+    # the answer is recorded ahead of a feature that does not exist yet. The
+    # settings page says so in as many words — keep the two in step.
     feature = Keyword.get(opts, :feature, "analytics")
     user = Guardian.Plug.current_resource(conn)
 

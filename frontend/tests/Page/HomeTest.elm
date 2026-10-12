@@ -69,6 +69,15 @@ suite =
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "home__link--marketplace" ]
                         |> Query.has [ Selector.attribute (Attr.href "/marketplace") ]
+            , test "reaches the FAQ → /faq, so the route is linked rather than URL-only" <|
+                \() ->
+                    Home.view Landing
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.attribute (Attr.attribute "data-testid" "home-faq-link") ]
+                        |> Expect.all
+                            [ Query.has [ Selector.attribute (Attr.href "/faq") ]
+                            , Query.has [ Selector.text "Questions, answered" ]
+                            ]
             , test "does NOT route into the collection (no Add-Book CTA)" <|
                 \() ->
                     Home.view Landing

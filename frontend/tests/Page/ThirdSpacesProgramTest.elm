@@ -14,6 +14,7 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 suite : Test
@@ -55,15 +56,9 @@ thirdSpacesInitEffects : Maybe String -> SimulatedEffect ThirdSpaces.Msg
 thirdSpacesInitEffects maybeToken =
     case maybeToken of
         Just token ->
-            SimulatedEffect.Http.request
-                { method = "GET"
-                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                , url = "/api/third-spaces"
-                , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded ThirdSpaces.thirdSpacesResponseDecoder
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            TestHelpers.authedRequestFromSpec ThirdSpaces.spacesRequest
+                token
+                (SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded ThirdSpaces.thirdSpacesResponseDecoder)
 
         Nothing ->
             SimulatedEffect.Cmd.none

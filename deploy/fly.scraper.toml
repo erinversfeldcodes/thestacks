@@ -9,6 +9,23 @@ kill_timeout = "5s"
 [env]
   RUST_LOG = "info"
 
+# 6PN-only via Flycast — no public IPs are ever allocated for this app, so the
+# proxy-routed port is reachable only from inside the org. Proxy routing is
+# what makes scale-to-zero possible: the core app's calls wake it on demand
+# and it sleeps ~5min after core goes quiet. NOTE: once this stanza exists the
+# port stops answering on the instance's 6PN address, so clients MUST use
+# `<app>.flycast` — `.internal` is connection-refused (same trap the metrics
+# store hit; see scripts/deploy-stack.sh).
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[services.ports]]
+    port = 8080
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"

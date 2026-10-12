@@ -42,15 +42,15 @@
 
 | Phase | Name | Stories | Rationale |
 |-------|------|---------|-----------|
-| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.1, US-1.6.2, US-1.6.3, US-1.6.4, US-1.6.5, US-1.6.6, US-1.7.1, US-1.1.9, US-1.5.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8), importing an existing Goodreads library through the ISBN gate (US-1.1.9), and browsing the full catalogue (US-1.5.5). Everything a single user needs to start using The Stacks. |
+| **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.4, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.1, US-1.6.2, US-1.6.3, US-1.6.4, US-1.6.5, US-1.6.6, US-1.7.1, US-1.1.9, US-1.5.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8), importing an existing Goodreads library through the ISBN gate (US-1.1.9), and browsing the full catalogue (US-1.5.5). Everything a single user needs to start using The Stacks. |
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3, US-2.6.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), automatic edition discovery (US-2.6.1), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
 | **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
-| **Phase 5** | Marketplace (Classifieds) | US-7.1, US-7.2, US-7.3, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
+| **Phase 5** | Marketplace | US-7.1.1, US-7.2.1, US-7.3.1, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-10.5.1, US-10.5.2, US-10.5.3, US-10.5.4, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, public handles/profiles (US-10.5.x), groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
-| **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-12.2.1, US-12.2.2, US-13.1.1, US-13.1.2, US-6.2.1 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, the writing assistant (US-12.2.x), threaded comments with block filtering, and POSSE syndication of posts to Substack (US-6.2.1). Requires Phase 6 visibility infrastructure. |
+| **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-12.2.1, US-12.2.2, US-13.1.1, US-13.1.2, US-6.2.1 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering, and POSSE syndication of posts to Substack (US-6.2.1). The writing assistant (US-12.2.x) was designed and deferred to Phase 2, so it is NOT part of what this phase delivered. Requires Phase 6 visibility infrastructure. |
 | **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.1.3, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-14.4.1, US-14.4.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-15.4.1, US-15.5.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), invite-only registration for the closed beta (US-14.1.3), password reset (US-14.4.1/US-14.4.2), a platform FAQ (US-15.4.1) and beta feedback channel (US-15.5.1), and accessibility (US-19.x). |
-| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5, US-8.6, US-14.5.1, US-20.1.1, US-20.2.1 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Also spans data insights/transparency (US-8.6), 24-hour erasure of unconfirmed accounts (US-14.5.1), and the admin/owner surfaces — MFA-gated admin access (US-20.1.1) and owner-only data corrections such as edition un-merge (US-20.2.1). |
+| **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5, US-8.6.1, US-14.5.1, US-20.1.1, US-20.2.1 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Also spans data insights/transparency (US-8.6.1), 24-hour erasure of unconfirmed accounts (US-14.5.1), and the admin/owner surfaces — MFA-gated admin access (US-20.1.1) and owner-only data corrections such as edition un-merge (US-20.2.1). |
 
 ### Additional Features Under Consideration (per phase)
 
@@ -112,7 +112,7 @@ can reopen the decision rather than rediscover the gap.
 
 | Not built | Ruling | Why, and what stands instead |
 |---|---|---|
-| **Cancel-deletion grace period** — a window after "delete my account" in which the user can change their mind | Owner, 2026-07-30 (Wave 7 of `plans/staff-campaign-2026-07-30.md`; recorded by #376) | **Immediate erasure stays.** A grace period means the data still exists after the person asked for it to be gone, which is the opposite of what they asked for, and it turns a one-shot operation into a scheduled state that has to be defended against every other write path for the length of the window. The confirmation flow is where doubt belongs: the delete flow on `Page.Settings.Privacy` already requires a typed confirmation phrase, and `ConfirmDeletionJob` sends a verification email before anything executes. Two deliberate gates in front, none behind. See US-8.1.2. |
+| **Cancel-deletion grace period** — a window after "delete my account" in which the user can change their mind | Owner, 2026-07-30 (`plans/staff-campaign-2026-07-30.md`), re-affirmed 2026-08-19 | **Immediate erasure stays.** A grace period means the data still exists after the person asked for it to be gone, which is the opposite of what they asked for, and it delays an erasure the law expects us to perform without undue delay. It also turns a one-shot operation into a scheduled state that has to be defended against every other write path for the length of the window. There is exactly one gate, and it sits in front: the delete flow on `Page.Settings.Privacy` requires the phrase `DELETE` to be typed exactly before the submit button enables (`deleteConfirmationPhrase`/`deleteConfirmed`). Past that, `DELETE /api/gdpr/account` records the request in the audit log and enqueues `AccountDeletionJob` immediately — no confirmation email, no waiting period, no second gate — and the worker runs the cascade in a single transaction with `max_attempts: 1`. The typed phrase is the deliberate friction; promptness is the reason there is nothing after it. See US-8.1.2. |
 | **User-facing "delete this photo"** — a public control for removing an uploaded image before its retention window expires | Owner, 2026-07-30 (same ruling) | **Excluded publicly**, not excluded outright. Automatic deletion at 30 days (US-8.1.4, `ImageRetentionJob`) is the guarantee we make, and a manual button is a second, weaker path to the same outcome that would need its own authorisation, its own audit, and its own R2 reconciliation. What the ruling *does* require is a follow-up that **verifies the automatic path actually works** — an unverified auto-delete is worse than no button, because it is a promise. That verification is folded into the deferred GDPR revisit; until it is done, US-8.1.4's guarantee is asserted rather than proven. See US-8.1.4. |
 
 Wave 7's other two recovery legs were **not** excluded and are built: undo-remove
@@ -162,8 +162,8 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-5.1.1 _(in-app dashboard superseded by Grafana, #267)_ | -- (Grafana) | R (metrics) | -- | -- | R (all schemas) | RW (metric models) | -- |
 | US-6.1.1 | -- | RW (feed gen) | -- | -- | R (bookshelves, bookshelf_placements, books) | -- | -- |
 | US-7.1 | RW (listing form) | RW (listing) | -- | -- | RW (listings, bookshelf_placements, uploaded_images) | -- | -- |
-| US-7.2 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
-| US-7.3 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
+| US-7.2.1 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
+| US-7.3.1 | -- | -- | -- | -- | -- | -- | **DEFERRED** (ADR 013) |
 | US-10.1.1 | RW (privacy settings) | RW (profile visibility) | -- | -- | RW (users) | -- | -- |
 | US-10.1.2 | RW (block UI) | RW (block) | -- | -- | RW (user_blocks) | -- | -- |
 | US-10.2.1 | RW (shelf settings) | RW (shelf visibility) | -- | -- | RW (bookshelves, groups) | -- | -- |
@@ -434,7 +434,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Upload` module — multi-step state machine: `Uploading` → `Verifying IdentifiedBook` → `ChoosingShelf IdentifiedBook` → `Complete`. Drag-and-drop / file picker. Verification step shows uploaded image alongside identified book ("We think this is…"). Shelf picker defaults to WishList. Post-success: "Add another" / "View on shelf". Types: `UploadStep`, `IdentifiedBook`, `ShelfPicker`. Ports for file-input interop. |
-| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.identify/2` (`POST /api/upload/identify`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`. |
+| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.init/2` (`POST /api/upload/init`) then `commit/2` (`POST /api/upload/:image_id/commit`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`. |
 | **Database** | **Write:** `op.books` (work), `op.book_editions` (edition with ISBN, format, cover), `op.authors`, `op.uploaded_images`, `op.bookshelf_placements`, `op.audit_log`. **Read:** `op.book_editions` (dedup check by ISBN), `op.books` (fuzzy match for multi-format merge). |
 | **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` — sends base64 image to Modal vision service over HMAC-authenticated HTTPS. Returns candidates to caller. `Stacks.Workers.EnrichBookJob` — fetch metadata from Open Library / Google Books after ISBN resolved. |
 | **External Services** | **Modal** (Qwen2.5-VL-7B-Instruct on A10G GPU) for image classification and book extraction. Open Library API for ISBN lookup + work/edition metadata. Google Books API as fallback. |
@@ -489,7 +489,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | The person adding a book can mark it "adults only" (raise-only); the platform owner can override either way. Only 18+ verified users can view gated books. No automatic subject/BISAC classification — that classifier was removed as unreliable. |
-| **Phase** | Phase 1 (late) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Added late within Phase 1; cross-cutting in effect. |
 
 | Layer | Components |
 |-------|------------|
@@ -533,7 +534,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.DuplicateDetected` — shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. For multi-format: shows both editions side-by-side with "Yes, same book" (merge) and "No, it's different" (create new). |
+| **Frontend (Elm)** | The `DuplicateDetected` variant of `Page.Upload`'s result type (there is no separate component module) — shows existing book cover + current shelf, with "View Book", "Move to Shelf", and "Close" actions. For multi-format: shows both editions side-by-side with "Yes, same book" (merge) and "No, it's different" (create new). |
 | **Backend (Phoenix)** | `Stacks.Books.find_existing/1` — ISBN dedup check against `book_editions.isbn`. `Stacks.Books.find_same_work/2` — fuzzy match on title+author (Jaro-Winkler > 0.8) against existing `books` works. Returns existing book data or merge candidate. |
 | **Database** | **Read:** `op.book_editions` (ISBN lookup), `op.books` (fuzzy title+author match), `op.bookshelf_placements` (current shelf). |
 | **Jobs (Oban)** | None. |
@@ -553,7 +554,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.FormatMerge` — side-by-side view of existing and new edition covers. "You own [Title] as a [format]. Add the [new format] edition?" with merge/decline buttons. Reuses warm blue state from duplicate detection. |
+| **Frontend (Elm)** | The `SameWorkFound` / `EditionMerged` variants of `Page.Upload` and its `ConfirmMergeFormat` message (there is no separate component module) — side-by-side view of existing and new edition covers. "You own [Title] as a [format]. Add the [new format] edition?" with merge/decline buttons. Reuses warm blue state from duplicate detection. |
 | **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row under the existing `books` work. Links the new ISBN. Sets `is_primary = false` (existing edition remains primary). No new shelf placement created. `StacksWeb.BookController.merge_format/2` (`POST /api/books/:id/merge-format`). **Un-merge (#376)** is owner-side, not public UI (owner ruling 2026-07-30): `Stacks.DataCorrection.UnmergeEdition`, a `Stacks.DataCorrection.Targeted` correction reached by `POST /api/admin/data_corrections/unmerge_edition/target` behind `[:api, :admin, :require_owner, :rate_limit_admin]`. Splits the edition onto a newly minted work, promotes it to that work's primary, and inherits `visibility_tier` so a repair cannot un-gate content. **Placements are deliberately not moved** — `Shelving.place_book/3` always points a placement at its work's *primary* edition and a merged edition is never primary, so no placement has ever named the split-out edition and which readers acquired it is unrecorded; the plan reports the retained count instead of guessing. See [`runbooks/data-correction.md`](runbooks/data-correction.md). |
 | **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.books` (existing work), `op.book_editions` (existing editions). |
 | **Jobs (Oban)** | `EnrichBookJob` — fetch edition-specific metadata (page count, cover) for the new edition. `TriggerPriceScrapeJob` — scrape prices for the new ISBN. |
@@ -673,7 +674,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Navigation.ShelfRouter` module. Elm `Browser.application` with URL-driven routing. `Animation.SlideTransition` and `Animation.RoomTransition` modules using `elm-animator` or CSS keyframe ports. Swipe gesture detection via ports for mobile. |
+| **Frontend (Elm)** | `Navigation.Route` module. Elm `Browser.application` with URL-driven routing. `Animation.SlideTransition` and `Animation.RoomTransition` modules, CSS-driven. Swipe gesture detection in `Navigation.SwipeNavigation`, wired in `Main`. |
 | **Backend (Phoenix)** | None -- purely client-side routing. Phoenix handles initial page load and falls back to SSR for direct URL access. |
 | **Database** | None. |
 | **Jobs (Oban)** | None. |
@@ -749,12 +750,13 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Searches beyond the user's own collection: other users' public shelves, marketplace listings, partner inventory, and Third Spaces events. Results surfaced in the search dropdown and enriched within the book detail overlay. |
-| **Phase** | Phase 1 (late MVP) / Phase 3 (partner results) |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Shipped late within Phase 1; the partner-results half lands in Phase 3 (Partner Integration). |
 
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `SearchScope` type gains `WholePlatform` variant. Search dropdown splits into "Your Collection" (instant local) and "On the Platform" (async API). External results show contextual labels ("Listed by [user] for R120", "In stock at [partner]", "On [user]'s shelf"). Shimmer placeholders while loading. |
-| **Backend (Phoenix)** | `Stacks.Books.search_platform/2` (`GET /api/search/platform`) — queries across `bookshelf_placements` (public visibility), `listings` (active), `partner_inventory` (approved partners), `partner_events` (related ISBNs). Applies `resolve_visibility/2` filtering and block filtering. Results grouped by type. |
+| **Backend (Phoenix)** | `Stacks.Books.search_platform/2` (`GET /api/search`) — queries across `bookshelf_placements` (public visibility), `listings` (active), `partner_inventory` (approved partners), `partner_events` (related ISBNs). Applies `resolve_visibility/2` filtering and block filtering. Results grouped by type. |
 | **Database** | **Read:** `op.books`, `op.book_editions`, `op.bookshelf_placements` (where visibility = 'platform'), `op.listings`, `op.partner_inventory`, `op.partner_events`, `op.user_blocks`. |
 | **Jobs (Oban)** | None. |
 | **External Services** | None. |
@@ -793,7 +795,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.AbandonModal` -- optional textarea for note, confirm/cancel. Triggered from Reading Pile or Book Detail. |
+| **Frontend (Elm)** | Abandoning is a status on `Components.PlacementCard` (an `Abandoned` option in its status picker), not a dedicated modal. No note is captured — the optional "why" this story asks for is unbuilt. |
 | **Backend (Phoenix)** | `Stacks.Shelving.abandon_book/2` -- special case of move with optional `abandon_note`. |
 | **Database** | **Write:** `op.bookshelf_placements`, `op.bookshelf_placement_history` (with note field). |
 | **Jobs (Oban)** | Wear recalculation. |
@@ -808,19 +810,20 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Track which formats the user owns per book. Formats are now derived from `book_editions` — each owned format is a row in `book_editions` under the same work. Adding a format means creating a new edition (with its own ISBN) or toggling `is_primary`. |
+| **Summary** | Track which formats the reader owns of a book they have shelved — physical, ebook, audiobook — as a set carried on their own placement. This is a claim about the reader's copies, not about which editions of the work exist, so it needs no ISBN and no new edition row. |
 | **Phase** | Phase 1 (MVP) |
+| **Status** | Built |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.FormatPicker` on Book Detail overlay. Shows all known editions as filled icons (owned) plus outlined icons for formats not yet owned. Clicking an un-owned format prompts: "Enter the ISBN for the [format] edition" (inline ISBN input), which triggers the multi-format merge flow (US-1.1.8). |
-| **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row. No `update_placement_formats` — formats are no longer a column on placements. |
-| **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.book_editions` (existing editions for the work). |
-| **Jobs (Oban)** | `EnrichBookJob` (fetch edition-specific metadata). |
-| **External Services** | Open Library, Google Books (ISBN resolution for new format). |
-| **dbt Models** | `stg_book_editions`, `int_format_distribution`. |
+| **Frontend (Elm)** | `Components.FormatPicker`, rendered by `Page.BookDetail.viewFormatsOnShelf` for a reader who owns a placement. Three toggle buttons; a click sends the whole resulting set through `Api.updatePlacementFormats`, and a rejected save rolls the button back and says so. Format strings cross the wire via `Types.Placement.formatToString`/`parseFormat`. |
+| **Backend (Phoenix)** | `PUT /api/placements/:id/formats` → `BookshelfPlacementController.update_formats/2` → `Stacks.Shelving.update_placement_formats/3`, ownership-checked against the placement's bookshelf. Response serialised by `ProtoJSON.placement_formats/1` as `{placement: {id, formats}}`. |
+| **Database** | **Write / Read:** `op.bookshelf_placements.formats` (`{:array, :string}`, default `[]`). Whole-list replacement, not a delta. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. `stg_book_editions` models the work's editions, which is a different question from which copies a reader owns. |
 | **Infrastructure** | None additional. |
-| **Dependencies** | US-1.3.2 (format picker lives on detail overlay), US-1.1.8 (merge flow). |
+| **Dependencies** | US-1.3.2 (the picker lives on the detail overlay), US-1.5.1 (a placement must exist to carry the set). Distinct from US-1.1.8, whose ISBN-driven merge flow adds *editions* and lives on the upload page. |
 
 ---
 
@@ -853,7 +856,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.EmptyShelf` -- per-shelf variant with themed illustration and message. Rendered when `bookshelf_placements` count is 0 for a shelf. Includes CTA button ("Add a book" → upload). |
+| **Frontend (Elm)** | `Components.EmptyBookshelf` -- per-bookshelf variant with themed illustration and message. Rendered when `bookshelf_placements` count is 0 for a shelf. Includes CTA button ("Add a book" → upload). |
 | **Backend (Phoenix)** | None additional (empty state is client-side based on empty shelf data). |
 | **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements` (count check). |
 | **Jobs (Oban)** | None. |
@@ -890,7 +893,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Record that a book has been read again (re-read), incrementing its read count. Canonical refresh of the older US-1.5.3 entry. |
+| **Summary** | Record that a book has been read again (re-read), incrementing its read count. Canonical refresh of an earlier re-read entry that carried the number US-1.5.3 before that number was reassigned to Platform-Wide Discovery Search — cite this section, not the old number. |
 | **Phase** | Phase 1 (MVP) |
 | **Status** | Built |
 | **Implementation** | `Stacks.Shelving.reread_book/2` (context; a re-read is recorded when a completed book is moved back to the Reading Pile). Frontend `Page.BookDetail`. Registered event via `Stacks.Events.Registry`. |
@@ -925,10 +928,28 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 |-----------|--------|
 | **Summary** | Bulk-import a Goodreads CSV export: each row resolved through the ISBN hard gate and placed on a bookshelf, with a per-row import status view. |
 | **Phase** | Phase 1 (MVP) |
-| **Status** | Not built — spec only (`Page.Import`, `POST /api/imports/goodreads`, `GET /api/imports/:id/rows` are specified but absent). Reuses the shipped `Stacks.Books.ISBNResolver` and `POST /api/bookshelves/:bookshelf_name/placements`. |
-| **Implementation** | Planned: `Page.Import`, `StacksWeb.ImportController`; row resolution via `Stacks.Books.ISBNResolver.resolve/1`. |
+| **Status** | Built |
+| **Implementation** | `POST /api/imports/goodreads`, `GET /api/imports`, `GET /api/imports/:id`, `GET /api/imports/:id/rows` → `StacksWeb.ImportController`; `Page.Import`; row resolution via `Stacks.Books.ISBNResolver.resolve/1`. |
 
 ---
+
+#### US-1.1.10 -- Notice When Book Recognition Gets Worse
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A scored, labelled corpus run against the real vision service, so that a regression in book recognition is caught by a failing gate rather than by readers noticing their uploads stopped working. Gates on **no regression against a recorded baseline** rather than an absolute accuracy threshold — on six fixtures one image changing its mind moves a percentage by 16.7 points, which reads as rigour and behaves as noise. |
+| **Phase** | Phase 1 (extended) |
+| **Phase note** | Corpus expansion to ~120 images (per `docs/vision-eval-corpus-plan.md`) is deferred to Phase 2, when per-stratum absolute thresholds become defensible. |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None — this protects the upload path (US-1.1.1, US-1.1.3) rather than adding a surface. |
+| **Backend (Phoenix)** | `mix eval.vision` calls the production seam `Stacks.AI.Client.call_vision/2` against `/analyze`, exactly as `Stacks.Moderation` does. Corpus at `priv/eval/vision_corpus.exs`; baseline at `priv/eval/vision_baseline.json`. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal — the deployed vision service. With no `VISION_SERVICE_URL` the task SKIPS and says so; `EVAL_VISION_REQUIRED=1` turns that skip into a failure for callers that need it enforced. |
+| **dbt Models** | None. |
 
 #### US-1.5.5 -- Browse the Whole Catalogue and Shelve What You Find
 
@@ -1089,12 +1110,12 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Businesses discovered and listed without their consent can request removal. "Is this your business?" link on every discovered listing. Exclusion list prevents re-discovery. |
+| **Summary** | Businesses discovered and listed without their consent can request removal. "Is this your business?" link wherever a discovered business is named on a routed page. Exclusion list prevents re-discovery. |
 | **Phase** | Phase 2 (Enrichment) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | Subtle "Is this your business?" link on `Components.SpaceCard` and `Components.PriceInfo` for discovered (non-partner) sources. Links to a simple form: business name, contact email, choice between "Remove my listing" and "Become a partner". |
+| **Frontend (Elm)** | The link is one component, `Components.BusinessClaim`, so the copy and the route live in one place. Rendered from `Components.PriceInfo` (beside a scraped shop's price) and `Components.AuthorCard` (beside a shop hosting a scraped event) — in each case only when a shop was actually named, since the form's first question is the listing's web address. `Page.ListingRemoval` at `/listing-removal` is the form: the listing's web address, a contact email, an optional note, and an `/about` link for a business that would rather be listed properly. `Page.Faq` carries the same route under `business-listings` in the "Your data" section, and that answer is the entry point that is present unconditionally — the two book-detail blocks appear only when scrape output exists, which today it does not. `Page.ThirdSpaces` also carries the link but is not routed, so it reaches nobody. |
 | **Backend (Phoenix)** | `StacksWeb.OptOutController.create/2` (`POST /api/opt-out`) — unauthenticated endpoint. Creates an opt-out request. Platform owner is notified. For removal: sets `discovered_sources.status = 'excluded'` and/or `third_spaces.opted_out = true`. For partnership interest: routes to US-9.1.1 flow. `Stacks.Discovery.OptOut` context — `request_removal/1`, `process_removal/1`, `add_to_exclusion_list/1`. |
 | **Database** | **Write:** `op.discovered_sources` (status = 'excluded', excluded_at, exclusion_email). `op.third_spaces` (opted_out = true, opted_out_at). `op.audit_log`. |
 | **Jobs (Oban)** | `Stacks.Workers.OptOutConfirmationJob` — sends confirmation email to the business. |
@@ -1149,7 +1170,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | 4-step pipeline: (1) book check via vision, (2) ISBN resolution, (3) metadata lookup, (4) store book as `public`. Age-gating is NOT decided here — it is human-set afterward (see US-1.1.4). |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1169,7 +1191,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | KYC integration for age verification. Self-config for single-user. Proper verification for multi-user. |
-| **Phase** | Cross-cutting (Phase 1 for self-config, Phase 3 for full KYC) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Self-configuration lands in Phase 1 (MVP); full KYC in Phase 3 (Partner Integration). |
 
 | Layer | Components |
 |-------|------------|
@@ -1204,7 +1227,8 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | System health, job status, data freshness, source discovery stats, costs, GDPR compliance. Curator's desk aesthetic. NOT user reading analytics. |
-| **Phase** | Phase 4 (Polish) — **SUPERSEDED by Grafana (#267)** |
+| **Phase** | Phase 4 (Polish) |
+| **Phase note** | SUPERSEDED by Grafana (#267) — the ops-metrics surface is now the Grafana observability stack (ADR-021). |
 
 | Layer | Components |
 |-------|------------|
@@ -1248,9 +1272,9 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Publish Own Site, Syndicate Elsewhere: syndicate a native blog post to Substack (and record the syndication link), with the canonical URL remaining `/blog/:id`. Depends on the blog (Phase 7). |
-| **Phase** | Phase 7 (Blog) |
-| **Status** | Not built — spec only (no syndication modules in `apps/core`). Email-to-Substack leg deliberately deferred; canonical URL stays the post UUID (`/blog/:id`) — slugs deferred with the reasoning recorded in the story. |
-| **Implementation** | Planned: `POST/PUT /api/blog/posts/:id/syndications`, `GET /api/blog/posts/:id/syndication` → `StacksWeb.BlogController`; `Page.Blog.Editor` / `Page.Blog.Post`; visibility gated by `Stacks.Visibility`. Existing per-handle blog feed: `GET /api/feeds/u/:handle/blog`. |
+| **Phase** | Phase 7 (Blog & Comments) |
+| **Status** | Built. Email-to-Substack leg deliberately deferred; canonical URL stays the post UUID (`/blog/:id`) — slugs deferred with the reasoning recorded in the story. |
+| **Implementation** | `GET /api/blog/posts/:id/syndication`, `POST /api/blog/posts/:id/syndications`, `PUT /api/blog/posts/:id/syndications/:sid` → `StacksWeb.BlogController`; `Stacks.Blog.Syndication`; `Components.Syndication`. Existing per-handle blog feed: `GET /api/feeds/u/:handle/blog`. |
 
 ---
 
@@ -1265,7 +1289,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Classifieds listing: photos, condition grading (new / like_new / good / fair / poor), pricing, and seller contact info for off-platform communication. No on-platform payments or messaging. |
-| **Phase** | Phase 5 (Marketplace) — **Implemented** |
+| **Phase** | Phase 5 (Marketplace) |
+| **Phase note** | Implemented. |
 
 | Layer | Components |
 |-------|------------|
@@ -1285,7 +1310,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | **Deferred per [ADR 013](decisions/013-marketplace-classifieds-first.md).** On-platform payments (Stitch Money, #054b) and shipping (Pargo, #054c) are deferred indefinitely. Buyers contact sellers directly using the contact info on the listing. The `transactions`, `offer_threads`, and `offer_messages` tables exist in DB but are unused. |
-| **Phase** | Future (was Phase 5) |
+| **Phase** | Future |
+| **Phase note** | Was Phase 5; deferred (see ADR-013). |
 
 ---
 
@@ -1294,7 +1320,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | **Deferred per [ADR 013](decisions/013-marketplace-classifieds-first.md).** Seller KYC becomes relevant when the platform facilitates financial transactions. Not needed for classifieds model. |
-| **Phase** | Future (was Phase 5) |
+| **Phase** | Future |
+| **Phase note** | Was Phase 5; deferred (see ADR-013). |
 
 ---
 
@@ -1307,7 +1334,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | User can export all personal data in JSON, CSV, or OPDS format. |
-| **Phase** | Phase 2 (Enrichment) / Cross-cutting |
+| **Phase** | Phase 2 (Enrichment) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1327,19 +1355,20 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Cascade delete all user data from operational DB. Anonymise records in warehouse. |
-| **Phase** | Phase 2 (Enrichment) / Cross-cutting |
+| **Phase** | Phase 2 (Enrichment) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | No dedicated page. The delete flow lives on `Page.Settings.Privacy` — a typed confirmation phrase (`"DELETE"`, `deleteConfirmed`) gates `UserClicksDeleteAccount` → `Api.deleteAccount` → `DELETE /api/gdpr/account`, emitting the `AccountDeleted` out-message. There is no `Page.Settings.DeleteAccount` module. |
-| **Backend (Phoenix)** | `Stacks.GDPR.Deletion` -- `delete_user_data/1`. Ecto.Multi transaction for cascade delete across op schema. Separate call to anonymise `wh` schema records. `StacksWeb.GDPRController.delete/2`. |
+| **Backend (Phoenix)** | `Stacks.GDPR.Deletion` -- `delete_user_data/1`. Ecto.Multi transaction for cascade delete across op schema. Separate call to anonymise `wh` schema records. `StacksWeb.GDPRController.delete_account/2` audit-logs the request, enqueues the job, and returns 202. |
 | **Database** | **Delete:** All user rows in `op.*`. **Update:** `wh.*` (anonymise user_id, hash PII). |
-| **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation. `Stacks.Workers.ConfirmDeletionJob` -- verification email before execution. |
+| **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation; `max_attempts: 1`. It is the only job in this flow, enqueued directly by the controller with nothing scheduled ahead of it. |
 | **External Services** | None. |
-| **dbt Models** | `mart_gdpr_deletions` (tracking). |
+| **dbt Models** | `mart_gdpr_compliance` (tracking). |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-8.1.3 (consent), US-8.1.5 (audit log records deletion event). |
-| **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, recorded by #376). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation — the typed confirmation phrase and `ConfirmDeletionJob`'s verification email — not behind it. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
+| **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, re-affirmed 2026-08-19). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, it delays an erasure that is supposed to happen without undue delay, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation, and there is exactly one place it lives — the typed `DELETE` phrase that enables the submit button. Past it the controller enqueues `AccountDeletionJob` immediately: no confirmation email, no waiting period, nothing behind. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
 
 ---
 
@@ -1348,11 +1377,12 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Per-use consent with timestamps. User controls what data is collected and how it is used. |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Settings.Consent` -- toggle switches per consent category. `Components.ConsentBanner` -- first-visit consent collection. Timestamps displayed per consent. |
+| **Frontend (Elm)** | `Page.Settings.Consent` -- toggle switches per consent category. There is no first-visit consent banner; consent is collected only from the settings page. Timestamps displayed per consent. |
 | **Backend (Phoenix)** | `Stacks.GDPR.Consent` -- `grant_consent/2`, `revoke_consent/2`, `check_consent/2`. Plug `StacksWeb.Plugs.ConsentCheck` for gating features on consent. |
 | **Database** | **Write:** Consent records (user_id, consent_type, granted_at, revoked_at) in `op.audit_log` or dedicated consent table. |
 | **Jobs (Oban)** | None. |
@@ -1368,7 +1398,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Uploaded images auto-deleted after 30 days. Only thumbnails retained permanently. |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1389,7 +1420,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Immutable append-only log. Hashed IPs. Encrypted metadata. |
-| **Phase** | Phase 1 (MVP) / Cross-cutting |
+| **Phase** | Phase 1 (MVP) |
+| **Phase note** | Cross-cutting — applies beyond its home phase. |
 
 | Layer | Components |
 |-------|------------|
@@ -1404,12 +1436,13 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 ---
 
-#### US-8.6 -- See What Your Own Data Reveals About You
+#### US-8.6.1 -- See What Your Own Data Reveals About You
 
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | A radical-transparency surface (ADR-019 §3a): show a user the inferences the platform can draw from their own reading data. Retro-story of record for the shipped Insights surface. |
-| **Phase** | Cross-cutting (GDPR / transparency, ADR-019 §3a) |
+| **Phase** | Cross-cutting |
+| **Phase note** | GDPR / transparency; see ADR-019 §3a. |
 | **Status** | Built (shipped in #242, no prior story file) |
 | **Implementation** | `Stacks.Insights`; `GET /api/me/inferences` → `StacksWeb.MeInferenceController.index`. Frontend `Page.Insights` (and `Page.CostTransparency`). Reads own `Shelving.Placement`/`PlacementHistory`/`Bookshelf`. Owner-only linked-accounts de-anonymisation view is explicitly NOT built. |
 
@@ -1935,8 +1968,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | An in-editor writing assistant (chat + contextual nudges) that draws on the author's own reading data, gated by consent (#184). |
 | **Phase** | Phase 7 (Blog & Comments) |
-| **Status** | Built |
-| **Implementation** | `POST /api/blog/posts/:id/chat`, `GET /api/blog/posts/:id/assistant/session`, `.../assistant/nudge` → `StacksWeb.BlogController`; consent-gated route pipeline (#184). Backend `Stacks.WritingAssistant` (`stacks/writing_assistant/`). Frontend `Page.Blog.Editor`. |
+| **Status** | Not built — designed, deferred to Phase 2, which will build it with its own eval. The consent and data-lifecycle surface around it IS shipped; the assistant is not. |
+| **Implementation** | Shipped: `POST /api/blog/posts/:id/chat` → `StacksWeb.BlogController.chat/2`, which answers `{"status": "under_construction"}` — an honest placeholder, not a model call; the consent-gated route pipeline (`:writing_assistant_consent`, #184); the `Stacks.WritingAssistant.*` Ecto schemas and their pgvector tables. Absent: any embedding, retrieval or model-call path (nothing writes a row to `op.embeddings` or `op.book_content_chunks`), `GET /api/blog/posts/:id/assistant/session`, `.../assistant/nudge`, and any assistant UI in `Page.Blog.Editor`. |
 
 ---
 
@@ -1946,8 +1979,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | View and delete the writing-assistant sessions and the derived data the assistant holds about the user. |
 | **Phase** | Phase 7 (Blog & Comments) |
-| **Status** | Built |
-| **Implementation** | `GET /api/writing-assistant/sessions`, `DELETE /api/writing-assistant/sessions/:id` → writing-assistant controller; schema `Stacks.AI.BlogAssistantSession` (`gen/writing_assistant/session.ex`). Frontend `Page.Settings.WritingAssistant`. GDPR-covered derived data. |
+| **Status** | Not built — deferred to Phase 2 with US-12.2.1. There is no assistant data to manage yet, so the management surface is unbuilt; the erasure and export paths that would cover it ARE shipped. |
+| **Implementation** | Shipped: the `Stacks.WritingAssistant.*` schemas (`gen/writing_assistant/session.ex` and siblings); GDPR export coverage (`GDPR.Export`) and purge-on-consent-revoke (`Stacks.Workers.WritingAssistantDataPurgeWorker`), both of which operate correctly over zero rows. Absent: `GET /api/writing-assistant/sessions`, `DELETE /api/writing-assistant/sessions/:id`, and `Page.Settings.WritingAssistant`. |
 
 ---
 
@@ -2110,7 +2143,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | Request a password-reset link by email, then set a new password via a tokened link. |
 | **Phase** | Phase 1 (extended) |
 | **Status** | Built |
-| **Implementation** | `POST /api/auth/forgot-password` → `StacksWeb.AuthController.forgot_password`; `POST /api/auth/reset-password` → `.reset_password`. Frontend `Page.ForgotPassword`, `Page.ResetPassword`. |
+| **Implementation** | `POST /api/auth/forgot-password` → `StacksWeb.AuthController.forgot_password`; `POST /api/auth/reset-password` → `.reset_password`. Frontend: the forgot-password screen is a MODE of `Page.Login` (`Login.init Login.ForgotPassword`), not a module of its own; the reset screen is `Page.ResetPassword`. |
 
 ---
 
@@ -2131,8 +2164,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | Gate registration behind an invite code during closed beta; the owner issues and revokes invites, and the SPA reflects invite-only mode via `/api/config`. |
 | **Phase** | Phase 1 (extended) |
-| **Status** | Not built — spec only (`Stacks.Accounts.Invites`, `Page.Admin.Invites`, invite routes are specified but absent). Builds on shipped `Stacks.Accounts.register` and `/api/config`. |
-| **Implementation** | Planned: `POST /api/auth/register` (invite-gated), `GET /api/auth/invite/:code`, `GET/POST/DELETE /api/admin/invites` → invites admin; `Page.Admin.Invites`, `Page.Login`. |
+| **Status** | Built |
+| **Implementation** | `GET /api/auth/invite/:code` → `StacksWeb.InviteController`; `GET/POST/DELETE /api/admin/invites` → `StacksWeb.InviteAdminController`; `Stacks.Accounts.Invites`; `Page.Admin.Invites`. Invite-gated registration builds on `Stacks.Accounts.register` and `/api/config`. |
 
 ---
 
@@ -2141,7 +2174,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | An account that is never email-confirmed is fully erased within ~24h, so abandoned/unverified registrations do not accumulate personal data. Retro-story of record. |
-| **Phase** | Cross-cutting (auth hygiene / GDPR) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Auth hygiene / GDPR. |
 | **Status** | Built (shipped in #124 A2 / #179 / #373, no prior story file) |
 | **Implementation** | `Stacks.Workers.ExpiredUnverifiedAccountsJob` runs erasure through `Stacks.GDPR.Deletion.delete_user_data/1`; companion sweeps `Stacks.Workers.GuardianTokenSweepJob`, `Stacks.Workers.CacheSweepJob`, `Stacks.Workers.ImageRetentionJob`. Registration/confirmation via `StacksWeb.AuthController` (`POST /api/auth/register`, `.../resend-confirmation`), `Stacks.Accounts.Guardian`. |
 
@@ -2221,8 +2255,9 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 |-----------|--------|
 | **Summary** | A platform-info FAQ page reached via nav/footer, answering the questions a stranger asks before trusting the platform. Launch Milestone B; a new member of the existing epic 15 (15.1–15.3 taken). |
 | **Phase** | Phase 1 (extended) |
-| **Status** | Not built — spec only (`Page.Faq` absent; `/api/config` / `Page.About` exist and would be reused). |
-| **Implementation** | Planned: `Page.Faq` (static content surface, reusing `curator-desk`/`about__*` styles), reachable from nav/footer; server flags via `GET /api/config` → `StacksWeb.ConfigController.show`. Fourteen new CSS classes must ship with rules in the same change (`scripts/check-css.sh`). |
+| **Status** | Built — `/faq` renders `Page.Faq`, publicly and without authentication, linked from the home landing and from About. |
+| **Implementation** | `frontend/src/Page/Faq.elm` — nineteen questions across six sections, each a native `<details>` shipped `open` (keyboard-operable, no JavaScript, findable by browser search). `Route.Faq` → `/faq` in `frontend/src/Navigation/Route.elm`; `PageFaq` wired through `Main.requiresAuth` (public), `initPage`, `pageTitle`, and `viewPage`, which passes `model.config.inviteOnly` so the closed-beta answer follows the server flag rather than a constant. Entry points: `Page.Home.viewLanding` (`home-faq-link`) and `Page.About.viewTransparency` (`about-faq-link`). Data-rights answers link `/settings/privacy`, `/settings/audit-log`, `/transparency`, `/metrics`, `/costs`. Styles reuse `curator-desk` and the shared About/Metrics heading groups; the `faq__*` block ships its own rules in `frontend/css/main.css` (`scripts/check-css.sh` clean, zero orphaned classes). Tests: `frontend/tests/Page/FaqTest.elm`, plus route and auth-matrix coverage in `RouteTest` and `MainRequiresAuthTest`. |
+| **Open** | Licence wording is now one register everywhere: `LICENSE` ("Source Available License"), `Page.About`, the footer, `CLAUDE.md` and the FAQ answer all say *source available*. The FAQ still asks "Is The Stacks open source?" deliberately — that is the question a reader actually arrives with, and the answer restates it accurately rather than dodging it. Fragment deep links (`/faq#erasure`) resolve to real element ids but are not scrolled into view on a cold load; that needs the `Browser.Dom` command from the story's §12. Collapse-all / expand-all is not built. |
 
 ---
 
@@ -2230,16 +2265,86 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | An in-app feedback channel for beta users to submit feedback, with an owner-side triage/status view. A new member of the existing epic 15, reached via nav/footer. |
+| **Summary** | An in-app feedback channel for beta users to submit feedback, with an owner-side reading view. A new member of the existing epic 15, reached from the account menu and the admin disclosure. |
 | **Phase** | Phase 1 (extended) |
-| **Status** | Not built — spec only (`Stacks.Feedback`, `Page.Admin.Feedback` absent). |
-| **Implementation** | Planned: `POST /api/feedback` → `Stacks.Feedback.submit`; `GET /api/admin/feedback`, `PUT /api/admin/feedback/:id/status` → `StacksWeb.FeedbackAdminController`; `Stacks.Notifications.FeedbackHandler`, `Stacks.Workers.FeedbackRetentionJob`; frontend `Page.Admin.Feedback`. |
+| **Status** | Built (minimal shape — one form, one table, one admin list). |
+| **Implementation** | `POST /api/feedback` (authed, `:feedback` rate-limit bucket) → `StacksWeb.FeedbackController.create` → `Stacks.Feedback.submit/3`; `GET /api/admin/feedback` (`:admin` pipeline, MFA + audited) → `StacksWeb.FeedbackAdminController.index` → `Stacks.Feedback.list_entries/1`. Table `op.feedback_entries` from `proto/stacks/common/v1/feedback.proto` (`FeedbackEntry`, `skip_dbt` — the body never reaches the warehouse). Event `feedback.submitted` carries a sender id and a character count, no body. Erasure deletes the rows (`GDPR.Deletion.delete_user_data/2`, `:delete_feedback_entries`); export gains a `feedback` key. Frontend `Page.Feedback` (account menu) and `Page.Admin.Feedback` (admin disclosure); page context is captured via `Route.toPattern`, never `Route.toPath`. |
+| **Deferred** | The story's wider shape: anonymous submission, the four categories, the optional contact email, `GET /api/admin/feedback` (read-only; there is no status-update endpoint) triage, `Stacks.Notifications.FeedbackHandler`, `Stacks.Workers.FeedbackRetentionJob` (180-day sweep), and the `stg_feedback_submissions` / `mart_feedback_volume` models. The retention sweep is the one with a standing obligation behind it — it only bites once anonymous submission exists, since every row today is erasure-reachable through its sender. |
 
 ---
 
 ### 16. Error Handling
 
 ---
+
+#### US-15.6.1 -- Read What the Platform Is and Why
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A public page explaining what The Stacks is, what it refuses to do, and on what terms the source is available. It is the page a stranger lands on before deciding whether to trust anything else. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.About`, routed at `/about` via `Navigation.Route`. Static prose; no fetch. Links onward to the cost and metrics surfaces. |
+| **Backend (Phoenix)** | None — served by the SPA shell. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-15.6.2 -- See What the Platform Costs to Run
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A public page itemising what this platform actually costs its owner to operate, per provider, for the current period. Published because a reader deciding whether to trust a free service is entitled to know how it is paid for. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.CostTransparency`, routed at `/costs`. Fetches on init; `RemoteData` through Loading → Success/Failure. |
+| **Backend (Phoenix)** | `GET /api/costs` -> `StacksWeb.CostController`. Line items built by `Stacks.Costs`, refreshed by `Stacks.Workers.RefreshCostsJob`. |
+| **Database** | Read: the current period's cost line items. |
+| **Jobs (Oban)** | `Stacks.Workers.RefreshCostsJob` — recomputes the period's items from live usage counts. |
+| **External Services** | None at read time; the figures are derived from measured usage and provider rates rather than fetched per request. |
+| **dbt Models** | None. |
+
+#### US-15.6.3 -- Read What the Platform Measures About You
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | The data-transparency essay: what is collected, what is deliberately not, and the reasoning behind each choice. The companion to the metrics surface, which shows the numbers this page explains. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.DataTransparency`, routed at `/transparency`. Static prose; no fetch. Reached from the metrics page and from `Page.Architecture`. |
+| **Backend (Phoenix)** | None — served by the SPA shell. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-15.6.4 -- Read How the Platform Is Built
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | The architecture essay: the shape of the system, the decisions behind it, and why a decision without its reasoning is indistinguishable from an accident six months later. |
+| **Phase** | Phase 1 (extended) |
+| **Phase note** | Content is owner-authored; five editorial markers remain live on the page (RL-067). |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | `Page.Architecture`, routed at `/architecture`. Static prose; no fetch. Links onward to `/metrics` and `/transparency`. |
+| **Backend (Phoenix)** | None — served by the SPA shell. |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
 
 #### US-16.1.1 -- View the 404 Not Found Page
 
@@ -2413,7 +2518,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | Attributes added to existing components: `Components.Spine` gets `aria-label` ("Book: [Title] by [Author], [Pages] pages, [wear state]"). `Components.Shelf` gets `role="list"`, `aria-label` ("[Shelf Name] — N books"). Book detail overlay gets `role="dialog"` with focus trapping. Upload states use `aria-live="polite"` for progress announcements. `Components.UserMenu` dropdown labelled "User menu". |
+| **Frontend (Elm)** | Attributes added to existing components: `Components.Spine` gets `aria-label` ("Book: [Title] by [Author], [Pages] pages, [wear state]"). the shelf row rendered by `Page.Bookshelf.Helpers` gets `role="list"`, `aria-label` ("[Shelf Name] — N books"). Book detail overlay gets `role="dialog"` with focus trapping. Upload states use `aria-live="polite"` for progress announcements. `Components.UserMenu` dropdown labelled "User menu". |
 | **Backend (Phoenix)** | API responses must include all data needed for labels: shelf name, book count per shelf, wear state as text, page count. No new endpoints — data already present in existing responses. |
 | **Database** | None additional. |
 | **Dependencies** | US-1.2.1–4 (shelves), US-1.3.1 (spines), US-1.3.2 (detail overlay). |
@@ -2429,7 +2534,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Navigation.Keyboard` module — keyboard event subscriptions. `tabindex` attributes on all interactive spine elements. Arrow key handlers for shelf grid navigation. Focus management: return focus to triggering spine when overlay closes. Skip link: hidden "Skip to main content" link before navigation. Visible focus indicators styled with platform aesthetic. |
+| **Frontend (Elm)** | `Page.Bookshelf.GridNav` — arrow-key grid navigation; per-module keyboard handlers elsewhere. There is no single keyboard module. `tabindex` attributes on all interactive spine elements. Arrow key handlers for shelf grid navigation. Focus management: return focus to triggering spine when overlay closes. Skip link: hidden "Skip to main content" link before navigation. Visible focus indicators styled with platform aesthetic. |
 | **Backend (Phoenix)** | None (purely client-side). |
 | **Database** | None. |
 | **Dependencies** | US-1.2.1–4 (shelves), US-1.3.2 (detail overlay), US-19.1.1 (ARIA labels). |
@@ -2465,7 +2570,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | Admin surfaces sit behind a dedicated admin login plus a TOTP second factor; a distinct admin session (not the ordinary user JWT) authorises admin actions. Retro-story of record for the shipped MFA gate. |
-| **Phase** | Cross-cutting (admin) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Admin surface — belongs to no single delivery phase. |
 | **Status** | Built (shipped in #237 / #303 / #332, no prior story file) |
 | **Implementation** | `POST /api/admin/auth/login`, `.../mfa/setup`, `.../mfa/confirm`, `.../verify_mfa`, `DELETE /api/admin/auth/logout` → admin auth; `Stacks.AdminSession`, `Stacks.MFA.UserMFA` (secret in `Stacks.EncryptedBinary`). Frontend `Page.Admin.Session`. Token hygiene via `Stacks.Workers.GuardianTokenSweepJob`. |
 
@@ -2476,7 +2582,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Dimension | Detail |
 |-----------|--------|
 | **Summary** | The owner un-merges an edition that was wrongly merged into a work, splitting it back onto its own work, with a required reason and an audit trail. |
-| **Phase** | Cross-cutting (admin) |
+| **Phase** | Cross-cutting |
+| **Phase note** | Admin surface — belongs to no single delivery phase. |
 | **Status** | Built |
 | **Implementation** | `Stacks.DataCorrection` framework (`data_correction/unmerge_edition.ex`, `data_correction/targeted.ex`); `GET /api/admin/data_corrections`, `POST /api/admin/data_corrections/:name/target`, `.../:name/apply` (reason required) → `StacksWeb.DataCorrectionController`. Audited via `Stacks.Audit`; cache invalidated via `Stacks.Books.BookDetailCache`; re-enriched via `Stacks.Workers.EnrichBookJob`. Frontend surfaced through the admin data-corrections view. |
 
@@ -2541,7 +2648,7 @@ These are choices, not gaps. Each names the ruling so a future audit stops
 re-raising it (and a future reader can reopen the decision rather than
 rediscover it). See also the phase-level exclusions table near the top.
 
-- **Cancel-deletion grace period** — EXCLUDED; immediate erasure stays (owner ruling, 2026-07-30). A grace window means the data still exists after the person asked for it to be gone. The doubt belongs in the confirmation flow, not behind it. See US-8.1.2.
+- **Cancel-deletion grace period** — EXCLUDED; immediate erasure stays (owner ruling, 2026-07-30, re-affirmed 2026-08-19). A grace window means the data still exists after the person asked for it to be gone, and it delays an erasure that should happen without undue delay. There is one gate and it is in front: the typed `DELETE` phrase that enables the submit button. Past it the erasure job is enqueued immediately — no confirmation email, nothing behind. See US-8.1.2.
 - **Public "delete this photo" UI** — EXCLUDED publicly; the guarantee is automatic 30-day deletion (US-8.1.4, `ImageRetentionJob`). What the ruling requires instead is *verifying the auto-deletion path actually works* — that verification folds into the deferred GDPR revisit.
 - **Age-gate self-service Verify affordance** — REMOVED by ADR-020 §2; provider-sourced verification is the model, and the provider flow is tracked in #069. A spec asking for a user-facing "Verify my age" button describes a withdrawn design — treat as `n/a (ADR-020 §2, #069)`.
 - **Non-ISBN readables** (articles, zines, papers, video as first-class knowledge sources) — OUT OF SCOPE by the ISBN hard gate (no book enters the system without a verified ISBN). A generalisation to non-ISBN Readables would warrant its own ADR because it touches that gate; recorded as a forward-looking Phase 7 direction, not built.
@@ -2613,7 +2720,6 @@ Which user stories touch each database table:
 | `ShipmentTrackingJob` | US-7.2.1 | Scheduled (hourly) — **DEFERRED** (ADR 013) |
 | `DataExportJob` | US-8.1.1 | On-demand |
 | `AccountDeletionJob` | US-8.1.2 | On-demand |
-| `ConfirmDeletionJob` | US-8.1.2 | On-demand |
 | `ImageRetentionJob` | US-8.1.4 | Scheduled (daily) |
 | `PartnerApprovalNotificationJob` | US-9.1.1 | Event-driven (partner.approved/declined) |
 | `PartnerISBNResolveJob` | US-9.2.1, US-9.2.2 | Event-driven (unknown ISBN in partner inventory) |
@@ -2621,7 +2727,7 @@ Which user stories touch each database table:
 | `PartnerMetricsSnapshotJob` | US-9.5.1 | Scheduled (daily) |
 | `GeographicDiscoveryJob` | US-2.5.2 | Event-driven (user.location_updated) + quarterly Oban.Cron |
 | `OptOutConfirmationJob` | US-2.5.3 | On-demand (opt-out request) |
-| `MarketplaceSaleWorker` | US-7.2 | Event-driven (book.sold — checks buyer WishList, prompts) — **DEFERRED** (ADR 013, relevant when payments are on-platform) |
+| `MarketplaceSaleWorker` | US-7.2.1 | Event-driven (book.sold — checks buyer WishList, prompts) — **DEFERRED** (ADR 013, relevant when payments are on-platform) |
 | `WishListAvailabilityJob` | US-17.3.1 | Event-driven (partner inventory ingested, classifieds listing activated) |
 | `EmailNotificationJob` | US-17.3.1 | On-demand (checks preferences before sending) |
 | `EventSubscriberWorker` | EDA (cross-cutting) | Event-driven (dispatches to subscriber modules) |
@@ -2685,7 +2791,7 @@ Which user stories touch each database table:
 | `mart_data_freshness` | Mart | Multiple | US-5.1.1 |
 | `mart_cost_tracking` | Mart | Multiple | US-5.1.1 |
 | `mart_gdpr_compliance` | Mart | US-8.1.1--5 | US-5.1.1 |
-| `mart_gdpr_deletions` | Mart | US-8.1.2 | US-5.1.1 |
+| `mart_gdpr_compliance` | Mart | US-8.1.2 | US-5.1.1 |
 | `mart_consent_status` | Mart | US-8.1.3 | US-5.1.1 |
 | `mart_image_retention_stats` | Mart | US-8.1.4 | US-5.1.1 |
 | `mart_audit_summary` | Mart | US-8.1.5 | US-5.1.1 |

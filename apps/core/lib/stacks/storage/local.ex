@@ -4,6 +4,11 @@ defmodule Stacks.Storage.Local do
 
       Stores files under `priv/static/uploads/` (configurable via `:upload_dir`).
       Presigned URLs return `file://` paths — only suitable for local development.
+
+      GDPR export objects are the exception: `priv/static/uploads` is served by
+      `Plug.Static`, and an export is a complete copy of one user's personal
+      data, so `exports/` keys land under `:export_dir` (`priv/exports`) where
+      the endpoint cannot reach them.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour
@@ -53,6 +58,22 @@ defmodule Stacks.Storage.Local do
   end
 
   @impl true
+  @spec list(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list(prefix) do
+    base = base_for(prefix)
+
+    keys =
+      base
+      |> Path.join(prefix)
+      |> Path.join("**")
+      |> Path.wildcard()
+      |> Enum.reject(&File.dir?/1)
+      |> Enum.map(&Path.relative_to(&1, base))
+
+    {:ok, keys}
+  end
+
+  @impl true
   @spec delete(String.t()) :: :ok | {:error, term()}
   def delete(key) do
     path = full_path(key)
@@ -71,8 +92,8 @@ defmodule Stacks.Storage.Local do
     end
   end
 
-  defp full_path(key) do
-    base = Application.get_env(:core, :upload_dir, "priv/static/uploads")
-    Path.join(base, key)
-  end
+  defp full_path(key), do: Path.join(base_for(key), key)
+
+  defp base_for("exports/" <> _), do: Application.get_env(:core, :export_dir, "priv/exports")
+  defp base_for(_key), do: Application.get_env(:core, :upload_dir, "priv/static/uploads")
 end

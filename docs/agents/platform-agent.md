@@ -59,7 +59,7 @@ Develop and maintain infrastructure, CI/CD, containerisation, and deployment: Fl
 - `cleanup-preview.sh` — tear down a preview environment
 - `check-slo-gate.sh` — post-deploy SLO probe gate
 - `rollback-production.sh` — rollback production release (called by composite action)
-- `probe-production.sh`, `preflight-resolver-health.sh`, `warmup-vision.sh` — deploy-time probes
+- `probe-production.sh`, `preflight-resolver-health.sh` — deploy-time probes (vision warmup is inline in deploy-stack.sh)
 - `security.sh` — canonical security scan suite (Sobelow, Semgrep, Trivy, Gitleaks, Checkov, Hadolint)
 
 ### Nix/Flox

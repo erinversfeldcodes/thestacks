@@ -725,6 +725,10 @@ userSuite =
                         , notifyEventMatches = False
                         , emailConfirmed = False
                         , emailConfirmationToken = ""
+                        , pendingEmail = ""
+                        , pendingEmailToken = ""
+                        , pendingEmailSentAt = ""
+                        , pendingEmailRevertToken = ""
                         , passwordResetToken = ""
                         , passwordResetSentAt = ""
                         , createdAt = ""
@@ -732,6 +736,7 @@ userSuite =
                         , failedLoginCount = 0
                         , failedLoginFirstAt = ""
                         , lockedUntil = ""
+                        , lockoutDurationSeconds = 0
                         }
 
                     result =
@@ -1243,6 +1248,10 @@ responseSuite =
                             , notifyEventMatches = False
                             , emailConfirmed = False
                             , emailConfirmationToken = ""
+                            , pendingEmail = ""
+                            , pendingEmailToken = ""
+                            , pendingEmailSentAt = ""
+                            , pendingEmailRevertToken = ""
                             , passwordResetToken = ""
                             , passwordResetSentAt = ""
                             , createdAt = ""
@@ -1250,6 +1259,7 @@ responseSuite =
                             , failedLoginCount = 0
                             , failedLoginFirstAt = ""
                             , lockedUntil = ""
+                            , lockoutDurationSeconds = 0
                             }
                         }
 
@@ -1450,7 +1460,10 @@ blogSuite =
                             "id": "bp-3",
                             "title": "Cottage Core Reading",
                             "visibility": "platform",
-                            "created_at": "2026-03-22T00:00:00Z"
+                            "created_at": "2026-03-22T00:00:00Z",
+                            "body": "The shelf by the window.",
+                            "author_display_name": "Ada Reader",
+                            "author_handle": "ada"
                         }
                         """
 
@@ -1464,6 +1477,13 @@ blogSuite =
                             , \s -> Expect.equal "Cottage Core Reading" s.title
                             , \s -> Expect.equal BlogVisibilityPlatform s.visibility
                             , \s -> Expect.equal "2026-03-22T00:00:00Z" s.createdAt
+
+                            -- The archive shows a preview and a byline. Both were
+                            -- absent from this message, so the list rendered an
+                            -- empty paragraph under every anonymous title.
+                            , \s -> Expect.equal "The shelf by the window." s.body
+                            , \s -> Expect.equal "Ada Reader" s.authorDisplayName
+                            , \s -> Expect.equal "ada" s.authorHandle
                             ]
                             summary
 
