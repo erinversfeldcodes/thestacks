@@ -286,6 +286,26 @@ else
     NEON_CONNECTION_URI=""
 fi
 
+# The Ecto schemas are generated HERE, before anything compiles the core app
+# on this machine — and the vision eval below does exactly that, by running
+# `mix eval.vision` against the checkout. They used to be generated further
+# down, after the eval, so the eval compiled a tree with no
+# `Stacks.Accounts.User` and died as "COULD NOT RUN". The preview workflow
+# happened to pre-generate them in its own step, which hid the ordering from
+# every PR; the production workflow did not, and the first prod deploy of that
+# script ordering rolled back. The script owns its own prerequisite now, so no
+# caller has to know.
+echo ""
+echo "==> Generating Ecto schemas from proto..."
+bash "$REPO_ROOT/scripts/gen-ecto-proto.sh" \
+    || { echo "FAIL deploy: gen-ecto-proto.sh failed"; exit 1; }
+python3 "$REPO_ROOT/scripts/gen_python_proto.py" --language elixir \
+    || { echo "FAIL deploy: gen_python_proto.py --language elixir failed"; exit 1; }
+if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROOT/apps/core/lib/stacks/gen" 2>/dev/null)" ]]; then
+    echo "FAIL deploy: apps/core/lib/stacks/gen/ is empty after generation"; exit 1
+fi
+echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
+
 if [[ -z "${SKIP_VISION:-}" ]] && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     MODAL_PYTHON=""
     if [[ -x "${REPO_ROOT}/apps/vision/.venv/bin/python3" ]] \
@@ -755,17 +775,6 @@ else
     echo "FAIL deploy: scripts/gen-elm-proto.sh not found"
     exit 1
 fi
-
-echo ""
-echo "==> Generating Ecto schemas from proto..."
-bash "$REPO_ROOT/scripts/gen-ecto-proto.sh" \
-    || { echo "FAIL deploy: gen-ecto-proto.sh failed"; exit 1; }
-python3 "$REPO_ROOT/scripts/gen_python_proto.py" --language elixir \
-    || { echo "FAIL deploy: gen_python_proto.py --language elixir failed"; exit 1; }
-if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROOT/apps/core/lib/stacks/gen" 2>/dev/null)" ]]; then
-    echo "FAIL deploy: apps/core/lib/stacks/gen/ is empty after generation"; exit 1
-fi
-echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 
 if [[ "${PROD_MODE}" == 1 ]]; then
     echo ""
