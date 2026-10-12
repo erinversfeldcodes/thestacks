@@ -39,6 +39,8 @@ defmodule Mix.Tasks.Eval.Vision do
 
   @switches [record: :boolean, corpus: :string]
   @baseline_path "priv/eval/vision_baseline.json"
+  @call_attempts 3
+  @retry_pause_ms 30_000
 
   @impl Mix.Task
   def run(argv) do
@@ -104,9 +106,13 @@ defmodule Mix.Tasks.Eval.Vision do
       {:ok, bytes} ->
         b64 = Base.encode64(bytes)
 
-        case analyze(b64) do
+        case analyze_with_retry(b64, @call_attempts) do
           {:error, reason} ->
-            Map.merge(item, %{ok: false, detail: "call failed: #{inspect(reason)}"})
+            Map.merge(item, %{
+              ok: false,
+              unscored: true,
+              detail: "call failed after #{@call_attempts} attempt(s): #{inspect(reason)}"
+            })
 
           {classified, isbns} ->
             book_ok = classified == item.expect_book
@@ -119,6 +125,25 @@ defmodule Mix.Tasks.Eval.Vision do
         end
     end
   end
+
+  # A failed CALL is not a wrong ANSWER. A freshly deployed service answers its
+  # first heavy request only after loading the model, and past the HTTP window
+  # the platform answers 303 instead of waiting — so the failed first call IS
+  # the warmup, and a retry scores the now-warm service. Only after the
+  # attempts are spent does the case become unscored — never a wrong answer,
+  # because counting it as one once reported a cold cache as "model regressed".
+  defp analyze_with_retry(b64, attempts) when attempts > 1 do
+    case analyze(b64) do
+      {:error, _reason} ->
+        Process.sleep(@retry_pause_ms)
+        analyze_with_retry(b64, attempts - 1)
+
+      scored ->
+        scored
+    end
+  end
+
+  defp analyze_with_retry(b64, _last), do: analyze(b64)
 
   # The production seam exactly: `Stacks.Moderation` posts `%{image: b64}` to
   # /analyze and reads a CLASSIFICATION_RESULT_* enum plus a `books` list, each
@@ -174,7 +199,20 @@ defmodule Mix.Tasks.Eval.Vision do
   defp gate(results, record?) do
     passed = Enum.count(results, & &1.ok)
     total = length(results)
+    unscored = Enum.count(results, &Map.get(&1, :unscored, false))
     Mix.shell().info("\nscore: #{passed}/#{total}")
+
+    # An unscored case poisons both verdicts: the score can neither prove a
+    # regression (the model never answered) nor clear the gate (the baseline
+    # counts every case). Say that, in words deploy-stack.sh classifies as a
+    # broken gate rather than a scored regression — it greps for REGRESSION.
+    if unscored > 0 and not record? do
+      Mix.raise(
+        "eval.vision: INCOMPLETE — #{unscored} of #{total} case(s) could not be scored " <>
+          "(the call failed; that is transport, not a model answer). " <>
+          "No regression is claimed and no pass is granted on a partial score."
+      )
+    end
 
     baseline_file = Path.join(Application.app_dir(:core), @baseline_path)
     baseline = read_baseline(baseline_file)
