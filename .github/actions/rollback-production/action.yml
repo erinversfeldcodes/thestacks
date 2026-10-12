@@ -205,6 +205,12 @@ runs:
         TRIGGERED_BY: ${{ inputs.triggered-by }}
       run: |
         set -euo pipefail
+        # The audit row is written by compiling the core app on this runner,
+        # and the core app does not compile without its proto-generated Ecto
+        # schemas (gitignored). The first production rollback hit exactly that
+        # and this best-effort step silently wrote no audit row at all.
+        scripts/gen-ecto-proto.sh
+        python3 scripts/gen_python_proto.py --language elixir
         cd apps/core
         mix run -e '
           nilify = fn
