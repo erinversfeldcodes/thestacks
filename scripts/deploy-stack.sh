@@ -174,11 +174,24 @@ else
     INVITE_ONLY_REGISTRATION="true"
     RATE_LIMIT_PUBLIC="5000"
     RATE_LIMIT_E2E_HELPER="5000"
-    # The whole E2E suite arrives from ONE runner IP, and its fast opening
-    # specs are mostly register/login — they exhaust a 60/60s :auth budget
-    # inside the first minute, and every later form login 429s until the
-    # sliding window drains. Prod keeps the config default.
-    RATE_LIMIT_AUTH="5000"
+    # The :auth ceiling serves two masters on a preview, and the number lives
+    # between them. It must sit ABOVE the suite's organic burst: the whole E2E
+    # run arrives from ONE runner IP, and its fast opening specs are mostly
+    # register/login — under prod's 60/60s they exhausted the budget inside
+    # the first minute and every later form login 429'd until the window
+    # drained. And it must sit WITHIN reach of the rate-limit spec's flood:
+    # that spec is the only E2E proof the bucket limits at all, and at a
+    # ceiling of 5000 it could never see a 429 — brute-force protection
+    # unprovable by construction. 200 clears the burst (~100/min peak) with
+    # 2x headroom and is floodable in ~30s by the spec, which runs LAST and
+    # serially so its own flood cannot starve a concurrent login. The spec
+    # reads the value via E2E_AUTH_RATE_LIMIT (exported below) so the two
+    # cannot drift apart. Prod keeps the config default.
+    RATE_LIMIT_AUTH="200"
+    # Hand the ceiling to the E2E step (same job) so the spec floods past it.
+    if [[ -n "${GITHUB_ENV:-}" ]]; then
+        echo "E2E_AUTH_RATE_LIMIT=${RATE_LIMIT_AUTH}" >> "${GITHUB_ENV}"
+    fi
     SMOKE_TESTS_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
