@@ -156,6 +156,19 @@ if [[ -z "${INVOCATION_LOG:-}" ]]; then
         echo "FAIL rollback: could not check out ${MODAL_PREV_COMMIT} from ${ORIGIN_REMOTE}" >&2
         exit 1
     }
+    # A fresh clone has none of the proto-generated Python the vision app
+    # imports at startup (`app/proto/gen`, gitignored). The first production
+    # rollback deployed exactly such a tree, and the rolled-back vision app
+    # crash-looped on ModuleNotFoundError while every other signal said the
+    # rollback had succeeded. Generate before deploying, from the checked-out
+    # commit's own generator so the artefacts match that commit.
+    (
+        cd "$WORK_DIR/stacks-rollback"
+        python3 scripts/gen_python_proto.py --language python
+    ) || {
+        echo "FAIL rollback: could not generate the vision app's proto artefacts at ${MODAL_PREV_COMMIT}" >&2
+        exit 1
+    }
     MODAL_APP_NAME="$MODAL_APP_NAME" \
         modal deploy "$WORK_DIR/stacks-rollback/apps/vision/modal_app.py" \
         || {
