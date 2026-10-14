@@ -179,6 +179,42 @@ defmodule Stacks.Accounts.InvitesTest do
       assert row.code_prefix == invite.code_prefix
       refute Map.has_key?(row, :note)
       refute Map.has_key?(row, :code_hash)
+
+      # The remaining two excluded columns, and the reason they belong here
+      # rather than being left to the `select` that currently enforces them.
+      #
+      # This export goes to the REDEEMER. `note` and `invited_email` are the
+      # ISSUER's words and the issuer's record of who they invited, and
+      # `issued_by_id` is the issuer's identity — three columns of a THIRD
+      # party's data sitting on a row the redeemer is entitled to see the
+      # prefix of. `code_hash` is a credential. All four are excluded only by
+      # the `select` in `Export.export_user_data/2`; replacing that select with
+      # a bare `Repo.all()` — which is what the sibling `library_imports` query
+      # does, so it is the house style in the same function — exports all four.
+      #
+      # The warehouse direction of this exact promise is already asserted:
+      # `gdpr_test.exs`'s @warehouse_forbidden_columns names
+      # `note invited_email code_hash` for `stg_invite_codes.sql`. The export
+      # direction was asserted for two of the three.
+      refute Map.has_key?(row, :invited_email)
+      refute Map.has_key?(row, :issued_by_id)
+
+      # And by VALUE, not only by key name. Every assertion above is satisfied
+      # by a secret re-keyed on its way out — `%{invite_code: code_hash}` passes
+      # all four. This is the direction that caught a real credential hole in
+      # the user-row exclusion list.
+      serialised = inspect(row)
+
+      for {label, secret} <- [
+            {"code hash", Repo.get!(InviteCode, invite.id).code_hash},
+            {"issuer's private note", "private note"}
+          ],
+          is_binary(secret) and secret != "" do
+        refute serialised =~ secret,
+               "the #{label} appears in the redeemer's export by value. It is excluded by key " <>
+                 "but present under a different one, which is the same disclosure with a " <>
+                 "different label on it."
+      end
     end
 
     test "the invitation survives the ISSUER's erasure, so the redeemer can still see it" do
