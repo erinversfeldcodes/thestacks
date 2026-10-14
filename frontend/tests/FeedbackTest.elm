@@ -14,6 +14,7 @@ import Api
 import Expect
 import Html.Attributes as Attr
 import Http
+import Json.Decode as Decode
 import Json.Encode as Encode
 import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
 import Page.Admin.Feedback as AdminQueue
@@ -67,7 +68,15 @@ queue entries total =
 
 queueAt : Int -> RemoteData Http.Error Api.AdminFeedbackPage -> AdminQueue.Model
 queueAt offset page =
-    { page = page, offset = offset, token = Just "token" }
+    { page = page, offset = offset }
+
+
+adminUpdate :
+    AdminQueue.Msg
+    -> AdminQueue.Model
+    -> ( AdminQueue.Model, Cmd AdminQueue.Msg, AdminQueue.OutMsg )
+adminUpdate msg model =
+    AdminQueue.update msg model (Just "token")
 
 
 {-| Every route with an argument, given an argument no path segment could be
@@ -258,7 +267,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            AdminQueue.update
+                            adminUpdate
                                 (AdminQueue.EntriesReceived
                                     (Ok { entries = [ entry "one" ], total = 1 })
                                 )
@@ -269,7 +278,7 @@ suite =
                 \_ ->
                     let
                         ( _, _, out ) =
-                            AdminQueue.update
+                            adminUpdate
                                 (AdminQueue.EntriesReceived (Err (Http.BadStatus 401)))
                                 (queueAt 0 Loading)
                     in
@@ -278,7 +287,7 @@ suite =
                 \_ ->
                     let
                         ( _, _, out ) =
-                            AdminQueue.update
+                            adminUpdate
                                 (AdminQueue.EntriesReceived (Err Http.NetworkError))
                                 (queueAt 0 Loading)
                     in
@@ -340,25 +349,38 @@ suite =
                             [ Query.has [ testId "admin-feedback-error" ]
                             , Query.has [ testId "admin-feedback-newer" ]
                             ]
-            , test "asking for older feedback moves the window a page on" <|
+            , test "asking for older feedback moves the window past what was shown" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            AdminQueue.update AdminQueue.ShowOlder (queue [ entry "one" ] 143)
+                            adminUpdate AdminQueue.ClickedOlder
+                                (queue (List.repeat AdminQueue.pageSize (entry "one")) 143)
                     in
                     Expect.equal AdminQueue.pageSize model.offset
+            , test "a short page advances by what arrived, not by what was asked for" <|
+                \_ ->
+                    -- The window advances on the server's actual answer. Asking
+                    -- for 25 and being given 10 means the next window starts at
+                    -- 10; advancing by 25 would skip fifteen entries that were
+                    -- never shown, on the only interface that can read them.
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedOlder
+                                (queue (List.repeat 10 (entry "one")) 143)
+                    in
+                    Expect.equal 10 model.offset
             , test "asking for older feedback at the end of the queue stays put" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            AdminQueue.update AdminQueue.ShowOlder (queue [ entry "one" ] 1)
+                            adminUpdate AdminQueue.ClickedOlder (queue [ entry "one" ] 1)
                     in
                     Expect.equal 0 model.offset
             , test "coming back from a later window never goes past the start" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            AdminQueue.update AdminQueue.ShowNewer
+                            adminUpdate AdminQueue.ClickedNewer
                                 (queueAt AdminQueue.pageSize
                                     (Success { entries = [ entry "one" ], total = 143 })
                                 )
@@ -375,5 +397,106 @@ suite =
                             [ Query.hasNot [ testId "admin-feedback-empty" ]
                             , Query.has [ Selector.text "10 in total" ]
                             ]
+            , test "coming back from a window that is not a whole page lands on the start" <|
+                \_ ->
+                    -- From offset 10 the arithmetic is 10 - 25 = -15, so this is
+                    -- the only case that exercises the floor at all. The
+                    -- previous test starts at exactly one page, where 25 - 25 is
+                    -- already 0 and the floor is never reached — its name
+                    -- claimed cover it did not have.
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedNewer
+                                (queueAt 10 (Success { entries = [ entry "one" ], total = 143 }))
+                    in
+                    Expect.equal 0 model.offset
+            ]
+        , describe "the window actually reaches the server"
+            [ test "the request names the endpoint and carries the window it was given" <|
+                \_ ->
+                    -- The one piece of this change nothing else could reach. An
+                    -- off-by-one here serves the same page forever and every
+                    -- paging test above still passes, because they assert the
+                    -- model and never the request.
+                    Expect.equal
+                        { method = "GET"
+                        , url = "/api/admin/feedback?limit=25&offset=50"
+                        , body = Nothing
+                        }
+                        (Api.adminFeedbackRequest { limit = 25, offset = 50 })
+            , test "the first window asks for offset zero rather than omitting it" <|
+                \_ ->
+                    Expect.equal "/api/admin/feedback?limit=25&offset=0"
+                        (Api.adminFeedbackRequest { limit = 25, offset = 0 }).url
+            ]
+        , describe "the queue response decodes"
+            [ test "a populated page carries its entries and the whole-queue total" <|
+                \_ ->
+                    case
+                        Decode.decodeString Api.adminFeedbackPageDecoder
+                            """
+                            { "feedback": [ { "id": "f1", "body": "The spines overlap.",
+                                              "page_context": "wishlist",
+                                              "sender_handle": "mara",
+                                              "created_at": "2026-08-18T09:30:00Z" } ],
+                              "total": 143 }
+                            """
+                    of
+                        Ok page ->
+                            Expect.equal ( 1, 143 ) ( List.length page.entries, page.total )
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "an empty page with a non-zero total decodes — that is a window past the end" <|
+                \_ ->
+                    case
+                        Decode.decodeString Api.adminFeedbackPageDecoder
+                            """{ "feedback": [], "total": 10 }"""
+                    of
+                        Ok page ->
+                            Expect.equal ( 0, 10 ) ( List.length page.entries, page.total )
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "a response with no total is a decode failure" <|
+                \_ ->
+                    -- Without this, renaming the server's `total` to anything
+                    -- else leaves the page saying "could not load the feedback"
+                    -- forever with the whole suite green.
+                    case
+                        Decode.decodeString Api.adminFeedbackPageDecoder
+                            """{ "feedback": [] }"""
+                    of
+                        Ok _ ->
+                            Expect.fail "total must stay required — the count is the point"
+
+                        Err _ ->
+                            Expect.pass
+            ]
+        , describe "the invitation code never travels in the URL"
+            [ test "the lookup is a POST and the code is in the body" <|
+                \_ ->
+                    -- The reason this endpoint is a POST at all: a code in the
+                    -- path is written into the request log on every attempt.
+                    -- Nothing else pins that, so a later refactor could put it
+                    -- back with no test failing.
+                    let
+                        spec =
+                            Api.checkInviteRequest "STK-ABCD-1234"
+                    in
+                    Expect.all
+                        [ \s -> Expect.equal "POST" s.method
+                        , \s ->
+                            Expect.equal False (String.contains "STK-ABCD-1234" s.url)
+                        , \s ->
+                            Expect.equal
+                                (Just
+                                    (Encode.object
+                                        [ ( "code", Encode.string "STK-ABCD-1234" ) ]
+                                    )
+                                )
+                                s.body
+                        ]
+                        spec
             ]
         ]

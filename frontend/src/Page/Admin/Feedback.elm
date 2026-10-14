@@ -26,7 +26,7 @@ cannot tell a full page from a truncated queue.
 
 import Api exposing (AdminFeedbackEntry, AdminFeedbackPage)
 import Html exposing (Html, button, div, h1, li, p, span, text, ul)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
@@ -41,17 +41,21 @@ pageSize =
     25
 
 
+{-| No token here, deliberately. Every sibling admin page takes it as `update`'s
+third argument, read fresh from one place on each dispatch, and the function
+that supplies it carries a post-mortem of what a second copy cost: it drifted,
+and every admin action 401'd behind a page that still looked loaded.
+-}
 type alias Model =
     { page : RemoteData Http.Error AdminFeedbackPage
     , offset : Int
-    , token : Maybe String
     }
 
 
 type Msg
     = EntriesReceived (Result Http.Error AdminFeedbackPage)
-    | ShowOlder
-    | ShowNewer
+    | ClickedOlder
+    | ClickedNewer
 
 
 type OutMsg
@@ -61,7 +65,7 @@ type OutMsg
 
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
-    ( { page = Loading, offset = 0, token = maybeToken }
+    ( { page = Loading, offset = 0 }
     , fetch maybeToken 0
     )
 
@@ -78,8 +82,8 @@ fetch maybeToken offset =
             Cmd.none
 
 
-update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update msg model =
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update msg model maybeToken =
     case msg of
         EntriesReceived (Ok page) ->
             ( { model | page = Success page }, Cmd.none, NoOut )
@@ -91,28 +95,33 @@ update msg model =
             else
                 ( { model | page = Failure err }, Cmd.none, NoOut )
 
-        ShowOlder ->
-            let
-                offset =
-                    model.offset + pageSize
-            in
+        ClickedOlder ->
             if hasOlder model then
+                let
+                    -- Advanced by what the server ACTUALLY returned, not by the
+                    -- page size we asked for. The two agree today because the
+                    -- server honours a limit of 25, but a change to its clamp
+                    -- would silently skip or repeat rows; counting what arrived
+                    -- is right whenever there is a next page at all.
+                    offset =
+                        model.offset + shownCount model
+                in
                 ( { model | offset = offset, page = Loading }
-                , fetch model.token offset
+                , fetch maybeToken offset
                 , NoOut
                 )
 
             else
                 ( model, Cmd.none, NoOut )
 
-        ShowNewer ->
-            let
-                offset =
-                    max 0 (model.offset - pageSize)
-            in
-            if model.offset > 0 then
+        ClickedNewer ->
+            if hasNewer model then
+                let
+                    offset =
+                        max 0 (model.offset - pageSize)
+                in
                 ( { model | offset = offset, page = Loading }
-                , fetch model.token offset
+                , fetch maybeToken offset
                 , NoOut
                 )
 
@@ -132,6 +141,27 @@ hasOlder model =
 
         _ ->
             False
+
+
+{-| True when there is a window before this one. One function rather than a
+predicate written twice in two polarities, which is how the view's copy and the
+update's copy drift apart.
+-}
+hasNewer : Model -> Bool
+hasNewer model =
+    model.offset > 0
+
+
+{-| How many entries the current window actually returned.
+-}
+shownCount : Model -> Int
+shownCount model =
+    case model.page of
+        Success page ->
+            List.length page.entries
+
+        _ ->
+            0
 
 
 view : Model -> Html Msg
@@ -188,7 +218,15 @@ viewCount model page =
                     ++ " of "
                     ++ String.fromInt page.total
     in
-    p [ class "admin-feedback__count", testId "admin-feedback-count" ]
+    -- `aria-live` because paging replaces the list underneath a reader who
+    -- cannot see it change; this line is the only thing that says where they
+    -- now are. The existing pager's class is reused rather than a second one
+    -- invented for the same job.
+    p
+        [ class "admin__page-info admin-feedback__count"
+        , attribute "aria-live" "polite"
+        , testId "admin-feedback-count"
+        ]
         [ text label ]
 
 
@@ -206,7 +244,7 @@ viewPager : Model -> Html Msg
 viewPager model =
     let
         newer =
-            model.offset > 0
+            hasNewer model
 
         older =
             hasOlder model
@@ -220,7 +258,7 @@ viewPager model =
                 button
                     [ class "btn btn--secondary btn--sm"
                     , testId "admin-feedback-newer"
-                    , onClick ShowNewer
+                    , onClick ClickedNewer
                     ]
                     [ text "Newer" ]
 
@@ -230,7 +268,7 @@ viewPager model =
                 button
                     [ class "btn btn--secondary btn--sm"
                     , testId "admin-feedback-older"
-                    , onClick ShowOlder
+                    , onClick ClickedOlder
                     ]
                     [ text "Older" ]
 

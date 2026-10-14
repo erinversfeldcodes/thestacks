@@ -2704,7 +2704,7 @@ update msg model =
                 PageAdminFeedback subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminFeedback.update subMsg subModel
+                            AdminFeedback.update subMsg subModel (adminTokenFor model)
                     in
                     case outMsg of
                         AdminFeedback.NoOut ->
