@@ -175,6 +175,46 @@ for s in "${REQUIRED_SECRETS[@]}"; do
     fi
 done
 
+# ── the production database URL's provenance ─────────────────────────────────
+#
+# A deleted comment here asserted that NEON_PROJECT_ID and NEON_API_KEY "should
+# not be referenced from this workflow" at all, because production never
+# consults Neon. That claim is now OBSOLETE rather than unmechanised: the
+# workflow legitimately uses both, in two places added after the comment was
+# written — capturing the pre-migrate write-ahead-log position so a rollback can
+# restore to a point in time, and handing that position to the rollback
+# composite. A gate asserting the old claim would fail against the correct
+# design, so it was not built.
+#
+# What SURVIVES of the comment is narrower and still worth holding: production's
+# DATABASE_URL is COMPOSED from its own secret components, never fetched from
+# Neon's API. That is the half with consequences — a URL obtained from Neon
+# would point at whichever branch that call happened to return, which on a
+# two-project architecture is how a production migration ends up running against
+# a staging branch.
+test_case "prod_database_url_is_composed_not_fetched" \
+    "production composes its DATABASE_URL from its own secrets rather than asking Neon for one"
+COMPOSE_STEP="$(awk '
+    /^      - name: Compose DATABASE_URL/ { in_step = 1; print; next }
+    in_step && /^      - name:/ { exit }
+    in_step { print }
+' "$WF")"
+
+if [[ -z "$COMPOSE_STEP" ]]; then
+    _record_fail "no step composes DATABASE_URL — production may now be obtaining it some other way, and this suite can no longer tell"
+else
+    for component in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+        assert_contains "$COMPOSE_STEP" "$component" \
+            "the composed URL still uses $component"
+    done
+
+    assert_not_contains "$COMPOSE_STEP" "console.neon.tech" \
+        "the compose step does not call Neon's API — a fetched URL points at whichever branch that call returns, which is how a production migration ends up running against staging"
+
+    assert_not_contains "$COMPOSE_STEP" "NEON_API_KEY" \
+        "the compose step does not take a Neon credential, so it cannot be fetching the URL"
+fi
+
 test_case "rollback_if_failure" "rollback step uses failure() (not just gate.conclusion)"
 ROLLBACK_BLOCK="$(python3 -c '
 import re, sys
