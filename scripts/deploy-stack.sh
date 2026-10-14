@@ -157,6 +157,20 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # shell/.env export can promote it onto the prod app — production must launch with
     # age-gating invisible and inert.
     AGE_GATING_ENABLED=""
+    # Invite-only registration is the LAUNCH posture, so unlike the dark flags
+    # above this is set ON rather than forced empty — but it is set HERE, which
+    # is the point. Every other posture flag is pinned on BOTH branches, and
+    # this one was pinned only on the preview branch, so the staging line's
+    # `${VAR:+...}` expansion dropped it entirely whenever the variable was
+    # unset: fly was told nothing, and the prod app kept whatever was last
+    # staged. The flag's state became a function of deploy history rather than
+    # of this script, in both directions — a clean shell could leave
+    # registration OPEN, and a stale .env export could promote closed beta.
+    #
+    # Reading this branch now tells you the flag's production value. When the
+    # closed beta is lifted this line becomes `""` and the lift is a reviewable
+    # diff rather than an environment change nobody can see.
+    INVITE_ONLY_REGISTRATION="true"
     RATE_LIMIT_PUBLIC=""
     RATE_LIMIT_E2E_HELPER=""
     RATE_LIMIT_AUTH=""
