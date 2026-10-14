@@ -427,10 +427,14 @@ defmodule Stacks.ShelvingTest do
       # and then stopped, which left a deliberate lock as the only thing holding
       # an invariant, protected by nothing.
       #
-      # So this asserts the weaker, checkable thing: the lock is still there.
-      # That is worth having precisely because the lock is invisible — it has no
-      # return value anyone reads, so it looks like a dead query to anyone
-      # tidying up.
+      # So this asserts the weaker, checkable thing: the lock is still there,
+      # AND that it is taken BEFORE the count. That second half is not padding.
+      # The first version of this test asserted presence alone, and a probe
+      # that MOVED the lock below the aggregate — leaving it present and
+      # useless, since a lock acquired after the count it is meant to serialise
+      # serialises nothing — passed it. A lock in the wrong place is the more
+      # likely regression than a deleted one, because it survives every reading
+      # that greps for the line.
       source = File.read!("lib/stacks/shelving.ex")
 
       capacity_fn =
@@ -451,6 +455,28 @@ defmodule Stacks.ShelvingTest do
                "concurrent placements can both read active_count < limit and both insert, " <>
                "putting the pile one past its cap. The lock's result is deliberately " <>
                "discarded, so it reads like a dead query — it is not."
+
+      lock_at = :binary.match(body, ~s(lock: "FOR UPDATE")) |> elem(0)
+
+      count_at =
+        case :binary.match(body, "repo.aggregate") do
+          {at, _} ->
+            at
+
+          :nomatch ->
+            flunk(
+              "the capacity check no longer counts with repo.aggregate, so this test can no " <>
+                "longer tell whether the lock precedes the count. Re-point it at whatever " <>
+                "reads the pile's size."
+            )
+        end
+
+      assert lock_at < count_at,
+             "the row lock is taken AFTER the count it exists to serialise, which makes it " <>
+               "inert: both concurrent placements complete their count before either acquires " <>
+               "the lock, so both still read active_count < limit and both insert. The lock " <>
+               "must be the first statement in the function. (lock at byte #{lock_at}, count " <>
+               "at byte #{count_at}.)"
     end
 
     test "moving within a full reading pile is not blocked" do

@@ -9,20 +9,6 @@ defmodule Stacks.Audit do
 
   alias Core.Repo
 
-  @doc """
-      Logs an audit entry. This function only ever INSERTs — never updates or deletes.
-
-      ## Options
-      - `:resource_type` — type of the resource being acted on (e.g. "book", "user")
-      - `:resource_id` — UUID of the resource
-      - `:ip` — raw IP string (will be hashed via SHA-256 before storage)
-      - `:metadata` — arbitrary map stored as jsonb
-      - `:endpoint` — API endpoint for admin calls (e.g. "/api/admin/users/by_email")
-      - `:latency_ms` — round-trip latency in milliseconds for admin calls
-      - `:success` — whether the admin call succeeded
-      - `:row_count` — rows returned or affected by the admin call
-      - `:operator_session_id` — UUID of the admin session issuing the call
-  """
   # ⚠️ `action` and `resource_type` are arbitrary strings on the way IN — the
   # function signature says `String.t()` and nothing validates them — and they
   # went straight out as Prometheus labels. Every caller today passes a literal
@@ -81,6 +67,20 @@ defmodule Stacks.Audit do
   @spec bounded_label_for(term(), [String.t()]) :: String.t()
   def bounded_label_for(value, allowed), do: bounded_label(value, allowed)
 
+  @doc """
+      Logs an audit entry. This function only ever INSERTs — never updates or deletes.
+
+      ## Options
+      - `:resource_type` — type of the resource being acted on (e.g. "book", "user")
+      - `:resource_id` — UUID of the resource
+      - `:ip` — raw IP string (will be hashed via SHA-256 before storage)
+      - `:metadata` — arbitrary map stored as jsonb
+      - `:endpoint` — API endpoint for admin calls (e.g. "/api/admin/users/by_email")
+      - `:latency_ms` — round-trip latency in milliseconds for admin calls
+      - `:success` — whether the admin call succeeded
+      - `:row_count` — rows returned or affected by the admin call
+      - `:operator_session_id` — UUID of the admin session issuing the call
+  """
   @spec log(binary() | nil, String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def log(user_id, action, opts \\ []) do
     now = DateTime.utc_now()
