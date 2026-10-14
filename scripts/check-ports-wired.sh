@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# ⚠️ The `|| echo .` below is why the vacuity guards further down are not
+# hypothetical. With git absent or the tree not a repository, REPO_ROOT becomes
+# `.`, the cd is a no-op, and every glob resolves against whatever directory the
+# caller happened to be in — matching nothing. Ways in: a source tarball or a
+# Docker build context that excludes `.git` (this repo's .dockerignore does), git
+# missing from PATH in a minimal container or hook environment, or any future move
+# of the Elm source root. The `2>/dev/null` swallows the only signal, so without
+# those guards the gate reports a clean pass in every one of those cases.
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
 MODE="${1:-check}"
@@ -49,6 +57,21 @@ if not seen_files:
     print("FAIL: found no Elm sources under frontend/src.")
     print("That cannot be right, so the scan has drifted from the source rather than")
     print("the app having stopped declaring ports. Fix this script before trusting it.")
+    sys.exit(1)
+
+# And the ROSTER, not just the files — a strictly stronger check than the one
+# above, because it also catches the case where the files are found and nothing
+# is harvested from them: a drifted `port` regex, a moved `port module`, an Elm
+# syntax change. Files present with zero ports parsed would satisfy the check
+# above and still compare two empty sets.
+#
+# Zero ports is always drift, never an achievement: this SPA is a port module
+# and carries 21 of them.
+if not ports:
+    print("FAIL: found no `port` declarations under frontend/src.")
+    print("The SPA is a `port module`, so zero ports means this scan stopped")
+    print("matching the source, not that the app stopped using ports.")
+    print("Fix this script before trusting it.")
     sys.exit(1)
 
 subscribes = set()   # app.ports.X.subscribe
