@@ -606,6 +606,40 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert slug =~ ~r/_and_\d+_more_to_users$/
     end
 
+    test "keeps a whole name, and still fits, at the longest column Postgres allows" do
+      # The invariant the implementation states: keep whole names only, and
+      # always keep at least ONE, so the slug can never degenerate to
+      # `add__and_1_more_to_x` — a filename and a module name with nothing in
+      # them saying what the migration does.
+      #
+      # The capping test above proves a name survives for a 29-column input. It
+      # cannot reach the case where the FIRST name alone exceeds the budget,
+      # which is the input that would produce the empty slug.
+      #
+      # 63 bytes is the real ceiling, not an arbitrary large number: a column
+      # name is a Postgres identifier and `max_identifier_length` is 63, so no
+      # longer name can reach this function from a migration. (The longest in
+      # the schema today is 28.) Past that ceiling the two invariants genuinely
+      # conflict — keeping a 300-byte name whole produces a 343-byte filename
+      # the filesystem will not take — and the implementation prefers the whole
+      # name. That is the right preference and it is unreachable, so this test
+      # pins the boundary rather than the impossible case.
+      longest_possible_column = String.duplicate("a", 63)
+
+      slug = MigrationGenerator.add_columns_slug(fields_named([longest_possible_column]), "users")
+
+      refute slug =~ ~r/^add__/,
+             "the slug lost its only column name and says nothing about the migration: " <>
+               inspect(slug)
+
+      assert String.starts_with?(slug, "add_a")
+
+      filename = "20260728000000_#{slug}.exs"
+      assert byte_size(filename) < 255, "the filename is unusable at #{byte_size(filename)} bytes"
+
+      assert byte_size("Elixir.Core.Repo.Migrations." <> Macro.camelize(slug)) < 255
+    end
+
     test "is deterministic for the same field set" do
       names = Enum.map(1..40, &"some_reasonably_long_column_name_#{&1}")
       fields = fields_named(names)
