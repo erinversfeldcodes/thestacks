@@ -224,6 +224,18 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "User registration outcomes (right-to-account creation).",
           tags: [:result]
         ),
+        # The invite gate's own outcomes. Refusals were deliberately moved OFF the
+        # registration counter above so they would not drown its signal — but no
+        # reporter was declared for the event they moved to, so the launch gate went
+        # from counted-but-noisy to not counted at all. `result` is bounded by
+        # `invite_telemetry_label/1`: ok, required, invalid, expired, revoked,
+        # exhausted, email_mismatch.
+        counter(
+          [:stacks, :auth, :invite, :count, :total],
+          event_name: [:stacks, :auth, :invite],
+          description: "Invite-gate outcomes at registration (closed-beta admission).",
+          tags: [:result]
+        ),
         counter(
           [:stacks, :auth, :jwt_issued, :count, :total],
           event_name: [:stacks, :auth, :jwt_issued],

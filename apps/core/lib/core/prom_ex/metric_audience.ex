@@ -17,6 +17,10 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_auth_jwt_issued_count_total" => :public,
     "stacks_auth_login_failure_count_total" => :public,
     "stacks_auth_mfa_verify_count_total" => :public,
+    # Invite-gate outcomes. `:public` like its registration sibling: the counter is an
+    # aggregate keyed only by a bounded result atom (ok / required / invalid / expired
+    # / revoked / exhausted / email_mismatch) and names no invite, code or person.
+    "stacks_auth_invite_count_total" => :public,
     "stacks_auth_refresh_reuse_detected_count_total" => :public,
     "stacks_auth_refresh_revoke_failed_count_total" => :public,
     "stacks_auth_registration_count_total" => :public,

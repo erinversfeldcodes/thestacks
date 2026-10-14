@@ -66,7 +66,7 @@
   "timezone": "",
   "title": "The Stacks \u2014 Auth & Session Security",
   "uid": "stacks-auth-security",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "id": 1,
@@ -177,7 +177,7 @@
     {
       "id": 4,
       "type": "row",
-      "title": "Auth lifecycle (login \u00b7 registration \u00b7 JWT \u00b7 MFA)",
+      "title": "Auth lifecycle (login \u00b7 registration \u00b7 invite \u00b7 JWT \u00b7 MFA)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -424,6 +424,55 @@
           },
           "expr": "sum by (outcome) (rate(stacks_auth_mfa_verify_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Invite-gate outcomes (closed-beta admission)",
+      "description": "WHAT: rate of invite-gate decisions at registration, split by result (ok / required / invalid / expired / revoked / exhausted / email_mismatch). HOW: rate over stacks_auth_invite_count_total, emitted by AuthController.register/2 with a bounded result atom \u2014 an aggregate that names no invite, code or person. MEANS: who is getting into the closed beta and who is being turned away. `ok` is only emitted while invite-only registration is switched on, so a flat zero line across every series means the gate is OFF and registration is open to anyone. WATCH: `invalid` dominating means codes are being guessed \u2014 the gate is being brute-forced, and the codes are short enough for that to matter; a rise in `required` means people are arriving at signup without a code at all (a link shared past its audience, or an invite email that did not land); `expired` or `exhausted` climbing while `ok` falls means the invites in circulation have run out and real guests are being refused.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(stacks_auth_invite_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{result}}"
         }
       ]
     },
