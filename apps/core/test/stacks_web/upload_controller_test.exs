@@ -138,6 +138,33 @@ defmodule StacksWeb.UploadControllerTest do
       assert String.contains?(content_type, "text/event-stream")
     end
 
+    test "accepts the Accept header a real EventSource actually sends", %{user: user} do
+      # The browser's EventSource always sends `Accept: text/event-stream`. The
+      # SSE pipeline therefore must NOT carry `plug :accepts, ["json"]`, which
+      # would answer 406 and break upload progress for every reader.
+      #
+      # The test above cannot catch that: it sends no Accept header at all, and
+      # an absent Accept passes an accepts filter. So the invariant — stated in
+      # the router and relied on by the only streaming endpoint in the app — was
+      # asserted nowhere, and adding that plug "for consistency" with the sibling
+      # `:api` pipeline would have shipped green.
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      conn =
+        build_conn()
+        |> put_req_header("accept", "text/event-stream")
+        |> get("/api/upload/#{image.id}/stream?token=#{token}")
+
+      refute conn.status == 406,
+             "the SSE route rejected `Accept: text/event-stream` — the SSE pipeline has " <>
+               "gained an accepts filter, and a real EventSource cannot connect"
+
+      assert conn.status == 200
+    end
+
     test "returns 404 for unknown image_id", %{user: user} do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
