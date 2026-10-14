@@ -411,6 +411,48 @@ defmodule Stacks.ShelvingTest do
       assert active_pile_count(user.id) == 54
     end
 
+    test "the capacity check takes a row lock, so two concurrent placements cannot both pass" do
+      # ⚠️ A SOURCE assertion, deliberately, and the reason is the finding.
+      #
+      # `check_reading_pile_capacity/2` opens with a `SELECT … FOR UPDATE` on the
+      # bookshelf row whose result is discarded. The line exists purely for its
+      # side effect: it serialises concurrent capacity checks, so two placements
+      # arriving together cannot both read `active_count < limit` and both
+      # insert, taking the pile one past its cap.
+      #
+      # Nothing failed if that line were deleted. The test sandbox puts every
+      # connection inside ONE transaction, so the race it prevents cannot be
+      # staged here at all — a behavioural test would need two real connections
+      # and a deployed database. The original comment at that line said as much
+      # and then stopped, which left a deliberate lock as the only thing holding
+      # an invariant, protected by nothing.
+      #
+      # So this asserts the weaker, checkable thing: the lock is still there.
+      # That is worth having precisely because the lock is invisible — it has no
+      # return value anyone reads, so it looks like a dead query to anyone
+      # tidying up.
+      source = File.read!("lib/stacks/shelving.ex")
+
+      capacity_fn =
+        source
+        |> String.split(
+          "defp check_reading_pile_capacity(repo, %Bookshelf{name: \"reading_pile\""
+        )
+        |> Enum.at(1)
+
+      assert capacity_fn,
+             "check_reading_pile_capacity/2 was renamed or removed — this test can no longer " <>
+               "find the function whose lock it guards, so it is asserting nothing"
+
+      body = capacity_fn |> String.split("\n  end") |> List.first()
+
+      assert body =~ ~s(lock: "FOR UPDATE"),
+             "the reading-pile capacity check no longer takes a row lock. Without it two " <>
+               "concurrent placements can both read active_count < limit and both insert, " <>
+               "putting the pile one past its cap. The lock's result is deliberately " <>
+               "discarded, so it reads like a dead query — it is not."
+    end
+
     test "moving within a full reading pile is not blocked" do
       user = insert(:user)
       pile = fill_reading_pile(user, 50)
