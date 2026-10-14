@@ -35,19 +35,58 @@ sources = {}
 for path in sorted(glob.glob(LIB_GLOB, recursive=True)):
     sources[path] = read(path)
 
-transports = {}  # module name -> defining path
+# Outbound calls this gate KNOWS how to reason about. `Finch.request` was the
+# only shape when this was written, and the header claimed Finch was the app's
+# only HTTP client — which was already false on disk: the object-storage module
+# calls `Req.get`, and it never appeared in the roster at all. It happens to be
+# seamed correctly, so the gate was silently right about a module it was not
+# checking, which is the worst way to be right.
+#
+# `Finch.stream` is included for the same reason, though no caller exists today:
+# a streaming client is an outbound call, and the roster should not have to be
+# extended at the moment somebody adds one under deadline.
+OUTBOUND = re.compile(
+    r"\b(?:Finch\.(?:request|stream)!?|Req\.(?:get|post|put|patch|delete|request)!?)\("
+)
+
+# Anything that LOOKS like an HTTP call, whether this gate understands it or
+# not. A module matching this but not OUTBOUND is a transport the gate cannot
+# see, and it fails below rather than dropping quietly out of scope — which is
+# how the next library gets in. Same property the stale-exemption check already
+# gives the roster from the other direction.
+HTTP_ISH = re.compile(
+    r"\b(?:Finch\.|Req\.|HTTPoison\.|Tesla\.|:hackney\.|:httpc\.|Mint\.HTTP\.)\w+!?\("
+)
+
+transports = {}   # module name -> defining path
+unrecognised = []  # (module, path) making an HTTP call this gate cannot parse
 for path, text in sources.items():
     code = blank_comments(text)
-    if "Finch.request(" not in code:
-        continue
     match = re.search(r"^defmodule\s+([A-Za-z0-9_.]+)\s+do", code, re.M)
-    if match:
-        transports[match.group(1)] = path
+    if not match:
+        continue
+    module = match.group(1)
+
+    if OUTBOUND.search(code):
+        transports[module] = path
+    elif HTTP_ISH.search(code):
+        unrecognised.append((module, path))
 
 if not transports:
-    print("FAIL: found no module calling Finch.request under apps/core/lib.")
+    print("FAIL: found no module making an outbound HTTP call under apps/core/lib.")
     print("That cannot be right, so the scan has drifted from the source rather than the")
     print("app having stopped making HTTP requests. Fix this script before trusting it.")
+    sys.exit(1)
+
+if unrecognised:
+    print("FAIL: these modules make an outbound HTTP call this gate does not recognise:")
+    for module, path in sorted(unrecognised):
+        print(f"  {module}  ({path})")
+    print("")
+    print("A transport the gate cannot see is a transport with no asserted test floor —")
+    print("it drops out of scope silently, which is how the previous one got in. Extend")
+    print("OUTBOUND to cover the call shape, then this module joins the roster and has")
+    print("to prove its seam like every other.")
     sys.exit(1)
 
 SEAM = re.compile(
@@ -65,6 +104,30 @@ for path, text in sources.items():
         module = this_module if default == "__MODULE__" else default
         if module in transports:
             seams.setdefault(module, set()).add(key)
+
+# A seam does not have to live in the module that makes the call. The
+# object-storage client is selected by a FACADE — `Application.get_env(:core,
+# :storage, Stacks.Storage.Local)` in the parent module — so the harvest above
+# attributes that key to the DEFAULT it names and never to the production
+# implementation, which is the module that actually calls out.
+#
+# So also attribute a key to every module CONFIG ASSIGNS to it. That module can
+# be selected for that key, which is exactly what being behind a seam means. The
+# `:test` default check below is unchanged and still has to pass, so this widens
+# who is recognised as seamed without weakening what seamed requires.
+#
+# Without this, bringing the storage client into the roster reported it as
+# unseamed when it is seamed — and a gate that cries wolf gets edited until it
+# is quiet, which is worse than the gap it was closing.
+CONFIG_GLOBS = ["apps/core/config/*.exs", "config/*.exs"]
+CONFIG_ASSIGN = re.compile(
+    r"^\s*config\s+:core,\s*:([a-z0-9_]+),\s*([A-Za-z0-9_.]+)\s*$", re.M
+)
+for pattern in CONFIG_GLOBS:
+    for path in sorted(glob.glob(pattern)):
+        for key, module in CONFIG_ASSIGN.findall(read(path)):
+            if module in transports:
+                seams.setdefault(module, set()).add(key)
 
 test_config = read(TEST_CONFIG)
 
