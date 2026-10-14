@@ -443,7 +443,29 @@ defmodule Stacks.ShelvingTest do
       :telemetry.attach(
         handler_id,
         [:core, :repo, :query],
-        fn _event, _measurements, %{query: query}, _ -> send(test_pid, {:sql, query}) end,
+        # ⚠️ The `self() == test_pid` filter is load-bearing, not hygiene.
+        #
+        # A telemetry handler runs in the EMITTING process, and this module is
+        # `async: true`, so without the filter every query from every
+        # concurrently-running test module lands in this mailbox for the whole
+        # attach-to-detach window. A neighbour's placement count arriving before
+        # this test's own `FOR UPDATE` yields `count_i < lock_i` and fails
+        # against perfectly correct code.
+        #
+        # That was proven, not theorised: a foreign process running an ordinary
+        # `Repo.aggregate(Placement, :count)` produces
+        # `SELECT count(*) FROM "op"."bookshelf_placements" AS b0 …`, which
+        # matches this test's own `count_i` pattern at index 0 with no lock
+        # ahead of it. An Oban plugin's polling query lands the same way. It did
+        # not reproduce at seeds 1 and 7, which makes it load-dependent — the
+        # worst kind, because it passes until CI is busy.
+        #
+        # `place_book/3` runs its Multi in the calling process, so filtering to
+        # this process keeps the test fully behavioural while making it
+        # deterministic.
+        fn _event, _measurements, %{query: query}, _ ->
+          if self() == test_pid, do: send(test_pid, {:sql, query})
+        end,
         nil
       )
 
