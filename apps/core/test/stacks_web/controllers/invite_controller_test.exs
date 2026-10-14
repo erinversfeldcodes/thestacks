@@ -97,6 +97,18 @@ defmodule StacksWeb.InviteControllerTest do
     test "a blank code answers the same, revealing nothing a prober can use", %{conn: conn} do
       assert conn |> check("") |> json_response(404) |> Map.get("error") == "invite_not_found"
     end
+
+    test "a code that is not a string answers the same, and never 500s", %{conn: conn} do
+      # This endpoint is unauthenticated and pre-account, and its whole design is
+      # that a prober learns nothing from the response. A 500 with a stacktrace
+      # is the most informative answer it could possibly give, and coercing the
+      # value instead — a charlist becoming a string, a number becoming its
+      # digits — is guessing at an intent it has no business guessing.
+      for value <- [%{"a" => 1}, [104, 105], 12, true, nil] do
+        body = conn |> post("/api/auth/invite/check", %{"code" => value}) |> json_response(404)
+        assert body["error"] == "invite_not_found"
+      end
+    end
   end
 
   describe "the code does not reach the request log" do

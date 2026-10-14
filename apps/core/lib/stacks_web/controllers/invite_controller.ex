@@ -25,11 +25,8 @@ defmodule StacksWeb.InviteController do
   alias Stacks.Accounts.Invites
 
   @doc ~S(POST /api/auth/invite/check — body `{"code": "…"}`.)
-  def check(conn, params) do
-    # A missing or blank code answers `invite_not_found` rather than 400: it is
-    # the truthful answer (no invitation matches an empty string) and it tells a
-    # prober nothing that distinguishing the two cases would.
-    case Invites.check(to_string(params["code"] || "")) do
+  def check(conn, %{"code" => code}) when is_binary(code) do
+    case Invites.check(code) do
       {:ok, %{expires_at: expires_at, email_bound: email_bound}} ->
         json(conn, %{
           valid: true,
@@ -49,5 +46,22 @@ defmodule StacksWeb.InviteController do
       {:error, :invite_exhausted} ->
         conn |> put_status(409) |> json(%{error: "invite_exhausted"})
     end
+  end
+
+  # Anything that is not a string `code` — absent, null, a number, a list, an
+  # object — answers exactly as an unknown code does.
+  #
+  # It used to be `to_string(params["code"] || "")`, which raises
+  # `Protocol.UndefinedError` on a map or a boolean: a 500 with a stacktrace, on
+  # an UNAUTHENTICATED endpoint whose entire design is that a prober learns
+  # nothing from the response. A distinguishable crash is information. It also
+  # silently coerced, so `[104, 105]` became "hi" and `12` became "12" — a
+  # charlist is a plausible thing for a hand-rolled client to send, and guessing
+  # what it meant is not this endpoint's job.
+  #
+  # Answering not-found rather than 400 is the same reasoning as the blank case:
+  # it is the truthful answer, and the two are indistinguishable to a prober.
+  def check(conn, _params) do
+    conn |> put_status(404) |> json(%{error: "invite_not_found"})
   end
 end
