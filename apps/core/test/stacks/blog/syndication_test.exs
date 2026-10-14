@@ -9,6 +9,19 @@ defmodule Stacks.Blog.SyndicationTest do
   alias Stacks.Events.EventLog
   alias Stacks.GDPR.Deletion
 
+  # What an Atom consumer does to `<content type="html">`: one pass of entity
+  # decoding, after which the result is treated as HTML. Asserting against this
+  # rather than against the raw XML is the whole point — the raw XML was
+  # well-formed both before and after the escaping fix, so only the consumer's
+  # view distinguishes text from markup.
+  defp unescape_once(xml) do
+    xml
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&amp;", "&")
+  end
+
   defp public_post(attrs \\ []) do
     insert(
       :post,
@@ -59,13 +72,39 @@ defmodule Stacks.Blog.SyndicationTest do
       refute xml =~ "<entry>"
     end
 
-    test "post bodies are escaped — markup in a post cannot break the XML" do
+    test "post bodies survive the consumer's unescape as TEXT, not as markup" do
+      # ⚠️ This assertion was changed deliberately. It previously asserted the
+      # SINGLE-escaped form `&lt;/feed&gt; weird &amp; trick`, which is well-formed
+      # XML — and that is exactly why the defect survived: the feed is emitted as
+      # `<content type="html">`, which per Atom is entity-encoded HTML, so the
+      # consumer unescapes once. One level of escaping meant the consumer recovered
+      # `</feed> weird & trick` and rendered it as markup. The body is plain text
+      # everywhere else in the product, so the feed was the only surface
+      # reinterpreting it.
+      #
+      # The body therefore needs two levels here, so that one unescape leaves text.
       user = insert(:user)
       public_post(user: user, body: "One </feed> weird & trick")
 
       {xml, _} = Syndication.feed_xml(user)
-      assert xml =~ "&lt;/feed&gt; weird &amp; trick"
+
+      assert xml =~ "&amp;lt;/feed&amp;gt; weird &amp;amp; trick"
       refute xml =~ "One </feed>"
+
+      # What the consumer actually sees after its single unescape: the escaped text,
+      # not tags.
+      assert xml |> unescape_once() =~ "&lt;/feed&gt; weird &amp; trick"
+      refute xml |> unescape_once() =~ "<p>One </feed>"
+    end
+
+    test "a script tag in a body is not republished as live markup" do
+      user = insert(:user)
+      public_post(user: user, body: "Look: <script>alert(1)</script>")
+
+      {xml, _} = Syndication.feed_xml(user)
+
+      refute unescape_once(xml) =~ "<script>"
+      assert unescape_once(xml) =~ "&lt;script&gt;"
     end
   end
 

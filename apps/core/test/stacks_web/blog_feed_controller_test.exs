@@ -38,6 +38,33 @@ defmodule StacksWeb.BlogFeedControllerTest do
       assert response(conn2, 304) == ""
     end
 
+    test "an EMPTY feed has a stable validator, so a poller gets 304 not 200", %{conn: conn} do
+      # `<updated>` used to fall back to `DateTime.utc_now()` for a writer with no
+      # public posts. The ETag is an MD5 of the whole document, so the validator
+      # changed on every request: the 304 branch could never match and every Substack
+      # poll of an empty feed served a full 200, despite the max-age beside it. It
+      # also claimed the feed had just changed when nothing was ever published.
+      user = insert(:user)
+
+      first = get(conn, "/api/feeds/u/#{user.handle}/blog")
+      assert [etag] = get_resp_header(first, "etag")
+      refute response(first, 200) =~ "<entry>"
+
+      second =
+        build_conn()
+        |> get("/api/feeds/u/#{user.handle}/blog")
+
+      assert get_resp_header(second, "etag") == [etag],
+             "the validator must not change when nothing has changed"
+
+      conditional =
+        build_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/api/feeds/u/#{user.handle}/blog")
+
+      assert response(conditional, 304) == ""
+    end
+
     test "⛔ a valid OWNER token changes nothing: the platform post stays absent", %{conn: conn} do
       user = insert(:user)
       public_post(user, title: "For everyone")

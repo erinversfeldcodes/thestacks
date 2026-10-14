@@ -54,10 +54,17 @@ defmodule Stacks.Blog.Syndication do
     posts = feed_posts(user.id)
     display_name = user.display_name || user.handle || "A reader"
 
+    # An EMPTY feed falls back to the writer's own `created_at`, not to `now()`.
+    #
+    # `now()` made `<updated>` change on every request, and since the ETag is an MD5
+    # of the whole document (`Feeds.compute_etag/1`), the validator changed too — so
+    # the 304 branch could never match and every poll of an empty feed served a full
+    # 200, despite the `max-age=300` beside it. It also asserted the feed had just
+    # changed when nothing had ever been published.
     updated =
       posts
       |> Enum.map(& &1.published_at)
-      |> Enum.max(DateTime, fn -> DateTime.utc_now() end)
+      |> Enum.max(DateTime, fn -> user.created_at end)
       |> DateTime.to_iso8601()
 
     entries = Enum.map_join(posts, "\n", &feed_entry/1)
@@ -243,10 +250,26 @@ defmodule Stacks.Blog.Syndication do
 
   defp host_url, do: CoreWeb.Endpoint.url()
 
+  # The post body is PLAIN TEXT everywhere else in the product — it is authored in a
+  # `textarea` and rendered with `text` inside a `pre` (`Page/Blog/Post.elm:441`). This
+  # is the one place it crosses into HTML, so it is escaped here, before the `<p>`
+  # wrapper is added.
+  #
+  # Without that, a body containing `&` or `<` was corrupted on the far side and a body
+  # containing a tag was republished as live markup. The two callers make the reason
+  # non-obvious, so both are spelled out:
+  #
+  #   * `export/2`'s html branch uses this result directly as HTML, where this is the
+  #     only escaping there is.
+  #   * `feed_entry/1` runs `escape_xml/1` over the COMPOSED string and emits it as
+  #     `<content type="html">`, which per Atom is entity-encoded HTML — so the consumer
+  #     unescapes exactly once. The body therefore needs escaping TWICE in that path, and
+  #     this is the first of the two. Escaping only in `escape_xml` left the body with
+  #     one level, which the consumer's single unescape removed entirely.
   defp body_as_html(body) do
     body
     |> String.split(~r/\n{2,}/)
-    |> Enum.map_join("\n", fn para -> "<p>#{String.trim(para)}</p>" end)
+    |> Enum.map_join("\n", fn para -> "<p>#{escape_xml(String.trim(para))}</p>" end)
   end
 
   defp escape_xml(text) do
