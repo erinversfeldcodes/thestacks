@@ -76,6 +76,8 @@ module Api exposing
     , activateListing
     , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
+    , adminFeedbackPageDecoder
+    , adminFeedbackRequest
     , adminInviteDecoder
     , adminListBooks
     , adminListBooksRequest
@@ -655,7 +657,7 @@ libraryImportDecoder =
     Decode.succeed LibraryImport
         |> andMap (Decode.field "id" Decode.string)
         |> andMap (Decode.field "status" Decode.string)
-        |> andMap (Decode.field "filename" Decode.string)
+        |> andMap (textOrBlank "filename")
         |> andMap (Decode.field "row_count" Decode.int)
         |> andMap (Decode.field "processed_count" Decode.int)
         |> andMap (Decode.field "shelved_count" Decode.int)
@@ -664,9 +666,14 @@ libraryImportDecoder =
         |> andMap (Decode.field "unreadable_count" Decode.int)
 
 
-{-| A string field that may be absent or null, as blank. The same shape the
-generated proto decoders use, so a server that stops sending a field degrades the
-one cell rather than the whole response.
+{-| A string field that may be absent, null, or not a string at all, as blank.
+
+The same shape the generated proto decoders use, so a server that stops sending a
+field degrades the one cell rather than the whole response. Note the third case:
+`oneOf` falls through on a type mismatch too, so `"title": 42` becomes `""`
+rather than failing. That is the same tolerance the generated decoders have and
+it is deliberate here, but it is wider than "absent or null" and worth naming.
+
 -}
 textOrBlank : String -> Decoder String
 textOrBlank name =
@@ -915,7 +922,7 @@ inviteErrorDecoder =
             )
 
 
-{-| What `GET /api/auth/invite/:code` says about a redeemable code.
+{-| What `POST /api/auth/invite/check` says about a redeemable code.
 Deliberately tiny: the server never reveals the note, the bound address, or a
 redeemer — `emailBound` is a boolean so the form can say "written for a
 specific address" without naming it.
@@ -4703,6 +4710,26 @@ adminFeedbackPageDecoder =
         |> andMap (Decode.field "total" Decode.int)
 
 
+{-| The data of `getAdminFeedback`'s request — see `RequestSpec`.
+
+Factored out so the window can be asserted. Built inline, the query string was
+the one piece of this change nothing could reach: an off-by-one in the offset
+would serve the same page forever and every paging test would still pass,
+because those tests assert the model, never the request.
+
+-}
+adminFeedbackRequest : { limit : Int, offset : Int } -> RequestSpec
+adminFeedbackRequest window =
+    { method = "GET"
+    , url =
+        Url.Builder.absolute [ "api", "admin", "feedback" ]
+            [ Url.Builder.int "limit" window.limit
+            , Url.Builder.int "offset" window.offset
+            ]
+    , body = Nothing
+    }
+
+
 {-| GET /api/admin/feedback — one page of the owner's queue, newest first.
 
 The window is explicit because the queue is read a page at a time and this is
@@ -4716,15 +4743,14 @@ getAdminFeedback :
     -> (Result Http.Error AdminFeedbackPage -> msg)
     -> Cmd msg
 getAdminFeedback token window toMsg =
+    let
+        spec =
+            adminFeedbackRequest window
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url =
-            baseUrl
-                ++ "/api/admin/feedback?limit="
-                ++ String.fromInt window.limit
-                ++ "&offset="
-                ++ String.fromInt window.offset
+        , url = spec.url
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminFeedbackPageDecoder
         , timeout = standardTimeout

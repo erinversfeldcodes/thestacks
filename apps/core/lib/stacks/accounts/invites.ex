@@ -100,7 +100,7 @@ defmodule Stacks.Accounts.Invites do
   end
 
   @doc """
-      What `GET /api/auth/invite/:code` answers. Deliberately reveals nothing about
+      What `POST /api/auth/invite/check` answers. Deliberately reveals nothing about
       a person: no note, no address (only whether one is bound), no redeemer.
   """
   @spec check(String.t()) ::

@@ -9,13 +9,14 @@ hand-written ones dropped that tolerance without checking the server honours
 it. One of them already cost a surface — a single Goodreads row with four NULL
 columns made the entire import report permanently unloadable, because a list
 decode fails whole. The same shape was latent in the import summary itself:
-`op.library_imports.filename` is a nullable column and `libraryImportDecoder`
-requires a string, so the server coalesces it.
+`op.library_imports.filename` is a nullable column, and `filename` sits in the
+`{"import": …}` envelope, so one null would have failed the whole import page
+rather than one cell. Both sides are tolerant of it now.
 
-Each decoder gets three cases: the populated shape, the server's nullable or
-absent fields, and a field that must stay strict. The strict cases are the
-point — a decoder with no required field tolerates a response that is not the
-response at all.
+Each decoder gets three kinds of case: the populated shape, the server's
+nullable or absent fields, and a field that must stay strict. The strict cases
+are the point — a decoder with no required field tolerates a response that is
+not the response at all.
 
 -}
 
@@ -100,23 +101,37 @@ suite =
                           "unreadable_count": 0 }
                         """
                         (\i -> Expect.equal "" i.filename)
-            , test "a null filename is a decode failure, which is why the server coalesces it" <|
+            , test "a null filename decodes as blank — neither side has to remember" <|
                 \_ ->
-                    -- This case documents the contract rather than asking for
-                    -- tolerance: the fix belongs on the server, where the null
-                    -- can be turned into the blank the page already renders.
-                    expectFails Api.libraryImportDecoder
+                    -- This test used to assert the opposite, pinning the
+                    -- strictness in place as correct and leaving the whole
+                    -- guarantee resting on one `|| ""` in one serialiser. The
+                    -- blast radius made that the wrong call: `filename` is in
+                    -- the `{"import": …}` envelope, so a null fails the entire
+                    -- import page rather than one cell. Both sides are tolerant
+                    -- now, and the server still coalesces.
+                    expectDecodes Api.libraryImportDecoder
                         """
                         { "id": "i3", "status": "enqueued", "filename": null,
                           "row_count": 0, "processed_count": 0, "shelved_count": 0,
                           "duplicate_count": 0, "unverified_count": 0,
                           "unreadable_count": 0 }
                         """
-                        "filename is typed as a String; if this starts passing the type changed"
+                        (\i -> Expect.equal "" i.filename)
+            , test "an absent filename decodes as blank too" <|
+                \_ ->
+                    expectDecodes Api.libraryImportDecoder
+                        """
+                        { "id": "i4", "status": "enqueued",
+                          "row_count": 0, "processed_count": 0, "shelved_count": 0,
+                          "duplicate_count": 0, "unverified_count": 0,
+                          "unreadable_count": 0 }
+                        """
+                        (\i -> Expect.equal "" i.filename)
             , test "a missing count is a decode failure" <|
                 \_ ->
                     expectFails Api.libraryImportDecoder
-                        """{ "id": "i4", "status": "complete", "filename": "x.csv",
+                        """{ "id": "i5", "status": "complete", "filename": "x.csv",
                              "row_count": 1 }"""
                         "every count must be present — a missing one would render as a wrong total"
             ]
@@ -124,22 +139,21 @@ suite =
             [ test "decodes a code bound to an address, without naming it" <|
                 \_ ->
                     expectDecodes Api.inviteStatusDecoder
-                        """{ "valid": true, "expires_at": "2026-11-13T00:00:00Z",
-                             "email_bound": true }"""
+                        """{ "expires_at": "2026-11-13T00:00:00Z", "email_bound": true }"""
                         (\s -> Expect.equal True s.emailBound)
             , test "a never-expiring code decodes with no expiry" <|
                 \_ ->
                     -- A null `expires_at` means the invitation never expires,
                     -- which is a real state the admin API can create.
                     expectDecodes Api.inviteStatusDecoder
-                        """{ "valid": true, "expires_at": null, "email_bound": false }"""
+                        """{ "expires_at": null, "email_bound": false }"""
                         (\s -> Expect.equal Nothing s.expiresAt)
             , test "a missing email_bound is a decode failure" <|
                 \_ ->
                     -- The form's copy depends on it: defaulting it to false
                     -- would promise any address can use a code reserved for one.
                     expectFails Api.inviteStatusDecoder
-                        """{ "valid": true, "expires_at": null }"""
+                        """{ "expires_at": null }"""
                         "email_bound must stay required — a default would mislead the reader"
             ]
         , describe "syndicationDecoder"
