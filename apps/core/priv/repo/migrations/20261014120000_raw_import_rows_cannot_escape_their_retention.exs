@@ -71,6 +71,17 @@ defmodule Core.Repo.Migrations.RawImportRowsCannotEscapeTheirRetention do
 
   @disable_migration_lock true
 
+  # ⚠️ EVERY statement below must be re-runnable, because `@disable_ddl_transaction`
+  # means a failure part-way through leaves the earlier statements COMMITTED while
+  # the migration itself is never recorded as having run. The next deploy retries
+  # from the top — so a statement that cannot repeat wedges the migration
+  # permanently, and the only way out is a hand-run `ALTER` on production.
+  #
+  # `ADD CONSTRAINT` is the one with no `IF NOT EXISTS` in Postgres, so it is
+  # preceded by a `DROP ... IF EXISTS`. The index is created with
+  # `create_if_not_exists` after a drop, because a CONCURRENTLY build that fails
+  # leaves an INVALID index behind that `IF NOT EXISTS` would happily skip —
+  # leaving a useless index and the sweep still scanning.
   def up do
     execute("""
     UPDATE op.library_import_rows r
@@ -84,12 +95,22 @@ defmodule Core.Repo.Migrations.RawImportRowsCannotEscapeTheirRetention do
 
     execute("""
     ALTER TABLE op.library_import_rows
+      DROP CONSTRAINT IF EXISTS library_import_rows_created_at_present
+    """)
+
+    execute("""
+    ALTER TABLE op.library_import_rows
       ADD CONSTRAINT library_import_rows_created_at_present
       CHECK (created_at IS NOT NULL)
       NOT VALID
     """)
 
-    create index(:library_import_rows, [:created_at], prefix: "op", concurrently: true)
+    drop_if_exists index(:library_import_rows, [:created_at], prefix: "op", concurrently: true)
+
+    create_if_not_exists index(:library_import_rows, [:created_at],
+                           prefix: "op",
+                           concurrently: true
+                         )
 
     drop_if_exists index(:library_import_rows, [:import_id], prefix: "op", concurrently: true)
   end
