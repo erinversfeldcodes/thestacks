@@ -248,6 +248,7 @@ defmodule CoreWeb.Router do
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
     get "/blog/posts/:id/syndication", BlogController, :syndication
+    get "/blog/posts/:id/syndications", BlogController, :list_syndications
     post "/blog/posts/:id/syndications", BlogController, :create_syndication
     put "/blog/posts/:id/syndications/:sid", BlogController, :update_syndication
     put "/blog/posts/:post_id/associations/:id/confirm", BlogController, :confirm_association
@@ -319,7 +320,7 @@ defmodule CoreWeb.Router do
 
   scope "/api/auth", StacksWeb do
     pipe_through [:api, :rate_limit_auth]
-    get "/invite/:code", InviteController, :show
+    post "/invite/check", InviteController, :check
   end
 
   scope "/api/admin", StacksWeb do

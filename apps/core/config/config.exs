@@ -51,6 +51,14 @@ config :core, CoreWeb.Endpoint,
 
 config :phoenix, :json_library, Jason
 
+# Request logging prints the parameter map at :info, so anything that is itself a
+# credential has to be named here or it lands in the application log — and from
+# there in whatever aggregates it. Substring matching, so "code" also covers
+# `invite_code` and an MFA code, and "token" covers refresh and confirmation
+# tokens. Phoenix's default is `["password"]` alone; setting this REPLACES that
+# default, which is why password is restated.
+config :phoenix, :filter_parameters, ["password", "code", "token", "secret"]
+
 config :core, Stacks.Accounts.Guardian,
   issuer: "stacks",
   ttl: {8, :hours},

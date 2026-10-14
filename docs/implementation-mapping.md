@@ -1063,6 +1063,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **dbt Models** | `stg_bookstore_events`, `int_event_matches`. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-2.2.2 (bookstores must exist), US-2.5.1 (discovery agent). |
+| **Status (2026-10-14)** | **Built and driven live.** The modules that exist, verified on this date: extractor `apps/core/lib/stacks/enrichment/event_extractor.ex`; job `Stacks.Workers.DiscoverBookstoreEventsJob` with its cron at `apps/core/config/config.exs:28` (Mondays 07:30); read endpoint `apps/core/lib/core_web/router.ex:90` (`GET /api/authors/:id/events` → `AuthorEventsController.index`); surface `frontend/src/Page/BookDetail.elm:80` (`authorEvents`, fetched and rendered). ⚠️ The Frontend row above names `Page.Events` and `Components.EventCard`, which do **not** exist — events surface on book detail's author section instead. Proven live 2026-08-10: `op.bookstore_events` 0 → 1 on preview via the real job. Deferred: the `.ics` and LLM extractor tiers; two-store coverage cap. The cron fires only while a node is awake (`min_machines_running = 0`) — tracked as #455. |
 
 ---
 
@@ -2165,7 +2166,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | Gate registration behind an invite code during closed beta; the owner issues and revokes invites, and the SPA reflects invite-only mode via `/api/config`. |
 | **Phase** | Phase 1 (extended) |
 | **Status** | Built |
-| **Implementation** | `GET /api/auth/invite/:code` → `StacksWeb.InviteController`; `GET/POST/DELETE /api/admin/invites` → `StacksWeb.InviteAdminController`; `Stacks.Accounts.Invites`; `Page.Admin.Invites`. Invite-gated registration builds on `Stacks.Accounts.register` and `/api/config`. |
+| **Implementation** | `POST /api/auth/invite/check` → `StacksWeb.InviteController`; `GET/POST/DELETE /api/admin/invites` → `StacksWeb.InviteAdminController`; `Stacks.Accounts.Invites`; `Page.Admin.Invites`. Invite-gated registration builds on `Stacks.Accounts.register` and `/api/config`. |
 
 ---
 

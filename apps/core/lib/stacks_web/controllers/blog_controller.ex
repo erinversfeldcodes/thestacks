@@ -153,6 +153,30 @@ defmodule StacksWeb.BlogController do
   end
 
   @doc """
+      GET /api/blog/posts/:id/syndications — what has already been syndicated.
+
+      Without this the POSSE loop only half closed: `record/2` persisted a row and
+      `set_syndicated_url/2` filled in the backlink, but nothing could read either
+      back, so the panel showed the recorded URL until the page was reloaded and then
+      forgot it permanently — and the field for entering one disappeared with it. The
+      writer's only way back was to export again, writing a duplicate row.
+
+      `Syndication.list_syndications/1` had existed since the feature shipped, with a
+      `@spec` and no callers at all.
+  """
+  @spec list_syndications(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def list_syndications(conn, %{"id" => id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    with {:ok, post} <- fetch_post(id),
+         :ok <- check_ownership(post, user) do
+      json(conn, %{
+        syndications: Enum.map(Syndication.list_syndications(post), &format_syndication/1)
+      })
+    end
+  end
+
+  @doc """
       PUT /api/blog/posts/:id/syndications/:sid — the writer pastes the live
       Substack URL back in ("Also published at"), closing the POSSE loop.
   """

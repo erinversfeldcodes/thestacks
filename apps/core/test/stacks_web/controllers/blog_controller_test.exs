@@ -6,6 +6,7 @@ defmodule StacksWeb.BlogControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Blog.Syndication
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -475,6 +476,64 @@ defmodule StacksWeb.BlogControllerTest do
         |> put("/api/blog/posts/#{blog_post.id}/associations/#{Ecto.UUID.generate()}/dismiss")
 
       assert json_response(conn, 404)
+    end
+  end
+
+  describe "GET /api/blog/posts/:id/syndications" do
+    # The read half of POSSE. `Syndication.list_syndications/1` shipped with a @spec
+    # and zero callers, so a recorded backlink survived in the database and could
+    # never be shown again: the panel forgot it on reload, and the field for entering
+    # one disappeared with it. These tests exist so the route cannot go missing again.
+    defp published(user) do
+      insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
+    end
+
+    test "returns what has been syndicated, oldest first", %{conn: conn} do
+      user = insert(:user)
+      blog_post = published(user)
+
+      {:ok, first} = Syndication.record(blog_post, "export")
+      {:ok, _} = Syndication.set_syndicated_url(first, "https://example.test/post")
+      {:ok, _second} = Syndication.record(blog_post, "rss")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{blog_post.id}/syndications")
+
+      assert %{"syndications" => [one, two]} = json_response(conn, 200)
+      assert one["method"] == "export"
+      assert one["syndicated_url"] == "https://example.test/post"
+      assert two["method"] == "rss"
+    end
+
+    test "returns an empty list for a post never syndicated", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{published(user).id}/syndications")
+
+      assert %{"syndications" => []} = json_response(conn, 200)
+    end
+
+    test "refuses another writer's post", %{conn: conn} do
+      owner = insert(:user)
+      other = insert(:user)
+      blog_post = published(owner)
+
+      conn =
+        conn
+        |> auth_conn(other)
+        |> get("/api/blog/posts/#{blog_post.id}/syndications")
+
+      # 403 rather than 404, which is what `check_ownership/2` returns for every
+      # sibling syndication endpoint. It confirms the post exists to someone who may
+      # not read it; the campaign's contract review has a separate open finding about
+      # the 404-not-403 property, so this route stays consistent with its siblings
+      # rather than diverging on its own.
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
     end
   end
 end
