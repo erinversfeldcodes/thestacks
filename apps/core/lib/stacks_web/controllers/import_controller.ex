@@ -93,7 +93,10 @@ defmodule StacksWeb.ImportController do
     %{
       id: import.id,
       source: import.source,
-      filename: import.filename,
+      # Coalesced for the same reason the four row columns below are: the
+      # column is nullable, the client's decoder requires a string, and a
+      # failed decode here takes the whole import page rather than one label.
+      filename: import.filename || "",
       status: import.status,
       row_count: import.row_count,
       processed_count: import.processed_count,
@@ -107,12 +110,19 @@ defmodule StacksWeb.ImportController do
   end
 
   defp row_json(row) do
+    # An UNREADABLE row never had these parsed — `GoodreadsCsv` emits only
+    # `row_number`/`outcome`/`reason` for it, and `insert_all` applies no changeset or
+    # schema default, so the columns are NULL. They are coalesced here because the
+    # client's decoder requires all four as strings, and `Decode.list` fails the WHOLE
+    # report for one bad row: a single malformed line made the entire import report
+    # unreadable, permanently. The row still says what happened — `outcome` and
+    # `reason` carry that, and both are already nullable on the wire.
     %{
       row_number: row.row_number,
-      title: row.raw_title,
-      author: row.raw_author,
-      isbn13: row.raw_isbn13,
-      goodreads_shelf: row.goodreads_shelf,
+      title: row.raw_title || "",
+      author: row.raw_author || "",
+      isbn13: row.raw_isbn13 || "",
+      goodreads_shelf: row.goodreads_shelf || "",
       outcome: row.outcome,
       reason: row.reason,
       book_id: row.book_id

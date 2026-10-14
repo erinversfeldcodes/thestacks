@@ -135,5 +135,19 @@ defmodule StacksWeb.ImportControllerTest do
       assert json_response(get(conn, "/api/imports/#{import.id}"), 404)
       assert json_response(get(conn, "/api/imports/#{import.id}/rows"), 404)
     end
+
+    test "an import with no filename answers a blank one, not a null", %{
+      conn: conn,
+      import: import
+    } do
+      # `op.library_imports.filename` is nullable and the client's decoder
+      # requires a string, so a null would fail the decode and take the whole
+      # import page — the same shape that made one unreadable CSV row render
+      # "the report didn't load" forever.
+      import |> Ecto.Changeset.change(filename: nil) |> Core.Repo.update!()
+
+      assert %{"import" => shown} = json_response(get(conn, "/api/imports/#{import.id}"), 200)
+      assert shown["filename"] == ""
+    end
   end
 end
