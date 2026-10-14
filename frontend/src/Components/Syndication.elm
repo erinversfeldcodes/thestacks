@@ -3,6 +3,7 @@ module Components.Syndication exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , latestSyndication
     , update
     , view
     )
@@ -51,6 +52,13 @@ type alias Model =
     , urlError : Bool
     , savingUrl : Bool
     , syndications : List Syndication
+
+    -- "Could not ask" is held apart from "none recorded", because the two render
+    -- the same and mean opposite things. An empty list hides the backlink input
+    -- (below), which is the exact defect this read was added to fix — so a
+    -- failed read silently reproducing it, with the panel claiming parity, is
+    -- the one outcome worth being able to see.
+    , readFailed : Bool
     , includeInFeed : Bool
     }
 
@@ -87,6 +95,7 @@ initialModel postId origin syndicated =
     , urlError = False
     , savingUrl = False
     , syndications = []
+    , readFailed = False
     , includeInFeed = syndicated
     }
 
@@ -156,12 +165,24 @@ update msg model maybeToken =
             ( { model | exportState = Failure err }, Cmd.none, NoOut )
 
         GotSyndications (Ok syndications) ->
-            ( { model | syndications = syndications }, Cmd.none, NoOut )
+            -- MERGED, not replaced. This read starts on mount and a record can
+            -- land first; the server's snapshot would then predate the POST, drop
+            -- the locally-appended row, and send `latestSyndication` back to an
+            -- older one — so the writer's backlink would be saved against the
+            -- wrong syndication id. A wrong write, not a cosmetic glitch.
+            ( { model
+                | syndications = mergeSyndications syndications model.syndications
+                , readFailed = False
+              }
+            , Cmd.none
+            , NoOut
+            )
 
         GotSyndications (Err _) ->
-            -- Deliberately not an error state: the panel's job is the export, which
-            -- still works. Showing nothing is the same as before this read existed.
-            ( model, Cmd.none, NoOut )
+            -- Not an error STATE — the panel's job is the export, which still
+            -- works — but recorded, because an empty list is what hides the
+            -- backlink field, and that is the defect this read exists to fix.
+            ( { model | readFailed = True }, Cmd.none, NoOut )
 
         SyndicationRecorded (Ok syndication) ->
             ( { model | syndications = model.syndications ++ [ syndication ] }
@@ -275,9 +296,33 @@ recordIfExport pending maybeToken ( model, cmd, out ) =
             ( model, cmd, out )
 
 
+{-| The most recently recorded syndication — the one a pasted backlink belongs
+to.
+
+Sorted by `createdAt` rather than taken from the end of the list. Position only
+meant "newest" because the server happens to return these oldest-first, and
+nothing pinned that; the sibling feedback queue returns its rows the other way
+round. If this one ever flipped, the backlink would be saved against the wrong
+row with no test failing.
+
+-}
 latestSyndication : Model -> Maybe Syndication
 latestSyndication model =
-    List.head (List.reverse model.syndications)
+    model.syndications
+        |> List.sortBy .createdAt
+        |> List.reverse
+        |> List.head
+
+
+{-| The server's list, with any locally-known row it has not caught up with kept.
+-}
+mergeSyndications : List Syndication -> List Syndication -> List Syndication
+mergeSyndications fetched known =
+    let
+        fetchedIds =
+            List.map .id fetched
+    in
+    fetched ++ List.filter (\s -> not (List.member s.id fetchedIds)) known
 
 
 replaceSyndication : Syndication -> List Syndication -> List Syndication
@@ -421,7 +466,17 @@ viewAlsoPublishedAt model =
 
         Nothing ->
             if model.syndications == [] then
-                text ""
+                if model.readFailed then
+                    -- Says so rather than rendering nothing. Nothing is what the
+                    -- never-syndicated case renders, and conflating the two is
+                    -- how a failed read looks exactly like "you have not
+                    -- syndicated this yet" — the field the writer needs, absent
+                    -- with no explanation.
+                    p [ class "post__syndication-note", testId "syndication-read-failed" ]
+                        [ text "Could not check what has already been published. Reload to try again." ]
+
+                else
+                    text ""
 
             else
                 Html.form [ class "post__syndication-backlink", onSubmit UrlSubmitted ]

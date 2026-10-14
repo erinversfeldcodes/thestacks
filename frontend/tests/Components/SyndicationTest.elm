@@ -29,12 +29,17 @@ initModel =
 
 recorded : Maybe String -> Api.Syndication
 recorded syndicatedUrl =
-    { id = "syn-1"
+    recordedAt "syn-1" "2026-10-14T00:00:00Z" syndicatedUrl
+
+
+recordedAt : String -> String -> Maybe String -> Api.Syndication
+recordedAt id createdAt syndicatedUrl =
+    { id = id
     , target = "substack"
     , method = "export"
     , canonicalUrl = "https://thestacks.test/blog/post-1"
     , syndicatedUrl = syndicatedUrl
-    , createdAt = "2026-10-14T00:00:00Z"
+    , createdAt = createdAt
     }
 
 
@@ -146,17 +151,72 @@ suite =
                 \_ ->
                     render (afterFetch []) True
                         |> Query.hasNot [ byTestId "syndication-also-at-input" ]
-            , test "a failed fetch leaves the panel usable rather than erroring" <|
+            , test "a failed fetch leaves the export working and says it could not check" <|
                 \_ ->
+                    -- This asserted the canonical-url block, which renders
+                    -- unconditionally — so it passed for any model and for any
+                    -- rewrite of the branch it was named after. What the branch
+                    -- actually protects is that the export still works AND that
+                    -- a failed read does not masquerade as "never syndicated".
                     let
-                        ( model, _, _ ) =
+                        ( model, _, out ) =
                             Syndication.update
                                 (Syndication.GotSyndications (Err Http.NetworkError))
                                 initModel
                                 Nothing
                     in
-                    render model True
-                        |> Query.has [ byTestId "syndication-canonical-url" ]
+                    Expect.all
+                        [ \m ->
+                            render m True
+                                |> Query.has [ byTestId "syndication-export-markdown" ]
+                        , \m ->
+                            render m True
+                                |> Query.has [ byTestId "syndication-read-failed" ]
+                        , \_ -> Expect.equal Syndication.NoOut out
+                        ]
+                        model
+            , test "a never-syndicated post does not claim the read failed" <|
+                \_ ->
+                    render (afterFetch []) True
+                        |> Query.hasNot [ byTestId "syndication-read-failed" ]
+            , test "a late read does not drop a syndication recorded while it was in flight" <|
+                \_ ->
+                    -- The POST can land before the mount GET answers. Replacing
+                    -- the list would lose the new row and send the backlink PUT
+                    -- to an older syndication id — a wrong write.
+                    let
+                        ( afterRecord, _, _ ) =
+                            Syndication.update
+                                (Syndication.SyndicationRecorded
+                                    (Ok (recordedAt "syn-2" "2026-10-15T00:00:00Z" Nothing))
+                                )
+                                (afterFetch [ recordedAt "syn-1" "2026-10-14T00:00:00Z" Nothing ])
+                                Nothing
+
+                        ( afterLateRead, _, _ ) =
+                            Syndication.update
+                                (Syndication.GotSyndications
+                                    (Ok [ recordedAt "syn-1" "2026-10-14T00:00:00Z" Nothing ])
+                                )
+                                afterRecord
+                                Nothing
+                    in
+                    Expect.equal [ "syn-1", "syn-2" ]
+                        (List.map .id afterLateRead.syndications |> List.sort)
+            , test "the backlink is recorded against the newest syndication by time" <|
+                \_ ->
+                    -- Not by list position. The server returns these oldest-first
+                    -- and nothing pins that, so position meaning "newest" is a
+                    -- coincidence the wrong write would depend on.
+                    let
+                        outOfOrder =
+                            afterFetch
+                                [ recordedAt "syn-new" "2026-10-20T00:00:00Z" Nothing
+                                , recordedAt "syn-old" "2026-10-01T00:00:00Z" Nothing
+                                ]
+                    in
+                    Expect.equal (Just "syn-new")
+                        (Maybe.map .id (Syndication.latestSyndication outOfOrder))
             , test "without a token the panel issues no request" <|
                 \_ ->
                     -- Elm commands are opaque, so this pins the branch that CAN be
