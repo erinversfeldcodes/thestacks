@@ -570,4 +570,80 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert get_resp_header(resp, "retry-after") == ["60"]
     end
   end
+
+  # ⚠️ This endpoint had NO test of any kind. Five of the six gated helpers carried
+  # an ungated-404 case; this one carried none, so its gate was the only one in the
+  # family asserted nowhere — found by checking each route against the tests rather
+  # than assuming the family was covered because its siblings were.
+  # The author's own view of their posts — drafts included, which is what a
+  # "nothing was written" assertion has to be able to see.
+  defp own_posts(user_id), do: Stacks.Blog.list_user_posts(user_id, {:platform_user, user_id})
+
+  describe "POST /api/test/book-writing with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404 and writes nothing", %{conn: conn} do
+      user = insert(:user, email: "e2e-writing-off@thestacks.test")
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/test/book-writing", %{
+          email: user.email,
+          book_id: book.id,
+          title: "Should never exist"
+        })
+
+      assert conn.status == 404
+      assert own_posts(user.id) == []
+    end
+
+    test "returns 404 even when the flag is present but not exactly \"1\"", %{conn: conn} do
+      System.put_env(@flag, "true")
+      user = insert(:user, email: "e2e-writing-notone@thestacks.test")
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/test/book-writing", %{email: user.email, book_id: book.id})
+
+      assert conn.status == 404
+      assert own_posts(user.id) == []
+    end
+  end
+
+  describe "POST /api/test/book-writing with the flag ON" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    test "seeds a post associated with the book", %{conn: conn} do
+      user = insert(:user, email: "e2e-writing-on@thestacks.test")
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/test/book-writing", %{
+          email: user.email,
+          book_id: book.id,
+          title: "Seeded writing"
+        })
+
+      assert %{"ok" => true, "post_id" => post_id} = json_response(conn, 201)
+      assert Enum.any?(own_posts(user.id), &(&1.id == post_id))
+    end
+
+    test "refuses an email outside the test domain, so it cannot touch a real account", %{
+      conn: conn
+    } do
+      user = insert(:user, email: "a-real-person@example.com")
+      book = insert(:book)
+
+      conn = post(conn, "/api/test/book-writing", %{email: user.email, book_id: book.id})
+
+      assert conn.status == 404
+      assert own_posts(user.id) == []
+    end
+  end
 end
