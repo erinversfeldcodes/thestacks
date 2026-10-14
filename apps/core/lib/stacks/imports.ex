@@ -27,6 +27,9 @@ defmodule Stacks.Imports do
   alias Stacks.Workers.GoodreadsImportJob
 
   @active_statuses ~w(enqueued running)
+
+  # Every outcome a row can be given, matching the column's CHECK constraint.
+  @row_outcomes ~w(shelved duplicate unverified unreadable)
   @row_retention_days 30
   @insert_chunk 500
 
@@ -161,7 +164,16 @@ defmodule Stacks.Imports do
 
   def mark_running(import), do: import
 
-  @doc "Writes a row's outcome (and any resolved book/placement ids)."
+  @doc """
+      Writes a row's outcome (and any resolved book/placement ids).
+
+      `outcome` is validated here because this is the ONLY path that writes it,
+      it is called exclusively from inside an Oban job, and `change/2` casts
+      without checking — so before this the value was validated nowhere, and the
+      column's own CHECK constraint was the first thing to see it. Failing on the
+      changeset puts the error where the caller is rather than three frames down
+      in a database driver.
+  """
   @spec record_outcome(LibraryImportRow.t(), String.t(), keyword()) :: LibraryImportRow.t()
   def record_outcome(%LibraryImportRow{} = row, outcome, opts \\ []) do
     row
@@ -170,6 +182,11 @@ defmodule Stacks.Imports do
       reason: Keyword.get(opts, :reason),
       book_id: Keyword.get(opts, :book_id),
       placement_id: Keyword.get(opts, :placement_id)
+    )
+    |> Ecto.Changeset.validate_inclusion(:outcome, @row_outcomes)
+    |> Ecto.Changeset.check_constraint(:outcome,
+      name: :library_import_rows_outcome_known,
+      message: "is not a recognised outcome"
     )
     |> Repo.update!()
   end

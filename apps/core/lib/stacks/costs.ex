@@ -173,6 +173,18 @@ defmodule Stacks.Costs do
     |> validate_inclusion(:category, @platform_cost_valid_categories)
     |> validate_number(:amount_cents, greater_than_or_equal_to: 0)
     |> unique_constraint([:service, :period_start, :period_end])
+    # The column now carries the same two rules as a CHECK, because the factory
+    # and any future non-changeset writer bypass everything above. These name the
+    # constraints so a violation arrives as a changeset error rather than as a
+    # raw database error the caller has no clause for.
+    |> check_constraint(:category,
+      name: :platform_costs_category_known,
+      message: "is not a recognised category"
+    )
+    |> check_constraint(:amount_cents,
+      name: :platform_costs_amount_not_negative,
+      message: "must be zero or more"
+    )
   end
 
   @doc """

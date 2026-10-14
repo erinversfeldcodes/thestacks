@@ -119,7 +119,11 @@ defmodule Stacks.Workers.LibraryImportRowRetentionJobTest do
       # different claims.
       import_record = insert(:library_import)
 
-      assert_raise Postgrex.Error, fn ->
+      # The constraint NAME is asserted, not just that something raised. Without
+      # it a typo in this INSERT — a renamed column, a missing NOT NULL field —
+      # also raises `Postgrex.Error`, and the test would pass while proving
+      # nothing about the constraint it is named after.
+      assert_raise Postgrex.Error, ~r/library_import_rows_created_at_present/, fn ->
         Repo.query!(
           """
           INSERT INTO op.library_import_rows (id, import_id, row_number, raw_rating,

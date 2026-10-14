@@ -223,6 +223,13 @@ defmodule Stacks.Blog.Syndication do
     |> Ecto.Changeset.validate_inclusion(:method, @valid_methods)
     |> validate_url(:syndicated_url)
     |> Ecto.Changeset.foreign_key_constraint(:post_id)
+    # Names the column's CHECK so a violation arrives as a changeset error rather
+    # than as a raw database error. The constraint covers both columns, so it is
+    # attached to `method` — the one with more than a single valid value.
+    |> Ecto.Changeset.check_constraint(:method,
+      name: :post_syndications_target_and_method_known,
+      message: "is not a recognised syndication target or method"
+    )
   end
 
   defp validate_url(changeset, field) do

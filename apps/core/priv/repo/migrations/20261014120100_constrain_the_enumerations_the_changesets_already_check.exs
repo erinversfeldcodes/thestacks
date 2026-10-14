@@ -10,7 +10,7 @@ defmodule Core.Repo.Migrations.ConstrainTheEnumerationsTheChangesetsAlreadyCheck
         | `platform_costs.category`           | hosting · compute · database · domain · services  | `Costs.platform_cost_changeset/2` |
         | `platform_costs.amount_cents`       | `>= 0`                                            | same |
         | `library_imports.status`            | enqueued · running · complete · failed            | `Imports.mark_running/1`, `finalize/2` guards |
-        | `library_import_rows.outcome`       | shelved · duplicate · unverified · unreadable     | `Imports.record_outcome/3` |
+        | `library_import_rows.outcome`       | shelved · duplicate · unverified · unreadable     | **nowhere** — see below |
         | `post_syndications.target`/`method` | substack · rss/export                             | `Syndication.syndication_changeset/2` |
 
       ## Why the column and not the changeset
@@ -27,6 +27,14 @@ defmodule Core.Repo.Migrations.ConstrainTheEnumerationsTheChangesetsAlreadyCheck
       failure. A constraint here would have reddened every test that used the
       factory on the day it was written, and it defends the write paths that do
       not exist yet, which is the half a changeset can never cover.
+
+      ⚠️ `library_import_rows.outcome` is the sharpest case and an earlier draft
+      of this note got it wrong, claiming `Imports.record_outcome/3` validated
+      it. That function uses `Ecto.Changeset.change/2` — cast, no validation —
+      and `Repo.update!`, so the value was checked **nowhere at all** before
+      this constraint, on a column written exclusively from inside an Oban job.
+      A `validate_inclusion` was added alongside this migration so the job fails
+      on its own changeset rather than on a database error three frames down.
 
       `outcome` stays nullable on purpose: it is empty until the row is
       processed, and an unprocessed row is a legitimate state rather than a
