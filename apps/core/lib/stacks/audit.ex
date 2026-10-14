@@ -23,6 +23,64 @@ defmodule Stacks.Audit do
       - `:row_count` — rows returned or affected by the admin call
       - `:operator_session_id` — UUID of the admin session issuing the call
   """
+  # ⚠️ `action` and `resource_type` are arbitrary strings on the way IN — the
+  # function signature says `String.t()` and nothing validates them — and they
+  # went straight out as Prometheus labels. Every caller today passes a literal
+  # from the sets below, so the values were bounded by caller DISCIPLINE and by
+  # nothing else.
+  #
+  # That is not good enough for a label. A label is a dimension: one series per
+  # distinct value, forever. A future caller interpolating a resource name, an
+  # email or an id — the obvious thing to do when debugging — would mint a series
+  # per value in a store that has no erasure path and, for a family classified
+  # public, an anonymous reader.
+  #
+  # So the ROW keeps the exact string, because the audit log is the record and
+  # must be faithful, and the LABEL is bounded to a known set with everything
+  # else collapsing to "other". An unexpected action showing up as `other` in the
+  # metric is a signal to come and add it here; an unbounded label is a signal
+  # nobody gets until the store is already full.
+  #
+  # These sets are the labels' vocabulary, NOT a validation of what may be
+  # audited: a new action writes its row correctly on the day it is added and
+  # only its metric needs catching up.
+  @telemetry_actions ~w(
+    admin.call admin.login admin.mfa_verified
+    invite.issued invite.revoked
+    placement.created placement.moved placement.removed
+    placement.reread placement.restored
+    user.data_deleted user.deletion_requested user.login user.registered
+  )
+
+  @telemetry_resource_types ~w(
+    admin_endpoint admin_session bookshelf deploy invite placement user unknown
+  )
+
+  defp bounded_label(value, allowed) when is_binary(value) do
+    if value in allowed, do: value, else: "other"
+  end
+
+  defp bounded_label(_value, _allowed), do: "other"
+
+  @doc "The action values the write counter may label. Anything else labels as `other`."
+  @spec telemetry_actions() :: [String.t()]
+  def telemetry_actions, do: @telemetry_actions
+
+  @doc "The resource types the write counter may label. Anything else labels as `other`."
+  @spec telemetry_resource_types() :: [String.t()]
+  def telemetry_resource_types, do: @telemetry_resource_types
+
+  @doc """
+      The label-bounding rule, exposed so it can be asserted rather than trusted.
+
+      The label guard's allowlist carries a written reason for every label key,
+      and for these two the reason is about CODE rather than a literal — so the
+      reason has to be checkable. An allowlist entry a machine cannot verify is
+      a sentence, which this project has shipped before.
+  """
+  @spec bounded_label_for(term(), [String.t()]) :: String.t()
+  def bounded_label_for(value, allowed), do: bounded_label(value, allowed)
+
   @spec log(binary() | nil, String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def log(user_id, action, opts \\ []) do
     now = DateTime.utc_now()
@@ -67,8 +125,8 @@ defmodule Stacks.Audit do
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
       {1, _} ->
         :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
-          action: action,
-          resource_type: resource_type
+          action: bounded_label(action, @telemetry_actions),
+          resource_type: bounded_label(resource_type, @telemetry_resource_types)
         })
 
         {:ok, result_params}

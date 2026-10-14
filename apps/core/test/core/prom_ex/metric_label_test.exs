@@ -46,7 +46,9 @@ defmodule Core.PromEx.MetricLabelTest do
   # bounded. The reason is the point: it names where the boundedness comes from,
   # so the next person can check it rather than trust it.
   @bounded_labels %{
-    action: "audit action verb, from the fixed set the audit writer accepts",
+    action:
+      "audit action verb, bounded at the emit site against a known set with everything " <>
+        "else collapsing to \"other\" — NOT by the writer's signature, which takes any string",
     aggregate_type: "event aggregate kind — one of the domain's own nouns",
     bucket: "rate-limit bucket name, an atom named in the limiter's config",
     context: "where a token was issued (login vs refresh) — two values",
@@ -65,7 +67,9 @@ defmodule Core.PromEx.MetricLabelTest do
     reason: "bounded failure-reason atom, never a message or an exception",
     reason_class: "transport failure CLASS, deliberately a name rather than the failure",
     repo: "Ecto repo module name — the app declares two",
-    resource_type: "domain resource kind, from the audit/visibility vocabulary",
+    resource_type:
+      "domain resource kind. Bounded at the audit emit site the same way as `action`; the " <>
+        "visibility emitters pass their own closed set",
     result: "ok / error style result atom",
     route_group: "coarse route family assigned by a plug, not a request path",
     source: "provenance tag, from a fixed set per emit site",
@@ -188,6 +192,58 @@ defmodule Core.PromEx.MetricLabelTest do
 
       assert stale == [],
              "these ambiguity notes describe labels nobody attaches: " <> inspect(stale)
+    end
+  end
+
+  describe "a declared-bounded label is bounded at its SOURCE" do
+    # ⚠️ This describe exists because the declarations above were WRONG when
+    # first written, in the file whose whole design is that a declaration cannot
+    # be trusted on its own.
+    #
+    # `action` was declared "from the fixed set the audit writer accepts". The
+    # writer accepts any string: its signature is `String.t()` and nothing
+    # validated it, so both labels were bounded by caller discipline and by
+    # nothing else. The reason read plausibly and was false — which is exactly
+    # the defect this project has shipped before, in an allowlist whose written
+    # justification nothing checked, and which `@forbidden_segments` above exists
+    # to make impossible for the PII half.
+    #
+    # So the two labels whose boundedness lives in code rather than in a literal
+    # get asserted here. This cannot be made general — "is this value bounded"
+    # is a question about a specific producer — so it is a small set of named
+    # checks that grows when a label's source is non-obvious.
+    test "the audit labels collapse an unknown value rather than minting a series" do
+      actions = Stacks.Audit.telemetry_actions()
+      resource_types = Stacks.Audit.telemetry_resource_types()
+
+      assert "user.login" in actions, "the known-action set looks wrong"
+      assert "user" in resource_types, "the known-resource-type set looks wrong"
+
+      # The property: anything outside the set becomes one shared value, so a
+      # caller interpolating a name or an id cannot mint a series per value.
+      assert Stacks.Audit.bounded_label_for("user.login", actions) == "user.login"
+      assert Stacks.Audit.bounded_label_for("something.new", actions) == "other"
+      assert Stacks.Audit.bounded_label_for("mara@example.test", actions) == "other"
+      assert Stacks.Audit.bounded_label_for(nil, actions) == "other"
+      assert Stacks.Audit.bounded_label_for("user", resource_types) == "user"
+
+      assert Stacks.Audit.bounded_label_for("book:#{Ecto.UUID.generate()}", resource_types) ==
+               "other"
+    end
+
+    test "the invite-gate label is total, so an unexpected refusal cannot raise" do
+      # Reached from an UNAUTHENTICATED registration path. Its sibling status
+      # function is total; this one was not, and the gate module already defines
+      # a seventh refusal atom one `with` clause away from reaching it. A
+      # `FunctionClauseError` there is a 500 on registration — both the worst
+      # place for one and a distinguishable response on an endpoint designed to
+      # tell a prober nothing.
+      assert StacksWeb.AuthController.invite_label_for(:invite_expired) == :expired
+
+      assert StacksWeb.AuthController.invite_label_for(:invite_not_found) == :other,
+             "the gate module's seventh refusal atom has no clause and no catch-all"
+
+      assert StacksWeb.AuthController.invite_label_for(:something_nobody_has_added_yet) == :other
     end
   end
 

@@ -375,4 +375,32 @@ defmodule StacksWeb.AuthController do
   defp invite_telemetry_label(:invite_revoked), do: :revoked
   defp invite_telemetry_label(:invite_exhausted), do: :exhausted
   defp invite_telemetry_label(:invite_email_mismatch), do: :email_mismatch
+
+  # A catch-all, because this function is reached from an UNAUTHENTICATED
+  # registration path and its only job is to produce a metric label.
+  #
+  # Its sibling `invite_error_status/1` two clauses below is total — it ends in
+  # `_ -> 403`. This one was not, and the asymmetry is the whole point: the gate
+  # module already defines a seventh refusal atom (`:invite_not_found`, returned
+  # by the lookup endpoint), one `with` clause away from reaching here. The day
+  # it does, or the day an eighth is added, the status function copes and this
+  # one raises `FunctionClauseError` — a 500 on registration, which is both the
+  # worst place for one and a distinguishable response on an endpoint designed
+  # to tell a prober nothing.
+  #
+  # `:other` keeps the label BOUNDED, which is what a Prometheus label has to be,
+  # while still recording that a refusal happened. An unexpected atom showing up
+  # as `other` in the metric is a signal to come and add a clause; a 500 is not.
+
+  defp invite_telemetry_label(_unexpected), do: :other
+
+  @doc """
+      The invite-gate label mapping, exposed so its TOTALITY can be asserted.
+
+      Its sibling status function is total and this one was not; the label guard
+      declares this label bounded, and that declaration is only true while every
+      input maps to something.
+  """
+  @spec invite_label_for(atom()) :: atom()
+  def invite_label_for(reason), do: invite_telemetry_label(reason)
 end
