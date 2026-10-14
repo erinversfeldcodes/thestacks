@@ -31,7 +31,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-route-clients.sh` | `justfile`, `scripts/check-prose-assertions.sh`, `scripts/lint-elixir.sh`, `scripts/route-clients-allowlist.txt` |  |
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
 | `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml` |  |
-| `scripts/check-script-wiring.sh` | `scripts/ci.sh` | Every script has a caller, and the inventory that says so is generated. |
+| `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | Every script has a caller, and the inventory that says so is generated. |
 | `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml` |  |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
@@ -94,7 +94,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `e2e/global-setup.ts`, `e2e/tests/age-gate.spec.ts`, `e2e/tests/rate-limit.spec.ts` … |  |
 | `scripts/test-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/test-mcp.sh` | `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
+| `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
 | `scripts/test-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/wave-status.sh` | `justfile` |  |

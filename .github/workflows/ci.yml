@@ -155,6 +155,15 @@ jobs:
               - 'scripts/**'
               - 'deploy/**'
               - '.github/actions/**'
+              # The workflows themselves, because four of the platform suites
+              # assert ON this file and the composite actions beside it — the
+              # IDOR step, the migration-safety job, the production deploy and
+              # the rollback composite. Without this line, reverting or deleting
+              # one of those steps is a workflows-only edit, so `platform` is
+              # false, `platform-suites` is skipped, and the assertions written
+              # to catch exactly that regression never run. The gate was
+              # unreachable by the change class it exists to guard.
+              - '.github/workflows/**'
             licenses:
               - 'mix.lock'
               - 'frontend/package-lock.json'
@@ -668,6 +677,16 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Platform shell suites
         run: bash test/platform/run_all.sh
+      # The other two thirds of the local gate runner's platform group. PR CI
+      # ran only the suites above, so a gate that reddens a local full run could
+      # pass here — which is the same shape as a gate that cannot fail at all,
+      # and it bit once already: a new script left the script inventory stale,
+      # failing locally while every PR check stayed green.
+      # A platform suite asserts that these stay in step with the local group.
+      - name: Script wiring and inventory
+        run: bash scripts/check-script-wiring.sh
+      - name: MCP server tests
+        run: bash scripts/test-mcp.sh
 
   trufflehog:
     needs: changes
