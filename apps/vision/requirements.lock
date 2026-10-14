@@ -216,9 +216,9 @@ click==8.4.2 \
     # via
     #   modal
     #   uvicorn
-fastapi==0.141.1 \
-    --hash=sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3 \
-    --hash=sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1
+fastapi==0.142.2 \
+    --hash=sha256:06366626f2e70576367714d9ab2fe8472e6c8456dba69b399f9f797ab5e92570 \
+    --hash=sha256:bd5f4d81f1e93a88bcd77caf4dfe3c2dbffc3805407a0007e9a114c18b3a670b
     # via -r apps/vision/requirements.txt
 frozenlist==1.8.0 \
     --hash=sha256:0325024fe97f94c41c08872db482cf8ac4800d80e79222c6b0b7b162d5b13686 \
@@ -451,9 +451,9 @@ mdurl==0.1.2 \
     --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8 \
     --hash=sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba
     # via markdown-it-py
-modal==1.5.5 \
-    --hash=sha256:30df363ed1898cc3d91a09ff3f95c38ab043f6b6294011b01085312c6a0ac777 \
-    --hash=sha256:8d10d3ee09818aaba1973b73ce2521ab8961b63a29b5b52e3ff0d25e7a74808e
+modal==1.6.1 \
+    --hash=sha256:f408ef88563003a83e491a6be09d4221eaa6e038fa4faa2ad8b15b25afe949a4 \
+    --hash=sha256:ff17768f67a65595aa7882e893e6cb78e2e001b3653aa52cfe98d4051d8d9e9e
     # via -r apps/vision/requirements.txt
 multidict==6.7.1 \
     --hash=sha256:026d264228bcd637d4e060844e39cdc60f86c479e463d49075dedc21b18fbbe0 \
@@ -606,6 +606,10 @@ multidict==6.7.1 \
     #   aiohttp
     #   grpclib
     #   yarl
+opentelemetry-api==1.45.1 \
+    --hash=sha256:aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75 \
+    --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb
+    # via fastapi
 pillow==12.3.0 \
     --hash=sha256:00808c5e14ef63ac5161091d242999076604ff74b883423a11e5d7bbb38bf756 \
     --hash=sha256:04f01d28a6aaff387bf842a13be313df23ba0597a44f1a976c9feb3c6ff4711a \
@@ -1059,9 +1063,9 @@ rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb \
     --hash=sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36
     # via modal
-starlette==1.6.0 \
-    --hash=sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c \
-    --hash=sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b
+starlette==1.7.0 \
+    --hash=sha256:67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e \
+    --hash=sha256:c79f74ea63cff761804fbbfb182f1e0b440c2d07b164d24700c5a1bab5d6ff5d
     # via
     #   -r apps/vision/requirements.txt
     #   fastapi
@@ -1069,9 +1073,9 @@ structlog==26.1.0 \
     --hash=sha256:e081a26d6c373e6d201eca24eede26d8ffab07f88f477822e679183428d3d91e \
     --hash=sha256:f63a716cbd1b1291cf7661de7794b455acfa4c43c5bcf1630e6ad5ddc1adb3b7
     # via -r requirements/base.txt
-synchronicity==0.12.5 \
-    --hash=sha256:94d96b1d85698e3056b96a793b8c0949af6584e4a7d877fabdeb5385efe230aa \
-    --hash=sha256:fdbbb10d437bc08a6b0f814fc66fddd1b58ffed314533d42f1ab555801e781af
+synchronicity==0.12.6 \
+    --hash=sha256:ac971eadb64c95938816b8d6125d6e28473982f3256789a35bdbe02025e1ce17 \
+    --hash=sha256:bc2bab6dde31f6bd9389912cef573b7fa7a5cb4a120ec786275e3284f06473ae
     # via modal
 toml==0.10.2 \
     --hash=sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b \
@@ -1091,6 +1095,7 @@ typing-extensions==4.16.0 \
     # via
     #   fastapi
     #   modal
+    #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   synchronicity
@@ -1102,9 +1107,9 @@ typing-inspection==0.4.2 \
     #   fastapi
     #   pydantic
     #   pydantic-settings
-uvicorn==0.52.4 \
-    --hash=sha256:73acfee47a0b133c5de13d219492d62d8a31e935f4fe6e41a232451a15379f86 \
-    --hash=sha256:f86e41a149d7d05a9969337e3946a9c171c06a5d42680896daaba624aeac8da1
+uvicorn==0.54.0 \
+    --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf \
+    --hash=sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620
     # via -r apps/vision/requirements.txt
 uvloop==0.22.1 \
     --hash=sha256:017bd46f9e7b78e81606329d07141d3da446f8798c6baeec124260e22c262772 \
