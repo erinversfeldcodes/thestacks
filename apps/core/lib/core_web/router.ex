@@ -376,6 +376,18 @@ defmodule CoreWeb.Router do
     post "/book-description", TestHelperController, :seed_book_description
   end
 
+  # ⛔ Must stay ABOVE the SPA catch-all. Everything under `/api` that no route
+  # above matched is an API request that does not exist, and it has to say so in
+  # the API's own vocabulary. Falling through to the catch-all made every such
+  # request answer `200 text/html` with the app shell, which meant a removed or
+  # mistyped endpoint was indistinguishable from a working one by status, and
+  # `Api.isNotFound` could never fire for it.
+  scope "/api", CoreWeb do
+    pipe_through :api
+
+    match :*, "/*path", PageController, :api_not_found
+  end
+
   scope "/", CoreWeb do
     pipe_through :spa
 
