@@ -304,20 +304,42 @@ suite =
                 \_ ->
                     AdminQueue.view (queue [ entry "one" ] 143)
                         |> Query.fromHtml
-                        |> Query.find [ testId "admin-feedback-older" ]
-                        |> Query.hasNot [ Selector.disabled True ]
-            , test "a full page with nothing behind it offers no older page" <|
+                        |> Query.has [ testId "admin-feedback-older" ]
+            , test "a full page with nothing behind it offers no older control at all" <|
                 \_ ->
+                    -- ABSENT, not disabled. A dead button in this stylesheet is
+                    -- indistinguishable from a live one — `.btn` has no
+                    -- `:disabled` rule and `.btn--secondary` paints over the
+                    -- browser's grey — so it would invite a click that does
+                    -- nothing and explains nothing.
                     AdminQueue.view (queue (List.repeat 25 (entry "one")) 25)
                         |> Query.fromHtml
-                        |> Query.find [ testId "admin-feedback-older" ]
-                        |> Query.has [ Selector.disabled True ]
-            , test "the first window offers no newer page" <|
+                        |> Query.hasNot [ testId "admin-feedback-older" ]
+            , test "the first window offers no newer control at all" <|
                 \_ ->
                     AdminQueue.view (queue [ entry "one" ] 143)
                         |> Query.fromHtml
-                        |> Query.find [ testId "admin-feedback-newer" ]
-                        |> Query.has [ Selector.disabled True ]
+                        |> Query.hasNot [ testId "admin-feedback-newer" ]
+            , test "a queue that fits in one window shows no pager" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one", entry "two" ] 2)
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.hasNot [ testId "admin-feedback-newer" ]
+                            , Query.hasNot [ testId "admin-feedback-older" ]
+                            ]
+            , test "a failed refetch at a later window still offers the way back" <|
+                \_ ->
+                    -- Otherwise the owner is stranded: an error with no pager, on
+                    -- the only surface that can read feedback, and the sole escape
+                    -- is navigating away — which silently returns them to the
+                    -- newest page as if nothing had happened.
+                    AdminQueue.view (queueAt AdminQueue.pageSize (Failure Http.NetworkError))
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ testId "admin-feedback-error" ]
+                            , Query.has [ testId "admin-feedback-newer" ]
+                            ]
             , test "asking for older feedback moves the window a page on" <|
                 \_ ->
                     let

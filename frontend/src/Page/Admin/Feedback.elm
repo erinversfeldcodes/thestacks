@@ -26,7 +26,7 @@ cannot tell a full page from a truncated queue.
 
 import Api exposing (AdminFeedbackEntry, AdminFeedbackPage)
 import Html exposing (Html, button, div, h1, li, p, span, text, ul)
-import Html.Attributes exposing (class, disabled)
+import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
@@ -149,7 +149,6 @@ view model =
                         [ viewCount model page
                         , ul [ class "admin-feedback__list" ]
                             (List.map viewEntry page.entries)
-                        , viewPager model
                         ]
 
             Failure _ ->
@@ -158,6 +157,13 @@ view model =
 
             _ ->
                 p [ class "admin__loading" ] [ text "Loading…" ]
+
+        -- OUTSIDE the case, deliberately. A failed refetch at a non-zero offset
+        -- would otherwise leave the owner on a page with an error and no way
+        -- back, on the only surface that can read feedback at all — and the way
+        -- out would be to navigate away, which silently resets to the newest
+        -- page. "Newer" needs nothing from the response to be correct.
+        , viewPager model
         ]
 
 
@@ -186,24 +192,51 @@ viewCount model page =
         [ text label ]
 
 
+{-| The two controls, each rendered only when it leads somewhere.
+
+Absent rather than disabled, which is this project's settled answer for an
+affordance that cannot act: a greyed button invites a click that will never
+work, and in this stylesheet it would not even read as greyed — `.btn` has no
+`:disabled` rule, and `.btn--secondary` paints the accent border and accent
+text over the browser's own grey, so a dead button looks exactly like a live
+one. The admin moderation pager omits its controls for the same reason.
+
+-}
 viewPager : Model -> Html Msg
 viewPager model =
-    div [ class "admin-feedback__pager" ]
-        [ button
-            [ class "btn btn--secondary btn--sm"
-            , testId "admin-feedback-newer"
-            , disabled (model.offset == 0)
-            , onClick ShowNewer
+    let
+        newer =
+            model.offset > 0
+
+        older =
+            hasOlder model
+    in
+    if not newer && not older then
+        text ""
+
+    else
+        div [ class "admin__pagination" ]
+            [ if newer then
+                button
+                    [ class "btn btn--secondary btn--sm"
+                    , testId "admin-feedback-newer"
+                    , onClick ShowNewer
+                    ]
+                    [ text "Newer" ]
+
+              else
+                text ""
+            , if older then
+                button
+                    [ class "btn btn--secondary btn--sm"
+                    , testId "admin-feedback-older"
+                    , onClick ShowOlder
+                    ]
+                    [ text "Older" ]
+
+              else
+                text ""
             ]
-            [ text "Newer" ]
-        , button
-            [ class "btn btn--secondary btn--sm"
-            , testId "admin-feedback-older"
-            , disabled (not (hasOlder model))
-            , onClick ShowOlder
-            ]
-            [ text "Older" ]
-        ]
 
 
 viewEntry : AdminFeedbackEntry -> Html Msg
