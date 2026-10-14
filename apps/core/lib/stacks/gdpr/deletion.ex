@@ -308,7 +308,8 @@ defmodule Stacks.GDPR.Deletion do
     {:ok, %{scrubbed: scrub_invites(repo, user_id, user_email), restored: restore?}}
   end
 
-  # Three ways a user can be named by an invitation, and all three must scrub.
+  # Three ways a user can be named by an invitation, and all three must scrub —
+  # but NOT all three the same way, which is the subtlety that cost a round here.
   #
   # ⚠️ `issued_by_id` was missing, and its absence was invisible: `op.invites`'
   # user FK is `:nilify_all`, so erasing an ISSUER nulled the reference and left
@@ -318,13 +319,30 @@ defmodule Stacks.GDPR.Deletion do
   # `op.post_comments.body` defect this project has already shipped once, and the
   # erasure schema-guard could not catch it because the guard asserts FK
   # behaviour, not that free text actually went.
+  #
+  # ⚠️ And then adding the issuer to a SINGLE `update_all` was wrong in the other
+  # direction: it widened WHICH ROWS matched without narrowing WHAT WAS SET, so a
+  # redeemer-shaped `set` landed on rows that matched for an issuer-shaped reason
+  # and nulled a THIRD PARTY's `redeemed_by_id`. Consequences, all real:
+  #
+  #   * `GDPR.Export` finds a person's invitation by `redeemed_by_id`, so the
+  #     redeemer's own data export silently lost the invitation that admitted
+  #     them — a right-of-access regression triggered by someone else's erasure.
+  #   * `Invites.consume_invite/2` reads `is_nil(redeemed_by_id)` as "not yet
+  #     redeemed", so on a multi-use code the next redeemer overwrote it.
+  #   * The row was left incoherent: a `redeemed_at` and a `use_count` with no
+  #     redeemer.
+  #
+  # Hence two statements. The rule is that a row's `set` must answer the same
+  # question its `where` asked.
   defp scrub_invites(repo, user_id, user_email) do
-    {scrubbed, _} =
+    # Named as the REDEEMER, or by the address the invitation was written to:
+    # the redemption link is this person's own, so it goes with them.
+    {as_subject, _} =
       repo.update_all(
         from(i in Stacks.Accounts.InviteCode,
           where:
             i.redeemed_by_id == ^user_id or
-              i.issued_by_id == ^user_id or
               (not is_nil(i.invited_email) and
                  fragment("lower(?)", i.invited_email) == ^String.downcase(user_email || "")),
           where: not is_nil(i.note) or not is_nil(i.invited_email) or not is_nil(i.redeemed_by_id)
@@ -332,6 +350,18 @@ defmodule Stacks.GDPR.Deletion do
         set: [note: nil, invited_email: nil, redeemed_by_id: nil]
       )
 
-    scrubbed
+    # Named as the ISSUER: their free text and the address they typed are theirs
+    # to lose. Who redeemed is somebody else's record and stays. `issued_by_id`
+    # itself is nulled by the FK, so it is deliberately absent from the `set`.
+    {as_author, _} =
+      repo.update_all(
+        from(i in Stacks.Accounts.InviteCode,
+          where: i.issued_by_id == ^user_id,
+          where: not is_nil(i.note) or not is_nil(i.invited_email)
+        ),
+        set: [note: nil, invited_email: nil]
+      )
+
+    as_subject + as_author
   end
 end

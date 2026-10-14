@@ -180,6 +180,30 @@ defmodule Stacks.Accounts.InvitesTest do
       refute Map.has_key?(row, :note)
       refute Map.has_key?(row, :code_hash)
     end
+
+    test "the invitation survives the ISSUER's erasure, so the redeemer can still see it" do
+      # The export finds a person's invitation by `redeemed_by_id`. The invite
+      # scrub reaches the same row when the ISSUER is erased, so a scrub that
+      # nulled that column would delete this record out of someone else's export
+      # — a right-of-access loss caused by a different person's erasure, which no
+      # test of the erasure path itself would ever look for.
+      gate_on()
+      issuer = insert(:user, role: "owner")
+      {:ok, %{code: code, invite: invite}} = Invites.issue(issuer, %{"note" => "private note"})
+      {:ok, user} = register("still-mine@example.test", code)
+
+      assert {:ok, _} = Deletion.delete_user_data(issuer.id)
+
+      {:ok, export} = Export.export_user_data(user.id)
+
+      assert [row] = export.invitations,
+             "the redeemer's own invitation record disappeared when the issuer was erased"
+
+      assert row.code_prefix == invite.code_prefix
+
+      # And the issuer's free text is still gone — the two obligations hold together.
+      assert is_nil(Repo.get!(InviteCode, invite.id).note)
+    end
   end
 
   describe "ExpiredInvitesSweepJob" do

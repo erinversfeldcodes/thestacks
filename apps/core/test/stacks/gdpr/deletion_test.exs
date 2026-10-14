@@ -489,6 +489,50 @@ defmodule Stacks.GDPR.DeletionTest do
       assert is_nil(row.note)
     end
 
+    test "erasing the ISSUER leaves a third party's redemption on the record" do
+      # The issuer's free text and the address they typed are theirs to lose.
+      # WHO REDEEMED is not: that is the redeemer's own record, it is what their
+      # data export reads to tell them which invitation let them in
+      # (`export.ex` matches on `redeemed_by_id`), and nulling it reopens the
+      # first-redemption branch so a later redeemer on a multi-use code
+      # overwrites it.
+      #
+      # The bug this pins: widening the scrub's WHERE to cover the issuer
+      # without narrowing its SET, so one `update_all` applied a redeemer-shaped
+      # `set` to rows that matched for an issuer-shaped reason.
+      issuer = insert(:user)
+      redeemer = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "Mara from the book club",
+          "invited_email" => "mara@example.test",
+          "max_uses" => 2
+        })
+
+      invite
+      |> Ecto.Changeset.change(
+        redeemed_by_id: redeemer.id,
+        redeemed_at: DateTime.utc_now(),
+        use_count: 1
+      )
+      |> Repo.update!()
+
+      assert {:ok, _} = Deletion.delete_user_data(issuer.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert is_nil(row.note), "the issuer's own free text must not outlive them"
+      assert is_nil(row.invited_email), "the third party's address goes with the issuer"
+
+      assert row.redeemed_by_id == redeemer.id,
+             "the redeemer's own record must survive someone else's erasure — their data " <>
+               "export reads this column to tell them which invitation admitted them"
+
+      refute is_nil(row.redeemed_at),
+             "a redemption with a redeemer but no timestamp is an incoherent row"
+    end
+
     test "an unrelated user's erasure leaves the invitation alone" do
       issuer = insert(:user)
       bystander = insert(:user)
