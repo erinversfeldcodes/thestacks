@@ -6,19 +6,45 @@ defmodule Stacks.SwallowToSafeDefaultTest do
       not take down the request that happened to touch it. That makes them the
       kind of code where a regression is invisible: delete the rescue and
       everything stays green until the day the bad input actually arrives,
-      which is the day you least want to discover it. Neither site is dead
-      code — they are insurance whose premium nobody had checked.
+      which is the day you least want to discover it.
 
       The two are together because they share that shape, not a subject.
 
-      ## Why `transparency_test.exs`'s "graceful degradation" does not cover this
+      ## ⚠️ Correction: only ONE of the two is a rescue this file executes
+
+      An earlier version of this moduledoc claimed both, and a reviewer's probe
+      disproved half of it. Deleting `rescue ArgumentError -> []` from BOTH
+      `safe_lookup/1` and `safe_insert/1` leaves every test here green, because
+      those functions guard with `table_exists?()` *before* the rescue — so a
+      terminated child reaches the `else: []`, not the rescue. The claim that
+      "reaching it needs the child actually stopped" was exactly backwards:
+      stopping the child reaches the GUARD.
+
+      So, precisely:
+
+      * **`Audit.decrypt_metadata/1` — a true guarantee.** Deleting its
+        `rescue _ -> %{}` fails here with `Jason.DecodeError`. That rescue is
+        the mechanism and this file covers it.
+      * **`Transparency.Cache` — this file covers the GUARD, not the rescue.**
+        The guard is worth covering on its own merits: it is what makes a
+        lookup during a cache restart a miss rather than a 500, and nothing
+        asserted it. But it is a weaker claim than the heading promised.
+
+      The cache's rescue is for a different and narrower thing: the table
+      vanishing BETWEEN `:ets.whereis/1` returning a reference and
+      `:ets.lookup/2` running, which happens if the owning GenServer dies in
+      that window. That race is real and is deliberately **not** asserted here,
+      because staging it needs the owner to die inside a two-call window and no
+      sandbox can do that deterministically. Said plainly rather than left to
+      look covered — a rescue nobody can reach from a test is still worth
+      keeping, and is not worth claiming.
+
+      ## Why `transparency_test.exs`'s "graceful degradation" does not cover the guard
 
       That describe degrades the **Prometheus client** —
       `MockPrometheusClient.put_response({:error, …})` — which exercises the
-      error path *through* the cache and never removes the ETS table. The
-      `ArgumentError` rescue in `safe_lookup/1` only fires when the table is
-      absent, which happens before the owning GenServer has initialised or
-      after it has gone down. Reaching it needs the child actually stopped.
+      error path *through* the cache and never removes the ETS table, so it
+      never reaches either the guard or the rescue.
   """
   use Core.DataCase, async: false
 
@@ -85,7 +111,7 @@ defmodule Stacks.SwallowToSafeDefaultTest do
     end
   end
 
-  describe "a transparency cache lookup with no table is a miss, not a crash" do
+  describe "a transparency cache lookup with no table is a miss via its guard, not a crash" do
     setup do
       # Deterministically absent, rather than deleting the table underneath its
       # owner: terminate_child stops the GenServer (taking its ETS table with
