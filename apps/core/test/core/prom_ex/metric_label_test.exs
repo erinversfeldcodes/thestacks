@@ -116,6 +116,35 @@ defmodule Core.PromEx.MetricLabelTest do
 
   defp segments(tag), do: tag |> Atom.to_string() |> String.split("_")
 
+  @repo_root Path.expand("../../../../..", __DIR__)
+
+  # Every Elixir source under the app, read once. The scan deliberately covers
+  # `apps/core/lib` only: a test that audits something is not a caller whose
+  # label reaches production.
+  defp audit_sources do
+    Path.wildcard(Path.join(@repo_root, "apps/core/lib/**/*.ex"))
+    |> Enum.map(&{&1, File.read!(&1)})
+  end
+
+  # The number of `Audit.log(` call sites in apps/core/lib. Declared so that a
+  # NEW one fails loudly and has to be classified, rather than being silently
+  # missed by a literal scan that cannot parse nested call arguments.
+  @audit_call_sites 16
+
+  # The call sites whose action is not a string literal: {file, attribute,
+  # the literal it resolves to}. Each is invisible to the literal scan, so each
+  # is named here and checked to still resolve where it claims.
+  @indirect_action_sites [
+    {"apps/core/lib/stacks/data_correction.ex", "@audit_action", "data.correction.applied"}
+  ]
+
+  # Every capture of `regex` across the app's sources, flattened.
+  defp audited_literals(regex) do
+    for {_path, source} <- audit_sources(),
+        [_, captured] <- Regex.scan(regex, source),
+        do: captured
+  end
+
   describe "every label is bounded, by declaration" do
     test "a metric cannot attach a label that has not been declared bounded" do
       undeclared =
@@ -212,23 +241,159 @@ defmodule Core.PromEx.MetricLabelTest do
     # get asserted here. This cannot be made general — "is this value bounded"
     # is a question about a specific producer — so it is a small set of named
     # checks that grows when a label's source is non-obvious.
-    test "the audit labels collapse an unknown value rather than minting a series" do
+    test "the audit label vocabularies exist and name real values" do
+      # ⚠️ This used to assert the BEHAVIOUR here, through a public
+      # `Audit.bounded_label_for/2` that existed only so this test could reach a
+      # private function. That accessor is gone, and the behaviour is now
+      # asserted where it actually happens: `gdpr_telemetry_test.exs` drives
+      # `Audit.log/3` end to end and asserts both halves of the contract — an
+      # unknown action arrives as `"other"` in the telemetry metadata while the
+      # audit ROW keeps the caller's exact string — with a companion test
+      # proving a KNOWN action passes through unchanged, so the bounding
+      # assertion cannot be satisfied by a function that collapses everything.
+      #
+      # That is strictly stronger than a pass-through to a private function, and
+      # it needed no new public promise on a context module. What remains here is
+      # this file's own job: the `action` and `resource_type` entries in
+      # @bounded_labels justify themselves by naming these two vocabularies, so
+      # the vocabularies have to exist and be real. Their COMPLETENESS is the
+      # sibling test below.
       actions = Stacks.Audit.telemetry_actions()
       resource_types = Stacks.Audit.telemetry_resource_types()
 
-      assert "user.login" in actions, "the known-action set looks wrong"
-      assert "user" in resource_types, "the known-resource-type set looks wrong"
+      assert "user.login" in actions,
+             "the known-action vocabulary no longer contains a value @bounded_labels' reason " <>
+               "for `action` depends on existing"
 
-      # The property: anything outside the set becomes one shared value, so a
-      # caller interpolating a name or an id cannot mint a series per value.
-      assert Stacks.Audit.bounded_label_for("user.login", actions) == "user.login"
-      assert Stacks.Audit.bounded_label_for("something.new", actions) == "other"
-      assert Stacks.Audit.bounded_label_for("mara@example.test", actions) == "other"
-      assert Stacks.Audit.bounded_label_for(nil, actions) == "other"
-      assert Stacks.Audit.bounded_label_for("user", resource_types) == "user"
+      assert "user" in resource_types, "the known-resource-type vocabulary looks wrong"
 
-      assert Stacks.Audit.bounded_label_for("book:#{Ecto.UUID.generate()}", resource_types) ==
-               "other"
+      assert "other" not in actions and "other" not in resource_types,
+             "`other` is in a vocabulary, which would make the collapse value indistinguishable " <>
+               "from a real action a caller passed"
+    end
+
+    test "every action and resource type actually audited is in the bounded set" do
+      # ⚠️ The finding that produced this test: the sets were INCOMPLETE the day
+      # they were written, and the comment above them claimed "Every caller today
+      # passes a literal from the sets below". Four values were missing —
+      # `admin.account_restored`, `data.correction.applied`, `book_edition`, and
+      # `system.rollback`, which `Audit.log_rollback/1` emits forty lines below
+      # the list in that same module. Each silently labelled `other`, so the
+      # operator-attribution signal for someone reaching into a specific account
+      # became indistinguishable from any unknown string.
+      #
+      # That is the same error the describe's own header is about, one level up:
+      # the first version asserted a false REASON, this one asserted a false
+      # POPULATION. The completeness of an allowlist is a fact about its
+      # callers, so it has to be read off the callers.
+      #
+      # The remedy when this fails is to add the value to `@telemetry_actions`
+      # in `Stacks.Audit` — not to delete the assertion. If an action genuinely
+      # SHOULD aggregate under `other` because its values are high-cardinality
+      # by nature, that is a deliberate choice and belongs in this test as a
+      # named exception with its reason, so the next reader can tell a decision
+      # from an oversight.
+      actions =
+        audited_literals(~r/Audit\.log\(\s*[^,]+,\s*"([a-z_.]+)"/) ++
+          audited_literals(~r/@audit_action\s+"([a-z_.]+)"/) ++
+          audited_literals(~r/\blog\(nil,\s*"([a-z_.]+)"/)
+
+      resource_types =
+        audited_literals(~r/resource_type:\s*"([a-z_]+)"/) ++
+          audited_literals(~r/def resource_type,\s*do:\s*"([a-z_]+)"/)
+
+      # Anti-vacuity, and it is not ceremony: every assertion below is a subset
+      # check, which an empty scan satisfies. These floors are the counts at the
+      # time of writing, so a regex that stops matching fails here rather than
+      # turning the real assertions green.
+      assert length(Enum.uniq(actions)) >= 16,
+             "the action scan found only #{length(Enum.uniq(actions))} distinct audited " <>
+               "actions (expected at least 16). A call shape changed and the patterns no " <>
+               "longer match it, so the subset assertions below are now vacuous.\nFound: " <>
+               inspect(Enum.sort(Enum.uniq(actions)))
+
+      assert length(Enum.uniq(resource_types)) >= 7,
+             "the resource-type scan found only #{length(Enum.uniq(resource_types))} " <>
+               "distinct values (expected at least 7), so the assertion below is vacuous"
+
+      unbounded_actions =
+        actions
+        |> Enum.uniq()
+        |> Enum.reject(&(&1 in Stacks.Audit.telemetry_actions()))
+        |> Enum.sort()
+
+      unbounded_types =
+        resource_types
+        |> Enum.uniq()
+        |> Enum.reject(&(&1 in Stacks.Audit.telemetry_resource_types()))
+        |> Enum.sort()
+
+      assert unbounded_actions == [],
+             "these actions are audited somewhere in apps/core/lib and are NOT in " <>
+               "Audit.telemetry_actions/0, so each one labels as `other` and its metric " <>
+               "series is indistinguishable from an unknown value: " <>
+               "#{inspect(unbounded_actions)}"
+
+      assert unbounded_types == [],
+             "these resource types are audited and are NOT in " <>
+               "Audit.telemetry_resource_types/0, so each labels as `other`: " <>
+               "#{inspect(unbounded_types)}"
+    end
+
+    test "every audit call site is accounted for, so the scan above cannot miss one" do
+      # ⚠️ This test exists because my FIRST attempt at it was vacuous, which is
+      # worth recording where the fix lives.
+      #
+      # It tried to regex the second argument of every `Audit.log(` call and
+      # flag any that was not a string literal. Two things were wrong. The
+      # comprehension filtered on `[line] <- Regex.scan(...)` while the pattern
+      # had a capture group, so every scan result was a two-element list, the
+      # filter matched nothing, and the assertion compared [] to [] forever.
+      # And even corrected it could not have worked: `data_correction.ex` calls
+      # `Audit.log(Keyword.get(opts, :actor_id), @audit_action, …)`, whose first
+      # argument contains a comma, and a regex cannot reliably find the second
+      # argument of a call whose first one has nested parens and commas.
+      #
+      # So this does not parse arguments at all. It counts CALL SITES and
+      # requires the total to match a declared number. A new site — literal or
+      # not — changes the count and fails here, and whoever added it has to come
+      # and say which kind it is. That is fail-closed without pretending regex
+      # can parse Elixir.
+      sites =
+        for {path, source} <- audit_sources(),
+            count = length(Regex.scan(~r/Audit\.log\(/, source)),
+            count > 0,
+            do: {Path.relative_to(path, @repo_root), count}
+
+      total = sites |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+
+      assert total == @audit_call_sites,
+             "the number of `Audit.log(` call sites in apps/core/lib is #{total}, not the " <>
+               "declared #{@audit_call_sites}. If you ADDED one: check that its action is in " <>
+               "`Audit.telemetry_actions/0` (the sibling test will tell you), then update " <>
+               "@audit_call_sites. If its action is not a string literal, add it to " <>
+               "@indirect_action_sites with the literal it resolves to, because the sibling " <>
+               "test's scan cannot see it.\n\nSites found:\n" <>
+               (sites |> Enum.sort() |> Enum.map_join("\n", fn {f, n} -> "  #{n}x #{f}" end))
+
+      # The one call site whose action is not a literal, named so the sibling
+      # scan's blind spot is explicit rather than unknown. Its value IS covered,
+      # via the `@audit_action "…"` pattern that reads the attribute's own
+      # definition.
+      for {file, attribute, resolves_to} <- @indirect_action_sites do
+        source = File.read!(Path.join(@repo_root, file))
+
+        assert source =~ "Audit.log(" and source =~ attribute,
+               "#{file} no longer calls Audit.log with #{attribute}, so this entry in " <>
+                 "@indirect_action_sites is stale — remove it or re-point it"
+
+        assert source =~ ~s(#{attribute} "#{resolves_to}"),
+               "#{file}'s #{attribute} no longer resolves to #{inspect(resolves_to)}, so the " <>
+                 "sibling scan is now collecting a value this site does not emit"
+
+        assert resolves_to in Stacks.Audit.telemetry_actions(),
+               "#{inspect(resolves_to)} is emitted via #{attribute} and is not bounded"
+      end
     end
 
     test "the invite-gate label is total, so an unexpected refusal cannot raise" do

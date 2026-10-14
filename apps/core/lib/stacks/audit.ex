@@ -11,8 +11,7 @@ defmodule Stacks.Audit do
 
   # ⚠️ `action` and `resource_type` are arbitrary strings on the way IN — the
   # function signature says `String.t()` and nothing validates them — and they
-  # went straight out as Prometheus labels. Every caller today passes a literal
-  # from the sets below, so the values were bounded by caller DISCIPLINE and by
+  # went straight out as Prometheus labels, bounded by caller DISCIPLINE and by
   # nothing else.
   #
   # That is not good enough for a label. A label is a dimension: one series per
@@ -30,16 +29,29 @@ defmodule Stacks.Audit do
   # These sets are the labels' vocabulary, NOT a validation of what may be
   # audited: a new action writes its row correctly on the day it is added and
   # only its metric needs catching up.
+  #
+  # ⚠️ The completeness of these sets is a fact about the CALLERS, not about
+  # this list, so it is asserted by a set difference over every audited action
+  # in the tree rather than claimed here. An earlier version of this comment
+  # read "Every caller today passes a literal from the sets below" and was
+  # false on disk the day it was written: four values were missing, including
+  # `system.rollback`, emitted forty lines below by `log_rollback/1` in this
+  # very module, and `admin.account_restored`, which is the only signal
+  # recording that an operator reached into a specific account. Collapsing
+  # that one to `other` made it indistinguishable from any unknown value.
   @telemetry_actions ~w(
-    admin.call admin.login admin.mfa_verified
+    admin.account_restored admin.call admin.login admin.mfa_verified
+    data.correction.applied
     invite.issued invite.revoked
     placement.created placement.moved placement.removed
     placement.reread placement.restored
+    system.rollback
     user.data_deleted user.deletion_requested user.login user.registered
   )
 
   @telemetry_resource_types ~w(
-    admin_endpoint admin_session bookshelf deploy invite placement user unknown
+    admin_endpoint admin_session book_edition bookshelf deploy invite placement
+    user unknown
   )
 
   defp bounded_label(value, allowed) when is_binary(value) do
@@ -55,17 +67,6 @@ defmodule Stacks.Audit do
   @doc "The resource types the write counter may label. Anything else labels as `other`."
   @spec telemetry_resource_types() :: [String.t()]
   def telemetry_resource_types, do: @telemetry_resource_types
-
-  @doc """
-      The label-bounding rule, exposed so it can be asserted rather than trusted.
-
-      The label guard's allowlist carries a written reason for every label key,
-      and for these two the reason is about CODE rather than a literal — so the
-      reason has to be checkable. An allowlist entry a machine cannot verify is
-      a sentence, which this project has shipped before.
-  """
-  @spec bounded_label_for(term(), [String.t()]) :: String.t()
-  def bounded_label_for(value, allowed), do: bounded_label(value, allowed)
 
   @doc """
       Logs an audit entry. This function only ever INSERTs — never updates or deletes.
