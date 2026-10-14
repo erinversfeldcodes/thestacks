@@ -58,8 +58,10 @@ defmodule Stacks.Transparency.Cache do
   @doc "Clear the entire cache (used by tests and manual invalidation)."
   @spec invalidate_all() :: :ok
   def invalidate_all do
-    if table_exists?(), do: :ets.delete_all_objects(@table)
+    :ets.delete_all_objects(@table)
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   @impl true
@@ -83,17 +85,38 @@ defmodule Stacks.Transparency.Cache do
 
   defp schedule_cleanup, do: Process.send_after(self(), :cleanup, @cleanup_interval)
 
+  # ⚠️ No `table_exists?()` guard ahead of these, deliberately, and the reason
+  # is the invariant.
+  #
+  # These run in the CALLING process — a web request — not in the GenServer that
+  # owns the table. So the owner can die between a `:ets.whereis/1` check and
+  # the operation that follows it, and `:ets.lookup/2` takes the table NAME, so
+  # it re-resolves and raises. A guard therefore cannot close the window; it can
+  # only make the common absent-table case branch instead of raise, which means
+  # it is an optimisation and the rescue is the actual mechanism.
+  #
+  # Keeping both looked like defence in depth and cost more than it bought: two
+  # routes to one outcome, of which only the guarded one is reachable from a
+  # test. With the guard present, deleting BOTH rescues leaves the suite green
+  # — the mechanism that ships was unprovable. With the rescue alone, deleting
+  # it fails. Same test, now a guarantee about the code that runs.
+  #
+  # Cost, stated so nobody has to re-derive it: during a cache outage every read
+  # raises and is rescued rather than branching. That window is unreachable at
+  # boot — `Stacks.Transparency.Cache` precedes `endpoint_children()` in the
+  # supervision list, so no request can arrive before `init/1` creates the table
+  # — leaving only a supervisor restart, which is milliseconds and during which
+  # every read is already fanning out to Prometheus to recompute. A rescued
+  # exception is noise against a cost already being paid.
   defp safe_lookup(key) do
-    if table_exists?(), do: :ets.lookup(@table, key), else: []
+    :ets.lookup(@table, key)
   rescue
     ArgumentError -> []
   end
 
   defp safe_insert(tuple) do
-    if table_exists?(), do: :ets.insert(@table, tuple)
+    :ets.insert(@table, tuple)
   rescue
     ArgumentError -> false
   end
-
-  defp table_exists?, do: :ets.whereis(@table) != :undefined
 end

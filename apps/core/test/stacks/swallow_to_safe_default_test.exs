@@ -1,6 +1,6 @@
 defmodule Stacks.SwallowToSafeDefaultTest do
   @moduledoc """
-      Two rescue clauses, each of which has never been executed by a test.
+      Two rescue clauses, neither of which had ever been executed by a test.
 
       Both are on a READ path and both exist so that one unreadable thing does
       not take down the request that happened to touch it. That makes them the
@@ -10,41 +10,35 @@ defmodule Stacks.SwallowToSafeDefaultTest do
 
       The two are together because they share that shape, not a subject.
 
-      ## ⚠️ Correction: only ONE of the two is a rescue this file executes
+      ## Both rescues are now the mechanism, after a correction
 
-      An earlier version of this moduledoc claimed both, and a reviewer's probe
-      disproved half of it. Deleting `rescue ArgumentError -> []` from BOTH
-      `safe_lookup/1` and `safe_insert/1` leaves every test here green, because
-      those functions guard with `table_exists?()` *before* the rescue — so a
-      terminated child reaches the `else: []`, not the rescue. The claim that
-      "reaching it needs the child actually stopped" was exactly backwards:
-      stopping the child reaches the GUARD.
+      An earlier version of this file claimed to execute both rescues and only
+      executed one. `Transparency.Cache` guarded with `table_exists?()` BEFORE
+      its rescue, so a terminated child reached the `else: []` and the rescue was
+      unreachable from any test — deleting both rescues left every test here
+      green. A reviewer's probe found it.
 
-      So, precisely:
+      The fix was to the CODE, not just the claim, and the reasoning is worth
+      keeping because the conclusion is counter-intuitive. The race the rescue
+      exists for is real: these functions run in the calling web-request process,
+      not in the table's owner, and `:ets.lookup/2` takes the table NAME, so the
+      owner dying between a `whereis` check and the lookup makes the lookup
+      raise. A guard therefore *cannot* close that window — which means the
+      guard was never the safety mechanism, only an optimisation, and keeping it
+      bought a second route to one outcome of which only the unimportant one was
+      testable.
 
-      * **`Audit.decrypt_metadata/1` — a true guarantee.** Deleting its
-        `rescue _ -> %{}` fails here with `Jason.DecodeError`. That rescue is
-        the mechanism and this file covers it.
-      * **`Transparency.Cache` — this file covers the GUARD, not the rescue.**
-        The guard is worth covering on its own merits: it is what makes a
-        lookup during a cache restart a miss rather than a 500, and nothing
-        asserted it. But it is a weaker claim than the heading promised.
+      So the guard is gone and the rescue is the single mechanism, which makes
+      the terminate-child tests below a guarantee about the code that actually
+      ships rather than about a branch in front of it. Nothing here is hedged any
+      more: deleting either rescue now fails.
 
-      The cache's rescue is for a different and narrower thing: the table
-      vanishing BETWEEN `:ets.whereis/1` returning a reference and
-      `:ets.lookup/2` running, which happens if the owning GenServer dies in
-      that window. That race is real and is deliberately **not** asserted here,
-      because staging it needs the owner to die inside a two-call window and no
-      sandbox can do that deterministically. Said plainly rather than left to
-      look covered — a rescue nobody can reach from a test is still worth
-      keeping, and is not worth claiming.
-
-      ## Why `transparency_test.exs`'s "graceful degradation" does not cover the guard
+      ## Why `transparency_test.exs`'s "graceful degradation" does not cover either
 
       That describe degrades the **Prometheus client** —
       `MockPrometheusClient.put_response({:error, …})` — which exercises the
       error path *through* the cache and never removes the ETS table, so it
-      never reaches either the guard or the rescue.
+      never reaches the rescue at all.
   """
   use Core.DataCase, async: false
 
@@ -111,7 +105,7 @@ defmodule Stacks.SwallowToSafeDefaultTest do
     end
   end
 
-  describe "a transparency cache lookup with no table is a miss via its guard, not a crash" do
+  describe "a transparency cache lookup with no table is a miss, not a crash" do
     setup do
       # Deterministically absent, rather than deleting the table underneath its
       # owner: terminate_child stops the GenServer (taking its ETS table with
@@ -122,6 +116,10 @@ defmodule Stacks.SwallowToSafeDefaultTest do
       # async: false on this module for exactly this reason — the table is
       # process-global, so a concurrent test reading the cache during this one
       # would see the absence too.
+      #
+      # With the guard removed this now reaches the rescue, which is the whole
+      # mechanism: `:ets.lookup/2` on an absent named table raises ArgumentError
+      # and the rescue turns it into the documented miss.
       :ok = Supervisor.terminate_child(Core.Supervisor, Cache)
 
       on_exit(fn ->
@@ -132,9 +130,9 @@ defmodule Stacks.SwallowToSafeDefaultTest do
     end
 
     test "get, get_stale and invalidate_all are inert while the table is gone" do
-      refute :ets.whereis(:transparency_cache) != :undefined,
-             "precondition: the cache table is still present, so none of the rescue clauses " <>
-               "below can be reached and this test proves nothing"
+      assert :ets.whereis(:transparency_cache) == :undefined,
+             "precondition: the cache table is still present, so the rescue below cannot " <>
+               "be reached and this test proves nothing"
 
       assert Cache.get(:live_signals, 45_000) == :miss,
              "a lookup against an absent table did not report a miss. If it raised, every " <>
@@ -152,7 +150,7 @@ defmodule Stacks.SwallowToSafeDefaultTest do
              "writing to an absent table raised instead of being inert. The write path is " <>
                "reached from the same request as the read, so a raise here is the same 500."
 
-      refute :ets.whereis(:transparency_cache) != :undefined,
+      assert :ets.whereis(:transparency_cache) == :undefined,
              "the put recreated the ETS table from the calling process. That would make the " <>
                "table owned by whoever happened to write first and die with them, which is " <>
                "a worse failure than the miss it was avoiding."
