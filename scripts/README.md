@@ -18,6 +18,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-e2e-vacuous-guards.sh` | `e2e/tests/spine-rendering.spec.ts`, `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-idor-response.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | A story that describes the system as it stands must cite things that exist. |
 | `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented Oban queues must be the queues that exist. |
@@ -42,13 +43,13 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-preview.sh` |  |
 | `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh` | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
 | `scripts/format.sh` | `justfile` |  |
-| `scripts/gen-ecto-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml`, `scripts/deploy-stack.sh` … |  |
+| `scripts/gen-ecto-proto.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml` … |  |
 | `scripts/gen-elixir-proto.sh` | `.github/workflows/reseed-staging.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
 | `scripts/gen-elm-proto.py` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-stack.sh` … | Generate Elm JSON decoder/encoder modules from a buf JSON FileDescriptorSet. |
 | `scripts/gen-elm-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-stack.sh` … |  |
 | `scripts/gen-python-proto.sh` | `.github/workflows/deploy-production.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
 | `scripts/gen-rust-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` … |  |
-| `scripts/gen_python_proto.py` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-enum-coverage.py`, `scripts/deploy-stack.sh` … |  |
+| `scripts/gen_python_proto.py` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-enum-coverage.py` … |  |
 | `scripts/generate-textures.py` | `justfile` | Generate cinematic textures and assets for The Stacks WebGL bookshelf. |
 | `scripts/generated-file-class.sh` | `scripts/gen-elm-proto.sh`, `scripts/gen_python_proto.py` |  |
 | `scripts/hooks/lib/check-issue-evidence.sh` | `scripts/hooks/lib/pre-stop-lint.sh` |  |

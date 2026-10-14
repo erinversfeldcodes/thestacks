@@ -23,6 +23,7 @@ SUITES=(
     "$HERE/schema_diff_test.sh"
     "$HERE/ci_migration_safety_job_test.sh"
     "$HERE/probe_production_test.sh"
+    "$HERE/idor_gate_test.sh"
     "$HERE/check_slo_gate_test.sh"
     "$HERE/rollback_production_test.sh"
     "$HERE/parse_rollback_output_test.sh"

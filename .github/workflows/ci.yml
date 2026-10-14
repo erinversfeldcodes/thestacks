@@ -1132,12 +1132,7 @@ jobs:
           IDOR_CODE="$(curl -o /dev/null -s -w "%{http_code}" \
             -X DELETE "${CORE_URL}/api/placements/${PLACEMENT}" \
             -H "Authorization: Bearer ${U2}")"
-          if [[ "${IDOR_CODE}" == "200" ]]; then
-            echo "FAIL: IDOR — user2 deleted user1's placement (HTTP 200)"
-            exit 1
-          else
-            echo "PASS: IDOR cross-user DELETE blocked (HTTP ${IDOR_CODE})"
-          fi
+          bash scripts/check-idor-response.sh "${IDOR_CODE}"
       - name: Cleanup preview stack
         if: always()
         run: |
