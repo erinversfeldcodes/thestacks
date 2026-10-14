@@ -665,15 +665,48 @@ defmodule Stacks.GDPRTest do
       assert {:ok, preview} = Deletion.preview_user_data(user.id)
       assert preview.library_imports == 1
 
+      # Captured BEFORE erasure, because afterwards there is no path back to
+      # these rows except their own ids — which is the whole point.
+      row_ids =
+        Repo.all(
+          from(r in Stacks.Imports.LibraryImportRow,
+            where: r.import_id == ^import.id,
+            select: r.id
+          )
+        )
+
+      assert row_ids != [], "the import parsed no rows, so this test would assert nothing"
+
       assert {:ok, result} = Deletion.delete_user_data(user.id)
       assert result.delete_library_imports == 1
 
       assert nil == Repo.get(Stacks.Imports.LibraryImport, import.id)
 
-      assert [] ==
-               Repo.all(
-                 from(r in Stacks.Imports.LibraryImportRow, where: r.import_id == ^import.id)
-               )
+      # ⚠️ Asserted by ROW ID, not by `where import_id == ^import.id`.
+      #
+      # That was the previous assertion, and it could not tell the two outcomes
+      # apart: a row whose `import_id` was NULLED no longer matches the filter
+      # either, so a detached row full of the reader's review and private notes
+      # returned `[]` exactly like a deleted one. The invariant this test is
+      # named for — free text must be DELETED, never author-nulled, because
+      # nulling removes the reference and keeps the content — was the one thing
+      # it could not observe. It is the `post_comments.body` defect class, in
+      # the test written to catch it.
+      #
+      # Fetching by the ids captured before erasure distinguishes them: a
+      # detached row is still found by its own id.
+      remaining =
+        Repo.all(
+          from(r in Stacks.Imports.LibraryImportRow,
+            where: r.id in ^row_ids,
+            select: {r.id, r.raw_review, r.raw_notes}
+          )
+        )
+
+      assert remaining == [],
+             "raw import rows survived erasure. If `import_id` is nil on these they were " <>
+               "DETACHED rather than deleted, which leaves the reader's review and private " <>
+               "notes in the table after they asked to be forgotten: " <> inspect(remaining)
     end
   end
 
