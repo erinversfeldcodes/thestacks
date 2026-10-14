@@ -628,7 +628,7 @@ defmodule Stacks.Factory do
     now = DateTime.utc_now()
 
     %PlatformCost{
-      category: "infrastructure",
+      category: "hosting",
       service: sequence(:service_name, &"service-#{&1}"),
       description: "Monthly hosting cost.",
       amount_cents: 1500,

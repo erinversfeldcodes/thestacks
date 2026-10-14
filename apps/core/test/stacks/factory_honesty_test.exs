@@ -20,6 +20,8 @@ defmodule Stacks.FactoryHonestyTest do
   alias Stacks.Books.BookEdition
   alias Stacks.Books.ISBN
   alias Stacks.Books.UploadedImage
+  alias Stacks.Costs
+  alias Stacks.Costs.PlatformCost
   alias Stacks.Shelving
   alias Stacks.Shelving.{Placement, Shelf}
 
@@ -320,6 +322,30 @@ defmodule Stacks.FactoryHonestyTest do
       book = insert(:book)
 
       refute insert(:book_edition, book: book).is_primary
+    end
+  end
+
+  describe "probe 9 — a platform cost carries a category the changeset accepts" do
+    test "a factory-built platform cost survives the production changeset" do
+      # The factory defaulted to "infrastructure", which is outside
+      # `@platform_cost_valid_categories` (costs.ex:151) — so every test built on
+      # it asserted against a row the application itself could never write, and
+      # nothing noticed for months. `op.platform_costs.category` has no CHECK
+      # constraint, which is why only the changeset can catch this.
+      cost = build(:platform_cost)
+
+      changeset =
+        Costs.platform_cost_changeset(%PlatformCost{}, %{
+          category: cost.category,
+          service: cost.service,
+          description: cost.description,
+          amount_cents: cost.amount_cents,
+          currency: cost.currency,
+          period_start: cost.period_start,
+          period_end: cost.period_end
+        })
+
+      assert changeset.valid?, inspect(changeset.errors)
     end
   end
 end
