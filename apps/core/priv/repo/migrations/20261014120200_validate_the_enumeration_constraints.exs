@@ -1,6 +1,7 @@
 defmodule Core.Repo.Migrations.ValidateTheEnumerationConstraints do
   @moduledoc """
-      Validates the five CHECKs added in the previous migration.
+      Validates the six CHECKs added by the two previous migrations — the five
+      enumerations, plus the import row's `created_at IS NOT NULL`.
 
       Split out for the reason the lockout-pair constraint was: `VALIDATE
       CONSTRAINT` scans the table under SHARE UPDATE EXCLUSIVE, which lets
@@ -30,6 +31,10 @@ defmodule Core.Repo.Migrations.ValidateTheEnumerationConstraints do
 
     execute(
       "ALTER TABLE op.post_syndications VALIDATE CONSTRAINT post_syndications_target_and_method_known"
+    )
+
+    execute(
+      "ALTER TABLE op.library_import_rows VALIDATE CONSTRAINT library_import_rows_created_at_present"
     )
   end
 

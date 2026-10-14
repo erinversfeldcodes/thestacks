@@ -11,11 +11,17 @@ defmodule Stacks.Workers.LibraryImportRowRetentionJobTest do
       `where created_at < cutoff`, and a NULL never satisfies a `<`, so a row
       with no `created_at` is swept NEVER: the reader's text survives
       permanently and the job's log line reports what it deleted, not what it
-      could not see. The column is NOT NULL with a `now()` default for exactly
-      that reason, and that is asserted against the live schema rather than
+      could not see. A validated CHECK plus a `now()` default is what stops
+      that, and both are asserted against the live catalogue rather than
       assumed, because `Imports.insert_import/3` writes through `insert_all` —
-      which bypasses both the changeset and the Ecto schema default, leaving the
-      column itself as the only thing that can enforce it.
+      which bypasses the changeset and the Ecto schema default alike, leaving
+      the table itself as the only thing that can enforce it.
+
+      A CHECK rather than `SET NOT NULL` because the latter scans the table
+      under ACCESS EXCLUSIVE; the constraint is enforced identically on every
+      write, so the guard asserts the constraint and that it is VALIDATED. An
+      unvalidated CHECK binds new writes but says nothing about the rows
+      already there, which is exactly the population this fix exists for.
   """
   use Core.DataCase, async: false
 
@@ -73,26 +79,56 @@ defmodule Stacks.Workers.LibraryImportRowRetentionJobTest do
   end
 
   describe "no row can hide from the sweep" do
-    test "created_at is NOT NULL in the live schema, with a default to fill it" do
-      {:ok, %{rows: rows}} =
+    test "a validated constraint requires created_at, and a default fills it" do
+      {:ok, %{rows: constraints}} =
         Repo.query("""
-        SELECT a.attnotnull, pg_get_expr(d.adbin, d.adrelid)
+        SELECT convalidated
+        FROM pg_constraint
+        WHERE conrelid = 'op.library_import_rows'::regclass
+          AND conname = 'library_import_rows_created_at_present'
+        """)
+
+      assert [[validated]] = constraints,
+             "op.library_import_rows has no constraint requiring created_at — a row without " <>
+               "one never satisfies the retention sweep's `< cutoff`, so the reader's review " <>
+               "and notes would be kept permanently with nothing reporting it"
+
+      assert validated,
+             "the constraint exists but is NOT VALID, so it binds new writes and says nothing " <>
+               "about the rows already there — which is the population this exists for"
+
+      {:ok, %{rows: defaults}} =
+        Repo.query("""
+        SELECT pg_get_expr(d.adbin, d.adrelid)
         FROM pg_attribute a
         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
         WHERE a.attrelid = 'op.library_import_rows'::regclass
           AND a.attname = 'created_at'
         """)
 
-      assert [[not_null, default]] = rows
+      assert [[default]] = defaults
 
-      assert not_null,
-             "op.library_import_rows.created_at is nullable again — a row with no created_at " <>
-               "never satisfies the retention sweep's `< cutoff`, so the reader's review and " <>
-               "notes would be kept permanently with nothing reporting it"
-
-      assert default =~ "now()",
+      assert to_string(default) =~ "now()",
              "the column lost its default — a writer that omits created_at would now fail the " <>
                "insert rather than start the retention clock, and insert_all is the write path"
+    end
+
+    test "the constraint actually refuses a row with no created_at" do
+      # The catalogue assertions above describe the schema; this one exercises
+      # it, because a constraint that exists and a constraint that fires are
+      # different claims.
+      import_record = insert(:library_import)
+
+      assert_raise Postgrex.Error, fn ->
+        Repo.query!(
+          """
+          INSERT INTO op.library_import_rows (id, import_id, row_number, raw_rating,
+                                              raw_read_count, raw_owned_copies, created_at)
+          VALUES (gen_random_uuid(), $1, 999, 0, 0, 0, NULL)
+          """,
+          [Ecto.UUID.dump!(import_record.id)]
+        )
+      end
     end
 
     test "the column the sweep filters on is indexed" do
