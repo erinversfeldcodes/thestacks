@@ -338,6 +338,8 @@ defmodule Stacks.Shelving do
       (provenance, also carried on the `placement.created` payload so feed regen
       can coalesce imports) and `:attrs` (extra placement fields, same changeset).
   """
+  @spec place_book(binary(), binary(), String.t(), binary() | nil, keyword()) ::
+          {:ok, Placement.t()} | {:error, Ecto.Changeset.t() | :reading_pile_full}
   def place_book(user_id, book_id, bookshelf_name, book_edition_id, opts \\ []) do
     source = Keyword.get(opts, :source, "manual")
     extra_attrs = Keyword.get(opts, :attrs, %{})
