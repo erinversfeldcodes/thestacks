@@ -366,6 +366,51 @@ defmodule Stacks.GDPRTest do
                "@export_excluded_fields WITH a written rationale if it is a secret, " <>
                "account-security mechanic, or internal UX flag."
     end
+
+    test "and every EXCLUDED field stays out of it" do
+      # ⚠️ The sweep above asserts one direction only: that nothing personal is
+      # MISSING. It skips the excluded fields entirely, so it cannot notice one
+      # of them being PRESENT — adding `password_hash: user.password_hash` to the
+      # export map passes it, because the field is on the exclusion list and the
+      # loop therefore never looks at it.
+      #
+      # That is the half that matters most here. The first direction protects the
+      # reader's right of access; this one protects their credentials, and the
+      # whole point of excluding a password hash or a reset token is that handing
+      # it to anyone holding the export defeats the thing it secures. An
+      # exclusion list asserted in one direction is a list of fields nobody
+      # checks.
+      user = insert(:user)
+      {:ok, export} = Export.export_user_data(user.id)
+
+      exported_keys = MapSet.new(Map.keys(export.user))
+
+      leaked =
+        for field <- @export_excluded_fields,
+            MapSet.member?(exported_keys, field),
+            do: field
+
+      assert leaked == [],
+             "these fields are on @export_excluded_fields and were exported anyway: " <>
+               "#{inspect(leaked)}. Either the exclusion was wrong and the rationale needs " <>
+               "rewriting, or a credential is being handed to whoever holds this export."
+
+      # `:password` is virtual, so it is absent from `__schema__(:fields)` and no
+      # schema-derived loop can reach it. Named explicitly for that reason.
+      refute MapSet.member?(exported_keys, :password)
+
+      # And the values, not only the key names: a secret smuggled out under a
+      # different key would satisfy every assertion above.
+      serialised = inspect(export.user)
+
+      for {label, secret} <- [
+            {"password hash", user.password_hash},
+            {"confirmation token", user.email_confirmation_token}
+          ],
+          is_binary(secret) and secret != "" do
+        refute serialised =~ secret, "the #{label} appears in the export payload by value"
+      end
+    end
   end
 
   describe "export completeness — table-level guard" do
