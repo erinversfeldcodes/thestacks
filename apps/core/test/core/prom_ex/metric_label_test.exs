@@ -118,13 +118,65 @@ defmodule Core.PromEx.MetricLabelTest do
 
   @repo_root Path.expand("../../../../..", __DIR__)
 
-  # Every Elixir source under the app, read once. The scan deliberately covers
-  # `apps/core/lib` only: a test that audits something is not a caller whose
-  # label reaches production.
-  defp audit_sources do
+  # Every Elixir source under the app, read once. Deliberately `apps/core/lib`
+  # only: a test that audits something is not a caller whose label reaches
+  # production.
+  defp all_sources do
     Path.wildcard(Path.join(@repo_root, "apps/core/lib/**/*.ex"))
     |> Enum.map(&{&1, File.read!(&1)})
   end
+
+  # Each scan pattern with its OWN minimum count, rather than one aggregate
+  # floor over all of them.
+  #
+  # ⚠️ The aggregate floor was calibrated to exactly the number that survived
+  # its own newest pattern breaking. Patterns 1 and 2 supply 16 distinct
+  # actions; pattern 3's only UNIQUE contribution is `system.rollback` (its
+  # other match, `user.data_deleted`, is also caught by pattern 1). So with a
+  # single `>= 16`, pattern 3 could stop matching, 16 would remain, the floor
+  # would pass, and the subset check would silently stop covering the only
+  # audit write inside `Stacks.Audit` — one of the four values this whole test
+  # exists because of. A per-pattern floor also makes a dead pattern
+  # diagnosable: one aggregate number cannot say WHICH scan died.
+  # Regex SOURCES, not compiled sigils: a compiled `~r//` is a Reference and
+  # cannot be escaped out of a module attribute into a function body.
+  @action_patterns [
+    {~S/Audit\.log\(\s*[^,]+,\s*"([a-z_.]+)"/, 14, "direct Audit.log/3 calls", :all},
+    {~S/@audit_action\s+"([a-z_.]+)"/, 1, "@audit_action module attributes", :all},
+    {~S/\blog\(nil,\s*"([a-z_.]+)"/, 2, "Audit's own internal log/3 calls", :all}
+  ]
+
+  # ⚠️ The floor of 6 is itself a finding. Before scoping, this scan collected 7
+  # — the seventh being `bookshelf`, whose ONLY occurrence in the tree is a
+  # `VisibilityGrant` changeset in `social/social.ex`. Nothing audits a
+  # bookshelf. So `"bookshelf"` sits in `@telemetry_resource_types` as dead
+  # vocabulary: harmless, because the assertion is audited ⊆ declared and an
+  # unused declared value simply never labels anything, but it was there giving
+  # the unscoped scan a value to find. Left in place rather than removed — it
+  # costs nothing and would be correct the day something does audit a shelf —
+  # and recorded here because the scoped scan is what made it visible.
+  # `resource_type:` is scoped to files that actually audit; see
+  # `auditing_sources/0` for why. `def resource_type, do:` is the indirect
+  # source for the data-correction modules, named here the way
+  # @indirect_action_sites names the action equivalent.
+  @resource_type_patterns [
+    {~S/resource_type:\s*"([a-z_]+)"/, 6, "resource_type: options at audit sites", :auditing},
+    {~S/def resource_type,\s*do:\s*"([a-z_]+)"/, 1, "data-correction resource_type/0 callbacks",
+     :all}
+  ]
+
+  # Bare `log(` call sites inside `Stacks.Audit` itself — the internal-wrapper
+  # shape `log_rollback/1` established.
+  #
+  # ⚠️ Declared separately because the main census counts `Audit.log(`, of which
+  # `audit.ex` contains ZERO: its own writes are unqualified self-calls. So the
+  # census's promise — a new site changes the count and fails — did not hold in
+  # the one file that produced this defect in the first place. A natural next
+  # wrapper (`log_admin_action(user_id, "deploy.promoted", …)`) would match none
+  # of the three action patterns AND leave the `Audit.log(` count unmoved.
+  # Counted test-side rather than fully qualifying the self-call in production:
+  # production should not contort for a scanner.
+  @internal_audit_log_sites 1
 
   # The number of `Audit.log(` call sites in apps/core/lib. Declared so that a
   # NEW one fails loudly and has to be classified, rather than being silently
@@ -138,11 +190,51 @@ defmodule Core.PromEx.MetricLabelTest do
     {"apps/core/lib/stacks/data_correction.ex", "@audit_action", "data.correction.applied"}
   ]
 
-  # Every capture of `regex` across the app's sources, flattened.
-  defp audited_literals(regex) do
-    for {_path, source} <- audit_sources(),
-        [_, captured] <- Regex.scan(regex, source),
-        do: captured
+  # Sources that actually write to the audit log — the only files whose
+  # `resource_type:` options belong to the audit metric's vocabulary.
+  #
+  # ⚠️ Scoped because the unscoped scan over-collected and the risk ran the
+  # over-strong way. `social/social.ex:565` sets `resource_type: "bookshelf"` on
+  # a `VisibilityGrant` CHANGESET — nothing to do with auditing — and the test
+  # passed only because `bookshelf` happened to already be in the vocabulary.
+  # The next `resource_type: "whatever"` added to any changeset anywhere in
+  # `apps/core/lib` would have reddened this test, whose cheapest fix would be
+  # polluting the audit label vocabulary with an unrelated value. A guard that
+  # cries wolf gets edited until it is quiet.
+  #
+  # `audit.ex` qualifies as an auditing source despite calling nothing: it IS
+  # the writer, and contributes `"deploy"` and the `"unknown"` default.
+  defp auditing_sources do
+    for {path, source} <- all_sources(),
+        String.contains?(source, "Audit.log(") or String.contains?(source, "@audit_action") or
+          Path.basename(path) == "audit.ex",
+        do: {path, source}
+  end
+
+  # A pattern with its own anti-vacuity floor. A scan that drops below its floor
+  # FLUNKS naming itself, rather than contributing nothing to a subset check
+  # that an empty list satisfies.
+  defp scan_with_floor!({pattern, floor, description, scope}) do
+    regex = Regex.compile!(pattern)
+    sources = if scope == :auditing, do: auditing_sources(), else: all_sources()
+
+    found =
+      for {_path, source} <- sources,
+          [_, captured] <- Regex.scan(regex, source),
+          do: captured
+
+    distinct = found |> Enum.uniq() |> Enum.sort()
+
+    if length(distinct) < floor do
+      flunk(
+        "the scan for #{description} found #{length(distinct)} distinct value(s), below its " <>
+          "declared floor of #{floor}. That pattern has stopped matching the code, so the " <>
+          "subset assertion it feeds is now partly vacuous — re-point the pattern rather " <>
+          "than lowering the floor.\nFound: #{inspect(distinct)}"
+      )
+    end
+
+    found
   end
 
   describe "every label is bounded, by declaration" do
@@ -293,28 +385,8 @@ defmodule Core.PromEx.MetricLabelTest do
       # by nature, that is a deliberate choice and belongs in this test as a
       # named exception with its reason, so the next reader can tell a decision
       # from an oversight.
-      actions =
-        audited_literals(~r/Audit\.log\(\s*[^,]+,\s*"([a-z_.]+)"/) ++
-          audited_literals(~r/@audit_action\s+"([a-z_.]+)"/) ++
-          audited_literals(~r/\blog\(nil,\s*"([a-z_.]+)"/)
-
-      resource_types =
-        audited_literals(~r/resource_type:\s*"([a-z_]+)"/) ++
-          audited_literals(~r/def resource_type,\s*do:\s*"([a-z_]+)"/)
-
-      # Anti-vacuity, and it is not ceremony: every assertion below is a subset
-      # check, which an empty scan satisfies. These floors are the counts at the
-      # time of writing, so a regex that stops matching fails here rather than
-      # turning the real assertions green.
-      assert length(Enum.uniq(actions)) >= 16,
-             "the action scan found only #{length(Enum.uniq(actions))} distinct audited " <>
-               "actions (expected at least 16). A call shape changed and the patterns no " <>
-               "longer match it, so the subset assertions below are now vacuous.\nFound: " <>
-               inspect(Enum.sort(Enum.uniq(actions)))
-
-      assert length(Enum.uniq(resource_types)) >= 7,
-             "the resource-type scan found only #{length(Enum.uniq(resource_types))} " <>
-               "distinct values (expected at least 7), so the assertion below is vacuous"
+      actions = Enum.flat_map(@action_patterns, &scan_with_floor!/1)
+      resource_types = Enum.flat_map(@resource_type_patterns, &scan_with_floor!/1)
 
       unbounded_actions =
         actions
@@ -360,7 +432,7 @@ defmodule Core.PromEx.MetricLabelTest do
       # and say which kind it is. That is fail-closed without pretending regex
       # can parse Elixir.
       sites =
-        for {path, source} <- audit_sources(),
+        for {path, source} <- all_sources(),
             count = length(Regex.scan(~r/Audit\.log\(/, source)),
             count > 0,
             do: {Path.relative_to(path, @repo_root), count}
@@ -375,6 +447,23 @@ defmodule Core.PromEx.MetricLabelTest do
                "@indirect_action_sites with the literal it resolves to, because the sibling " <>
                "test's scan cannot see it.\n\nSites found:\n" <>
                (sites |> Enum.sort() |> Enum.map_join("\n", fn {f, n} -> "  #{n}x #{f}" end))
+
+      # ⚠️ The second census, scoped to `audit.ex`, because the count above is of
+      # `Audit.log(` and that file contains none — its own writes are
+      # unqualified self-calls, so the promise "a new site changes the count"
+      # did not hold in the one file that produced this defect.
+      internal =
+        ~r/^\s*(?:case )?log\(/m
+        |> Regex.scan(File.read!(Path.join(@repo_root, "apps/core/lib/stacks/audit.ex")))
+        |> length()
+
+      assert internal == @internal_audit_log_sites,
+             "`Stacks.Audit` now has #{internal} internal `log(` call site(s), not the " <>
+               "declared #{@internal_audit_log_sites}. These are invisible to the " <>
+               "`Audit.log(` census above. If you added an internal wrapper like " <>
+               "`log_admin_action(user_id, \"deploy.promoted\", …)`, note that it matches " <>
+               "none of @action_patterns either — add a pattern for its shape, then update " <>
+               "this count."
 
       # The one call site whose action is not a literal, named so the sibling
       # scan's blind spot is explicit rather than unknown. Its value IS covered,
