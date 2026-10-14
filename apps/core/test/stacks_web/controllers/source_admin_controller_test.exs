@@ -164,6 +164,71 @@ defmodule StacksWeb.SourceAdminControllerTest do
     end
   end
 
+  describe "PUT /api/admin/removal-requests/:id — a decided request is not an absent one" do
+    # `Discovery` returns `:not_pending` for a request that has already been
+    # decided and `:not_found` for an id that never existed, and
+    # `discovery_removal_review_test.exs` covers that distinction three times at
+    # the context level. What nothing covered is the CONTROLLER's mapping of the
+    # two onto status codes — which is where the distinction either survives to
+    # the reviewer or is lost.
+    #
+    # It matters because of who is looking. A second reviewer opening the queue,
+    # or one person double-clicking, must be able to tell "someone already
+    # handled this" from "this never existed" — the first is routine, the second
+    # means the queue is lying to them. A single 404 for both reads as the
+    # second, and the operator's correct response to each is different.
+    defp decided_request do
+      insert(:discovered_source,
+        name: "Already Handled",
+        type: "community",
+        url: "https://decided-#{System.unique_integer([:positive])}.test",
+        status: "excluded",
+        exclusion_requested_at: DateTime.utc_now(),
+        discovered_at: DateTime.utc_now()
+      )
+    end
+
+    test "honouring an already-decided request is 409, and an unknown id is 404", %{conn: conn} do
+      {conn, _user, _session} = setup_admin_conn(conn)
+
+      decided = decided_request()
+
+      decided_conn = put(conn, "/api/admin/removal-requests/#{decided.id}/honour")
+      unknown_conn = put(conn, "/api/admin/removal-requests/#{Ecto.UUID.generate()}/honour")
+
+      assert decided_conn.status == 409,
+             "an already-decided removal request answered #{decided_conn.status}. A reviewer " <>
+               "who cannot distinguish 'already handled' from 'never existed' has to go and " <>
+               "check the queue by hand to find out which."
+
+      assert unknown_conn.status == 404,
+             "an unknown removal-request id answered #{unknown_conn.status} rather than 404"
+
+      refute decided_conn.status == unknown_conn.status,
+             "a decided request and an unknown id now answer with the same status, so the " <>
+               "distinction the context takes care to make is discarded at the controller"
+    end
+
+    test "declining an already-decided request is 409, and an unknown id is 404", %{conn: conn} do
+      # The sibling action, asserted separately rather than looped: the two go
+      # through different `Discovery` functions and only share `removal_error/2`.
+      # A regression that re-points one of them would pass a loop that happened
+      # to exercise the other.
+      {conn, _user, _session} = setup_admin_conn(conn)
+
+      decided = decided_request()
+
+      decided_conn = put(conn, "/api/admin/removal-requests/#{decided.id}/decline")
+      unknown_conn = put(conn, "/api/admin/removal-requests/#{Ecto.UUID.generate()}/decline")
+
+      assert decided_conn.status == 409,
+             "declining an already-decided request answered #{decided_conn.status}, not 409"
+
+      assert unknown_conn.status == 404,
+             "declining an unknown id answered #{unknown_conn.status}, not 404"
+    end
+  end
+
   describe "GET /api/admin/source-health" do
     test "returns per-source health under a data envelope for admin JWT", %{conn: conn} do
       {conn, _user, _session} = setup_admin_conn(conn)

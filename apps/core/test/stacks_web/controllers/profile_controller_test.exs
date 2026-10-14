@@ -154,6 +154,57 @@ defmodule StacksWeb.ProfileControllerTest do
       |> get("/api/u/ghost_shelf/bookshelves/library")
       |> json_response(404)
     end
+
+    test "a hidden bookshelf is byte-identical to one that does not exist", %{conn: conn} do
+      # Asserted as a COMPARISON of the two responses, not as two separate shape
+      # checks, because the property is indistinguishability and that is a
+      # relation. Two tests each asserting `count == 0` would both stay green
+      # while the bodies drifted apart — a `visibility` key or a different
+      # `shelves` shape on one branch and not the other is enough to tell a
+      # prober that the shelf exists and they simply cannot see it.
+      #
+      # Both cases share one expression in `render_shelf/4` today
+      # (`if is_nil(bookshelf) or resolve_visibility(...) == :hidden`), so they
+      # cannot currently differ. That is exactly what makes this worth pinning:
+      # the regression is someone splitting that branch to give the hidden case
+      # its own response, which reads like a harmless clarification.
+      hidden_owner = insert(:user, handle: "hidden_shelf_owner", profile_visibility: "platform")
+      insert(:bookshelf, user: hidden_owner, name: "library", visibility: "owner")
+
+      # No bookshelf row for this one — that is the "absent" half.
+      _absent_owner = insert(:user, handle: "absent_shelf_owner", profile_visibility: "platform")
+
+      viewer = insert(:user)
+
+      hidden_conn =
+        conn |> auth_conn(viewer) |> get("/api/u/hidden_shelf_owner/bookshelves/library")
+
+      absent_conn =
+        conn |> auth_conn(viewer) |> get("/api/u/absent_shelf_owner/bookshelves/library")
+
+      assert hidden_conn.status == absent_conn.status,
+             "a hidden bookshelf answers with status #{hidden_conn.status} while an absent " <>
+               "one answers #{absent_conn.status}, so the status alone discloses that the " <>
+               "shelf exists"
+
+      assert hidden_conn.resp_body == absent_conn.resp_body,
+             "a hidden bookshelf and an absent one no longer give the same response, so the " <>
+               "difference tells an unauthorised viewer that the shelf exists and is merely " <>
+               "withheld.\n  hidden: #{hidden_conn.resp_body}\n  absent: #{absent_conn.resp_body}"
+
+      # Anti-vacuity: both must be the real 200-empty body. If some earlier
+      # branch started returning 404 for both, the comparison above would be
+      # satisfied by two identical 404s and this describe would silently stop
+      # covering the branch it names.
+      assert json_response(hidden_conn, 200) == %{
+               "bookshelf" => "library",
+               "count" => 0,
+               "shelves" => []
+             },
+             "the hidden-bookshelf branch no longer returns the 200-empty body this test " <>
+               "compares, so the equality assertion above may now be comparing two of " <>
+               "something else"
+    end
   end
 
   describe "visibility matrix — group + unauthenticated" do
