@@ -14,17 +14,33 @@ defmodule StacksWeb.AuthorEventsController do
   alias Core.Repo
   alias Stacks.Enrichment.Events
 
-  @doc "GET /api/authors/:id/events"
-  def index(conn, %{"id" => author_id}) do
-    events =
-      author_id
-      |> Events.listed_events_for_author()
-      |> Repo.preload(:store)
-      |> Enum.map(&event_json/1)
+  @doc """
+      GET /api/authors/:id/events
 
-    json(conn, %{events: events})
-  rescue
-    Ecto.Query.CastError -> json(conn, %{events: []})
+      An id that is not an id is a 400; an id that is well-formed but names
+      nobody is a 200 with an empty list. The two used to be the same answer,
+      and that made a caller bug permanently invisible — send a slug or a name
+      where a UUID belongs and the card says "no events" forever, which is a
+      sentence about the author rather than about the request. The empty list
+      stays the answer for an unknown author: it is the truthful one, and it
+      keeps the endpoint from reporting who exists.
+  """
+  def index(conn, %{"id" => author_id}) do
+    case Ecto.UUID.cast(author_id) do
+      {:ok, id} ->
+        events =
+          id
+          |> Events.listed_events_for_author()
+          |> Repo.preload(:store)
+          |> Enum.map(&event_json/1)
+
+        json(conn, %{events: events})
+
+      :error ->
+        conn
+        |> put_status(400)
+        |> json(%{error: "invalid_author_id"})
+    end
   end
 
   defp event_json(event) do
