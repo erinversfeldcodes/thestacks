@@ -664,44 +664,56 @@ defmodule Stacks.UploadDbtTest do
   describe "deployed-only: dbt staging views reflect op table data" do
     @moduletag :deployed_only
 
+    # Every test below used to swallow a query error as `{:error, _} -> :ok`, so
+    # all five passed against a database with no warehouse whatsoever — which is
+    # the state the warehouse has actually been in on staging, preview and
+    # production. A missing relation is the finding these tests exist to report,
+    # so it fails here and names what is absent.
+    defp warehouse_rows!(sql, params, relation) do
+      case Repo.query(sql, params) do
+        {:ok, %{rows: rows}} ->
+          rows
+
+        {:error, error} ->
+          flunk("""
+          #{relation} could not be queried on this stack: #{inspect(error)}
+
+          The relation is missing or ungranted. Expected to stay red until a
+          scheduled dbt run materialises the warehouse on a deployed database.
+          """)
+      end
+    end
+
     @tag suite: :dbt
     test "stg_books view exposes book with correct visibility_tier" do
       {_user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
-      result =
-        Repo.query(
-          "SELECT id, title, visibility_tier FROM wh.stg_books WHERE id = $1",
-          [book.id]
+      rows =
+        warehouse_rows!(
+          "SELECT id, title, visibility_tier FROM staging.stg_books WHERE id = $1",
+          [book.id],
+          "staging.stg_books"
         )
 
-      case result do
-        {:ok, %{rows: [[_id, title, tier]]}} ->
-          assert title == "Test Book"
-          assert tier == "age_gated"
-
-        {:error, _} ->
-          :ok
-      end
+      assert [[_id, title, tier]] = rows
+      assert title == "Test Book"
+      assert tier == "age_gated"
     end
 
     @tag suite: :dbt
     test "stg_book_editions view exposes edition with ISBN" do
       {_user, _book, edition, _author} = create_user_with_book()
 
-      result =
-        Repo.query(
-          "SELECT isbn, is_primary FROM wh.stg_book_editions WHERE id = $1",
-          [edition.id]
+      rows =
+        warehouse_rows!(
+          "SELECT isbn, is_primary FROM staging.stg_book_editions WHERE id = $1",
+          [edition.id],
+          "staging.stg_book_editions"
         )
 
-      case result do
-        {:ok, %{rows: [[isbn, is_primary]]}} ->
-          assert isbn == edition.isbn
-          assert is_primary == true
-
-        {:error, _} ->
-          :ok
-      end
+      assert [[isbn, is_primary]] = rows
+      assert isbn == edition.isbn
+      assert is_primary == true
     end
 
     @tag suite: :dbt
@@ -709,20 +721,16 @@ defmodule Stacks.UploadDbtTest do
       image =
         insert(:uploaded_image, status: "rejected", rejection_reason: "isbn_not_found")
 
-      result =
-        Repo.query(
-          "SELECT status, rejection_reason FROM wh.stg_uploaded_images WHERE id = $1",
-          [image.id]
+      rows =
+        warehouse_rows!(
+          "SELECT status, rejection_reason FROM staging.stg_uploaded_images WHERE id = $1",
+          [image.id],
+          "staging.stg_uploaded_images"
         )
 
-      case result do
-        {:ok, %{rows: [[status, reason]]}} ->
-          assert status == "rejected"
-          assert reason == "isbn_not_found"
-
-        {:error, _} ->
-          :ok
-      end
+      assert [[status, reason]] = rows
+      assert status == "rejected"
+      assert reason == "isbn_not_found"
     end
 
     @tag suite: :dbt
@@ -730,29 +738,64 @@ defmodule Stacks.UploadDbtTest do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, placement} = Shelving.place_book(user.id, book.id, "antilibrary")
 
-      result =
-        Repo.query(
-          "SELECT book_id, bookshelf_id FROM wh.stg_bookshelf_placements WHERE id = $1",
-          [placement.id]
+      rows =
+        warehouse_rows!(
+          "SELECT book_id, bookshelf_id FROM staging.stg_bookshelf_placements WHERE id = $1",
+          [placement.id],
+          "staging.stg_bookshelf_placements"
         )
 
-      case result do
-        {:ok, %{rows: [[book_id, _bookshelf_id]]}} ->
-          assert book_id == book.id
-
-        {:error, _} ->
-          :ok
-      end
+      assert [[book_id, _bookshelf_id]] = rows
+      assert book_id == book.id
     end
 
     @tag suite: :dbt
-    test "mart_community_read_count reflects placement after dbt refresh" do
-      {user, book, _edition, _author} = create_user_with_book()
-      {:ok, _placement} = Shelving.place_book(user.id, book.id, "library")
+    test "community_read_count/1 returns what the mart holds" do
+      # Three vacuity traps sit in front of this one assertion, and the first two
+      # were walked into before this version:
+      #
+      #   1. `assert is_integer(count)` — `community_read_count/1` answers 0 by
+      #      design when the mart is absent (books.ex:85-88), so it passed on
+      #      every stack that had no warehouse at all.
+      #   2. Comparing the context against a mart row *for a book the test just
+      #      placed*. `mart_community_read_count` is `materialized='incremental'`
+      #      — a table, not a view — so a new placement is absent until dbt runs,
+      #      both sides are 0, and `0 == 0` passes however broken the read path is.
+      #   3. Picking any mart row at all: one with `read_count = 0` would collapse
+      #      to the same tautology.
+      #
+      # So: pick a row the mart says is NON-ZERO, and assert the context returns
+      # that same number. Gutting the mart read makes this fail, because 0 is no
+      # longer the expected answer. An empty mart fails too, and should — on a
+      # stack where dbt has run, a warehouse with no read counts is the finding.
+      rows =
+        warehouse_rows!(
+          """
+          SELECT book_id, read_count
+          FROM marts.mart_community_read_count
+          WHERE read_count > 0
+          LIMIT 1
+          """,
+          [],
+          "marts.mart_community_read_count"
+        )
 
-      count = Books.community_read_count(book.id)
+      case rows do
+        [[book_id, read_count]] ->
+          assert read_count > 0,
+                 "the query asked for a non-zero row and got #{inspect(read_count)}"
 
-      assert is_integer(count)
+          assert Books.community_read_count(book_id) == read_count
+
+        [] ->
+          flunk("""
+          marts.mart_community_read_count exists but holds no row with read_count > 0.
+
+          Nothing can be proven about the read path from an empty mart, so this
+          fails rather than passing vacuously. Expected until a scheduled dbt run
+          populates the warehouse on a deployed database.
+          """)
+      end
     end
   end
 end
