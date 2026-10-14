@@ -107,5 +107,57 @@ else
     done <<<"$GROUP_SCRIPTS"
 fi
 
+# The `elm:` paths-filter block, same flag-not-range reason as above.
+elm_filter() {
+    awk '
+        /^            elm:$/ { in_block = 1; next }
+        in_block && /^            [a-z_]+:$/ { exit }
+        in_block { print }
+    ' "$CI_YML"
+}
+
+# Every directory the ports gate READS, taken from the gate itself rather than
+# written down here. The gate compares Elm port declarations against the
+# JavaScript that subscribes to them, and those two live in different trees —
+# so its caller has to run when EITHER changes.
+ports_gate_roots() {
+    grep -oE '"[a-zA-Z0-9_/]+/\*\*/\*\.(elm|js)"' "$REPO_ROOT/scripts/check-ports-wired.sh" |
+        tr -d '"' |
+        sed 's|/\*\*/\*\..*$||' |
+        sort -u
+}
+
+test_case "ports_gate_inputs_trigger_its_lane" \
+    "the lane that runs the ports gate is triggered by every tree the gate reads"
+ELM_FILTER_TXT="$(elm_filter)"
+GATE_ROOTS="$(ports_gate_roots)"
+
+if [[ -z "$ELM_FILTER_TXT" ]]; then
+    _record_fail "the 'elm:' paths-filter block is gone from ci.yml, or was renamed"
+elif [[ -z "$GATE_ROOTS" ]]; then
+    _record_fail "could not read any glob root from scripts/check-ports-wired.sh"
+else
+    while IFS= read -r root; do
+        [[ -z "$root" ]] && continue
+        # The filter covers a root if it names that root, or any ancestor of it,
+        # with a recursive glob. `frontend/**` covers `frontend/src`.
+        covered=0
+        candidate="$root"
+        while [[ -n "$candidate" && "$candidate" != "." ]]; do
+            if printf '%s' "$ELM_FILTER_TXT" | grep -qF "'$candidate/**'"; then
+                covered=1
+                break
+            fi
+            candidate="$(dirname "$candidate")"
+        done
+
+        if [[ "$covered" -eq 1 ]]; then
+            _record_pass "the elm filter covers $root, which the ports gate reads"
+        else
+            _record_fail "the ports gate reads $root but no elm filter path covers it — a change confined to that tree skips the lane that runs the gate, so the gate cannot fire on the input most likely to break it"
+        fi
+    done <<<"$GATE_ROOTS"
+fi
+
 summarise
 exit $?

@@ -36,6 +36,21 @@ for pattern in ELM_GLOBS:
                 else:
                     unparseable.append((name, line.strip()))
 
+# Anti-vacuity, both halves. Without this the gate reports "OK — 0 ports" and
+# exits 0 when its globs match nothing — which is indistinguishable from a clean
+# run and is exactly how a gate stops being a gate. The sibling transport check
+# has had this guard since it was written; this one did not, and a platform
+# review found it by deleting the frontend tree and watching the gate pass.
+#
+# Both directions matter: no Elm files means the port DECLARATIONS are missing,
+# and no JS files means the SUBSCRIPTIONS are, and either way every comparison
+# below becomes trivially satisfied.
+if not seen_files:
+    print("FAIL: found no Elm sources under frontend/src.")
+    print("That cannot be right, so the scan has drifted from the source rather than")
+    print("the app having stopped declaring ports. Fix this script before trusting it.")
+    sys.exit(1)
+
 subscribes = set()   # app.ports.X.subscribe
 sends = set()        # app.ports.X.send
 js_refs = set()      # every app.ports.X referenced
@@ -51,6 +66,12 @@ for pattern in JS_GLOBS:
             subscribes.add(name); js_refs.add(name)
         for name in re.findall(r"app\.ports\.([A-Za-z0-9_]+)\.send", text):
             sends.add(name); js_refs.add(name)
+
+if not seen_js:
+    print("FAIL: found no JavaScript under apps/core/assets.")
+    print("That cannot be right, so the scan has drifted from the source rather than")
+    print("the app having stopped subscribing to ports. Fix this script before trusting it.")
+    sys.exit(1)
 
 failures = []
 warnings = []

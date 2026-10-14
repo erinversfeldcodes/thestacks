@@ -135,6 +135,14 @@ jobs:
               - 'mix.lock'
             elm:
               - 'frontend/**'
+              # The Elm lint lane also runs the ports gate, which compares Elm
+              # port DECLARATIONS against the JavaScript that SUBSCRIBES to them
+              # — and that JavaScript lives here, not under frontend/. Without
+              # this path, deleting a subscription from app.js is a
+              # JavaScript-only change: the Elm lane is skipped, the gate never
+              # runs, and the regression it was written for (finishing
+              # onboarding never persisting) comes back with CI fully green.
+              - 'apps/core/assets/**'
             rust:
               - 'apps/scraper/**'
             python:
