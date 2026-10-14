@@ -337,9 +337,19 @@ defmodule Stacks.Shelving do
       `nil` falls back to the work's primary edition. Options: `:source`
       (provenance, also carried on the `placement.created` payload so feed regen
       can coalesce imports) and `:attrs` (extra placement fields, same changeset).
+
+      ⚠️ The error side is `{:error, term()}`, not just the two named reasons.
+      The transaction's last clause is `{:error, _, reason, _} -> {:error, reason}`,
+      and one of its steps is `Audit.log/3`, whose own contract is
+      `{:ok, map()} | {:error, term()}`. A caller that matches only the changeset
+      and `:reading_pile_full` will raise `CaseClauseError` on an audit failure —
+      an earlier version of this spec named only those two and made exactly that
+      omission look safe.
   """
   @spec place_book(binary(), binary(), String.t(), binary() | nil, keyword()) ::
-          {:ok, Placement.t()} | {:error, Ecto.Changeset.t() | :reading_pile_full}
+          {:ok, Placement.t()}
+          | {:error, Ecto.Changeset.t() | :reading_pile_full}
+          | {:error, term()}
   def place_book(user_id, book_id, bookshelf_name, book_edition_id, opts \\ []) do
     source = Keyword.get(opts, :source, "manual")
     extra_attrs = Keyword.get(opts, :attrs, %{})
