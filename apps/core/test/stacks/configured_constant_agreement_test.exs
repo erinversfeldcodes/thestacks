@@ -167,6 +167,55 @@ defmodule Stacks.ConfiguredConstantAgreementTest do
              "precondition: the TTL rounds to zero hours, so the assertion above is " <>
                "matching on a sentence that reads 'expires in 0 hours' and proves nothing"
     end
+
+    test "the reset email's hardcoded expiry equals the token's max_age" do
+      # ⚠️ This is the half of the describe that can actually drift, and it was
+      # missing. A reviewer put it precisely: the structural assertion went where
+      # behaviour already reached (`defp unit_in_seconds`, where the behavioural
+      # pair above already covers the main case) and was omitted where behaviour
+      # cannot reach at all.
+      #
+      # The registration template DERIVES its number from
+      # `unverified_account_ttl_seconds/0`, so it cannot disagree — that is the
+      # test above. The reset template HARDCODES "This link expires in 24
+      # hours" while `Email.reset_password/2` enforces `max_age: 86_400` in a
+      # different file. Two independent literals, no derivation between them.
+      # They agree today, which is why this is a guard rather than a bug report.
+      #
+      # A source assertion, and unavoidably so: no behavioural test can observe
+      # the relationship between a sentence baked into an HTML heredoc and a
+      # `max_age` passed to `Phoenix.Token.verify/4`. Note also that
+      # `expiry_phrase/1` already exists in that module and is not used here —
+      # deriving the phrase would delete the need for this test, which is the
+      # better fix whenever someone next touches that template.
+      templates =
+        File.read!(Path.join(@repo_root, "apps/core/lib/stacks/email/templates.ex"))
+
+      email = File.read!(Path.join(@repo_root, "apps/core/lib/stacks/email.ex"))
+
+      # Matches only the HARDCODED phrase: the derived sibling renders as
+      # `expires in #{expiry_hours} hours`, which has no digits to capture.
+      quoted_hours =
+        single_integer!(
+          templates,
+          ~r/This link expires in (\d+) hours/,
+          "the hardcoded expiry phrase in the password-reset email template"
+        )
+
+      enforced_seconds =
+        single_integer!(
+          email,
+          ~r/"password_reset",\s*token,\s*max_age:\s*([\d_]+)/,
+          "the max_age enforced for a password-reset token"
+        )
+
+      assert quoted_hours * 3600 == enforced_seconds,
+             "the password-reset email tells the reader the link lasts " <>
+               "#{quoted_hours} hours (#{quoted_hours * 3600}s) while the token is verified " <>
+               "with max_age: #{enforced_seconds}s. One of the two literals moved without " <>
+               "the other. A reader told the wrong window either loses an account they " <>
+               "thought they had time to recover, or sits on a link that is already dead."
+    end
   end
 
   describe "a cap enforced in one place is defined in one place" do

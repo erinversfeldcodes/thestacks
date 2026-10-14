@@ -30,7 +30,14 @@ defmodule Stacks.ProbeCredentialShapeTest do
       same config key, the same credential header name, and a refusal to probe
       at all when the key is absent.
   """
-  use ExUnit.Case, async: true
+  # `async: false`: the keyless-probe tests mutate two process-global
+  # `Application` env keys. It is not order-dependent today — every real client
+  # of those keys (`brave_client.ex`, `together_client.ex`) sits behind a seam
+  # that defaults to a mock in `:test`, and `circuit_breakers_test.exs` is
+  # itself sync — but that safety rests on an unstated property of other
+  # modules, which is caller discipline, the exact thing this file's subject
+  # refuses to trust for labels. One word buys independence from it.
+  use ExUnit.Case, async: false
 
   alias Stacks.CircuitBreakers
 
@@ -59,7 +66,31 @@ defmodule Stacks.ProbeCredentialShapeTest do
   ]
 
   defp breakers_source do
-    File.read!(Path.join(@repo_root, "apps/core/lib/stacks/circuit_breakers.ex"))
+    @repo_root
+    |> Path.join("apps/core/lib/stacks/circuit_breakers.ex")
+    |> File.read!()
+    |> code_only()
+  end
+
+  # Source with comments and @moduledoc/@doc prose stripped.
+  #
+  # ⚠️ Load-bearing. The production-side assertions below scan a whole file, and
+  # `brave_client.ex`'s moduledoc mentions `:brave_search_api_key` in prose — so
+  # before this, rotating that client OFF the key (exactly the drift the failure
+  # message describes) left this file at 5 tests, 0 failures. A reviewer proved
+  # it by doing the rotation. An assertion a comment can satisfy is checking the
+  # documentation, not the code, and documentation is the thing that goes stale
+  # first.
+  #
+  # Same reason `scripts/check-outbound-test-default.sh` strips comments before
+  # harvesting transports, in this very diff.
+  defp code_only(source) do
+    source
+    |> String.split("\n")
+    |> Enum.reject(&String.match?(&1, ~r/^\s*#/))
+    |> Enum.join("\n")
+    |> String.replace(~r/@(module)?doc\s+"""(.*?)"""/s, "")
+    |> String.replace(~r/@(module)?doc\s+"[^"]*"/, "")
   end
 
   # The probe function's body, so a config key mentioned by a DIFFERENT probe in
@@ -102,7 +133,9 @@ defmodule Stacks.ProbeCredentialShapeTest do
 
       for pair <- @credentialed_pairs do
         body = probe_body(source, pair.probe)
-        production = File.read!(Path.join(@repo_root, pair.production))
+
+        production =
+          pair.production |> then(&Path.join(@repo_root, &1)) |> File.read!() |> code_only()
 
         assert body =~ pair.config_key,
                "#{pair.probe}/0 no longer reads #{pair.config_key}. If production rotated to " <>
