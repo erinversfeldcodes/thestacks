@@ -32,7 +32,44 @@ skip() {
 run_group() {
     local name="$1"; shift
     echo -e "\n${CYAN}${BOLD}=== $name ===${RESET}"
-    if "$@"; then
+
+    # The group's own output is teed so that a gate which skipped INTERNALLY can
+    # be relayed into the skip register below. Several scripts decide for
+    # themselves that a tool is absent and echo "SKIP: …" inline — before this,
+    # those never reached the summary, so a run could end green with no record
+    # that the container-image gate, or trufflehog, had not run at all. A gate
+    # that did not run is not a gate that passed, and the summary is the only
+    # place a reader looks.
+    #
+    # A pipe with `PIPESTATUS`, not process substitution: the command's own exit
+    # status has to survive, AND the log has to be complete before it is read.
+    # Process substitution gives no guarantee the tee has flushed by the time the
+    # command returns, and an unflushed log reads as "nothing was skipped" —
+    # which is the failure this exists to prevent, arrived at a different way.
+    # An explicit XXXXXX template. `mktemp -t <name>` is a BSD spelling that GNU
+    # coreutils rejects with "too few X's in template" — and it failed quietly
+    # enough that the relay below read an empty path and reported nothing
+    # skipped, which is this function's own defect class arrived at from the
+    # other side. If the file cannot be made, say so rather than relay nothing.
+    local log status
+    log="$(mktemp "${TMPDIR:-/tmp}/stacks-ci-group.XXXXXX")" || log=""
+
+    if [[ -z "$log" ]]; then
+        echo "WARN: could not create a temp file, so internal SKIPs from this group will not be relayed" >&2
+        "$@"
+        status=$?
+    else
+        "$@" 2>&1 | tee "$log"
+        status="${PIPESTATUS[0]}"
+
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && skip "$name — ${line#SKIP: }"
+        done < <(grep '^[[:space:]]*SKIP:' "$log" 2>/dev/null | sed 's/^[[:space:]]*//')
+
+        rm -f "$log"
+    fi
+
+    if [[ $status -eq 0 ]]; then
         pass "$name"
     else
         fail "$name"

@@ -548,7 +548,11 @@ campaign-residue:
 # Run the project-tools MCP server's own test suite. These tests existed for
 # months with NO caller anywhere — green by definition, catching nothing.
 test-mcp:
-    @bash scripts/test-mcp.sh 2>&1 | tail -3
+    # NOT piped. A just recipe line runs under `sh -cu` with no `pipefail`, so
+    # piping to `tail` made the recipe exit with tail's status: the suite printed
+    # its failure and `just test-mcp` reported success. Trimming the output was
+    # never worth reporting the opposite of the result.
+    @bash scripts/test-mcp.sh
 
 # Lint ONE migration file through squawk with the project's config — the
 # manual sibling of the security-squawk CI gate, for trying a migration
