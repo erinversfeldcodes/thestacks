@@ -2,13 +2,17 @@
 
 > ## Status — read this first
 >
-> **Refreshed 2026-08-06 for #321** (Wave 11), replacing a description that had gone false in three separate ways. The old text described a bare `Finch.build(:get, "#{website_url}/events")` fetch, index-paired regex extraction, and events rendering as amber cards on the Third Spaces page. None of those is the code, and the third was never true.
+> **Refreshed 2026-10-14**, replacing a 2026-08-06 banner that listed four things as "not built" which were built on 2026-08-10. Each line below was verified against the code on the day of writing, not carried over.
 >
-> **What is built** (verified against the code): a compliant egress (robots → rate limit → fuse), sitemap-based path resolution that asks the shop instead of guessing (#307), individual-event-page discovery for shops that publish one event per page (#382), block-scoped heading extraction, optional `event_date`, and a classified batch summary.
+> **What is built** (verified, file:line): a compliant egress (robots → rate limit → fuse); sitemap-based path resolution that asks the shop instead of guessing (#307); individual-event-page discovery for shops publishing one event per page (#382); block-scoped heading extraction; optional `event_date`; a classified batch summary; the **structured extractor** (`apps/core/lib/stacks/enrichment/event_extractor.ex`); the **cron entry** (`apps/core/config/config.exs:28`, Mondays 07:30, `args: %{batch: true}`); the **read endpoint** (`apps/core/lib/core_web/router.ex:90`, `GET /api/authors/:id/events` → `AuthorEventsController.index`); and the **surface** (`frontend/src/Page/BookDetail.elm:80` holds `authorEvents` as `RemoteData`, fetched and rendered rather than passed `Nothing`).
 >
-> **What is not built**: the **structured extractor** (schema.org/Event → `.ics` → LLM fallback), any **cron entry** for the job, any **read endpoint**, and any **surface**. `op.bookstore_events` holds zero rows in production, and the book detail's author section says "Events coming soon" for every book because it is passed `Nothing` unconditionally.
+> **Proven live, not inferred**: `op.bookstore_events` went 0 → 1 on preview via the real job (not a seed) on 2026-08-10, against the real Wordsworth signing page; job log "2 store(s): 1 event(s) written, 1 with no events page". That zero-row sweep was the acceptance instrument the owner's ruling named.
 >
-> **Owner ruling 2026-07-30**: the bookstore-events vertical is **wired, not deleted**. #321 §25 is the work; the acceptance instrument is a zero-row sweep, `op.bookstore_events` 0 → N on preview *via the real job, not a seed*.
+> **What is still deferred**: the `.ics` and LLM fallback tiers of the extractor (schema.org/Event is the tier that shipped). Two-store coverage is a cap, not a finished crawl.
+>
+> ⚠️ **The cron's real cadence**: the Monday 07:30 entry is an Oban cron plugin, and the core VM runs with `min_machines_running = 0`, so it fires only while a node happens to be awake and never backfills. Freshness is therefore best-effort today. Moving scheduled work onto a GitHub workflow with a `last_success` gauge is tracked as #455.
+>
+> **Owner ruling 2026-07-30**: the bookstore-events vertical is **wired, not deleted**. #321 §25 was the work.
 >
 > Sections are marked **[BUILT]** or **[TO BUILD]** so no reader has to guess.
 
