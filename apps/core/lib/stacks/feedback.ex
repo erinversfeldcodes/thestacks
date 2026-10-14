@@ -96,12 +96,32 @@ defmodule Stacks.Feedback do
   @spec count_entries() :: non_neg_integer()
   def count_entries, do: Repo.aggregate(Entry, :count)
 
-  # A non-integer falls back to the DEFAULT, not to the floor: this is reached from a
-  # hand-typed admin query string, where `?limit=all` showing one entry would read as
-  # an empty queue rather than as a rejected parameter.
-  defp clamp(value, lo, hi, _default) when is_integer(value) do
-    value = if hi, do: min(value, hi), else: value
-    max(value, lo)
+  @doc """
+      The largest page the queue will serve.
+
+      Exposed so a test can assert the ceiling holds against more rows than the
+      ceiling. Asserting it against a fixture smaller than the ceiling says
+      nothing: the assertion passes whatever the ceiling is, including none.
+  """
+  @spec max_limit() :: pos_integer()
+  def max_limit, do: @max_limit
+
+  # An UNUSABLE value falls back to the DEFAULT, not to the floor. This is reached
+  # from a hand-typed admin query string, where `?limit=all` — or `?limit=-5` —
+  # showing one entry would read as an empty queue rather than as a rejected
+  # parameter, on the only interface that can read feedback at all.
+  #
+  # ⚠️ "Unusable" covers BOTH a non-integer and an integer below the floor. The
+  # first draft only caught the non-integer: `?limit=-5` parsed fine, took
+  # `max(-5, 1)`, and produced exactly the one-entry page this comment claimed to
+  # prevent. The comment was true of the case it was written for and false of the
+  # one beside it.
+  #
+  # Above the CEILING is different and is clamped rather than defaulted: someone
+  # asking for 10,000 is asking for as many as possible, and the ceiling is as
+  # many as possible. That answer is not misleading.
+  defp clamp(value, lo, hi, _default) when is_integer(value) and value >= lo do
+    if hi, do: min(value, hi), else: value
   end
 
   defp clamp(_value, _lo, _hi, default), do: default

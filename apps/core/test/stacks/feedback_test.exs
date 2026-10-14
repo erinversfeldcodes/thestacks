@@ -270,9 +270,27 @@ defmodule Stacks.FeedbackTest do
              "a second page must not repeat the first"
     end
 
-    test "an absurd limit is clamped rather than honoured" do
-      assert length(Feedback.list_entries(limit: 10_000)) == 5
-      assert length(Feedback.list_entries(limit: 0)) == 1
+    test "a limit above the ceiling is clamped to the ceiling" do
+      # Against a 5-row fixture this assertion was vacuous: `== 5` passed whether
+      # the ceiling was 200, 10,000, or deleted outright. It needs more rows than
+      # the ceiling to say anything at all.
+      user = insert(:user)
+      extra = Feedback.max_limit() + 1 - Feedback.count_entries()
+      for n <- 1..extra, do: {:ok, _} = Feedback.submit(user.id, "bulk #{n}")
+
+      assert Feedback.count_entries() == Feedback.max_limit() + 1
+
+      assert length(Feedback.list_entries(limit: 10_000)) == Feedback.max_limit(),
+             "a hand-typed absurd limit must not ask the only reader interface " <>
+               "to load the whole table"
+    end
+
+    test "a limit below one falls back to the default, not to a one-entry page" do
+      # Both of these must read as "that parameter was rejected", not as "the
+      # queue is nearly empty". A floor-clamp would answer 1 for each, which on
+      # the sole interface that can read feedback is the more misleading answer.
+      assert length(Feedback.list_entries(limit: 0)) == 5
+      assert length(Feedback.list_entries(limit: -5)) == 5
     end
 
     test "a non-integer limit falls back to the default rather than raising" do
