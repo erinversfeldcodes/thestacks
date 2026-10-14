@@ -7608,6 +7608,22 @@ h4 {
     margin: 0;
 }
 
+/* "Showing 1–25 of 143". Quiet, but above the list rather than below it: the
+   reader needs to know there is older feedback behind this page before they
+   finish reading the page. */
+.admin-feedback__count {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    margin: 0 0 var(--space-3);
+}
+
+.admin-feedback__pager {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+}
+
 /* The business opt-out link. Sits at the foot of any block that names a shop
    we found rather than one that asked to be here. Quiet on purpose — the reader
    browsing for a book is not its audience — but never hidden, because an

@@ -88,17 +88,21 @@ update msg model maybeToken =
         PostLoaded result ->
             case result of
                 Ok post ->
+                    let
+                        ( syndication, syndicationCmd ) =
+                            if model.currentUserId == Just post.userId then
+                                Syndication.init post.id model.origin post.syndicated maybeToken
+                                    |> Tuple.mapFirst Just
+
+                            else
+                                ( Nothing, Cmd.none )
+                    in
                     ( { model
                         | post = Success post
                         , blockModal = blockModalFor model.currentUserId post
-                        , syndication =
-                            if model.currentUserId == Just post.userId then
-                                Just (Syndication.init post.id model.origin post.syndicated)
-
-                            else
-                                Nothing
+                        , syndication = syndication
                       }
-                    , Cmd.none
+                    , Cmd.map SyndicationMsg syndicationCmd
                     , NoOut
                     )
 

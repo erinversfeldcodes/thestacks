@@ -55,8 +55,29 @@ type alias Model =
     }
 
 
-init : String -> String -> Bool -> Model
-init postId origin syndicated =
+{-| The panel starts by asking what has already been syndicated.
+
+It used to start empty and only learn about a syndication performed in THIS
+session, so a recorded backlink was invisible after a reload — and the field for
+entering one disappeared with it, because that field is shown against a recorded
+syndication. The writer's only route back was to export again, writing a
+duplicate row.
+
+-}
+init : String -> String -> Bool -> Maybe String -> ( Model, Cmd Msg )
+init postId origin syndicated maybeToken =
+    ( initialModel postId origin syndicated
+    , case maybeToken of
+        Just token ->
+            Api.listSyndications token postId GotSyndications
+
+        Nothing ->
+            Cmd.none
+    )
+
+
+initialModel : String -> String -> Bool -> Model
+initialModel postId origin syndicated =
     { postId = postId
     , origin = origin
     , copyState = Idle
@@ -75,6 +96,7 @@ type Msg
     | ClickedCopyFeedUrl String
     | ClickedCopyExport String
     | GotExport String (Result Http.Error SyndicationExport)
+    | GotSyndications (Result Http.Error (List Syndication))
     | SyndicationRecorded (Result Http.Error Syndication)
     | UrlChanged String
     | UrlSubmitted
@@ -132,6 +154,14 @@ update msg model maybeToken =
 
         GotExport _ (Err err) ->
             ( { model | exportState = Failure err }, Cmd.none, NoOut )
+
+        GotSyndications (Ok syndications) ->
+            ( { model | syndications = syndications }, Cmd.none, NoOut )
+
+        GotSyndications (Err _) ->
+            -- Deliberately not an error state: the panel's job is the export, which
+            -- still works. Showing nothing is the same as before this read existed.
+            ( model, Cmd.none, NoOut )
 
         SyndicationRecorded (Ok syndication) ->
             ( { model | syndications = model.syndications ++ [ syndication ] }

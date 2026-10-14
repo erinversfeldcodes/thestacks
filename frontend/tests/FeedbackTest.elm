@@ -58,6 +58,18 @@ entry body =
     }
 
 
+{-| A loaded queue showing `entries` out of `total`, from the first page.
+-}
+queue : List Api.AdminFeedbackEntry -> Int -> AdminQueue.Model
+queue entries total =
+    queueAt 0 (Success { entries = entries, total = total })
+
+
+queueAt : Int -> RemoteData Http.Error Api.AdminFeedbackPage -> AdminQueue.Model
+queueAt offset page =
+    { page = page, offset = offset, token = Just "token" }
+
+
 {-| Every route with an argument, given an argument no path segment could be
 mistaken for. `toPattern` must not echo it back.
 -}
@@ -215,28 +227,28 @@ suite =
         , describe "the owner's queue distinguishes empty from broken"
             [ test "renders one row per message" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [ entry "one", entry "two" ] }
+                    AdminQueue.view (queue [ entry "one", entry "two" ] 2)
                         |> Query.fromHtml
                         |> Query.findAll [ testId "admin-feedback-entry" ]
                         |> Query.count (Expect.equal 2)
             , test "shows what the reader actually wrote" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [ entry "The bookcase breaks at 320px." ] }
+                    AdminQueue.view (queue [ entry "The bookcase breaks at 320px." ] 1)
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "The bookcase breaks at 320px." ]
             , test "shows who wrote it" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [ entry "one" ] }
+                    AdminQueue.view (queue [ entry "one" ] 1)
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "@mara" ]
             , test "an empty queue says so" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [] }
+                    AdminQueue.view (queue [] 0)
                         |> Query.fromHtml
                         |> Query.has [ testId "admin-feedback-empty" ]
             , test "a failed load does NOT read as an empty queue" <|
                 \_ ->
-                    AdminQueue.view { entries = Failure Http.NetworkError }
+                    AdminQueue.view (queueAt 0 (Failure Http.NetworkError))
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ testId "admin-feedback-error" ]
@@ -247,17 +259,19 @@ suite =
                     let
                         ( model, _, _ ) =
                             AdminQueue.update
-                                (AdminQueue.EntriesReceived (Ok [ entry "one" ]))
-                                { entries = Loading }
+                                (AdminQueue.EntriesReceived
+                                    (Ok { entries = [ entry "one" ], total = 1 })
+                                )
+                                (queueAt 0 Loading)
                     in
-                    Expect.equal (Success [ entry "one" ]) model.entries
+                    Expect.equal (Success { entries = [ entry "one" ], total = 1 }) model.page
             , test "a lapsed admin session bubbles out rather than rendering an error" <|
                 \_ ->
                     let
                         ( _, _, out ) =
                             AdminQueue.update
                                 (AdminQueue.EntriesReceived (Err (Http.BadStatus 401)))
-                                { entries = Loading }
+                                (queueAt 0 Loading)
                     in
                     Expect.equal AdminQueue.SessionExpired out
             , test "an ordinary failure stays on the page" <|
@@ -266,8 +280,78 @@ suite =
                         ( _, _, out ) =
                             AdminQueue.update
                                 (AdminQueue.EntriesReceived (Err Http.NetworkError))
-                                { entries = Loading }
+                                (queueAt 0 Loading)
                     in
                     Expect.equal AdminQueue.NoOut out
+            ]
+        , describe "the owner can reach feedback older than one page"
+            [ test "the page states the window it is showing out of the whole queue" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one", entry "two" ] 143)
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-count" ]
+                        |> Query.has [ Selector.text "Showing 1–2 of 143" ]
+            , test "a later window counts from its own offset, not from one" <|
+                \_ ->
+                    AdminQueue.view
+                        (queueAt AdminQueue.pageSize
+                            (Success { entries = [ entry "one" ], total = 143 })
+                        )
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-count" ]
+                        |> Query.has [ Selector.text "Showing 26–26 of 143" ]
+            , test "older feedback is reachable when the total exceeds the window" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one" ] 143)
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-older" ]
+                        |> Query.hasNot [ Selector.disabled True ]
+            , test "a full page with nothing behind it offers no older page" <|
+                \_ ->
+                    AdminQueue.view (queue (List.repeat 25 (entry "one")) 25)
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-older" ]
+                        |> Query.has [ Selector.disabled True ]
+            , test "the first window offers no newer page" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one" ] 143)
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-newer" ]
+                        |> Query.has [ Selector.disabled True ]
+            , test "asking for older feedback moves the window a page on" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            AdminQueue.update AdminQueue.ShowOlder (queue [ entry "one" ] 143)
+                    in
+                    Expect.equal AdminQueue.pageSize model.offset
+            , test "asking for older feedback at the end of the queue stays put" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            AdminQueue.update AdminQueue.ShowOlder (queue [ entry "one" ] 1)
+                    in
+                    Expect.equal 0 model.offset
+            , test "coming back from a later window never goes past the start" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            AdminQueue.update AdminQueue.ShowNewer
+                                (queueAt AdminQueue.pageSize
+                                    (Success { entries = [ entry "one" ], total = 143 })
+                                )
+                    in
+                    Expect.equal 0 model.offset
+            , test "a window past the end of the queue does not read as an empty queue" <|
+                \_ ->
+                    AdminQueue.view
+                        (queueAt (AdminQueue.pageSize * 4)
+                            (Success { entries = [], total = 10 })
+                        )
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.hasNot [ testId "admin-feedback-empty" ]
+                            , Query.has [ Selector.text "10 in total" ]
+                            ]
             ]
         ]

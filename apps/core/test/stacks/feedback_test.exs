@@ -157,6 +157,19 @@ defmodule Stacks.FeedbackTest do
 
       # Asserting on the body, not on a row count: a count passes against a
       # SET NULL implementation that leaves the words behind.
+      #
+      # ⚠️ What this test does NOT cover: the FK's delete action. `Deletion`
+      # removes these rows with an explicit `delete_all` scoped by `user_id`,
+      # which works whatever the FK does — so relaxing the FK to SET NULL
+      # leaves this test GREEN. The only guard on that is the schema-level FK
+      # test in `deletion_test.exs` ("every op.* FK that references op.users
+      # cascades"). Established by probe, not by reading: flipping the FK in the
+      # test database fired that guard and left this one passing.
+      #
+      # The trap is that each regression is caught by the test its author is
+      # least likely to look at. Someone relaxing the FK would check this test
+      # and see green; someone deleting the explicit step would check the schema
+      # guard and see green.
       bodies = Repo.all(from f in Stacks.Feedback.Entry, select: f.body)
       refute "A sentence only this reader wrote." in bodies
     end
@@ -198,6 +211,72 @@ defmodule Stacks.FeedbackTest do
       assert {:ok, export} = Export.export_user_data(user.id)
 
       assert Enum.map(export.feedback, & &1.body) == ["Mine."]
+    end
+  end
+
+  describe "page_context is untrusted input" do
+    # The proto used to promise this field "never carries another reader's handle".
+    # It is client-supplied and the server cannot confirm that — a label for a static
+    # route and a path naming a person have the same shape — so the promise was
+    # removed and what IS enforceable is enforced here instead.
+    test "rejects a URL" do
+      user = insert(:user)
+
+      assert {:error, changeset} =
+               Feedback.submit(user.id, "Broken.", "https://example.test/u/someone")
+
+      assert %{page_context: _} = errors_on(changeset)
+    end
+
+    test "rejects a query string and a fragment" do
+      user = insert(:user)
+
+      assert {:error, _} = Feedback.submit(user.id, "Broken.", "/books?id=secret")
+      assert {:error, _} = Feedback.submit(user.id, "Broken.", "/books#frag")
+    end
+
+    test "accepts the route patterns and bare labels the client actually sends" do
+      user = insert(:user)
+
+      for context <- ["/books/:id", "wishlist", "/blog/:id/edit", ""] do
+        assert {:ok, _} = Feedback.submit(user.id, "Fine.", context)
+      end
+    end
+  end
+
+  describe "list_entries/1 paging and count_entries/0" do
+    # The admin queue is the only interface that reads feedback, and it reads one
+    # page at a time. Without a total, a full page and a truncated queue look
+    # identical — and the end that falls off is the OLDEST, which for a beta channel
+    # is the feedback most likely to have gone unanswered.
+    setup do
+      user = insert(:user)
+      for n <- 1..5, do: {:ok, _} = Feedback.submit(user.id, "entry #{n}")
+      %{user: user}
+    end
+
+    test "count_entries/0 counts everything, not just the page" do
+      assert Feedback.count_entries() == 5
+    end
+
+    test "limit and offset page through the queue" do
+      first = Feedback.list_entries(limit: 2)
+      second = Feedback.list_entries(limit: 2, offset: 2)
+
+      assert length(first) == 2
+      assert length(second) == 2
+
+      assert Enum.map(first, & &1.id) != Enum.map(second, & &1.id),
+             "a second page must not repeat the first"
+    end
+
+    test "an absurd limit is clamped rather than honoured" do
+      assert length(Feedback.list_entries(limit: 10_000)) == 5
+      assert length(Feedback.list_entries(limit: 0)) == 1
+    end
+
+    test "a non-integer limit falls back to the default rather than raising" do
+      assert length(Feedback.list_entries(limit: "all")) == 5
     end
   end
 end

@@ -4,6 +4,7 @@ module Api exposing
     , AdminBook
     , AdminBooksResponse
     , AdminFeedbackEntry
+    , AdminFeedbackPage
     , AdminInvite
     , AdminMfaEnrolment
     , AdminSession
@@ -75,6 +76,7 @@ module Api exposing
     , activateListing
     , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
+    , adminInviteDecoder
     , adminListBooks
     , adminListBooksRequest
     , adminLogin
@@ -89,6 +91,7 @@ module Api exposing
     , authHeaders
     , authResponseDecoder
     , authed
+    , authorEventDecoder
     , authorEventsDecoder
     , awaitingConfirmationCount
     , blockUser
@@ -158,6 +161,7 @@ module Api exposing
     , getUserPlacements
     , getUserPlacementsRequest
     , honourRemovalRequest
+    , importRowDecoder
     , initUploadRequest
     , interpretAuthed
     , inviteStatusDecoder
@@ -165,7 +169,9 @@ module Api exposing
     , isNotFound
     , isUnauthorized
     , leaveGroup
+    , libraryImportDecoder
     , listBlockedUsers
+    , listSyndications
     , loginRequest
     , logout
     , mergeFormatRequest
@@ -225,6 +231,7 @@ module Api exposing
     , standardTimeout
     , storedVisibilityDecoder
     , streamEventDecoder
+    , syndicationDecoder
     , transparencyMetricsDecoder
     , unblockUser
     , updateBlogPost
@@ -657,14 +664,32 @@ libraryImportDecoder =
         |> andMap (Decode.field "unreadable_count" Decode.int)
 
 
+{-| A string field that may be absent or null, as blank. The same shape the
+generated proto decoders use, so a server that stops sending a field degrades the
+one cell rather than the whole response.
+-}
+textOrBlank : String -> Decoder String
+textOrBlank name =
+    Decode.oneOf
+        [ Decode.field name Decode.string
+        , Decode.succeed ""
+        ]
+
+
 importRowDecoder : Decoder ImportRow
 importRowDecoder =
+    -- `outcome` and `reason` were already nullable here; these four were not, and an
+    -- unreadable row nulls exactly these four. Because the report decodes as a
+    -- `Decode.list`, one such row failed the whole response and the page showed "the
+    -- report didn't load" forever. Tolerating absent-or-null matches what this
+    -- project's GENERATED decoders already do (`oneOf [field, succeed ""]`), which the
+    -- hand-written one dropped.
     Decode.map7 ImportRow
         (Decode.field "row_number" Decode.int)
-        (Decode.field "title" Decode.string)
-        (Decode.field "author" Decode.string)
-        (Decode.field "isbn13" Decode.string)
-        (Decode.field "goodreads_shelf" Decode.string)
+        (textOrBlank "title")
+        (textOrBlank "author")
+        (textOrBlank "isbn13")
+        (textOrBlank "goodreads_shelf")
         (Decode.field "outcome" (Decode.nullable Decode.string))
         (Decode.field "reason" (Decode.nullable Decode.string))
 
@@ -908,18 +933,23 @@ inviteStatusDecoder =
         (Decode.field "email_bound" Decode.bool)
 
 
-{-| `GET /api/auth/invite/:code` — look an invitation code up before offering
+{-| `POST /api/auth/invite/check` — look an invitation code up before offering
 the Register form.
 
 The four refusals arrive as plain `BadStatus`; the status alone tells them
 apart, so the card maps status to copy and never reads the body.
 
+A POST for what reads like a lookup, because the code is a credential and the
+server logs every request path: in the path it would be written into the
+application log on every attempt. In the body it is filterable, and the server
+filters it.
+
 -}
 checkInviteRequest : String -> RequestSpec
 checkInviteRequest code =
-    { method = "GET"
-    , url = baseUrl ++ "/api/auth/invite/" ++ code
-    , body = Nothing
+    { method = "POST"
+    , url = baseUrl ++ "/api/auth/invite/check"
+    , body = Just (Encode.object [ ( "code", Encode.string code ) ])
     }
 
 
@@ -3434,6 +3464,31 @@ fetchSyndicationExport token postId format toMsg =
         }
 
 
+{-| `GET /api/blog/posts/:id/syndications` — what has already been syndicated.
+
+Without this the panel could only ever show what happened in the current session:
+a recorded backlink survived in the database and was invisible after a reload, and
+the field to enter one vanished with it.
+
+-}
+listSyndications :
+    String
+    -> String
+    -> (Result Http.Error (List Syndication) -> msg)
+    -> Cmd msg
+listSyndications token postId toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg (Decode.field "syndications" (Decode.list syndicationDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
 {-| `POST /api/blog/posts/:id/syndications` — record that a copy went out.
 -}
 recordSyndication :
@@ -4618,6 +4673,19 @@ type alias AdminFeedbackEntry =
     }
 
 
+{-| One page of the queue, with the size of the whole queue beside it.
+
+`total` is what lets the page say "1–25 of 143" rather than just listing what
+came back. Without it a full page and a truncated queue are indistinguishable,
+and the end that falls off is the oldest.
+
+-}
+type alias AdminFeedbackPage =
+    { entries : List AdminFeedbackEntry
+    , total : Int
+    }
+
+
 adminFeedbackEntryDecoder : Decoder AdminFeedbackEntry
 adminFeedbackEntryDecoder =
     Decode.succeed AdminFeedbackEntry
@@ -4628,17 +4696,37 @@ adminFeedbackEntryDecoder =
         |> andMap (Decode.field "created_at" Decode.string)
 
 
-{-| GET /api/admin/feedback — the owner's queue, newest first.
+adminFeedbackPageDecoder : Decoder AdminFeedbackPage
+adminFeedbackPageDecoder =
+    Decode.succeed AdminFeedbackPage
+        |> andMap (Decode.field "feedback" (Decode.list adminFeedbackEntryDecoder))
+        |> andMap (Decode.field "total" Decode.int)
+
+
+{-| GET /api/admin/feedback — one page of the owner's queue, newest first.
+
+The window is explicit because the queue is read a page at a time and this is
+the only interface that can read it at all: an unwindowed request takes the
+server's default and leaves everything past it with no way to be asked for.
+
 -}
-getAdminFeedback : String -> (Result Http.Error (List AdminFeedbackEntry) -> msg) -> Cmd msg
-getAdminFeedback token toMsg =
+getAdminFeedback :
+    String
+    -> { limit : Int, offset : Int }
+    -> (Result Http.Error AdminFeedbackPage -> msg)
+    -> Cmd msg
+getAdminFeedback token window toMsg =
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/admin/feedback"
+        , url =
+            baseUrl
+                ++ "/api/admin/feedback?limit="
+                ++ String.fromInt window.limit
+                ++ "&offset="
+                ++ String.fromInt window.offset
         , body = Http.emptyBody
-        , expect =
-            Http.expectJson toMsg (Decode.field "feedback" (Decode.list adminFeedbackEntryDecoder))
+        , expect = Http.expectJson toMsg adminFeedbackPageDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }

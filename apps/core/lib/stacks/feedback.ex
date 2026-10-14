@@ -28,6 +28,11 @@ defmodule Stacks.Feedback do
   @body_max 5_000
   @page_context_max 200
 
+  # The admin queue reads a page at a time. `@max_limit` exists so a hand-typed
+  # `?limit=100000` cannot ask the only reader interface to load the whole table.
+  @default_limit 100
+  @max_limit 200
+
   @doc """
       Records one piece of feedback from a signed-in reader.
 
@@ -55,6 +60,7 @@ defmodule Stacks.Feedback do
     |> validate_required([:user_id, :body])
     |> validate_length(:body, min: 1, max: @body_max)
     |> validate_length(:page_context, max: @page_context_max)
+    |> validate_page_context()
     |> foreign_key_constraint(:user_id)
     |> Repo.insert()
     |> emit_submitted()
@@ -68,14 +74,37 @@ defmodule Stacks.Feedback do
   """
   @spec list_entries(keyword()) :: [Entry.t()]
   def list_entries(opts \\ []) do
-    limit = Keyword.get(opts, :limit, 100)
+    limit = opts |> Keyword.get(:limit, @default_limit) |> clamp(1, @max_limit, @default_limit)
+    offset = opts |> Keyword.get(:offset, 0) |> clamp(0, nil, 0)
 
     Entry
     |> order_by([e], desc: e.created_at)
     |> limit(^limit)
+    |> offset(^offset)
     |> preload(:user)
     |> Repo.all()
   end
+
+  @doc """
+      How many entries exist in total.
+
+      The admin queue is the ONLY interface that can read feedback, and it reads a
+      page at a time, so without this a reader cannot tell a full queue from a
+      truncated one — and the end that falls off is the OLDEST, which for a beta
+      channel is the feedback most likely to have gone unanswered.
+  """
+  @spec count_entries() :: non_neg_integer()
+  def count_entries, do: Repo.aggregate(Entry, :count)
+
+  # A non-integer falls back to the DEFAULT, not to the floor: this is reached from a
+  # hand-typed admin query string, where `?limit=all` showing one entry would read as
+  # an empty queue rather than as a rejected parameter.
+  defp clamp(value, lo, hi, _default) when is_integer(value) do
+    value = if hi, do: min(value, hi), else: value
+    max(value, lo)
+  end
+
+  defp clamp(_value, _lo, _hi, default), do: default
 
   # `user_id` is here so the erasure sweep can find this row by payload — the
   # same reason the blog events carry it. `character_count` is the only thing
@@ -92,4 +121,28 @@ defmodule Stacks.Feedback do
   end
 
   defp emit_submitted({:error, _changeset} = result), do: result
+
+  # `page_context` arrives as ordinary client input, so it is validated rather than
+  # trusted. Only the "not a URL" half of the proto's old claim is enforceable, and
+  # only loosely: a scheme, a query or a fragment all mean something other than a
+  # short context label was sent.
+  #
+  # The stronger half — that it never names another reader — is NOT enforceable here.
+  # A label for a static route ("/about", or the bare "wishlist" this field also
+  # carries) is indistinguishable in shape from a concrete path naming a person
+  # ("/u/somehandle"), and enumerating the valid set would copy the SPA's route table
+  # across the boundary and drift from it. So the proto comment now describes the
+  # field as untrusted rather than asserting a guarantee nothing keeps, and readers of
+  # the admin queue should treat it as reader-supplied text.
+  defp validate_page_context(changeset) do
+    validate_change(changeset, :page_context, fn :page_context, value ->
+      cond do
+        value in [nil, ""] -> []
+        String.contains?(value, "://") -> [page_context: "must not be a URL"]
+        String.contains?(value, "?") -> [page_context: "must not carry a query string"]
+        String.contains?(value, "#") -> [page_context: "must not carry a fragment"]
+        true -> []
+      end
+    end)
+  end
 end
