@@ -411,72 +411,84 @@ defmodule Stacks.ShelvingTest do
       assert active_pile_count(user.id) == 54
     end
 
-    test "the capacity check takes a row lock, so two concurrent placements cannot both pass" do
-      # ⚠️ A SOURCE assertion, deliberately, and the reason is the finding.
+    test "the capacity check takes its row lock BEFORE the count it serialises" do
+      # Observes the STATEMENTS the database actually received, in order, via
+      # Ecto's query telemetry. Three earlier versions of this test read the
+      # source text instead, and each closed exactly one spelling of one
+      # regression while the next walked through:
       #
-      # `check_reading_pile_capacity/2` opens with a `SELECT … FOR UPDATE` on the
-      # bookshelf row whose result is discarded. The line exists purely for its
-      # side effect: it serialises concurrent capacity checks, so two placements
-      # arriving together cannot both read `active_count < limit` and both
-      # insert, taking the pile one past its cap.
+      #   1. deleted lock      — caught by asserting the line is present
+      #   2. lock MOVED below the count — passed (1); caught by asserting order
+      #   3. lock COMMENTED OUT          — passed (1) and (2), because `body` is
+      #      raw text and `# repo.one(… lock: "FOR UPDATE"))` still sits at a
+      #      byte offset before `repo.aggregate`
       #
-      # Nothing failed if that line were deleted. The test sandbox puts every
-      # connection inside ONE transaction, so the race it prevents cannot be
-      # staged here at all — a behavioural test would need two real connections
-      # and a deployed database. The original comment at that line said as much
-      # and then stopped, which left a deliberate lock as the only thing holding
-      # an invariant, protected by nothing.
+      # A text instrument can only ever enumerate spellings, so the third
+      # correction is to stop using one. This version is immune to all three
+      # plus renames and a change of aggregate shape, because it does not care
+      # how the code is written — only what reached Postgres.
       #
-      # So this asserts the weaker, checkable thing: the lock is still there,
-      # AND that it is taken BEFORE the count. That second half is not padding.
-      # The first version of this test asserted presence alone, and a probe
-      # that MOVED the lock below the aggregate — leaving it present and
-      # useless, since a lock acquired after the count it is meant to serialise
-      # serialises nothing — passed it. A lock in the wrong place is the more
-      # likely regression than a deleted one, because it survives every reading
-      # that greps for the line.
-      source = File.read!("lib/stacks/shelving.ex")
+      # ⚠️ What this still does NOT prove: that the lock prevents the race. The
+      # sandbox puts every connection in ONE transaction, so two concurrent
+      # placements cannot be staged here; that needs two real connections and a
+      # deployed database. But the sandbox argument was never a reason not to
+      # observe the STATEMENT, which is the part that was going unchecked.
+      user = insert(:user)
+      book = insert(:book)
+      Shelving.place_book(user.id, insert(:book).id, "reading_pile")
 
-      capacity_fn =
-        source
-        |> String.split(
-          "defp check_reading_pile_capacity(repo, %Bookshelf{name: \"reading_pile\""
-        )
-        |> Enum.at(1)
+      handler_id = "lock-order-#{System.unique_integer([:positive])}"
+      test_pid = self()
 
-      assert capacity_fn,
-             "check_reading_pile_capacity/2 was renamed or removed — this test can no longer " <>
-               "find the function whose lock it guards, so it is asserting nothing"
+      :telemetry.attach(
+        handler_id,
+        [:core, :repo, :query],
+        fn _event, _measurements, %{query: query}, _ -> send(test_pid, {:sql, query}) end,
+        nil
+      )
 
-      body = capacity_fn |> String.split("\n  end") |> List.first()
+      on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      assert body =~ ~s(lock: "FOR UPDATE"),
-             "the reading-pile capacity check no longer takes a row lock. Without it two " <>
-               "concurrent placements can both read active_count < limit and both insert, " <>
-               "putting the pile one past its cap. The lock's result is deliberately " <>
-               "discarded, so it reads like a dead query — it is not."
+      assert {:ok, _} = Shelving.place_book(user.id, book.id, "reading_pile")
 
-      lock_at = :binary.match(body, ~s(lock: "FOR UPDATE")) |> elem(0)
+      sqls = drain_sql([])
 
-      count_at =
-        case :binary.match(body, "repo.aggregate") do
-          {at, _} ->
-            at
+      lock_i =
+        Enum.find_index(sqls, &(&1 =~ ~r/FROM "op"\."bookshelves".*FOR UPDATE/s))
 
-          :nomatch ->
-            flunk(
-              "the capacity check no longer counts with repo.aggregate, so this test can no " <>
-                "longer tell whether the lock precedes the count. Re-point it at whatever " <>
-                "reads the pile's size."
-            )
-        end
+      count_i =
+        Enum.find_index(sqls, &(&1 =~ ~r/count\(.*FROM "op"\."bookshelf_placements"/s))
 
-      assert lock_at < count_at,
-             "the row lock is taken AFTER the count it exists to serialise, which makes it " <>
+      assert lock_i,
+             "no `SELECT … FROM op.bookshelves … FOR UPDATE` reached the database during a " <>
+               "reading-pile placement. Without that lock two concurrent placements can both " <>
+               "read active_count < limit and both insert, putting the pile one past its cap. " <>
+               "The lock's result is deliberately discarded in the source, so it reads like a " <>
+               "dead query — it is not.\n\nStatements seen:\n" <> Enum.join(sqls, "\n")
+
+      assert count_i,
+             "no count over op.bookshelf_placements reached the database, so this test cannot " <>
+               "tell whether the lock precedes the count. The capacity check changed shape — " <>
+               "re-point the pattern rather than deleting the assertion.\n\nStatements " <>
+               "seen:\n" <> Enum.join(sqls, "\n")
+
+      assert lock_i < count_i,
+             "the row lock was taken AFTER the count it exists to serialise, which makes it " <>
                "inert: both concurrent placements complete their count before either acquires " <>
-               "the lock, so both still read active_count < limit and both insert. The lock " <>
-               "must be the first statement in the function. (lock at byte #{lock_at}, count " <>
-               "at byte #{count_at}.)"
+               "the lock, so both still read active_count < limit and both insert. (lock was " <>
+               "statement #{lock_i}, count was statement #{count_i}.)"
+    end
+
+    # Collects the SQL emitted since the handler attached. A short timeout per
+    # message rather than one long sleep: the queries have already run by the
+    # time `place_book/3` returns, so this drains a mailbox rather than waiting
+    # for work.
+    defp drain_sql(acc) do
+      receive do
+        {:sql, query} -> drain_sql([query | acc])
+      after
+        50 -> Enum.reverse(acc)
+      end
     end
 
     test "moving within a full reading pile is not blocked" do
