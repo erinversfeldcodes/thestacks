@@ -17,6 +17,8 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.Guardian
+  alias Stacks.Accounts.InviteCode
+  alias Stacks.Accounts.Invites
   alias Stacks.Admin.SessionContext
   alias Stacks.AdminSession
   alias Stacks.Audit
@@ -442,6 +444,70 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
+  describe "delete_user_data/1 invitation erasure" do
+    # The schema guard below allows `invite_codes` to nilify its user FK on the
+    # written justification that "note/invited_email scrubbed by
+    # :settle_invites_naming_user step". Nothing tested that the justification was
+    # TRUE — and for an issuer it was not: the scrub matched `redeemed_by_id` and
+    # `invited_email` but never `issued_by_id`, so erasing the person who WROTE the
+    # note nulled the FK and left the note and a third party's email in the row.
+    # These tests exist so the justification has to stay true.
+    test "erasing the ISSUER scrubs the note they wrote and the email they invited" do
+      issuer = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "Mara from the book club",
+          "invited_email" => "mara@example.test"
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(issuer.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert row, "the row should survive — beta history is kept deliberately"
+      assert is_nil(row.note), "the issuer's own free text must not outlive them"
+      assert is_nil(row.invited_email), "the invitee's address must not outlive the issuer"
+    end
+
+    test "erasing the INVITEE scrubs the invitation naming them" do
+      issuer = insert(:user)
+      invitee = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "a friend of a friend",
+          "invited_email" => invitee.email
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(invitee.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert row
+      assert is_nil(row.invited_email)
+      assert is_nil(row.note)
+    end
+
+    test "an unrelated user's erasure leaves the invitation alone" do
+      issuer = insert(:user)
+      bystander = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "Mara from the book club",
+          "invited_email" => "mara@example.test"
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(bystander.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert row.note == "Mara from the book club", "the scrub must stay scoped, not sweep"
+      assert row.invited_email == "mara@example.test"
+    end
+  end
+
   describe "delete_user_data/1 feed cache erasure" do
     test "erasing a user removes their feed_cache rows and preview reports the count" do
       user = insert(:user, profile_visibility: "platform")
@@ -601,6 +667,26 @@ defmodule Stacks.GDPR.DeletionTest do
           "ip digest — through the GUC, which is the only path permitted to mutate this table"
     }
 
+    # ⚠️ The scope of this guard, and what it cannot see.
+    #
+    # It asserts FK BEHAVIOUR and nothing else. Where erasure removes rows with
+    # an explicit `delete_all` scoped by `user_id` — `op.feedback_entries` is
+    # the clearest case — that step works whatever the FK does, so deleting the
+    # step leaves this guard GREEN. Each such step is guarded only by its own
+    # per-table test asserting on the CONTENT (for feedback, "erasure DELETES
+    # the body" in `feedback_test.exs`), which in turn stays green if the FK is
+    # relaxed. Established by probe: flipping that FK to SET NULL in the test
+    # database fired this guard and left the body test passing.
+    #
+    # So the two defences do not back each other up. Changing either mechanism
+    # means reading the other one's test, because the green you get for free is
+    # from the half you did not touch.
+    #
+    # The second limit is the allowlist above: each entry's justification is a
+    # SENTENCE, and nothing here checks whether it is true. One of them was
+    # false for months — the invite entry claimed the scrub step covered
+    # `note`/`invited_email`, and the scrub never matched the ISSUER, so an
+    # erased issuer's own free text stayed in the row.
     test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
       {:ok, %{rows: rows}} =
         Repo.query("""

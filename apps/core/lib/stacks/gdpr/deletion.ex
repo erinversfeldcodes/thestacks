@@ -308,12 +308,23 @@ defmodule Stacks.GDPR.Deletion do
     {:ok, %{scrubbed: scrub_invites(repo, user_id, user_email), restored: restore?}}
   end
 
+  # Three ways a user can be named by an invitation, and all three must scrub.
+  #
+  # ⚠️ `issued_by_id` was missing, and its absence was invisible: `op.invites`'
+  # user FK is `:nilify_all`, so erasing an ISSUER nulled the reference and left
+  # `note` — the issuer's own free text about a named person, e.g. "Mara from the
+  # book club" — plus `invited_email`, a third party's address, sitting in the
+  # row forever. Author-nulled, content retained. That is exactly the
+  # `op.post_comments.body` defect this project has already shipped once, and the
+  # erasure schema-guard could not catch it because the guard asserts FK
+  # behaviour, not that free text actually went.
   defp scrub_invites(repo, user_id, user_email) do
     {scrubbed, _} =
       repo.update_all(
         from(i in Stacks.Accounts.InviteCode,
           where:
             i.redeemed_by_id == ^user_id or
+              i.issued_by_id == ^user_id or
               (not is_nil(i.invited_email) and
                  fragment("lower(?)", i.invited_email) == ^String.downcase(user_email || "")),
           where: not is_nil(i.note) or not is_nil(i.invited_email) or not is_nil(i.redeemed_by_id)

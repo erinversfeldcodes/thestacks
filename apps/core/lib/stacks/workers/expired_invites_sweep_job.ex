@@ -29,10 +29,20 @@ defmodule Stacks.Workers.ExpiredInvitesSweepJob do
   def perform(%Oban.Job{}) do
     cutoff = DateTime.add(DateTime.utc_now(), -@retention_days * 24 * 3600, :second)
 
+    # Both arms matter. `expires_at` is NULLABLE and a null means "never expires"
+    # (`Invites.expires_at_from/1` returns nil for an explicit `"expires_in_days": null`),
+    # so the original `not is_nil(expires_at)` guard meant a never-expiring invitation
+    # was never swept — and since it was never redeemed either, no erasure path reached
+    # it. Its `invited_email` belongs to someone who never registered and therefore
+    # cannot ask for it to be removed, which is the case retention exists for.
+    #
+    # A null-expiry row ages from `created_at` instead, on the same 90-day clock.
     {deleted, _} =
       Repo.delete_all(
         from(i in InviteCode,
-          where: not is_nil(i.expires_at) and i.expires_at < ^cutoff,
+          where:
+            (not is_nil(i.expires_at) and i.expires_at < ^cutoff) or
+              (is_nil(i.expires_at) and i.created_at < ^cutoff),
           where: is_nil(i.redeemed_at) and i.use_count == 0
         )
       )
