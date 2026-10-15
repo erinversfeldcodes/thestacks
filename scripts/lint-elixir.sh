@@ -14,9 +14,17 @@
 #   fail-open paths. This is the same harness, for the same reasons:
 #
 #     * every gate runs even after an earlier one fails, so one run tells you everything;
-#     * a sub-script is parse-checked with the interpreter that will run it, so "does not parse" is
-#       reported as itself rather than as whatever the parser eventually chokes on — an unparseable
-#       gate has never run, whatever a green log claimed;
+#     * a sub-script's BASH layer is parse-checked before it runs, so "does not parse" is
+#       reported as itself rather than as whatever the parser eventually chokes on — an
+#       unparseable gate has never run, whatever a green log claimed.
+#
+#       ⚠️ The bash layer ONLY. An earlier version of this line said "parse-checked with the
+#       interpreter that will run it", which is not what `bash -n` does: every one of these
+#       gates carries its real logic in a `<<'PY'` heredoc, and `bash -n` does not parse
+#       Python. A SyntaxError inside the heredoc passes the parse-check and is caught one
+#       step later as "exited 1" — so the behaviour is fail-closed and only the prose was
+#       wrong. Corrected rather than deleted, because a reader trusting the old sentence
+#       would take a green parse-check as evidence the Python was sound;
 #     * the run ends with a roster naming every gate and tool and its outcome.
 #
 #   Nothing in here may print SKIP. A gate that cannot run is a failure.
@@ -30,6 +38,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
 BASH_ID="$(bash --version | head -1)"
+
+# ⚠️ Which Elixir ran, recorded in the summary alongside bash.
+#
+# This repo corrupts `_build` when the flake toolchain (1.18.4/OTP 28) and a system one
+# (Homebrew 1.19.5) are mixed, and the failure surfaces much later as `corrupt atom table`
+# on core modules or a vanished PLT. Without this line a correct run and a corrupting one
+# print an identical roster, so the log cannot answer the first question you ask when the
+# next corruption appears. Not a guard — it does not refuse the wrong toolchain — just the
+# evidence that makes the guess unnecessary.
+ELIXIR_ID="$(elixir --version 2>/dev/null | grep -m1 Elixir || echo "NOT ON PATH")"
 
 PASSED=()
 FAILED=()
@@ -141,7 +159,9 @@ step_in_core "mix sobelow" mix sobelow --config
 # fix.
 step "mix deps.audit" mix deps.audit --ignore-advisory-ids GHSA-g2wm-735q-3f56
 
-printf '\n=== lint-elixir summary (%s) ===\n' "$BASH_ID"
+printf '\n=== lint-elixir summary ===\n'
+printf '  bash:   %s\n' "$BASH_ID"
+printf '  elixir: %s\n' "$ELIXIR_ID"
 if [[ ${#PASSED[@]} -gt 0 ]]; then
     for name in "${PASSED[@]}"; do printf '  pass  %s\n' "$name"; done
 fi
