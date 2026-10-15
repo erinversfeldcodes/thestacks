@@ -105,7 +105,7 @@ defmodule Core.PromEx.MetricLabelTest do
      "operator-supplied rollback justification, read from a workflow input"}
   ]
 
-  # Words that must never appear as a SEGMENT of a label key, whatever the  # Words that must never appear as a SEGMENT of a label key, whatever the
+  # Words that must never appear as a SEGMENT of a label key, whatever the
   # allowlist says. Either per-person (a disclosure) or per-record (unbounded
   # cardinality).
   #
