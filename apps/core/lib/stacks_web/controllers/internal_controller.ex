@@ -1,13 +1,18 @@
 defmodule StacksWeb.InternalController do
   @moduledoc """
-      Internal callbacks and smoke-test endpoints. The vision associate
-      callback is HMAC-authed via `X-Vision-Signature`
-      (`<ts>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>`, ±60s window),
-      service-to-service only, and always returns 200 once auth passes — the
-      sidecar must not retry on app errors.
+      Internal service-to-service endpoints.
+
       `POST /api/internal/smoke/circuit_breakers` is gated by
       `:smoke_tests_enabled` (404 in production) behind the scraper's
-      `X-Internal-Token` scheme.
+      `X-Internal-Token` scheme: it blows all five fuses through real failure
+      paths and reports whether each recovered.
+
+      ⚠️ This module also carried `POST /api/internal/vision/associate` until
+      2026-10-15 — an HMAC-authed callback by which the vision sidecar reported
+      an asynchronous cover-verification result. Nothing ever called the
+      endpoint that started those jobs, so no callback could arrive, and the
+      whole loop went with it. The ±60s replay window it introduced is kept
+      below because the surviving smoke-token path shares it.
   """
 
   use CoreWeb, :controller
@@ -16,29 +21,13 @@ defmodule StacksWeb.InternalController do
 
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.TogetherClient
-  alias Stacks.Books
   alias Stacks.Books.ISBNResolver
   alias Stacks.CircuitBreakers
   alias Stacks.Enrichment.ScraperClient
-  alias Stacks.Proto.Vision.AssociateCallback
 
-  @vision_path "/api/internal/vision/associate"
   @smoke_path "/api/internal/smoke/circuit_breakers"
+  # Shared with the smoke-token path below — NOT specific to any one callback.
   @replay_window_seconds 60
-
-  @status_confirmed "ASSOCIATION_STATUS_CONFIRMED"
-  @status_rejected "ASSOCIATION_STATUS_REJECTED"
-
-  @doc "POST /api/internal/vision/associate — receive async cover association result."
-  def vision_associate(conn, params) do
-    if valid_vision_signature?(conn) do
-      handle_association(conn, params)
-    else
-      conn
-      |> put_status(401)
-      |> json(%{error: "unauthorized"})
-    end
-  end
 
   @doc """
       POST /api/internal/smoke/circuit_breakers — smoke-test all 5 circuit breakers.
@@ -244,151 +233,6 @@ defmodule StacksWeb.InternalController do
       true ->
         Process.sleep(500)
         poll_for_recovery(fuses, start_ms, updated)
-    end
-  end
-
-  defp handle_association(conn, params) do
-    callback = %AssociateCallback{
-      isbn: Map.get(params, "isbn", ""),
-      book_id: Map.get(params, "book_id", ""),
-      edition_id: Map.get(params, "edition_id", ""),
-      status: Map.get(params, "status", ""),
-      job_id: Map.get(params, "job_id", ""),
-      reason: Map.get(params, "reason"),
-      cover_image_url: Map.get(params, "cover_image_url", "")
-    }
-
-    case validate_callback(callback) do
-      :ok ->
-        dispatch_association(conn, callback)
-
-      {:error, reason} ->
-        Logger.warning("InternalController: invalid callback payload — #{reason}")
-        json(conn, %{ok: true})
-    end
-  end
-
-  defp validate_callback(%AssociateCallback{isbn: ""}),
-    do: {:error, "isbn is required"}
-
-  defp validate_callback(%AssociateCallback{job_id: ""}),
-    do: {:error, "job_id is required"}
-
-  defp validate_callback(%AssociateCallback{edition_id: ""}),
-    do: {:error, "edition_id is required"}
-
-  defp validate_callback(%AssociateCallback{status: ""}),
-    do: {:error, "status is required"}
-
-  defp validate_callback(%AssociateCallback{
-         status: @status_confirmed,
-         cover_image_url: ""
-       }),
-       do: {:error, "cover_image_url is required for confirmed status"}
-
-  defp validate_callback(%AssociateCallback{
-         status: @status_confirmed,
-         cover_image_url: url
-       })
-       when is_binary(url) and byte_size(url) > 0 do
-    if String.starts_with?(url, "http://") or String.starts_with?(url, "https://") do
-      :ok
-    else
-      {:error, "cover_image_url must use http or https scheme"}
-    end
-  end
-
-  defp validate_callback(_callback), do: :ok
-
-  defp dispatch_association(conn, %AssociateCallback{
-         status: @status_confirmed,
-         edition_id: edition_id,
-         cover_image_url: cover_url
-       }) do
-    case Books.confirm_cover_association(edition_id, cover_url) do
-      {:ok, _edition} ->
-        json(conn, %{ok: true})
-
-      {:error, :not_found} ->
-        Logger.warning(
-          "InternalController: edition #{edition_id} not found for cover confirmation"
-        )
-
-        json(conn, %{ok: true})
-
-      {:error, reason} ->
-        Logger.error(
-          "InternalController: failed to confirm cover for edition #{edition_id}: #{inspect(reason)}"
-        )
-
-        json(conn, %{ok: true})
-    end
-  end
-
-  defp dispatch_association(conn, %AssociateCallback{
-         status: @status_rejected,
-         edition_id: edition_id,
-         reason: reason
-       }) do
-    reason_suffix = if is_binary(reason) and reason != "", do: ": #{reason}", else: ""
-
-    Logger.warning(
-      "InternalController: cover association rejected for edition #{edition_id}#{reason_suffix}"
-    )
-
-    json(conn, %{ok: true})
-  end
-
-  defp dispatch_association(conn, %AssociateCallback{status: status}) do
-    Logger.warning("InternalController: unknown status #{inspect(status)} received")
-
-    :telemetry.execute(
-      [:stacks, :vision, :unknown_association_status],
-      %{count: 1},
-      %{status: status}
-    )
-
-    json(conn, %{ok: true})
-  end
-
-  defp valid_vision_signature?(conn) do
-    case get_req_header(conn, "x-vision-signature") do
-      [provided] -> verify_vision_token(provided)
-      _ -> false
-    end
-  end
-
-  defp verify_vision_token(provided) do
-    case String.split(provided, ".", parts: 2) do
-      [ts_str, provided_sig] -> verify_vision_hmac(ts_str, provided_sig)
-      _ -> false
-    end
-  end
-
-  defp verify_vision_hmac(ts_str, provided_sig) do
-    with {ts, ""} <- Integer.parse(ts_str),
-         now = System.os_time(:second),
-         true <- abs(now - ts) <= @replay_window_seconds,
-         secret when not is_nil(secret) <-
-           Application.get_env(:core, :vision_hmac_secret) do
-      message = "#{ts_str}.POST.#{@vision_path}"
-      expected = :crypto.mac(:hmac, :sha256, secret, message) |> Base.encode16(case: :lower)
-      Plug.Crypto.secure_compare(expected, provided_sig)
-    else
-      :error ->
-        Logger.warning("InternalController: X-Vision-Signature has non-numeric timestamp")
-        false
-
-      false ->
-        Logger.warning(
-          "InternalController: X-Vision-Signature timestamp outside ±60s replay window"
-        )
-
-        false
-
-      nil ->
-        Logger.error("InternalController: vision_hmac_secret not configured — rejecting request")
-        false
     end
   end
 

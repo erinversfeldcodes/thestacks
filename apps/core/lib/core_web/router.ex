@@ -362,7 +362,6 @@ defmodule CoreWeb.Router do
 
   scope "/api/internal", StacksWeb do
     pipe_through :api
-    post "/vision/associate", InternalController, :vision_associate
     post "/smoke/circuit_breakers", InternalController, :smoke_circuit_breakers
   end
 
