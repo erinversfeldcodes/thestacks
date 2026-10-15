@@ -86,10 +86,12 @@ defmodule Stacks.AI.Client do
   # the caller is asking, the path says who answers.
   #
   # ⚠️ "is_book" mapped to `/classify` until 2026-10-15. That endpoint is gone,
-  # so the mapping had become a route to a 404 — harmless today only because the
-  # single production caller is the smoke probe, which melts a fuse and ignores
-  # the response. Pointing it at `/analyze` keeps the question askable and stops
-  # the table describing a service that no longer exists.
+  # so the mapping had become a route to a 404. ⚠️ The 404 was not what made it
+  # harmless, and saying so would understate it: the single production caller is
+  # `blow_all_fuses/1`, which sets `vision_service_url` to `http://localhost:1`
+  # BEFORE calling, so the probe never reaches a server and the resolved path
+  # never mattered. Pointing it at `/analyze` keeps the question askable and
+  # stops the table describing a service that no longer exists.
   #
   # ⚠️ Do NOT collapse this to a single `endpoint_path(_), do: "analyze"`. The
   # catch-all raise below is load-bearing: an unrecognised operation must fail at
