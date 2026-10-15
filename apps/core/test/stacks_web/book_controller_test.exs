@@ -740,6 +740,40 @@ defmodule StacksWeb.BookControllerTest do
       assert hd(my_writing)["title"] == "My Review"
     end
 
+    test "my_writing excludes another author's post about the same book", %{conn: conn} do
+      # The contract that makes `list_posts_for_book_by_user/2` a DIFFERENT
+      # function from the any-author lister deleted alongside it, rather than a
+      # rename of it: it filters `p.user_id == ^user_id`. Every other test in
+      # this describe inserts a single post authored by the viewer, so all of
+      # them pass identically with that filter removed — which is exactly how a
+      # viewer could have ended up reading a stranger's drafts.
+      viewer = insert(:user)
+      stranger = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      mine =
+        insert(:post, user: viewer, title: "Mine", published_at: DateTime.utc_now())
+
+      theirs =
+        insert(:post, user: stranger, title: "Theirs", published_at: DateTime.utc_now())
+
+      {:ok, _} = Stacks.Blog.associate_book(mine, book.id, %{visible: true})
+      {:ok, _} = Stacks.Blog.associate_book(theirs, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(viewer)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"my_writing" => my_writing} = json_response(conn, 200)
+
+      titles = Enum.map(my_writing, & &1["title"])
+      assert titles == ["Mine"]
+
+      refute "Theirs" in titles,
+             "my_writing leaked another author's post: #{inspect(titles)}"
+    end
+
     test "authenticated user with no associations sees empty my_writing", %{conn: conn} do
       user = insert(:user)
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
