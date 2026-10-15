@@ -40,7 +40,15 @@ defmodule Stacks.AI.TogetherClient do
     {:error, reason}
   end
 
-  defp parse_success_response(resp_body) do
+  @doc false
+  # Public for one reason: so a test can observe what this does to a 200 body
+  # without going through the transport. The module seam used by every other
+  # test (`config :core, :together_client`) replaces `complete/2` wholesale with
+  # a mock, so nothing that drives the seam can see this function at all — which
+  # is how a truncation here corrupted a caller's JSON undetected. `handle_response/1`
+  # is deliberately NOT exposed: it takes a `%Finch.Response{}` and would couple
+  # a caller to the transport, which is the real implementation detail.
+  def parse_success_response(resp_body) do
     case Jason.decode(resp_body) do
       {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]}} ->
         # one billable completion — the cost page counts these
@@ -68,6 +76,17 @@ defmodule Stacks.AI.TogetherClient do
         Logger.warning("TogetherClient: unexpected response shape: #{inspect(other)}")
         Stacks.CircuitBreakers.melt(@fuse_name)
         {:error, {:unexpected_response, other}}
+
+      # A 200 whose body is not JSON at all. Without this clause the `case` has
+      # no match and raises `CaseClauseError` from inside the HTTP path — an
+      # exception where every other failure here returns a tagged tuple, so the
+      # caller's `{:error, _}` handling would be bypassed entirely. A proxy or
+      # gateway error page served with status 200 is the realistic way to get
+      # here.
+      {:error, %Jason.DecodeError{} = error} ->
+        Logger.warning("TogetherClient: 200 with undecodable body: #{inspect(error)}")
+        Stacks.CircuitBreakers.melt(@fuse_name)
+        {:error, {:undecodable_response, error}}
     end
   end
 
