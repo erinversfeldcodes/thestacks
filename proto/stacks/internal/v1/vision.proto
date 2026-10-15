@@ -112,9 +112,37 @@ message VisionError {
 // anyone chasing it should look at the /analyze handler, not at this deletion.
 //
 // There is no message-level `reserved` construct in protobuf — `reserved`
-// reserves field NUMBERS and names inside a surviving message — so nothing is
-// held here on their behalf. If the two-call shape ever returns, the messages
-// come back by name and their field numbering starts fresh.
+// reserves field NUMBERS and names inside a surviving message, and enum values —
+// so nothing is held here on their behalf, and nothing can be.
+//
+// ⚠️ If the two-call shape ever returns, these messages come back by name and
+// their field numbering starts fresh. **That is true HERE and false in general;
+// do not carry it to another message.** It holds only because of three facts
+// specific to these four:
+//   1. Nothing ever encoded them. The endpoints had no caller in any revision —
+//      the same fact that justified deleting them — so no payload of these
+//      shapes exists anywhere to be mis-decoded.
+//   2. This contract is JSON on the wire. Every field carries `json_name`, and
+//      the generated Python, Elixir and Elm all identify fields by NAME, so the
+//      number is not the wire identity.
+//   3. Nothing persists them: `proto/persisted.exs` has no vision entry, so no
+//      stored row carries an encoding of these shapes.
+// For a message that HAS been on the wire, numbering never starts fresh, and
+// reusing a number silently corrupts old data rather than failing loudly.
+//
+// The concrete trap, recorded because the natural rebuild walks into it: the old
+// `ExtractRequest` was `repeated string images = 1` / `optional string image_url = 2`,
+// and `ClassifyRequest` was `string image = 1` / `string image_url = 2` (a oneof).
+// `AnalyzeRequest` today has `string image = 1`. A rebuilt `ExtractRequest`
+// derived from it — the obvious move — would put a SINGULAR string on number 1
+// where a REPEATED one used to be. Both encode length-delimited, so a stale
+// binary payload would decode silently and wrongly rather than erroring. Harmless
+// here only because point 1 above means no such payload exists.
+//
+// Note the asymmetry with the association set kept below: those are RETAINED, so
+// `buf breaking` holds their field numbers immovable for as long as they sit in
+// this file. Keeping a contract is the strongest protection against number drift;
+// it is the deleted-and-never-encoded case that has nothing to protect.
 //
 // ClassificationResult and ExtractedBook deliberately SURVIVE: AnalyzeResponse
 // is typed on both.
