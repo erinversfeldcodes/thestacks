@@ -31,7 +31,7 @@ if body != "model.adminAuth":
             resolver_line + 2,
             f"{RESOLVER} returns `{body}`, not `model.adminAuth`. The admin endpoints require an "
             "MFA-verified admin session and 401 anything else — returning the ordinary session here "
-            "is #303's original defect with a better name on it.",
+            "is the original defect with a better name on it.",
         )
     )
 sites.append((resolver_line + 2, "resolver body", body, body == "model.adminAuth"))
@@ -70,7 +70,7 @@ if findings:
         print(f"  {path}:{lineno}")
         print(f"    {what}")
         print(f"    -> must be `{RESOLVER} model`. Two entry points disagreeing about which token")
-        print("       to send is what made four admin surfaces unreachable (#303).\n")
+        print("       to send is what made four admin surfaces unreachable.\n")
     print(f"{len(findings)} bypass(es). No Elm test can catch this — see the header.")
     sys.exit(1)
 

@@ -329,7 +329,7 @@ suite =
                 \_ ->
                     fromPath "/search"
                         |> Expect.equal Search
-            , -- #318 TR-4: the consent page folded into Privacy. The legacy path
+            , -- The consent page folded into Privacy. The legacy path
               test "legacy /settings/consent resolves to Privacy" <|
                 \_ ->
                     fromPath "/settings/consent"

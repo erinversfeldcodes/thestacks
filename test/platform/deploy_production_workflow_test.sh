@@ -773,7 +773,7 @@ test_case "prober_secrets_wired" "deploy-production.yml uses STACKS_PROBER_* sec
 if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_EMAIL"* ]]; then
     _record_pass "workflow references secrets.STACKS_PROBER_EMAIL"
 else
-    _record_fail "workflow must reference secrets.STACKS_PROBER_EMAIL (Phase 1 of #138)"
+    _record_fail "workflow must reference secrets.STACKS_PROBER_EMAIL"
 fi
 
 if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_PASSWORD"* ]]; then

@@ -109,7 +109,7 @@ suite =
             \_ ->
                 outMsgFor (Err (Http.BadStatus 401))
                     |> Expect.equal SessionExpired
-        , -- Paired contract (#220): the Elixir serializer key-set assertions live in
+        , -- Paired contract: the Elixir serializer key-set assertions live in
           describe "publicProfileDecoder (redaction + null tolerance)"
             [ test "decodes a full payload" <|
                 \_ ->

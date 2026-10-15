@@ -522,7 +522,7 @@ defmodule Core.PromEx.Plugins.Stacks do
         counter(
           [:stacks, :shelf, :browse_capped, :count, :total],
           event_name: [:stacks, :shelf, :browse_capped],
-          description: "Public shelf-browse responses truncated by the public_shelf_cap (#221)."
+          description: "Public shelf-browse responses truncated by the public_shelf_cap."
         ),
         counter(
           [:stacks, :handle, :claimed, :count, :total],

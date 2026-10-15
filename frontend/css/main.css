@@ -6177,7 +6177,7 @@ h4 {
 /* The shelf choices on the manual-ISBN and photo verification steps. These are
    a radio group in behaviour — exactly one is chosen — but they are <button>s,
    so without a reset they render as native controls: white bars with black
-   text on the dark ground. They had no rule at all until #356; the gate that
+   text on the dark ground. They had no rule at all until a CSS gate was added; the gate that
    should have caught it is blind to the computed `class (if …)` form these use.
    The container above still says `list-style: none` from when they were <li>s.
 
@@ -6523,7 +6523,7 @@ h4 {
     color: #d99a6c;
 }
 
-/* The consent gate in front of the risk illustration — the reader asks before it is shown. Dashed and quiet: it is an invitation, not a warning, and `cursor: pointer` is what makes it read as clickable at all. (`InsightsProgramTest` guards that the revealed content stays hidden until asked; #302 found that assertion had been vacuous.) */
+/* The consent gate in front of the risk illustration — the reader asks before it is shown. Dashed and quiet: it is an invitation, not a warning, and `cursor: pointer` is what makes it read as clickable at all. (`InsightsProgramTest` guards that the revealed content stays hidden until asked; a probe found that assertion had been vacuous.) */
 .insights__risk-gate,
 .insights__risk-reveal {
     font-family: var(--font-body);
@@ -6746,7 +6746,7 @@ h4 {
 }
 
 /* ============================================================================
- * Found by DRIVING the pages — not by any static check (#306)
+ * Found by DRIVING the pages — not by any static check
  * ============================================================================
  *
  * These seven were exempt from the orphan gate as "verified test hooks", and every one of them was
@@ -6759,7 +6759,7 @@ h4 {
  * whether a reader sees it.
  *
  * The exemption's real justification disappears once the hooks become `data-testid` attributes, which
- * is #310. Until then it stays, narrowed, with these seven removed from it by having actual rules.
+ * is tracked separately. Until then it stays, narrowed, with these seven removed from it by having actual rules.
  * ============================================================================ */
 
 .book-detail__author-card {

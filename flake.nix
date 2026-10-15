@@ -23,7 +23,7 @@
             # That made local `mix dialyzer` build an OTP-27 PLT while CI, the
             # prod Docker image (hexpm/elixir:1.18.4-erlang-28.x), and this
             # flake's own `erlang_28` all run OTP 28, so dialyzer results
-            # diverged (Issue #300). `beam.packages.erlang_28.elixir_1_18`
+            # diverged. `beam.packages.erlang_28.elixir_1_18`
             # binds Elixir 1.18.4 to OTP 28, aligning local == CI == prod.
             beam.packages.erlang_28.elixir_1_18
             erlang_28

@@ -101,13 +101,13 @@ defmodule Core.PromEx.DashboardDriftTest do
         |> MapSet.new()
 
       assert MapSet.size(issue_228) == 6,
-             "expected 6 registered #228 moderation/age-gate families, found: " <>
+             "expected 6 registered moderation/age-gate families, found: " <>
                inspect(MapSet.to_list(issue_228))
 
       missing = MapSet.difference(issue_228, referenced)
 
       assert MapSet.size(missing) == 0,
-             "these #228 metric families have no dashboard panel (invisible metric): " <>
+             "these moderation/age-gate metric families have no dashboard panel (invisible metric): " <>
                inspect(MapSet.to_list(missing))
     end
   end

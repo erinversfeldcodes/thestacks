@@ -112,7 +112,7 @@ defmodule Core.PromEx.DiscoveryDriftTest do
           |> MapSet.difference(referenced)
 
         assert MapSet.size(missing) == 0,
-               "these new #239 discovery families have no dashboard panel " <>
+               "these discovery families have no dashboard panel " <>
                  "(invisible metric): " <> inspect(MapSet.to_list(missing))
       end
     end

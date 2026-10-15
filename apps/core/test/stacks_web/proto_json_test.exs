@@ -980,7 +980,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert Enum.map(result.bookshelves, & &1.name) == ["library", "wishlist"]
     end
 
-    test "coalesces a nil display_name to \"\" (guards the #210 null-decode bug)" do
+    test "coalesces a nil display_name to \"\" (guards the null-decode bug)" do
       user = insert(:user, handle: "nameless", display_name: nil)
 
       result = ProtoJSON.public_profile(user, [])

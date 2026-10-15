@@ -118,7 +118,7 @@ async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string
     outcome,
     `${what}. ⚠️ If the value above is the gate's message about a CODE, the owner's ` +
       `single shared MFA factor was replaced mid-run and this run's secret is stale ` +
-      `(#371) — enrolment belongs in auth.setup.ts and nowhere else. If the gate ` +
+      `enrolment belongs in auth.setup.ts and nowhere else. If the gate ` +
       `offered ENROLMENT instead, the setup step's factor never landed.`,
   ).toBe("advanced");
 }

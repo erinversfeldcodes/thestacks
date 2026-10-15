@@ -306,6 +306,7 @@ jobs:
       - run: scripts/check-dbt-model-drift.sh
       - run: scripts/check-phase-scheme.sh
       - run: scripts/check-route-reachability.sh
+      - run: scripts/check-tracker-refs.sh
 
   test-elixir:
     needs: [changes, versions]
@@ -940,7 +941,7 @@ jobs:
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
-      - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)
+      - name: Derive PREVIEW_SUFFIX (run-unique preview names, so concurrent runs cannot collide)
         run: |
           echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}" >> "$GITHUB_ENV"
           echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}"

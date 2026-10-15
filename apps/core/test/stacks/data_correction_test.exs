@@ -37,7 +37,7 @@ defmodule Stacks.DataCorrectionTest.RelabelVerificationSource do
   @impl true
   def plan do
     for {id, value} <- Column.holding(@target, @from) do
-      %{id: id, from: value, to: @to, because: "stand-in for #370's disposition"}
+      %{id: id, from: value, to: @to, because: "stand-in for a real correction's disposition"}
     end
   end
 

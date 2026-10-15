@@ -637,7 +637,7 @@ suite =
                                 Nothing
                     in
                     model.existingShelves |> Expect.equal [ "library" ]
-            , -- #333 — inform, NEVER block: an already-owned book still
+            , -- Inform, NEVER block: an already-owned book still
               test "ConfirmCompleted Ok on an already-owned book still reaches Complete" <|
                 \_ ->
                     let
@@ -659,7 +659,7 @@ suite =
                         , \m -> m.confirmState |> Expect.equal (Success ())
                         ]
                         model
-            , -- #333 — a book the reader does not already own leaves the
+            , -- A book the reader does not already own leaves the
               test "ConfirmCompleted Ok with only the used shelf records no existing shelves" <|
                 \_ ->
                     let

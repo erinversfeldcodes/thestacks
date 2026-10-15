@@ -103,7 +103,7 @@ install-python-dev:
 # Run all tests
 test: test-elixir test-elm test-rust test-python test-dbt
 
-# Fail if the flake's Elixir/OTP has drifted from .versions (Issue #300).
+# Fail if the flake's Elixir/OTP has drifted from .versions.
 version-drift:
     scripts/check-version-drift.sh
 
@@ -207,7 +207,7 @@ db-reset:
 # Run this in the MAIN checkout after merging anything that touched a .proto file.
 # Most generated artefacts are gitignored, so a stale tree looks clean in `git status`
 # and only announces itself as a gate failure — in three groups at once, since the
-# Elixir and Python suites compile against the stale code (Issue #354).
+# Elixir and Python suites compile against the stale code.
 #
 # `just bootstrap-worktree` does this for a worktree; this is the main-checkout door.
 regen-proto:
@@ -479,7 +479,7 @@ lock-vision:
     '
     echo "Regenerated apps/vision/requirements.lock + requirements-dev.lock"
 
-# Local observability stack (ADR-021 / Epic #249): VictoriaMetrics + anonymous
+# Local observability stack: VictoriaMetrics + anonymous
 # Grafana so you can SEE the public dashboards populate with real data. Run
 # alongside Phoenix started with METRICS_SCRAPE_TOKEN=local-dev-metrics-token.
 # Grafana (no login): http://localhost:3010 · VictoriaMetrics: http://localhost:8428
@@ -519,7 +519,7 @@ local-stack-up:
 local-stack-down:
     docker compose -f deploy/local/docker-compose.yml down
 
-# Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement): evaluates
+# Dashboard RENDER gate: evaluates
 # EVERY dashboard panel's real PromQL against a live VictoriaMetrics (seeded with
 # synthesized well-formed data) and fails on any blank panel or malformed query.
 # Deterministic; complements the CI preview VM emission smoke (real emission fidelity).
@@ -532,8 +532,8 @@ render-gate:
 # items). Exists because campaign-level completion used to be prose an agent asserted
 # and a human had to challenge — twice, wrongly. Ask the tree, not the agent.
 #   just wave-status                          # newest campaign
-#   just wave-status staff-campaign-2026-07-27
-#   just wave-status staff-campaign-2026-07-27 --next
+#   just wave-status <campaign-slug>
+#   just wave-status <campaign-slug> --next
 wave-status *ARGS:
     @bash scripts/wave-status.sh {{ARGS}}
 

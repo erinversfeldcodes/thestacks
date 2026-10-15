@@ -180,7 +180,7 @@ suite =
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "The library is unreachable, so your notification preferences were not saved." ]
-        , -- ⛔ #374. All three of these were "Could not save notification
+        , -- ⛔ All three of these were "Could not save notification
           test "a 422 sends the reader to a reload, not to a repeat" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err (Http.BadStatus 422))) (loadedWith allOff) (Just "test-token")

@@ -63,7 +63,7 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSourceTest do
                DataCorrection.run(SeedEditionVerificationSource,
                  apply: true,
                  invoked_by: "test",
-                 reason: "#370 acceptance"
+                 reason: "verification-source correction acceptance"
                )
 
       assert Enum.any?(first.changes, &(&1.id == id))
@@ -73,7 +73,7 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSourceTest do
                DataCorrection.run(SeedEditionVerificationSource,
                  apply: true,
                  invoked_by: "test",
-                 reason: "#370 acceptance, second run"
+                 reason: "verification-source correction acceptance, second run"
                )
 
       refute Enum.any?(second.changes, &(&1.id == id))

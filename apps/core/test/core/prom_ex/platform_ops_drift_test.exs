@@ -105,7 +105,7 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
                "registered: " <> inspect(Enum.sort(MapSet.to_list(registered)))
 
       assert MapSet.member?(referenced, @new_family),
-             "expected the new #240 metric #{inspect(@new_family)} to be queried by a panel; " <>
+             "expected the platform-ops metric #{inspect(@new_family)} to be queried by a panel; " <>
                "referenced: " <> inspect(Enum.sort(MapSet.to_list(referenced)))
     end
   end

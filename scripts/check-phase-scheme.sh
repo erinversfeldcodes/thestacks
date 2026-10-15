@@ -6,7 +6,7 @@
 # (MVP) / Cross-cutting", "Phase 1 (late) / Cross-cutting", "Phase 1 (late MVP) /
 # Phase 3 (partner results)"), a stale sub-phase style survived in two docs
 # ("Phase 1E.3"), and — worse than either — the cell was being used to smuggle
-# STATUS: "Phase 4 (Polish) — **SUPERSEDED by Grafana (#267)**" and
+# STATUS: "Phase 4 (Polish) — **SUPERSEDED by Grafana**" and
 # "Phase 5 (Marketplace) — **Implemented**". Twenty of 122 cells were
 # non-canonical.
 #

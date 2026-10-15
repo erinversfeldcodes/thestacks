@@ -11,7 +11,7 @@ const LISTING_DRAFT_KEY = "stacks-listing-draft";
 const DRAFT_PRICE = "247";
 const DRAFT_CONTACT = "e2e-182-draft@thestacks.test";
 const DRAFT_DESCRIPTION =
-  "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry #182";
+  "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry";
 
 test.describe("Marketplace listing draft []", () => {
   test("CreateListing draft survives a mid-compose session expiry and is restored after re-login []", async ({

@@ -133,7 +133,7 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
                  "registered: " <> inspect(Enum.sort(MapSet.to_list(registered)))
 
         assert MapSet.member?(referenced, family),
-               "expected the new #238 metric #{inspect(family)} to be queried by a panel; " <>
+               "expected the GDPR data-rights metric #{inspect(family)} to be queried by a panel; " <>
                  "referenced: " <> inspect(Enum.sort(MapSet.to_list(referenced)))
       end
     end

@@ -1137,7 +1137,7 @@ uploadSendFailures =
                     |> List.map (\err -> Upload.sendError err)
                     |> distinctCount
                     |> Expect.equal 3
-        , -- ⛔ Added because a probe found nothing (#374).
+        , -- ⛔ Added because a probe found nothing.
           test "a 429 on the R2 PUT keeps its status instead of becoming a network error" <|
             \() ->
                 startUpload

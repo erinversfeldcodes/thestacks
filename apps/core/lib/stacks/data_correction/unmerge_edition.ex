@@ -39,7 +39,7 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     do:
       "the single op.book_editions row #{edition_id} — its book_id and is_primary, " <>
         "plus one new op.books row to hold it. Placements that NAME this edition " <>
-        "follow it to the new work (#396); every other placement is untouched."
+        "follow it to the new work; every other placement is untouched."
 
   @impl true
   def reversibility,
@@ -133,7 +133,7 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
       to: %{work_title: title, visibility_tier: work.visibility_tier},
       because:
         "ISBN #{edition.isbn} is not an edition of #{inspect(work.title)}; splitting it onto " <>
-          "its own work. #{movers} placement(s) name this edition and follow it (#396 — the " <>
+          "its own work. #{movers} placement(s) name this edition and follow it (the " <>
           "recorded scan is the evidence); #{retained} placement(s) stay on " <>
           "#{inspect(work.title)}, whose readers' acquisitions are not recorded and may not " <>
           "be guessed."

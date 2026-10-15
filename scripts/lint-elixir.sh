@@ -122,6 +122,7 @@ gate check-public-route-metering.sh
 gate check-oban-queue-drift.sh
 gate check-dbt-model-drift.sh
 gate check-phase-scheme.sh
+gate check-tracker-refs.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

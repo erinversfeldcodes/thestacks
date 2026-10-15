@@ -133,11 +133,11 @@ test.describe("un-merge correction round trip", () => {
     );
 
     const adminAuth = { Authorization: `Bearer ${await ownerAdminToken(request)}` };
-    const argument = { edition_id: editionId, title: `Split of ${target.title} (#384)` };
+    const argument = { edition_id: editionId, title: `Split of ${target.title} (e2e)` };
 
     const dry = await request.post("/api/admin/data_corrections/unmerge_edition/target", {
       headers: adminAuth,
-      data: { reason: "#384 E2E round trip — dry run", argument },
+      data: { reason: "E2E round trip — dry run", argument },
     });
     expect(dry.status(), "dry-run").toBe(200);
     const dryOutcome = (await dry.json()).correction;
@@ -149,7 +149,7 @@ test.describe("un-merge correction round trip", () => {
 
     const apply = await request.post("/api/admin/data_corrections/unmerge_edition/target", {
       headers: adminAuth,
-      data: { reason: "#384 E2E round trip — apply", apply: true, argument },
+      data: { reason: "E2E round trip — apply", apply: true, argument },
     });
     expect(apply.status(), "apply").toBe(200);
     expect((await apply.json()).correction.count).toBe(1);
@@ -163,7 +163,7 @@ test.describe("un-merge correction round trip", () => {
 
     const again = await request.post("/api/admin/data_corrections/unmerge_edition/target", {
       headers: adminAuth,
-      data: { reason: "#384 E2E round trip — second apply must refuse", apply: true, argument },
+      data: { reason: "E2E round trip — second apply must refuse", apply: true, argument },
     });
     expect(again.status(), "second apply refuses").toBe(422);
     expect((await again.json()).detail, "refusal names the primary-edition guard").toContain(

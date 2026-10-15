@@ -325,7 +325,7 @@ test.describe("Login is not downstream of the door animation", () => {
     const { elapsed, token } = await msUntilTokenStored(page, 1000);
     expect(
       token,
-      "the 200 was discarded: no stacks-auth token within 1s (#359)"
+      "the 200 was discarded: no stacks-auth token within 1s"
     ).toBeTruthy();
     expect(elapsed).toBeLessThan(1000);
 
@@ -361,7 +361,7 @@ test.describe("Login is not downstream of the door animation", () => {
     const { elapsed, token } = await msUntilTokenStored(page, 1000);
     expect(
       token,
-      "the 200 was discarded while every animation was stalled (#359)"
+      "the 200 was discarded while every animation was stalled"
     ).toBeTruthy();
     expect(elapsed).toBeLessThan(1000);
 
@@ -476,7 +476,7 @@ test.describe("The arrival door plays from the shell", () => {
     const count = await doorAnimationCount(page, 4000);
     expect(
       count,
-      "the door started zero animations — the dolly-shot is not playing over the arrival (#364)"
+      "the door started zero animations — the dolly-shot is not playing over the arrival"
     ).toBeGreaterThan(0);
   });
 
@@ -512,7 +512,7 @@ test.describe("The arrival door plays from the shell", () => {
     const count = await doorAnimationCount(page, 4000);
     expect(
       count,
-      "the door never started, so this is not exercising the frozen dolly-shot (#364)"
+      "the door never started, so this is not exercising the frozen dolly-shot"
     ).toBeGreaterThan(0);
 
     await page.reload();

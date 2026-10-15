@@ -10,7 +10,7 @@
 
 # ── Search engines: index public pages, never user-scoped ones ───────────────
 # `/u/`, `/shelf/` and `/post/` are user-authored and user-identifying. Keeping
-# them out of search results is a privacy commitment (US-10.4.1), not SEO.
+# them out of search results is a privacy commitment, not SEO.
 User-agent: *
 Disallow: /api/
 Disallow: /u/

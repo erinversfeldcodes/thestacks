@@ -235,7 +235,7 @@ viewSection locked model =
             ]
         , div [ class "settings-actions" ]
             [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]
-        , -- Distinguished by cause since #374 — see
+        , -- Distinguished by cause — see
           case model.saving of
             Failure err ->
                 p [ class "error" ]

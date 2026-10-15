@@ -9,12 +9,12 @@ on drift, so a script with no caller cannot sit here silently.
 | script | called by | purpose |
 |---|---|---|
 | `scripts/bootstrap-worktree.sh` | `justfile`, `scripts/regen-proto.sh` |  |
-| `scripts/campaign-residue.sh` | `justfile` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/campaign-residue.sh` | `justfile`, `scripts/check-tracker-refs.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Two set differences: the documented dbt model counts must match the models on disk, and every model named in `DbtRefreshHandler`'s `@model_mapping` must exist (dbt exits 0 on a selector matching nothing, so a stale mapping is a green run that refreshes nothing). |
+| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-e2e-vacuous-guards.sh` | `e2e/tests/spine-rendering.spec.ts`, `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
@@ -34,6 +34,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | Every script has a caller, and the inventory that says so is generated. |
 | `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml` |  |
+| `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Code must not cite tracker artefacts — state the substance instead. |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/ci.sh` | `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push`, `scripts/lib/python-tools.sh` |  |
 | `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` … | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
@@ -97,4 +98,4 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
 | `scripts/test-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/wave-status.sh` | `justfile` |  |
+| `scripts/wave-status.sh` | `justfile`, `scripts/check-tracker-refs.sh` |  |

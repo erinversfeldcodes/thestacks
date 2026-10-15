@@ -33,7 +33,7 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSource do
   def scope,
     do:
       "seed-fixture editions (deterministic #{@seed_id_prefix}… ids) still carrying " <>
-        "the #335 backfill's #{@from} fallback"
+        "the verification_source backfill's #{@from} fallback"
 
   @impl true
   def reversibility,
@@ -53,7 +53,7 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSource do
         from: from,
         to: @to,
         because:
-          "seed fixture predating the #335 verification_source column; seeds.exs " <>
+          "seed fixture predating the verification_source column; seeds.exs " <>
             "declares open_library for every seeded edition"
       }
     end)

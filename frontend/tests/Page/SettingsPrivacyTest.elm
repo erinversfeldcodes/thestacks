@@ -170,7 +170,7 @@ suite =
                         |> Privacy.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "and we cannot say why" ]
-            , -- ⛔ #374. The 422 here is the ceiling rule this module documents
+            , -- ⛔ The 422 here is the ceiling rule this module documents
               test "a 422 names the ceiling rule rather than saying 'try again'" <|
                 \_ ->
                     { init0 | savingShelf = Failure (Http.BadStatus 422) }
