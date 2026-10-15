@@ -14,7 +14,7 @@ defmodule Stacks.AI.ClientTest do
 
   describe "build_vision_request/2 — HMAC token format" do
     test "X-Internal-Token header is present and matches <timestamp>.<64 hex chars>" do
-      req = Client.build_vision_request("/classify", %{image: "test"})
+      req = Client.build_vision_request("/analyze", %{image: "test"})
       token = extract_token(req)
 
       assert String.match?(token, @token_format),
@@ -23,25 +23,33 @@ defmodule Stacks.AI.ClientTest do
 
     test "timestamp in token is within 5 seconds of current time" do
       now = System.os_time(:second)
-      req = Client.build_vision_request("/classify", %{image: "test"})
+      req = Client.build_vision_request("/analyze", %{image: "test"})
       [ts_str, _sig] = String.split(extract_token(req), ".", parts: 2)
       ts = String.to_integer(ts_str)
       assert abs(now - ts) <= 5, "timestamp #{ts} is not close to now #{now}"
     end
 
     test "different paths produce different signatures" do
-      tok_classify = extract_token(Client.build_vision_request("/classify", %{}))
-      tok_extract = extract_token(Client.build_vision_request("/extract", %{}))
+      # The path is part of the signed message, which is what stops a token
+      # minted for one route being replayed against another.
+      #
+      # ⚠️ One real path and one that does not exist, deliberately. This signed
+      # "/classify" and "/extract" until 2026-10-15; both are now deleted, and a
+      # test that pins a property by naming two live routes has to be rewritten
+      # every time the route set changes. A route that never existed cannot be
+      # deleted out from under it.
+      tok_real = extract_token(Client.build_vision_request("/analyze", %{}))
+      tok_other = extract_token(Client.build_vision_request("/not-a-route", %{}))
 
-      [_ts1, sig1] = String.split(tok_classify, ".", parts: 2)
-      [_ts2, sig2] = String.split(tok_extract, ".", parts: 2)
+      [_ts1, sig1] = String.split(tok_real, ".", parts: 2)
+      [_ts2, sig2] = String.split(tok_other, ".", parts: 2)
 
       refute sig1 == sig2
     end
 
     test "successive calls each produce a structurally valid token" do
-      tok1 = extract_token(Client.build_vision_request("/classify", %{}))
-      tok2 = extract_token(Client.build_vision_request("/classify", %{}))
+      tok1 = extract_token(Client.build_vision_request("/analyze", %{}))
+      tok2 = extract_token(Client.build_vision_request("/analyze", %{}))
 
       assert String.match?(tok1, @token_format)
       assert String.match?(tok2, @token_format)
@@ -50,7 +58,7 @@ defmodule Stacks.AI.ClientTest do
 
   describe "build_vision_request/2 — other headers" do
     test "includes content-type application/json" do
-      req = Client.build_vision_request("/classify", %{image: "test"})
+      req = Client.build_vision_request("/analyze", %{image: "test"})
       ct = Enum.find(req.headers, fn {k, _} -> k == "content-type" end)
       assert ct == {"content-type", "application/json"}
     end
@@ -105,7 +113,7 @@ defmodule Stacks.AI.ClientTest do
   describe "build_vision_request/2 — cross-language HMAC compatibility" do
     test "token satisfies the Python verify_hmac algorithm" do
       secret = Application.fetch_env!(:core, :vision_hmac_secret)
-      path = "/classify"
+      path = "/analyze"
 
       req = Client.build_vision_request(path, %{})
       [ts_str, provided_hex] = String.split(extract_token(req), ".", parts: 2)

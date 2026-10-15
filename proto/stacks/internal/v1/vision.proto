@@ -51,17 +51,36 @@ enum VisionErrorCode {
   // (never followed — SSRF guard), or a body over the download cap. The
   // presigned URL in hand will not start working within one job's lifetime.
   VISION_ERROR_CODE_IMAGE_UNREACHABLE = 3;
-  // Neither `image` nor `image_url` was supplied. A malformed request from
-  // core; retrying sends the identical malformed request.
+  // ⚠️ UNREACHABLE as of 2026-10-15 — nothing can send this, and the value is
+  // retained deliberately rather than removed.
+  //
+  // It meant "neither `image` nor `image_url` was supplied". That condition is
+  // now caught earlier: `AnalyzeRequest` declares the two as a `oneof`, so the
+  // request fails schema validation before any handler body runs and the caller
+  // receives MALFORMED_REQUEST instead. The only remaining raise site in the
+  // sidecar is defensive and cannot be reached through `/analyze`. The endpoint
+  // that could reach it, `/extract`, was deleted the same day.
+  //
+  // It stays because removing an enum value is a wire-contract change, and
+  // because the sidecar pins its constant set against this enum. A rebuilt
+  // two-input endpoint could make it reachable again — but until then, do NOT
+  // write a client branch for it expecting traffic.
   VISION_ERROR_CODE_NO_IMAGE_SUPPLIED = 4;
-  // The request violates an endpoint constraint that is not about the image
-  // bytes at all: both `images` and `image_url` set when they are mutually
-  // exclusive, or more `images` than the endpoint accepts. Distinct from
-  // NO_IMAGE_SUPPLIED, which means the request named no image; here it named
-  // too many, or named them in a combination the endpoint rejects. Kept
-  // separate so an operator reading the counter can tell "core sent nothing"
-  // from "core sent a contradiction" — both are core bugs, but not the same
-  // one.
+  // The request violates a constraint that is not about the image bytes at all:
+  // today, `image` and `image_url` both set, or neither set, since
+  // `AnalyzeRequest` declares them as a `oneof`.
+  //
+  // ⚠️ This comment described a `repeated images` field ("more `images` than
+  // the endpoint accepts") until 2026-10-15 and was the last live reference to
+  // it anywhere in this contract; that field went with `ExtractRequest`.
+  //
+  // ⚠️ It also promised an operator distinction that can no longer be drawn.
+  // It said this code is kept separate from NO_IMAGE_SUPPLIED so a counter can
+  // tell "core sent nothing" from "core sent a contradiction". Both now arrive
+  // here: the oneof rejects the empty case before a handler runs. The two codes
+  // remain distinct VALUES — NO_IMAGE_SUPPLIED is unreachable, see above — but
+  // the counter no longer separates those two causes, and an operator should
+  // read the message text rather than the code to tell them apart.
   VISION_ERROR_CODE_MALFORMED_REQUEST = 5;
 }
 

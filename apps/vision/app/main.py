@@ -200,8 +200,8 @@ async def _load_image_b64(
     """Resolve `image` (already base64) OR `image_url` (downloaded and re-encoded)
     into a single base64-encoded string. Raises HTTPException(422) for invalid
     input — carrying forward the validation semantics the removed /classify
-    endpoint applied inline
-    logic, factored out so /analyze can reuse it without duplication.
+    endpoint applied inline, factored out so /analyze can reuse them without
+    duplication.
     """
     if image_url is not None:
         image_bytes = await _download_image(image_url)

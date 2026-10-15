@@ -9,8 +9,19 @@ breaking:
   use:
     - FILE
   ignore_only:
-    FIELD_SAME_TYPE:
-      - stacks/internal/v1/vision.proto
+    # A FIELD_SAME_TYPE suppression for stacks/internal/v1/vision.proto stood
+    # here and was REMOVED on 2026-10-15 because it was spent: with it deleted,
+    # `buf breaking` still exits 0, so it had been suppressing nothing for an
+    # unknown length of time while silently covering any future field-type
+    # change in that file.
+    #
+    # ⚠️ Worth stating because of where it sat — directly above the entry below,
+    # which is the same instrument with a comment promising it is temporary.
+    # One such promise in this block had already lapsed unnoticed. A suppression
+    # is only as temporary as whatever re-checks it, so the entry below has a
+    # filed piece of work carrying the removal and a planted-violation red run,
+    # rather than relying on this comment being read.
+    #
     # ⚠️ TIME-BOXED — remove this entry once the vision.proto change it covers
     # has landed on the default branch. `buf breaking` compares against that
     # branch, so after the merge there is nothing left for it to flag and the
