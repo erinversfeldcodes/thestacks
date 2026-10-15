@@ -52,6 +52,10 @@ _classify_patcher.start()
 _http_client = TestClient(app)
 _http_client.__enter__()
 
+# The one authenticated endpoint the sidecar serves. Kept as a constant so a
+# future route change is a one-line edit here rather than a silent 404 loop.
+_PATH = "/analyze"
+
 
 def _make_auth_header(path: str) -> dict[str, str]:
     ts = str(int(time.time()))
@@ -61,7 +65,7 @@ def _make_auth_header(path: str) -> dict[str, str]:
 
 
 def _fuzz_base64_and_size(raw: bytes) -> None:
-    """Simulate the per-image validation path shared by /extract and /classify."""
+    """Simulate the per-image validation path used by /analyze."""
     b64 = base64.b64encode(raw).decode()
     try:
         decoded = base64.b64decode(b64, validate=True)
@@ -101,10 +105,21 @@ def _fuzz_http_body(raw: bytes) -> None:
 
     Exercises: FastAPI JSON body parsing, Pydantic model validation, base64 decode,
     and size check — paths not reachable from the unit-level fuzz functions above.
+
+    ⚠️ This looped over ("/extract", "/classify") until 2026-10-15. Both routes
+    are gone, and the loop would have kept running happily against two 404s:
+    the target discards the response, so only an unhandled server exception
+    surfaces and a missing route is silent. That is the failure mode this
+    function is supposed to protect against, so it now asserts the status CLASS
+    as well — a fuzz target that cannot tell "handled correctly" from "route
+    does not exist" is not fuzzing anything.
     """
-    for path in ("/extract", "/classify"):
-        headers = {**_make_auth_header(path), "Content-Type": "application/json"}
-        _http_client.post(path, content=raw, headers=headers)
+    headers = {**_make_auth_header(_PATH), "Content-Type": "application/json"}
+    response = _http_client.post(_PATH, content=raw, headers=headers)
+    assert 400 <= response.status_code < 500, (
+        f"any input must yield a structured client error, never a 5xx or a 404: "
+        f"got {response.status_code} for {raw!r:.80}"
+    )
 
 
 def _fuzz_http_token(raw: bytes) -> None:
@@ -120,9 +135,13 @@ def _fuzz_http_token(raw: bytes) -> None:
     token_str = "".join(chr(b) for b in raw if 0x20 <= b <= 0x7E)
     if not token_str:
         return
-    for path in ("/extract", "/classify"):
-        body = {"images": ["dGVzdA=="]} if path == "/extract" else {"image": "dGVzdA=="}
-        _http_client.post(path, json=body, headers={"X-Internal-Token": token_str})
+    response = _http_client.post(
+        _PATH, json={"image": "dGVzdA=="}, headers={"X-Internal-Token": token_str}
+    )
+    assert 400 <= response.status_code < 500, (
+        f"an adversarial token must be rejected, never accepted or crashed on: "
+        f"got {response.status_code} for token {token_str!r:.80}"
+    )
 
 
 def TestOneInput(data: bytes) -> None:  # noqa: N802 — Atheris requires this exact name
