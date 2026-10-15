@@ -4,10 +4,16 @@ defmodule Stacks.Moderation do
       store (resolve ISBNs, store each book as `public`). Age-gating is NOT
       decided here — only a human marks a book adults-only.
 
-      Sidecar contract: POST /classify → `{classification, confidence,
-      model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
-      raw_text, confidence}], model_used}`. Context carries `image_url`
+      Sidecar contract: POST /analyze → `{classification, confidence, books:
+      [{title, author, potential_isbns, raw_text, confidence}], model_used}` —
+      one call answering both questions. Context carries `image_url`
       (preferred, presigned) or `image_b64` (legacy).
+
+      ⚠️ This described two endpoints, `/classify` and `/extract`, until
+      2026-10-15, while the code below already called `"analyze"`. They were
+      superseded for measured reasons — a second HTTP round-trip and a second
+      cold-container start cost 2-4s of the p95 — and deleted with the
+      cover-verification loop.
   """
 
   require Logger

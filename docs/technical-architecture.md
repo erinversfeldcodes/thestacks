@@ -5801,6 +5801,15 @@ end
 
 The Python vision service gains a second endpoint for text-to-book association:
 
+> ⚠️ **Not to be confused with the vision cover-association endpoint of the same
+> path**, which existed, was never called, and was deleted on 2026-10-15 along
+> with its callback. This section describes a DIFFERENT and still-unbuilt
+> endpoint: it takes a blog post's body plus candidate books and returns ranked
+> associations, where the deleted one took an ISBN and a cover image URL and
+> replied asynchronously. They share only a name. Anyone implementing this should
+> read it as a fresh design, and anyone cleaning up after the deletion should
+> leave it alone.
+
 ```
 POST /associate
 {

@@ -120,66 +120,79 @@ triage.
 
 ## Wire format constraints (deploy ordering)
 
-The vision service and core use proto enum string values for
-`AssociationStatus`:
+> ⚠️ **Rewritten 2026-10-15.** This section ran ~64 lines and described the
+> `AssociationStatus` enum crossing from the vision sidecar back to core via a
+> callback. **That callback, its endpoint, `dispatch_association/2`, the
+> `@status_confirmed`/`@status_rejected` attributes, the `_STATUS_*` constants
+> and the `[:stacks, :vision, :unknown_association_status]` telemetry it told
+> you to watch have all been deleted** — the cover-verification loop had no
+> caller and was removed. Following the old procedure would have meant grepping
+> for constants that do not exist and watching a telemetry event that can never
+> fire, which is worse than having no procedure.
+>
+> **The constraint itself survives, on a different enum**, and that is what
+> follows.
 
-- `ASSOCIATION_STATUS_CONFIRMED` — cover association succeeded
-- `ASSOCIATION_STATUS_REJECTED` — cover association rejected (check `reason`)
+The vision service and core share one cross-language enum in the surviving
+`/analyze` path: **`ClassificationResult`**.
 
-These strings must match between Python (sender) and Elixir (receiver).
-A mismatch causes the catch-all `dispatch_association/2` clause to fire
-— associations are silently discarded with a `Logger.warning` and a
-`[:stacks, :vision, :unknown_association_status]` telemetry event. No
-error is returned to the vision service (it must not retry on app
-errors).
+- `CLASSIFICATION_RESULT_BOOK`
+- `CLASSIFICATION_RESULT_NOT_BOOK`
+- `CLASSIFICATION_RESULT_AMBIGUOUS`
+
+Python sends these strings in the `/analyze` response body; core reads them in
+`Stacks.Moderation.classification_outcome/1`
+(`apps/core/lib/stacks/moderation.ex:127-130`). They must match.
 
 ### Always deploy Elixir (core) before Python (vision)
 
-- Elixir is backward-compatible: unknown status strings fall to the
-  catch-all with a warning and telemetry, not a crash.
-- Python is forward-only: it immediately sends the new enum strings
-  once deployed.
+Unchanged, and for the same reason as before — only the failure mode differs.
 
-Deploying Python first creates a window where Elixir receives strings
-it does not recognise, silently dropping all cover associations until
-Elixir is updated. The composite action's core-then-vision ordering
-preserves this invariant during rollback as well.
+- **Elixir is tolerant:** `classification_outcome/1` ends in a
+  `defp classification_outcome(_), do: :unknown` catch-all, so an unrecognised
+  classification string degrades rather than crashing. ⚠️ **But it degrades
+  silently** — there is no warning and no telemetry on that clause, which is the
+  gap this section used to cover for the other enum. Treat `:unknown` outcomes
+  showing up in moderation results as the signal.
+- **Python is forward-only:** it sends the new strings as soon as it is deployed.
+
+Deploying Python first creates a window where core classifies every image as
+`:unknown`. The composite action's core-then-vision ordering preserves the
+invariant during rollback too.
 
 ### Symptoms of a wire format mismatch
 
-1. `[:stacks, :vision, :unknown_association_status]` telemetry events firing.
-2. Log lines: `InternalController: unknown status "..." received` in core logs.
-3. Cover images not appearing on book editions despite vision service logs showing success.
-4. Vision service logs show `200` responses but no DB updates in core.
+1. Uploaded images resolving to no book while the sidecar logs `200` responses.
+2. Moderation outcomes landing as `:unknown` rather than book / not_a_book /
+   ambiguous.
+3. No DB updates in core despite healthy vision logs.
+
+Note what is NOT a symptom any more: cover images failing to appear on editions.
+Nothing writes a cover from the sidecar — `store_cover/3` and the association
+loop were deleted together.
 
 ### Rolling vision back across an enum change
 
-If you need to roll back Python to a pre-enum version while core is on
-the new enum strings:
-
-1. **Before rollback:** check `_STATUS_CONFIRMED` and `_STATUS_REJECTED`
-   constants in `apps/vision/app/main.py` on the old tag. If they use
-   old strings (e.g., `"confirmed"`, `"rejected"`), proceed.
-2. **Notify:** alert #ops that cover associations will be silently
-   dropped during the window.
-3. **Roll back core first** to the version whose `dispatch_association/2`
-   accepts the old strings (composite action handles this ordering
-   automatically), then roll back vision.
-4. **Verify:** send a test association callback with the old status
-   string and confirm it is handled (not caught by the catch-all).
-5. **Monitor:** watch `[:stacks, :vision, :unknown_association_status]`
-   telemetry — it should drop to zero after both services are aligned.
+1. **Before rollback:** check the `_CLF_*` constants in
+   `apps/vision/app/main.py` on the old tag against the three strings above.
+2. **Roll back core first** if the old sidecar sends different strings, so the
+   receiver is the tolerant side for the whole window.
+3. **Verify:** POST a known book image to `/analyze` and confirm the response
+   `classification` is one of the three strings, and that core resolves a book
+   from it.
+4. **Monitor:** moderation outcomes, since the catch-all is silent.
 
 ### Verifying wire format alignment
 
-The `InternalController` module attributes `@status_confirmed` and
-`@status_rejected` are the authoritative Elixir-side enum strings. They
-must match the JSON names of `AssociationStatus` in
-`proto/stacks/internal/v1/vision.proto`.
+`scripts/check-enum-coverage.py` is the gate: it compares each proto enum
+against the Elixir and Python code that handles it. `ClassificationResult` is
+covered there, with one recorded exemption at
+`apps/core/lib/mix/tasks/eval.vision.ex:156`.
 
-CI catches this indirectly: `internal_controller_test.exs` sends the
-expected strings and asserts correct DB behaviour. If the strings
-drift, those tests fail.
+⚠️ The old version of this section claimed CI caught enum drift "indirectly"
+via `internal_controller_test.exs`. That test file no longer contains any
+association tests, so that claim is now false in two ways — cite the enum
+coverage gate instead.
 
 ---
 
@@ -202,8 +215,13 @@ drift, those tests fail.
        LIMIT 1;
       ```
 - [ ] **`[:stacks, :system, :rollback]` telemetry visible in Axiom.**
-- [ ] **No wire-format telemetry firing.**
-      `[:stacks, :vision, :unknown_association_status]` should be flat.
+- [ ] **Classification strings align.** ⚠️ This step used to read "no
+      wire-format telemetry firing — `[:stacks, :vision, :unknown_association_status]`
+      should be flat." That event no longer exists (deleted 2026-10-15 with the
+      association loop), and a checklist item that can never fail is worse than
+      none. There is no telemetry on the surviving enum's catch-all, so check it
+      by behaviour instead: upload a known book image and confirm it resolves to
+      a book rather than landing as `:unknown`.
 
 ---
 

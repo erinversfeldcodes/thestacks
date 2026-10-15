@@ -111,7 +111,7 @@ For each job enqueued or triggered:
 
 For each external service interaction:
 - **Service**: Vision sidecar / Rust scraper / Open Library / Google Books / Together AI / Brave Search / SearXNG / Resend / R2
-- **Endpoint**: `POST /classify`, `GET https://openlibrary.org/...`, etc.
+- **Endpoint**: `POST /analyze`, `GET https://openlibrary.org/...`, etc.
 - **Client module**: `Stacks.AI.Client`, `Stacks.Enrichment.ScraperClient`, etc.
 - **Auth**: HMAC, API key, Bearer token
 - **Circuit breaker**: fuse name, thresholds

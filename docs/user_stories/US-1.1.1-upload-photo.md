@@ -215,8 +215,11 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **What it does**:
   1. Fetches a presigned URL for the image from `Stacks.Storage.get_image_url/1`
   2. Calls `Stacks.Moderation.run_pipeline/1` which:
-     a. Calls vision sidecar `POST /classify` to check if the image is a book
-     b. Calls vision sidecar `POST /extract` to extract book candidates
+     a. Calls vision sidecar `POST /analyze` ONCE — it both decides whether the
+        image is a book and extracts candidates, short-circuiting on a confident
+        `not_book`/`ambiguous`. (This read as two calls, `/classify` then
+        `/extract`, until those endpoints were deleted on 2026-10-15; the
+        pipeline had already been using the single fused call.)
      c. Expands compound candidates (titles joined by " OR ")
      d. For each candidate, resolves ISBN directly or via `ISBNResolver.search_by_title/3`
      e. For each resolved ISBN, calls `Books.resolve_isbn/1` for metadata
@@ -232,22 +235,27 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 
 ## 8. External Service Calls
 
-### Vision Sidecar -- Classification
+### Vision Sidecar -- Classification and Extraction (one call)
 - **Service**: Modal vision sidecar (Qwen2.5-VL-7B-Instruct)
-- **Endpoint**: `POST /classify`
-- **Client module**: `Stacks.AI.Client` via `call_vision("is_book", payload)`
+- **Endpoint**: `POST /analyze` — the sidecar's only identification endpoint
+- **Client module**: `Stacks.AI.Client` via `call_vision("analyze", payload)`
 - **Auth**: HMAC (`X-Internal-Token` header: `<timestamp>.<HMAC-SHA256>`)
-- **Circuit breaker**: `:vision_service` fuse
-- **Response**: `%{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}`
+- **Circuit breaker**: `:vision_fuse`
+- **Request**: a single `image` (base64) OR `image_url` — a proto `oneof`; sending both or
+  neither returns `VISION_ERROR_CODE_MALFORMED_REQUEST`
+- **Response**: `%{"classification" => "CLASSIFICATION_RESULT_BOOK"|"..._NOT_BOOK"|"..._AMBIGUOUS",
+  "confidence" => float, "books" => [%{"title" => str, "author" => str,
+  "potential_isbns" => [str], "raw_text" => str, "confidence" => float}], "model_used" => str}`
 - **Fallback**: Returns `{:error, :circuit_open}` when fuse is blown
 - **Mock in test**: `Stacks.AI.MockClient` (configured via `config :core, :vision_client`)
 
-### Vision Sidecar -- Extraction
-- **Service**: Modal vision sidecar
-- **Endpoint**: `POST /extract`
-- **Client module**: `Stacks.AI.Client` via `call_vision("extract_isbn", payload)`
-- **Auth**: Same HMAC scheme
-- **Response**: `%{"books" => [%{"title" => str, "author" => str, "potential_isbns" => [str], "raw_text" => str, "confidence" => float}]}`
+> ⚠️ **Two sections stood here — Classification via `POST /classify` and Extraction via
+> `POST /extract` — until 2026-10-15.** Both endpoints were deleted; `/analyze` answers both
+> questions in one call, which is the point of it. Two details in the old text were already wrong
+> and are corrected above rather than carried over: the fuse is `:vision_fuse`, not
+> `:vision_service`, and the classification values are the full `CLASSIFICATION_RESULT_*` enum
+> strings, not `"book"`/`"not_book"`/`"ambiguous"` — `Moderation.classification_outcome/1` matches
+> on the enum form.
 
 ### Open Library API
 - **Service**: Open Library
@@ -487,7 +495,7 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **Dashboard**: Vision pipeline section
 
 - **Metric name**: Vision extraction time
-- **How measured**: Same as classification — `call_vision("extract_isbn", ...)` duration. Not yet instrumented separately.
+- **How measured**: Same as classification — `call_vision("analyze", ...)` duration. Extraction is not separately instrumented, and since 2026-10-15 it cannot be: it shares one call with classification.
 - **Target/SLA**: p50 < 5s, p95 < 15s
 - **Dashboard**: Vision pipeline section
 
@@ -561,11 +569,15 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **Tracked by**: `Stacks.AI.BudgetTracker` (GenServer, daily limit R5, monthly limit R100), `op.platform_costs` table (via `Stacks.Costs.upsert_cost/1`), `mart_cost_tracking` dbt mart
 
 ### Vision Extraction (Modal GPU)
-- **Service**: Modal (same GPU instance as classification)
-- **Trigger**: `IdentifyBookJob` calls `Stacks.AI.Client.call_vision("extract_isbn", ...)` — one extraction per upload that passes classification
-- **Unit cost**: Included in the classification call cost above (same Modal container session, 3-8s additional)
-- **Volume estimate**: ~95% of uploads pass classification, so nearly 1:1 with uploads
-- **Tracked by**: `Stacks.AI.BudgetTracker` (combined with classification under `:modal` provider)
+- **Service**: Modal (same GPU instance, same call as classification)
+- **Trigger**: no separate trigger. ⚠️ This read `call_vision("extract_isbn", ...)` — "one
+  extraction per upload that passes classification" — until 2026-10-15. There is no second call:
+  `IdentifyBookJob` makes one `call_vision("analyze", ...)`, and the sidecar runs extraction
+  internally only when classification is positive. The short-circuit still exists; it just happens
+  inside the sidecar rather than between two HTTP requests, which is why `/extract` was deleted.
+- **Unit cost**: not separable from the classification call — it is the same call
+- **Volume estimate**: ~95% of uploads pass classification, so extraction runs on nearly 1:1 with uploads
+- **Tracked by**: `Stacks.AI.BudgetTracker` (one `:modal` charge per upload, not two)
 
 ### Open Library API
 - **Service**: Open Library

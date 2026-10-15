@@ -1675,7 +1675,7 @@ defmodule Stacks.UploadPipelineTest do
       try do
         Application.put_env(:core, :vision_hmac_secret, "test_secret_key")
 
-        req = AIClient.build_vision_request("/classify", %{image: "test"})
+        req = AIClient.build_vision_request("/analyze", %{image: "test"})
 
         token_header =
           Enum.find_value(req.headers, fn

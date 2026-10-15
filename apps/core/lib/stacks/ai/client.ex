@@ -81,17 +81,20 @@ defmodule Stacks.AI.Client do
     "#{ts}.#{sig}"
   end
 
-  # `/analyze` is the one endpoint the sidecar serves for identification, and
-  # "is_book" still maps to `/classify` because the smoke probe and the
-  # circuit-breaker tests drive that path against the real client.
+  # `/analyze` is the ONE endpoint the sidecar serves. Two caller-facing
+  # operation names still resolve to it, which is deliberate: the name says what
+  # the caller is asking, the path says who answers.
+  #
+  # ⚠️ "is_book" mapped to `/classify` until 2026-10-15. That endpoint is gone,
+  # so the mapping had become a route to a 404 — harmless today only because the
+  # single production caller is the smoke probe, which melts a fuse and ignores
+  # the response. Pointing it at `/analyze` keeps the question askable and stops
+  # the table describing a service that no longer exists.
   #
   # ⚠️ Do NOT collapse this to a single `endpoint_path(_), do: "analyze"`. The
-  # catch-all raise below is load-bearing: two circuit-breaker tests melt the
-  # fuse by calling "is_book" against the real client and then assert
-  # `{:error, :circuit_open}`. With a catch-all that returns a path, an
-  # unrecognised operation would silently go to `/analyze` instead of failing
-  # loudly at the call site.
-  defp endpoint_path("is_book"), do: "classify"
+  # catch-all raise below is load-bearing: an unrecognised operation must fail at
+  # the call site rather than silently reach a real endpoint, and a test pins it.
+  defp endpoint_path("is_book"), do: "analyze"
   defp endpoint_path("analyze"), do: "analyze"
 
   defp endpoint_path(other) do

@@ -125,7 +125,7 @@ dbt refresh for a newly-shelved book is triggered by the downstream
 
 ### Vision sidecar (Python/FastAPI)
 - **Service**: Vision sidecar (`apps/vision/`)
-- **Endpoint**: `POST /analyze` — single fused classify + extract call. The sidecar still exposes `POST /classify` and `POST /extract` for direct/legacy use, but the moderation pipeline uses `/analyze` only.
+- **Endpoint**: `POST /analyze` — single fused classify + extract call, and now the sidecar's ONLY identification endpoint. ⚠️ This line said the sidecar "still exposes `POST /classify` and `POST /extract` for direct/legacy use" until 2026-10-15, when both were deleted: nothing called them, and the moderation pipeline already used `/analyze` only.
 - **Client module**: `Stacks.AI.Client` (`endpoint_path("analyze")` → `/analyze`)
 - **Auth**: HMAC (`X-Internal-Token`)
 - **Circuit breaker**: Fuse on the vision client
