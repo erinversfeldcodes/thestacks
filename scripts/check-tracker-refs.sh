@@ -59,6 +59,18 @@ TOOLING_PATHS = (
     "scripts/wave-status.sh",
     "scripts/hooks/",
     "scripts/mcp/",
+    # ⚠️ This gate exempts ITSELF, and the reason is not convenience. Its
+    # patterns and its comments must show what a violation LOOKS like to be
+    # readable at all — the examples below are the documentation. A checker
+    # that cannot contain its own examples either loses them or starts
+    # obfuscating them to pass, and both are worse than one honest exemption.
+    #
+    # Note how this surfaced: the gate ran clean while it was still untracked,
+    # because `git ls-files` could not see it. It began failing the moment it
+    # was committed. A tool whose input is "tracked files" does not check
+    # itself until it is tracked, so a clean first run proves less than it
+    # appears to.
+    "scripts/check-tracker-refs.sh",
 )
 
 # Deliberately conservative. Each pattern names a tracker artefact and nothing
