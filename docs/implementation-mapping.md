@@ -1959,7 +1959,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | Browse and read published blog posts the viewer is allowed to see. |
 | **Phase** | Phase 7 (Blog & Comments) |
 | **Status** | Built |
-| **Implementation** | `GET /api/blog/posts` → `BlogController.index`, `GET /api/blog/posts/:id` → `.show`; per-viewer filtering via `Stacks.Visibility`. Frontend `Page.Blog.Post`. ⚠️ One section-5 read path in the story is **unbuilt**: the any-author, visibility-filtered book cross-reference. The book detail calls `Blog.list_posts_for_book_by_user/2`, which returns only the viewer's own posts (drafts included) — a narrower contract. The any-author variant existed as `list_posts_for_book/2`, never acquired a caller, and was deleted 2026-10-15. |
+| **Implementation** | `GET /api/blog/posts` → `BlogController.index`, `GET /api/blog/posts/:id` → `.show`; per-viewer filtering via `Stacks.Visibility`. Frontend `Page.Blog.Post`. ⚠️ One section-5 read path in the story is **unbuilt and one is unwired**. Unbuilt: the any-author, visibility-filtered cross-reference — it existed as `list_posts_for_book/2`, never acquired a caller, and was deleted 2026-10-15. Unwired: `Blog.list_posts_for_book_by_user/2` (the viewer's own posts, drafts included) is called at `book_controller.ex:224` and serialised, but `Api.elm:1596`'s `map4` decoder drops the field and `BookDetail.elm:1853`'s `viewWritingSection` takes no arguments and renders a stub with a handler-less `Add Post` button. So the writing section displays neither variant. |
 
 ---
 

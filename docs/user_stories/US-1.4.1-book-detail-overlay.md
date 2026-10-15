@@ -19,7 +19,7 @@
 - Clicking a spine opens a modal overlay with book details.
 - Overlay has backdrop blur and click-to-dismiss.
 - Close button (X) in top-right corner.
-- All detail sections render: Hero, About, Reviews, Prices, Author, Writing, Shelf Actions.
+- All detail sections render: Hero, About, Reviews, Prices, Author, Writing, Shelf Actions. ⚠️ **Writing renders as a STUB only** — see section 5's read path. The section's heading, empty list and `Add Post` button are present; no post is ever shown and the button has no handler.
 - If user owns the book: Move to Shelf, Format toggles, and Remove actions are shown.
 - If authenticated but book not owned: "Add to Collection" action is shown.
 - If unauthenticated: "Sign In or Register" prompt is shown.
@@ -36,7 +36,7 @@
 5. The overlay renders immediately via `Page.BookDetail.overlayView model`.
 6. Backdrop with blur (`rgba(10, 8, 6, 0.75)`, `backdrop-filter: blur(4px)`) covers the shelf.
 7. Card renders centered with `max-width: 900px`, `width: 90vw`, `max-height: 90vh`, `overflow-y: auto`.
-8. On `BookLoaded (Ok response)`, the book detail content fills in: hero, about, reviews, prices, author, writing, shelf actions.
+8. On `BookLoaded (Ok response)`, the book detail content fills in: hero, about, reviews, prices, author, shelf actions. ⚠️ **Not writing** — `viewWritingSection` takes no arguments, so nothing in `response` can reach it.
 9. User dismisses by clicking X, clicking backdrop, or pressing Escape -> `CloseOverlay` msg -> `OutMsg RequestCloseOverlay`.
 
 ### Sad Paths
@@ -119,10 +119,16 @@
 - **Query**: Raw SQL `SELECT read_count FROM wh.mart_community_read_count WHERE book_id = $1 LIMIT 1`
 - **Schema module**: N/A (raw query)
 
-### Read: User's writing linked to book
+### Read: User's writing linked to book — ⚠️ RUNS, SERIALISED, THEN DISCARDED
 - **Table(s)**: `op.blog_posts` (via `Blog.list_posts_for_book_by_user/2`)
 - **Query**: Posts associated with the book by the current user
 - **Schema module**: `Stacks.Blog.Post`
+- **Status**: the query runs on every authenticated book-detail read and
+  `book_controller.ex:218-219` puts `my_writing` on the wire, but `Api.elm:1596-1604`'s
+  `bookDetailResponseDecoder` is a `Decode.map4` that drops the field (its docstring says so:
+  *"Proto includes myWriting (dropped)"*) and `BookDetail.elm:1853`'s `viewWritingSection` takes no
+  arguments. So this read is **pure overhead** today, not a feature: three layers exist and the
+  middle one is missing. The `db.query.count{table="op.blog_posts"}` metric in section 15 counts it.
 
 ---
 
