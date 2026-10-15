@@ -102,7 +102,8 @@ warnings = []
 for name, direction in sorted(ports.items()):
     if direction == "out" and name not in subscribes:
         failures.append(f"OUTBOUND port `{name}` (Cmd) has no `app.ports.{name}.subscribe` — "
-                        f"its Cmd is dropped silently (the #395 shape).")
+                        f"its Cmd is dropped silently — the shape where a port is declared and "
+                        f"sent to, and nothing is listening.")
     if direction == "in" and name not in sends:
         warnings.append(f"INBOUND port `{name}` (Sub) is never fed by `app.ports.{name}.send` "
                         f"— inert; reserved hook or dead. Not gating.")

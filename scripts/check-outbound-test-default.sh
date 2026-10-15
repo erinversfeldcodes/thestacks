@@ -28,8 +28,21 @@ def read(path):
         return handle.read()
 
 def blank_comments(text):
-    """Strip `#`-comments so prose about Finch is not read as a call to it."""
-    return re.sub(r"#[^\n]*", "", text)
+    """Strip `#`-comments so prose about Finch is not read as a call to it.
+
+    The `(?!\\{)` is load-bearing and was missing. `#[^\\n]*` treats `#{` as the
+    start of a comment, so everything after an interpolation on the same line
+    was erased -- and this gate FAILED OPEN as a result. A module whose only
+    outbound call sits after an interpolation, for instance
+
+        "#{base}/b/#{isbn}" |> then(&Finch.build(:get, &1)) |> Finch.request(name)
+
+    had its `Finch.request(` eaten and dropped out of scope entirely: planted
+    unseamed and with no test default, the gate printed `OK: all 11 outbound
+    transports are seam-selected` and exited 0. Interpolation before a call is
+    ordinary Elixir, so this was not an exotic shape.
+    """
+    return re.sub(r"#(?!\{)[^\n]*", "", text)
 
 sources = {}
 for path in sorted(glob.glob(LIB_GLOB, recursive=True)):
@@ -58,6 +71,33 @@ HTTP_ISH = re.compile(
     r"\b(?:Finch\.|Req\.|HTTPoison\.|Tesla\.|:hackney\.|:httpc\.|Mint\.HTTP\.)\w+!?\("
 )
 
+# Calls that LOOK like HTTP to HTTP_ISH and touch no socket. `Finch.build/3`
+# allocates a request struct; `Req.new/1` and `Tesla.client/2` build a client.
+# A module that only ever does these makes no outbound call.
+#
+# ⚠️ Why this is subtracted rather than left to trip the check: without it, a
+# build-only module FAILED with "extend OUTBOUND to cover the call shape", whose
+# remedy would have put a non-transport on the roster and demanded it prove a
+# seam it does not need. That is the cry-wolf failure this file's own comment
+# names sixty lines below — and a gate that cries wolf gets edited until it is
+# quiet.
+#
+# ⚠️ And why the ORDER of the two fixes mattered: before `blank_comments` stopped
+# eating `#{}` interpolation, subtracting these would have turned
+# `Finch.build(:get, "#{u}/x") |> Finch.request(name)` from a loud failure into
+# an invisible one — the interpolation ate the `Finch.request(`, and only the
+# surviving `Finch.build(` was tripping HTTP_ISH. The accidental catch was the
+# only thing covering that shape. Removing it before fixing the cause would have
+# opened a hole while closing a nuisance.
+NON_EXECUTING = re.compile(r"\b(?:Finch\.build|Req\.new|Tesla\.client)!?\(")
+
+def http_ish_beyond_building(code):
+    """Does this module make an HTTP-ish call that is not merely building one?"""
+    return any(
+        not NON_EXECUTING.match(match.group(0))
+        for match in HTTP_ISH.finditer(code)
+    )
+
 transports = {}   # module name -> defining path
 unrecognised = []  # (module, path) making an HTTP call this gate cannot parse
 for path, text in sources.items():
@@ -69,7 +109,7 @@ for path, text in sources.items():
 
     if OUTBOUND.search(code):
         transports[module] = path
-    elif HTTP_ISH.search(code):
+    elif http_ish_beyond_building(code):
         unrecognised.append((module, path))
 
 if not transports:
@@ -168,7 +208,7 @@ for module, path in sorted(transports.items()):
                 "seam key(s) with no `:test` default in " + TEST_CONFIG + ": "
                 + ", ".join(":" + k for k in floorless)
                 + ". Without the compile-time floor, a runtime delete_env restores the LIVE "
-                "client — the exact mechanics of #379.",
+                "client — the exact mechanics of the live-client leak this gate exists for.",
             )
         )
         continue
@@ -215,7 +255,8 @@ if stale:
 if findings:
     print("")
     print("FAIL: " + str(len(findings)) + " outbound transport(s) the test suite can reach the")
-    print("public internet through. This class produced #377, #379 and the five #381 sites;")
+    print("public internet through. This class has produced seven separate live-client")
+    print("leaks in this codebase so far;")
     print("each presented as a flaky test until someone chased it instead of re-running.")
     print("")
     for module, path, reason in findings:
