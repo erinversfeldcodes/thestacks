@@ -5847,9 +5847,7 @@ Data quality is measured per data product relative to its consumer, not as a pla
 
 ### dbt models for quality
 
-| Model | Purpose |
-|-------|---------|
-⚠️ **All four were deleted on 2026-10-15** and this table is kept as the specification of what a
+⚠️ **All four were deleted on 2026-10-15** and the table below is kept as the specification of what a
 rebuilt quality surface should produce — not as a description of what exists. Their only consumer
 was the in-app metrics dashboard, which Grafana superseded, and nothing else read them. The goal is
 filed as its own work; the SQL for the two with real logic is recoverable from git history.

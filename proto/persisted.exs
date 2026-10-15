@@ -1117,7 +1117,15 @@
       dbt_path: "stg_review_snapshots.sql",
       timestamps: false,
       migration_exists: true,
-      dbt_grant: false,
+      # Left TRUE deliberately. `dbt_grant` is read only by the migration
+      # generator's `grant_block/1`, and `migration_exists: true` means no
+      # migration is generated here — so setting it false would emit no SQL,
+      # revoke nothing, and leave `stacks_dbt`'s existing grant in place while
+      # claiming in the manifest that the table has none. It would also be the
+      # wrong value the day this table's migration IS regenerated, silently
+      # dropping a grant the table should keep. `skip_dbt` below is the single
+      # carrier of "no model is generated".
+      dbt_grant: true,
       # ⚠️ Opted out of dbt generation on 2026-10-15, when the three review dbt
       # models were deleted. They modelled a table holding zero rows: the
       # scraping implementation was removed by owner ruling and its sanctioned
@@ -1129,8 +1137,9 @@
       # in this manifest with its Ecto half intact and its dbt half off, rather
       # than being removed entirely.
       #
-      # Flip this back (and restore `dbt_path` and `dbt_grant`) in the same
-      # change that produces the first sanctioned review rows. Until then a
+      # Flip `skip_dbt` back in the same change that produces the first
+      # sanctioned review rows — and only that: `dbt_path` and `dbt_grant` above
+      # were never removed, so there is nothing to restore. Until then a
       # staging model here would be a view over an empty table, and the warehouse
       # has no erasure path for the reader free text it would eventually carry.
       skip_dbt: true,

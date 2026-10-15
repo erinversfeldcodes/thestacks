@@ -212,7 +212,7 @@ N/A — `Components.PriceInfo` is a pure view function with no messages or state
 
 ## 13. Operational Metrics
 
-- **Oban job counts for `TriggerPriceScrapeJob`**: enqueued, completed, failed, retried — tracked via `mart_job_stats` dbt model and Oban telemetry
+- **Oban job counts for `TriggerPriceScrapeJob`**: enqueued, completed, failed, retried — ⚠️ the `mart_job_stats` dbt model named here was **deleted on 2026-10-15** as an orphan (nothing read it); Oban telemetry remains the live source
 - **Rust scraper call counts and latencies**: per-store `POST /scrape` duration and success/failure rates recorded via `Monitoring.record_success/2` and `Monitoring.record_failure/3`
 - **Circuit breaker state**: `:scraper_fuse` open/closed transitions — melt events tracked per failed scrape call, visible in `op.source_health_checks` (source_type: `"scraper"`)
 - **Broadway pipeline throughput**: `PricePipeline` messages/sec, batch sizes (configured: batch_size=50, batch_timeout=5000ms), processor concurrency=2, batcher concurrency=1

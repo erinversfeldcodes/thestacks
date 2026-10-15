@@ -65,7 +65,7 @@ int ──► wh.mart_*      Consumer-optimised read models (one per use case)
 
 2. **Every layer after `op.*` is derived and rebuildable.** If the `wh` schema is dropped, `dbt run` reconstructs it. If the ETS cache crashes, events rebuild it. If the search index drifts, the mart is the source of truth. The only non-rebuildable data is in `op.*` and `audit.*`.
 
-3. **Purpose-built read models, not generic "gold" tables.** Each mart serves a specific consumer with a specific access pattern. `mart_community_read_count` exists for the "Looking for a Home" wear calculation (5-min refresh). `mart_platform_searchable` exists for the search endpoint (5-min refresh). `mart_cost_tracking` exists for the cost section (daily). Don't create a mart without a named consumer.
+3. **Purpose-built read models, not generic "gold" tables.** Each mart should serve a specific consumer with a specific access pattern. Don't create a mart without a named consumer.
 
    ⚠️ **This principle was violated and the bill came due on 2026-10-15**, when nine marts were
    deleted because their only named consumer — the in-app metrics dashboard — had been removed and
@@ -73,6 +73,24 @@ int ──► wh.mart_*      Consumer-optimised read models (one per use case)
    right; what was missing was a mechanism that fails when a mart's named consumer disappears.
    Two of the nine (`mart_data_quality_trend`, `mart_enrichment_gaps`) had real logic and their
    goal was re-filed as its own work rather than preserved as unread models.
+
+   ⚠️ **And the principle is still not satisfied — stated plainly, because this paragraph used to
+   illustrate the rule with examples that broke it.** Of the four marts that survive, exactly
+   **one** is read by application code:
+
+   | Mart | Read by | Refreshed by an event |
+   |---|---|---|
+   | `mart_community_read_count` | ✅ `books.ex:81`, `insights.ex:230` (raw SQL) | yes |
+   | `mart_platform_searchable` | ❌ nothing | yes |
+   | `mart_book_prices` | ❌ nothing | yes |
+   | `mart_cost_tracking` | ❌ nothing — `CostController.index` calls `Costs.cost_breakdown/0`, which reads the `op.platform_costs` Ecto context | no |
+
+   The earlier wording here named `mart_platform_searchable` as existing "for the search endpoint"
+   and `mart_cost_tracking` as existing "for the cost section". Neither is read by the surface it
+   was named for, so the three-example list was illustrating the rule with two violations of it.
+   The three unread survivors were each kept for a reason recorded at the time, but "every mart has
+   a reader" describes an intention, not this warehouse. A mart being *refreshed* by an event is
+   not a consumer — that is the mechanism above keeping something warm for nobody.
 
 4. **Event-triggered where possible, cron as catch-all.** Prefer triggering selective dbt runs based on event types over running everything on a daily cron. The daily cron remains as a catch-all to ensure eventual consistency, but the primary refresh mechanism should be event-driven:
 

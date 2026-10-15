@@ -236,7 +236,13 @@ N/A — snapshots live in the database. And no review text is stored anywhere (�
 
 ## 12. dbt Model Dependencies
 
-All three models exist and are currently fed by nothing.
+⚠️ **All three models were DELETED on 2026-10-15 and none of them exists.** This section is kept as
+the **specification** a rebuild would start from — the materialisations, the join shapes and the
+consumers below describe what the review vertical *should* build, not what runs today. Every
+"Consumer" line below is therefore a historical intent: the in-app metrics dashboard that named most
+of them was removed, and the Grafana surface some of them cite **does not read any mart** (there is
+no Postgres datasource in `deploy/grafana/provisioning/datasources/`, and all six dashboards in
+`apps/core/priv/grafana/` are Prometheus-only). Read nothing here as a live dependency.
 
 ### `int_review_sentiment` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Trigger**: the refresh event via `DbtRefreshHandler`
@@ -245,13 +251,19 @@ All three models exist and are currently fed by nothing.
 
 ### `mart_book_reviews` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Materialisation**: view — `SELECT book_id, avg_rating, avg_sentiment_score, review_count FROM int_review_sentiment`
-- **Consumer**: the Grafana observability surface
+- **Consumer**: ~~the Grafana observability surface~~ — **it had none.** Verified 2026-10-15: no
+  dashboard reads any mart. This claimed consumer is what kept the model alive unread.
 
-### `mart_enrichment_gaps`
+### `mart_enrichment_gaps` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Materialisation**: view — joins `int_book_detail_view` with `int_review_sentiment` to flag `missing_reviews`
-- **Consumer**: the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (the in-app metrics dashboard was superseded by Grafana, ADR-021); the mart is retained for Grafana
+- **Consumer**: ~~the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (the in-app metrics dashboard was superseded by Grafana, ADR-021); the mart is retained for Grafana~~ — **the
+  retention reason was false and is overturned.** The endpoint's removal is accurate; "retained for
+  Grafana" was not, because no Grafana dashboard reads a mart. It held 169 rows — more than any
+  other mart — and no reader, which is why a row count is not a liveness signal.
 
-⚠️ **Every row in all three is currently empty**, and `mart_enrichment_gaps.missing_reviews` therefore reports 100% — which is correct, and is the cleanest available proof that this story is unbuilt.
+⚠️ **All three held zero review rows while they existed**, which is the cleanest available proof
+that this story is unbuilt — and `mart_enrichment_gaps.missing_reviews` reported 100% for the same
+reason. Those numbers are historical; the models are gone.
 
 ---
 
@@ -289,7 +301,7 @@ N/A — pure view function.
 | Fuse state per source | `:fuse` / `op.source_health_checks` | Gauge | Open/closed transitions | **Each source its own fuse** (§9). A shared fuse melting is itself the incident |
 | Summary validation rejections | Logger | Counter | Summaries altered by the URL-stripping / truncation validator | > 0 is expected; a sudden rise means the model or the prompt changed |
 | LLM spend | `mart_cost_tracking` | Gauge | Per-summary token cost | Against the §9 cap |
-| `mart_enrichment_gaps.missing_reviews` | dbt | Gauge (%) | Books with no snapshot | 100% today. Falling is the only progress signal |
+| `mart_enrichment_gaps.missing_reviews` | ⚠️ dbt — **mart deleted 2026-10-15 (§12)**; the rebuild must recreate it before this gauge can exist | Gauge (%) | Books with no snapshot | Was 100%. Falling is the only progress signal |
 
 ---
 
@@ -298,7 +310,7 @@ N/A — pure view function.
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
 | Data freshness per book | Derived | Histogram (days) | `scraped_at` vs `NOW()` | **Must differ by bookshelf.** Reading Pile fresher than Library, or the cadence promise in §1 is unmet — which is exactly what the deleted flat-30-day rule failed |
-| Review coverage | `mart_enrichment_gaps` | Gauge (%) | Books with ≥ 1 snapshot | Rising |
+| Review coverage | ⚠️ `mart_enrichment_gaps` — **deleted 2026-10-15 (§12)**, to be recreated by the rebuild | Gauge (%) | Books with ≥ 1 snapshot | Rising |
 | Sources per book | SQL | Histogram | `count(DISTINCT source) GROUP BY book_id` | **> 1 is the point.** One source is a rating, not a balanced sense of reception |
 | Card click-through | Elm event tracking | Gauge (%) | Link follows / section renders | Tests whether "link, don't host" serves the reader or just protects us |
 | Batch throughput | Oban telemetry | Gauge | Books per batch run | Informational |
