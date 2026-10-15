@@ -1111,10 +1111,29 @@
       schema_prefix: "op",
       ecto_module: Stacks.Enrichment.ReviewSnapshot,
       ecto_path: "lib/stacks/gen/enrichment/review_snapshot.ex",
+      # `dbt_path` stays declared even though generation is off: the manifest
+      # requires the key, and the sibling skip_dbt tables keep theirs the same
+      # way. It is the path the model returns to, not a claim that it exists.
       dbt_path: "stg_review_snapshots.sql",
       timestamps: false,
       migration_exists: true,
-      dbt_grant: true,
+      dbt_grant: false,
+      # ⚠️ Opted out of dbt generation on 2026-10-15, when the three review dbt
+      # models were deleted. They modelled a table holding zero rows: the
+      # scraping implementation was removed by owner ruling and its sanctioned
+      # replacement is not built yet.
+      #
+      # The TABLE, this proto message and the generated Ecto schema are
+      # deliberately KEPT — the returning review vertical writes to them, and
+      # its ordered rebuild makes that write its second step. So the row stays
+      # in this manifest with its Ecto half intact and its dbt half off, rather
+      # than being removed entirely.
+      #
+      # Flip this back (and restore `dbt_path` and `dbt_grant`) in the same
+      # change that produces the first sanctioned review rows. Until then a
+      # staging model here would be a view over an empty table, and the warehouse
+      # has no erasure path for the reader free text it would eventually carry.
+      skip_dbt: true,
       indexes: [],
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book}

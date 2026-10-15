@@ -171,7 +171,7 @@ dbt refresh for a newly-shelved book is triggered by the downstream
 - **Model**: `int_book_detail_view`
 - **Trigger**: `placement.created` via `DbtRefreshHandler`
 - **Materialisation**: Intermediate
-- **Consumer**: `mart_enrichment_gaps`, `mart_platform_searchable`
+- **Consumer**: `mart_platform_searchable`. (`mart_enrichment_gaps` was the other and was deleted 2026-10-15 — it had no reader.)
 
 ---
 
@@ -207,7 +207,7 @@ dbt refresh for a newly-shelved book is triggered by the downstream
 
 ## 13. Operational Metrics
 
-- **Oban job counts for `IdentifyBookJob`**: enqueued, completed, failed, retried — tracked via `mart_job_stats` and Oban telemetry
+- **Oban job counts for `IdentifyBookJob`**: enqueued, completed, failed, retried — tracked via Oban telemetry and the `oban_jobs` table (the `mart_job_stats` rollup was deleted 2026-10-15, unread)
 - **Vision sidecar call counts and latencies**: `POST /analyze` duration, success/failure rates. One call per upload (the sidecar internally short-circuits the extract step when classification is not BOOK).
 - **Circuit breaker state**: vision client fuse events — open/closed transitions when sidecar is unavailable or slow
 - **ISBN resolution call counts**: Open Library and Google Books API hit rates, latencies, and fallback rates (one fails, other succeeds)

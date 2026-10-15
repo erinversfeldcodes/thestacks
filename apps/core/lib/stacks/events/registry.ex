@@ -28,14 +28,7 @@ defmodule Stacks.Events.Registry do
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
     "blog.post_published" => [
-      Stacks.Blog.Handlers.BlogAssociationHandler,
-      Stacks.Workers.DbtRefreshHandler
-    ],
-    "blog.post_updated" => [
-      Stacks.Workers.DbtRefreshHandler
-    ],
-    "blog.post_deleted" => [
-      Stacks.Workers.DbtRefreshHandler
+      Stacks.Blog.Handlers.BlogAssociationHandler
     ],
     "blog.associations_suggested" => [
       Stacks.Books.Handlers.CacheInvalidationHandler
@@ -76,9 +69,6 @@ defmodule Stacks.Events.Registry do
     "enrichment.events_discovered" => [
       Stacks.Workers.DbtRefreshHandler
     ],
-    "source_health.recorded" => [
-      Stacks.Workers.DbtRefreshHandler
-    ],
     "group.invitation_sent" => [
       Stacks.Notifications.GroupInvitationHandler
     ],
@@ -91,6 +81,23 @@ defmodule Stacks.Events.Registry do
   }
 
   @unsubscribed [
+    # ⚠️ Added 2026-10-15. Each of these three was handled ONLY by
+    # DbtRefreshHandler, and every dbt model that handler refreshed for them was
+    # deleted as an orphan — the nine marts whose consumer left with the metrics
+    # dashboard. A handler subscribed to an event it can no longer act on is
+    # worse than no handler: it reads as wiring. So the subscription went and the
+    # event is named here instead.
+    #
+    # `source_health.recorded` is still emitted and still useful: the operational
+    # view reads the `op.source_health_checks` TABLE directly
+    # (`Monitoring.list_source_health/0`), never the deleted `int_source_health`
+    # view, so nothing a person looks at changed.
+    "source_health.recorded",
+    # Blog posts are a built feature and these two are emitted; only their dbt
+    # refresh is gone. `blog.post_published` keeps a real handler
+    # (BlogAssociationHandler) and so stays in @registry.
+    "blog.post_updated",
+    "blog.post_deleted",
     # The confirmation email is enqueued directly at registration; the event
     # remains for audit/replay but no longer carries the email.
     "user.registered",

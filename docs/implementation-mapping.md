@@ -980,7 +980,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **Database** | **Write:** `op.review_snapshots`. **Read:** `op.books` (ISBN for lookup). |
 | **Jobs (Oban)** | `Stacks.Workers.FetchReviewsJob` -- per-book, scheduled with adaptive staleness (popular books refresh more often). |
 | **External Services** | GoodReads (scrape/API), Reddit API, Storygraph (scrape). |
-| **dbt Models** | `stg_review_snapshots`, `int_review_sentiment`, `mart_book_reviews`. |
+| **dbt Models** | ⚠️ **none** — ⚠️ deleted 2026-10-15: the three review models modelled a table with 0 rows. The TABLE, proto message, Ecto schema and payload contract are kept by owner ruling; the dbt layer is rebuilt when there are rows. |
 | **Infrastructure** | Broadway pipeline for backpressure on bulk review fetching. |
 | **Dependencies** | US-1.1.1, US-1.3.2 (reviews displayed on detail page). |
 
@@ -1238,7 +1238,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **Database** | **Read:** `op.audit_log`, `wh.*` (warehouse views), Oban job tables, `op.discovered_sources`. |
 | **Jobs (Oban)** | `Stacks.Workers.MetricsSnapshotJob` -- periodic snapshot of system state. |
 | **External Services** | None (all internal data). |
-| **dbt Models** | `mart_system_health`, `mart_job_stats`, `mart_data_freshness`, `mart_cost_tracking`, `mart_gdpr_compliance`. |
+| **dbt Models** | `mart_cost_tracking` only. The other four — ⚠️ deleted 2026-10-15 — their consumer was the in-app metrics dashboard, which Grafana superseded. |
 | **Infrastructure** | dbt scheduled runs (could be Oban-triggered or cron). |
 | **Dependencies** | US-8.1.5 (audit log must exist). Most useful after Phase 2 when enrichment jobs are running. |
 
@@ -1300,7 +1300,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Database** | **Write:** `op.listings` (including `contact_info`), `op.uploaded_images` (listing photos), `op.bookshelf_placements` (`listing_status` denorm). **Read:** `op.books`. |
 | **Jobs (Oban)** | `Stacks.Workers.ListingExpiryJob` -- auto-expire listings past 30-day TTL. |
 | **External Services** | None. |
-| **dbt Models** | `stg_listings`, `mart_marketplace_activity`. |
+| **dbt Models** | `stg_listings`. `mart_marketplace_activity` — ⚠️ deleted 2026-10-15 (no reader). |
 | **Infrastructure** | Image storage for listing photos. |
 | **Dependencies** | US-1.1.1 (book must exist). |
 
@@ -1366,7 +1366,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Database** | **Delete:** All user rows in `op.*`. **Update:** `wh.*` (anonymise user_id, hash PII). |
 | **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation; `max_attempts: 1`. It is the only job in this flow, enqueued directly by the controller with nothing scheduled ahead of it. |
 | **External Services** | None. |
-| **dbt Models** | `mart_gdpr_compliance` (tracking). |
+| **dbt Models** | ⚠️ **none** — `mart_gdpr_compliance` — ⚠️ deleted 2026-10-15 (no reader). GDPR compliance is evidenced by the erasure schema-guard and the export sweep in the test suite, not by a mart. |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-8.1.3 (consent), US-8.1.5 (audit log records deletion event). |
 | **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, re-affirmed 2026-08-19). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, it delays an erasure that is supposed to happen without undue delay, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation, and there is exactly one place it lives — the typed `DELETE` phrase that enables the submit button. Past it the controller enqueues `AccountDeletionJob` immediately: no confirmation email, no waiting period, nothing behind. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
@@ -2637,7 +2637,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Affects stories** | US-5.1 (metrics dashboard — data quality section), US-2.1.1–2.4.1 (enrichment — source health), US-12.1.2 (blog — LLM faithfulness) |
 | **Backend (Phoenix)** | `Stacks.Enrichment.SourceHealth` — `record_success/2`, `record_failure/3`. Instrumented in all enrichment workers. `Stacks.Workers.RSSLivenessJob` — weekly feed health check. |
 | **Database** | `op.source_health_checks` — per-source operational health with consecutive failure tracking and computed status (healthy/degraded/broken). |
-| **dbt Models** | `stg_source_health_checks`, `int_source_health` (per-source status), `mart_data_quality_trend` (12-week rollup), `mart_enrichment_gaps` (missing data by cause), `mart_llm_faithfulness` (LLM output quality). |
+| **dbt Models** | `stg_source_health_checks` only. The four derived models — ⚠️ deleted 2026-10-15; the operational view reads the `op.source_health_checks` table directly. The data-quality goal they served is filed as its own work. |
 | **Rust Scraper** | Returns `selector_match_rate` in scrape response — percentage of CSS selectors that found matches. Low rate indicates HTML structure change. |
 | **Elm** | Metrics dashboard: quality trend sparklines, source health table, enrichment gap cards, LLM faithfulness indicators. |
 
@@ -2763,7 +2763,6 @@ Which user stories touch each database table:
 | `stg_uploaded_images` | Staging | US-1.1.1 | US-8.1.4 |
 | `stg_bookshelf_placements` | Staging | US-1.5.1--3 | US-1.2.1--4 |
 | `stg_bookshelf_placement_history` | Staging | US-1.5.1--3 | US-1.3.1 |
-| `stg_review_snapshots` | Staging | US-2.1.1 | US-1.3.2 |
 | `stg_price_snapshots` | Staging | US-2.2.1 | US-1.3.2 |
 | `stg_authors` | Staging | US-1.1.1 | US-2.3.1 |
 | `stg_bookstore_events` | Staging | US-2.4.1 | US-2.4.1 |
@@ -2778,26 +2777,17 @@ Which user stories touch each database table:
 | `int_book_journey` | Intermediate | US-1.5.1 | US-5.1.1 |
 | `int_abandonment_rate` | Intermediate | US-1.5.2 | US-5.1.1 |
 | `int_format_distribution` | Intermediate | US-1.5.4 | US-5.1.1 |
-| `int_review_sentiment` | Intermediate | US-2.1.1 | US-2.1.1 |
 | `int_price_trends` | Intermediate | US-2.2.1 | US-2.2.1 |
 | `int_author_activity` | Intermediate | US-2.3.1 | US-2.3.1 |
 | `int_event_matches` | Intermediate | US-2.4.1 | US-2.4.1 |
 | `int_source_approval_rate` | Intermediate | US-2.5.1 | US-5.1.1 |
 | `int_moderation_outcomes` | Intermediate | US-4.1.1 | US-5.1.1 |
 | `int_seller_verification_funnel` | Intermediate | US-7.3.1 | US-5.1.1 |
-| `mart_book_reviews` | Mart | US-2.1.1 | US-1.3.2 |
 | `mart_book_prices` | Mart | US-2.2.1 | US-1.3.2 |
-| `mart_system_health` | Mart | Multiple | US-5.1.1 |
-| `mart_job_stats` | Mart | Multiple | US-5.1.1 |
-| `mart_data_freshness` | Mart | Multiple | US-5.1.1 |
 | `mart_cost_tracking` | Mart | Multiple | US-5.1.1 |
-| `mart_gdpr_compliance` | Mart | US-8.1.1--5 | US-5.1.1 |
-| `mart_gdpr_compliance` | Mart | US-8.1.2 | US-5.1.1 |
 | `mart_consent_status` | Mart | US-8.1.3 | US-5.1.1 |
 | `mart_image_retention_stats` | Mart | US-8.1.4 | US-5.1.1 |
 | `mart_audit_summary` | Mart | US-8.1.5 | US-5.1.1 |
-| `mart_marketplace_activity` | Mart | US-7.1.1 | US-5.1.1 |
-| `mart_transaction_volume` | Mart | US-7.2.1 | US-5.1.1 |
 | `mart_marketplace_revenue` | Mart | US-7.2.1 | US-5.1.1 |
 | `stg_partners` | Staging | US-9.1.1 | US-9.5.1, US-9.6.1 |
 | `stg_partner_inventory` | Staging | US-9.2.1, US-9.2.2 | US-9.5.1 |
@@ -2827,17 +2817,11 @@ Which user stories touch each database table:
 | `int_visibility_resolution` | Intermediate | US-10.1.1--5 | US-10.x, US-12.x, US-13.x |
 | `int_comment_threads` | Intermediate | US-13.1.1 | US-13.1.1 |
 | `int_offer_activity` | Intermediate | US-7.1.1, US-13.2.2 | US-5.1.1 |
-| `int_blog_engagement` | Intermediate | US-12.1.1 | US-5.1.1 |
 | `int_group_activity` | Intermediate | US-11.1.1 | US-5.1.1 |
 | `mart_social_graph_health` | Mart | US-11.x | US-5.1.1 |
-| `mart_blog_activity` | Mart | US-12.x | US-5.1.1 |
 | `mart_marketplace_offers` | Mart | US-7.1.1, US-13.2.2 | US-5.1.1 |
 | `mart_community_read_count` | Mart | US-1.2.1 (Library placements) | US-18.1.1 (Looking for a Home wear) |
 | `int_onboarding_completion_rate` | Intermediate | US-14.1.2 | US-5.1.1 |
 | `int_notification_delivery_rate` | Intermediate | US-17.3.1 | US-5.1.1 |
 | `int_opt_out_rate` | Intermediate | US-2.5.3 | US-5.1.1 |
 | `stg_source_health_checks` | Staging | US-2.1.1–2.4.1 (enrichment workers) | US-5.1.1 |
-| `int_source_health` | Intermediate | US-2.1.1–2.4.1 | US-5.1.1 (source health table) |
-| `mart_data_quality_trend` | Mart | US-2.1.1–2.4.1 | US-5.1.1 (quality trend sparklines) |
-| `mart_enrichment_gaps` | Mart | US-2.1.1–2.4.1 | US-5.1.1 (gap drill-down) |
-| `mart_llm_faithfulness` | Mart | US-12.1.2, US-2.1.1 | US-5.1.1 (LLM quality metrics) |

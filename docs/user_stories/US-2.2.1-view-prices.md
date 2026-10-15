@@ -161,7 +161,7 @@ N/A — price data served directly from the database.
 - **Model**: `int_price_trends`
 - **Trigger**: `enrichment.prices_scraped` via `DbtRefreshHandler`
 - **Materialisation**: Intermediate model with `recency_rank` for latest-per-store calculation
-- **Consumer**: `mart_book_prices`, `mart_enrichment_gaps`
+- **Consumer**: `mart_book_prices`. (`mart_enrichment_gaps` was its other consumer and was deleted 2026-10-15 — see below.)
 
 ### `mart_book_prices`
 - **Model**: `mart_book_prices` (view)
@@ -169,11 +169,18 @@ N/A — price data served directly from the database.
 - **Materialisation**: View — `SELECT book_id, store_name, price_cents, currency, in_stock, scraped_at FROM int_price_trends WHERE recency_rank = 1`
 - **Consumer**: Metrics dashboard price coverage data
 
-### `mart_enrichment_gaps`
-- **Model**: `mart_enrichment_gaps` (view)
-- **Trigger**: Indirectly refreshed when price data changes
-- **Materialisation**: View — identifies books with `missing_prices`
-- **Consumer**: the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (in-app metrics dashboard superseded by Grafana); the `mart_enrichment_gaps` mart is retained for the Grafana observability surface
+### `mart_enrichment_gaps` — DELETED 2026-10-15
+- **Model**: ~~`mart_enrichment_gaps` (view)~~ deleted by owner ruling; it had no reader.
+- **Trigger**: ~~Indirectly refreshed when price data changes~~
+- **Materialisation**: ~~View — identifies books with `missing_prices`~~ The gap-by-cause grouping was the useful half and is recoverable from git history for whoever builds the data-quality surface.
+- **Consumer**: ⚠️ **none, and the mart is now deleted** (owner ruling 2026-10-15). The
+  `/api/metrics/enrichment-gaps` endpoint was removed when the in-app metrics dashboard was
+  superseded by Grafana, and this line then claimed `mart_enrichment_gaps` was "retained for the
+  Grafana observability surface". That consumer never existed: there is no Postgres datasource in
+  `deploy/grafana/provisioning/datasources/` — only VictoriaMetrics/Prometheus — and none of the
+  dashboards in `apps/core/priv/grafana/*.json` reads any mart. The mart held 169 rows and no
+  reader. It is deleted, and the data-quality goal it served is filed as its own work rather than
+  preserved as an unread model; the gap-by-cause grouping is recoverable from git history.
 
 ---
 
@@ -218,7 +225,7 @@ N/A — `Components.PriceInfo` is a pure view function with no messages or state
 
 - **Enrichment data freshness**: time since last price scrape per book/edition — derived from `price_snapshots.scraped_at` vs `NOW()`. Stale threshold: 7 days (configurable via `Prices.stale_isbns/1`)
 - **Price scrape success rate per store**: percentage of `(isbn, store)` pairs that return a valid price vs those that fail — derivable from `op.price_snapshots` and `op.source_health_checks`
-- **Price coverage**: percentage of book editions with at least one price snapshot — reported via `mart_enrichment_gaps.missing_prices`
+- **Price coverage**: percentage of book editions with at least one price snapshot. ⚠️ **Not currently reported anywhere** — it was computed by `mart_enrichment_gaps.missing_prices`, deleted 2026-10-15 with no reader. Restoring this metric means building the data-quality surface, not just the mart.
 - **Broadway batch efficiency**: ratio of messages successfully processed vs failed in `handle_batch/4`
 - **Per-store availability**: percentage of books marked `in_stock: true` per bookstore — derivable from `op.price_snapshots`
 

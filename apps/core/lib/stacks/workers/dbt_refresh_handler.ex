@@ -7,15 +7,21 @@ defmodule Stacks.Workers.DbtRefreshHandler do
 
   alias Stacks.Workers.DbtRefreshJob
 
+  # ⚠️ Five event keys were removed from this map on 2026-10-15 because every model
+  # they refreshed was deleted as an orphan — `mart_system_health`,
+  # `int_blog_engagement`/`mart_blog_activity`, and
+  # `int_review_sentiment`/`mart_book_reviews`.
+  #
+  # `handle_event/1` no-ops on an unmapped type, so leaving a key here with no
+  # models would have been harmless and meaningless. What is NOT harmless is
+  # leaving this handler SUBSCRIBED to an event it can no longer act on: that is
+  # a handler which can never run, which is exactly what the registry's
+  # completeness test exists to surface. So the subscriptions moved too, except
+  # the one an owner ruling keeps — see the registry for each decision.
   @model_mapping %{
     "enrichment.prices_scraped" => ["int_price_trends", "mart_book_prices"],
-    "enrichment.reviews_scraped" => ["int_review_sentiment", "mart_book_reviews"],
     "enrichment.author_updated" => ["int_author_activity"],
     "enrichment.events_discovered" => ["int_event_matches"],
-    "source_health.recorded" => ["mart_system_health"],
-    "blog.post_published" => ["int_blog_engagement", "mart_blog_activity"],
-    "blog.post_updated" => ["int_blog_engagement", "mart_blog_activity"],
-    "blog.post_deleted" => ["int_blog_engagement", "mart_blog_activity"],
     "placement.created" => ["mart_community_read_count", "mart_platform_searchable"],
     "placement.moved" => ["mart_community_read_count"],
     # a removal (Shelving.remove_book/2 soft-deletes by

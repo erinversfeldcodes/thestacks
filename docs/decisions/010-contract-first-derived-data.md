@@ -65,7 +65,14 @@ int ──► wh.mart_*      Consumer-optimised read models (one per use case)
 
 2. **Every layer after `op.*` is derived and rebuildable.** If the `wh` schema is dropped, `dbt run` reconstructs it. If the ETS cache crashes, events rebuild it. If the search index drifts, the mart is the source of truth. The only non-rebuildable data is in `op.*` and `audit.*`.
 
-3. **Purpose-built read models, not generic "gold" tables.** Each mart serves a specific consumer with a specific access pattern. `mart_community_read_count` exists for the "Looking for a Home" wear calculation (5-min refresh). `mart_platform_searchable` exists for the search endpoint (5-min refresh). `mart_data_freshness` exists for the metrics dashboard (daily). Don't create a mart without a named consumer.
+3. **Purpose-built read models, not generic "gold" tables.** Each mart serves a specific consumer with a specific access pattern. `mart_community_read_count` exists for the "Looking for a Home" wear calculation (5-min refresh). `mart_platform_searchable` exists for the search endpoint (5-min refresh). `mart_cost_tracking` exists for the cost section (daily). Don't create a mart without a named consumer.
+
+   ⚠️ **This principle was violated and the bill came due on 2026-10-15**, when nine marts were
+   deleted because their only named consumer — the in-app metrics dashboard — had been removed and
+   nothing noticed for long enough that two marts with real logic sat unread. The principle is
+   right; what was missing was a mechanism that fails when a mart's named consumer disappears.
+   Two of the nine (`mart_data_quality_trend`, `mart_enrichment_gaps`) had real logic and their
+   goal was re-filed as its own work rather than preserved as unread models.
 
 4. **Event-triggered where possible, cron as catch-all.** Prefer triggering selective dbt runs based on event types over running everything on a daily cron. The daily cron remains as a catch-all to ensure eventual consistency, but the primary refresh mechanism should be event-driven:
 
@@ -73,16 +80,15 @@ int ──► wh.mart_*      Consumer-optimised read models (one per use case)
    |------------|------------------------------|
    | `shelf.book_placed`, `shelf.book_moved` | `mart_community_read_count` |
    | `enrichment.prices_scraped` | `int_price_trends`, `mart_book_prices` |
-   | `enrichment.reviews_scraped` | `int_review_sentiment`, `mart_book_reviews` |
-   | `post.published`, `post.updated` | `int_blog_engagement`, `mart_blog_activity` |
-   | `source_health.recorded` | `int_source_health`, `mart_data_quality_trend` |
+   | `enrichment.reviews_scraped` | ⚠️ nothing — models deleted 2026-10-15; the subscription is kept by owner ruling because the review vertical returns, and is restored with the models |
+   | `blog.post_published`, `blog.post_updated`, `blog.post_deleted` | ⚠️ nothing — models deleted 2026-10-15. `blog.post_published` keeps a real handler (blog associations); the other two are now recorded as unsubscribed |
+   | `source_health.recorded` | ⚠️ nothing — models deleted 2026-10-15; now recorded as unsubscribed. The operational view reads the `op.source_health_checks` table directly |
 
 5. **Incremental materialisation for high-volume models.** Models fed by unboundedly growing source tables should use dbt's `+materialized: incremental` with merge strategies rather than full rebuilds:
 
    | Model | Why incremental |
    |-------|----------------|
    | `int_price_trends` | `price_snapshots` grows as editions × stores × days |
-   | `mart_data_quality_trend` | 12-week rolling window — append new, drop oldest |
    | `mart_community_read_count` | 5-min refresh; only changed placements matter |
    | `mart_platform_searchable` | 5-min refresh; only changed/new books matter |
 

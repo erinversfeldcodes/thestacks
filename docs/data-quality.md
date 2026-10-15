@@ -30,7 +30,7 @@ The following quality dimensions apply to all data products. Each SLA section sp
 | **Accuracy** | Does the data match the source of truth? | Spot checks, user reports, validation against Open Library |
 | **Validity** | Are the values in expected ranges? | dbt tests: `not_null`, `accepted_values`, range checks |
 | **Consistency** | Are related fields consistent with each other? | dbt tests: referential integrity, foreign key presence |
-| **LLM Faithfulness** | For AI-generated content, does the output faithfully represent the input? | URL presence validation, hallucination detection via `mart_llm_faithfulness` |
+| **LLM Faithfulness** | For AI-generated content, does the output faithfully represent the input? | ⚠️ **no mechanism today** — `mart_llm_faithfulness` was deleted 2026-10-15 (no consumer), and it measured association confidence rather than URL faithfulness in any case |
 
 ---
 
@@ -68,7 +68,7 @@ The following quality dimensions apply to all data products. Each SLA section sp
 | Freshness — books in Library | Reviews refreshed within 30 days | Alert if > 10% of Library books have reviews > 60 days old |
 | Freshness — books in Reading Pile | Reviews refreshed within 7 days | Alert if any Reading Pile book has reviews > 14 days old |
 | Completeness | > 60% of active books have at least one review source | Alert if < 40% (many obscure books have no GoodReads entry — this is expected) |
-| LLM Faithfulness | All URLs in summaries exist in the source data | dbt test in `mart_llm_faithfulness` |
+| LLM Faithfulness | All URLs in summaries exist in the source data | ⚠️ **unimplemented** — there are no summaries, and the mart that carried this row's name measured something else (see below) |
 | LLM Attribution | Every summary has "AI-generated summary" label in the UI | Not a data quality check — enforced in Elm renderer |
 | Validity | `rating` between 0.0 and 5.0 (GoodReads scale) | dbt test |
 | Validity | `rating_count > 0` when `rating` is not null | dbt test |
@@ -83,11 +83,18 @@ was, not whether a summary fabricated a URL, and `marts/schema.yml` has describe
 along. The stale definition was here, in the document, and a reader reconciling the two would have
 concluded the mart was broken rather than the prose.
 
-**dbt models:**
-- `stg_review_snapshots` — staging (1:1 with `op.review_snapshots`, unified across GoodReads / Reddit / StoryGraph via `source` column)
-- `int_review_sentiment` — aggregated sentiment per work across sources
-- `mart_book_reviews` — review summaries surfaced to users
-- `mart_llm_faithfulness` — per-summary faithfulness tracking
+**dbt models:** ⚠️ **all four deleted 2026-10-15** — they modelled rows that do not exist
+(`op.review_snapshots` holds 0, because the scraping implementation was removed and its sanctioned
+replacement is not built yet). The TABLE, its proto message, its Ecto schema and its payload
+contract are deliberately kept by owner ruling, and the dbt layer is rebuilt when there are rows to
+model. For the record, what was deleted:
+- ~~`stg_review_snapshots`~~ — staging (1:1 with `op.review_snapshots`). ⚠️ It was a graph orphan
+  even before this: `int_review_sentiment` read `source('op','review_snapshots')` directly.
+- ~~`int_review_sentiment`~~ — aggregated sentiment per work across sources
+- ~~`mart_book_reviews`~~ — review summaries surfaced to users. Its `schema.yml` claimed
+  `BookController.show` as consumer; that claim was false.
+- ~~`mart_llm_faithfulness`~~ — deleted on "no consumer", NOT on the faithfulness definition above,
+  which was the document's error rather than the mart's.
 
 ### 2.3 Author Intelligence
 
@@ -131,8 +138,9 @@ concluded the mart was broken rather than the prose.
 
 **dbt models:**
 - `stg_post_book_associations` (proto-generated from `op.post_book_associations`)
-- `int_blog_engagement` — post views, comments, association quality
-- `mart_blog_activity` — post engagement surfaced to author dashboards
+- ~~`int_blog_engagement`~~ and ~~`mart_blog_activity`~~ — ⚠️ both deleted 2026-10-15. They
+  modelled post engagement for author dashboards that were never built, and the only consumer named
+  for them was the removed in-app metrics dashboard.
 
 ### 2.6 Scraper Configs (TOML)
 
@@ -142,13 +150,13 @@ concluded the mart was broken rather than the prose.
 |-----------|-----------|----------------|
 | Validity | All TOML files parse without errors | Rust scraper returns non-zero exit on invalid TOML → CI fails |
 | Liveness | Each active scraper config produces at least one price snapshot per 7 days | Alert if a config produces 0 results for 7 consecutive days |
-| HTML structure | CSS selectors still resolve on the target page | HTML change detection via `int_source_health` (delivered by Issue #068) |
+| HTML structure | CSS selectors still resolve on the target page | HTML change detection — the selector hash lives on `op.source_health_checks`. ⚠️ The `int_source_health` dbt rollup was deleted 2026-10-15 (its only consumer was a deleted mart); the detection itself is unaffected because it reads the table |
 
 ---
 
 ## 3. Source Health Monitoring
 
-Source health monitoring tracks whether each external data source is healthy. This was implemented by Issue #068 — staging in `stg_source_health_checks`, rollup in `int_source_health`.
+Source health monitoring tracks whether each external data source is healthy — staging in `stg_source_health_checks`, which is proto-generated and intact. ⚠️ The `int_source_health` dbt rollup was deleted 2026-10-15: its only consumer was `mart_data_quality_trend`, itself unread. Nothing a person looks at changed — `Monitoring.list_source_health/0` queries the `op.source_health_checks` TABLE directly and always did. The references below describe the rollup's logic and are kept because that logic is what a rebuilt quality surface would want.
 
 ### Source health record structure
 
@@ -245,32 +253,34 @@ Alert if 7-day faithfulness rate drops below 95%.
 
 ## 5. dbt Model Scope Reference
 
-The following dbt models support the data quality framework. The intermediate and mart layers were delivered by Issue #052; source health and quality-trend marts by Issue #068. Staging models are proto-generated (`mix proto.sync`) per ADR-009 / ADR-010 — see `dbt/models/staging/` for the full list of 30+ staging views.
+The following dbt models support the data quality framework. Staging models are proto-generated
+(`mix proto.sync`) per ADR-009 / ADR-010 — see `dbt/models/staging/` for the full list of 40
+staging views.
+
+⚠️ **Updated 2026-10-15.** Most of the quality-framework marts were deleted by owner ruling: their
+only consumer was the in-app metrics dashboard, which Grafana superseded, and a verification pass
+confirmed no query, script, dbt test, E2E spec or seed read any of them. `mart_data_quality_trend`
+and `mart_enrichment_gaps` were the two with real logic; the "nutrition label" goal they served is
+filed as its own work rather than preserved as unread models, and their SQL is recoverable from git
+history. `int_source_health` went with them — note that the operational view a person reads comes
+from `Monitoring.list_source_health/0`, which queries the `op.source_health_checks` TABLE directly
+and is unaffected.
 
 | dbt model | Layer | Purpose |
 |-----------|-------|---------|
 | `stg_price_snapshots` | staging | Clean price data (proto-generated) |
-| `stg_review_snapshots` | staging | Clean review data (proto-generated) |
 | `stg_books` / `stg_book_editions` | staging | Work and edition data (proto-generated) |
 | `stg_authors` | staging | Author data (proto-generated) |
 | `stg_event_log` | staging | Event log (proto-generated) |
 | `stg_source_health_checks` | staging | Per-source health probe results (proto-generated) |
 | `int_price_trends` | intermediate | Price over time per edition per store |
-| `int_review_sentiment` | intermediate | Aggregated review sentiment across sources |
-| `int_source_health` | intermediate | Per-source health tracking |
 | `int_book_detail_view` | intermediate | Book + all metadata joined |
 | `int_author_activity` | intermediate | Recent events and releases per author |
 | `int_event_matches` | intermediate | Events matched to authors/books in user collections |
 | `mart_book_prices` | mart | Current and historical prices surfaced to users |
-| `mart_book_reviews` | mart | Review summaries surfaced to users |
 | `mart_community_read_count` | mart | Aggregate read count per work |
 | `mart_platform_searchable` | mart | Cross-user search index |
-| `mart_data_freshness` | mart | Freshness panel data per source/shelf |
-| `mart_data_quality_trend` | mart | Quality metric trends over time |
-| `mart_enrichment_gaps` | mart | Books missing enrichment |
-| `mart_llm_faithfulness` | mart | Per-summary faithfulness tracking |
 | `mart_cost_tracking` | mart | LLM / infra cost rollups |
-| `mart_system_health` | mart | Job stats and platform health rollup |
 
 **Note on Tier 3/4 data exclusion:** dbt models must never include Tier 3 (sensitive) or Tier 4 (external personal) data. The `wh` schema is available to `stacks_dbt` and `stacks_readonly` roles — any PII that reaches these models would be accessible to analytics queries. The staging models enforce this with column-level exclusions. The following columns are explicitly excluded from all warehouse models:
 - `users.password_hash`

@@ -28,7 +28,7 @@ DOC = "docs/technical-architecture.md"
 doc_src = open(DOC, encoding="utf-8").read()
 
 # "total" is optional so the prose can read naturally in each layer — the doc
-# says "41 total staging views" but "10+ intermediate models".
+# says "40 total staging views" but "8+ intermediate models".
 LAYERS = {
     "staging": r"\((\d+)(\+?)\s+(?:total\s+)?staging views\)",
     "intermediate": r"\((\d+)(\+?)\s+(?:total\s+)?intermediate models\)",

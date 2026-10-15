@@ -114,7 +114,7 @@ The dashboard fetches from 4 API endpoints in parallel, each section using Remot
 ### Read: Enrichment gaps
 - **Table(s)**: `op.books`, `op.price_snapshots`, `op.review_snapshots`
 - **Query**: `Stacks.Admin.Metrics.enrichment_gaps/0` — counts books missing prices, covers, reviews
-- **dbt model**: `mart_enrichment_gaps` provides the same data for the dbt layer
+- **dbt model**: ~~`mart_enrichment_gaps` provides the same data for the dbt layer~~ — deleted 2026-10-15 (see §11); nothing provides this for the dbt layer today
 
 ---
 
@@ -162,42 +162,31 @@ N/A — metrics are computed on each request. No caching layer for dashboard dat
 
 ---
 
-## 11. dbt Model Dependencies
+## 11. dbt Model Dependencies — SIX OF SEVEN DELETED 2026-10-15
 
-### `mart_enrichment_gaps`
-- **Model**: `mart_enrichment_gaps` (view)
-- **Trigger**: Refreshed when enrichment events fire
-- **Materialisation**: View — joins `int_book_detail_view` with `int_price_trends` and `int_review_sentiment` to find books with `missing_cover`, `missing_prices`, `missing_reviews`
-- **Consumer**: `GET /api/metrics/enrichment-gaps`
+⚠️ This story's consumer (`MetricsController` and the in-app metrics dashboard) was removed when
+Grafana superseded it. Every mart below except `mart_cost_tracking` was therefore unread, and all
+six were deleted by owner ruling on 2026-10-15 after a verification pass confirmed no Elixir query,
+no script, no dbt singular test, no E2E spec and no seed referenced any of them.
 
-### `mart_system_health`
-- **Model**: `mart_system_health`
-- **Trigger**: `source_health.recorded` via `DbtRefreshHandler`
-- **Materialisation**: View
-- **Consumer**: Source health section of the metrics dashboard
+| Model | Was consumed by | Disposition |
+|---|---|---|
+| `mart_enrichment_gaps` | `GET /api/metrics/enrichment-gaps` (removed) | **deleted** — 169 rows, no reader. Its gap-by-cause grouping is the useful half and is recoverable from git history. |
+| `mart_system_health` | source-health section of the dashboard | **deleted**. The operational view a person actually reads comes from `Monitoring.list_source_health/0`, which queries the `op.source_health_checks` TABLE directly and is unaffected. |
+| `mart_data_freshness` | freshness indicators | **deleted** |
+| `mart_data_quality_trend` | quality-trend sparklines | **deleted** — the weekly-rollup-over-12-weeks shape is likewise recoverable from history. |
+| `mart_gdpr_compliance` | GDPR section | **deleted** |
+| `mart_job_stats` | job-status section | **deleted** |
+| `mart_cost_tracking` | cost section | **KEPT** — on forward-looking work that re-points it. ⚠️ It has no consumer today either, and its own `schema.yml` consumer claim was false (`CostController.index` reads the `op.platform_costs` Ecto context, never the mart). A weaker justification than the six deletions', stated rather than hidden. |
 
-### `mart_data_freshness`
-- **Model**: `mart_data_freshness` (view)
-- **Trigger**: Various enrichment events
-- **Materialisation**: View — `SELECT aggregate_type, MAX(occurred_at) AS last_event_at FROM stg_event_log GROUP BY aggregate_type`
-- **Consumer**: Data freshness indicators
+**The two with real logic** — `mart_data_quality_trend` and `mart_enrichment_gaps` — were the
+mechanism for the "data nutrition label" idea: publish a quality profile per data product
+(completeness, freshness, distributions, gaps grouped by cause) rather than a green/amber/red score.
+The ruling deleted them and filed that goal as its own work, because the label needs a public
+surface that was never built, and keeping two unread marts would not have preserved the goal.
 
-### `mart_data_quality_trend`
-- **Model**: `mart_data_quality_trend`
-- **Trigger**: Periodic dbt runs
-- **Consumer**: Quality trends sparkline data
-
-### `mart_cost_tracking`
-- **Model**: `mart_cost_tracking`
-- **Consumer**: Cost section of the metrics dashboard
-
-### `mart_gdpr_compliance`
-- **Model**: `mart_gdpr_compliance`
-- **Consumer**: GDPR section of the metrics dashboard
-
-### `mart_job_stats`
-- **Model**: `mart_job_stats`
-- **Consumer**: Job status section (running, queued, failed)
+**Also deleted with them:** `int_blog_engagement` (fed only `mart_blog_activity`) and
+`int_source_health` (fed only `mart_data_quality_trend`).
 
 ---
 

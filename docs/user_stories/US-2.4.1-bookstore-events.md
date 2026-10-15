@@ -313,7 +313,7 @@ N/A — pure view rendering.
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
 | **`op.bookstore_events` row count** | SQL | Gauge | Total rows | **The acceptance instrument (#321 §48).** 0 → N on preview *via the real job, not a seed*. Every metric below is meaningless until this moves |
-| Oban outcome for `DiscoverBookstoreEventsJob` | `oban_jobs` / `mart_job_stats` | Counter | enqueued / completed / failed | **Currently always 0 enqueued** (§7). A run existing at all is the first thing to measure |
+| Oban outcome for `DiscoverBookstoreEventsJob` | `oban_jobs` (the `mart_job_stats` rollup was deleted 2026-10-15 — read the table) | Counter | enqueued / completed / failed | **Currently always 0 enqueued** (§7). A run existing at all is the first thing to measure |
 | Batch tally | The job's own summary log | Gauge ×6 | `events` / `no_page` / `blocked` / `paced` / `unchanged` / `failed` | **Already built and already earned its keep** — the tally exists because "0 events written" was mistaken for breakage |
 | 304 rate | Batch tally `unchanged` | Gauge (%) | Conditional requests that saved a body | Should be high in steady state; that is the courtesy working |
 | robots-blocked stores | Batch tally `blocked` + `op.bookstores` | Gauge | Stores with a recorded block | Non-zero is fine and self-healing; **a rise is a compliance signal, not a bug** |

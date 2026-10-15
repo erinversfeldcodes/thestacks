@@ -103,34 +103,35 @@ defmodule Stacks.Workers.DbtRefreshJobTest do
       )
     end
 
-    test "maps source_health.recorded to correct models" do
-      event = %{event_type: "source_health.recorded", aggregate_id: "test", payload: %{}}
-      assert :ok = DbtRefreshHandler.handle_event(event)
+    test "the events whose only models were deleted enqueue NOTHING, and do not raise" do
+      # ⚠️ These three used to assert a refresh. Every dbt model they refreshed
+      # was deleted as an orphan — `mart_system_health` and the
+      # `int_blog_engagement`/`mart_blog_activity` pair — so the handler has
+      # nothing to enqueue for them.
+      #
+      # Asserted as `refute_enqueued` rather than deleted outright, because
+      # "enqueues nothing" is the new behaviour and the interesting failure is
+      # the OTHER direction: a future reader re-adding one of these mappings
+      # without restoring the model would enqueue a dbt run that selects a model
+      # that does not exist, and `DbtRefreshJob` logs
+      # "selective refresh requested with no models" rather than failing a test.
+      #
+      # `blog.post_published` is still handled — by `BlogAssociationHandler` —
+      # so only its dbt refresh is gone. `blog.post_updated` and
+      # `blog.post_deleted` and `source_health.recorded` lost their only handler
+      # and are recorded in the registry's @unsubscribed list with their reasons.
+      for event_type <- [
+            "source_health.recorded",
+            "blog.post_published",
+            "blog.post_updated",
+            "blog.post_deleted",
+            "enrichment.reviews_scraped"
+          ] do
+        event = %{event_type: event_type, aggregate_id: "test", payload: %{}}
+        assert :ok = DbtRefreshHandler.handle_event(event)
+      end
 
-      assert_enqueued(
-        worker: DbtRefreshJob,
-        args: %{models: ["mart_system_health"]}
-      )
-    end
-
-    test "maps blog.post_published to correct models" do
-      event = %{event_type: "blog.post_published", aggregate_id: "test", payload: %{}}
-      assert :ok = DbtRefreshHandler.handle_event(event)
-
-      assert_enqueued(
-        worker: DbtRefreshJob,
-        args: %{models: ["int_blog_engagement", "mart_blog_activity"]}
-      )
-    end
-
-    test "maps blog.post_updated to correct models" do
-      event = %{event_type: "blog.post_updated", aggregate_id: "test", payload: %{}}
-      assert :ok = DbtRefreshHandler.handle_event(event)
-
-      assert_enqueued(
-        worker: DbtRefreshJob,
-        args: %{models: ["int_blog_engagement", "mart_blog_activity"]}
-      )
+      refute_enqueued(worker: DbtRefreshJob)
     end
 
     test "ignores unmapped events" do

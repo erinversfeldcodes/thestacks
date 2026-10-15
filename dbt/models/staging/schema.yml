@@ -956,33 +956,6 @@ models:
         tests:
           - not_null
 
-  - name: stg_review_snapshots
-    description: >
-      Proto-synced staging model for review_snapshots.
-    columns:
-      - name: id
-        description: Surrogate UUID primary key.
-        tests:
-          - not_null
-          - unique
-      - name: book_id
-        description: Book id.
-      - name: source
-        description: Source.
-      - name: source_url
-        description: Source url.
-      - name: sentiment_score
-        description: Sentiment score.
-      - name: summary
-        description: Summary.
-      - name: rating
-        description: Rating.
-      - name: rating_count
-        description: Rating count.
-      - name: scraped_at
-        description: Scraped at.
-      - name: stale_after
-        description: Stale after.
 
   - name: stg_third_space_events
     description: >

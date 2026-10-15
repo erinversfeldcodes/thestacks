@@ -4,7 +4,18 @@
 >
 > **This story is a SPEC, not a description of a working surface.** The scraping-based implementation it used to describe was **deleted** in Wave 9 (#323) under **owner ruling D6, 2026-07-30: *the story survives, re-scoped***. What was removed: `Stacks.Workers.FetchReviewsJob`, the `Stacks.Enrichment.Reviews` context, `Stacks.Enrichment.MockReviewFetcher`, and the `Components.ReviewSummary` Elm component. Nothing writes `op.review_snapshots` and nothing reads it.
 >
-> **What survives** (verified 2026-08-06): the `op.review_snapshots` table, the proto message `ReviewSnapshot` (`proto/stacks/common/v1/enrichment.proto:146-177`) and its generated Ecto schema `Stacks.Enrichment.ReviewSnapshot`, the `Stacks.Enrichment.review_snapshot_changeset/2` validator, and three dbt models — `stg_review_snapshots`, `int_review_sentiment`, `mart_book_reviews`. The contract and the storage are intact; the acquisition and display layers are gone.
+> **What survives** (verified 2026-08-06; **narrowed 2026-10-15**): the `op.review_snapshots`
+> table, the proto message `ReviewSnapshot` and its generated Ecto schema
+> `Stacks.Enrichment.ReviewSnapshot`, the `Stacks.Enrichment.review_snapshot_changeset/2` validator,
+> and the `enrichment.reviews_scraped` payload contract and registry wiring. **The contract and the
+> storage are intact; the acquisition and display layers are gone.**
+>
+> ⚠️ **The three dbt models no longer survive.** `stg_review_snapshots`, `int_review_sentiment` and
+> `mart_book_reviews` were deleted on 2026-10-15: they modelled a table holding zero rows, one was
+> a graph orphan even among themselves, and `mart_book_reviews` claimed a consumer
+> (`BookController.show`) that never read it. They are rebuilt when there are rows to model — which
+> is §17 step 2, not step 1. Deleting them does not touch this story's foundation, because the
+> foundation is the table and the contract, and both were deliberately kept by the same ruling.
 >
 > **What ruling D6 changed about the spec**: reviews may come **only from sanctioned sources**. Open scraping of review platforms is out. §4 is the new source policy and is the substance of this revision; everything downstream of it follows.
 >
@@ -155,7 +166,7 @@ The old `Reviews.stale_books/1` is gone along with its context. Whatever replace
 - **Emission**: `Events.emit_safe/1`
 
 ### Event Handlers (to build)
-- **`Stacks.Workers.DbtRefreshHandler`** → `["int_review_sentiment", "mart_book_reviews"]`
+- **`Stacks.Workers.DbtRefreshHandler`** → ⚠️ currently refreshes **nothing** for this event: both models were deleted 2026-10-15. The subscription is deliberately kept (owner ruling) and the model list is restored when §17 step 2 produces rows worth modelling.
 
 **Registry status**: the subscription is **still in place and deliberately so** — `Stacks.Events.Registry:121-129` keeps `enrichment.reviews_scraped => [DbtRefreshHandler]` behind an explicit note:
 
@@ -227,12 +238,12 @@ N/A — snapshots live in the database. And no review text is stored anywhere (�
 
 All three models exist and are currently fed by nothing.
 
-### `int_review_sentiment`
+### `int_review_sentiment` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Trigger**: the refresh event via `DbtRefreshHandler`
 - **Materialisation**: intermediate
-- **Consumer**: `mart_book_reviews`, `mart_enrichment_gaps`
+- **Consumer**: ~~`mart_book_reviews`, `mart_enrichment_gaps`~~ — both deleted 2026-10-15, as was this model.
 
-### `mart_book_reviews`
+### `mart_book_reviews` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Materialisation**: view — `SELECT book_id, avg_rating, avg_sentiment_score, review_count FROM int_review_sentiment`
 - **Consumer**: the Grafana observability surface
 
@@ -273,7 +284,7 @@ N/A — pure view function.
 | **`op.review_snapshots` row count** | SQL | Gauge | Total rows | **The acceptance instrument.** 0 → N on a preview stack via the real job, not a seed. Everything below is meaningless until this moves |
 | **Unsanctioned-source rows** | SQL | Gauge | `WHERE source NOT IN (sanctioned list)` | **0, always.** The check that ruling D6 is enforced rather than documented |
 | **`source_url` host ≠ source's host** | SQL | Gauge | — | **0.** Catches a snapshot claiming a sanctioned source while linking elsewhere |
-| Oban outcome for the refresh worker | `oban_jobs` / `mart_job_stats` | Counter | completed / failed / retried | **A run must exist.** The deleted job's defect was never running, and no per-source metric would have shown that |
+| Oban outcome for the refresh worker | `oban_jobs` (the `mart_job_stats` rollup was deleted 2026-10-15 — read the table) | Counter | completed / failed / retried | **A run must exist.** The deleted job's defect was never running, and no per-source metric would have shown that |
 | Per-source success rate | `op.source_health_checks` | Gauge (%) | `Monitoring.record_success/failure` per source | Per source, never aggregated — an aggregate hides one dead source behind two live ones |
 | Fuse state per source | `:fuse` / `op.source_health_checks` | Gauge | Open/closed transitions | **Each source its own fuse** (§9). A shared fuse melting is itself the incident |
 | Summary validation rejections | Logger | Counter | Summaries altered by the URL-stripping / truncation validator | > 0 is expected; a sudden rise means the model or the prompt changed |
