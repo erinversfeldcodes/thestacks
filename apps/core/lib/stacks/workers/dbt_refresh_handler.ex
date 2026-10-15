@@ -35,7 +35,7 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     # is mapped (mirroring moved): mart_platform_searchable derives from
     # int_book_detail_view, which does not reference placements, and books
     # survive removal — searchability is unaffected. Last-placement removal is
-    # handled by the mart's tombstone semantics (issues/279): the model
+    # handled by the mart's tombstone semantics: the model
     # aggregates over ALL placements and counts active ones via a FILTER, so a
     # book whose LAST active placement is removed enters the incremental batch
     # (remove_book bumps updated_at) and recomputes to a read_count = 0 row,

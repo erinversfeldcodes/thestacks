@@ -20,16 +20,26 @@ defmodule Stacks.Workers.DbtRefreshJobTest do
     end
 
     test "passes three models as a single space-joined --select value" do
+      # Models that EXIST. The job forwards whatever list it is handed without
+      # checking the models are real, so this case used to be written against
+      # three models that were later deleted — it kept passing and quietly
+      # described a warehouse that no longer existed. No current event maps to
+      # three models; the three-argument join is still worth pinning because the
+      # joining, not the mapping, is what this asserts.
       assert :ok =
                perform_job(DbtRefreshJob, %{
-                 "models" => ["int_blog_engagement", "mart_blog_activity", "mart_system_health"]
+                 "models" => [
+                   "int_book_detail_view",
+                   "mart_platform_searchable",
+                   "mart_cost_tracking"
+                 ]
                })
 
       assert MockDbtRunner.last_args() ==
                [
                  "run",
                  "--select",
-                 "int_blog_engagement mart_blog_activity mart_system_health"
+                 "int_book_detail_view mart_platform_searchable mart_cost_tracking"
                ]
     end
 

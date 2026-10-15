@@ -57,8 +57,12 @@ message GdprCompliance {
   string generated_at = 3 [json_name = "generated_at"];
 }
 
-// QualityTrendRow is one row from wh.mart_data_quality_trend.
-// Columns match the dbt mart: snapshot_date, counts, and percentages.
+// QualityTrendRow is one row from a daily data-quality snapshot.
+// ⚠️ The mart this described (`wh.mart_data_quality_trend`) was DELETED on
+// 2026-10-15 as an orphan: nothing read it. This message therefore has no
+// backing table, and the field numbers below are reserved forever whether or
+// not it is ever repopulated. Do not implement against it expecting the mart to
+// exist — rebuild the mart first, or delete this message.
 message QualityTrendRow {
   // Date of the daily quality snapshot (YYYY-MM-DD).
   string snapshot_date = 1 [json_name = "snapshot_date"];
