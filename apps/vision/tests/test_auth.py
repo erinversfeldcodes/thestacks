@@ -115,6 +115,35 @@ def test_with_token_signed_for_another_path_returns_401() -> None:
     assert response.status_code == 401
 
 
+def test_a_token_signed_without_any_path_is_rejected() -> None:
+    """The path must be IN the signed message, not merely compared alongside it.
+
+    ⚠️ This test exists because the one above cannot prove that. Probed: remove
+    `request.url.path` from the server's message and the whole auth suite still
+    passes — signing for "/not-this-path" then mismatches because the TEST
+    included a path and the server did not, so the 401 arrives for the wrong
+    reason and the assertion holds either way.
+
+    This one discriminates. It signs exactly what a server that ignored the path
+    would compute (`<ts>.POST`, no path). Against the real implementation that
+    is a mismatch and must be rejected; against a path-blind implementation it
+    would be the correct signature and would be ACCEPTED. So this test fails
+    precisely when the binding is lost, which is the property the pair is
+    supposed to guarantee.
+    """
+    ts = str(int(time.time()))
+    message = f"{ts}.POST".encode()
+    token_hex = hmac.new(settings.hmac_secret.encode(), message, hashlib.sha256).hexdigest()
+
+    with TestClient(app) as client:
+        response = client.post(
+            _PATH,
+            json={"image": _VALID_IMAGE},
+            headers={"X-Internal-Token": f"{ts}.{token_hex}"},
+        )
+    assert response.status_code == 401
+
+
 def test_auth_rejects_before_body_validation() -> None:
     """An unauthenticated request with an invalid body is still a 401, not a 422.
 
