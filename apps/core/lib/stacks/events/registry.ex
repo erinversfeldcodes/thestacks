@@ -193,7 +193,10 @@ defmodule Stacks.Events.Registry do
     "enrichment.reviews_scraped" =>
       "reviews are planned, not deleted (owner ruling 2026-08-07, reaffirmed 2026-10-15): " <>
         "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
-        "returns. The handler and payload contract stay wired; the three dbt models were " <>
+        "returns. ⚠️ The handler stays SUBSCRIBED and the payload contract stays, but the " <>
+        "handler currently maps NO models and therefore refreshes nothing — see " <>
+        "DbtRefreshHandler's @subscribed_without_models, which is where that is declared and " <>
+        "gated. Restoring the mapping is part of the rebuild, not automatic; the three dbt models " <>
         "deleted in the 2026-10-15 ruling because they model rows that do not exist yet, " <>
         "and are rebuilt when there are rows. The return is SCOPED, not merely intended: " <>
         "the sanctioned-source policy is the story's section 4 and the ordered rebuild is " <>

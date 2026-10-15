@@ -53,11 +53,32 @@ defmodule Stacks.Workers.DbtRefreshHandler do
   # that bites later rather than now: a mapping naming a deleted model fails a
   # set difference against the models on disk, but an event with NO key at all
   # matches nothing, enqueues nothing, logs nothing, and returns :ok. The
-  # registry promises that this handler "stays wired" for the review rebuild —
-  # true of the subscription, and worth nothing on the day the emitter returns
-  # unless somebody also restores the mapping. Hence: declared here, and checked
-  # by `scripts/check-dbt-model-drift.sh`, which fails on any subscribed event
-  # that is neither mapped nor named below.
+  # registry calls this handler "subscribed" for the review rebuild — true, and
+  # worth nothing on the day the emitter returns unless somebody also restores
+  # the mapping. Hence: declared here, and checked by
+  # `scripts/check-dbt-model-drift.sh`, which fails on any subscribed event that
+  # is neither mapped nor named below.
+  #
+  # ⚠️ Why a GATE and not a `CompileError` like the registry's own guard. Not
+  # because this is runtime data — `@model_mapping` is a compile-time literal and
+  # a CompileError over it is technically available. The reason is that this
+  # invariant SPANS TWO MODULES: it is
+  # `Registry.@registry − @model_mapping − @subscribed_without_models`, so
+  # enforcing it at compile time would make this module read the registry during
+  # compilation, buying a compile-time dependency and a recompile cascade — touch
+  # the registry, rebuild every handler — in a repo that already pays real costs
+  # for toolchain-level mystery. The registry's guard is cheap precisely because
+  # it compares three literals in its OWN module and depends on nothing outside.
+  # The gate is also strictly stronger than a CompileError here: static analysis
+  # pre-merge, with no coupling. The runtime warning below is defence in depth
+  # for what static analysis cannot see — a registry edited where the gate did
+  # not run, or an event_type that appears in no static list at all.
+  #
+  # Division of labour with the registry, so neither record restates the other:
+  # the registry carries WHY THE SUBSCRIPTION EXISTS (the ruling, the policy, the
+  # rebuild); this map carries WHY IT MAPS NOTHING. Keep the reason below short
+  # and pointed at the mapping question — if it starts reciting the owner ruling,
+  # the two have begun to drift.
   @subscribed_without_models %{
     "enrichment.reviews_scraped" =>
       "the review vertical returns by owner ruling and this subscription is kept so " <>
@@ -101,8 +122,11 @@ defmodule Stacks.Workers.DbtRefreshHandler do
   defp warn_if_undeclared(event_type) do
     unless Map.has_key?(@subscribed_without_models, event_type) do
       Logger.warning(
-        "DbtRefreshHandler: subscribed to #{event_type} but no models are mapped for it — " <>
-          "refreshing nothing. Either map its models or unsubscribe the handler."
+        "DbtRefreshHandler: subscribed to #{event_type} with no models mapped and no declared " <>
+          "exception, so this refreshed nothing. THIS LINE SHOULD BE UNREACHABLE: " <>
+          "scripts/check-dbt-model-drift.sh asserts the condition cannot exist, so reaching here " <>
+          "means the gate was bypassed or the registry changed without it running. Either map " <>
+          "this event's models, unsubscribe the handler, or declare the gap."
       )
     end
 
