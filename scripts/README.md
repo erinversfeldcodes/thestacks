@@ -25,7 +25,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |
 | `scripts/check-outbound-test-default.sh` | `scripts/lint-elixir.sh` |  |
 | `scripts/check-phase-scheme.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Every story's Phase cell must name a phase that exists, and nothing else. |
-| `scripts/check-ports-wired.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-ports-wired.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` |  |
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | An anonymously-reachable route must be metered, or say why it is not. |
 | `scripts/check-route-clients.sh` | `justfile`, `scripts/check-prose-assertions.sh`, `scripts/lint-elixir.sh`, `scripts/route-clients-allowlist.txt` |  |
