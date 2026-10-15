@@ -174,9 +174,14 @@ defmodule Stacks.Events.Registry do
         "so nothing can emit this yet. OfferNotificationHandler stays registered so " <>
         "the flow lands with its consumer already wired",
     "enrichment.reviews_scraped" =>
-      "reviews are planned, not deleted (owner ruling 2026-08-07): " <>
+      "reviews are planned, not deleted (owner ruling 2026-08-07, reaffirmed 2026-10-15): " <>
         "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
-        "returns; its handler, payload contract and dbt models stay wired"
+        "returns. The handler and payload contract stay wired; the three dbt models were " <>
+        "deleted in the 2026-10-15 ruling because they model rows that do not exist yet, " <>
+        "and are rebuilt when there are rows. The return is SCOPED, not merely intended: " <>
+        "the sanctioned-source policy is the story's section 4 and the ordered rebuild is " <>
+        "its section 17, whose step 2 writes to op.review_snapshots — which is why that " <>
+        "table, its proto message, its Ecto schema and this contract are kept"
   }
 
   @overlap Enum.filter(@unsubscribed, &Map.has_key?(@registry, &1))
