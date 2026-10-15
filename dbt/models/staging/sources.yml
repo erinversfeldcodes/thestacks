@@ -428,7 +428,15 @@ sources:
             description: Timestamp when the price was observed.
 
       - name: review_snapshots
-        description: Aggregated review data scraped from external sources.
+        description: >
+          Aggregated review data scraped from external sources. DELIBERATELY HAS NO
+          CONSUMING MODEL as of 2026-10-15: the staging view, the sentiment
+          intermediate and the reviews mart were deleted because the table holds zero
+          rows and nothing read them, but the table and this declaration are KEPT
+          because the review vertical is scheduled to return on sanctioned sources
+          only, and the rebuild's second step writes here. This is the one source in
+          this file with no referencing model — that is a recorded decision, not drift,
+          so do not delete it as an orphan.
         freshness: null
         columns:
           - name: id
