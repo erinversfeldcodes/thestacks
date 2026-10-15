@@ -1471,9 +1471,9 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag suite: :external
     test "steering is per-endpoint — an unsteered endpoint keeps its default" do
-      MockClient.put_response("extract_isbn", {:error, :steered_failure})
+      MockClient.put_response("analyze", {:error, :steered_failure})
 
-      assert {:error, :steered_failure} = MockClient.call_vision("extract_isbn", %{})
+      assert {:error, :steered_failure} = MockClient.call_vision("analyze", %{})
 
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
                MockClient.call_vision("is_book", %{})
@@ -1481,36 +1481,36 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag suite: :external
     test "the most recent registration for an endpoint wins" do
-      MockClient.put_response("extract_isbn", {:error, :first})
-      MockClient.put_response("extract_isbn", {:error, :second})
-      assert {:error, :second} = MockClient.call_vision("extract_isbn", %{})
+      MockClient.put_response("analyze", {:error, :first})
+      MockClient.put_response("analyze", {:error, :second})
+      assert {:error, :second} = MockClient.call_vision("analyze", %{})
     end
 
     @tag suite: :external
     test "an exact-endpoint registration wins over an :any registration" do
       MockClient.put_response(:any, {:error, :catch_all})
-      MockClient.put_response("extract_isbn", {:error, :specific})
+      MockClient.put_response("analyze", {:error, :specific})
 
-      assert {:error, :specific} = MockClient.call_vision("extract_isbn", %{})
+      assert {:error, :specific} = MockClient.call_vision("analyze", %{})
       assert {:error, :catch_all} = MockClient.call_vision("is_book", %{})
     end
 
     @tag suite: :external
     test "a response can be a function of the payload" do
-      MockClient.put_response("extract_isbn", fn payload ->
+      MockClient.put_response("analyze", fn payload ->
         {:ok, %{"echoed" => Map.get(payload, :image_b64)}}
       end)
 
       assert {:ok, %{"echoed" => "abc"}} =
-               MockClient.call_vision("extract_isbn", %{image_b64: "abc"})
+               MockClient.call_vision("analyze", %{image_b64: "abc"})
     end
 
     @tag suite: :external
     test "a steered response reaches work the caller farms out to a Task ($callers)" do
-      MockClient.put_response("extract_isbn", {:error, :steered_in_parent})
+      MockClient.put_response("analyze", {:error, :steered_in_parent})
 
       result =
-        Task.async(fn -> MockClient.call_vision("extract_isbn", %{}) end)
+        Task.async(fn -> MockClient.call_vision("analyze", %{}) end)
         |> Task.await()
 
       assert {:error, :steered_in_parent} = result

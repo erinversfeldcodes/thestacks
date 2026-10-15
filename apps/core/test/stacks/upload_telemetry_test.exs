@@ -969,7 +969,7 @@ defmodule Stacks.UploadTelemetryTest do
       :fuse.melt(:vision_fuse)
       :fuse.melt(:vision_fuse)
 
-      result = Client.call_vision("extract_isbn", %{image_b64: "test"})
+      result = Client.call_vision("analyze", %{image_b64: "test"})
 
       assert result == {:error, :circuit_open}
 

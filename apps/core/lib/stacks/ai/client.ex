@@ -17,8 +17,6 @@ defmodule Stacks.AI.Client do
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.ClientBehaviour
   alias Stacks.AI.VisionError
-  alias Stacks.Proto.Vision.AssociateRequest
-  alias Stacks.Proto.Vision.ExtractRequest
 
   @behaviour ClientBehaviour
 
@@ -75,44 +73,6 @@ defmodule Stacks.AI.Client do
     end
   end
 
-  @doc """
-      POST /associate — asks the vision service to associate a known ISBN with a cover image.
-      Returns {:ok, job_id} on success, {:error, reason} on failure.
-
-      Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
-      Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
-      The result arrives later via the InternalController callback (`AssociateCallback`).
-  """
-  @spec associate_isbn(String.t(), String.t(), String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  def associate_isbn(isbn, book_id, edition_id, cover_image_url) do
-    payload = %AssociateRequest{
-      isbn: isbn,
-      book_id: book_id,
-      edition_id: edition_id,
-      cover_image_url: cover_image_url
-    }
-
-    case call_vision("associate", payload) do
-      {:ok, %{"job_id" => job_id}} -> {:ok, job_id}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-      POST /extract — extract ISBNs from a book cover image at a URL.
-      Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
-  """
-  @spec extract_from_url(String.t()) :: {:ok, map()} | {:error, term()}
-  def extract_from_url(image_url) do
-    case call_vision("extract_isbn", %ExtractRequest{image_url: image_url}) do
-      {:ok, %{"books" => _} = resp} -> {:ok, resp}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      {:error, _} = err -> err
-    end
-  end
-
   defp auth_token(method, path) do
     ts = System.os_time(:second) |> Integer.to_string()
     secret = Application.fetch_env!(:core, :vision_hmac_secret)
@@ -121,10 +81,18 @@ defmodule Stacks.AI.Client do
     "#{ts}.#{sig}"
   end
 
+  # `/analyze` is the one endpoint the sidecar serves for identification, and
+  # "is_book" still maps to `/classify` because the smoke probe and the
+  # circuit-breaker tests drive that path against the real client.
+  #
+  # ⚠️ Do NOT collapse this to a single `endpoint_path(_), do: "analyze"`. The
+  # catch-all raise below is load-bearing: two circuit-breaker tests melt the
+  # fuse by calling "is_book" against the real client and then assert
+  # `{:error, :circuit_open}`. With a catch-all that returns a path, an
+  # unrecognised operation would silently go to `/analyze` instead of failing
+  # loudly at the call site.
   defp endpoint_path("is_book"), do: "classify"
-  defp endpoint_path("extract_isbn"), do: "extract"
   defp endpoint_path("analyze"), do: "analyze"
-  defp endpoint_path("associate"), do: "associate"
 
   defp endpoint_path(other) do
     raise ArgumentError, "unknown vision endpoint: #{inspect(other)}"

@@ -56,83 +56,43 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
-  describe "associate_isbn/4 — mock client" do
-    setup do
-      original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
-      :ok
-    end
-
-    test "returns {:ok, job_id} containing isbn and edition_id" do
-      assert {:ok, job_id} =
-               Client.associate_isbn(
-                 "9780743273565",
-                 "book-1",
-                 "edition-1",
-                 "https://example.com/cover.jpg"
-               )
-
-      assert is_binary(job_id)
-      assert String.contains?(job_id, "9780743273565")
-      assert String.contains?(job_id, "edition-1")
-    end
-  end
-
-  describe "extract_from_url/1 — mock client" do
-    setup do
-      original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
-      :ok
-    end
-
-    test "returns {:ok, result} with a books key" do
-      assert {:ok, result} = Client.extract_from_url("https://example.com/cover.jpg")
-      assert is_map(result)
-      assert Map.has_key?(result, "books")
-    end
-  end
-
-  describe "associate_isbn/4 — unexpected response shape" do
-    setup do
-      original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, MockClient)
-      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
-
-      MockClient.put_response("associate", {:ok, %{"unexpected_key" => "value"}})
-      :ok
-    end
-
-    test "returns {:error, {:unexpected_response, _}} when job_id is missing" do
-      assert {:error, {:unexpected_response, _}} =
-               Client.associate_isbn(
-                 "9780743273565",
-                 "book-1",
-                 "edition-1",
-                 "https://example.com/cover.jpg"
-               )
-    end
-  end
-
   describe "endpoint_path/1 — path mapping" do
-    test "maps is_book to /classify" do
-      req = Client.build_vision_request("/classify", %{})
-      assert req.path == "/classify"
+    # ⚠️ Two tests were removed from here, not just re-pointed. They read
+    #
+    #     req = Client.build_vision_request("/classify", %{})
+    #     assert req.path == "/classify"
+    #
+    # which passes a literal path in and asserts it comes back out:
+    # `build_vision_request/2` takes the path as an argument, so neither test
+    # ever reached `endpoint_path/1`. They were tautologies wearing the name of
+    # the function they did not exercise, and one of them named an endpoint that
+    # no longer exists.
+    #
+    # The mapping is only reachable through `call_vision/2` -> `make_vision_request/2`,
+    # and only against the REAL client — the mock short-circuits before it. So
+    # the observable worth asserting is the one below: an unrecognised operation
+    # fails loudly instead of being silently sent somewhere.
+    test "an unknown operation raises rather than resolving to a path" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, Stacks.AI.Client)
+
+        assert_raise ArgumentError, ~r/unknown vision endpoint/, fn ->
+          Client.call_vision("not_an_endpoint", %{image: "test"})
+        end
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
     end
 
-    test "maps extract_isbn to /extract" do
-      req = Client.build_vision_request("/extract", %{})
-      assert req.path == "/extract"
-    end
-
-    test "call_vision dispatches through mock without crashing for all endpoints" do
+    test "call_vision dispatches through mock without crashing for every live operation" do
       original = Application.get_env(:core, :vision_client)
 
       try do
         Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
 
-        for endpoint <- ["is_book", "extract_isbn"] do
+        for endpoint <- ["is_book", "analyze"] do
           result = Client.call_vision(endpoint, %{image: "test"})
           assert {:ok, _} = result
         end

@@ -11,3 +11,20 @@ breaking:
   ignore_only:
     FIELD_SAME_TYPE:
       - stacks/internal/v1/vision.proto
+    # ⚠️ TIME-BOXED — remove this entry once the vision.proto change it covers
+    # has landed on the default branch. `buf breaking` compares against that
+    # branch, so after the merge there is nothing left for it to flag and the
+    # entry only weakens the gate.
+    #
+    # It covers the deletion of the ClassifyRequest/ClassifyResponse and
+    # ExtractRequest/ExtractResponse messages, superseded by a single /analyze
+    # call. `breaking.use: [FILE]` makes any message deletion an error, and
+    # there is no message-level `reserved` construct to declare the intent
+    # inline instead.
+    #
+    # Note the scope: this suppression is FILE-wide, so while it stands, ANY
+    # message deletion from vision.proto goes unflagged. That is the reason it
+    # is time-boxed rather than left as a permanent allowance, and why the
+    # removal is tracked as its own piece of work rather than a someday note.
+    MESSAGE_NO_DELETE:
+      - stacks/internal/v1/vision.proto

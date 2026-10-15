@@ -165,9 +165,11 @@ defmodule Core.PromEx.Plugins.Stacks do
         # measured and never left the BEAM, so every timeout in the upload path
         # was sized from an estimate in a comment.
         #
-        # `endpoint` ∈ is_book|extract_isbn|analyze|associate (the fixed set
+        # `endpoint` ∈ is_book|analyze (the fixed set
         # `Stacks.AI.Client.endpoint_path/1` accepts — an unknown value raises
-        # there, so this label cannot be widened by user input) and `status` is
+        # there, so this label cannot be widened by user input; it listed
+        # extract_isbn and associate until those two operations were deleted on
+        # 2026-10-15) and `status` is
         # the HTTP status integer. Both are bounded and neither is derived from
         # an upload: no ISBN, title, filename, image or user id reaches a label
         # (GDPR: telemetry is warehouse-adjacent).

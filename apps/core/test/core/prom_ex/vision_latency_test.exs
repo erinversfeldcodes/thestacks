@@ -178,13 +178,13 @@ defmodule Core.PromEx.VisionLatencyTest do
 
   describe "no non-whitelisted metadata reaches a label (GDPR: telemetry is warehouse-adjacent)" do
     test "the exported label set is exactly endpoint, status and the histogram's le" do
-      emit(2_000, "extract_isbn", @error_status)
+      emit(2_000, "analyze", @error_status)
 
       output = scrape()
 
       blocks =
         output
-        |> series("_bucket", endpoint: "extract_isbn", status: @error_status)
+        |> series("_bucket", endpoint: "analyze", status: @error_status)
         |> Enum.map(fn {block, _} -> block end)
 
       assert blocks != [], "expected an exported series to inspect, got:\n#{output}"

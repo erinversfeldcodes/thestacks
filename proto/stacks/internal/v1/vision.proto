@@ -75,42 +75,19 @@ message VisionError {
   string message = 2 [json_name = "message"];
 }
 
-// POST /classify — determine if an image contains a book cover.
-message ClassifyRequest {
-  // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
-  oneof input {
-    // Base64-encoded image data.
-    string image = 1 [json_name = "image"];
-    // URL of a remote image.
-    string image_url = 2 [json_name = "image_url"];
-  }
-}
-
-// Response from POST /classify.
-message ClassifyResponse {
-  // Classification result; see ClassificationResult enum.
-  ClassificationResult classification = 1 [json_name = "classification"];
-  // Confidence score (0.0–1.0).
-  double confidence = 2 [json_name = "confidence"];
-  // Name of the vision model used for inference.
-  string model_used = 3 [json_name = "model_used"];
-}
-
-// POST /extract — extract book metadata and ISBNs from images.
-message ExtractRequest {
-  // Base64-encoded images (1–3). Mutually exclusive with image_url.
-  repeated string images = 1 [json_name = "images"];
-  // URL of a remote image. Mutually exclusive with images.
-  optional string image_url = 2 [json_name = "image_url"];
-}
-
-// Response from POST /extract.
-message ExtractResponse {
-  // Extracted book candidates.
-  repeated ExtractedBook books = 1 [json_name = "books"];
-  // Name of the vision model used for inference.
-  string model_used = 2 [json_name = "model_used"];
-}
+// The ClassifyRequest/ClassifyResponse and ExtractRequest/ExtractResponse
+// message pairs stood here until 2026-10-15. They described two HTTP endpoints
+// on the vision sidecar that a single /analyze call now supersedes, for measured
+// reasons: two endpoints meant a second HTTP round-trip and a second cold
+// container invocation, costing 2-4 seconds of inter-call gap at p95=7.7s.
+//
+// There is no message-level `reserved` construct in protobuf — `reserved`
+// reserves field NUMBERS and names inside a surviving message — so nothing is
+// held here on their behalf. If the two-call shape ever returns, the messages
+// come back by name and their field numbering starts fresh.
+//
+// ClassificationResult and ExtractedBook deliberately SURVIVE: AnalyzeResponse
+// is typed on both.
 
 // A book candidate extracted from an image by the vision model.
 message ExtractedBook {

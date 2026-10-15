@@ -41,20 +41,20 @@ defmodule Stacks.ObservabilityTelemetryTest do
       :telemetry.execute(
         [:stacks, :vision, :request, :start],
         %{system_time: System.system_time()},
-        %{endpoint: "extract_isbn"}
+        %{endpoint: "analyze"}
       )
 
       :telemetry.execute(
         [:stacks, :vision, :request, :stop],
         %{duration: 1_000_000},
-        %{endpoint: "extract_isbn", status: 200}
+        %{endpoint: "analyze", status: 200}
       )
 
       assert_receive {:telemetry_event, [:stacks, :vision, :request, :start], %{system_time: _},
-                      %{endpoint: "extract_isbn"}}
+                      %{endpoint: "analyze"}}
 
       assert_receive {:telemetry_event, [:stacks, :vision, :request, :stop],
-                      %{duration: 1_000_000}, %{endpoint: "extract_isbn", status: 200}}
+                      %{duration: 1_000_000}, %{endpoint: "analyze", status: 200}}
     end
 
     test "emits exception event on error" do
