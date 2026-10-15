@@ -158,6 +158,23 @@ defmodule Core.PromEx.MetricLabelTest do
   # Each scan pattern with its OWN minimum count, rather than one aggregate
   # floor over all of them.
   #
+  # **A floor is the pattern's OWN distinct count, counted independently of the
+  # other patterns.** Stating the rule because getting it wrong is subtle: four
+  # of these floors were the pattern's total, and pattern 1's was its UNIQUE
+  # contribution — 14 rather than 15 — because `user.data_deleted` is matched by
+  # both pattern 1 and pattern 3 (`Audit.log(nil, …)` in `gdpr/deletion.ex`
+  # satisfies `\blog\(nil,` at the `.`→`l` boundary). A mixed basis left one
+  # pattern with a slack of exactly one.
+  #
+  # Why one slack mattered: pattern 1 matches its first argument with `[^,]+`,
+  # which cannot match an argument CONTAINING a comma — and
+  # `Audit.log(Keyword.get(opts, :actor_id), @audit_action, …)` is standing
+  # proof that shape occurs here. So the realistic degradation is not the
+  # pattern dying (that gives 0 and flunks loudly) but one existing call site's
+  # first argument gaining a comma: 15 drops to 14, the floor passes, and that
+  # site's action silently stops being checked — through the pattern that covers
+  # 15 of the 17 actions.
+  #
   # ⚠️ The aggregate floor was calibrated to exactly the number that survived
   # its own newest pattern breaking. Patterns 1 and 2 supply 16 distinct
   # actions; pattern 3's only UNIQUE contribution is `system.rollback` (its
@@ -170,9 +187,9 @@ defmodule Core.PromEx.MetricLabelTest do
   # Regex SOURCES, not compiled sigils: a compiled `~r//` is a Reference and
   # cannot be escaped out of a module attribute into a function body.
   @action_patterns [
-    {~S/Audit\.log\(\s*[^,]+,\s*"([a-z_.]+)"/, 14, "direct Audit.log/3 calls", :all},
+    {~S/Audit\.log\(\s*[^,]+,\s*"([a-z_.]+)"/, 15, "direct Audit.log/3 calls", :all},
     {~S/@audit_action\s+"([a-z_.]+)"/, 1, "@audit_action module attributes", :all},
-    {~S/\blog\(nil,\s*"([a-z_.]+)"/, 2, "Audit's own internal log/3 calls", :all}
+    {~S/\blog\(nil,\s*"([a-z_.]+)"/, 2, "audit writes whose first argument is nil", :all}
   ]
 
   # ⚠️ The floor of 6 is itself a finding. Before scoping, this scan collected 7
@@ -523,8 +540,21 @@ defmodule Core.PromEx.MetricLabelTest do
       # tell a prober nothing.
       assert StacksWeb.AuthController.invite_label_for(:invite_expired) == :expired
 
-      assert StacksWeb.AuthController.invite_label_for(:invite_not_found) == :other,
-             "the gate module's seventh refusal atom has no clause and no catch-all"
+      # NOT `:invite_not_found` as an example of something that can arrive here.
+      # It cannot: it is produced only by `Invites.check/1`, consumed only by
+      # `InviteController`, which answers 404 and never reaches this controller.
+      # An earlier version of this assertion and the comment beside the function
+      # both claimed it was "one `with` clause away" — plausible, unchecked and
+      # false, which is this file's own failure mode a fourth time.
+      #
+      # The real reason the catch-all is load-bearing is wider: `do_register/3`
+      # ends in `{:error, _, reason, _} -> {:error, reason}`, a pass-through over
+      # EVERY step of the registration Multi. So the input set is any atom any
+      # step returns, present or future — not the invite gate's vocabulary.
+      assert StacksWeb.AuthController.invite_label_for(:a_future_multi_step_failure) == :other,
+             "an atom from some other step of the registration Multi has no clause and no " <>
+               "catch-all, so it would raise a FunctionClauseError on an unauthenticated " <>
+               "registration path"
 
       assert StacksWeb.AuthController.invite_label_for(:something_nobody_has_added_yet) == :other
     end

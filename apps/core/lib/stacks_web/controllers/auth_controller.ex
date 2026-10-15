@@ -380,13 +380,34 @@ defmodule StacksWeb.AuthController do
   # registration path and its only job is to produce a metric label.
   #
   # Its sibling `invite_error_status/1` two clauses below is total — it ends in
-  # `_ -> 403`. This one was not, and the asymmetry is the whole point: the gate
-  # module already defines a seventh refusal atom (`:invite_not_found`, returned
-  # by the lookup endpoint), one `with` clause away from reaching here. The day
-  # it does, or the day an eighth is added, the status function copes and this
-  # one raises `FunctionClauseError` — a 500 on registration, which is both the
+  # `_ -> 403`. This one was not, and the asymmetry is the whole point.
+  #
+  # ⚠️ An earlier version of this comment justified the catch-all by naming
+  # `:invite_not_found` as "one `with` clause away from reaching here". That was
+  # plausible, unchecked and false: `:invite_not_found` is produced only by
+  # `Invites.check/1` and consumed only by `InviteController`, which answers it
+  # with a 404 — a different controller behind a different context function
+  # whose declared return type does not include it. Recorded rather than quietly
+  # rewritten, because the argument is the kind that would be re-derived from the
+  # same wrong premise by the next person to consider deleting the clause.
+  #
+  # The real exposure is WIDER than that claim, which is why the catch-all earns
+  # its place. `Accounts.do_register/3` ends in
+  # `{:error, _, reason, _} -> {:error, reason}` — a pass-through over EVERY step
+  # of the registration Multi, not just the invite steps. So the input set here
+  # is "any atom any step of that Multi returns, present or future", not the
+  # invite gate's six refusal atoms. `Accounts.register/2`'s `@spec` lists those
+  # six and is therefore narrower than its own body; dialyzer will not flag a
+  # spec narrower than the success typing without `--overspecs`, so that spec is
+  # documentation rather than a guarantee, and it is exactly what a reader would
+  # use to conclude this function's input set is closed. It is not.
+  #
+  # Without the catch-all, a future `Multi.run` step returning `{:error, :atom}`
+  # raises `FunctionClauseError` here — a 500 on registration, which is both the
   # worst place for one and a distinguishable response on an endpoint designed
-  # to tell a prober nothing.
+  # to tell a prober nothing. (No such step exists today: the only atom-returning
+  # ones are the six invite steps, `:set_confirmation` fails with a changeset,
+  # and `consume_invite/3` raises rather than returning a tuple.)
   #
   # `:other` keeps the label BOUNDED, which is what a Prometheus label has to be,
   # while still recording that a refusal happened. An unexpected atom showing up
