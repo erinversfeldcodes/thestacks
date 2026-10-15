@@ -81,14 +81,17 @@ defmodule Stacks.AI.MockClient do
     end
   end
 
-  defp default_response("is_book", _payload) do
-    {:ok,
-     %{
-       "classification" => "CLASSIFICATION_RESULT_BOOK",
-       "confidence" => 0.9,
-       "model_used" => "mock"
-     }}
-  end
+  # ⚠️ "is_book" answers with the SAME shape as "analyze", and must.
+  #
+  # It used to return a classification-only body — `{classification, confidence,
+  # model_used}`, the response of the `/classify` endpoint. That endpoint was
+  # deleted on 2026-10-15 and `endpoint_path/1` now resolves BOTH operation
+  # names to `/analyze`, so in production a caller asking "is_book" receives an
+  # `AnalyzeResponse` with a `books` key. A mock that kept answering in the old
+  # shape would disagree with the real client about what the same call returns —
+  # which is the failure this module's own moduledoc warns about, and it would
+  # hand a test a confident green for a response production cannot produce.
+  defp default_response("is_book", payload), do: default_response("analyze", payload)
 
   defp default_response("analyze", payload) do
     {:ok,
