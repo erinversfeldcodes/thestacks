@@ -77,9 +77,18 @@ message VisionError {
 
 // The ClassifyRequest/ClassifyResponse and ExtractRequest/ExtractResponse
 // message pairs stood here until 2026-10-15. They described two HTTP endpoints
-// on the vision sidecar that a single /analyze call now supersedes, for measured
-// reasons: two endpoints meant a second HTTP round-trip and a second cold
-// container invocation, costing 2-4 seconds of inter-call gap at p95=7.7s.
+// on the vision sidecar, superseded by a single /analyze call.
+//
+// Why they went: they had NO CALLER in any revision — core has always asked
+// /analyze — and ADR-015 §3 rules the two-call shape superseded in principle.
+// ⚠️ Deleting them saved no latency, and an earlier version of this comment
+// wrongly claimed it did (the "2-4s inter-call gap at p95=7.7s" from ADR-015 §3).
+// That measurement is about two MODAL method invocations, not two HTTP
+// endpoints, and /analyze still makes both: `main.py` calls `client.classify`
+// and then `client.extract`, two `remote.aio` round-trips with a short-circuit
+// between them. ADR-015's own 2026-05 update records that the single-prompt
+// collapse was REVERTED. So the fan-out cost is still live and still unpaid —
+// anyone chasing it should look at the /analyze handler, not at this deletion.
 //
 // There is no message-level `reserved` construct in protobuf — `reserved`
 // reserves field NUMBERS and names inside a surviving message — so nothing is
@@ -105,13 +114,20 @@ message ExtractedBook {
 
 // POST /analyze — single-request classification + extraction.
 //
-// Combines /classify + /extract into one call so core pays for one HTTP
-// round-trip and one potential cold-start on the Modal side. The vision
-// service runs classify internally first; if the result is BOOK it
-// proceeds to extract, otherwise returns an empty `books` list and
-// skips the expensive extract step. Preserves the pre-consolidation
-// short-circuit ("don't run extract on non-books") without forcing
-// core to make two HTTP calls.
+// Combines classification + extraction into one call so core pays for one
+// HTTP round-trip. The vision service runs classify internally first; if the
+// result is BOOK it proceeds to extract, otherwise returns an empty `books`
+// list and skips the expensive extract step. Preserves the pre-consolidation
+// short-circuit ("don't run extract on non-books") without forcing core to
+// make two HTTP calls.
+//
+// ⚠️ "One HTTP round-trip" is the accurate claim; this comment also used to say
+// "and one potential cold-start on the Modal side", which is NOT true and is
+// worth correcting here because it is the same error as the one in the
+// deletion note above. The handler invokes TWO Modal methods —
+// `client.classify` then `client.extract` — so the Modal-side fan-out and its
+// cold-start exposure are unchanged by the HTTP consolidation. Collapsing them
+// into a single prompt was tried and REVERTED (ADR-015, 2026-05 update).
 message AnalyzeRequest {
   // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
   oneof input {
@@ -140,7 +156,19 @@ message AnalyzeResponse {
   string model_used = 4 [json_name = "model_used"];
 }
 
-// POST /associate — async cover classification with callback.
+// Cover association: request, response, callback and status enum.
+//
+// ⚠️ RETAINED UNUSED, deliberately (owner ruling 2026-10-15). Nothing serves or
+// calls any of these as of that date: the sidecar's `POST /associate` endpoint
+// and core's `POST /api/internal/vision/associate` callback route were both
+// deleted, together with the job runner between them, because nothing ever
+// started a verification job. They are kept because cover verification is
+// expected to return with the vision redesign and re-deriving a cross-language
+// contract is the expensive part; the endpoints are the cheap part.
+//
+// So read every "POST ..." below as the shape a rebuild SHOULD serve, not one
+// that is served today. Do not implement a client against them expecting a
+// listener.
 message AssociateRequest {
   // ISBN (digits only, no hyphens).
   string isbn = 1 [json_name = "isbn"];
@@ -152,14 +180,18 @@ message AssociateRequest {
   string cover_image_url = 4 [json_name = "cover_image_url"];
 }
 
-// Response from POST /associate (202 Accepted).
+// Response from the (unserved) POST /associate — 202 Accepted. See the note on
+// AssociateRequest: retained unused.
 message AssociateResponse {
   // Unique job ID for tracking the async classification.
   string job_id = 1 [json_name = "job_id"];
 }
 
 // Callback payload from vision → core when async classification completes.
-// POST /api/internal/vision/associate with X-Vision-Signature header.
+// The route that received it, POST /api/internal/vision/associate (HMAC via the
+// X-Vision-Signature header), was DELETED on 2026-10-15 — this comment was the
+// last live assertion anywhere that it exists. Retained unused; see the note on
+// AssociateRequest.
 message AssociateCallback {
   // ISBN (echoed from request).
   string isbn = 1 [json_name = "isbn"];

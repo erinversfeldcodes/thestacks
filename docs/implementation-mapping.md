@@ -474,7 +474,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Extends `Page.Upload` -- `NotABook` variant. Displays rejection with humour/clarity. |
-| **Backend (Phoenix)** | ⚠️ `Stacks.Books.classify_image/1` **does not exist** (verified 2026-10-15) and no such function is anywhere in `apps/core`. This row was a phantom — a cited symbol with nothing behind it. Classification reaches the sidecar through `Stacks.AI.Client.call_vision/2`; the `/classify` endpoint itself is a candidate for removal under the campaign's deletion wave. |
+| **Backend (Phoenix)** | ⚠️ `Stacks.Books.classify_image/1` **does not exist** (verified 2026-10-15) and no such function is anywhere in `apps/core`. This row was a phantom — a cited symbol with nothing behind it. Classification reaches the sidecar through `Stacks.AI.Client.call_vision/2`. The `/classify` endpoint was duly removed on 2026-10-15; `/analyze` answers classification and extraction in one call. |
 | **Database** | **Write:** `op.audit_log` (classification result + rejection reason). |
 | **Jobs (Oban)** | Part of `IdentifyBookJob` pipeline (step 1). |
 | **External Services** | Modal / Qwen2.5-VL-7B-Instruct (same vision model, classification prompt). |
@@ -581,7 +581,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **External Services** | Modal vision service (classify + extract per image). Open Library, Google Books (ISBN resolution per confirmed book). |
 | **dbt Models** | `int_bulk_upload_batch_size`, `int_bulk_upload_confirmation_rate` (how many detected books users confirm vs. dismiss). |
 | **Infrastructure** | No new services. Requires `batch_id` and `group_id` migration on `op.uploaded_images`. |
-| **Dependencies** | US-1.1.1 (single-image pipeline); Issue #008 (multi-book extraction API — `/extract` must return `books: list` before this can be implemented); Issue #009 (bulk upload issue). |
+| **Dependencies** | US-1.1.1 (single-image pipeline); Issue #008 (multi-book extraction API — ⚠️ this said "`/extract` must return `books: list`"; `/extract` was deleted 2026-10-15 and the requirement is now satisfied by `/analyze`, whose `AnalyzeResponse.books` is already a repeated field); Issue #009 (bulk upload issue). |
 
 ---
 

@@ -199,7 +199,8 @@ async def _load_image_b64(
 ) -> str:
     """Resolve `image` (already base64) OR `image_url` (downloaded and re-encoded)
     into a single base64-encoded string. Raises HTTPException(422) for invalid
-    input — identical validation semantics to the /classify endpoint's inline
+    input — carrying forward the validation semantics the removed /classify
+    endpoint applied inline
     logic, factored out so /analyze can reuse it without duplication.
     """
     if image_url is not None:
@@ -223,7 +224,7 @@ async def _load_image_b64(
 
 def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
     """Normalise the ML model's classify payload into a (proto-enum, confidence)
-    pair. Identical to /classify's inline parsing."""
+    pair. Carried over from the removed /classify endpoint's inline parsing."""
     raw_ml = str(parsed.get("classification", "ambiguous"))
     classification = _ML_TO_CLASSIFICATION.get(raw_ml, _CLF_AMBIGUOUS)
     raw_confidence = parsed.get("confidence", 0.0)
@@ -234,7 +235,7 @@ def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
 
 def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
     """Normalise the ML model's extract payload into a list of ExtractedBook.
-    Identical to /extract's inline parsing."""
+    Carried over from the removed /extract endpoint's inline parsing."""
     books: list[ExtractedBook] = []
     raw_books = parsed.get("books")
     if not isinstance(raw_books, list):

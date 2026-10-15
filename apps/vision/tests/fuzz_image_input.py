@@ -116,8 +116,23 @@ def _fuzz_http_body(raw: bytes) -> None:
     """
     headers = {**_make_auth_header(_PATH), "Content-Type": "application/json"}
     response = _http_client.post(_PATH, content=raw, headers=headers)
-    assert 400 <= response.status_code < 500, (
-        f"any input must yield a structured client error, never a 5xx or a 404: "
+
+    # ⚠️ Two properties, and deliberately NOT "the status is 4xx". This request
+    # is authenticated, so a fuzzer that happens to emit valid JSON with a
+    # decodable tiny image reaches the real handler and gets a legitimate 200 —
+    # `_resize_for_vlm` swallows Pillow errors, the classifier defaults to
+    # AMBIGUOUS, and the call short-circuits successfully. A 4xx-only assertion
+    # would call that correct behaviour a crash, which is how a fuzz target
+    # starts reporting findings nobody can act on. The properties that actually
+    # matter are that the route exists and that no input reaches an unhandled
+    # exception.
+    assert response.status_code != 404, (
+        f"the fuzz target is pointed at a route that does not exist: "
+        f"got 404 for {_PATH}. This is the silent-vacuity failure this "
+        f"assertion exists to catch — fix the path, do not relax the check."
+    )
+    assert response.status_code < 500, (
+        f"any input must yield a structured response, never a 5xx: "
         f"got {response.status_code} for {raw!r:.80}"
     )
 

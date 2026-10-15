@@ -242,7 +242,7 @@ def test_analyze_invalid_base64_returns_422() -> None:
 
 
 def test_analyze_rejects_missing_hmac() -> None:
-    """/analyze must be HMAC-gated — same as /classify and /extract."""
+    """/analyze must be HMAC-gated — it is the only authenticated endpoint left."""
     with TestClient(app) as client:
         response = client.post("/analyze", json={"image": _VALID_IMAGE})
     assert response.status_code in (401, 403)

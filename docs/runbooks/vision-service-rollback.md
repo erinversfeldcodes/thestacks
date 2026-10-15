@@ -247,7 +247,11 @@ coverage gate instead.
 - [`apps/core/lib/stacks/audit.ex`](../../apps/core/lib/stacks/audit.ex)
   — `Stacks.Audit.log_rollback/1`, the audit + telemetry helper.
 - `proto/stacks/internal/v1/vision.proto` — canonical enum definition.
-- `apps/vision/app/main.py` — `_STATUS_CONFIRMED`, `_STATUS_REJECTED` constants.
-- `apps/core/lib/stacks_web/controllers/internal_controller.ex` —
-  `@status_confirmed`, `@status_rejected` constants.
+- `apps/vision/app/main.py` — the `_CLF_*` classification constants.
+- `apps/core/lib/stacks/moderation.ex` — `classification_outcome/1`, the Elixir
+  side of the enum, including its silent catch-all.
+  ⚠️ This list pointed at `_STATUS_CONFIRMED`/`_STATUS_REJECTED` and
+  `@status_confirmed`/`@status_rejected` until 2026-10-15. All four were deleted
+  with the association callback; an operator following them would have found
+  nothing.
 - `docs/decisions/006-ambiguous-classification-as-rejection.md`

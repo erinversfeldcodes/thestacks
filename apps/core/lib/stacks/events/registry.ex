@@ -180,10 +180,16 @@ defmodule Stacks.Events.Registry do
         "started a verification job, so no result could arrive. The wire contract it " <>
         "reported through is deliberately kept for the same reason this entry is — the " <>
         "association request, response and callback messages, and the status enum, all " <>
-        "survive in the vision proto. CacheInvalidationHandler stays registered because " <>
-        "its clause encodes something a rebuild would otherwise have to rediscover: a " <>
-        "confirmed cover invalidates the WORK, not the edition the event aggregates on, " <>
-        "since the detail payload is assembled per work. Its two tests stay with it",
+        "survive in the vision proto. ⚠️ The reason this entry exists rather than a plain " <>
+        "deletion is that it is GATED and a comment is not: a @pending key absent from " <>
+        "@registry raises a CompileError, and the completeness test fails both if a " <>
+        "catalogued type has no emitter and no entry here, and if an entry here gains one. " <>
+        "So this record cannot quietly go stale, which is the property the kept wire " <>
+        "contract has no equivalent of. CacheInvalidationHandler stays registered on that " <>
+        "basis. (An earlier version claimed the handler clause encodes knowledge a rebuild " <>
+        "would otherwise lose — it does not: the handler's own moduledoc states the rule " <>
+        "generally, four sibling clauses instantiate it, and payload_contract.ex records " <>
+        "this payload's keys. The decision was right and the stated reason was borrowed.)",
     "offer.opened" =>
       "the marketplace offer flow is deferred (owner ruling 2026-08-19): the " <>
         "offer_threads and offer_messages tables, their schemas and their changesets " <>
