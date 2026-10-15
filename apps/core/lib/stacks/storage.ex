@@ -5,7 +5,12 @@ defmodule Stacks.Storage do
 
       Storage keys follow these conventions:
       - User uploads: `uploads/{image_id}`
-      - Book covers:  `covers/{isbn}-cover.jpg`
+      - Book covers:  `covers/{isbn}-cover.jpg` — ⚠️ NO LONGER WRITTEN. `store_cover/3`
+        was the only writer of this prefix and its only caller was the
+        cover-verification loop, which nothing ever triggered, so no object with
+        this key was ever created. Both were deleted 2026-10-15. The prefix is
+        documented here so a rebuild reuses it rather than inventing a second
+        layout, not because anything is stored under it.
       - GDPR exports: `exports/{user_id}/{unix_expiry}-{token}.json`
         (owned by `Stacks.GDPR.ExportDelivery`, which builds the key)
 
@@ -115,19 +120,6 @@ defmodule Stacks.Storage do
   @spec delete_image(String.t()) :: :ok | {:error, term()}
   def delete_image(storage_key) do
     delete_object(storage_key)
-  end
-
-  @doc """
-      Store a book cover image.
-
-      Returns `{:ok, storage_key}` on success.
-  """
-  @spec store_cover(String.t(), binary(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
-  def store_cover(isbn, data, opts \\ []) do
-    key = "covers/#{isbn}-cover.jpg"
-    content_type = Keyword.get(opts, :content_type, "image/jpeg")
-    backend().put(key, data, content_type: content_type)
   end
 
   defp backend do

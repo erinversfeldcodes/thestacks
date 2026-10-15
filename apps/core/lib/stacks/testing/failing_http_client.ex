@@ -15,7 +15,4 @@ defmodule Stacks.Testing.FailingHttpClient do
 
   @impl true
   def get(_url), do: {:error, :transport_error}
-
-  @impl true
-  def get_binary(_url), do: {:error, :transport_error}
 end

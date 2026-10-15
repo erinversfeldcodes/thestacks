@@ -185,18 +185,26 @@ defmodule Stacks.Books.HttpClientTest do
       refute search =~ "REDACTED"
     end
 
-    test "a cover download keeps the id that says which cover failed" do
-      # `get_binary/1` is the module's second entry point and fetches a URL a
-      # THIRD PARTY gave us (`imageLinks.thumbnail`), so its parameters are not
-      # ours to enumerate. `id` is the only one that names the cover; without it
-      # the log says a cover download failed and nothing more.
+    test "a third-party cover URL now has its id redacted like any other unknown param" do
+      # ⚠️ This test asserted the OPPOSITE until 2026-10-15, and the inversion is
+      # the point. `id` was in `@loggable_params` for exactly one reason: the
+      # module's second entry point, `get_binary/1`, fetched a cover URL a THIRD
+      # PARTY gave us (`imageLinks.thumbnail`) whose parameters were not ours to
+      # enumerate, and `id` was the only one naming which cover had failed.
+      #
+      # That entry point is gone, and no URL `get/1` constructs carries an `id`.
+      # So the allowlist entry would have been justified by a function that no
+      # longer exists. For a redaction list the safe direction is to drop an
+      # entry whose reason is gone — this test pins that it was dropped, rather
+      # than leaving the change to be noticed by whoever next reads a log.
       cover =
         HttpClient.redact(
           "http://books.google.com/books/content?id=hLZXDwAAQBAJ&printsec=frontcover" <>
             "&img=1&zoom=1&edge=curl&source=gbs_api"
         )
 
-      assert cover =~ "id=hLZXDwAAQBAJ"
+      refute cover =~ "hLZXDwAAQBAJ"
+      assert cover =~ "id=REDACTED"
     end
 
     test "an Open Library cover URL has no query to redact" do

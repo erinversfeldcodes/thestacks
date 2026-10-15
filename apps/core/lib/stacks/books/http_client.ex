@@ -28,19 +28,23 @@ defmodule Stacks.Books.HttpClient do
   # exact loss this redaction exists to avoid. They are not new exposure either:
   # `isbn_resolver.ex:186`, `:564` and `:570` already log both in the clear.
   #
-  # ⚠️ This module has TWO entry points with different trust properties, and the
-  # list has to serve both. `get/1` fetches URLs we construct, one shape of which
-  # carries our API key — an allowlist is exactly right there. `get_binary/1`
-  # fetches a cover URL a third party handed us (`imageLinks.thumbnail`), whose
-  # parameters are theirs and cannot be enumerated in advance; `id` is there
-  # because it is the only thing naming which cover failed, and it is an opaque
-  # public volume identifier rather than a credential. Open Library covers are
-  # path-based and never reach this list at all.
+  # This module now has ONE entry point: `get/1`, which fetches URLs we
+  # construct, one shape of which carries our API key — an allowlist is exactly
+  # right there.
+  #
+  # ⚠️ `id` was dropped from this list on 2026-10-15 along with `get_binary/1`.
+  # It was here for one reason: that second entry point fetched a cover URL a
+  # third party handed us (`imageLinks.thumbnail`), whose parameters are theirs
+  # and cannot be enumerated in advance, and `id` was the only thing naming
+  # which cover had failed. No URL `get/1` builds carries an `id` parameter, so
+  # keeping it would have meant an allowlist entry justified by a function that
+  # no longer exists — and the safe direction for a redaction list is to drop an
+  # entry whose reason is gone, not to keep it in case.
   #
   # Names are compared downcased, which is why `maxresults` and `langrestrict`
   # appear in that form.
   @loggable_params ~w(q isbn bibkeys jscmd format fields maxresults langrestrict
-                      country title author limit id)
+                      country title author limit)
 
   @impl true
   def get(url) do
@@ -52,23 +56,6 @@ defmodule Stacks.Books.HttpClient do
 
       {:ok, %Finch.Response{status: status}} ->
         warn("ISBNResolver: unexpected status #{status}", url)
-        {:error, :unexpected_status}
-
-      {:error, error} ->
-        map_error(error, url)
-    end
-  end
-
-  @impl true
-  def get_binary(url) do
-    req = Finch.build(:get, url)
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 10_000, request_timeout: 10_000) do
-      {:ok, %Finch.Response{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %Finch.Response{status: status}} ->
-        warn("Books.get_binary: unexpected status #{status}", url)
         {:error, :unexpected_status}
 
       {:error, error} ->
