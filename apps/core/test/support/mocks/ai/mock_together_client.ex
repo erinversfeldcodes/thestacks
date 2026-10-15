@@ -7,9 +7,9 @@ defmodule Stacks.AI.MockTogetherClient do
 
       ## Usage
 
-          MockTogetherClient.put_response({:ok, "A great book summary."})
+          MockTogetherClient.put_response({:ok, "0.9"})
 
-      Unmatched calls return a default summary.
+      Unmatched calls return a default completion.
 
       Every call is also recorded, in order, with the text it was handed —
       `sent/0`. A consent gate is only proved by what did NOT cross the seam,
@@ -20,16 +20,6 @@ defmodule Stacks.AI.MockTogetherClient do
   @behaviour Stacks.AI.TogetherClientBehaviour
 
   @sent_key {__MODULE__, :sent}
-
-  @impl true
-  def summarize_reviews(review_text, book_context) do
-    record({:summarize_reviews, review_text, book_context})
-
-    get_response(
-      {:ok,
-       "Readers generally enjoyed this book, praising its engaging narrative and well-developed characters."}
-    )
-  end
 
   @impl true
   def complete(prompt, opts \\ []) do
@@ -50,7 +40,7 @@ defmodule Stacks.AI.MockTogetherClient do
 
   @doc """
       Everything handed to the client in this test process, oldest first, as
-      `{:complete, prompt, opts}` / `{:summarize_reviews, text, context}`.
+      `{:complete, prompt, opts}`.
   """
   @spec sent() :: [tuple()]
   def sent, do: Process.get(@sent_key, [])

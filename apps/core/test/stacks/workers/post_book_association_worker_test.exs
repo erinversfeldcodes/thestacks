@@ -39,6 +39,63 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       assert assoc.reasoning == "Directly discussed"
     end
 
+    test "a multi-association response persists every association" do
+      # Four associations in one response, which the single-association happy
+      # path above does not cover: it proves the decode, the mapping and the
+      # persistence all hold for a list rather than a singleton.
+      #
+      # ⚠️ What this test does NOT cover, stated because I first wrote it
+      # claiming otherwise and the probe caught me.
+      #
+      # It was written as a regression test for a real production defect:
+      # `TogetherClient.parse_success_response/1` used to end in
+      # `String.slice(content, 0, 500)` — a cap that mirrored the 500-character
+      # limit on a review summary and belonged to the review-summary caller,
+      # now deleted. In production that truncation corrupts THIS caller, which
+      # asks for `max_tokens: 1024` and prompts for a JSON array of
+      # `{book_id, confidence, reasoning}` over up to 200 candidate books: a
+      # UUID alone is 36 characters, so a few associations exceed 500, the JSON
+      # is cut mid-object, `Jason.decode/1` fails, and every association is
+      # dropped while the worker still returns `:ok`.
+      #
+      # This test cannot see any of that. `complete/2` delegates to
+      # `configured_client()`, which in test is `MockTogetherClient`, so the
+      # real `parse_success_response/1` never runs — restoring the truncation
+      # leaves this test green, which is how I know. The observable I would need
+      # is an HTTP 200 body reaching the real parser, and there is no stub server
+      # in this suite to produce one; `circuit_breakers_test.exs` points at the
+      # real client only to force connection failures. Covering it means
+      # building that stub, which is test infrastructure beyond a deletion's
+      # scope, so the truncation removal rests on inspection: the review
+      # validator is documented as the thing that "truncat[ed] to 500
+      # characters", and the surviving cap lives on the changeset where it
+      # belongs.
+      user = consenting_author()
+      books = for title <- ~w(Circe Kindred Beloved Ariel), do: insert(:book, title: title)
+      post = insert(:post, user: user, body: "A long post about four books.")
+
+      response =
+        Jason.encode!(
+          Enum.map(books, fn b ->
+            %{
+              book_id: b.id,
+              confidence: 0.9,
+              reasoning:
+                "Discussed at length in the post, with the narrator returning to it repeatedly."
+            }
+          end)
+        )
+
+      MockTogetherClient.put_response({:ok, response})
+
+      assert :ok == perform_job(PostBookAssociationWorker, %{post_id: post.id})
+
+      associations = Blog.list_associations(post.id)
+
+      assert length(associations) == 4,
+             "expected all four associations to persist; got #{length(associations)}"
+    end
+
     test "returns :ok when LLM returns invalid JSON" do
       user = consenting_author()
       _book = insert(:book)

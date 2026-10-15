@@ -1,10 +1,19 @@
 defmodule Stacks.AI.TogetherClient do
   @moduledoc """
-      HTTP client for the Together AI LLM API (review summaries). Swappable
-      via `config:core,:together_client` (real vs mock). Auth is
+      HTTP client for the Together AI LLM API. Swappable via
+      `config:core,:together_client` (real vs mock). Auth is
       `Authorization: Bearer <VISION_TOGETHER_API_KEY>` (not HMAC). Protected
-      by `:together_ai_fuse` — when blown, callers persist snapshots without a
-      summary.
+      by `:together_ai_fuse`.
+
+      One operation: `complete/2`, a general chat completion. Its callers are
+      the blog post-book association worker and the source-scoring job.
+
+      ⚠️ It used to carry a second operation, `summarize_reviews/2`, for review
+      summaries — deleted 2026-10-15 along with the review-summary chain, which
+      modelled a table holding no rows. The 500-character truncation that lived
+      in `parse_success_response/1` went with it: it mirrored the review
+      summary's own column cap, and it was corrupting the JSON that `complete/2`
+      callers parse.
   """
 
   @model "meta-llama/Llama-3.3-70B-Instruct-Turbo"
@@ -14,78 +23,6 @@ defmodule Stacks.AI.TogetherClient do
   require Logger
 
   @fuse_name :together_ai_fuse
-
-  @impl true
-  def summarize_reviews(review_text, book_context) do
-    case configured_client() do
-      __MODULE__ -> do_summarize(review_text, book_context)
-      client -> client.summarize_reviews(review_text, book_context)
-    end
-  end
-
-  defp do_summarize(review_text, book_context) do
-    case :fuse.ask(@fuse_name, :sync) do
-      :blown -> {:error, :circuit_open}
-      :ok -> make_request(review_text, book_context)
-    end
-  end
-
-  defp make_request(review_text, book_context) do
-    case Application.get_env(:core, :vision_together_api_key) do
-      nil ->
-        Logger.warning("TogetherClient: VISION_TOGETHER_API_KEY not configured")
-        {:error, :api_key_missing}
-
-      api_key ->
-        send_request(review_text, book_context, api_key)
-    end
-  end
-
-  defp send_request(review_text, book_context, api_key) do
-    body = build_request_body(review_text, book_context)
-    url = "#{base_url()}/v1/chat/completions"
-
-    req =
-      Finch.build(
-        :post,
-        url,
-        [
-          {"content-type", "application/json"},
-          {"authorization", "Bearer #{api_key}"}
-        ],
-        body
-      )
-
-    req
-    |> Finch.request(Stacks.Finch, receive_timeout: 30_000, request_timeout: 30_000)
-    |> handle_response()
-  end
-
-  defp build_request_body(review_text, book_context) do
-    title = Map.get(book_context, :title, "Unknown")
-    author = Map.get(book_context, :author, "Unknown")
-
-    prompt = """
-    Summarize the following reviews for "#{title}" by #{author}. \
-    Write a concise, balanced summary (max 500 characters) that captures \
-    the consensus view. Do not invent URLs or cite sources not present \
-    in the reviews. Focus on what reviewers liked, disliked, and the \
-    overall sentiment.
-
-    Reviews:
-    #{review_text}
-    """
-
-    Jason.encode!(%{
-      model: @model,
-      messages: [
-        %{role: "system", content: "You are a helpful book review summarizer."},
-        %{role: "user", content: prompt}
-      ],
-      max_tokens: 256,
-      temperature: 0.3
-    })
-  end
 
   defp handle_response({:ok, %Finch.Response{status: 200, body: resp_body}}) do
     parse_success_response(resp_body)
@@ -108,7 +45,24 @@ defmodule Stacks.AI.TogetherClient do
       {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]}} ->
         # one billable completion — the cost page counts these
         :telemetry.execute([:stacks, :ai, :together_completion], %{count: 1}, %{})
-        {:ok, String.slice(String.trim(content), 0, 500)}
+
+        # ⚠️ No truncation here, deliberately, and removing it FIXED a live bug.
+        #
+        # This used to `String.slice(…, 0, 500)`, mirroring the 500-character cap
+        # that `Enrichment.review_snapshot_changeset/2` puts on a review
+        # summary — so the limit belonged to the review-summary caller and
+        # travelled with it when that caller was deleted. The cap still exists
+        # where it belongs: on the changeset.
+        #
+        # Meanwhile it was silently breaking the OTHER caller. The blog
+        # post-book association worker asks for `max_tokens: 1024` and prompts
+        # for a JSON array of `{book_id, confidence, reasoning}` objects over up
+        # to 200 candidate books. A UUID alone is 36 characters, so two or three
+        # associations with any real reasoning exceeded 500 — and the worker
+        # then ran `Jason.decode/1` on JSON truncated mid-object, failed to
+        # parse, logged a warning and emitted `:unreadable_response`. The
+        # associations were dropped and nothing said why.
+        {:ok, String.trim(content)}
 
       {:ok, other} ->
         Logger.warning("TogetherClient: unexpected response shape: #{inspect(other)}")

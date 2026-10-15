@@ -159,8 +159,13 @@ defmodule StacksWeb.InternalController do
     Application.put_env(:core, :together_client, TogetherClient)
     Application.put_env(:core, :vision_together_api_key, "smoke-test-dummy-key")
 
+    # `complete/2`, not the deleted `summarize_reviews/2`. Behaviour-preserving
+    # for this probe's purpose: both route through the same `:together_ai_fuse`
+    # ask and the same `handle_response` melt path, and the base URL is pointed
+    # at a closed port so the call fails and melts regardless of which operation
+    # it was.
     for _ <- 1..2 do
-      TogetherClient.summarize_reviews("text", %{title: "T", author: "A"})
+      TogetherClient.complete("smoke", max_tokens: 1)
     end
 
     Application.put_env(:core, :together_ai_base_url, original.together_ai_base_url)
