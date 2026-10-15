@@ -440,34 +440,45 @@ defmodule Stacks.ShelvingTest do
       handler_id = "lock-order-#{System.unique_integer([:positive])}"
       test_pid = self()
 
-      :telemetry.attach(
-        handler_id,
-        [:core, :repo, :query],
-        # ⚠️ The `self() == test_pid` filter is load-bearing, not hygiene.
-        #
-        # A telemetry handler runs in the EMITTING process, and this module is
-        # `async: true`, so without the filter every query from every
-        # concurrently-running test module lands in this mailbox for the whole
-        # attach-to-detach window. A neighbour's placement count arriving before
-        # this test's own `FOR UPDATE` yields `count_i < lock_i` and fails
-        # against perfectly correct code.
-        #
-        # That was proven, not theorised: a foreign process running an ordinary
-        # `Repo.aggregate(Placement, :count)` produces
-        # `SELECT count(*) FROM "op"."bookshelf_placements" AS b0 …`, which
-        # matches this test's own `count_i` pattern at index 0 with no lock
-        # ahead of it. An Oban plugin's polling query lands the same way. It did
-        # not reproduce at seeds 1 and 7, which makes it load-dependent — the
-        # worst kind, because it passes until CI is busy.
-        #
-        # `place_book/3` runs its Multi in the calling process, so filtering to
-        # this process keeps the test fully behavioural while making it
-        # deterministic.
-        fn _event, _measurements, %{query: query}, _ ->
-          if self() == test_pid, do: send(test_pid, {:sql, query})
-        end,
-        nil
-      )
+      # Matched, so a failed attach says so rather than surfacing later as
+      # `lock_i == nil` and reading like a missing lock.
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:core, :repo, :query],
+          # ⚠️ The `self() == test_pid` filter is load-bearing, not hygiene.
+          #
+          # A telemetry handler runs in the EMITTING process, and this module is
+          # `async: true`, so without the filter every query from every
+          # concurrently-running test module lands in this mailbox for the whole
+          # attach-to-detach window. A neighbour's placement count arriving before
+          # this test's own `FOR UPDATE` yields `count_i < lock_i` and fails
+          # against perfectly correct code.
+          #
+          # That was proven, not theorised: a foreign process running an ordinary
+          # `Repo.aggregate(Placement, :count)` produces
+          # `SELECT count(*) FROM "op"."bookshelf_placements" AS b0 …`, which
+          # matches this test's own `count_i` pattern at index 0 with no lock
+          # ahead of it. An Oban plugin's polling query lands the same way. It did
+          # not reproduce at seeds 1 and 7, which makes it load-dependent — the
+          # worst kind, because it passes until CI is busy.
+          #
+          # `place_book/3` runs its Multi in the calling process, so filtering to
+          # this process keeps the test fully behavioural while making it
+          # deterministic.
+          #
+          # ⚠️ If you COPY this pattern — and it is worth copying — know its one
+          # blind spot: `Ecto.Repo.Preloader` runs preload queries through
+          # `Task.async_stream`, so those are emitted from Task processes and a
+          # `self() == test_pid` filter drops them. Over a call that preloads,
+          # statements would go silently missing and surface as `find_index`
+          # returning nil, which reads like the statement never ran.
+          # `place_book/3` does no preloads, so it does not bite here.
+          fn _event, _measurements, %{query: query}, _ ->
+            if self() == test_pid, do: send(test_pid, {:sql, query})
+          end,
+          nil
+        )
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
@@ -478,8 +489,17 @@ defmodule Stacks.ShelvingTest do
       lock_i =
         Enum.find_index(sqls, &(&1 =~ ~r/FROM "op"\."bookshelves".*FOR UPDATE/s))
 
-      count_i =
-        Enum.find_index(sqls, &(&1 =~ ~r/count\(.*FROM "op"\."bookshelf_placements"/s))
+      # EVERY count index, not the first. `find_index` would take the earliest
+      # match, so a future pre-transaction count over `op.bookshelf_placements`
+      # — a cheap availability pre-check, say — would set `count_i` ahead of the
+      # lock and fail correct code, with a message claiming the lock came after
+      # the count it serialises. The invariant is about the count INSIDE the
+      # capacity check, and the honest way to say that without parsing
+      # transaction boundaries is: every count must follow the lock.
+      count_indices =
+        for {sql, i} <- Enum.with_index(sqls),
+            sql =~ ~r/count\(.*FROM "op"\."bookshelf_placements"/s,
+            do: i
 
       assert lock_i,
              "no `SELECT … FROM op.bookshelves … FOR UPDATE` reached the database during a " <>
@@ -488,17 +508,21 @@ defmodule Stacks.ShelvingTest do
                "The lock's result is deliberately discarded in the source, so it reads like a " <>
                "dead query — it is not.\n\nStatements seen:\n" <> Enum.join(sqls, "\n")
 
-      assert count_i,
+      assert count_indices != [],
              "no count over op.bookshelf_placements reached the database, so this test cannot " <>
                "tell whether the lock precedes the count. The capacity check changed shape — " <>
                "re-point the pattern rather than deleting the assertion.\n\nStatements " <>
                "seen:\n" <> Enum.join(sqls, "\n")
 
-      assert lock_i < count_i,
-             "the row lock was taken AFTER the count it exists to serialise, which makes it " <>
-               "inert: both concurrent placements complete their count before either acquires " <>
-               "the lock, so both still read active_count < limit and both insert. (lock was " <>
-               "statement #{lock_i}, count was statement #{count_i}.)"
+      early = Enum.filter(count_indices, &(&1 < lock_i))
+
+      assert early == [],
+             "a count over op.bookshelf_placements ran BEFORE the row lock that exists to " <>
+               "serialise it, which makes the lock inert: two concurrent placements both " <>
+               "complete their count before either acquires the lock, so both read " <>
+               "active_count < limit and both insert. (lock was statement #{lock_i}; " <>
+               "count(s) at #{inspect(count_indices)}, of which #{inspect(early)} preceded " <>
+               "it.)"
     end
 
     # Collects the SQL emitted since the handler attached. A short timeout per

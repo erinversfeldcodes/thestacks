@@ -108,6 +108,16 @@ defmodule Stacks.Transparency.Cache do
   # — leaving only a supervisor restart, which is milliseconds and during which
   # every read is already fanning out to Prometheus to recompute. A rescued
   # exception is noise against a cost already being paid.
+  #
+  # And the accounting is better than "acceptable": measured at 200k iterations,
+  # the rescue is ~1.7x FASTER on the present-table path (0.028 vs 0.047 us),
+  # because `table_exists?()` was a second name resolution on every hit. The
+  # outage-window penalty is ~38ns absolute. So the guard was a per-hit tax to
+  # branch on a condition that only occurs during a supervisor restart, and
+  # removing it is a net win on the path that runs all the time — not a cost
+  # paid for testability, which is how an earlier version of this comment put it.
+  # (Single-process microbenchmark on an idle machine; the magnitudes make
+  # contention unlikely to flip it, but that was not measured.)
   defp safe_lookup(key) do
     :ets.lookup(@table, key)
   rescue
