@@ -80,13 +80,15 @@ message VisionError {
 // on the vision sidecar, superseded by a single /analyze call.
 //
 // Why they went: they had NO CALLER in any revision — core has always asked
-// /analyze — and ADR-015 §3 rules the two-call shape superseded in principle.
+// /analyze — and the vision architecture decision rules the two-call HTTP shape
+// superseded in principle.
 // ⚠️ Deleting them saved no latency, and an earlier version of this comment
-// wrongly claimed it did (the "2-4s inter-call gap at p95=7.7s" from ADR-015 §3).
+// wrongly claimed it did, borrowing a "2-4s inter-call gap at p95=7.7s" figure
+// from the architecture decision that chose this stack.
 // That measurement is about two MODAL method invocations, not two HTTP
 // endpoints, and /analyze still makes both: `main.py` calls `client.classify`
 // and then `client.extract`, two `remote.aio` round-trips with a short-circuit
-// between them. ADR-015's own 2026-05 update records that the single-prompt
+// between them. That decision's own 2026-05 update records that the single-prompt
 // collapse was REVERTED. So the fan-out cost is still live and still unpaid —
 // anyone chasing it should look at the /analyze handler, not at this deletion.
 //
@@ -127,7 +129,8 @@ message ExtractedBook {
 // deletion note above. The handler invokes TWO Modal methods —
 // `client.classify` then `client.extract` — so the Modal-side fan-out and its
 // cold-start exposure are unchanged by the HTTP consolidation. Collapsing them
-// into a single prompt was tried and REVERTED (ADR-015, 2026-05 update).
+// into a single prompt was tried and REVERTED (recorded in the vision
+// architecture decision's 2026-05 update).
 message AnalyzeRequest {
   // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
   oneof input {
