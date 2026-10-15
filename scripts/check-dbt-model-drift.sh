@@ -112,6 +112,9 @@ mapped = {
     for name in re.findall(r'"([^"]+)"', list_body)
 }
 
+# The event keys themselves, for the inverse check further down.
+mapped_events = set(re.findall(r'"([a-z_.]+)"\s*=>', mapping.group(1)))
+
 on_disk = {
     os.path.basename(p)[: -len(".sql")]
     for p in glob.glob("dbt/models/**/*.sql", recursive=True)
@@ -134,4 +137,75 @@ if missing:
     sys.exit(1)
 
 print(f"OK: all {len(mapped)} model(s) named in the dbt refresh map exist on disk.")
+
+# ---------------------------------------------------------------------------
+# And the inverse: every event the handler SUBSCRIBES to must either map to
+# models or be declared as deliberately keyless.
+#
+# The check above catches a mapping that points at a deleted model. It cannot
+# catch an event with no mapping key at all — `handle_event/1` falls to
+# `Map.get(@model_mapping, type) -> nil -> :ok`, enqueues nothing and returns
+# success. That is the direction that bites on the day an emitter comes BACK:
+# the registry can promise a handler "stays wired" and be telling the truth
+# about the subscription while the handler does nothing.
+#
+# So the handler declares its intentional gaps in @subscribed_without_models,
+# each with a reason, and this gate fails on any subscribed event that is in
+# neither map.
+REGISTRY = "apps/core/lib/stacks/events/registry.ex"
+
+try:
+    registry_src = open(REGISTRY, encoding="utf-8").read()
+except OSError as exc:
+    print(f"FAIL: cannot read {REGISTRY}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+registry_block = re.search(r"@registry\s+%\{(.*?)\n  \}", registry_src, re.DOTALL)
+if not registry_block:
+    print(f"FAIL: no @registry block found in {REGISTRY}.", file=sys.stderr)
+    sys.exit(1)
+
+subscribed = {
+    event
+    for event, handlers in re.findall(
+        r'"([a-z_.]+)"\s*=>\s*\[([^\]]*)\]', registry_block.group(1)
+    )
+    if "DbtRefreshHandler" in handlers
+}
+
+keyless_block = re.search(
+    r"@subscribed_without_models\s+%\{(.*?)\n  \}", handler_src, re.DOTALL
+)
+if not keyless_block:
+    print(
+        f"FAIL: no @subscribed_without_models block found in {HANDLER}.\n"
+        "This gate reads it to tell a deliberate keyless subscription from a forgotten "
+        "mapping. If it was removed, the distinction is gone — restore it, or declare an "
+        "empty map if every subscription now maps to models.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+declared_keyless = set(re.findall(r'"([a-z_.]+)"\s*=>', keyless_block.group(1)))
+
+unaccounted = sorted(subscribed - mapped_events - declared_keyless)
+if unaccounted:
+    print(
+        "FAIL: the dbt refresh handler is subscribed to events it cannot act on.",
+        file=sys.stderr,
+    )
+    for event in unaccounted:
+        print(f"  {event}", file=sys.stderr)
+    print(
+        f"\nEach reaches `handle_event/1`, matches no mapping, enqueues nothing and returns :ok — "
+        f"a handler that reads as wiring and refreshes nothing. Either map its models, unsubscribe "
+        f"it in {REGISTRY}, or declare it in @subscribed_without_models with the reason.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+print(
+    f"OK: all {len(subscribed)} dbt-refresh subscription(s) either map to models "
+    f"or are declared keyless ({len(declared_keyless)} declared)."
+)
 PY

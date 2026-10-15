@@ -45,10 +45,36 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     "placement.restored" => ["mart_community_read_count"]
   }
 
+  # Events this handler is SUBSCRIBED to on purpose while having no models to
+  # refresh, each with the reason. Without this, "subscribed but unmapped" and
+  # "someone forgot the mapping" are the same silent no-op.
+  #
+  # ⚠️ This is the inverse of the gate on @model_mapping, and it is the direction
+  # that bites later rather than now: a mapping naming a deleted model fails a
+  # set difference against the models on disk, but an event with NO key at all
+  # matches nothing, enqueues nothing, logs nothing, and returns :ok. The
+  # registry promises that this handler "stays wired" for the review rebuild —
+  # true of the subscription, and worth nothing on the day the emitter returns
+  # unless somebody also restores the mapping. Hence: declared here, and checked
+  # by `scripts/check-dbt-model-drift.sh`, which fails on any subscribed event
+  # that is neither mapped nor named below.
+  @subscribed_without_models %{
+    "enrichment.reviews_scraped" =>
+      "the review vertical returns by owner ruling and this subscription is kept so " <>
+        "the rebuild lands with its consumer already attached — but its three dbt " <>
+        "models were deleted, so there is nothing to refresh until the rebuild " <>
+        "recreates them. Restore the mapping in the same change that recreates the " <>
+        "models, or this handler will run and refresh nothing while reporting success."
+  }
+
+  @doc false
+  def subscribed_without_models, do: @subscribed_without_models
+
   @impl true
   def handle_event(%{event_type: event_type}) do
     case Map.get(@model_mapping, event_type) do
       nil ->
+        warn_if_undeclared(event_type)
         :ok
 
       models ->
@@ -67,4 +93,19 @@ defmodule Stacks.Workers.DbtRefreshHandler do
   end
 
   def handle_event(_event), do: :ok
+
+  # A declared keyless event is silent; anything else reaching here means this
+  # handler was subscribed to something it cannot act on, which is the shape the
+  # registry's completeness test exists to surface and is worth saying out loud
+  # at runtime too.
+  defp warn_if_undeclared(event_type) do
+    unless Map.has_key?(@subscribed_without_models, event_type) do
+      Logger.warning(
+        "DbtRefreshHandler: subscribed to #{event_type} but no models are mapped for it — " <>
+          "refreshing nothing. Either map its models or unsubscribe the handler."
+      )
+    end
+
+    :ok
+  end
 end
