@@ -14,7 +14,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented dbt model counts must match the models on disk. |
+| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Two set differences: the documented dbt model counts must match the models on disk, and every model named in `DbtRefreshHandler`'s `@model_mapping` must exist (dbt exits 0 on a selector matching nothing, so a stale mapping is a green run that refreshes nothing). |
 | `scripts/check-e2e-vacuous-guards.sh` | `e2e/tests/spine-rendering.spec.ts`, `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |

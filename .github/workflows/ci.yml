@@ -239,6 +239,14 @@ jobs:
               - 'dbt/models/**'
               - 'apps/core/config/config.exs'
               - 'apps/core/lib/core_web/router.ex'
+              # The dbt model-drift gate reads this handler's @model_mapping and
+              # fails when it names a model that is not on disk. dbt exits 0 on a
+              # selector matching nothing, so that mismatch is otherwise a green
+              # run that refreshes nothing. A handler-only change does reach the
+              # gate via the `elixir` filter and lint-elixir.sh, but naming the
+              # file the gate READS keeps the dependency visible here rather than
+              # resting on another lane's path list.
+              - 'apps/core/lib/stacks/workers/dbt_refresh_handler.ex'
               - 'frontend/src/**'
               - 'scripts/check-*.sh'
 

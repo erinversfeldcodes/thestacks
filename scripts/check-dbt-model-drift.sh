@@ -21,6 +21,7 @@ cd "$REPO_ROOT" || exit 1
 
 python3 - <<'PY'
 import glob
+import os
 import re
 import sys
 
@@ -66,4 +67,71 @@ if problems:
     sys.exit(1)
 
 print(f"OK: {checked} dbt layer count(s) match the models on disk.")
+
+# ---------------------------------------------------------------------------
+# Every model named in the event→model refresh map must exist on disk.
+#
+# WHY THIS IS A GATE AND NOT A TEST. dbt exits 0 on a selector that matches
+# nothing: `dbt ls --select mart_gone` prints "does not match any enabled nodes
+# / No nodes selected!" and returns 0. So a map entry naming a deleted model
+# produces a GREEN dbt run that refreshes nothing, and the warehouse goes stale
+# behind it. Proven by planting exactly that: the worker suite stayed green at
+# 332 tests, `dbt parse` exited 0, and so did this script before this block
+# existed. Nothing at any rung could see it.
+#
+# The map couples Elixir strings to dbt filenames, which is why neither side's
+# own tooling catches a mismatch — the Elixir side has no model list and the dbt
+# side never reads the map. A set difference across the boundary is the only
+# thing that can.
+#
+# Model names are read ONLY from the `=> [...]` list literals. The map's own
+# comments name several DELETED models on purpose (recording why their keys
+# went), so a naive scan of the block would flag the documentation of a
+# deletion as a deletion.
+HANDLER = "apps/core/lib/stacks/workers/dbt_refresh_handler.ex"
+
+try:
+    handler_src = open(HANDLER, encoding="utf-8").read()
+except OSError as exc:
+    print(f"FAIL: cannot read {HANDLER}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+mapping = re.search(r"@model_mapping\s+%\{(.*?)\n  \}", handler_src, re.DOTALL)
+if not mapping:
+    print(
+        f"FAIL: no @model_mapping block found in {HANDLER}.\n"
+        "This gate reads that map to prove every model it names exists. If the map moved "
+        "or was renamed, point this check at its new home rather than deleting the check.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+mapped = {
+    name
+    for list_body in re.findall(r"=>\s*\[([^\]]*)\]", mapping.group(1))
+    for name in re.findall(r'"([^"]+)"', list_body)
+}
+
+on_disk = {
+    os.path.basename(p)[: -len(".sql")]
+    for p in glob.glob("dbt/models/**/*.sql", recursive=True)
+}
+
+missing = sorted(mapped - on_disk)
+if missing:
+    print(
+        "FAIL: the dbt refresh map names models that do not exist on disk.",
+        file=sys.stderr,
+    )
+    for name in missing:
+        print(f"  {name}", file=sys.stderr)
+    print(
+        f"\nEach would make {HANDLER} enqueue a dbt run whose selector matches nothing — "
+        "which dbt reports as success. Either restore the model or remove it from the map, "
+        "and if an event loses every model it refreshed, unsubscribe the handler from it too.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+print(f"OK: all {len(mapped)} model(s) named in the dbt refresh map exist on disk.")
 PY
