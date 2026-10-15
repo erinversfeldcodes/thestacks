@@ -13,6 +13,22 @@ defmodule Stacks.AI.BudgetTracker do
 
   require Logger
 
+  # The providers this tracker actually meters. Production has exactly one
+  # caller — `Stacks.AI.Client` passing `:modal` — and this list says so rather
+  # than implying a vocabulary that does not exist.
+  #
+  # ⚠️ `provider` reaches a metric LABEL, and it arrives as whatever atom a
+  # caller passed: `to_string/1` on caller input is unbounded by construction,
+  # however disciplined today's single caller is. The spend STATE below keeps
+  # the exact key, because that is the ledger and it must stay accurate for a
+  # provider nobody declared; only the label collapses to "other".
+  #
+  # Adding a metered provider means adding it here, and an "other" series
+  # appearing in the store is the signal that someone did not. That is the
+  # intended failure mode: visible under-labelling beats an unbounded label set
+  # on a metric that meters money.
+  @telemetry_providers ~w(modal)
+
   @default_daily_limit_cents 500
   @default_monthly_limit_cents 5_000
 
@@ -57,7 +73,7 @@ defmodule Stacks.AI.BudgetTracker do
     :telemetry.execute(
       [:stacks, :budget, :cost_recorded],
       %{amount_cents: cost_cents},
-      %{provider: provider_key}
+      %{provider: bounded_provider(provider_key)}
     )
 
     providers =
@@ -84,7 +100,7 @@ defmodule Stacks.AI.BudgetTracker do
           :telemetry.execute(
             [:stacks, :budget, :limit_exceeded],
             %{},
-            %{provider: to_string(provider), type: :monthly}
+            %{provider: bounded_provider(provider), type: :monthly}
           )
 
           {:error, :monthly_limit_exceeded}
@@ -93,7 +109,7 @@ defmodule Stacks.AI.BudgetTracker do
           :telemetry.execute(
             [:stacks, :budget, :limit_exceeded],
             %{},
-            %{provider: to_string(provider), type: :daily}
+            %{provider: bounded_provider(provider), type: :daily}
           )
 
           {:error, :daily_limit_exceeded}
@@ -130,6 +146,15 @@ defmodule Stacks.AI.BudgetTracker do
 
     ms_until_midnight = DateTime.diff(tomorrow_midnight, now, :millisecond)
     Process.send_after(self(), :reset_daily, ms_until_midnight)
+  end
+
+  @doc "The provider values the budget metrics may label. Anything else labels as `other`."
+  @spec telemetry_providers() :: [String.t()]
+  def telemetry_providers, do: @telemetry_providers
+
+  defp bounded_provider(provider) do
+    key = to_string(provider)
+    if key in @telemetry_providers, do: key, else: "other"
   end
 
   defp get_limit(key, default) do

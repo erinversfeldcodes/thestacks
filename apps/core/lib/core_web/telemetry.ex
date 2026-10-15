@@ -1,12 +1,29 @@
 defmodule CoreWeb.Telemetry do
   @moduledoc """
-      Supervises the `telemetry_poller` that drives custom gauges, declares the
-      app's metric series, and wires request-scoped tags from `conn.private` into
-      the Phoenix dispatch telemetry metadata.
+      Supervises the `telemetry_poller` that drives custom gauges, and wires
+      request-scoped tags from `conn.private` into the Phoenix dispatch
+      telemetry metadata. Everything here is a live effect: the poller samples
+      fuse state and log-shipper keepalive, and the attached handlers add the
+      route group, the Oban worker and slow-query logging.
+
+      ⚠️ **This module no longer declares metric series, and the deletion is
+      worth explaining because the declarations looked exactly like
+      observability.** A `metrics/0` function lived here returning ~135 lines of
+      `Telemetry.Metrics` structs. Nothing consumed them: this supervisor's only
+      child is the poller, there is no `Telemetry.Metrics` reporter anywhere in
+      the tree, and no code called `metrics/0` — verified before removing it.
+      So every series declared here was emitted, counted by nothing, and on no
+      dashboard, while reading like a metric that existed.
+
+      Six of those families fired in production and reached no store at all;
+      they now live in `Core.PromEx.Plugins.Stacks`, which is where a metric
+      becomes observable in this project. The rest were already declared there
+      too, so the list was duplication that could only drift. If you are adding
+      a metric, add it to the PromEx plugin — and give it an audience in
+      `Core.PromEx.MetricAudience`, which is fail-closed.
   """
 
   use Supervisor
-  import Telemetry.Metrics
 
   @managed_fuses [
     :vision_fuse,
@@ -46,172 +63,6 @@ defmodule CoreWeb.Telemetry do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
-  end
-
-  def metrics do
-    [
-      summary("phoenix.endpoint.start.system_time",
-        unit: {:native, :millisecond}
-      ),
-      summary("phoenix.endpoint.stop.duration",
-        unit: {:native, :millisecond}
-      ),
-      summary("core.repo.query.total_time",
-        unit: {:native, :millisecond},
-        description: "The sum of the other measurements"
-      ),
-      summary("core.repo.query.decode_time",
-        unit: {:native, :millisecond},
-        description: "The time spent decoding the data received from the database"
-      ),
-      summary("core.repo.query.query_time",
-        unit: {:native, :millisecond},
-        description: "The time spent executing the query"
-      ),
-      summary("core.repo.query.queue_time",
-        unit: {:native, :millisecond},
-        description: "The time spent waiting for a database connection"
-      ),
-      counter("stacks.vision.request.start.system_time",
-        tags: [:endpoint],
-        description: "Count of vision request starts"
-      ),
-      summary("stacks.vision.request.stop.duration",
-        tags: [:endpoint, :status],
-        unit: {:native, :millisecond},
-        description: "Vision request duration"
-      ),
-      counter("stacks.vision.request.exception.duration",
-        tags: [:endpoint, :kind],
-        description: "Count of vision request exceptions"
-      ),
-      counter("stacks.fuse.melt.count",
-        event_name: [:stacks, :fuse, :melt],
-        tags: [:fuse_name],
-        description: "Fuse melt events (circuit still closed)"
-      ),
-      counter("stacks.fuse.blown.count",
-        event_name: [:stacks, :fuse, :blown],
-        tags: [:fuse_name],
-        description: "Fuse blown events (circuit opened)"
-      ),
-      sum("stacks.budget.cost_recorded.amount_cents",
-        tags: [:provider],
-        description: "AI API cost recorded in cents"
-      ),
-      counter("stacks.budget.limit_exceeded.count",
-        event_name: [:stacks, :budget, :limit_exceeded],
-        tags: [:provider, :type],
-        description: "Budget limit exceeded events"
-      ),
-      sum("stacks.costs.recorded.amount_cents",
-        tags: [:category, :service],
-        description: "Platform cost recorded in cents"
-      ),
-      counter("stacks.visibility.profile_change.count",
-        event_name: [:stacks, :visibility, :profile_change],
-        tags: [:direction],
-        description: "Profile-visibility changes, tagged tighten/loosen/same"
-      ),
-      counter("stacks.visibility.recap.count",
-        event_name: [:stacks, :visibility, :recap],
-        tags: [:outcome],
-        description: "Visibility recap job outcomes (capped/noop/error)"
-      ),
-      sum("stacks.visibility.recap.bookshelves_capped",
-        event_name: [:stacks, :visibility, :recap],
-        measurement: :bookshelves_capped,
-        tags: [:outcome],
-        description: "Bookshelves capped by the visibility recap job"
-      ),
-      sum("stacks.visibility.recap.placements_capped",
-        event_name: [:stacks, :visibility, :recap],
-        measurement: :placements_capped,
-        tags: [:outcome],
-        description: "Placements capped by the visibility recap job"
-      ),
-      sum("stacks.visibility.recap.posts_capped",
-        event_name: [:stacks, :visibility, :recap],
-        measurement: :posts_capped,
-        tags: [:outcome],
-        description: "Blog posts capped by the visibility recap job"
-      ),
-      counter("stacks.blog.association.count",
-        event_name: [:stacks, :blog, :association],
-        tags: [:outcome],
-        description:
-          "Blog book-association job outcomes — no_consent counts the posts whose " <>
-            "text was never sent to Together AI"
-      ),
-      counter("stacks.visibility.ceiling_rejection.count",
-        event_name: [:stacks, :visibility, :ceiling_rejection],
-        tags: [:resource_type],
-        description: "Visibility-ceiling rejections by resource type"
-      ),
-      counter("stacks.social.block.count",
-        event_name: [:stacks, :social, :block],
-        description: "Successful user blocks"
-      ),
-      counter("stacks.social.unblock.count",
-        event_name: [:stacks, :social, :unblock],
-        description: "Successful user unblocks"
-      ),
-      counter("stacks.social.block_error.count",
-        event_name: [:stacks, :social, :block_error],
-        tags: [:reason],
-        description:
-          "Block errors by reason (cannot_block_self/not_found/already_blocked/invalid)"
-      ),
-      counter("stacks.rate_limit.rejected.count",
-        event_name: [:stacks, :rate_limit, :rejected],
-        tags: [:bucket],
-        description: "Rate-limit rejections tagged by bucket (incl. :social, :auth)"
-      ),
-      counter("stacks.auth.password_reset.count",
-        event_name: [:stacks, :auth, :password_reset],
-        tags: [:outcome],
-        description:
-          "Password reset requests by outcome (sent/rate_limited/no_account). " <>
-            "The rate_limited series is the count of readers who asked for a " <>
-            "link and were silently sent nothing"
-      ),
-      counter("stacks.auth.confirmation_resend.count",
-        event_name: [:stacks, :auth, :confirmation_resend],
-        tags: [:outcome],
-        description:
-          "Confirmation resend requests by outcome (sent/rate_limited/" <>
-            "no_account/already_confirmed/past_renewal_ceiling)"
-      ),
-      counter("stacks.auth.email_change.count",
-        event_name: [:stacks, :auth, :email_change],
-        tags: [:outcome],
-        description:
-          "Email change flow by outcome (requested/rate_limited/confirmed/" <>
-            "reverted/invalid_confirm/invalid_revert). The reverted series is " <>
-            "readers saying a change to their account was not theirs"
-      ),
-      last_value("stacks.accounts.email_change_lapsed.degraded",
-        event_name: [:stacks, :accounts, :email_change_lapsed],
-        measurement: :degraded,
-        description:
-          "Accounts the daily sweep degraded because neither address answered " <>
-            "an email change inside the grace window"
-      ),
-      counter("stacks.view_as.usage.count",
-        event_name: [:stacks, :view_as, :usage],
-        tags: [:perspective],
-        description: "ViewAs usage by simulated perspective"
-      ),
-      counter("stacks.view_as.error.count",
-        event_name: [:stacks, :view_as, :error],
-        tags: [:reason, :phase],
-        description: "ViewAs errors by reason + phase (parse/authorize)"
-      ),
-      counter("stacks.crawler.robots_fetch.count",
-        event_name: [:stacks, :crawler, :robots_fetch],
-        description: "robots.txt fetch count"
-      )
-    ]
   end
 
   defp periodic_measurements do

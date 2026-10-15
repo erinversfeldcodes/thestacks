@@ -150,6 +150,45 @@ defmodule Stacks.Costs do
 
   @platform_cost_valid_categories ~w(hosting compute database domain services)
 
+  # The service names this module itself writes — every `service:` literal in
+  # the seeding functions below, which is the whole vocabulary the column is
+  # ever given by us.
+  #
+  # ⚠️ This exists because `service` is a FREE-TEXT column. `category` is
+  # validated by `validate_inclusion` against the list above, so its label is
+  # bounded by code a machine can check; `service` has no such validation, and
+  # a label is a cardinality commitment to the metrics store. A new service name
+  # minted tomorrow would mint a new time series forever.
+  #
+  # The ROW keeps whatever it was given — it is the record, and truncating a
+  # record to fit a metric would be the wrong trade. Only the LABEL collapses,
+  # to "other", which is a visible signal to come and add the name here rather
+  # than a silent loss.
+  @telemetry_services [
+    "Axiom",
+    "Brave Search API",
+    "Domain Registration",
+    "Fly.io Core",
+    "Fly.io Services",
+    "Google Books & Open Library",
+    "Modal GPU Inference",
+    "Neon PostgreSQL",
+    "Resend",
+    "Together AI"
+  ]
+
+  @doc "The service values the cost counter may label. Anything else labels as `other`."
+  @spec telemetry_services() :: [String.t()]
+  def telemetry_services, do: @telemetry_services
+
+  # Same shape as the audit writer's bounding, deliberately: one helper, one
+  # rule, so a reader who has met one has met both.
+  defp bounded_label(value, allowed) when is_binary(value) do
+    if value in allowed, do: value, else: "other"
+  end
+
+  defp bounded_label(_value, _allowed), do: "other"
+
   @doc "Changeset for creating or updating a platform cost line item."
   def platform_cost_changeset(cost, attrs) do
     cost
@@ -206,7 +245,10 @@ defmodule Stacks.Costs do
         :telemetry.execute(
           [:stacks, :costs, :recorded],
           %{amount_cents: cost.amount_cents},
-          %{category: cost.category, service: cost.service}
+          %{
+            category: cost.category,
+            service: bounded_label(cost.service, @telemetry_services)
+          }
         )
 
       _ ->

@@ -31,6 +31,46 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_events_handler_error_count_total" => :public,
     "stacks_events_handler_invoked_count_total" => :public,
     "stacks_fuse_state_state" => :public,
+    # ── The six families that gained a reporter ──────────────────────────────
+    # Classified consciously rather than inherited, since an unlisted metric is
+    # :unclassified and reaches no public surface by default.
+    #
+    # The two circuit-breaker counters are :public for the same reason
+    # `stacks_fuse_state_state` already is — a breaker name and a count say that
+    # a dependency is unwell, which is exactly what a transparency page is for,
+    # and they name no person.
+    "stacks_fuse_blown_count_total" => :public,
+    "stacks_fuse_melt_count_total" => :public,
+    # robots.txt fetches: an aggregate count with no tags at all. Nothing to
+    # attribute to anyone.
+    "stacks_crawler_robots_fetch_count_total" => :public,
+    # Platform operating cost by category and service. :public because the cost
+    # page already publishes these figures by design — this is the metric behind
+    # a surface that is deliberately open, and `service` is bounded to a
+    # ten-name vocabulary the app itself writes.
+    "stacks_costs_recorded_amount_cents" => :public,
+    # ⚠️ The two AI-spend metrics, and the one classification here that was
+    # genuinely arguable — recorded with the alternative so it can be overturned
+    # without re-deriving the argument.
+    #
+    # AGAINST :public — live spend against a budget limit is an operational
+    # control signal, not a published figure. Continuously exposed it tells an
+    # observer how close the platform is to refusing AI work, which is an
+    # invitation to push it there; the cost page reports spend in ARREARS, while
+    # this reports headroom in REAL TIME. Those are different disclosures.
+    #
+    # FOR :public, which is what was chosen — this project's transparency
+    # posture already publishes platform spend, and a reader discovering that
+    # image identification has stopped working deserves to see the reason was a
+    # budget ceiling rather than a fault. Hiding a refusal count makes a
+    # degradation look like a bug. The amounts are aggregates by provider,
+    # naming no person and no request.
+    #
+    # The DoS concern is real but weak here: the limit is a cost ceiling, not a
+    # capacity one, and anyone can already infer it by watching identification
+    # fail. If that changes — a per-user limit, say — revisit this first.
+    "stacks_budget_cost_recorded_amount_cents" => :public,
+    "stacks_budget_limit_exceeded_count_total" => :public,
     "stacks_gdpr_audit_read_count_total" => :public,
     "stacks_gdpr_audit_write_count_total" => :public,
     "stacks_gdpr_consent_grant_count_total" => :public,

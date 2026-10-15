@@ -76,10 +76,25 @@ defmodule Core.PromEx.MetricLabelTest do
     result: "ok / error style result atom",
     route_group: "coarse route family assigned by a plug, not a request path",
     source: "provenance tag, from a fixed set per emit site",
+    category:
+      "platform cost category — `validate_inclusion(:category, @platform_cost_valid_categories)` " <>
+        "at the changeset, so the bound is code a machine can check",
+    provider:
+      "AI provider the budget tracker meters. ⚠️ NOT bounded by its caller — it arrives as " <>
+        "`to_string/1` on a caller-supplied atom — so it is bounded AT THE EMIT SITE against " <>
+        "`BudgetTracker.telemetry_providers/0`, with anything else collapsing to \"other\"",
+    service:
+      "platform cost service name. ⚠️ The COLUMN is free text with no validation, so this is " <>
+        "bounded at the emit site against `Costs.telemetry_services/0` — the ten names the module " <>
+        "itself writes — with anything else collapsing to \"other\". The row keeps the exact value",
     status: "HTTP status code — bounded by the protocol",
     template: "email template name, one per declared template",
     tier: "age-gate tier — a small closed ladder",
-    type: "bounded login-failure type atom",
+    type:
+      "a bounded type atom — but from TWO producers with different vocabularies: login failure " <>
+        "kinds, and the budget guard's :monthly / :daily period. Both are literals at their emit " <>
+        "sites. Named per-producer rather than widened into a phrase that describes neither, " <>
+        "which is the third time this shape has come up here",
     worker: "Oban worker module name — bounded by the worker set"
   }
 

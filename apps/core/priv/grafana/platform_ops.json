@@ -784,6 +784,184 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Circuit-breaker melts and blows",
+      "description": "WHAT: rate of circuit-breaker events per fuse \u2014 a melt is one counted failure against a breaker that is still closed, a blow is the breaker opening. HOW: rate over stacks_fuse_melt_count_total and stacks_fuse_blown_count_total, split by fuse_name. MEANS: melts are the early signal, blows are the consequence; a dependency degrading shows as rising melt before any blow. WATCH: sustained melt with no blow means a dependency is flaky but under threshold \u2014 tune or investigate before it opens; a blow means calls to that dependency are being short-circuited right now, so pair this with the state-timeline above to see which.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "cps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (fuse_name) (rate(stacks_fuse_melt_count_total[5m]))",
+          "legendFormat": "melt \u2014 {{fuse_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (fuse_name) (rate(stacks_fuse_blown_count_total[5m]))",
+          "legendFormat": "blown \u2014 {{fuse_name}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Platform cost recorded, by service",
+      "description": "WHAT: platform operating spend as it is recorded, in cents, split by service. HOW: rate over the stacks_costs_recorded_amount_cents sum, by service. MEANS: these are the same figures the public cost page reports \u2014 this panel is the live view of them landing. The service label is bounded to the ten names the app itself writes; an 'other' series means a new service name was introduced without being declared, not that spending is unattributed. WATCH: an 'other' series appearing at all, and any service stepping to a new plateau.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(stacks_costs_recorded_amount_cents[1h]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "AI spend against budget, and refusals",
+      "description": "WHAT: AI API spend the budget guard is accumulating, and the calls it has refused. HOW: rate over stacks_budget_cost_recorded_amount_cents by provider, alongside stacks_budget_limit_exceeded_count_total by provider and type (daily/monthly). MEANS: the first series is money going out; the second is the guard actively declining AI work because a limit was already reached. A non-zero refusal rate means features that depend on the model are degraded RIGHT NOW. WATCH: any refusal at all is worth knowing about; a provider labelled 'other' means a metered provider was added without being declared at the emit site.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (provider) (rate(stacks_budget_cost_recorded_amount_cents[1h]))",
+          "legendFormat": "spend \u2014 {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (provider, type) (rate(stacks_budget_limit_exceeded_count_total[5m]))",
+          "legendFormat": "refused \u2014 {{provider}} {{type}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "robots.txt fetches",
+      "description": "WHAT: rate of robots.txt fetches served to crawlers. HOW: rate over stacks_crawler_robots_fetch_count_total. MEANS: a coarse signal of crawler interest in the site; it carries no tags deliberately, because a per-crawler label would be an unbounded user-agent string. WATCH: a sudden step change, which usually means a new crawler found the site or an existing one changed its cadence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(stacks_crawler_robots_fetch_count_total[5m])",
+          "legendFormat": "robots.txt fetches",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

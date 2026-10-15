@@ -158,6 +158,65 @@ defmodule Core.PromEx.Plugins.Stacks do
             "Successful Brave Search API queries — counted against the plan quota on the cost page."
         ),
 
+        # ── Six families that fired into nothing ────────────────────────────
+        # All six were declared ONLY in `CoreWeb.Telemetry.metrics/0`, whose
+        # supervisor holds a `:telemetry_poller` and no reporter — so they were
+        # emitted, covered by firing tests, and reached no store. A declaration
+        # there is not observability; this plugin is where a metric becomes
+        # visible, which is why they are declared here instead.
+        #
+        # ⚠️ Two of them meter MONEY: the spend the budget guard stops AI work
+        # over, and the figures the cost page reports. A deletion of these as
+        # "reporter-less telemetry" was proposed and would have made a
+        # money-metering gap permanent — deleting a declaration is not the same
+        # decision as deciding not to measure something.
+        sum(
+          [:stacks, :budget, :cost_recorded, :amount_cents],
+          event_name: [:stacks, :budget, :cost_recorded],
+          measurement: :amount_cents,
+          description:
+            "AI API spend recorded, in cents — the running total the budget guard compares against its daily and monthly limits.",
+          tags: [:provider]
+        ),
+        counter(
+          [:stacks, :budget, :limit_exceeded, :count, :total],
+          event_name: [:stacks, :budget, :limit_exceeded],
+          description:
+            "Budget refusals: an AI call the guard declined because the daily or monthly limit was already reached.",
+          tags: [:provider, :type]
+        ),
+        sum(
+          [:stacks, :costs, :recorded, :amount_cents],
+          event_name: [:stacks, :costs, :recorded],
+          measurement: :amount_cents,
+          description:
+            "Platform operating cost recorded, in cents, by category and service — the figures the public cost page reports.",
+          tags: [:category, :service]
+        ),
+        # The circuit breakers. These matter as much as the cost three: blow and
+        # melt are what an operator reaches for when a dependency is failing,
+        # and they were as invisible as the rest.
+        counter(
+          [:stacks, :fuse, :melt, :count, :total],
+          event_name: [:stacks, :fuse, :melt],
+          description:
+            "A failure was counted against a circuit breaker, which is still closed. Rising melt with no blow is a dependency degrading rather than down.",
+          tags: [:fuse_name]
+        ),
+        counter(
+          [:stacks, :fuse, :blown, :count, :total],
+          event_name: [:stacks, :fuse, :blown],
+          description:
+            "A circuit breaker opened: calls to that dependency now fail fast until it probes healthy again.",
+          tags: [:fuse_name]
+        ),
+        counter(
+          [:stacks, :crawler, :robots_fetch, :count, :total],
+          event_name: [:stacks, :crawler, :robots_fetch],
+          description:
+            "robots.txt fetches served to crawlers. Carries no tags deliberately — a per-crawler label would be an unbounded user-agent string."
+        ),
+
         # ── Vision request latency () ───────────────────────
         # Wall-clock for ONE Modal vision HTTP call. Emitted by
         # `Stacks.AI.Client.make_vision_request/2` on both the 200 and the
