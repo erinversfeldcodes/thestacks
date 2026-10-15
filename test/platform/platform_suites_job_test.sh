@@ -159,5 +159,59 @@ else
     done <<<"$GATE_ROOTS"
 fi
 
+# The same mechanism for the OUTBOUND gate, which the Elixir lint lane runs.
+#
+# ⚠️ Generalising this was the finding: the roots-from-the-gate assertion above
+# was written for one gate out of roughly ten, and the gate it was NOT applied
+# to had the identical defect. That gate reads `config/*.exs` at the repository
+# root — `config/runtime.exs` holds the only assignment putting the production
+# object-storage client on its seam roster — while the `elixir:` filter named
+# only `apps/core/**`, `mix.exs` and `mix.lock`. So deleting that assignment was
+# a change the lane never saw.
+outbound_gate_roots() {
+    grep -oE '"[a-zA-Z0-9_/]+/\*\.exs"' "$REPO_ROOT/scripts/check-outbound-test-default.sh" |
+        tr -d '"' |
+        sed 's|/\*\.exs$||' |
+        sort -u
+}
+
+elixir_filter() {
+    awk '
+        /^            elixir:$/ { in_block = 1; next }
+        in_block && /^            [a-z_]+:$/ { exit }
+        in_block { print }
+    ' "$REPO_ROOT/.github/workflows/ci.yml"
+}
+
+test_case "outbound_gate_inputs_trigger_its_lane" \
+    "the lane that runs the outbound-transport gate is triggered by every tree it reads"
+ELIXIR_FILTER_TXT="$(elixir_filter)"
+OUTBOUND_ROOTS="$(outbound_gate_roots)"
+
+if [[ -z "$ELIXIR_FILTER_TXT" ]]; then
+    _record_fail "the 'elixir:' paths-filter block is gone from ci.yml, or was renamed"
+elif [[ -z "$OUTBOUND_ROOTS" ]]; then
+    _record_fail "could not read any config-glob root from scripts/check-outbound-test-default.sh"
+else
+    while IFS= read -r root; do
+        [[ -z "$root" ]] && continue
+        covered=0
+        candidate="$root"
+        while [[ -n "$candidate" && "$candidate" != "." ]]; do
+            if printf '%s' "$ELIXIR_FILTER_TXT" | grep -qF "'$candidate/**'"; then
+                covered=1
+                break
+            fi
+            candidate="$(dirname "$candidate")"
+        done
+
+        if [[ "$covered" -eq 1 ]]; then
+            _record_pass "the elixir filter covers $root, which the outbound gate reads"
+        else
+            _record_fail "the outbound gate reads $root but no elixir filter path covers it — a change confined to that tree skips the lane that runs the gate"
+        fi
+    done <<<"$OUTBOUND_ROOTS"
+fi
+
 summarise
 exit $?

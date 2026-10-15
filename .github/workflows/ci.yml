@@ -133,6 +133,22 @@ jobs:
               - 'apps/core/**'
               - 'mix.exs'
               - 'mix.lock'
+              # The ROOT config tree, because the Elixir lint lane runs the
+              # outbound-transport gate and that gate reads `config/*.exs` as
+              # well as `apps/core/config/*.exs`. `config/runtime.exs` holds the
+              # ONLY assignment that puts the production object-storage client
+              # on that gate's seam roster — the facade's own default names the
+              # local implementation, so without this line deleting that
+              # assignment leaves the production client unaccounted for with PR
+              # CI fully green.
+              - 'config/**'
+              # The gate scripts themselves, because the lane that RUNS them is
+              # this one. `doc_gates` also matches `scripts/check-*.sh`, which
+              # made editing a gate look covered — but that job runs six gates
+              # and not the outbound, route-client or ports ones, so a change to
+              # a gate was never exercised by the lane that executes it.
+              - 'scripts/check-*.sh'
+              - 'scripts/lint-elixir.sh'
             elm:
               - 'frontend/**'
               # The Elm lint lane also runs the ports gate, which compares Elm
@@ -143,6 +159,11 @@ jobs:
               # runs, and the regression it was written for (finishing
               # onboarding never persisting) comes back with CI fully green.
               - 'apps/core/assets/**'
+              # And the gate itself, for the same reason it is listed on the
+              # Elixir lane: the job that runs it has to be triggered by a
+              # change to it.
+              - 'scripts/check-ports-wired.sh'
+              - 'scripts/lint-elm.sh'
             rust:
               - 'apps/scraper/**'
             python:
