@@ -519,69 +519,6 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  describe "confirm_cover_association/2" do
-    test "updates cover_image_url on a known edition" do
-      edition = insert(:book_edition)
-      cover_url = "https://example.com/cover.jpg"
-
-      assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
-      assert updated.cover_image_url == cover_url
-    end
-
-    test "the cover fetch is seamed — routed through the client, never a live request" do
-      edition = insert(:book_edition)
-      cover_url = "https://covers.example.test/#{edition.isbn}.jpg"
-
-      MockHttpClient.capture_requests()
-
-      assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
-
-      assert_receive {MockHttpClient, :request, ^cover_url}, 1_000
-      assert updated.cover_image_url == cover_url
-    end
-
-    test "returns {:error, :not_found} for an unknown edition_id" do
-      assert {:error, :not_found} =
-               Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
-    end
-
-    test "emits book.cover_confirmed event with edition_id and cover_url" do
-      edition = insert(:book_edition)
-      cover_url = "https://example.com/cover.jpg"
-      before_count = event_count("book.cover_confirmed")
-
-      Books.confirm_cover_association(edition.id, cover_url)
-
-      assert event_count("book.cover_confirmed") == before_count + 1
-    end
-
-    test "does not emit event when edition_id is not found" do
-      before_count = event_count("book.cover_confirmed")
-
-      Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
-
-      assert event_count("book.cover_confirmed") == before_count
-    end
-
-    test "the emitted event names the WORK, which is what the cache is keyed by" do
-      edition = insert(:book_edition)
-
-      Books.confirm_cover_association(edition.id, "https://example.com/cover.jpg")
-
-      payload =
-        Core.Repo.one!(
-          from(e in "event_log",
-            prefix: "op",
-            where: e.event_type == "book.cover_confirmed",
-            where: e.aggregate_id == type(^edition.id, Ecto.UUID),
-            select: e.payload
-          )
-        )
-
-      assert payload["book_id"] == edition.book_id
-    end
-  end
-
   describe "find_same_work/2" do
     test "returns empty list when DB is empty" do
       assert [] = Books.find_same_work("1984", "George Orwell")

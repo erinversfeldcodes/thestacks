@@ -597,60 +597,6 @@ defmodule Stacks.Books do
   end
 
   @doc """
-      Update cover_image_url on a book edition after the vision sidecar confirms the association.
-      Emits a book.cover_confirmed event.
-      Returns {:ok, edition} or {:error, reason}.
-  """
-  @spec confirm_cover_association(String.t(), String.t()) ::
-          {:ok, BookEdition.t()} | {:error, :not_found} | {:error, Ecto.Changeset.t()}
-  def confirm_cover_association(edition_id, cover_url) do
-    case Repo.get(BookEdition, edition_id) do
-      nil ->
-        {:error, :not_found}
-
-      edition ->
-        final_url = maybe_store_cover_in_r2(edition.isbn, cover_url)
-        changeset = book_edition_changeset(edition, %{cover_image_url: final_url})
-
-        case Repo.update(changeset) do
-          {:ok, updated} ->
-            Events.emit_safe(%{
-              event_type: "book.cover_confirmed",
-              aggregate_type: "book_edition",
-              aggregate_id: updated.id,
-              payload: %{book_id: updated.book_id, cover_image_url: final_url},
-              metadata: %{actor: "vision_sidecar"}
-            })
-
-            {:ok, updated}
-
-          {:error, changeset} ->
-            {:error, changeset}
-        end
-    end
-  end
-
-  defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
-    with {:ok, image_data} <- download_cover(cover_url),
-         {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
-         {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
-      r2_url
-    else
-      _ -> cover_url
-    end
-  end
-
-  defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
-
-  defp download_cover(url) when is_binary(url) do
-    books_http_client().get_binary(url)
-  end
-
-  defp books_http_client do
-    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
-  end
-
-  @doc """
       Finds books in the platform that are likely the same work as the given title
       and author, using Jaro-Winkler string similarity on both fields combined.
 

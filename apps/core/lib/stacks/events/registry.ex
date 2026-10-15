@@ -174,6 +174,16 @@ defmodule Stacks.Events.Registry do
   ]
 
   @pending %{
+    "book.cover_confirmed" =>
+      "cover verification is deferred to the vision redesign, not abandoned: the " <>
+        "loop that produced this event was deleted on 2026-10-15 because nothing ever " <>
+        "started a verification job, so no result could arrive. The wire contract it " <>
+        "reported through is deliberately kept for the same reason this entry is — the " <>
+        "association request, response and callback messages, and the status enum, all " <>
+        "survive in the vision proto. CacheInvalidationHandler stays registered because " <>
+        "its clause encodes something a rebuild would otherwise have to rediscover: a " <>
+        "confirmed cover invalidates the WORK, not the edition the event aggregates on, " <>
+        "since the detail payload is assembled per work. Its two tests stay with it",
     "offer.opened" =>
       "the marketplace offer flow is deferred (owner ruling 2026-08-19): the " <>
         "offer_threads and offer_messages tables, their schemas and their changesets " <>
