@@ -64,7 +64,10 @@ defmodule Core.PromEx.MetricLabelTest do
     outcome: "bounded outcome atom, per emit site",
     perspective: "view-as perspective, validated by the plug before use",
     phase: "pipeline phase name, declared in the telemetry wrapper",
-    reason: "bounded failure-reason atom, never a message or an exception",
+    reason:
+      "bounded failure-reason atom, never a message or an exception — true of the five " <>
+        "registered producers, and NOT of every emit site carrying a `reason` key; see " <>
+        "@free_text_reason_emitters",
     reason_class: "transport failure CLASS, deliberately a name rather than the failure",
     repo: "Ecto repo module name — the app declares two",
     resource_type:
@@ -80,7 +83,29 @@ defmodule Core.PromEx.MetricLabelTest do
     worker: "Oban worker module name — bounded by the worker set"
   }
 
-  # Words that must never appear as a SEGMENT of a label key, whatever the
+  # ⚠️ Emit sites that put FREE TEXT in a `reason` metadata key, and so must
+  # never have it promoted to a label.
+  #
+  # The guard above reasons over the metric REGISTRY, but boundedness is a
+  # property of the PRODUCER. `@bounded_labels[:reason]` said "bounded failure-
+  # reason atom, never a message or an exception", which is true of all five
+  # registered producers and false of this one: `Audit.log_rollback/1` emits
+  # `[:stacks, :system, :rollback]` with a `reason` taken from a workflow input,
+  # i.e. operator free text. Nothing registers that event today, so there is no
+  # live leak — the guard is simply blind to it. But the day someone adds
+  # `counter([:stacks, :system, :rollback, …], tags: [:reason])` the guard would
+  # PASS, because `:reason` is declared bounded and the declaration never said
+  # for whom.
+  #
+  # That is this file's own thesis failing one level up: a justification a
+  # machine cannot check is a sentence. So the exception is named, and the test
+  # below refuses to let one of these events be registered with the key as a tag.
+  @free_text_reason_emitters [
+    {[:stacks, :system, :rollback], :reason,
+     "operator-supplied rollback justification, read from a workflow input"}
+  ]
+
+  # Words that must never appear as a SEGMENT of a label key, whatever the  # Words that must never appear as a SEGMENT of a label key, whatever the
   # allowlist says. Either per-person (a disclosure) or per-record (unbounded
   # cardinality).
   #
@@ -113,6 +138,10 @@ defmodule Core.PromEx.MetricLabelTest do
   end
 
   defp family(metric), do: Enum.join(metric.name, "_")
+
+  # A metric's event name — the telemetry event it listens to, which is what
+  # ties a registered metric back to the emit site that fills its metadata.
+  defp metric_event(metric), do: Map.get(metric, :event_name, [])
 
   defp segments(tag), do: tag |> Atom.to_string() |> String.split("_")
 
@@ -498,6 +527,54 @@ defmodule Core.PromEx.MetricLabelTest do
              "the gate module's seventh refusal atom has no clause and no catch-all"
 
       assert StacksWeb.AuthController.invite_label_for(:something_nobody_has_added_yet) == :other
+    end
+  end
+
+  describe "a free-text metadata key is never promoted to a label" do
+    test "no registered metric tags an event whose metadata key is operator free text" do
+      # The assertion the registry-scoped guard above cannot make for itself.
+      # It checks every DECLARED label; this checks the one thing a declaration
+      # cannot express — that a specific producer's value is not bounded, so
+      # that producer's event must not carry the key as a tag however bounded
+      # the key is elsewhere.
+      offenders =
+        for {event, key, why} <- @free_text_reason_emitters,
+            metric <- registered_metrics(),
+            metric_event(metric) == event,
+            key in metric.tags,
+            do: "#{family(metric)} tags #{inspect(key)} (#{why})"
+
+      assert offenders == [],
+             "a metric now attaches a metadata key that its emit site fills with free text: " <>
+               "#{inspect(offenders)}. One series per distinct value, forever, in a store " <>
+               "with no erasure path — and for an operator-written justification, the text " <>
+               "itself may name a person. If the value has since been bounded at the emit " <>
+               "site, remove the entry from @free_text_reason_emitters and say so there."
+    end
+
+    test "every named free-text emitter still exists and still carries its key" do
+      # Anti-vacuity: the test above iterates @free_text_reason_emitters and
+      # passes trivially if an entry has gone stale, which is exactly when
+      # someone has been editing the emit site.
+      sources = all_sources()
+
+      for {event, key, _why} <- @free_text_reason_emitters do
+        event_literal = "[" <> Enum.map_join(event, ", ", &inspect/1) <> "]"
+
+        emitting =
+          Enum.filter(sources, fn {_p, src} ->
+            String.contains?(src, ":telemetry.execute(#{event_literal}")
+          end)
+
+        assert emitting != [],
+               "no source emits #{event_literal} any more, so its entry in " <>
+                 "@free_text_reason_emitters is stale. Remove it, or re-point it at the " <>
+                 "event that replaced it — leaving it makes the sibling test vacuous."
+
+        assert Enum.any?(emitting, fn {_p, src} -> src =~ "#{key}:" end),
+               "#{event_literal} is emitted but no longer puts #{inspect(key)} in its " <>
+                 "metadata. If the free text is gone, drop the entry and record why."
+      end
     end
   end
 
