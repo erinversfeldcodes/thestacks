@@ -39,6 +39,11 @@ defmodule Stacks.AI.ClientTest do
       # every time the route set changes. A route that never existed cannot be
       # deleted out from under it.
       tok_real = extract_token(Client.build_vision_request("/analyze", %{}))
+
+      # ⚠️ "/not-a-route" is DELIBERATELY NEVER SERVED. The assertion needs two
+      # distinct path strings, not two live routes — a fictional one cannot be
+      # deleted out from under the test the way "/classify" and "/extract" were.
+      # Do not "fix" it to a real endpoint.
       tok_other = extract_token(Client.build_vision_request("/not-a-route", %{}))
 
       [_ts1, sig1] = String.split(tok_real, ".", parts: 2)
