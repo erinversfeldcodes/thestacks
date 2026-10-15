@@ -2,7 +2,10 @@ version: 2
 
 models:
   - name: mart_book_reviews
-    description: Review summary per book — consumer BookController.show (review tab).
+    description: >-
+      Review summary per book. NO CONSUMER — `BookController.show` does not read this mart
+      (verified 2026-10-15); the claim that it did was false. `dbt_refresh_handler.ex:12`
+      names it as a refresh TARGET, which is not a reader.
     columns:
       - name: book_id
         description: FK to books.
@@ -20,7 +23,10 @@ models:
         description: Number of review sources.
 
   - name: mart_book_prices
-    description: Latest price per book per store — consumer BookController.show (price comparison).
+    description: >-
+      Latest price per book per store. NO CONSUMER — `BookController.show` does not read this
+      mart (verified 2026-10-15). `dbt_refresh_handler.ex:11` names it as a refresh target,
+      which is not a reader.
     columns:
       - name: book_id
         description: FK to books.
@@ -61,7 +67,10 @@ models:
           - not_null
 
   - name: mart_platform_searchable
-    description: Denormalised book data for catalogue search — consumer CatalogueController.index.
+    description: >-
+      Denormalised book data for catalogue search. NO CONSUMER — `CatalogueController.index`
+      does not read this mart (verified 2026-10-15), and platform search is recorded as not
+      currently built. `dbt_refresh_handler.ex:19` names it as a refresh target.
     columns:
       - name: book_id
         description: Book UUID.
@@ -136,7 +145,10 @@ models:
         description: Most recent event for this aggregate type.
 
   - name: mart_cost_tracking
-    description: Platform operational costs by service — consumer CostController.index. Tests deferred — source table requires dbt role grant.
+    description: >-
+      Platform operational costs by service. NO CONSUMER — `CostController.index` calls
+      `Costs.cost_breakdown/0`, which reads the `op.platform_costs` Ecto context and never
+      this mart (verified 2026-10-15). Tests deferred — source table requires dbt role grant.
     columns:
       - name: id
         description: Cost record UUID.

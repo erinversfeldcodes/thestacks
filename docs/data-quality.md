@@ -73,7 +73,15 @@ The following quality dimensions apply to all data products. Each SLA section sp
 | Validity | `rating` between 0.0 and 5.0 (GoodReads scale) | dbt test |
 | Validity | `rating_count > 0` when `rating` is not null | dbt test |
 
-**LLM faithfulness definition:** A review summary is "faithful" if every URL cited in the summary was present in the raw scraped data provided to the LLM. A summary with a fabricated URL is a faithfulness failure. This is tracked in `mart_llm_faithfulness` (see `docs/technical-architecture.md` section 29).
+**LLM faithfulness definition:** ⚠️ Corrected 2026-10-15 — the previous definition described a
+quantity this mart has never measured. It read: "A review summary is 'faithful' if every URL cited
+in the summary was present in the raw scraped data provided to the LLM." Review summaries were
+never built, and `mart_llm_faithfulness.sql` reads `ref('stg_post_book_associations')`: it is a
+confidence histogram over the LLM **post-book associations** that the blog publish flow produces,
+grouped by source. That producer is live. So the mart measures how confident the association model
+was, not whether a summary fabricated a URL, and `marts/schema.yml` has described it correctly all
+along. The stale definition was here, in the document, and a reader reconciling the two would have
+concluded the mart was broken rather than the prose.
 
 **dbt models:**
 - `stg_review_snapshots` — staging (1:1 with `op.review_snapshots`, unified across GoodReads / Reddit / StoryGraph via `source` column)

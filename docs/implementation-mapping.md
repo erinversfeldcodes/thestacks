@@ -474,7 +474,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Extends `Page.Upload` -- `NotABook` variant. Displays rejection with humour/clarity. |
-| **Backend (Phoenix)** | `Stacks.Books.classify_image/1` -- first step in pipeline. Calls Modal vision service `/classify` endpoint with classification prompt. Returns `{:error, :not_a_book, category}`. |
+| **Backend (Phoenix)** | ⚠️ `Stacks.Books.classify_image/1` **does not exist** (verified 2026-10-15) and no such function is anywhere in `apps/core`. This row was a phantom — a cited symbol with nothing behind it. Classification reaches the sidecar through `Stacks.AI.Client.call_vision/2`; the `/classify` endpoint itself is a candidate for removal under the campaign's deletion wave. |
 | **Database** | **Write:** `op.audit_log` (classification result + rejection reason). |
 | **Jobs (Oban)** | Part of `IdentifyBookJob` pipeline (step 1). |
 | **External Services** | Modal / Qwen2.5-VL-7B-Instruct (same vision model, classification prompt). |
