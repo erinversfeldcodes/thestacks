@@ -232,24 +232,6 @@ defmodule Stacks.Blog do
   end
 
   @doc """
-      Lists posts associated with a given book (by book_id), visible to the viewer.
-
-      Only returns published posts with visible associations.
-  """
-  @spec list_posts_for_book(String.t(), term()) :: [Post.t()]
-  def list_posts_for_book(book_id, viewer) do
-    from(p in Post,
-      join: a in PostBookAssociation,
-      on: a.post_id == p.id,
-      where: a.book_id == ^book_id and a.visible == true and not is_nil(p.published_at),
-      order_by: [desc: p.published_at],
-      distinct: true
-    )
-    |> Repo.all()
-    |> Visibility.filter_visible(viewer)
-  end
-
-  @doc """
       Re-evaluates all of a user's published posts against a new profile visibility ceiling.
 
       Any post whose visibility is less restrictive than the new ceiling is tightened
