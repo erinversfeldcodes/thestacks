@@ -102,14 +102,37 @@ else
     _record_pass "read $(printf '%s\n' "$PREVIEW_TXT" | grep -c . | tr -d ' ') lines of the preview branch"
 fi
 
+# ⚠️ The population's SIZE, declared in SOURCE rather than only printed on
+# failure — and the difference is the whole point.
+#
+# A population printed on failure is visible to whoever runs the test. A
+# population declared here is visible in the DIFF, so the next person reading a
+# change reviews it instead of re-deriving the set by eye. That converts "the
+# set was taken from reading" into a reviewable artefact.
+#
+# This is not hypothetical for THIS suite. Its derivation matched
+# `[A-Z_]+`, which excludes digits, so two flags were silently absent from the
+# population for as long as the suite existed. A declared count would have
+# turned that into a red run the day the regex was written: 7 expected, 5 found.
+EXPECTED_LITERAL_ASSIGNMENTS=7
+
+test_case "the_derived_population_is_the_declared_size" \
+    "the derivation finds as many literal assignments as this suite says it should"
+DERIVED="$(literal_assignments)"
+DERIVED_COUNT="$(printf '%s\n' "$DERIVED" | grep -c . | tr -d ' ')"
+if [[ "$DERIVED_COUNT" -eq "$EXPECTED_LITERAL_ASSIGNMENTS" ]]; then
+    _record_pass "derived $DERIVED_COUNT literal assignment(s), matching the declared count"
+else
+    _record_fail "derived $DERIVED_COUNT literal assignment(s) across both branches, but this suite declares $EXPECTED_LITERAL_ASSIGNMENTS. Either deploy-stack.sh gained or lost a posture flag — update EXPECTED_LITERAL_ASSIGNMENTS and the roster in the same change, so the new population is reviewable in the diff — or the derivation's regex has drifted and is now reading less than it claims. Found: $(printf '%s' "$DERIVED" | tr '\n' ' ')"
+fi
+
 test_case "the_roster_is_not_stale" "no literal-assigned flag is missing from the roster"
 # The half an allowlist cannot do for itself. A new posture flag added to
 # either branch shows up here rather than being quietly unchecked.
-DERIVED="$(literal_assignments)"
 if [[ -z "$DERIVED" ]]; then
     _record_fail "derived no literal assignments from either branch — the regex no longer matches the script's shape, so this staleness check is inert"
 else
-    _record_pass "derived $(printf '%s\n' "$DERIVED" | grep -c . | tr -d ' ') literal assignment(s) across both branches"
+    _record_pass "derived $DERIVED_COUNT literal assignment(s) across both branches"
     UNROSTERED=""
     while IFS= read -r name; do
         [[ -z "$name" ]] && continue
@@ -126,9 +149,29 @@ else
     done <<<"$DERIVED"
 
     if [[ -n "$UNROSTERED" ]]; then
-        _record_fail "these variables are assigned a literal by deploy-stack.sh but are absent from POSTURE_FLAGS in test/platform/lib/posture-flags.sh, so nothing asserts their production value: ${UNROSTERED}— add each to the roster (with a hostile and a production value) or add it to the non-posture exclusions above with a reason"
+        _record_fail "these variables are assigned a literal by deploy-stack.sh but are absent from POSTURE_FLAGS in test/platform/lib/posture-flags.sh, so nothing asserts their production value: ${UNROSTERED}— add each to the roster (with a hostile and a production value) or add it to the non-posture exclusions above with a reason. Full derived population: $(printf '%s' "$DERIVED" | tr '\n' ' ')"
     else
         _record_pass "every literal-assigned variable is either rostered or excluded with a reason"
+    fi
+fi
+
+test_case "the_roster_has_no_entry_the_script_stopped_assigning" \
+    "a rostered flag the script no longer pins is reported, not silently asserted"
+# The OTHER direction, and an allowlist needs it: an entry naming a flag
+# deploy-stack.sh has stopped assigning would keep being asserted against both
+# branches and keep failing for a reason nobody can act on — or, if the flag
+# were removed from the script entirely, keep claiming coverage of nothing.
+if [[ -z "$DERIVED" ]]; then
+    _record_fail "cannot check: no population was derived"
+else
+    ORPHANED=""
+    for flag in "${POSTURE_FLAGS[@]}"; do
+        printf '%s\n' "$DERIVED" | grep -qxF "$flag" || ORPHANED="${ORPHANED}${flag} "
+    done
+    if [[ -n "$ORPHANED" ]]; then
+        _record_fail "these roster entries name flags deploy-stack.sh no longer assigns a literal on either branch, so the roster claims coverage it does not have: ${ORPHANED}— remove them, or restore the assignment they describe"
+    else
+        _record_pass "every roster entry is still assigned a literal by the script"
     fi
 fi
 
