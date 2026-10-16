@@ -8,14 +8,14 @@ on drift, so a script with no caller cannot sit here silently.
 
 | script | called by | purpose |
 |---|---|---|
-| `scripts/bootstrap-worktree.sh` | `justfile`, `scripts/regen-proto.sh` |  |
+| `scripts/bootstrap-worktree.sh` | `justfile` |  |
 | `scripts/campaign-residue.sh` | `justfile`, `scripts/check-tracker-refs.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented dbt model counts must match the models on disk. |
-| `scripts/check-e2e-vacuous-guards.sh` | `e2e/tests/spine-rendering.spec.ts`, `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
+| `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml` |  |
@@ -28,7 +28,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-ports-wired.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` |  |
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | An anonymously-reachable route must be metered, or say why it is not. |
-| `scripts/check-route-clients.sh` | `justfile`, `scripts/check-prose-assertions.sh`, `scripts/lint-elixir.sh`, `scripts/route-clients-allowlist.txt` |  |
+| `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh` |  |
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
 | `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | Every script has a caller, and the inventory that says so is generated. |
@@ -37,11 +37,12 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Code must not cite tracker artefacts — state the substance instead. |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/ci.sh` | `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push`, `scripts/lib/python-tools.sh` |  |
-| `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` … | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
+| `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/dashboard-render-gate.sh` | `.github/workflows/ci.yml`, `justfile` |  |
-| `scripts/deploy-preview.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/cleanup-preview.sh` … |  |
-| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-preview.sh` |  |
+| `scripts/dbt-deployed.sh` | `.github/workflows/scheduled-dbt-refresh.yml`, `scripts/test-deployed.sh` |  |
+| `scripts/deploy-preview.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/deploy-stack.sh` … |  |
+| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-preview.sh` |  |
 | `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh` | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
 | `scripts/format.sh` | `justfile` |  |
 | `scripts/gen-ecto-proto.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml` … |  |
@@ -59,15 +60,16 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/hooks/lib/pre-stop-lint.sh` | `.claude/settings.json`, `scripts/install-hooks.sh` |  |
 | `scripts/hooks/lib/update-pr-ci.sh` | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` |  |
-| `scripts/hooks/pre-commit` | `e2e/tests/upload.spec.ts`, `scripts/install-hooks.sh` | pre-commit — Git pre-commit hook: lint gate on staged files. |
-| `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `justfile`, `scripts/hooks/lib/create-issue-and-pr.sh`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
+| `scripts/hooks/pre-commit` | `scripts/install-hooks.sh` | pre-commit — Git pre-commit hook: lint gate on staged files. |
+| `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
 | `scripts/install-flyctl.sh` | `justfile` |  |
-| `scripts/install-hooks.sh` | `justfile`, `scripts/hooks/pre-commit`, `scripts/hooks/pre-push` |  |
+| `scripts/install-hooks.sh` | `justfile` |  |
 | `scripts/lib/postgres.sh` | `scripts/test-dbt.sh`, `scripts/test-e2e.sh`, `scripts/test-elixir.sh` |  |
 | `scripts/lib/preview-names.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `scripts/cleanup-preview.sh`, `scripts/deploy-preview.sh` … |  |
 | `scripts/lib/python-tools.sh` | `scripts/lint-dbt.sh`, `scripts/lint-sql.sh`, `scripts/test-dbt.sh` |  |
+| `scripts/lib/squawk-rules.sh` | `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh` | Single source of truth for which squawk rules this repo suppresses. |
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-route-clients.sh`, `scripts/ci.sh` |  |
+| `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-migrations.sh` | `.github/workflows/ci.yml` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
 | `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` |  |
@@ -80,7 +82,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/mcp/test_project_tools.py` | `scripts/test-mcp.sh` | Tests for project_tools MCP server helpers and tools. |
 | `scripts/parse-fly-image.py` | `.github/workflows/deploy-production.yml` |  |
 | `scripts/parse-rollback-output.sh` | `.github/actions/rollback-production/action.yml` |  |
-| `scripts/preflight-resolver-health.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `e2e/tests/unmerge-edition.spec.ts`, `scripts/deploy-stack.sh` |  |
+| `scripts/preflight-resolver-health.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-stack.sh` |  |
 | `scripts/probe-production.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-slo-gate.sh` |  |
 | `scripts/push_billing_metrics.py` | `.github/workflows/refresh-billing-metrics.yml` | Compute month-to-date provider costs from the same inputs the providers |
 | `scripts/regen-proto.sh` | `justfile`, `scripts/bootstrap-worktree.sh` |  |
@@ -89,10 +91,10 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/security-squawk.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/extract-migration-sql.py` |  |
 | `scripts/security.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/smoke-circuit-breakers.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` |  |
-| `scripts/sweep-preview-orphans.sh` | `.github/workflows/cleanup-preview.yml`, `scripts/cleanup-preview.sh` | scripts/sweep-preview-orphans.sh — destroy preview resources no open PR owns. |
+| `scripts/sweep-preview-orphans.sh` | `.github/workflows/cleanup-preview.yml` | scripts/sweep-preview-orphans.sh — destroy preview resources no open PR owns. |
 | `scripts/test-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-deployed.sh` | `justfile` |  |
-| `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `e2e/global-setup.ts`, `e2e/tests/age-gate.spec.ts`, `e2e/tests/rate-limit.spec.ts` … |  |
+| `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |

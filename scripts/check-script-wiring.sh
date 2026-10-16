@@ -49,6 +49,44 @@ for pat in ["justfile", ".github/workflows/*.yml", ".github/actions/**/*.yml",
             try: corpus[f] = open(f, encoding="utf-8", errors="ignore").read()
             except OSError: pass
 
+# A mention in a COMMENT is not a call.
+#
+# This used to be a bare substring search over the whole file, so merely naming
+# a script recorded the naming file as a caller: a comment explaining what a
+# script replaces, a header listing what a gate supersedes, a note about a known
+# failure. That inflated "called by" with files that invoke nothing — and worse
+# in the other direction, a genuinely orphaned script could be lifted off the
+# orphan list by one sentence of prose about it, which makes the gate's central
+# claim ("a script with no caller cannot sit here silently") false.
+#
+# ⚠️ THE OBVIOUS STRONGER FIX DOES NOT WORK HERE, and it was tried and measured
+# rather than reasoned about. Requiring the mention to LOOK like an invocation —
+# the name following `bash`/`sh`/`source`/`python`/a workflow `run:`/a path
+# separator — reported 11 live scripts as orphans, because this repo dispatches
+# through its own shell functions: `lint-elm.sh` runs its gates as
+# `gate check-css.sh`, and `install-hooks.sh` installs via
+# `install_hook "pre-commit"`. Neither is distinguishable from prose by shape,
+# and enumerating every project-local dispatcher is a list that goes stale
+# exactly when someone adds a dispatcher.
+#
+# So the rule is the narrower one that the evidence supports: strip comments,
+# keep everything else. The comment test is deliberately crude — it drops only
+# lines whose first non-space characters begin a comment — because the
+# alternative is parsing four languages, and a commented-out invocation is not
+# an invocation either.
+def _code_lines(txt):
+    out = []
+    for line in txt.split("\n"):
+        stripped = line.lstrip()
+        # `#` covers shell, python and yaml; `//` and `*` cover JS/TS and block
+        # comments; `|` covers a markdown table row, which is the shape of this
+        # gate's own generated inventory.
+        if stripped.startswith(("#", "//", "*", "|")):
+            continue
+        out.append(line)
+    return out
+
+
 def callers(path):
     base = os.path.basename(path)
     # Python modules are imported by stem, not filename.
@@ -57,8 +95,10 @@ def callers(path):
         needles.add(base[:-3])
     found = []
     for f, txt in corpus.items():
-        if f == path: continue
-        if any(n in txt for n in needles):
+        if f == path:
+            continue
+        code = "\n".join(_code_lines(txt))
+        if any(n in code for n in needles):
             found.append(f)
     return sorted(found)
 
