@@ -38,8 +38,26 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 DEPLOY_STARTED_AT="${DEPLOY_STARTED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 if [[ "$TEST_MODE" -eq 0 ]]; then
-    : "${CORE_APP:?CORE_APP required in production mode}"
-    : "${METRICS_SCRAPE_TOKEN:?METRICS_SCRAPE_TOKEN required in production mode}"
+    # ⚠️ An explicit test and `exit 1`, NOT `: "${CORE_APP:?message}"`.
+    #
+    # The `${var:?}` idiom is the obvious way to demand a variable, and in this
+    # script it was silently useless: **any `trap … EXIT` makes the `${var:?}`
+    # abort path exit 0.** Measured here — bare, the idiom exits 1; with a
+    # `trap … EXIT` anywhere above it, the same script prints
+    # "CORE_APP required in production mode" and **exits 0**. A
+    # status-preserving `trap 'rc=$?; …; exit $rc'` does not help either,
+    # because `$?` is still 0 when the trap runs on that path.
+    #
+    # This file has `trap 'rm -rf "$WORK_DIR"' EXIT` above, so the production
+    # SLO gate announced its own missing inputs and then reported success — a
+    # gate that cannot fail on the one condition it checks first.
+    for required in CORE_APP METRICS_SCRAPE_TOKEN; do
+        if [[ -z "${!required:-}" ]]; then
+            echo "FAIL slo-gate: ${required} is required in production mode." >&2
+            echo "       Nothing was measured. This is a refusal, not a pass." >&2
+            exit 1
+        fi
+    done
 
     WINDOW="${PROBE_WINDOW_SECONDS:-600}"
     SCRAPE_INTERVAL=60
