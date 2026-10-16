@@ -16,7 +16,16 @@
 // type that maps to pgvector `vector`, and the proto→migration codegen
 // (`mix proto.sync`) cannot express it. The vector column is added by a
 // hand-written raw-SQL migration; these messages define only the
-// scalar/metadata columns. See docs/decisions/017.
+// scalar/metadata columns.
+//
+// The two codegen-expressible alternatives were both rejected for the same
+// reason: `bytes` → `bytea` and `repeated float` → `double precision[]` each
+// lose pgvector's ANN index and its `<->` / `<=>` distance operators, which is
+// the entire point of an embeddings table. And the migration generator does not
+// fail soft on an unknown type — `format_migration_type/1` raises — so there is
+// no partial version of this. Hence the hybrid: generate the scalar columns,
+// then `execute "ALTER TABLE … ADD COLUMN embedding vector(N)"` plus the index
+// by hand, the same shape as the existing `tsvector` migration.
 syntax = "proto3";
 
 package stacks.common.v1;

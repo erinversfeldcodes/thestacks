@@ -173,7 +173,7 @@ async function gotoShelf(page: Page, path: string): Promise<void> {
 }
 
 async function clickShelf(page: Page, href: string): Promise<void> {
-  // Wave 8 moved the five shelf links INSIDE a "Bookshelves"
+  // The five shelf links now sit INSIDE a "Bookshelves"
   // disclosure — a real <button aria-haspopup> whose menu is absent from the
   // DOM until it is clicked open. So the navigation step is now: open the
   // disclosure, then click the shelf link. Opening the disclosure only toggles

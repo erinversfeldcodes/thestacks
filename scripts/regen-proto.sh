@@ -8,8 +8,8 @@
 # artefacts are stale. Most of them are gitignored, so `git status` is clean and
 # nothing tells you — until a gate fails, and it fails in three places at once
 # (`proto: lint`, plus `elixir: test` and `python: test`, which compile against
-# the stale code). That happened in Wave 4 and again in Wave 5, costing a full
-# `just ci` re-run each time.
+# the stale code). That has happened twice, costing a full `just ci` re-run each
+# time.
 #
 # `just bootstrap-worktree` closes this for worktrees. Both incidents happened
 # in the MAIN checkout, which had no equivalent step. This is that step.

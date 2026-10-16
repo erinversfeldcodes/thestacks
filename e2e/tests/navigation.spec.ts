@@ -3,7 +3,7 @@ import { suiteAuthFile } from "./helpers";
 
 /**
  * Open a top-level nav disclosure (Bookshelves / Marketplace / Admin) by its
- * label. The Wave 8 nav replaced the CSS `:hover`/`:focus-within`
+ * label. The current nav replaced the CSS `:hover`/`:focus-within`
  * reveal — which was unreachable by touch — with a real
  * `<button class="app-nav__disclosure" aria-haspopup aria-expanded>` whose menu
  * is in the DOM ONLY once it is clicked open. Idempotent: a navigation does NOT

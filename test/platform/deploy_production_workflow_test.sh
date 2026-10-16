@@ -779,7 +779,8 @@ fi
 if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_PASSWORD"* ]]; then
     _record_pass "workflow references secrets.STACKS_PROBER_PASSWORD"
 else
-    _record_fail "workflow must reference secrets.STACKS_PROBER_PASSWORD (Phase 1 of #138)"
+    _record_fail "workflow must reference secrets.STACKS_PROBER_PASSWORD — the prober signs in
+        as its own least-privilege account, never as the owner"
 fi
 
 PROBE_SEED_EMAIL_LINE="$(printf '%s\n' "$WF_CONTENT" | grep -E '^\s*PROBE_SEED_EMAIL:' | head -1 || true)"
@@ -790,7 +791,9 @@ if [[ -n "$PROBE_SEED_EMAIL_LINE" ]]; then
         _record_fail "PROBE_SEED_EMAIL must reference secrets.STACKS_PROBER_EMAIL (got: '$PROBE_SEED_EMAIL_LINE')"
     fi
     if [[ "$PROBE_SEED_EMAIL_LINE" == *"PROD_OWNER_EMAIL"* ]]; then
-        _record_fail "PROBE_SEED_EMAIL must NOT reference PROD_OWNER_EMAIL — owner password leak path closed by #138 Phase 1 (got: '$PROBE_SEED_EMAIL_LINE')"
+        _record_fail "PROBE_SEED_EMAIL must NOT reference PROD_OWNER_EMAIL — seeding the probe
+            with the owner identity puts the owner credential on the probe path (got:
+            '$PROBE_SEED_EMAIL_LINE')"
     else
         _record_pass "PROBE_SEED_EMAIL no longer references PROD_OWNER_EMAIL"
     fi
@@ -806,7 +809,9 @@ if [[ -n "$PROBE_SEED_PASSWORD_LINE" ]]; then
         _record_fail "PROBE_SEED_PASSWORD must reference secrets.STACKS_PROBER_PASSWORD (got: '$PROBE_SEED_PASSWORD_LINE')"
     fi
     if [[ "$PROBE_SEED_PASSWORD_LINE" == *"PROD_OWNER_PASSWORD"* ]]; then
-        _record_fail "PROBE_SEED_PASSWORD must NOT reference PROD_OWNER_PASSWORD — owner password leak path closed by #138 Phase 1 (got: '$PROBE_SEED_PASSWORD_LINE')"
+        _record_fail "PROBE_SEED_PASSWORD must NOT reference PROD_OWNER_PASSWORD — the probe
+            would then be authenticating with the owner credential (got:
+            '$PROBE_SEED_PASSWORD_LINE')"
     else
         _record_pass "PROBE_SEED_PASSWORD no longer references PROD_OWNER_PASSWORD"
     fi
@@ -824,7 +829,7 @@ elif [[ -f "$DEPLOY_STACK_SCRIPT_PHASE1" ]] \
 fi
 case "$SEED_PROBER_FOUND" in
     yes-*) _record_pass "seed_prober is invoked in the deploy chain ($SEED_PROBER_FOUND)" ;;
-    no)    _record_fail "seed_prober must be invoked alongside seed_prod (in deploy-production.yml or scripts/deploy-stack.sh) — Phase 1 of #138" ;;
+    no)    _record_fail "seed_prober must be invoked alongside seed_prod (in deploy-production.yml or scripts/deploy-stack.sh) — without it the prober account does not exist and the probe falls back to owner credentials" ;;
 esac
 
 test_case "actionlint_clean_phase4" "actionlint passes on deploy-production.yml when available"

@@ -301,7 +301,7 @@ invariantSuite =
                         [ Query.find [ titleSelector ] >> Query.has [ Selector.exactText title ]
                         , Query.hasNot [ noticeSelector ]
                         ]
-        , fuzz2 standInTitleFuzzer (Fuzz.constant "barcode_unverified") "a book with no name still says so, whatever stand-in the server wrote (#344 holds)" <|
+        , fuzz2 standInTitleFuzzer (Fuzz.constant "barcode_unverified") "a book with no name still says so, whatever stand-in the server wrote" <|
             \title verificationSource ->
                 BookDetail.view (bookDetailModelFor (bookWith title verificationSource))
                     |> Query.fromHtml

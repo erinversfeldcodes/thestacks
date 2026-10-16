@@ -40,7 +40,10 @@ tracked = subprocess.run(
 ).stdout.split("\0")
 
 EXCLUDED_DIRS = ("docs/", "issues/", "plans/", "notes/", "e2e/node_modules/")
-EXCLUDED_NAMES = ("CLAUDE.md", "AGENTS.md", "README.md")
+# ⚠️ No EXCLUDED_NAMES list. There was one — CLAUDE.md, AGENTS.md, README.md —
+# and it was unreachable: all three end in `.md`, which the `endswith(".md")`
+# test below short-circuits first. Dead config that reads like coverage is
+# worse than no config, because the next reader trusts it.
 
 # ⚠️ The issue- and plan-MANAGEMENT tooling is exempt, and the distinction is
 # the whole point of this gate rather than a hole in it.
@@ -73,6 +76,21 @@ TOOLING_PATHS = (
     "scripts/check-tracker-refs.sh",
 )
 
+# ⚠️ A SECOND exemption, kept separate from the one above because the reason is
+# different and conflating them would let the tooling list grow by analogy.
+#
+# This gate's own test suite is nothing BUT planted violations: every case feeds
+# it a citation and asserts it fails. Those strings are fixture data, the way a
+# SQL-injection test contains injection strings. The alternatives are both
+# worse — splitting the literals (`"ADR-" + "015"`) to slip past the check makes
+# the suite unreadable and stops testing the real input, and dropping the cases
+# leaves the gate with no proof it can fire, which is the exact defect the suite
+# exists to prevent.
+#
+# Scope this to the suite that tests THIS gate. Any other test wanting in here
+# is a test citing a tracker for real, which is what the rule forbids.
+FIXTURE_PATHS = ("test/platform/tracker_refs_gate_test.sh",)
+
 # Deliberately conservative. Each pattern names a tracker artefact and nothing
 # else, and each has a worked false positive it must NOT match.
 PATTERNS = [
@@ -84,12 +102,44 @@ PATTERNS = [
     (re.compile(r"\bUS-\d+\.\d+"), "a user-story id"),
     # "issues/279", "plans/staff-campaign-..." — a path into the tracker trees.
     (re.compile(r"\b(?:issues|plans)/[\w.-]+"), "a path into issues/ or plans/"),
+    # ⚠️ A decision record cited as a PATH is still a decision-record citation.
+    # The `ADR[ -]\d` pattern above only sees the id spelling, so
+    # `See docs/decisions/017.` sailed past the first version of this gate while
+    # sitting in a protobuf contract comment — the same file type, and the same
+    # class, that this gate was filed over.
+    #
+    # `docs/user_stories/` likewise: most such paths embed `US-1.1.1` and are
+    # caught above, but the directory on its own is the same citation.
+    (
+        re.compile(r"\bdocs/(?:decisions|user_stories)/[\w.-]*"),
+        "a path to a decision record or user story",
+    ),
     # "#279" — three or more digits, NOT preceded by a hex-colour context and
     # not inside a longer alphanumeric run. Two digits are too noisy to claim.
     (re.compile(r"(?<![\w#])#\d{3,}\b"), "an issue number"),
     # Campaign and wave labels.
+    #
+    # ⚠️ The DATE is required, and that is the claim boundary. A dated slug
+    # (`staff-campaign-2026-10-13`) names one particular campaign and ages into
+    # a dead end. The bare phrase does not: `just wave-status`'s help text says
+    # "Is a staff-campaign wave actually done?", which is the recipe naming its
+    # own subject matter — the same "a tool naming its domain" case the tooling
+    # exemption above protects, and rewording it would make the help worse, not
+    # the code better.
     (re.compile(r"\bstaff-campaign-\d{4}-\d{2}-\d{2}"), "a campaign slug"),
     (re.compile(r"\bW\d+[a-z]\b"), "a wave label"),
+    # ⚠️ The SPELLED-OUT wave label, which is the form this project actually
+    # writes. `W2h` is how the campaign STATE FILE keys its items; prose in code
+    # says "Wave 8 moved the five shelf links" or "that happened in Wave 4".
+    # Seven live violations stood behind the gate because only the keyed form was
+    # claimed — the pattern set had been derived from the two violations in hand
+    # rather than from how the label is written in the tree.
+    #
+    # Not `Phase \d`, deliberately, and the contrast is the point: `view_as_plug`
+    # documents its own two-step design as "Phase 1 (plug)" / "Phase 2
+    # (authorize)". Fifty-odd such lines are a module describing itself, not a
+    # citation. "Wave" has no such second meaning here; "Phase" does.
+    (re.compile(r"\b[Ww]aves?\s+\d+\b"), "a wave label"),
 ]
 
 # Lines that legitimately contain a pattern. Each entry is a substring; a line
@@ -100,74 +150,101 @@ PATTERNS = [
 # reason beside it, and prefer rephrasing the code over adding a line.
 LINE_ALLOWLIST: list[tuple[str, str]] = []
 
-# A hex colour is the classic false positive for the #NNN pattern.
+# A hex colour is the classic false positive for the #NNN pattern, and getting
+# this discriminator right took three attempts. Both earlier versions were
+# silently WRONG — they passed on the repo and on a planted violation alike —
+# so the history is kept here rather than in a commit message nobody will read.
 #
-# ⚠️ The obvious guard is wrong, and silently so — it was written that way first
-# and swallowed almost every real violation. `^#[0-9a-fA-F]{3,8}$` matches
-# `#412` too, because 4, 1 and 2 are all valid hex digits. Since 0-9 are a
-# subset of hex, ANY all-digit issue number of length 3, 6 or 8 reads as a
-# colour, and those are the common lengths. The gate passed a planted `#412`
-# and would have shipped looking like it worked.
+# ATTEMPT 1, the obvious guard: `^#[0-9a-fA-F]{3,8}$`. It matches `#412`, because
+# 4, 1 and 2 are all valid hex digits. Since 0-9 are a subset of hex, EVERY
+# all-digit issue number of length 3, 6 or 8 reads as a colour — and those are
+# the common lengths. The gate passed a planted `#412` and looked like it worked.
 #
-# The discriminator that actually holds: a hex colour in this codebase contains
-# at least one LETTER (`#1a2b3c`, `#abc`), or sits in a CSS value position after
-# a colon. Checked empirically before relying on it — a sweep for all-digit hex
-# colours across every tracked non-doc file returned zero; every single hit was
-# an issue citation. So an all-digit `#NNN` outside a CSS value position is a
-# citation here, and treating it as one costs nothing.
-HEX_WITH_LETTER = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
-HAS_HEX_LETTER = re.compile(r"[a-fA-F]")
-CSS_VALUE_POSITION = re.compile(r":\s*#[0-9a-fA-F]{3,8}\b")
-
-
-# ⚠️ Second correction, and the lesson is that SYNTAX cannot separate these.
-# `#356` (an issue) and `#183020` (a gradient stop) are both "# plus hex-valid
-# digits"; a 3-digit issue number is indistinguishable from a 3-char colour.
-# An earlier version of this function claimed, on the strength of a repo sweep,
-# that no all-digit hex colours existed here — the sweep had been truncated by a
-# `head`, and `frontend/css/main.css` is full of them.
+# ATTEMPT 2, context by comment: an all-digit hex-shaped match is a colour unless
+# it sits on a comment line, since "a colour appears in a declaration value, a
+# citation appears in a comment". The second half of that sentence is false. A
+# citation also appears in a STRING LITERAL — a test name, an assertion message
+# — and the rule covers those explicitly. The miss was not hypothetical: a sweep
+# over every tracked file found FIVE live citations the gate was blind to, four
+# `#138`s inside shell assertion messages and one `#344` inside an Elm fuzz-test
+# description. All five were fixed in the same change as this comment.
 #
-# What DOES separate them is CONTEXT: a colour appears in a declaration value, a
-# citation appears in a comment. So a hex-shaped match is a colour unless it sits
-# on a comment line, and the comment forms below cover every language in this
-# repo (CSS/JS block and line comments and their ` * ` continuations, shell and
-# Elixir `#`, Elm/SQL `--`, HTML).
-COMMENT_LEAD = ("*", "/*", "//", "#", "--", "<!--", "{-")
+# ATTEMPT 3, what is actually true of this repo: an all-digit hex-shaped token is
+# a colour only where colours are written — in a stylesheet or markup file, in a
+# VALUE position, which is to say after a `:` on the same line. Every real case
+# satisfies that (`--wallpaper-color: #253040;`,
+# `background: linear-gradient(180deg, ..., #183020 100%)`), and the whole
+# tracked tree contains exactly two such lines. Anywhere else, in any language,
+# an all-digit `#NNN` is a citation.
+#
+# If a colour ever needs writing outside a stylesheet value, give it a letter
+# (`#1a2b3c`) or a named token. That is cheaper than widening this.
+#
+# ⚠️ ATTEMPT 3 ALSO SHIPPED DEAD CODE, which is worth keeping visible because it
+# is the same error one level down. The guard carried `HEX_WITH_LETTER` over a
+# `[0-9a-fA-F]` class plus a `HAS_HEX_LETTER` early return — and neither could
+# ever fire. The ONLY pattern above that produces a `#`-leading match is the
+# issue-number one, `(?<![\w#])#\d{3,}\b`, which is DIGITS ONLY. So a
+# letter-bearing colour like `#1a2b3c` never reaches this function at all, and
+# the letter branch was unreachable. The test case that claimed to pin it was
+# therefore passing for the wrong reason: deleting the guard left it green.
+#
+# What is actually being asked here is narrower than the old name suggested:
+# given a run of digits the citation pattern already matched, is that run ALSO
+# a legal hex-colour length?
+HEX_COLOUR_LENGTH = re.compile(r"^#(?:\d{3}|\d{6}|\d{8})$")
+
+# Where colours legitimately appear as literals. Deliberately NOT .elm/.ex/.ts:
+# an inline style there should use a token or a letter-bearing hex.
+STYLE_PATH_SUFFIXES = (".css", ".svg", ".html", ".heex")
 
 
-def on_comment_line(line: str, path: str) -> bool:
-    stripped = line.lstrip()
-    leads = COMMENT_LEAD
-    if path.endswith(".css"):
-        # ⚠️ `--` opens a comment in Elm and SQL but declares a CUSTOM PROPERTY
-        # in CSS: `--wallpaper-color: #253040;` is a colour, not prose. Treating
-        # `--` as a comment lead here marked every themed colour a citation.
-        leads = tuple(lead for lead in leads if lead != "--")
-    if stripped.startswith(leads):
+def in_comment(line: str, start: int) -> bool:
+    """True when the match at `start` is inside a comment opened on this line.
+
+    ⚠️ Without this, "after a colon" is far too weak. A stylesheet line is
+    FULL of colons, so a trailing comment inherits the value position of the
+    declaration before it:
+
+        --wallpaper-color: #253040; /* see #412 */
+
+    The colour is excused correctly, and then the citation beside it was
+    excused too — by a colon that belongs to the declaration, not to it.
+    """
+    before = line[:start]
+    if "/*" in before and before.rfind("/*") > before.rfind("*/"):
         return True
-    # A trailing comment: `foo();  // see #412` or `foo()  # see #412`.
-    trailing = "/*" in line or "//" in line or " # " in line
-    if not path.endswith(".css"):
-        trailing = trailing or " -- " in line
-    return trailing
+    if "<!--" in before and before.rfind("<!--") > before.rfind("-->"):
+        return True
+    return "//" in before
 
 
-def is_hex_colour(matched: str, line: str, path: str) -> bool:
-    if not HEX_WITH_LETTER.match(matched):
+def in_value_position(line: str, start: int) -> bool:
+    """True when the match at `start` sits after a `:` and outside a comment.
+
+    ⚠️ Takes the match's OFFSET, not its text. The earlier version did
+    `line.find(matched)`, which finds the FIRST occurrence — so on a line
+    holding the same token twice it answered about the wrong one.
+    """
+    return start > 0 and ":" in line[:start] and not in_comment(line, start)
+
+
+def is_hex_colour(matched: str, line: str, path: str, start: int) -> bool:
+    if not HEX_COLOUR_LENGTH.match(matched):
         return False
-    if HAS_HEX_LETTER.search(matched[1:]):
-        return True
-    # All-digit and hex-shaped: a colour in a value position, a citation in prose.
-    return not on_comment_line(line, path)
+    # A run of digits that is also a legal colour length. Only a stylesheet
+    # value position makes it a colour; a comment, a string literal and a test
+    # name are all citations.
+    return path.endswith(STYLE_PATH_SUFFIXES) and in_value_position(line, start)
 
 violations = []
 
 for path in tracked:
     if not path:
         continue
-    if path.endswith(".md") or path.startswith(EXCLUDED_DIRS) or path in EXCLUDED_NAMES:
+    if path.endswith(".md") or path.startswith(EXCLUDED_DIRS):
         continue
-    if path.startswith(TOOLING_PATHS):
+    if path.startswith(TOOLING_PATHS) or path in FIXTURE_PATHS:
         continue
     try:
         with open(path, encoding="utf-8") as handle:
@@ -178,14 +255,26 @@ for path in tracked:
     for lineno, line in enumerate(lines, start=1):
         if any(frag in line for frag, _reason in LINE_ALLOWLIST):
             continue
+        reported = False
         for pattern, label in PATTERNS:
-            match = pattern.search(line)
-            if not match:
-                continue
-            if is_hex_colour(match.group(0), line, path):
-                continue
-            violations.append((path, lineno, label, match.group(0), line.strip()[:120]))
-            break
+            # ⚠️ `finditer`, not `search`, and the reason is a fail-open rather
+            # than thoroughness. With `search` the loop saw only the FIRST match
+            # on a line; if that one was excused as a colour it moved to the next
+            # PATTERN, so every later citation on the same line went unreported.
+            # Concretely, this passed:
+            #     --wallpaper-color: #253040; /* see #412 */
+            # The colour is excused correctly and the citation beside it is never
+            # looked at. Narrow — only in the four stylesheet/markup extensions,
+            # only within one line — but it is a hole that widens with every
+            # excusal added here.
+            for match in pattern.finditer(line):
+                if is_hex_colour(match.group(0), line, path, match.start()):
+                    continue
+                violations.append((path, lineno, label, match.group(0), line.strip()[:120]))
+                reported = True
+                break
+            if reported:
+                break
 
 if violations:
     print(

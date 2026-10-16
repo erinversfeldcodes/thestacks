@@ -198,7 +198,7 @@ defmodule Stacks.Events.Registry do
         "the flow lands with its consumer already wired",
     "enrichment.reviews_scraped" =>
       "reviews are planned, not deleted (owner ruling 2026-08-07, reaffirmed 2026-10-15): " <>
-        "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
+        "a 2026-10-15 cleanup removed the scraper-side emitter but the review vertical " <>
         "returns. ⚠️ The handler stays SUBSCRIBED and the payload contract stays, but the " <>
         "handler currently maps NO models and therefore refreshes nothing — see " <>
         "DbtRefreshHandler's @subscribed_without_models, which is where that is declared and " <>

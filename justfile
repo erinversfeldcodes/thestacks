@@ -221,7 +221,7 @@ regen-proto:
 #
 # The codegen itself is `regen-proto` — one list of generators, so this recipe cannot
 # fall behind it. (It did: this used to run four of the five, omitting the Python
-# target, which is exactly the artefact Wave 5 tripped over.)
+# target — and the Python target is the one that then failed a `just ci` run.)
 proto-sync-all: regen-proto
     #!/usr/bin/env bash
     set -euo pipefail

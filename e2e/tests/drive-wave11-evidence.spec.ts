@@ -1,15 +1,25 @@
 /**
- * Wave 11 live-drive evidence capture (11b import + 11c syndication).
- * Not a test — a scripted drive that screenshots each surface on the preview.
+ * Live-drive evidence capture for the Goodreads import and the Substack
+ * syndication surfaces. Not a test — a scripted drive that screenshots each
+ * surface on a preview stack.
  * Run: BASE_URL=https://<preview>.fly.dev npx playwright test drive-wave11-evidence.ts --project=chromium
+ *
+ * ⚠️ THIS FILE DOES NOT CURRENTLY RUN AND WOULD FAIL IF IT DID. `SHOTS` below
+ * points at a scratchpad directory belonging to a session that has ended, and
+ * the syndication leg depends on a row hand-seeded into one specific preview DB
+ * that no longer exists. Nothing invokes it and it is skipped by default, so the
+ * breakage is invisible. Before reaching for it: repoint `SHOTS`, re-seed, and
+ * expect the drive to need rewriting against the current surfaces — or delete
+ * it, which is the honest option if nobody needs the evidence again.
  */
 import { test, expect } from "@playwright/test";
 
 /**
- * Evidence drives are NOT regression tests: they screenshot surfaces and (for
- * 11e) depend on a row hand-seeded into one specific preview DB. A fresh CI
- * stack has neither, so the whole file stands down unless explicitly invoked
- * with DRIVE_EVIDENCE=1 — its first full-suite run failed exactly this way.
+ * Evidence drives are NOT regression tests: they screenshot surfaces and the
+ * syndication leg depends on a row hand-seeded into one specific preview DB. A
+ * fresh CI stack has neither, so the whole file stands down unless explicitly
+ * invoked with DRIVE_EVIDENCE=1 — its first full-suite run failed exactly this
+ * way.
  */
 test.skip(
   process.env.DRIVE_EVIDENCE !== "1",
