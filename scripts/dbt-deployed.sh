@@ -123,6 +123,33 @@ if [[ "$ALLOW_LOCAL" -ne 1 ]]; then
     esac
 fi
 
+# Connect as the least-privilege warehouse role when its password is supplied,
+# keeping only the host/port/database from DATABASE_URL.
+#
+# ⚠️ This is the strongest available assertion that the warehouse grants are
+# real. For months every grant was aimed at a role that did not exist on any
+# deployed database, and because each one is wrapped in
+# `IF EXISTS (SELECT FROM pg_roles …)` the migrations granted nothing and
+# reported success. Running the build AS `stacks_dbt` means a missing grant
+# fails the build instead of passing silently — the privileges are exercised
+# rather than described.
+#
+# The password cannot come from the Neon API: Neon stores credentials only for
+# roles it created itself, and `stacks_dbt` is created by a migration. So it is
+# held as a secret on both sides, which is the cost of this posture and is worth
+# stating rather than discovering.
+#
+# Absent, the run falls back to DATABASE_URL's own role — which is the database
+# owner on a Neon stack. That is a wider blast radius, so it says so.
+if [[ -n "${STACKS_DBT_DB_PASSWORD:-}" ]]; then
+    DBT_USER="stacks_dbt"
+    DBT_PASSWORD="$STACKS_DBT_DB_PASSWORD"
+else
+    echo "NOTE: STACKS_DBT_DB_PASSWORD is unset — connecting as DATABASE_URL's own role"
+    echo "      (the database owner on a Neon stack), so the warehouse grants are not"
+    echo "      exercised by this run."
+fi
+
 export DBT_HOST DBT_PORT DBT_USER DBT_PASSWORD DBT_DBNAME
 
 # Named in the log, because the whole failure this replaces was not knowing

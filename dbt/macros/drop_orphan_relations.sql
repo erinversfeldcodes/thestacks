@@ -46,10 +46,27 @@
       no-op, even with `IF EXISTS`. That aborted the operation partway: six of
       fifteen dropped, nine left, and a "success" exit. Found by running it.
     #}
+    {#
+      ⚠️ `wh` is in this list, and it was not until 2026-10-16.
+      `dbt/profiles.yml` sets `schema: wh` as the default target, so a model
+      filed outside the three layer directories materialises THERE. The project
+      keeps `wh` for exactly that reason — a misfiling should show up as rows in
+      a schema nothing reads rather than as a dbt error someone "fixes" by
+      creating a schema — and the issue that made that decision says the orphan
+      sweep is what would surface it.
+
+      It would not have. The sweep looked at three schemas and `wh` was not one
+      of them, so a stray relation there was the only kind of orphan this macro
+      could never see: unswept, unread, and permanent. The safety net named in
+      the decision did not cover the case the decision existed for.
+
+      `wh` is expected to hold nothing, so every relation found there is an
+      orphan by construction.
+    #}
     {% set find_sql %}
       SELECT table_schema, table_name, table_type
       FROM information_schema.tables
-      WHERE table_schema IN ('staging', 'intermediate', 'marts')
+      WHERE table_schema IN ('staging', 'intermediate', 'marts', 'wh')
       ORDER BY table_schema, table_name
     {% endset %}
 
