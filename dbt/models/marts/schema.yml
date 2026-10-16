@@ -7,6 +7,11 @@ models:
       Latest price per book per store. NO CONSUMER — `BookController.show` does not read this
       mart (verified 2026-10-15). `dbt_refresh_handler.ex:11` names it as a refresh target,
       which is not a reader.
+    config:
+      meta:
+        # Named in dbt_refresh_handler.ex:11, which is a refresh target and
+        # not a reader. Kept against a filed issue rather than a hope.
+        pending_reader: the price-alerts item; refresh map only today
     columns:
       - name: book_id
         description: FK to books.
@@ -30,6 +35,9 @@ models:
 
   - name: mart_community_read_count
     description: Count of distinct shelf placements per book — consumer BookController.show (social proof).
+    config:
+      meta:
+        reader: StacksWeb.BookController.show
     columns:
       - name: book_id
         description: FK to books.
@@ -51,6 +59,12 @@ models:
       Denormalised book data for catalogue search. NO CONSUMER — `CatalogueController.index`
       does not read this mart (verified 2026-10-15), and platform search is recorded as not
       currently built. `dbt_refresh_handler.ex:19` names it as a refresh target.
+    config:
+      meta:
+        # Platform search is recorded as not currently built; this mart is
+        # its data, waiting. Refresh map names it (handler:19), which is not
+        # a reader.
+        pending_reader: platform search, recorded unbuilt; refresh map only today
     columns:
       - name: book_id
         description: Book UUID.
@@ -89,6 +103,12 @@ models:
       Platform operational costs by service. NO CONSUMER — `CostController.index` calls
       `Costs.cost_breakdown/0`, which reads the `op.platform_costs` Ecto context and never
       this mart (verified 2026-10-15). Tests deferred — source table requires dbt role grant.
+    config:
+      meta:
+        # CostController.index reads the op.platform_costs Ecto context, not
+        # this mart. Kept as the warehouse-side copy for cost history once
+        # the source table carries the dbt role grant.
+        pending_reader: cost history once the source table is granted to stacks_dbt
     columns:
       - name: id
         description: Cost record UUID.

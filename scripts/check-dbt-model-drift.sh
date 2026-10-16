@@ -209,3 +209,159 @@ print(
     f"or are declared keyless ({len(declared_keyless)} declared)."
 )
 PY
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Two warehouse-governance set differences, proposed by the mart-deletion review
+# and deliberately not built at the time.
+#
+# They are here rather than in a new script because they are the same shape as
+# the refresh-map check above — a declared set against a referenced set — and
+# because the review's own note was to land them together, before the next
+# warehouse deletion rather than after it.
+# ──────────────────────────────────────────────────────────────────────────────
+python3 - <<'PY'
+import glob
+import os
+import re
+import sys
+
+import yaml
+
+failed = False
+
+# ── (a) every mart commits to a reader, or says it is still waiting ──────────
+#
+# `docs/decisions/010-contract-first-derived-data.md` names this mechanism as
+# missing. The motivating fact: of the four surviving marts only
+# `mart_community_read_count` has an actual consumer — the other three appear
+# only in the refresh map, each kept for a different strength of reason. So the
+# rule the next person inherits ("every mart has a named consumer") is NOT the
+# rule the warehouse follows, and the difference was not decidable without
+# re-litigating the whole set, which a 180-line issue had just had to do.
+#
+# Prose in the description cannot carry this: it already said "NO CONSUMER" on
+# three marts and nothing could read that. A structured key can, and the
+# distinction it forces is the useful one — `reader` is a commitment, and
+# `pending_reader` is an admission with a reason attached.
+MARTS_SCHEMA = "dbt/models/marts/schema.yml"
+mart_files = {
+    os.path.basename(p)[:-4] for p in glob.glob("dbt/models/marts/*.sql")
+}
+
+try:
+    marts_doc = yaml.safe_load(open(MARTS_SCHEMA, encoding="utf-8").read()) or {}
+except OSError as exc:
+    print(f"FAIL: cannot read {MARTS_SCHEMA}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+declared = {}
+for model in marts_doc.get("models") or []:
+    meta = ((model.get("config") or {}).get("meta") or {})
+    meta.update(model.get("meta") or {})  # tolerate the pre-1.10 placement
+    declared[model["name"]] = meta
+
+uncommitted = sorted(
+    name
+    for name in mart_files
+    if not (declared.get(name, {}).get("reader") or declared.get(name, {}).get("pending_reader"))
+)
+undeclared = sorted(mart_files - set(declared))
+
+if undeclared:
+    failed = True
+    print(
+        f"FAIL: {len(undeclared)} mart(s) have a model file but no entry in {MARTS_SCHEMA}:",
+        file=sys.stderr,
+    )
+    for name in undeclared:
+        print(f"  {name}", file=sys.stderr)
+
+if uncommitted:
+    failed = True
+    print(
+        f"FAIL: {len(uncommitted)} mart(s) name neither a reader nor a pending_reader:",
+        file=sys.stderr,
+    )
+    for name in uncommitted:
+        print(f"  {name}", file=sys.stderr)
+    print(
+        "\nEvery mart costs a refresh on every run, so each one owes an answer to "
+        "'who reads this?'. Add under the model in "
+        f"{MARTS_SCHEMA}:\n"
+        "    config:\n"
+        "      meta:\n"
+        "        reader: Module.function        # an actual consumer, or\n"
+        "        pending_reader: <why it is kept, and against what>\n"
+        "\nA mart that can claim neither is a mart to delete — which is the "
+        "decision this gate exists to force while it is still cheap.",
+        file=sys.stderr,
+    )
+
+if not (undeclared or uncommitted):
+    readers = sum(1 for m in declared.values() if m.get("reader"))
+    pending = sum(1 for m in declared.values() if m.get("pending_reader") and not m.get("reader"))
+    print(
+        f"OK: all {len(mart_files)} mart(s) commit to a reader "
+        f"({readers} with a consumer, {pending} pending with a stated reason)."
+    )
+
+# ── (b) declared dbt sources that no model references ────────────────────────
+#
+# ⚠️ `check-source-childs` from dbt-checkpoint already performs this check and
+# already fires — it was examined and REJECTED as the carrier. Its only
+# exemption mechanisms are file-level `--exclude`/`--config`, the installed
+# package has no per-node meta key, and all sources share ONE `sources.yml` —
+# so exempting the one legitimate case would disable the check for all 41.
+#
+# Built as a set difference here instead, with the exemption carried by the
+# source's own `description`. That is the point: it makes the description
+# load-bearing rather than decorative.
+SOURCES = "dbt/models/staging/sources.yml"
+KEEP_MARKER = "DELIBERATELY HAS NO CONSUMING MODEL"
+
+try:
+    sources_doc = yaml.safe_load(open(SOURCES, encoding="utf-8").read()) or {}
+except OSError as exc:
+    print(f"FAIL: cannot read {SOURCES}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+declared_sources = {}
+for source in sources_doc.get("sources") or []:
+    for table in source.get("tables") or []:
+        declared_sources[table["name"]] = table.get("description") or ""
+
+referenced = set()
+for path in glob.glob("dbt/models/**/*.sql", recursive=True):
+    body = open(path, encoding="utf-8").read()
+    for _src, table in re.findall(
+        r"source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", body
+    ):
+        referenced.add(table)
+
+unreferenced = sorted(set(declared_sources) - referenced)
+unexplained = [t for t in unreferenced if KEEP_MARKER not in declared_sources[t].upper()]
+
+if unexplained:
+    failed = True
+    print(
+        f"FAIL: {len(unexplained)} declared source(s) are referenced by no model and say nothing "
+        "about why:",
+        file=sys.stderr,
+    )
+    for table in unexplained:
+        print(f"  {table}", file=sys.stderr)
+    print(
+        f"\nA source nobody reads is either drift or a decision. If it is a decision, say so in "
+        f"its `description` in {SOURCES} using the words '{KEEP_MARKER}' plus the reason; "
+        "otherwise remove the declaration.",
+        file=sys.stderr,
+    )
+else:
+    kept = len(unreferenced)
+    print(
+        f"OK: {len(declared_sources)} declared source(s), {len(referenced & set(declared_sources))} "
+        f"referenced, {kept} unreferenced and explained."
+    )
+
+sys.exit(1 if failed else 0)
+PY
