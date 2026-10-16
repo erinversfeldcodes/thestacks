@@ -1235,7 +1235,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 |-------|------------|
 | **Frontend (Elm)** | ~~`Page.Admin.Metrics` module~~ removed (#267). Ops-metrics surface is Grafana. |
 | **Backend (Phoenix)** | ~~`Stacks.Admin.Metrics` context / `StacksWeb.MetricsController`~~ removed (#267). Source-health survives as `Stacks.Monitoring.list_source_health/0` for the scraper-health page. |
-| **Database** | **Read:** `op.audit_log`, `wh.*` (warehouse views), Oban job tables, `op.discovered_sources`. |
+| **Database** | **Read:** `op.audit_log`, `marts.*` (warehouse views — `wh` is the empty default schema, not the warehouse), Oban job tables, `op.discovered_sources`. |
 | **Jobs (Oban)** | `Stacks.Workers.MetricsSnapshotJob` -- periodic snapshot of system state. |
 | **External Services** | None (all internal data). |
 | **dbt Models** | `mart_cost_tracking` only. The other four — ⚠️ deleted 2026-10-15 — their consumer was the in-app metrics dashboard, which Grafana superseded. |
@@ -1362,8 +1362,8 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | No dedicated page. The delete flow lives on `Page.Settings.Privacy` — a typed confirmation phrase (`"DELETE"`, `deleteConfirmed`) gates `UserClicksDeleteAccount` → `Api.deleteAccount` → `DELETE /api/gdpr/account`, emitting the `AccountDeleted` out-message. There is no `Page.Settings.DeleteAccount` module. |
-| **Backend (Phoenix)** | `Stacks.GDPR.Deletion` -- `delete_user_data/1`. Ecto.Multi transaction for cascade delete across op schema. Separate call to anonymise `wh` schema records. `StacksWeb.GDPRController.delete_account/2` audit-logs the request, enqueues the job, and returns 202. |
-| **Database** | **Delete:** All user rows in `op.*`. **Update:** `wh.*` (anonymise user_id, hash PII). |
+| **Backend (Phoenix)** | `Stacks.GDPR.Deletion` -- `delete_user_data/1`. Ecto.Multi transaction for cascade delete across op schema. ⚠️ **There is no separate call to anonymise warehouse records, and this row claimed one until 2026-10-16.** The warehouse needs no erasure step by construction: `staging` / `intermediate` / `marts` are rebuilt in full from the (already scrubbed) `op` tables by the daily refresh, so the erased user's rows are simply not found on the next build. The schema name was wrong too — dbt has never written to `wh`. The cadence that makes this a bounded guarantee is `.github/workflows/scheduled-dbt-refresh.yml`; see `docs/runbooks/gdpr-erase-user.md` for the window and how to verify it ran. `StacksWeb.GDPRController.delete_account/2` audit-logs the request, enqueues the job, and returns 202. |
+| **Database** | **Delete:** All user rows in `op.*`. **Warehouse:** nothing — no UPDATE, no anonymise step. ⚠️ This row said "**Update:** `wh.*` (anonymise user_id, hash PII)" until 2026-10-16 and that described work which does not exist and is not needed: the `staging` / `intermediate` / `marts` relations are rebuilt in full from the scrubbed `op` tables by the daily refresh, so the user's rows are absent on the next build. (`wh` was never the warehouse schema either.) |
 | **Jobs (Oban)** | `Stacks.Workers.AccountDeletionJob` -- async cascade + warehouse anonymisation; `max_attempts: 1`. It is the only job in this flow, enqueued directly by the controller with nothing scheduled ahead of it. |
 | **External Services** | None. |
 | **dbt Models** | ⚠️ **none** — `mart_gdpr_compliance` — ⚠️ deleted 2026-10-15 (no reader). GDPR compliance is evidenced by the erasure schema-guard and the export sweep in the test suite, not by a mart. |
@@ -2597,7 +2597,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **Summary** | The data pipeline follows a **contract-first derived data** pattern (ADR 010, drawing from DDIA Ch. 4, 11, 12). Protobuf contracts enforce shape at the write boundary; the event log provides ordered history; all downstream views are purpose-built derivations that can be rebuilt from the systems of record (`op.*`, `audit.*`). This is neither star schema nor medallion — it is "one log, many derivations" with contract-enforced input. |
 | **Systems of record** | `op.*` tables (OLTP, Ecto writes), `op.event_log` (append-only domain events), `audit.audit_log` (immutable, encrypted). |
 | **Derived data** | `staging.stg_*` (structural projections, PII-excluded), `intermediate.int_*` (semantic aggregates — domain joins), `marts.mart_*` (consumer-optimised read models), ETS caches (`BookDetailCache`), search indexes (`mart_platform_searchable`), Atom feeds. |
-| **Key invariant** | Every layer after `op.*` is derived and rebuildable. If the `wh` schema is dropped, `dbt run` reconstructs it. |
+| **Key invariant** | Every layer after `op.*` is derived and rebuildable. If `staging`, `intermediate` or `marts` is dropped, `dbt build` reconstructs it — which is what the daily refresh does, and what makes warehouse erasure need no deletion step of its own. (`wh` is not the warehouse schema; it is the default target schema, kept deliberately empty.) |
 | **Materialisation** | Staging: `VIEW`. Intermediate: `VIEW` or `incremental`. Marts: `incremental` for hot-path (5-min), `VIEW`/`table` for cold-path (daily). Hot-path marts may use `MATERIALIZED VIEW` with `REFRESH CONCURRENTLY`. |
 | **Refresh trigger** | Event-triggered selective dbt runs (event → specific model set) with daily cron as catch-all. Mapping in `Stacks.Workers.DbtRefreshJob`. |
 | **Design rules** | (1) No mart without a named consumer. (2) No `SELECT *` in staging — explicit column lists. (3) Tier 3/4 data never enters `wh`. (4) Incremental models for unboundedly growing sources. |

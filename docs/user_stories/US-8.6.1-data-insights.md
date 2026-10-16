@@ -24,7 +24,7 @@
 
 **Acceptance Criteria:**
 - Strictly own-only: no parameter selects another reader's data.
-- Nothing computed here is persisted — not to `op.*`, not to `wh.*`, not to `event_log`.
+- Nothing computed here is persisted — not to `op.*`, not to the warehouse schemas, not to `event_log`.
 - The sensitive section is server-enforced, not merely hidden client-side.
 - Facts are labelled as facts; inferences are labelled as illustrations.
 
@@ -217,7 +217,7 @@ None. Caching would mean holding a computed inference set somewhere with a lifet
 | `db.query.duration{query="insights.community_read_counts"}` | Ecto.Telemetry | Histogram (ms) | The batched mart read | p95 < 50ms |
 | `insights.degraded.count` | Logger warning | Counter | `Insights.community_read_counts failed` / `count_others_sharing_all failed` warnings | 0 in steady state; > 0 means readers are seeing `"unknown"` |
 | `http.response.status{endpoint="/api/me/inferences", status=401}` | Phoenix.Telemetry | Counter | Unauthenticated attempts | Informational |
-| **Rows written** | SQL | Invariant | `op.*` / `wh.*` / `event_log` row deltas attributable to this endpoint | **Exactly 0** — the zero-write property is the metric, and a non-zero value is a defect |
+| **Rows written** | SQL | Invariant | `op.*` / warehouse / `event_log` row deltas attributable to this endpoint | **Exactly 0** — the zero-write property is the metric, and a non-zero value is a defect |
 
 ---
 

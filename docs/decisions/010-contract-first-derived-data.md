@@ -118,7 +118,7 @@ int ──► marts.mart_*      Consumer-optimised read models (one per use case
 
 ### What this is NOT
 
-- **Not full CQRS.** We don't have separate write and read databases. `op.*` tables serve both OLTP writes and application reads. The `wh.*` layer is for analytical reads only — controllers reading individual records still query `op.*` directly.
+- **Not full CQRS.** We don't have separate write and read databases. `op.*` tables serve both OLTP writes and application reads. The warehouse layer (`staging` / `intermediate` / `marts`; this line said `wh.*`, which is the deliberately-empty default schema rather than where dbt builds) is for analytical reads only — controllers reading individual records still query `op.*` directly.
 - **Not event sourcing.** The `op.*` tables are the primary system of record for current state. The event log provides history and triggers, but you don't need to replay events to know what's on a shelf — you query `op.bookshelf_placements`.
 - **Not a data lake.** There's no object storage, no raw file ingestion, no schema-on-read. Data is structured and validated before it enters the system.
 

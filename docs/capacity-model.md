@@ -203,22 +203,35 @@ SELECT
   pg_size_pretty(pg_relation_size(schemaname || '.' || tablename)) AS table_size,
   pg_size_pretty(pg_indexes_size(schemaname || '.' || tablename)) AS index_size
 FROM pg_tables
-WHERE schemaname IN ('op', 'wh', 'audit')
+WHERE schemaname IN ('op', 'audit', 'cache', 'staging', 'intermediate', 'marts')
 ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC;
 ```
 
-### Analytical data growth (wh schema)
+### Analytical data growth (staging / intermediate / marts schemas)
 
-The `wh` schema is written by dbt and grows with the mart refresh cadence. Key marts:
+dbt materialises into `staging`, `intermediate` and `marts`, **not** `wh` — `wh`
+is `profiles.yml`'s default target schema and is deliberately kept empty. The
+table below named `wh` and three marts that do not exist; corrected 2026-10-16
+against the first successful deployed run.
 
-| dbt model | Refresh cadence | Estimated size at 1K users |
-|-----------|----------------|---------------------------|
-| `mart_community_read_count` | Per dbt refresh cycle (~hourly) | ~100K rows |
-| `mart_price_alerts` | Per dbt refresh | ~50K rows |
-| `mart_author_activity` | Per dbt refresh | ~20K rows |
-| `mart_platform_searchable` | Every 5 minutes | ~300K rows |
+The refresh cadence is **daily**, set by `.github/workflows/scheduled-dbt-refresh.yml`
+(`cron: "11 4 * * *"`), not hourly or every five minutes. That cadence is also
+the GDPR warehouse-erasure window — see `docs/runbooks/gdpr-erase-user.md`.
 
-The `wh` schema will remain significantly smaller than `op` throughout Phase 1 and most of Phase 2.
+| dbt model | Measured rows (preview, 2026-10-16) | Estimated at 1K users |
+|-----------|-------------------------------------|----------------------|
+| `marts.mart_community_read_count` | 150 | ~100K rows |
+| `marts.mart_platform_searchable` | 169 | ~300K rows |
+| `marts.mart_book_prices` | 0 (no price snapshots on that branch) | ~50K rows |
+| `marts.mart_cost_tracking` | 5 | ~1K rows |
+
+`mart_price_alerts` and `mart_author_activity` were listed here and have never
+existed; the warehouse holds **40 staging / 8 intermediate / 4 mart** relations,
+gated by `scripts/check-dbt-model-drift.sh`.
+
+The warehouse layers remain significantly smaller than `op` throughout Phase 1
+and most of Phase 2. All three are derived and rebuildable from `op`, so their
+size is a cost question rather than a durability one.
 
 ---
 

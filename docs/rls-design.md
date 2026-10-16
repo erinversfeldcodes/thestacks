@@ -20,11 +20,37 @@ Policies read this variable via `current_setting('app.current_user_id', true)` w
 
 ### Database roles
 
-Per [`20260305000020_create_db_roles.exs`](../apps/core/priv/repo/migrations/20260305000020_create_db_roles.exs) (and the login fix in `20260310000001_fix_db_role_login.exs`), three least-privilege roles exist:
+⚠️ **These roles exist on local and CI databases only. Verified 2026-10-16
+against the deployed database: none of them exists there.** This section used to
+describe the list below as the production posture, and it is not.
 
-- `stacks_app` — CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`. The Phoenix app connects as this role in production. RLS policies are evaluated against it.
-- `stacks_dbt` — SELECT on `op` + `audit`, CRUD on `wh`. Used by dbt transforms.
-- `stacks_readonly` — SELECT on `op` + `wh`. Used for analytics/debugging.
+The mechanism:
+[`20260305000020_create_db_roles.exs`](../apps/core/priv/repo/migrations/20260305000020_create_db_roles.exs)
+creates `stacks_app` and `stacks_dbt` **only when `STACKS_APP_DB_PASSWORD` /
+`STACKS_DBT_DB_PASSWORD` are present in the environment**, and the deploy sets
+neither. Every grant in that migration — and in the warehouse-schema migration
+that followed it — is wrapped in `IF EXISTS (SELECT FROM pg_roles …)`, so the
+migrations ran, granted nothing, and reported success. Deployed, the application
+and the nightly dbt refresh both connect as `neondb_owner`, which owns the
+database.
+
+So read the list below as the **intended** design. Whether to realise it
+(two new secrets, passed to the migrate step, with the refresh connecting as
+`stacks_dbt`) or to delete it and state the owner-level posture honestly is an
+open decision, tracked as RL-205 in `plans/residue-ledger.md`.
+
+- `stacks_app` — CRUD on `op`, SELECT on `marts`, INSERT-only on `audit`. RLS policies are evaluated against it.
+- `stacks_dbt` — SELECT on `op` + `audit`, CREATE + CRUD in `staging` / `intermediate` / `marts`. Used by dbt transforms.
+- `stacks_readonly` — SELECT on `op` + `marts`. Used for analytics/debugging.
+
+⚠️ `wh` is **not** the warehouse schema and these grants no longer name it. dbt
+materialises into `staging`, `intermediate` and `marts` per
+`dbt/dbt_project.yml`; `wh` is `profiles.yml`'s default target schema and is
+deliberately kept empty, so that a model filed outside the three layer
+directories shows up as rows in a schema nothing reads rather than as an error
+someone fixes by creating a schema. The original grants all targeted `wh` — the
+one schema dbt never writes to — which is why `stacks_dbt` could not have
+materialised a relation even where the role did exist.
 
 There is intentionally no `stacks_owner` role — schema migrations run as the hosting provider's owner account (`neondb_owner` on Neon, `postgres` locally).
 
