@@ -242,7 +242,18 @@ install_tool() {
     "$TOOLS_PIP" install --quiet "$package"
 }
 
-install_tool "dbt-postgres" "dbt"
+# dbt is pinned in dbt/requirements.txt rather than floating like the tools
+# below it, because the nightly refresh workflow installs from that same file to
+# build the production warehouse. An unpinned install here meant the version the
+# models were developed against was whatever pip resolved on the day, and the
+# divergence would have surfaced as rows in production rather than as an error
+# locally.
+if [[ -x "$TOOLS_VENV/bin/dbt" ]] && "$TOOLS_VENV/bin/dbt" --version &>/dev/null; then
+    success "dbt already in venv"
+else
+    info "Installing dbt from dbt/requirements.txt into .venv-tools/..."
+    "$TOOLS_PIP" install --quiet -r "$REPO_ROOT/dbt/requirements.txt"
+fi
 install_tool "sqlfluff" "sqlfluff"
 if ! "$TOOLS_PIP" show sqlfluff-templater-dbt &>/dev/null; then
     info "Installing sqlfluff-templater-dbt into .venv-tools/..."

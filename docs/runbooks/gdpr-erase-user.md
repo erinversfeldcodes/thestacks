@@ -91,27 +91,43 @@ shell/Elixir injection surface.
 
 The erasure scrubs the operational tables and event log immediately.
 
-⚠️ **There is currently no analytics warehouse to propagate to, and this
-section previously said otherwise.** Verified 2026-10-16 against the deployed
-database: the `wh` schema contains **zero tables**, and the `staging`,
-`intermediate` and `marts` schemas that `dbt/dbt_project.yml` targets do not
-exist. dbt has never successfully run against a deployed stack.
+**Warehouse copies of the erased user's data disappear within 24 hours**, and
+as of 2026-10-16 that is a live commitment rather than a vacuous one.
 
-So the honest position for an erasure today: **no warehouse copy of the user's
-data exists, because no warehouse exists.** Nothing is outstanding after the
-operational scrub completes.
+### Why it holds
 
-This section used to promise that warehouse copies drop within ≤24h via the
-daily `DbtRefreshJob` full run. That promise was satisfied only by there being
-nothing to drop — the job fires from an Oban crontab entry on a machine
-configured to scale to zero, shelling a binary the runtime image does not
-contain. Do not reinstate the ≤24h wording on the strength of the crontab line
-still being present.
+The warehouse is built entirely by `dbt build` from the operational tables. The
+erasure scrubs those tables synchronously, so the next rebuild simply does not
+find the user's rows — there is no separate deletion step in the warehouse to
+go wrong, and nothing in `staging`, `intermediate` or `marts` is appended to
+across runs except the incremental marts, which are keyed on ids the scrub
+removes.
 
-**When dbt starts running, this becomes a live commitment for the first time**,
-and whoever makes that change owns this paragraph: state the real refresh
-cadence, and if it is not daily, the erasure SLA quoted to a data subject
-changes with it.
+The rebuild is `.github/workflows/scheduled-dbt-refresh.yml`, on
+`cron: "11 4 * * *"` — daily, at 04:11 UTC. **That cron line is the SLA.** If it
+is changed, the number in the heading above changes with it, and so does what is
+quoted to a data subject.
+
+### How to check it actually ran
+
+Do not infer it from a green workflow badge. The previous arrangement was green
+for months while the warehouse stayed empty. Read the far-end value:
+
+    stacks_dbt_refresh_last_success_timestamp_seconds{target="production"}
+
+`now()` minus that gauge is how stale the warehouse is. If it exceeds 24 hours,
+the erasure commitment above is **not currently being met** and the subject's
+warehouse copy may still exist — say so rather than repeating the headline.
+
+### What this section used to say
+
+It promised the same ≤24h window via the daily `DbtRefreshJob` full run, and
+that promise was satisfied only by there being nothing to drop: the job fired
+from an Oban crontab entry on a machine configured to scale to zero, shelling a
+binary the runtime image does not contain, targeting schemas that did not exist.
+Verified 2026-10-16 before the fix — the `wh` schema held **zero tables**. The
+wording is restored here only because the mechanism behind it now exists and has
+been observed to run; the crontab line alone was never evidence for it.
 
 ## Verifying afterwards
 

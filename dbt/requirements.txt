@@ -1,0 +1,17 @@
+# The dbt version this project's models are developed and tested against.
+#
+# ONE PIN, TWO CONSUMERS  `setup.sh` installs from here into `.venv-tools/`, and
+# .github/workflows/scheduled-dbt-refresh.yml installs from here before building
+# the deployed warehouse. Before this file existed, `setup.sh` installed
+# `dbt-postgres` unpinned — so the version a developer tested against was
+# whatever pip resolved on the day they ran setup, and a workflow pinning
+# anything at all would have been pinning a version nobody had run the models
+# against. The nightly refresh is the one place where that divergence would
+# surface as rows in production rather than as an error on a laptop.
+#
+# Upgrading is a deliberate act: change these two lines, run `just test-dbt`
+# and the deployed refresh's workflow_dispatch against staging, and read the
+# orphan-relation report — an adapter upgrade can change how a relation is
+# materialised, which is exactly what that sweep is sensitive to.
+dbt-core==1.12.2
+dbt-postgres==1.11.0
