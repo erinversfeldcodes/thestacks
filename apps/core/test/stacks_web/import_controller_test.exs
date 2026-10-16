@@ -128,6 +128,32 @@ defmodule StacksWeb.ImportControllerTest do
       assert reported["reason"] == "no ISBN"
     end
 
+    test "a misspelled outcome is refused, not answered with an empty report", %{
+      conn: conn,
+      user: user,
+      import: import
+    } do
+      # The filter is applied by string equality, so an unknown value matched
+      # nothing and the endpoint answered `200 {"rows": []}` — identical to the
+      # true statement "nothing in this import was shelved". A client reading
+      # that cannot tell which it got, and the mistake is a single character.
+      {:ok, [first | _]} = Imports.list_rows(user.id, import.id)
+      Imports.record_outcome(first, "shelved")
+
+      body = json_response(get(conn, "/api/imports/#{import.id}/rows?outcome=shelve"), 422)
+
+      assert body["error"] == "unknown_outcome"
+
+      assert Enum.sort(body["valid_outcomes"]) ==
+               Enum.sort(["shelved", "duplicate", "unverified", "unreadable"])
+
+      # And the near-miss really would have come back empty, so the refusal is
+      # carrying information the 200 could not. Without this the test above
+      # passes against an endpoint that refuses everything.
+      assert %{"rows" => [_]} =
+               json_response(get(conn, "/api/imports/#{import.id}/rows?outcome=shelved"), 200)
+    end
+
     test "another user's import is a 404, not a leak", %{conn: _conn, import: import} do
       stranger = insert(:user)
       conn = auth_conn(Phoenix.ConnTest.build_conn(), stranger)

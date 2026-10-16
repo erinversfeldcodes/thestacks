@@ -84,6 +84,14 @@ defmodule StacksWeb.ImportController do
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 
+      {:error, :unknown_outcome} ->
+        # Names the roster rather than just refusing. The caller asked for a
+        # filter by spelling, and the only thing that fixes a misspelling is
+        # knowing the spellings.
+        conn
+        |> put_status(422)
+        |> json(%{error: "unknown_outcome", valid_outcomes: Imports.row_outcomes()})
+
       {:ok, rows} ->
         json(conn, %{rows: Enum.map(rows, &row_json/1)})
     end

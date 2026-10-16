@@ -38,6 +38,19 @@ defmodule Stacks.Imports do
   def row_retention_days, do: @row_retention_days
 
   @doc """
+      Every outcome a row can carry.
+
+      Exposed because the READ side needs the same roster the write side
+      validates against. `list_rows/3`'s `:outcome` filter was applied straight
+      to the query, so `?outcome=shelve` matched nothing and answered `200` with
+      an empty list — a typo rendering as "this import has no shelved rows",
+      which is a different and entirely plausible fact. One roster, checked at
+      both ends.
+  """
+  @spec row_outcomes() :: [String.t()]
+  def row_outcomes, do: @row_outcomes
+
+  @doc """
       Parses a Goodreads CSV export and creates the import with all its rows,
       enqueueing the processing job. Returns:
 
@@ -132,27 +145,36 @@ defmodule Stacks.Imports do
       empty list against a non-zero `row_count` means expired, not lost.
   """
   @spec list_rows(binary(), binary(), keyword()) ::
-          {:ok, [LibraryImportRow.t()]} | {:error, :not_found}
+          {:ok, [LibraryImportRow.t()]} | {:error, :not_found} | {:error, :unknown_outcome}
   def list_rows(user_id, import_id, opts \\ []) do
-    case get_import(user_id, import_id) do
-      nil ->
-        {:error, :not_found}
+    # Checked BEFORE the lookup, and reported rather than ignored. An unknown
+    # outcome used to be pasted into the WHERE clause, where it matched nothing
+    # and the caller got `200 []` — so `?outcome=shelve` was indistinguishable
+    # from an import in which nothing was shelved. Parameterised, so never an
+    # injection; wrong, because silence is an answer here.
+    with :ok <- validate_outcome(Keyword.get(opts, :outcome)),
+         import when not is_nil(import) <- get_import(user_id, import_id) do
+      query =
+        LibraryImportRow
+        |> where([r], r.import_id == ^import.id)
+        |> order_by([r], asc: r.row_number)
 
-      import ->
-        query =
-          LibraryImportRow
-          |> where([r], r.import_id == ^import.id)
-          |> order_by([r], asc: r.row_number)
+      query =
+        case Keyword.get(opts, :outcome) do
+          nil -> query
+          outcome -> where(query, [r], r.outcome == ^outcome)
+        end
 
-        query =
-          case Keyword.get(opts, :outcome) do
-            nil -> query
-            outcome -> where(query, [r], r.outcome == ^outcome)
-          end
-
-        {:ok, Repo.all(query)}
+      {:ok, Repo.all(query)}
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
+
+  defp validate_outcome(nil), do: :ok
+  defp validate_outcome(outcome) when outcome in @row_outcomes, do: :ok
+  defp validate_outcome(_), do: {:error, :unknown_outcome}
 
   @doc "Marks an import running and stamps `started_at` (first batch only)."
   @spec mark_running(LibraryImport.t()) :: LibraryImport.t()
