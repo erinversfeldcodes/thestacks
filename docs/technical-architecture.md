@@ -596,9 +596,9 @@ The data pipeline follows a **contract-first derived data** pattern, drawing fro
 ```
 SYSTEMS OF RECORD                 DERIVED DATA (all rebuildable)
 ─────────────────                 ──────────────────────────────
-op.* tables (OLTP) ──► wh.stg_*  (structural projections, PII-excluded)
-op.event_log       ──► wh.int_*  (semantic aggregates, domain joins)
-audit.audit_log    ──► wh.mart_* (consumer-optimised read models)
+op.* tables (OLTP) ──► staging.stg_*  (structural projections, PII-excluded)
+op.event_log       ──► intermediate.int_*  (semantic aggregates, domain joins)
+audit.audit_log    ──► marts.mart_* (consumer-optimised read models)
                    ──► ETS caches, search indexes, Atom feeds
 ```
 
@@ -5751,7 +5751,7 @@ Posts are standalone — they are not required to reference a book. The connecti
 - Enrichment data: `price_snapshots` (per edition), `review_snapshots` (per work), `discovered_sources`
 - The user's `bookshelf_placements` row (shelf, wear level)
 - The user's `post_book_associations` (links to their blog posts about this work)
-- Community read count from `wh.mart_community_read_count` (for Looking for a Home wear state)
+- Community read count from `marts.mart_community_read_count` (for Looking for a Home wear state)
 
 **In Phases 1–6**, the join set is small enough that query-time assembly is the correct approach. The enrichment data is canonical (scraped once per ISBN, not per user), and the user-specific joins are a single `placements` row.
 

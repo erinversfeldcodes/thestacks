@@ -4,7 +4,7 @@ defmodule Stacks.BooksMartWiringTest do
   import Stacks.Factory
 
   # The community read count is read with raw SQL against the mart dbt builds.
-  # The query named `wh.mart_community_read_count` while dbt's
+  # The query named `marts.mart_community_read_count` while dbt's
   # generate_schema_name macro materialises marts in the `marts` schema — so
   # the query could not succeed ANYWHERE, and the rescue-to-0 fallback absorbed
   # it silently: every book showed zero community reads, forever, with no error.

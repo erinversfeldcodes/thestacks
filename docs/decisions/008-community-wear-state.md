@@ -37,7 +37,7 @@ The design intent for Looking for a Home is that it functions as a *social signa
 **The Looking for a Home bookshelf uses community-driven wear state, derived from `mart_community_read_count`. The seller provides an explicit condition grade at listing time (separate from wear display).**
 
 **Community wear derivation:**
-The wear level displayed on Looking for a Home spines is computed from `wh.mart_community_read_count` — a dbt mart that aggregates, per work:
+The wear level displayed on Looking for a Home spines is computed from `marts.mart_community_read_count` — a dbt mart that aggregates, per work:
 - Total platform users who have this book in Library (have read it)
 - Total platform users who have moved it to Library from Reading Pile (completed it)
 - Average personal rating across all platform users who have rated it
@@ -57,7 +57,7 @@ When a seller creates a listing on Looking for a Home, they assign one of: `new 
 
 **Why this matters:** A buyer browsing Looking for a Home sees a spine with WellLoved wear and understands "this is a much-loved book on this platform" — a social proof signal. They then open the listing and see "condition: like_new" — the seller's description of the physical copy. These are complementary signals, not conflicting ones.
 
-**Data source:** `wh.mart_community_read_count` is refreshed by the `dbt_refresh` Oban queue after each data pipeline run. Staleness is acceptable — community wear changes slowly. Spines on Looking for a Home do not update in real-time.
+**Data source:** `marts.mart_community_read_count` is refreshed by the `dbt_refresh` Oban queue after each data pipeline run. Staleness is acceptable — community wear changes slowly. Spines on Looking for a Home do not update in real-time.
 
 **Privacy note:** Community wear aggregates are anonymous — the dbt mart does not expose which users have read a book. Only counts and averages. This is enforced at the dbt model level: Tier 3 and Tier 4 personal data never leaks to warehouse models.
 

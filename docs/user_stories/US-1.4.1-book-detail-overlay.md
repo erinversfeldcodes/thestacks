@@ -19,7 +19,7 @@
 - Clicking a spine opens a modal overlay with book details.
 - Overlay has backdrop blur and click-to-dismiss.
 - Close button (X) in top-right corner.
-- All detail sections render: Hero, About, Reviews, Prices, Author, Writing, Shelf Actions. ⚠️ **Writing renders as a STUB only** — see section 5's read path. The section's heading, empty list and `Add Post` button are present; no post is ever shown and the button has no handler.
+- All detail sections render: Hero, About, Reviews, Prices, Author, Writing, Shelf Actions. Writing shows the viewer's own posts about this book — title linking to the post, a date, or a `Draft` label — and an empty state otherwise. A signed-out reader sees no Writing section at all, because the server sends an empty list to anonymous callers and an empty list alone cannot distinguish "signed out" from "written nothing". There is no `Add Post` button: associations are created by an asynchronous worker when a post is published, so the page has no action to offer.
 - If user owns the book: Move to Shelf, Format toggles, and Remove actions are shown.
 - If authenticated but book not owned: "Add to Collection" action is shown.
 - If unauthenticated: "Sign In or Register" prompt is shown.
@@ -36,7 +36,7 @@
 5. The overlay renders immediately via `Page.BookDetail.overlayView model`.
 6. Backdrop with blur (`rgba(10, 8, 6, 0.75)`, `backdrop-filter: blur(4px)`) covers the shelf.
 7. Card renders centered with `max-width: 900px`, `width: 90vw`, `max-height: 90vh`, `overflow-y: auto`.
-8. On `BookLoaded (Ok response)`, the book detail content fills in: hero, about, reviews, prices, author, shelf actions. ⚠️ **Not writing** — `viewWritingSection` takes no arguments, so nothing in `response` can reach it.
+8. On `BookLoaded (Ok response)`, the book detail content fills in: hero, about, reviews, prices, author, writing, shelf actions. `response.myWriting` reaches `viewWritingSection model`; drafts sort first, because `published_at DESC` is NULLS FIRST in Postgres.
 9. User dismisses by clicking X, clicking backdrop, or pressing Escape -> `CloseOverlay` msg -> `OutMsg RequestCloseOverlay`.
 
 ### Sad Paths
@@ -115,8 +115,8 @@
 - **Schema module**: `Stacks.Shelving.Placement`
 
 ### Read: Community read count
-- **Table(s)**: `wh.mart_community_read_count`
-- **Query**: Raw SQL `SELECT read_count FROM wh.mart_community_read_count WHERE book_id = $1 LIMIT 1`
+- **Table(s)**: `marts.mart_community_read_count`
+- **Query**: Raw SQL `SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1`
 - **Schema module**: N/A (raw query)
 
 ### Read: User's writing linked to book
@@ -185,7 +185,7 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 
 ## 11. dbt Model Dependencies
 
-- **Model**: `wh.mart_community_read_count`
+- **Model**: `marts.mart_community_read_count`
 - **Trigger**: Refreshed when `placement.created` or `placement.moved` events fire (via `DbtRefreshHandler`)
 - **Materialisation**: Likely view or incremental
 - **Consumer**: `BookController.show/2` reads `community_read_count` from this mart
@@ -243,8 +243,8 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 | `db.query.count{table="op.books", op="select"}` | Ecto.Telemetry | Counter | Increment per book detail query | 0 on cache hit, 1 on cache miss |
 | `db.query.duration{table="op.books", op="select"}` | Ecto.Telemetry | Histogram (ms) | Book detail query with author/edition preloads | p95 < 30ms |
 | `db.query.count{table="op.bookshelf_placements", op="select"}` | Ecto.Telemetry | Counter | Increment per user placement lookup | 1 per request (authenticated users only) |
-| `db.query.count{table="wh.mart_community_read_count", op="select"}` | Ecto.Telemetry | Counter | Increment per community read count lookup | 1 per request |
-| `db.query.duration{table="wh.mart_community_read_count", op="select"}` | Ecto.Telemetry | Histogram (ms) | Raw SQL query to dbt mart | p95 < 15ms |
+| `db.query.count{table="marts.mart_community_read_count", op="select"}` | Ecto.Telemetry | Counter | Increment per community read count lookup | 1 per request |
+| `db.query.duration{table="marts.mart_community_read_count", op="select"}` | Ecto.Telemetry | Histogram (ms) | Raw SQL query to dbt mart | p95 < 15ms |
 | `db.query.count{table="op.blog_posts", op="select"}` | Ecto.Telemetry | Counter | Increment per user writing lookup | 1 per request (authenticated users only) |
 | `cache.hit{cache="BookDetailCache"}` | BookDetailCache | Counter | Increment on cache hit for book detail | Informational |
 | `cache.miss{cache="BookDetailCache"}` | BookDetailCache | Counter | Increment on cache miss for book detail | Informational |
@@ -277,7 +277,7 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 |-------------|------|--------------|-------|
 | Fly.io compute (core) | CPU-ms per request | Number of book detail overlay opens | Multiple queries per request: book detail, placement lookup, community read count, user writing. Cache hits reduce DB load. |
 | Neon DB (PostgreSQL) | Compute Units (CU) per query | Cache misses on book detail lookups | On cache miss: book + author + editions preload query. On every request: placement lookup, community read count (raw SQL to dbt mart), blog posts query. Total 3-4 queries per request. |
-| Neon DB (PostgreSQL) | Compute Units (CU) per query | `wh.mart_community_read_count` reads | Raw SQL read from dbt mart on every book detail request. Lightweight indexed lookup. |
+| Neon DB (PostgreSQL) | Compute Units (CU) per query | `marts.mart_community_read_count` reads | Raw SQL read from dbt mart on every book detail request. Lightweight indexed lookup. |
 | R2 presigned URLs | Presigned URL generation | Cover image display | `edition.cover_image_url` is pre-stored; no runtime R2 presigned URL generation. However, if cover URLs point to R2, each browser fetch incurs R2 egress. |
 | BookDetailCache (ETS) | Memory (bytes) | Cached book entries x TTL (5 min) | In-process ETS cache. No external cost, but consumes Fly.io instance memory. |
 

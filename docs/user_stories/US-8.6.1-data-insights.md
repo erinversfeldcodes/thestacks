@@ -113,7 +113,7 @@ Every interaction is a **read**. This story has no write.
 - **Note**: history rows reference bookshelf UUIDs rather than a user, so the scope is applied by first resolving the reader's own bookshelf ids.
 
 ### Read: community read counts for the fingerprint set
-- **Table(s)**: `wh.mart_community_read_count`
+- **Table(s)**: `marts.mart_community_read_count`
 - **Query**: one raw `SELECT book_id::text, read_count … WHERE book_id = ANY($1::uuid[])` for the whole shelf
 - **Why raw + batched**: a per-book `Books.community_read_count/1` would be an N+1 over an unbounded shelf. A missing mart degrades to an empty map (all-zero, deterministic ordering by id) rather than raising (`insights.ex:267-281`).
 

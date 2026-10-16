@@ -182,7 +182,7 @@ This server-side model is richer than the current frontend model and could be us
 The wear level does not currently modify the texture rendering. Both `Pristine` and `Softened` render identically in terms of colours and textures. The visual differentiation described in the user story (rounded corners, muted colours, creases) would be implemented via CSS classes keyed on wear level -- this is a future enhancement.
 
 ### Looking-for-a-Home community wear (ADR-008, aspirational)
-Per `docs/decisions/008-community-wear-state.md`, the Looking-for-a-Home bookshelf is intended to display **community-driven wear** derived from `wh.mart_community_read_count` rather than per-owner reading history. The full five-level palette (`Pristine | Softened | Cracking | WellRead | WellLoved`) and the reader-count thresholds (5 / 20 / 100 / 500) live in that ADR. `Stacks.Books.community_read_count/1` exposes the mart query, but the Elm `WearLevel` type still only encodes `Pristine | Softened`, so the community-wear rendering remains aspirational.
+Per `docs/decisions/008-community-wear-state.md`, the Looking-for-a-Home bookshelf is intended to display **community-driven wear** derived from `marts.mart_community_read_count` rather than per-owner reading history. The full five-level palette (`Pristine | Softened | Cracking | WellRead | WellLoved`) and the reader-count thresholds (5 / 20 / 100 / 500) live in that ADR. `Stacks.Books.community_read_count/1` exposes the mart query, but the Elm `WearLevel` type still only encodes `Pristine | Softened`, so the community-wear rendering remains aspirational.
 
 ### Update cycle
 N/A -- pure rendering.

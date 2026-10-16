@@ -51,9 +51,9 @@ Protobuf contracts ──► op.* tables (OLTP, Ecto writes)
 
                     DERIVED DATA (all rebuildable)
                     ──────────────────────────────
-op.* ──► wh.stg_*     Structural projections (PII-excluded, proto-derived where applicable)
-stg ──► wh.int_*       Semantic aggregates (domain-meaningful joins and computations)
-int ──► wh.mart_*      Consumer-optimised read models (one per use case)
+op.* ──► staging.stg_*     Structural projections (PII-excluded, proto-derived where applicable)
+stg ──► intermediate.int_*       Semantic aggregates (domain-meaningful joins and computations)
+int ──► marts.mart_*      Consumer-optimised read models (one per use case)
      ──► ETS caches    Ephemeral in-memory derivations (BookDetailCache)
      ──► Search index  mart_platform_searchable (denormalised for full-text)
      ──► Atom feeds    Per-shelf XML projections (event-driven regeneration)

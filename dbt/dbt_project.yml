@@ -15,6 +15,27 @@ clean-targets:
   - target
   - dbt_packages
 
+# Grant the app read access to whatever this run just built.
+#
+# ⚠️ This belongs here and NOT in a migration, which is where it was first
+# written. Postgres requires the caller of `ALTER DEFAULT PRIVILEGES FOR ROLE
+# stacks_dbt` to own or be a member of that role, and the migration role is
+# neither — verified against a fresh database with a non-superuser migrator,
+# where it fails with "permission denied to change default privileges" and
+# aborts the migration, and therefore the deploy. It passes locally only
+# because the dev migrator is a superuser.
+#
+# Running it here instead means it runs AS `stacks_dbt`, which owns the
+# relations and needs no membership. It also re-grants on every build, and that
+# is not redundancy: dbt drops and recreates a view, and a recreated relation
+# comes back with a fresh ACL. A one-shot grant at migration time would be
+# correct exactly once.
+#
+# `IF EXISTS` on the role so a local or CI database without the app roles is
+# not a failure — the same guard the migrations use.
+on-run-end:
+  - "{{ grant_marts_select() }}"
+
 models:
   thestacks:
     staging:
