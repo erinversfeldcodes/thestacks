@@ -109,8 +109,21 @@ update msg model maybeToken =
             ( { model | expiresInDays = value }, Cmd.none, NoOut )
 
         CreateClicked ->
-            case maybeToken of
-                Just token ->
+            -- ⚠️ Both numeric fields used to be coerced SILENTLY here:
+            -- `String.toInt |> Maybe.withDefault 1` for uses, and a bare
+            -- `String.toInt` for expiry which sends `Nothing` and lets the
+            -- server pick. So an operator who typed "3O" (letter O) got a
+            -- one-use invite expiring on the server default, with the form
+            -- still showing what they typed and no indication anything was
+            -- disregarded.
+            --
+            -- This is legibility, not security — `Api.elm` omits the field on
+            -- `Nothing` rather than sending null, and the server's own default
+            -- applies. But an expiry field that quietly ignores its input is a
+            -- bad shape wherever it lives, and the admin surface is where the
+            -- consequences are least visible.
+            case ( maybeToken, fieldErrors model ) of
+                ( Just token, [] ) ->
                     ( { model | creating = True, error = Nothing }
                     , Api.createAdminInvite token
                         { note = model.note
@@ -122,7 +135,10 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Nothing ->
+                ( Just _, errors ) ->
+                    ( { model | error = Just (String.join " " errors) }, Cmd.none, NoOut )
+
+                ( Nothing, _ ) ->
                     ( model, Cmd.none, NoOut )
 
         CreateCompleted (Ok ( invite, fullCode )) ->
@@ -170,6 +186,47 @@ update msg model maybeToken =
                 , Cmd.none
                 , NoOut
                 )
+
+
+{-| Which of the two numeric fields the operator has made unusable.
+
+Returns a list so both can be reported at once rather than one at a time, and
+so `[]` is the "safe to submit" signal the update branch reads.
+
+A BLANK field is deliberately not an error: blank means "use the default",
+which is a real intent and what the server does with an omitted value. What is
+an error is a field with something in it that is not a positive whole number,
+because that is someone who meant something and did not get it.
+
+-}
+fieldErrors : Model -> List String
+fieldErrors model =
+    List.filterMap identity
+        [ numericFieldError "Uses" model.maxUses
+        , numericFieldError "Expires in (days)" model.expiresInDays
+        ]
+
+
+numericFieldError : String -> String -> Maybe String
+numericFieldError label raw =
+    let
+        trimmed =
+            String.trim raw
+    in
+    if trimmed == "" then
+        Nothing
+
+    else
+        case String.toInt trimmed of
+            Just n ->
+                if n >= 1 then
+                    Nothing
+
+                else
+                    Just (label ++ " must be at least 1.")
+
+            Nothing ->
+                Just (label ++ " must be a whole number — \"" ++ trimmed ++ "\" is not.")
 
 
 view : Model -> Html Msg
