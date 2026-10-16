@@ -165,6 +165,7 @@ module Api exposing
     , getUserPlacements
     , getUserPlacementsRequest
     , honourRemovalRequest
+    , importRefusal
     , importRowDecoder
     , initUploadRequest
     , interpretAuthed
@@ -643,14 +644,33 @@ type alias ImportRow =
     }
 
 
-{-| Upload refusals the page owes distinct copy for. The server answers each
-with a distinct status, so the STATUS is the discriminant —
-no body parse to drift.
+{-| Upload refusals the page owes distinct copy for.
+
+⚠️ The status is NOT the discriminant, which this type previously assumed. 409
+and 413 are one refusal each, but **four** different refusals arrive as 422, and
+collapsing them told a reader with a perfectly good Goodreads export that it
+wasn't one:
+
+  - `no_rows` — a real export, correctly recognised, with nothing under the
+    header. Nothing is wrong with the file's format; there is nothing in it.
+  - `unrecognised_format` — the headers aren't Goodreads'. The server also sends
+    the headers it DID find, which is the one piece of information that lets a
+    reader work out they exported the wrong thing, and which was thrown away.
+  - `missing_file` / `unreadable_upload: …` — the multipart part never arrived,
+    or the temp file could not be read. Nothing about the reader's file is
+    known to be wrong, so blaming it is a guess, and it sends them to re-export
+    from Goodreads for no reason.
+
+So the body's `error` field is read. It is a small, stable vocabulary, and the
+`_` branch below keeps an unknown token from becoming a decode failure.
+
 -}
 type ImportError
     = ImportInProgress
     | ImportFileTooLarge
-    | ImportUnrecognised
+    | ImportUnrecognisedFormat (List String)
+    | ImportNoRows
+    | ImportUploadIncomplete
     | ImportRequestFailed Http.Error
 
 
@@ -730,7 +750,7 @@ expectImport toMsg =
                         |> Result.mapError
                             (\err -> ImportRequestFailed (Http.BadBody (Decode.errorToString err)))
 
-                Http.BadStatus_ metadata _ ->
+                Http.BadStatus_ metadata body ->
                     case metadata.statusCode of
                         409 ->
                             Err ImportInProgress
@@ -739,7 +759,7 @@ expectImport toMsg =
                             Err ImportFileTooLarge
 
                         422 ->
-                            Err ImportUnrecognised
+                            Err (importRefusal body)
 
                         status ->
                             Err (ImportRequestFailed (Http.BadStatus status))
@@ -752,6 +772,38 @@ expectImport toMsg =
 
                 Http.NetworkError_ ->
                     Err (ImportRequestFailed Http.NetworkError)
+
+
+{-| Which of the four 422s came back.
+
+An unparseable body, or a token this build has never heard of, falls to
+`ImportUploadIncomplete` — the one whose copy makes no claim about the reader's
+file. Guessing "wrong format" on an unknown token is how the collapsed version
+misled people in the first place.
+
+-}
+importRefusal : String -> ImportError
+importRefusal body =
+    let
+        token =
+            Decode.decodeString (Decode.field "error" Decode.string) body
+                |> Result.withDefault ""
+
+        headers =
+            Decode.decodeString
+                (Decode.field "found_headers" (Decode.list Decode.string))
+                body
+                |> Result.withDefault []
+    in
+    case token of
+        "no_rows" ->
+            ImportNoRows
+
+        "unrecognised_format" ->
+            ImportUnrecognisedFormat headers
+
+        _ ->
+            ImportUploadIncomplete
 
 
 {-| `GET /api/imports/:id` — polled while the job runs.

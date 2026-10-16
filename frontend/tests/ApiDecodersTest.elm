@@ -226,4 +226,47 @@ suite =
                         """
                         "use_count must stay required — a default would show a spent code as live"
             ]
+        , describe "importRefusal — the four refusals that share one status"
+            [ test "a wrong-format refusal carries through the headers the server found" <|
+                \_ ->
+                    Api.importRefusal
+                        """
+                        { "error": "unrecognised_format",
+                          "found_headers": ["Book Id", "Shelf", "Rating"] }
+                        """
+                        |> Expect.equal
+                            (Api.ImportUnrecognisedFormat [ "Book Id", "Shelf", "Rating" ])
+            , test "an empty export is its own refusal, not a format complaint" <|
+                \_ ->
+                    Api.importRefusal """{ "error": "no_rows" }"""
+                        |> Expect.equal Api.ImportNoRows
+            , test "a missing multipart part makes no claim about the reader's file" <|
+                \_ ->
+                    Api.importRefusal
+                        """
+                        { "error": "missing_file",
+                          "detail": "attach the CSV as multipart field \\"file\\"" }
+                        """
+                        |> Expect.equal Api.ImportUploadIncomplete
+            , test "an unreadable upload lands there too, by its prefixed token" <|
+                \_ ->
+                    -- The server interpolates the reason, so this token is
+                    -- `unreadable_upload: enoent` — never an exact match. The
+                    -- catch-all has to carry it, which is why the default is the
+                    -- claim-nothing branch rather than the format one.
+                    Api.importRefusal """{ "error": "unreadable_upload: enoent" }"""
+                        |> Expect.equal Api.ImportUploadIncomplete
+            , test "a body that is not JSON at all does not become a format complaint" <|
+                \_ ->
+                    -- A proxy's HTML error page reaching this branch must not
+                    -- tell the reader their Goodreads export is malformed.
+                    Api.importRefusal "<html>502 Bad Gateway</html>"
+                        |> Expect.equal Api.ImportUploadIncomplete
+            , test "a recognised-format refusal with no headers key still decodes" <|
+                \_ ->
+                    -- `found_headers` is read separately from `error`, so a
+                    -- missing one must not take the whole refusal with it.
+                    Api.importRefusal """{ "error": "unrecognised_format" }"""
+                        |> Expect.equal (Api.ImportUnrecognisedFormat [])
+            ]
         ]
