@@ -82,7 +82,24 @@ defmodule Core.Repo.Migrations.RawImportRowsCannotEscapeTheirRetention do
   # `create_if_not_exists` after a drop, because a CONCURRENTLY build that fails
   # leaves an INVALID index behind that `IF NOT EXISTS` would happily skip —
   # leaving a useless index and the sweep still scanning.
+  # Plain `SET`, not `SET LOCAL` — `@disable_ddl_transaction true` means there is
+  # no transaction for a LOCAL setting to be scoped to, and `SET LOCAL` outside
+  # one is a no-op that only emits a warning.
+  #
+  # `statement_timeout = 0` is deliberate and is NOT the lazy choice: a timeout
+  # firing mid-way through a `CREATE INDEX CONCURRENTLY` aborts the build and
+  # leaves an INVALID index behind, which the `create_if_not_exists` on a retry
+  # would skip — exactly the wedge the comment above is guarding against. The
+  # backfill `UPDATE` is likewise unbounded by design; it is a one-shot over a
+  # table whose size we do not control.
+  #
+  # `lock_timeout` is what actually protects availability here: every statement
+  # below wants a lock, and waiting for one is how a fast DDL turns into an
+  # outage. Failing fast is recoverable; queueing is not.
   def up do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     execute("""
     UPDATE op.library_import_rows r
        SET created_at = i.created_at
@@ -116,6 +133,9 @@ defmodule Core.Repo.Migrations.RawImportRowsCannotEscapeTheirRetention do
   end
 
   def down do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     create_if_not_exists index(:library_import_rows, [:import_id],
                            prefix: "op",
                            concurrently: true

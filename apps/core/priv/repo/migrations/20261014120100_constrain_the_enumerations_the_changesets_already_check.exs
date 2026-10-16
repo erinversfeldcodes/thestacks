@@ -45,7 +45,15 @@ defmodule Core.Repo.Migrations.ConstrainTheEnumerationsTheChangesetsAlreadyCheck
   """
   use Ecto.Migration
 
+  # This one runs in a transaction, so the settings are `SET LOCAL` and revert on
+  # commit. Both are short: `ADD CONSTRAINT ... NOT VALID` takes ACCESS EXCLUSIVE
+  # but does no scan, so it is a millisecond operation that should never be
+  # waiting — if it is, something long-running holds the table and the right
+  # answer is to abort and retry rather than to block every reader behind us.
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     execute("""
     ALTER TABLE op.platform_costs
       ADD CONSTRAINT platform_costs_category_known
@@ -86,6 +94,9 @@ defmodule Core.Repo.Migrations.ConstrainTheEnumerationsTheChangesetsAlreadyCheck
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     execute(
       "ALTER TABLE op.post_syndications DROP CONSTRAINT IF EXISTS post_syndications_target_and_method_known"
     )

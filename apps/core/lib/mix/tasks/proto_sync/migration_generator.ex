@@ -43,7 +43,19 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       # already serialised by the release pipeline.
       @disable_migration_lock true
 
+      # Plain `SET`, not `SET LOCAL` — `@disable_ddl_transaction true` above
+      # means there is no transaction for a LOCAL setting to be scoped to, and
+      # `SET LOCAL` outside one is a no-op that only emits a warning.
+      #
+      # `statement_timeout = 0` because the indexes below build CONCURRENTLY: a
+      # timeout firing mid-build aborts it and leaves an INVALID index behind.
+      # The `lock_timeout` is the one that protects availability — it makes a
+      # contended lock fail fast instead of queueing every later query behind
+      # this migration.
       def up do
+        execute("SET lock_timeout = '5s'")
+        execute("SET statement_timeout = 0")
+
         create table(:#{table.table_name}, prefix: "#{table.schema_prefix}", primary_key: false) do
           add :id, :binary_id, primary_key: true
     #{column_lines}#{timestamps_line}
@@ -51,6 +63,9 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     #{index_lines}#{grant_lines}  end
 
       def down do
+        execute("SET lock_timeout = '5s'")
+        execute("SET statement_timeout = 0")
+
         drop table(:#{table.table_name}, prefix: "#{table.schema_prefix}")
       end
     end
@@ -127,13 +142,26 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     defmodule #{module_name} do
       use Ecto.Migration
 
+      # `SET LOCAL` here, unlike the create-table migration above: this one runs
+      # inside Ecto's migration transaction, so the settings revert on commit.
+      #
+      # Both are short. `ADD COLUMN` without a volatile default takes ACCESS
+      # EXCLUSIVE but writes no rows, so it is a catalog update that should never
+      # be waiting — and if it is, blocking every reader behind it is worse than
+      # failing and retrying.
       def up do
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
+
         alter table(:#{table.table_name}, prefix: "#{table.schema_prefix}") do
     #{column_lines}
         end
       end
 
       def down do
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
+
         alter table(:#{table.table_name}, prefix: "#{table.schema_prefix}") do
     #{down_lines}
         end

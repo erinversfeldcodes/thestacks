@@ -27,9 +27,14 @@ source "$HERE/lib/assert.sh"
 WRAPPER="$REPO_ROOT/scripts/security-squawk-test-wrapper.sh"
 FIXTURES="$REPO_ROOT/test/fixtures/migrations/destructive"
 
+# `--minimal-fixture` because each fixture here is a single statement stripped
+# to the hazard under test. The gate also requires a timeout preamble, which
+# none of them carry and none of them are about; enforcing it would make every
+# case red for an unrelated reason. test/platform/extract_migration_sql_test.sh
+# and the proto_sync suite cover that rule against realistic migrations.
 run_squawk() {
     local fixture="$1"
-    OUT=$("$WRAPPER" "$fixture" 2>&1)
+    OUT=$("$WRAPPER" --minimal-fixture "$fixture" 2>&1)
     RC=$?
 }
 

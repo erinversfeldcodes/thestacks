@@ -11,20 +11,32 @@ records SQL instead of executing it, then emits DSL-derived DDL.
 import re
 import sys
 
+# Both `execute` forms in ONE alternation, so `finditer` yields them in source
+# order. They used to be scanned in two passes — every heredoc block first, then
+# every single-line one — which silently reordered the SQL stream handed to
+# squawk. That is not cosmetic: squawk's analysis is order-sensitive (a `SET
+# lock_timeout` only covers statements AFTER it; a constraint added `NOT VALID`
+# is only safe if the validation follows), so an out-of-order stream can both
+# miss a real hazard and invent one that the migration does not contain. The
+# heredoc branch is listed first because `"""` must win over `"`.
+_EXECUTE_RE = re.compile(
+    r'execute\s*\(\s*(?:"""(?P<heredoc>.*?)"""|"(?P<single>[^"]+)"\s*\))',
+    re.DOTALL,
+)
 
-def _extract_execute_blocks(src: str) -> list[str]:
-    blocks: list[str] = []
-    blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"""(.*?)"""', src, re.DOTALL)]
-    blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"([^"]+)"\s*\)', src)]
-    out = []
-    for b in blocks:
-        if "#{" in b:  # Elixir interpolation — not analysable
+
+def _execute_statements(src: str) -> list[tuple[int, str]]:
+    """Every analysable `execute(...)` string, paired with its source offset."""
+    out: list[tuple[int, str]] = []
+    for m in _EXECUTE_RE.finditer(src):
+        body = m.group("heredoc") if m.group("heredoc") is not None else m.group("single")
+        if "#{" in body:  # Elixir interpolation — not analysable
             continue
-        if re.search(r"DO\s*\$\$", b, re.IGNORECASE):  # anonymous procedure
+        if re.search(r"DO\s*\$\$", body, re.IGNORECASE):  # anonymous procedure
             continue
-        stmt = b.strip()
+        stmt = body.strip()
         if stmt:
-            out.append(stmt)
+            out.append((m.start(), stmt))
     return out
 
 
@@ -116,9 +128,13 @@ def _translate_create_table_dsl(src: str) -> list[str]:
     return out
 
 
-def _translate_index_dsl(src: str) -> list[str]:
-    """Synthesise CREATE INDEX SQL for each create (unique_)index DSL call."""
-    out: list[str] = []
+def _translate_index_dsl(src: str) -> list[tuple[int, str]]:
+    """Synthesise CREATE INDEX SQL for each create (unique_)index DSL call.
+
+    Each statement is paired with its source offset so it can be interleaved
+    with the `execute(...)` strings in the order the migration runs them.
+    """
+    out: list[tuple[int, str]] = []
     for m in re.finditer(r"\bcreate(?:_if_not_exists)?\s+(unique_)?index\s*\(", src):
         unique = bool(m.group(1))
         args = _balanced_args(src, m.end())
@@ -132,20 +148,26 @@ def _translate_index_dsl(src: str) -> list[str]:
         unique_kw = "UNIQUE " if unique else ""
         if info["concurrently"]:
             out.append(
-                f"CREATE {unique_kw}INDEX CONCURRENTLY IF NOT EXISTS "
-                f"{name} ON {qualified} ({cols});"
+                (
+                    m.start(),
+                    f"CREATE {unique_kw}INDEX CONCURRENTLY IF NOT EXISTS "
+                    f"{name} ON {qualified} ({cols});",
+                )
             )
         else:
-            out.append(f"CREATE {unique_kw}INDEX {name} ON {qualified} ({cols});")
+            out.append((m.start(), f"CREATE {unique_kw}INDEX {name} ON {qualified} ({cols});"))
     return out
 
 
 def extract(path: str) -> list[str]:
     with open(path) as f:
         src = f.read()
-    subject: list[str] = []
-    subject += _extract_execute_blocks(src)
-    subject += _translate_index_dsl(src)
+    # Sorted by source offset, so the stream squawk reads is the order the
+    # migration executes. The CREATE TABLE stubs are the one deliberate
+    # exception: they are context declarations rather than statements under
+    # analysis, and must precede anything that references the table.
+    positioned = sorted(_execute_statements(src) + _translate_index_dsl(src))
+    subject = [stmt for _, stmt in positioned]
     statements = (_translate_create_table_dsl(src) + subject) if subject else []
     return [s if s.rstrip().endswith(";") else s + ";" for s in statements]
 

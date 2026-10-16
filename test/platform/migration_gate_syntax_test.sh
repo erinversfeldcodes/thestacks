@@ -23,6 +23,15 @@ run_squawk() {
     RC=$?
 }
 
+# For the minimal fixtures under test/fixtures/migrations, which carry only the
+# DSL shape under test and no timeout preamble. The real-migration case below
+# deliberately does NOT use this — it asserts that a shipped migration clears
+# the gate's actual policy, which is only worth asserting at full strength.
+run_squawk_fixture() {
+    OUT=$("$WRAPPER" --minimal-fixture "$1" 2>&1)
+    RC=$?
+}
+
 test_case "raw_set_not_null_bad" "raw execute(SET NOT NULL) without @breaking_ok fails lint"
 run_linter "$ELIXIR_FIXTURES/execute_set_not_null_bad.exs"
 assert_exit_nonzero "$RC" "execute_set_not_null_bad.exs exits non-zero"
@@ -38,7 +47,7 @@ assert_contains "$OUT" "raw-execute NOT NULL tighten fixture" \
 
 test_case "dsl_unique_index_bad" "non-concurrent index DSL is translated + caught by squawk"
 if command -v squawk &>/dev/null; then
-    run_squawk "$DSL_FIXTURES/dsl_unique_index.exs"
+    run_squawk_fixture "$DSL_FIXTURES/dsl_unique_index.exs"
     assert_exit_nonzero "$RC" "dsl_unique_index.exs exits non-zero"
     assert_contains "$OUT" "require-concurrent-index-creation" \
         "output names the require-concurrent-index-creation rule"
@@ -48,7 +57,7 @@ fi
 
 test_case "dsl_unique_index_concurrent" "safe concurrent named index DSL passes squawk"
 if command -v squawk &>/dev/null; then
-    run_squawk "$DSL_FIXTURES/dsl_unique_index_concurrent.exs"
+    run_squawk_fixture "$DSL_FIXTURES/dsl_unique_index_concurrent.exs"
     assert_exit_zero "$RC" "dsl_unique_index_concurrent.exs exits 0 (no false positive)"
 else
     echo "# SKIP: squawk not installed"

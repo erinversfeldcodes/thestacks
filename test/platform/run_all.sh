@@ -17,6 +17,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 SUITES=(
     "$HERE/squawk_destructive_test.sh"
+    "$HERE/extract_migration_sql_test.sh"
     "$HERE/lint_migrations_test.sh"
     "$HERE/migration_gate_syntax_test.sh"
     "$HERE/squawk_worktree_selection_test.sh"

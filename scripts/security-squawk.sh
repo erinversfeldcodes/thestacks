@@ -5,6 +5,8 @@ set -euo pipefail
 EXIT_NOTHING_INSPECTED=2
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/squawk-rules.sh
+source "$REPO_ROOT/scripts/lib/squawk-rules.sh"
 DEFAULT_MIGRATIONS_DIR="$REPO_ROOT/apps/core/priv/repo/migrations"
 TARGET_DIR="${SQUAWK_TARGET_DIR:-$DEFAULT_MIGRATIONS_DIR}"
 if [[ -d "$TARGET_DIR" ]]; then
@@ -124,9 +126,18 @@ for migration in "${MIGRATION_FILES[@]}"; do
     mv "$tmpfile" "$tmpfile.sql"
     tmpfile="$tmpfile.sql"
     echo "$sql_block" > "$tmpfile"
+    # Suppressions and their reasoning live in scripts/lib/squawk-rules.sh,
+    # sourced above. Note what the timeout rule asks of a migration author:
+    # `SET LOCAL lock_timeout`/`statement_timeout` in a transactional migration,
+    # plain `SET` under `@disable_ddl_transaction` (there is no transaction for a
+    # LOCAL setting to scope to). The values are per migration on purpose —
+    # `CREATE INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` need
+    # `statement_timeout = 0`, since a timeout firing mid-build leaves an INVALID
+    # index, while a plain `ADD CONSTRAINT ... NOT VALID` wants a few seconds.
+    # Both want a short lock_timeout.
     if ! squawk \
             --assume-in-transaction \
-            --exclude=require-timeout-settings,adding-field-with-default,ban-concurrent-index-creation-in-transaction \
+            --exclude="$SQUAWK_EXCLUDED_RULES" \
             "$tmpfile"; then
         VIOLATIONS=$((VIOLATIONS + 1))
     fi

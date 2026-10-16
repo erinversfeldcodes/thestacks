@@ -1744,4 +1744,119 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert sql =~ "add :expires_at, :timestamptz"
     end
   end
+
+  describe "generated migrations carry a timeout preamble" do
+    # scripts/security-squawk.sh stopped excluding squawk's
+    # `require-timeout-settings` rule, so a migration that does not set a
+    # lock_timeout fails the gate. Codegen has to emit the preamble or every
+    # generated migration lands red — and more importantly, a migration without
+    # one queues every later query behind its own lock wait, turning a catalog
+    # update into an outage.
+    #
+    # The two shapes need DIFFERENT statements, which is why both are pinned:
+    # the create-table migration carries `@disable_ddl_transaction true`, and
+    # `SET LOCAL` outside a transaction is a no-op that only warns.
+    test "the create-table migration uses session SET, matching its disabled transaction" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [],
+            timestamps: :standard
+          },
+          [],
+          "20260101000000"
+        )
+
+      assert sql =~ "@disable_ddl_transaction true"
+      assert sql =~ ~s|execute("SET lock_timeout = '5s'")|
+
+      # Unbounded on purpose: the indexes build CONCURRENTLY, and a timeout
+      # firing mid-build leaves an INVALID index behind.
+      assert sql =~ ~s|execute("SET statement_timeout = 0")|
+
+      # Matched on the executable form, not the bare string: the generated file
+      # also carries a comment explaining why `SET LOCAL` is wrong here, and a
+      # refute over the whole text would be satisfied by that prose.
+      refute sql =~ ~s|execute("SET LOCAL|,
+             "there is no transaction for a LOCAL setting to scope to — it would " <>
+               "silently do nothing"
+
+      # `down` drops the table, which also takes ACCESS EXCLUSIVE. A preamble on
+      # `up` alone leaves the rollback path unguarded, which is the path taken
+      # when something has already gone wrong.
+      [_, down] = String.split(sql, "def down do")
+      assert down =~ ~s|execute("SET lock_timeout = '5s'")|
+    end
+
+    test "the add-column migration uses SET LOCAL, matching its transaction" do
+      sql =
+        MigrationGenerator.generate_add_columns(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{}
+          },
+          [%{name: "note", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      refute sql =~ "@disable_ddl_transaction",
+             "this shape runs inside Ecto's migration transaction"
+
+      assert sql =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+      assert sql =~ ~s|execute("SET LOCAL statement_timeout = '30s'")|
+
+      [_, down] = String.split(sql, "def down do")
+      assert down =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+    end
+
+    # The assertions above pin the strings. This one pins the thing we actually
+    # care about: that the gate accepts what codegen produces. Asserting the
+    # text alone would keep passing if squawk changed what it accepts, or if the
+    # SQL extractor stopped putting the preamble first — both of which have
+    # already happened once each.
+    @tag :tmp_dir
+    test "a generated create-table migration passes the real migration gate", %{
+      tmp_dir: tmp_dir
+    } do
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [%{name: "widgets_owner_id_index", columns: [:owner_id]}],
+            timestamps: :standard
+          },
+          [%{name: "owner_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      path = Path.join(tmp_dir, "20260101000000_create_widgets.exs")
+      File.write!(path, sql)
+
+      repo_root = Path.expand("../../../../..", __DIR__)
+      wrapper = Path.join(repo_root, "scripts/security-squawk-test-wrapper.sh")
+
+      {output, status} = System.cmd("bash", [wrapper, path], stderr_to_stdout: true)
+
+      if String.contains?(output, "SKIP: squawk not installed") do
+        # Recorded rather than silently passing: this test asserts nothing when
+        # the binary is absent, and saying so beats a green tick.
+        IO.puts("squawk not installed — gate acceptance not asserted")
+      else
+        assert status == 0,
+               "the generated migration was rejected by the migration gate:\n#{output}"
+      end
+    end
+  end
 end

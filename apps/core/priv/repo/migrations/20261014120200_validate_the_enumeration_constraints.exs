@@ -16,7 +16,21 @@ defmodule Core.Repo.Migrations.ValidateTheEnumerationConstraints do
 
   @disable_migration_lock true
 
+  # `@disable_ddl_transaction true`, so plain `SET` rather than `SET LOCAL`.
+  #
+  # `statement_timeout = 0`: a `VALIDATE CONSTRAINT` is a full table scan whose
+  # duration is a function of table size, not of anything this migration
+  # controls. Bounding it would convert "this deploy took a while" into "this
+  # deploy failed", and the scan holds only SHARE UPDATE EXCLUSIVE — readers and
+  # writers continue throughout, so there is nothing to protect them from.
+  #
+  # The `lock_timeout` still matters: acquiring even SHARE UPDATE EXCLUSIVE can
+  # queue behind a conflicting lock, and a queued lock request blocks everything
+  # that arrives after it.
   def up do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     execute("ALTER TABLE op.platform_costs VALIDATE CONSTRAINT platform_costs_category_known")
 
     execute(
