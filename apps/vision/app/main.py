@@ -73,7 +73,6 @@ _ML_TO_CLASSIFICATION: dict[str, str] = {
     "not_book": _CLF_NOT_BOOK,
     "ambiguous": _CLF_AMBIGUOUS,
 }
-_VALID_CLASSIFICATIONS = set(_ML_TO_CLASSIFICATION.values())
 
 
 @asynccontextmanager

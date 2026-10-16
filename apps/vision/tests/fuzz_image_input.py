@@ -31,10 +31,23 @@ from app.main import app
 
 _CORPUS_DIR = Path(__file__).parent.parent.parent.parent / "images"
 
-_MOCK_EXTRACT = {"choices": [{"message": {"content": '{"books":[]}'}}]}
-_MOCK_CLASSIFY = {
-    "choices": [{"message": {"content": '{"classification":"ambiguous","confidence":0.5}'}}]
-}
+# ⚠️ These are the shapes `VisionClient` ACTUALLY returns, not an OpenAI
+# `choices` envelope. The envelope is unwrapped inside the Modal class; by the
+# time `classify`/`extract` return, the result is already a parsed dict
+# (`vision_client.py:50,65-69`).
+#
+# They were wrong, and the consequence was not cosmetic: with a `choices`
+# envelope, `_parse_classification` read `.get("classification", "ambiguous")`
+# off a dict with no such key, landed on AMBIGUOUS every single time, and
+# `/analyze` short-circuited — so `extract` was never awaited and
+# `_parse_extracted_books` was never reached through the ASGI stack. The
+# `status < 500` assertion below, whose stated purpose is "no input reaches an
+# unhandled exception", was structurally unable to see model-output parsing at
+# all, which this file's own docstring claims as covered.
+#
+# Classify returns BOOK so the extract leg actually runs.
+_MOCK_EXTRACT: dict[str, object] = {"books": [{"title": "T", "potential_isbns": ["9780743273565"]}]}
+_MOCK_CLASSIFY: dict[str, object] = {"classification": "book", "confidence": 0.95}
 
 _extract_patcher = patch(
     "app.services.vision_client.VisionClient.extract",
@@ -120,12 +133,19 @@ def _fuzz_http_body(raw: bytes) -> None:
     # ⚠️ Two properties, and deliberately NOT "the status is 4xx". This request
     # is authenticated, so a fuzzer that happens to emit valid JSON with a
     # decodable tiny image reaches the real handler and gets a legitimate 200 —
-    # `_resize_for_vlm` swallows Pillow errors, the classifier defaults to
-    # AMBIGUOUS, and the call short-circuits successfully. A 4xx-only assertion
-    # would call that correct behaviour a crash, which is how a fuzz target
-    # starts reporting findings nobody can act on. The properties that actually
-    # matter are that the route exists and that no input reaches an unhandled
-    # exception.
+    # `_resize_for_vlm` swallows Pillow errors, the mocked classifier answers
+    # BOOK, and the extract leg runs to a successful response. A 4xx-only
+    # assertion would call that correct behaviour a crash, which is how a fuzz
+    # target starts reporting findings nobody can act on. The properties that
+    # actually matter are that the route exists and that no input reaches an
+    # unhandled exception.
+    #
+    # An earlier version of this comment said the 200 arrived because "the
+    # classifier defaults to AMBIGUOUS". That was an accurate description of
+    # what happened and a wrong account of why: the default was being hit
+    # because the mocks were malformed, so a consequence of a broken fixture
+    # was written up as intended behaviour — and it meant the extract leg was
+    # never reached.
     assert response.status_code != 404, (
         f"the fuzz target is pointed at a route that does not exist: "
         f"got 404 for {_PATH}. This is the silent-vacuity failure this "
@@ -174,10 +194,12 @@ def _run_seed_corpus() -> None:
         b'{"classification": "book", "confidence": 0.95}',
         b'{"classification": "unknown", "confidence": 999}',
         b'{"choices": []}',
-        b'{"images": ["dGVzdA=="]}',
+        # `images` (plural) is not a field on AnalyzeRequest, so these three
+        # only ever exercised the oneof rejection, never the shape they name.
         b'{"image": "dGVzdA=="}',
-        b'{"images": [null]}',
-        b'{"images": [""]}',
+        b'{"image": null}',
+        b'{"image": ""}',
+        b'{"images": ["dGVzdA=="]}',  # kept: the unknown-field path is worth one seed
         bytes(range(256)),
         b"\x00" * 10_000,
     ]

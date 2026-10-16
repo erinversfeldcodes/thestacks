@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 180
     max_image_size_bytes: int = 10_485_760  # 10 MB
     local_ocr_enabled: bool = True
-    local_ocr_confidence_threshold: float = 0.9
 
     model_config = SettingsConfigDict(
         env_prefix="VISION_",

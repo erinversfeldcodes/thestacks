@@ -187,7 +187,6 @@ def test_analyze_local_ocr_short_circuit_skips_vlm() -> None:
     with (
         patch(
             "app.main.local_isbn_scan",
-            create=True,
             return_value="9780156001311",
         ) as mock_scan,
         patch(
@@ -321,3 +320,164 @@ def test_analyze_empty_excluded_books_passes_empty_list() -> None:
     call = mock_extract.await_args
     assert call is not None
     assert call.kwargs.get("excluded_books") == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The normalisation the deletion kept and the deletion's tests took with them.
+#
+# `_parse_classification` and `_parse_extracted_books` say in their own
+# docstrings that they are "carried over from the removed endpoint's inline
+# parsing". The CODE survived; its tests went with `test_classification.py` and
+# `test_extraction.py`. What was lost: the enum fallback, the confidence clamp,
+# a non-list `books`, a non-dict item, partially-populated books, and more than
+# one book.
+#
+# ⚠️ Coverage cannot see this gap. The clamp and the fallback are branchless
+# single statements, so they are reported EXECUTED by every happy-path test
+# while nothing asserts what they produce. And `/analyze` is now their only
+# caller, so this is the response-shaping path for every upload in the product.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _analyze(classify_output: dict[str, object], extract_output: dict[str, object]):
+    """POST /analyze with both model calls stubbed. Returns the response."""
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value=classify_output,
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=extract_output,
+        ),
+        TestClient(app) as client,
+    ):
+        return client.post(
+            "/analyze",
+            json={"image": _VALID_IMAGE},
+            headers=_make_header(),
+        )
+
+
+def test_unknown_classification_falls_back_to_ambiguous() -> None:
+    """A label the model invents must not reach the response verbatim.
+
+    Every surviving test passes "book", "not_book" or "ambiguous" — all direct
+    hits in `_ML_TO_CLASSIFICATION`, so the `.get(raw_ml, _CLF_AMBIGUOUS)`
+    default was asserted by nothing.
+    """
+    response = _analyze({"classification": "banana", "confidence": 0.5}, {"books": []})
+
+    assert response.status_code == 200
+    assert response.json()["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
+
+
+def test_out_of_range_confidence_is_clamped() -> None:
+    """Confidence is a 0-1 probability in the contract; the model is not bound by that.
+
+    Surviving values were 0.95, 0.92, 0.45 and 0.85 — all already in range, so
+    the clamp was executed on every run and asserted on none.
+    """
+    high = _analyze({"classification": "book", "confidence": 7}, {"books": []})
+    assert high.status_code == 200
+    assert high.json()["confidence"] == 1.0
+
+    low = _analyze({"classification": "book", "confidence": -3}, {"books": []})
+    assert low.status_code == 200
+    assert low.json()["confidence"] == 0.0
+
+
+def test_non_numeric_confidence_becomes_zero_rather_than_raising() -> None:
+    """A string where a float belongs must not 500 the upload path."""
+    response = _analyze({"classification": "book", "confidence": "very"}, {"books": []})
+
+    assert response.status_code == 200
+    assert response.json()["confidence"] == 0.0
+
+
+def test_missing_classification_key_is_ambiguous() -> None:
+    """An envelope with no `classification` at all — the shape a wrong mock produces."""
+    response = _analyze({}, {"books": []})
+
+    assert response.status_code == 200
+    assert response.json()["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
+
+
+def test_non_list_books_field_yields_no_books() -> None:
+    """`books` as a string: the guard at the top of `_parse_extracted_books`."""
+    response = _analyze({"classification": "book", "confidence": 0.9}, {"books": "not a list"})
+
+    assert response.status_code == 200
+    assert response.json()["books"] == []
+
+
+def test_absent_books_key_yields_no_books() -> None:
+    response = _analyze({"classification": "book", "confidence": 0.9}, {})
+
+    assert response.status_code == 200
+    assert response.json()["books"] == []
+
+
+def test_non_dict_book_item_is_skipped_not_fatal() -> None:
+    """One bad element must not lose the good ones beside it.
+
+    This is the failure mode that has already cost this project an import page:
+    a strict parse dropping a whole list over one malformed member.
+    """
+    response = _analyze(
+        {"classification": "book", "confidence": 0.9},
+        {"books": [None, {"title": "Survivor"}, "also not a dict"]},
+    )
+
+    assert response.status_code == 200
+    books = response.json()["books"]
+    assert [b["title"] for b in books] == ["Survivor"]
+
+
+def test_partial_book_fields_are_coerced_rather_than_dropped() -> None:
+    """Five `isinstance` coercions that no surviving test exercised.
+
+    Every remaining test fed a fully-populated book dict, so a wrong type or a
+    missing key never reached them.
+    """
+    response = _analyze(
+        {"classification": "book", "confidence": 0.9},
+        {
+            "books": [
+                {
+                    "title": "Only a Title",
+                    "author": 42,
+                    "potential_isbns": "9780743273565",
+                    "confidence": "high",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    book = response.json()["books"][0]
+    assert book["title"] == "Only a Title"
+    assert book["author"] is None, "a non-string author must become None, not 42"
+    assert book["potential_isbns"] == [], "a bare string is not a list of ISBNs"
+    assert book["raw_text"] is None
+    assert book["confidence"] is None, "a non-numeric confidence must become None"
+
+
+def test_multiple_books_all_surface() -> None:
+    """The loop never ran with more than one item in any surviving test, so a
+    `List.head`-shaped bug would have looked entirely correct."""
+    response = _analyze(
+        {"classification": "book", "confidence": 0.9},
+        {
+            "books": [
+                {"title": "First"},
+                {"title": "Second"},
+                {"title": "Third"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert [b["title"] for b in response.json()["books"]] == ["First", "Second", "Third"]
