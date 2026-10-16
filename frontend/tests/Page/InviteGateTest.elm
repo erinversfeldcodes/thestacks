@@ -89,11 +89,30 @@ suite =
                 \_ ->
                     rendered (refused 404)
                         |> Query.has [ Selector.text "We don't recognise that code. Check it against the message you were sent." ]
-            , test "revoked reads exactly as expired — the reader learns nothing extra" <|
+            , test "revoked says withdrawn, not expired — the two have different remedies" <|
                 \_ ->
+                    -- ⚠️ This test asserted the OPPOSITE until 2026-10-16: that
+                    -- a revoked invitation reads exactly as an expired one. It
+                    -- was pinning deliberate reticence that cost the reader the
+                    -- one fact that decides what they do next — an expired
+                    -- invitation is reissued by asking again, a withdrawn one
+                    -- is not. Telling someone to ask for a fresh code when the
+                    -- sender deliberately withdrew it sends them to ask a
+                    -- question that has already been answered.
                     rendered (refused 403)
-                        |> Query.has
-                            [ Selector.text "That invitation has expired. Ask whoever sent it for a fresh one." ]
+                        |> Expect.all
+                            [ Query.has
+                                [ Selector.text "That invitation was withdrawn. Contact whoever invited you if you think that's wrong." ]
+                            , Query.hasNot [ Selector.text "Ask whoever sent it for a fresh one." ]
+                            ]
+            , test "expired still reads as expired — the two messages stay distinct" <|
+                \_ ->
+                    rendered (refused 410)
+                        |> Expect.all
+                            [ Query.has
+                                [ Selector.text "That invitation has expired. Ask whoever sent it for a fresh one." ]
+                            , Query.hasNot [ Selector.text "withdrawn" ]
+                            ]
             , test "an exhausted code says it has been used" <|
                 \_ ->
                     rendered (refused 409)

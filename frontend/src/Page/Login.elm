@@ -1180,6 +1180,29 @@ viewInviteOnlyPanel model =
             , a [ href "/faq" ] [ text "FAQ" ]
             , text " explains what The Stacks is and how the beta works."
             ]
+
+        -- ⚠️ The one route a signed-out reader has to say anything.
+        --
+        -- `/feedback` requires auth, so a stuck beta invitee — exactly the
+        -- person whose feedback is worth most — reaches the sign-in gate
+        -- instead of the form. The documented deferral of anonymous submission
+        -- covers retention and anonymity soundly, but it does not cover
+        -- REACHABILITY: a feedback channel that requires an account cannot hear
+        -- about the account being the problem.
+        --
+        -- Discussions rather than anonymous in-app submission is deliberate: it
+        -- costs nothing to operate and leaves the retention obligations the
+        -- deferral keeps dormant exactly where they are.
+        , p [ class "login-card__invite-only-copy" ]
+            [ text "Stuck, or something not working? Tell us in "
+            , a
+                [ href "https://github.com/erinversfeldcodes/thestacks/discussions"
+                , attribute "rel" "noopener noreferrer"
+                , attribute "target" "_blank"
+                ]
+                [ text "GitHub Discussions" ]
+            , text " — no account here needed."
+            ]
         , div [ class "login-card__field login-card__field--invite" ]
             [ label [ class "login-card__label", for "invite-code" ]
                 [ text "Invitation code" ]
@@ -1225,9 +1248,20 @@ viewInviteRefusal model =
             text ""
 
 
-{-| Refusal copy per status (sad paths). Revoked deliberately reads
-as expired — the reader learns nothing about WHY it stopped working, and
-neither wording implies the code was ever valid for someone else.
+{-| Refusal copy per status (sad paths).
+
+⚠️ 403 and 410 say DIFFERENT things, and that is a reversal.
+
+This function used to render revoked (403) as expired (410), on the reasoning
+that the reader learns nothing from the distinction. They learn the thing that
+decides what to do next: an expired invitation is reissued by asking again, and
+a revoked one is not. Telling someone to "ask for a fresh one" when the sender
+deliberately withdrew it sends them to ask a question already answered, and the
+sender gets to refuse twice.
+
+The four server statuses now render as four messages. None of them implies the
+code was ever valid for anyone else.
+
 -}
 inviteErrorMessage : Http.Error -> String
 inviteErrorMessage err =
@@ -1239,7 +1273,7 @@ inviteErrorMessage err =
             "That invitation has expired. Ask whoever sent it for a fresh one."
 
         Http.BadStatus 403 ->
-            "That invitation has expired. Ask whoever sent it for a fresh one."
+            "That invitation was withdrawn. Contact whoever invited you if you think that's wrong."
 
         Http.BadStatus 409 ->
             "That invitation has already been used."
@@ -1314,8 +1348,17 @@ errorMessage mode submitError =
 
 
 {-| Registration-time refusal copy, keyed by the server's bounded reason
-string. Revoked reads as expired on purpose — see
-`inviteErrorMessage`.
+string.
+
+⚠️ This is the SECOND place the invitation refusals are spelled, and it was
+missed when `inviteErrorMessage` stopped collapsing revoked onto expired — the
+sign-in card said "withdrawn" while the registration path still said "expired"
+for the same invitation. Found by a probe that reverted the first change and
+surfaced four copies of the expired string where two were expected.
+
+Both mappings must agree. If a third appears, that is the signal to make one of
+them the source rather than to fix all three.
+
 -}
 inviteRefusalMessage : String -> String
 inviteRefusalMessage reason =
@@ -1327,7 +1370,7 @@ inviteRefusalMessage reason =
             "That invitation has expired. Ask whoever sent it for a fresh one."
 
         "invite_revoked" ->
-            "That invitation has expired. Ask whoever sent it for a fresh one."
+            "That invitation was withdrawn. Contact whoever invited you if you think that's wrong."
 
         "invite_exhausted" ->
             "That invitation has already been used."
