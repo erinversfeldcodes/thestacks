@@ -185,12 +185,29 @@ defmodule Core.PromEx.Plugins.Stacks do
             "Budget refusals: an AI call the guard declined because the daily or monthly limit was already reached.",
           tags: [:provider, :type]
         ),
-        sum(
+        # ⚠️ `last_value`, NOT `sum`, and the difference is the whole meaning of
+        # this series.
+        #
+        # `Costs.upsert_cost/1` is idempotent: it replaces the row for
+        # `{service, period_start, period_end}` and fires this event on every
+        # success, replaces included. `RefreshCostsJob` runs daily and re-upserts
+        # all ten items for the CURRENT MONTH, so each day's event carries the
+        # month-to-date total, which already contains every earlier day's.
+        #
+        # Summed, the series would hold Σ(MTD₁ … MTD_N) — a figure that is not a
+        # cost in any sense, and because `Telemetry.Metrics.Sum` renders as a
+        # Prometheus counter it is monotonic and never resets at the month
+        # boundary, so the error compounds forever instead of self-healing.
+        #
+        # The datum is a LEVEL (what the period has cost so far), not an event
+        # (money moving), and `last_value` says exactly that. Read it with
+        # `max by (service)`, never `rate()`.
+        last_value(
           [:stacks, :costs, :recorded, :amount_cents],
           event_name: [:stacks, :costs, :recorded],
           measurement: :amount_cents,
           description:
-            "Platform operating cost recorded, in cents, by category and service — the figures the public cost page reports.",
+            "Platform operating cost for the current billing period, in cents, by category and service — the figures the public cost page reports.",
           tags: [:category, :service]
         ),
         # The circuit breakers. These matter as much as the cost three: blow and

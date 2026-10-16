@@ -17,10 +17,19 @@ defmodule CoreWeb.Telemetry do
 
       Six of those families fired in production and reached no store at all;
       they now live in `Core.PromEx.Plugins.Stacks`, which is where a metric
-      becomes observable in this project. The rest were already declared there
-      too, so the list was duplication that could only drift. If you are adding
-      a metric, add it to the PromEx plugin — and give it an audience in
-      `Core.PromEx.MetricAudience`, which is fail-closed.
+      becomes observable in this project. Of the 23 `stacks.*` families declared
+      here, 22 were already declared there too, so the list was duplication that
+      could only drift.
+
+      The 23rd is `[:stacks, :vision, :request, :start]`, whose attempt count is
+      now carried by nothing. That is deliberate rather than overlooked: it
+      reached no store before either, so no series was lost, and a start counter
+      is only useful beside its stop counter — which PromEx already registers.
+      If someone wants attempts-versus-completions, that is a metric to design,
+      not a line to restore.
+
+      If you are adding a metric, add it to the PromEx plugin — and give it an
+      audience in `Core.PromEx.MetricAudience`, which is fail-closed.
   """
 
   use Supervisor
