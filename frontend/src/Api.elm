@@ -39,6 +39,7 @@ module Api exposing
     , LiveSignals(..)
     , MergeFormatResponse
     , MoveError(..)
+    , MyWriting
     , NotificationPreferences
     , OnboardingStatus
     , PersonalInferences
@@ -1589,18 +1590,81 @@ type alias BookDetailResponse =
     , placement : Maybe Placement
     , bookshelfVisibility : Maybe String
     , placements : List Placement
+    , myWriting : List MyWriting
     }
+
+
+{-| One post the viewer has written about this book.
+
+`publishedAt` is `Nothing` for a DRAFT. The server includes drafts deliberately
+— these are the reader's own posts, and the query applies no `published_at`
+filter — so the view must say which is which rather than render a blank date.
+
+-}
+type alias MyWriting =
+    { id : String
+    , title : String
+    , publishedAt : Maybe String
+    }
+
+
+myWritingDecoder : Decoder MyWriting
+myWritingDecoder =
+    Decode.map3 MyWriting
+        (Decode.field "id" Decode.string)
+        (Decode.field "title" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "published_at" (Decode.nullable Decode.string)
+            , Decode.succeed Nothing
+            ]
+        )
 
 
 {-| Adapter: proto BookDetailResponse -> app BookDetailResponse.
 
-Proto includes myWriting (dropped). Proto book/placement are proto types
-decoded through the existing app-level decoders which already delegate to proto.
+⚠️ This decoder DROPPED `my_writing` until 2026-10-16, and the drop was visible
+to readers: the server computed the viewer's posts about the book on every
+authenticated request, serialised them, and the SPA threw them away — so the
+writing section showed a stub to everyone. Three layers existed and the middle
+one was missing, which is why a server test, a view test and a proto-decoder
+test all passed at once.
+
+Note what is NOT done here: `ProtoBookResp.decodeBookDetailResponse` reads
+`my_writing` and has no production caller, so converging on it the way
+`CatalogueResponse` and `SearchResponse` do would delete this hand-rolled
+decoder entirely. That is the better end state and is deliberately left for its
+own change. ⚠️ **Converging TODAY would reintroduce the defect this decoder was
+just written to fix**, so read this before attempting it:
+
+  - `book_responses.proto` types `published_at` as a plain proto3 `string`,
+    which has no null. The generated decoder is therefore
+    `D.oneOf [ D.field "published_at" D.string, D.succeed "" ]`, so a draft's
+    `null` fails the inner decoder and lands as `""` — a blank date where a
+    "Draft" label belongs. `myWritingDecoder` below uses `Decode.nullable` for
+    exactly this reason. The contract needs `optional string` first; the proto
+    comment records why that is its own change and not a line in this one.
+  - `placementDecoder` is not a plain proto decode either: it is a `oneOf` that
+    falls back to a `PlacementRef` shape when `bookshelf_name` is absent, and
+    quietly dropping that fallback is how a second defect gets introduced while
+    fixing the first.
+  - `decodeBookPlacement` **cannot fail**. All eight of its fields are
+    `D.oneOf [ D.field …, D.succeed <default> ]`, so it succeeds on _any_ JSON
+    value — `null` included — returning an all-defaults struct. The generated
+    `D.maybe (D.field "placement" decodeBookPlacement)` therefore yields
+    `Just <empty placement>` for `"placement": null`, never `Nothing`. The same
+    mechanism collapses an absent `bookshelf_visibility` to `""`, which is the
+    third field this decoder lifts by hand as a `Maybe`. This is the blocker
+    `confirmResponseDecoder` cites.
+
+All three blockers are the same shape: the generated decoder is not a drop-in
+for a hand-written one that encodes knowledge the contract does not. In each
+case the generated version succeeds and returns something wrong, rather than
+failing — which is why none of this surfaces as a decode error.
 
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
-    Decode.map4 BookDetailResponse
+    Decode.map5 BookDetailResponse
         (Decode.field "book" bookDecoder)
         (Decode.oneOf
             [ Decode.field "placement" (Decode.nullable placementDecoder)
@@ -1614,6 +1678,11 @@ bookDetailResponseDecoder =
         )
         (Decode.oneOf
             [ Decode.field "placements" (Decode.list placementDecoder)
+            , Decode.succeed []
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "my_writing" (Decode.list myWritingDecoder)
             , Decode.succeed []
             ]
         )
@@ -2672,9 +2741,15 @@ confirmErrorFromBody statusCode bodyText =
 
 {-| Adapter: the `BookConfirmResponse` wire shape → the app-level record.
 
-Hand-rolled over the app-level `bookDecoder` / `placementDecoder` for the same
-reason `bookDetailResponseDecoder` is: the proto-generated placement decoder
-turns a JSON `null` into a default struct rather than `Nothing`.
+Hand-rolled over the app-level `bookDecoder` / `placementDecoder` for one of the
+reasons `bookDetailResponseDecoder` is — the third in that decoder's list:
+`decodeBookPlacement` cannot fail, so the generated
+`D.maybe (D.field "placement" decodeBookPlacement)` turns a JSON `null` into
+`Just <all-defaults struct>` rather than `Nothing`.
+
+⚠️ This is the THIRD hand-rolled decoder over the same book / placement /
+placements triple. Converging any one of them means taking all three, and
+`bookDetailResponseDecoder` carries the full blocker list.
 
 -}
 confirmResponseDecoder : Decoder ConfirmResponse

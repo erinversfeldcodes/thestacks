@@ -119,16 +119,22 @@
 - **Query**: Raw SQL `SELECT read_count FROM wh.mart_community_read_count WHERE book_id = $1 LIMIT 1`
 - **Schema module**: N/A (raw query)
 
-### Read: User's writing linked to book — ⚠️ RUNS, SERIALISED, THEN DISCARDED
+### Read: User's writing linked to book
 - **Table(s)**: `op.blog_posts` (via `Blog.list_posts_for_book_by_user/2`)
-- **Query**: Posts associated with the book by the current user
+- **Query**: Posts associated with the book by the current user, drafts included
 - **Schema module**: `Stacks.Blog.Post`
-- **Status**: the query runs on every authenticated book-detail read and
-  `book_controller.ex:218-219` puts `my_writing` on the wire, but `Api.elm:1596-1604`'s
-  `bookDetailResponseDecoder` is a `Decode.map4` that drops the field (its docstring says so:
-  *"Proto includes myWriting (dropped)"*) and `BookDetail.elm:1853`'s `viewWritingSection` takes no
-  arguments. So this read is **pure overhead** today, not a feature: three layers exist and the
-  middle one is missing. The `db.query.count{table="op.blog_posts"}` metric in section 15 counts it.
+- **Status**: rendered as of 2026-10-16. The viewer's posts arrive as `my_writing`
+  (`{id, title, published_at}`), decode into `Api.MyWriting`, and render one entry each in the
+  book detail's writing section — title linking to `/blog/{id}`, a date, or a `Draft` label where
+  `published_at` is null. A signed-out reader sees no section at all, because the server sends `[]`
+  to anonymous callers and an empty list alone cannot tell "signed out" from "written nothing".
+  Until this landed the read was **pure overhead**: the controller serialised the field, the
+  `Decode.map4` decoder dropped it (its docstring said so — *"Proto includes myWriting
+  (dropped)"*), and `viewWritingSection` took no arguments, so three layers existed and the middle
+  one was missing. Every layer had a passing test; only the composition was broken, which is why
+  `frontend/tests/Page/BookDetailWritingTest.elm` drives a simulated HTTP response through the real
+  program instead of calling the view directly. The `db.query.count{table="op.blog_posts"}` metric
+  in section 15 counts the read.
 
 ---
 

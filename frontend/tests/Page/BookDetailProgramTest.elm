@@ -387,7 +387,7 @@ loadedOverlayModel =
         ( m1, _, _ ) =
             BookDetail.update
                 (BookDetail.BookLoaded
-                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
+                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                 )
                 m0
                 (Just "test-token")
@@ -971,7 +971,7 @@ confirmMoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
@@ -989,7 +989,7 @@ confirmMoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
@@ -1006,7 +1006,7 @@ confirmRemoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)
@@ -1023,7 +1023,7 @@ confirmRemoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)

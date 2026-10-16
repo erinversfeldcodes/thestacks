@@ -287,7 +287,7 @@ suite =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
@@ -302,7 +302,7 @@ suite =
                             { init_ | pendingBookIds = [ "book-1", "book-2" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.pendingBookIds |> Expect.equal [ "book-2" ]
@@ -329,7 +329,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) Upload.init Nothing
+                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , test "Err sets result to IdentificationFailed" <|
@@ -689,7 +689,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update
@@ -725,7 +725,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -735,7 +735,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing

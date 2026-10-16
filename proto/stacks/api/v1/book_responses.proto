@@ -43,7 +43,30 @@ message MyWritingSummary {
   // Title of the blog post.
   string title = 2 [json_name = "title"];
 
-  // When the post was published (null if still a draft).
+  // When the post was published. The server sends a real `null` here for a
+  // draft, and drafts are included deliberately.
+  //
+  // ⚠️ THIS FIELD CANNOT EXPRESS THAT, and the gap is not cosmetic. A plain
+  // proto3 scalar has no null, so the generated decoders fall back to the type
+  // default: the Elm one emits
+  // `D.oneOf [ D.field "published_at" D.string, D.succeed "" ]`, turning every
+  // draft into `""` — which renders as a blank date, indistinguishable from a
+  // post published at an unknown time.
+  //
+  // So any consumer that switches from a hand-written decoder to the generated
+  // one reintroduces that defect silently, and `buf breaking` stays quiet
+  // because the contract is not what changed. `Api.elm`'s `myWritingDecoder`
+  // is hand-written for exactly this reason.
+  //
+  // The fix is `optional string`, which makes the generators emit
+  // `Maybe String`. It is deliberately NOT applied here: `buf breaking` reports
+  // it as a cardinality change ("implicit presence" → "explicit presence"), and
+  // the only way past that in this repo is a FILE-scoped `ignore_only` entry
+  // that would then cover every future field change in this file. Buying that
+  // blast radius inside an unrelated bug fix is how a suppression outlives its
+  // reason. It wants its own change, where the wire-compatibility argument —
+  // that the server's JSON is byte-identical either way — gets decided on its
+  // own terms.
   string published_at = 3 [json_name = "published_at"];
 }
 

@@ -1731,6 +1731,62 @@ h4 {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+}
+
+.book-detail__writing-entry {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--parchment-border);
+}
+
+/* The section already ends in a divider, so a rule under the final entry
+   reads as a double line on the live page. */
+.book-detail__writing-entry:last-child {
+    border-bottom: none;
+}
+
+.book-detail__writing-link {
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    color: var(--parchment-text);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+
+.book-detail__writing-link:hover {
+    color: var(--parchment-accent);
+    border-bottom-color: var(--parchment-accent);
+}
+
+.book-detail__writing-date {
+    flex-shrink: 0;
+    font-size: var(--size-sm);
+    color: var(--parchment-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* A draft sorts above published posts (NULLS FIRST), so this sits in the
+   first row often enough to be worth distinguishing from a date rather than
+   leaving the column blank. */
+.book-detail__writing-draft {
+    flex-shrink: 0;
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted);
+}
+
+.book-detail__writing-empty {
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted);
+    line-height: 1.6;
 }
 
 .stub-notice {

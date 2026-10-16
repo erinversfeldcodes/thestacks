@@ -24,6 +24,7 @@ module TestHelpers exposing
     , simulateBookDetailResponseWithPlacement
     , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
+    , simulateBookDetailResponseWithWriting
     , simulateBookPricesResponse
     , simulateBookResponse
     , simulateBookshelfErrorResponse
@@ -805,6 +806,52 @@ simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibil
                 (Encode.object
                     [ ( "book", encodeBook book )
                     , ( "placement", placementJson )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| A book-detail response carrying the viewer's own posts about the book, in
+the shape `BookController.render_book_detail/3` serialises them: a list of
+`{id, title, published_at}`, with `published_at` null for a draft.
+
+Takes the posts as `(id, title, maybeIsoDate)` triples and encodes them here
+rather than accepting ready-made JSON, so a drift between this shape and the
+controller's is a type error in the helper and not a silently-ignored key in
+the decoder under test.
+
+-}
+simulateBookDetailResponseWithWriting : String -> Book -> List ( String, String, Maybe String ) -> Http.Response String
+simulateBookDetailResponseWithWriting bookId book posts =
+    let
+        encodePost ( postId, title, maybePublishedAt ) =
+            Encode.object
+                [ ( "id", Encode.string postId )
+                , ( "title", Encode.string title )
+                , ( "published_at"
+                  , case maybePublishedAt of
+                        Just publishedAt ->
+                            Encode.string publishedAt
+
+                        Nothing ->
+                            Encode.null
+                  )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", Encode.null )
+                    , ( "placements", Encode.list identity [] )
+                    , ( "my_writing", Encode.list encodePost posts )
                     ]
                 )
     in

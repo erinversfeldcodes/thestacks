@@ -774,6 +774,41 @@ defmodule StacksWeb.BookControllerTest do
              "my_writing leaked another author's post: #{inspect(titles)}"
     end
 
+    test "a draft is carried with published_at NULL, not coerced to a string", %{conn: conn} do
+      # ⚠️ The only test on either side of the wire that proves a draft arrives
+      # as `null`. The client renders a "Draft" label for exactly that value and
+      # a date otherwise, and until this existed BOTH ends of that claim lived
+      # in the client's own diff: every test here inserted
+      # `published_at: DateTime.utc_now()`, and the `null` the Elm tests decode
+      # was written by the Elm test helper.
+      #
+      # The edit this is here to catch is a plausible one, because the contract
+      # invites it: `book_responses.proto` types `published_at` as a
+      # non-optional proto3 `string`, so "make the server match the proto" reads
+      # like a correction. Coercing to `""` here would keep this suite, the
+      # whole Elm suite and the wire shape green while every draft rendered with
+      # a blank date.
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      draft = insert(:post, user: user, title: "Half-written", published_at: nil)
+      {:ok, _assoc} = Stacks.Blog.associate_book(draft, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"my_writing" => [entry]} = json_response(conn, 200)
+      assert entry["title"] == "Half-written"
+
+      assert Map.has_key?(entry, "published_at"),
+             "the key must be present — an absent key and a null one are different payloads, " <>
+               "and only one of them tells the client this post is a draft"
+
+      assert entry["published_at"] == nil,
+             "a draft must serialise as null; got #{inspect(entry["published_at"])}"
+    end
+
     test "authenticated user with no associations sees empty my_writing", %{conn: conn} do
       user = insert(:user)
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")

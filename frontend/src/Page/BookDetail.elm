@@ -92,6 +92,7 @@ type alias Model =
     , finishedReadPrompt : Bool
     , coverFailed : Bool
     , undoableRemoval : Maybe { placementId : String, bookTitle : String }
+    , myWriting : List Api.MyWriting
     }
 
 
@@ -208,6 +209,7 @@ initWithEffect bookId maybeToken maybePreviousRoute =
       , finishedReadPrompt = False
       , coverFailed = False
       , undoableRemoval = Nothing
+      , myWriting = []
       }
     , Effect.batch
         [ Effect.public (Api.getBookRequest bookId)
@@ -525,6 +527,7 @@ updateWithEffect msg model maybeToken =
                         , previousVisibility = placementVisibility
                         , shelfCeiling = shelfCeiling
                         , progressCard = progressCard
+                        , myWriting = response.myWriting
                       }
                     , Effect.batch
                         [ case response.book.author of
@@ -1281,7 +1284,7 @@ viewBook model book =
          , viewPricesSection model
          , viewAvailabilitySection model
          , viewAuthorSection model book
-         , viewWritingSection
+         , viewWritingSection model
          ]
             ++ (case ( model.placement, model.isAuthenticated ) of
                     ( Just _, _ ) ->
@@ -1850,17 +1853,65 @@ viewAuthorSection model book =
         )
 
 
-viewWritingSection : Html Msg
-viewWritingSection =
-    section [ class "book-detail__section book-detail__writing", attribute "role" "region", attribute "aria-labelledby" "section-writing" ]
-        [ h3 [ class "book-detail__section-title", id "section-writing" ] [ text "My Writing" ]
-        , div [ class "book-detail__writing-body" ]
-            [ div [ class "book-detail__writing-list" ] []
-            , p [ class "stub-notice" ]
-                [ text "Link your blog posts about this book" ]
-            , button [ class "btn btn--secondary btn--sm", attribute "aria-label" "Add a blog post about this book" ]
-                [ text "Add Post" ]
+{-| The viewer's own posts about this book.
+
+⚠️ This took NO ARGUMENTS until 2026-10-16, so nothing could reach it: it
+rendered a heading, an empty list, a stub notice and an `Add Post` button with
+no handler, to everyone, signed in or not. The server had been sending the posts
+all along.
+
+Three things it now gets right that the stub got wrong:
+
+  - A signed-out reader sees nothing at all, rather than a "My Writing" heading
+    over an affordance they cannot use. The server sends `[]` to anonymous
+    callers, so the empty list is the same for "signed out" and "signed in with
+    nothing written" — `isAuthenticated` is what tells them apart.
+  - A DRAFT is labelled. The query deliberately includes unpublished posts, and
+    `published_at DESC` is NULLS FIRST in Postgres, so drafts sort to the top.
+    Rendering a blank date there would read as a bug.
+  - There is no `Add Post` button. Associations are created by an asynchronous
+    worker when a post is published, so there is no affordance for this page to
+    invoke — and a button that does nothing is worse than no button. The empty
+    state says where writing comes from instead.
+
+-}
+viewWritingSection : Model -> Html Msg
+viewWritingSection model =
+    if not model.isAuthenticated then
+        text ""
+
+    else
+        section [ class "book-detail__section book-detail__writing", attribute "role" "region", attribute "aria-labelledby" "section-writing" ]
+            [ h3 [ class "book-detail__section-title", id "section-writing" ] [ text "My Writing" ]
+            , div [ class "book-detail__writing-body" ]
+                (case model.myWriting of
+                    [] ->
+                        [ p [ class "book-detail__writing-empty" ]
+                            [ text "You haven't written about this book yet. Posts you publish that mention it will appear here." ]
+                        ]
+
+                    posts ->
+                        [ ul [ class "book-detail__writing-list" ]
+                            (List.map viewWritingEntry posts)
+                        ]
+                )
             ]
+
+
+viewWritingEntry : Api.MyWriting -> Html Msg
+viewWritingEntry post =
+    li [ class "book-detail__writing-entry" ]
+        [ a [ href (Route.toPath (Route.BlogPost post.id)), class "book-detail__writing-link" ]
+            [ text post.title ]
+        , case post.publishedAt of
+            Just published ->
+                -- `String.left 10` is this project's existing convention for an
+                -- ISO timestamp (AuthorCard, BookList, RemovalRequests all do it);
+                -- there is no date utility to reach for yet.
+                span [ class "book-detail__writing-date" ] [ text (String.left 10 published) ]
+
+            Nothing ->
+                span [ class "book-detail__writing-draft" ] [ text "Draft" ]
         ]
 
 
