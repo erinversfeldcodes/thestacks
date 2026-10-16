@@ -49,7 +49,15 @@ type alias Model =
     , pendingCopy : Maybe { target : CopyTarget, payload : String }
     , exportState : RemoteData Http.Error SyndicationExport
     , syndicatedUrlInput : String
-    , urlError : Bool
+
+    -- The failure itself, not a flag. A flag could only ever render ONE
+    -- message, and the one it rendered was "that doesn't look like a web
+    -- address" — said to a writer whose session had expired, whose post had
+    -- been deleted in another tab, or who was briefly offline. Each of those is
+    -- a different thing to do next, and the writer was instead invited to
+    -- retype a URL that was never the problem. 422 is the only failure that
+    -- actually means the URL.
+    , urlError : Maybe Http.Error
     , savingUrl : Bool
     , syndications : List Syndication
 
@@ -92,7 +100,7 @@ initialModel postId origin syndicated =
     , pendingCopy = Nothing
     , exportState = NotAsked
     , syndicatedUrlInput = ""
-    , urlError = False
+    , urlError = Nothing
     , savingUrl = False
     , syndications = []
     , readFailed = False
@@ -194,7 +202,7 @@ update msg model maybeToken =
             ( model, Cmd.none, NoOut )
 
         UrlChanged value ->
-            ( { model | syndicatedUrlInput = value, urlError = False }, Cmd.none, NoOut )
+            ( { model | syndicatedUrlInput = value, urlError = Nothing }, Cmd.none, NoOut )
 
         UrlSubmitted ->
             case ( maybeToken, latestSyndication model ) of
@@ -222,8 +230,8 @@ update msg model maybeToken =
             , NoOut
             )
 
-        UrlSaved (Err _) ->
-            ( { model | savingUrl = False, urlError = True }, Cmd.none, NoOut )
+        UrlSaved (Err err) ->
+            ( { model | savingUrl = False, urlError = Just err }, Cmd.none, NoOut )
 
         ToggledIncludeInFeed include ->
             case maybeToken of
@@ -499,12 +507,18 @@ viewAlsoPublishedAt model =
                                 "Save"
                             )
                         ]
-                    , if model.urlError then
-                        span [ class "post__syndication-error" ]
-                            [ text "That doesn't look like a web address." ]
+                    , case model.urlError of
+                        Just err ->
+                            span
+                                [ class "post__syndication-error"
+                                , testId "syndication-url-error"
+                                , Html.Attributes.attribute "data-refusal" (urlErrorKind err)
+                                , Html.Attributes.attribute "role" "alert"
+                                ]
+                                [ text (urlErrorMessage err) ]
 
-                      else
-                        text ""
+                        Nothing ->
+                            text ""
                     ]
 
 
@@ -549,6 +563,71 @@ viewCopyFallback model =
 
         _ ->
             text ""
+
+
+{-| Which failure this is, as a stable token on the element — so a test can say
+"this is not the bad-address one" without betting on the wording of either
+message. A negative assertion about copy stops meaning anything as soon as the
+copy changes, and says nothing when it does.
+-}
+urlErrorKind : Http.Error -> String
+urlErrorKind err =
+    case err of
+        Http.BadStatus 422 ->
+            "bad-address"
+
+        Http.BadStatus 401 ->
+            "signed-out"
+
+        Http.BadStatus 403 ->
+            "not-yours"
+
+        Http.BadStatus 404 ->
+            "gone"
+
+        Http.NetworkError ->
+            "unreachable"
+
+        Http.Timeout ->
+            "timed-out"
+
+        _ ->
+            "unknown"
+
+
+{-| Why the backlink didn't save.
+
+Only 422 is the server saying something about the URL — `set_syndicated_url/2`
+rejecting it on the changeset. Everything else is about the request: the session
+(401), the post (403/404), or the network. Each one needs a different action from
+the writer, and all five used to arrive as "that doesn't look like a web
+address", which is both wrong and unfixable by the only thing it invites them to
+do.
+
+-}
+urlErrorMessage : Http.Error -> String
+urlErrorMessage err =
+    case err of
+        Http.BadStatus 422 ->
+            "That doesn't look like a web address."
+
+        Http.BadStatus 401 ->
+            "You've been signed out. Sign in again and the link will save — the text is still here."
+
+        Http.BadStatus 403 ->
+            "This post isn't yours to change."
+
+        Http.BadStatus 404 ->
+            "This post, or the syndication you're linking, is no longer here. Reload the page."
+
+        Http.NetworkError ->
+            "The link didn't reach us. The address is fine — try again in a moment."
+
+        Http.Timeout ->
+            "That took too long to save. Try again — nothing was lost."
+
+        _ ->
+            "The link didn't save. Try again in a moment."
 
 
 backlink : Model -> Maybe String

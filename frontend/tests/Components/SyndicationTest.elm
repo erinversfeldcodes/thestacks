@@ -20,6 +20,13 @@ byTestId id =
     Selector.attribute (Html.Attributes.attribute "data-testid" id)
 
 
+{-| Which refusal the panel is rendering, read as a token rather than as prose.
+-}
+refusal : String -> Selector.Selector
+refusal kind =
+    Selector.attribute (Html.Attributes.attribute "data-refusal" kind)
+
+
 initModel : Syndication.Model
 initModel =
     -- `init` now returns a Cmd as well, because the panel asks the server what has
@@ -54,6 +61,21 @@ afterFetch syndications =
                 |> (\( m, c, _ ) -> ( m, c ))
     in
     model
+
+
+{-| A panel with one recorded syndication (so the backlink field is offered) on
+which a save has just come back with the given failure.
+-}
+afterSaveFailure : Http.Error -> Query.Single Syndication.Msg
+afterSaveFailure err =
+    let
+        ( model, _, _ ) =
+            Syndication.update
+                (Syndication.UrlSaved (Err err))
+                (afterFetch [ recorded Nothing ])
+                (Just "tok")
+    in
+    render model True
 
 
 render : Syndication.Model -> Bool -> Query.Single Syndication.Msg
@@ -151,6 +173,60 @@ suite =
                 \_ ->
                     render (afterFetch []) True
                         |> Query.hasNot [ byTestId "syndication-also-at-input" ]
+            , describe "a failed backlink save says WHICH failure"
+                [ test "422 is the only one that blames the address" <|
+                    \_ ->
+                        afterSaveFailure (Http.BadStatus 422)
+                            |> Query.find [ byTestId "syndication-url-error" ]
+                            |> Expect.all
+                                [ Query.has [ Selector.text "doesn't look like a web address" ]
+                                , Query.has [ refusal "bad-address" ]
+                                ]
+                , test "an expired session says so, and says the text is still there" <|
+                    \_ ->
+                        -- All five of these were one message, and the message was
+                        -- "that doesn't look like a web address" — so a writer
+                        -- whose session had lapsed was invited to retype a URL
+                        -- that had never been the problem, as many times as they
+                        -- liked.
+                        --
+                        -- The negative is on `data-refusal`, not on the other
+                        -- message's wording: an absence asserted about copy comes
+                        -- true the moment the copy is reworded, which is the one
+                        -- change most likely to happen to it.
+                        afterSaveFailure (Http.BadStatus 401)
+                            |> Query.find [ byTestId "syndication-url-error" ]
+                            |> Expect.all
+                                [ Query.has [ Selector.text "signed out" ]
+                                , Query.has [ refusal "signed-out" ]
+                                , Query.hasNot [ refusal "bad-address" ]
+                                ]
+                , test "a vanished post sends the writer to reload, not to retype" <|
+                    \_ ->
+                        afterSaveFailure (Http.BadStatus 404)
+                            |> Query.find [ byTestId "syndication-url-error" ]
+                            |> Expect.all
+                                [ Query.has [ Selector.text "Reload the page" ]
+                                , Query.has [ refusal "gone" ]
+                                , Query.hasNot [ refusal "bad-address" ]
+                                ]
+                , test "a network failure exonerates the address explicitly" <|
+                    \_ ->
+                        afterSaveFailure Http.NetworkError
+                            |> Query.find [ byTestId "syndication-url-error" ]
+                            |> Expect.all
+                                [ Query.has [ Selector.text "The address is fine" ]
+                                , Query.has [ refusal "unreachable" ]
+                                , Query.hasNot [ refusal "bad-address" ]
+                                ]
+                , test "and a successful save shows no error at all" <|
+                    \_ ->
+                        -- The positive control: four hasNots above are each
+                        -- satisfied by a panel that renders no error element,
+                        -- which is also what a broken branch would do.
+                        render (afterFetch [ recorded Nothing ]) True
+                            |> Query.hasNot [ byTestId "syndication-url-error" ]
+                ]
             , test "a failed fetch leaves the export working and says it could not check" <|
                 \_ ->
                     -- This asserted the canonical-url block, which renders
