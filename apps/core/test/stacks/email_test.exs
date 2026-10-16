@@ -383,8 +383,22 @@ defmodule Stacks.EmailTest do
       confirmation = Enum.find(jobs, &(&1.args["template"] == "email_change_confirmation"))
       notice = Enum.find(jobs, &(&1.args["template"] == "email_change_notice"))
 
-      assert confirmation.args["params"]["token"] == user.pending_email_token
-      assert notice.args["params"]["token"] == user.pending_email_revert_token
+      # ⚠️ Digests, not tokens. These args used to carry the raw tokens, which
+      # put two live credentials into `oban_jobs` — a queryable table with no
+      # erasure path, and since the pruner moved from 60 seconds to 7 days, a
+      # long memory. The digest is what the worker needs (it detects a change
+      # settled or superseded since enqueue) and is useless to a reader.
+      assert confirmation.args["params"]["token_digest"] ==
+               EmailDeliveryJob.digest_of(user.pending_email_token)
+
+      assert notice.args["params"]["token_digest"] ==
+               EmailDeliveryJob.digest_of(user.pending_email_revert_token)
+
+      refute confirmation.args["params"]["token"],
+             "the raw confirmation token is back in the job args"
+
+      refute notice.args["params"]["token"],
+             "the raw revert token is back in the job args"
     end
 
     test "refuses rather than recording a change whose letters cannot be sent" do

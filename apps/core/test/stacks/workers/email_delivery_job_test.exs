@@ -145,17 +145,61 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
   end
 
   describe "enqueue shape (Stacks.Email -> EmailDeliveryJob)" do
-    test "registration_confirmation enqueues a job whose args.params.token is present" do
+    test "no enqueued job carries a usable credential in its args" do
+      # ⚠️ This test used to assert the OPPOSITE — that `args.params.token` was
+      # present and non-empty. It was pinning a defect.
+      #
+      # `oban_jobs.args` is an ordinary queryable table with no erasure path.
+      # A confirmation or reset token sitting there is a live credential: the
+      # reset token verifies for 24 hours and the confirmation tokens are
+      # compared straight against the user row with no expiry at all, so they
+      # work until consumed. The job never needed the token — it loads the user
+      # row anyway and can read the live one at delivery.
+      #
+      # Raising the Oban pruner from 60 seconds to 7 days is what made this
+      # urgent rather than merely wrong: the same credential, readable for
+      # 10,080× longer.
       user = user_with_confirmation_token()
 
       assert {:ok, _user} = Email.send_registration_confirmation(user)
-
       assert_enqueued(worker: EmailDeliveryJob, args: %{"user_id" => user.id})
 
       [job] = all_enqueued(worker: EmailDeliveryJob)
       assert job.args["template"] == "registration_confirmation"
-      assert is_binary(job.args["params"]["token"])
-      assert job.args["params"]["token"] != ""
+
+      refute Map.has_key?(job.args["params"], "token"),
+             "a raw token reached oban_jobs.args: #{inspect(job.args["params"])}. The worker " <>
+               "resolves the live token from the user row — nothing needs to carry it through " <>
+               "the queue."
+
+      assert job.args["user_id"] == user.id,
+             "the args must still identify the user, or the worker cannot resolve the token"
+    end
+
+    test "the email-change pair carries a DIGEST, which cannot be used as a token" do
+      # The two templates that genuinely need something from the enqueue: the
+      # worker compares against the user row to detect a change that has been
+      # settled or superseded since. A SHA-256 digest answers that question and
+      # is useless to anyone reading the table.
+      user = user_mid_change()
+
+      assert {:ok, _} = Email.send_email_change_pair(user)
+
+      jobs = all_enqueued(worker: EmailDeliveryJob)
+      confirmation = Enum.find(jobs, &(&1.args["template"] == "email_change_confirmation"))
+
+      refute is_nil(confirmation), "the confirmation letter was not enqueued"
+
+      digest = confirmation.args["params"]["token_digest"]
+
+      assert is_binary(digest) and byte_size(digest) == 64,
+             "expected a hex SHA-256 digest, got #{inspect(digest)}"
+
+      refute digest == user.pending_email_token,
+             "the digest is the token itself — hashing did not happen"
+
+      assert digest == EmailDeliveryJob.digest_of(user.pending_email_token),
+             "the digest must be of the token it supersedes, or staleness cannot be judged"
     end
   end
 

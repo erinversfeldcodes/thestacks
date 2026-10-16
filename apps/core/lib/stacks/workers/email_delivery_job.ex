@@ -74,18 +74,45 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     end
   end
 
+  # ⚠️ The token is resolved from the USER ROW, never from the job args.
+  #
+  # `oban_jobs.args` is an ordinary queryable table with no erasure path and,
+  # since the pruner window went from 60 seconds to 7 days, a long memory. A
+  # password-reset or confirmation token sitting there is a live credential:
+  # the reset token verifies for 24 hours (`Email.reset_password/2`'s
+  # `max_age: 86_400`) and the confirmation tokens are compared straight
+  # against the user row with no expiry at all, so they are usable until
+  # consumed.
+  #
+  # The job only ever needs to know WHICH user, and it already loads that row.
+  # What it cannot get from the row is whether its own enqueue has been
+  # superseded — so the args carry a SHA-256 digest of the token instead, which
+  # answers that question and is useless to anyone reading the table.
   defp deliver(template, user_id, params) do
     user = Repo.get!(User, user_id)
 
     cond do
+      # ⚠️ Staleness is judged against the ARGS AS ENQUEUED, before any token is
+      # resolved. Injecting the live token first — which an earlier version of
+      # this function did — overwrites the only thing that distinguishes this
+      # job's enqueue from the current state, so the comparison becomes the
+      # live token against itself and nothing is ever stale. The test for a
+      # superseded change is what caught it.
       stale_email_change?(user, template, params) ->
         {:discard, "email change already settled or superseded — its #{template} is a dead link"}
 
       should_send?(user, template) ->
-        send_email(user, template, params)
+        send_email(user, template, with_live_token(user, template, params))
 
       true ->
         :ok
+    end
+  end
+
+  defp with_live_token(user, template, params) do
+    case live_token(user, template) do
+      nil -> params
+      token -> Map.put(params, "token", token)
     end
   end
 
@@ -93,6 +120,20 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   # delivery. In all three the row no longer holds this job's token, and the link
   # in the email would resolve to nothing — so the job is dropped rather than
   # delivering a letter whose only affordance is already dead.
+  defp stale_email_change?(user, :email_change_confirmation, %{"token_digest" => digest}),
+    do: digest_of(user.pending_email_token) != digest
+
+  defp stale_email_change?(user, :email_change_notice, %{"token_digest" => digest}),
+    do: digest_of(user.pending_email_revert_token) != digest
+
+  # ⚠️ Jobs enqueued BEFORE this change carry the raw token, and the digest
+  # clauses above do not match them. Without this pair they would fall through
+  # to the catch-all, be judged "not stale", and deliver a dead link — the
+  # staleness gate silently skipped for exactly the jobs in flight across the
+  # deploy. The 7-day pruner window makes that population larger, not smaller.
+  #
+  # Remove after one release, once no `"token"`-shaped job can still be
+  # retrying.
   defp stale_email_change?(user, :email_change_confirmation, %{"token" => token}),
     do: user.pending_email_token != token
 
@@ -100,6 +141,23 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     do: user.pending_email_revert_token != token
 
   defp stale_email_change?(_user, _template, _params), do: false
+
+  # The token that is live for this user and template RIGHT NOW. Read at
+  # delivery time rather than carried through the queue.
+  defp live_token(user, :registration_confirmation), do: user.email_confirmation_token
+  defp live_token(user, :password_reset), do: user.password_reset_token
+  defp live_token(user, :email_change_confirmation), do: user.pending_email_token
+  defp live_token(user, :email_change_notice), do: user.pending_email_revert_token
+  # Most templates carry no credential at all — marketplace, wishlist and
+  # export notifications address the user, they do not authorise anything.
+  defp live_token(_user, _template), do: nil
+
+  @doc false
+  @spec digest_of(binary() | nil) :: binary() | nil
+  def digest_of(nil), do: nil
+
+  def digest_of(token) when is_binary(token),
+    do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower)
 
   defp send_email(user, template, params) do
     email = build_email(user, template, params)

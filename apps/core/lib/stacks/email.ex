@@ -34,7 +34,7 @@ defmodule Stacks.Email do
           EmailDeliveryJob.new(%{
             "template" => "registration_confirmation",
             "user_id" => user.id,
-            "params" => %{"token" => token}
+            "params" => %{}
           })
           |> Oban.insert!()
 
@@ -127,14 +127,16 @@ defmodule Stacks.Email do
         EmailDeliveryJob.new(%{
           "template" => "email_change_confirmation",
           "user_id" => user.id,
-          "params" => %{"token" => user.pending_email_token}
+          "params" => %{"token_digest" => EmailDeliveryJob.digest_of(user.pending_email_token)}
         })
         |> Oban.insert!()
 
         EmailDeliveryJob.new(%{
           "template" => "email_change_notice",
           "user_id" => user.id,
-          "params" => %{"token" => user.pending_email_revert_token}
+          "params" => %{
+            "token_digest" => EmailDeliveryJob.digest_of(user.pending_email_revert_token)
+          }
         })
         |> Oban.insert!()
 
@@ -245,7 +247,7 @@ defmodule Stacks.Email do
           EmailDeliveryJob.new(%{
             "template" => "password_reset",
             "user_id" => user.id,
-            "params" => %{"token" => token}
+            "params" => %{}
           })
           |> Oban.insert!()
         end)
@@ -286,7 +288,7 @@ defmodule Stacks.Email do
           EmailDeliveryJob.new(%{
             "template" => "registration_confirmation",
             "user_id" => user.id,
-            "params" => %{"token" => token}
+            "params" => %{}
           })
           |> Oban.insert!()
         end)
