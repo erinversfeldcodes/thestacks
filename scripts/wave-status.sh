@@ -167,6 +167,24 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
             + ", ".join(sorted(not_done))
         )
 
+    # ⚠️ The MIRROR of the check above, and it was missing: a wave whose every
+    # item is done while its own status still says in_progress passed silently.
+    # Wave 1 of the 10-13 campaign sat like that — six of six items complete,
+    # every DoD ticked, every staff-review verdict recorded — and the roll-up
+    # reported it as in-flight, which is the state a fresh pass reads and
+    # believes. A stale state file is a defect on par with a failing test, and
+    # this guard checked only the half that overclaims.
+    #
+    # `filed` and `not_started` waves with no items yet are not stale, so the
+    # emptiness case is excluded rather than reported.
+    if witems and not not_done and wstatus not in DONE:
+        violations.append(
+            f"WAVE {wname} is marked '{wave.get('status')}' but ALL {len(witems)} of its items "
+            f"are done. Either the wave is complete and its status should say so, or an item is "
+            f"marked done that is not — the roll-up is what a fresh pass reads, so an "
+            f"understated wave is as misleading as an overstated one."
+        )
+
     mark = "OK " if wstatus in DONE and not not_done else "-- "
     print(f"{mark}Wave {wname}: {wave.get('title','')}  [{wave.get('status','unknown')}]")
 

@@ -5,9 +5,10 @@
 # "ask wave-status whether a wave is done, never the human" — and it had no test
 # of any kind.
 #
-# These four cases cover its stack-review guard, which reports which stacks a
-# campaign touched and demands a recorded review for each. It got that wrong in
-# two ways, both of which made it say "nothing to review":
+# These cases cover its stack-review guard — which reports which stacks a
+# campaign touched and demands a recorded review for each — plus the
+# wave-level roll-up. The stack guard got things wrong in two ways, both of
+# which made it say "nothing to review":
 #
 #   1. It was BLIND TO UNCOMMITTED WORK, which is exactly what an in-flight wave
 #      looks like. With ten files modified and no commits beyond main it
@@ -17,6 +18,11 @@
 #      branch happened to be checked out. So the missing review axis that
 #      prompted this work was never going to be caught by the instrument built
 #      to catch it.
+#
+# And the roll-up checked only whether a wave OVERCLAIMED — a wave whose every
+# item was done while its own status said `in_progress` passed silently, which
+# is how wave 1 of the 10-13 campaign came to read as in-flight with all six
+# items complete, every DoD ticked and every review recorded.
 #
 # Each case builds its own throwaway git repository, because the behaviour under
 # test IS the diff computation and a test that ran against this checkout would
@@ -147,5 +153,39 @@ assert_contains "$OUT" "UNKNOWN" "coverage is reported as UNKNOWN"
 assert_contains "$OUT" "diff_range" "the message names the declared range as the problem"
 assert_not_contains "$OUT" "touches elixir" \
     "it must NOT silently fall back to the branch diff — that fallback is how the wrong range came to be measured"
+
+# ── 5. a wave understating itself is reported, not only one overstating ─────
+#
+# The roll-up checked only whether a wave claimed MORE than its items support.
+# Wave 1 of the 10-13 campaign sat at `in_progress` with six of six items
+# complete, every DoD ticked and every review recorded — and the roll-up called
+# it in-flight, which is what a fresh pass reads and believes.
+DIR="$(new_sandbox stale_wave '{"elixir": "LGTM"}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+
+test_case "a_wave_with_all_items_done_is_not_left_in_progress" "an understated wave is reported"
+run_gate "$DIR"
+assert_contains "$OUT" "ALL 1 of its items are done" \
+    "the sandbox wave is in_progress with its only item complete, which the roll-up must report"
+
+# And the mirror must not fire on a wave that genuinely has work left.
+python3 - "$DIR/plans/probe-campaign-state.json" <<'PY2'
+import json, sys
+path = sys.argv[1]
+state = json.load(open(path))
+items = state["waves"]["1"]["items"]
+items["W1b"] = {"status": "not_started", "informal": True, "note": "still to do", "title": "second"}
+json.dump(state, open(path, "w"), indent=2)
+PY2
+
+test_case "a_wave_with_work_left_is_not_reported" "the mirror check does not fire on a real in-flight wave"
+run_gate "$DIR"
+# ⚠️ Presence anchor first. A bare absence assertion is satisfied by a gate that
+# produced NOTHING — a crash, a missing state file, a changed slug — and would
+# then report the opposite of what it claims. This project has the rule written
+# down because a wait-for-absence once passed that way.
+assert_contains "$OUT" "Wave 1" "the gate ran and rendered the wave"
+assert_not_contains "$OUT" "of its items are done" \
+    "one item is not_started, so this wave is legitimately in_progress"
 
 summarise
