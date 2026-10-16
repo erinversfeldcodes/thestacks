@@ -528,6 +528,14 @@ defmodule Stacks.Moderation do
   #
   # The exposure was logs only: `raw_text` is in-memory, with no Ecto schema,
   # dbt model or `persisted.exs` entry, so erasure never had anything to reach.
+  #
+  # Only `nil | binary()` can arrive: the sole caller passes the result of
+  # `normalise_nullish_text/1`, whose catch-all collapses every other term to
+  # `nil`. A fourth defensive clause here looked like belt-and-braces and was
+  # the opposite — dialyzer proved it unreachable, and had anything reached it,
+  # `other.__struct__` would have raised on any non-struct, turning a log line
+  # into an exception inside the caller. The narrowing belongs upstream, where
+  # it already is.
   defp ocr_shape(nil), do: "none"
   defp ocr_shape(""), do: "empty"
 
@@ -535,6 +543,4 @@ defmodule Stacks.Moderation do
     digit_runs = Regex.scan(~r/\d{10}|\d{13}/, text) |> length()
     "#{byte_size(text)}B/#{digit_runs}isbn-shaped"
   end
-
-  defp ocr_shape(other), do: "non-text:#{inspect(other.__struct__ || :unknown)}"
 end
