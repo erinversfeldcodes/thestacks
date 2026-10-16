@@ -38,20 +38,31 @@ defmodule StacksWeb.DeployedDbRolesTest do
     [user, pass] = String.split(uri.userinfo || "", ":", parts: 2)
     database = uri.path |> String.trim_leading("/") |> String.split("?") |> hd()
 
-    {:ok, conn} =
-      Postgrex.start_link(
+    # `start_supervised!`, not `Postgrex.start_link` plus an `on_exit` stop.
+    #
+    # The sibling deployed test uses the latter, and it does not work here: the
+    # connection is LINKED to the test process, so it is already terminating by
+    # the time `on_exit` runs in its own process, and the `GenServer.stop/1`
+    # races it — every one of these tests failed with
+    # `(EXIT) exited in: :sys.terminate(...) ** (EXIT) shutdown` while its
+    # assertions had all passed. A teardown crash is reported identically to a
+    # failed assertion, which is a bad way to learn anything.
+    #
+    # Letting ExUnit own the lifecycle removes the race entirely.
+    conn =
+      start_supervised!({
+        Postgrex,
+        # `ssl: [...]`, not `ssl: true` + `ssl_opts:` — Postgrex 0.22 ignores
+        # the older pair and attempts the connection without TLS, which Neon
+        # refuses with "ssl not available".
         hostname: uri.host,
         port: uri.port || 5432,
         username: user,
         password: pass,
         database: database,
-        # `ssl: [...]`, not `ssl: true` + `ssl_opts:` — Postgrex 0.22 ignores
-        # the older pair and attempts the connection without TLS, which Neon
-        # refuses with "ssl not available".
         ssl: [verify: :verify_none]
-      )
+      })
 
-    on_exit(fn -> if Process.alive?(conn), do: GenServer.stop(conn) end)
     {:ok, conn: conn}
   end
 

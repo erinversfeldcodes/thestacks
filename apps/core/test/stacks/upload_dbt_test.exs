@@ -661,14 +661,41 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "deployed-only: dbt staging views reflect op table data" do
-    @moduletag :deployed_only
+  describe "dbt staging views reflect op table data" do
+    # ⚠️ NOT `:deployed_only`, and it was until 2026-10-16. That tag described a
+    # precondition these tests cannot be satisfied by.
+    #
+    # Each test writes a fixture through `Repo` — the sandboxed TEST database —
+    # and then reads it back from `staging.*` through the same `Repo`. So what
+    # they need is one database holding **both** their fixtures and a dbt-built
+    # warehouse. A deployed stack has the warehouse and not the fixtures, so
+    # pointing them at one cannot help; and the test sandbox has the fixtures
+    # and no warehouse, because nothing runs dbt against it.
+    #
+    # The history is worth keeping because the two halves look contradictory.
+    # They originally swallowed every query error as `{:error, _} -> :ok` and so
+    # passed against a database with no warehouse at all — which was the state
+    # of every deployed stack. Commit `6efad41d` correctly stopped that, and the
+    # flunk message it added said they were "expected to stay red until a
+    # scheduled dbt run materialises the warehouse on a deployed database". That
+    # run has now happened — verified, 40 staging views and 150 mart rows on a
+    # deployed database — and these tests are still red, because the cause named
+    # in the message was never the cause. Hardening a vacuous test revealed that
+    # it was also pointed at the wrong thing; both were true at once.
+    #
+    # So the tag now names the real precondition, and these stay EXCLUDED by
+    # default (`test_helper.exs`) exactly as they were — what changes is that
+    # `--only deployed_only` no longer selects them, so the deployed suite stops
+    # reporting eight failures for a reason that has nothing to do with the
+    # deployed stack.
+    #
+    # They are deliberately still FAILURES rather than skips when run without
+    # the warehouse. Returning them to a conditional pass would undo `6efad41d`
+    # and this project's rule that a skip is not a pass; the message below is
+    # what changed, because the old one sent the reader to a fix that could
+    # never work.
+    @moduletag :needs_dbt_warehouse
 
-    # Every test below used to swallow a query error as `{:error, _} -> :ok`, so
-    # all five passed against a database with no warehouse whatsoever — which is
-    # the state the warehouse has actually been in on staging, preview and
-    # production. A missing relation is the finding these tests exist to report,
-    # so it fails here and names what is absent.
     defp warehouse_rows!(sql, params, relation) do
       case Repo.query(sql, params) do
         {:ok, %{rows: rows}} ->
@@ -676,10 +703,19 @@ defmodule Stacks.UploadDbtTest do
 
         {:error, error} ->
           flunk("""
-          #{relation} could not be queried on this stack: #{inspect(error)}
+          #{relation} could not be queried on the database under test.
 
-          The relation is missing or ungranted. Expected to stay red until a
-          scheduled dbt run materialises the warehouse on a deployed database.
+          #{inspect(error)}
+
+          This needs ONE database holding both these fixtures and a dbt-built
+          warehouse. `just test-dbt` is the path: it resets the database, seeds
+          it, and builds the models.
+
+          A deployed stack cannot satisfy it — that has the warehouse but not
+          these fixtures, which is why the previous message ("expected to stay
+          red until a scheduled dbt run materialises the warehouse on a deployed
+          database") pointed at a fix that could never apply. That run has since
+          happened, and these were still red.
           """)
       end
     end

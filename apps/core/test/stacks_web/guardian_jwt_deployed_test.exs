@@ -58,23 +58,32 @@ defmodule StacksWeb.GuardianJwtDeployedTest do
     database =
       uri.path |> String.trim_leading("/") |> String.split("?") |> hd()
 
-    {:ok, conn} =
-      Postgrex.start_link(
-        hostname: uri.host,
-        port: uri.port || 5432,
-        username: user,
-        password: pass,
-        database: database,
+    # `start_supervised!`, not `Postgrex.start_link` plus an `on_exit` stop.
+    #
+    # The connection is LINKED to the test process, so by the time `on_exit`
+    # runs in its own process it is already terminating, and `GenServer.stop/1`
+    # races it: both tests in this module failed with
+    # `(EXIT) exited in: :sys.terminate(...) ** (EXIT) shutdown` while every
+    # assertion in them had passed. A teardown crash is reported identically to
+    # a failed assertion, so this read as a JWT-at-rest violation on the live
+    # stack rather than as a test-harness bug — and nothing noticed, because
+    # `scripts/test-deployed.sh` had no caller until 2026-10-16.
+    conn =
+      start_supervised!({
+        Postgrex,
         # `ssl: true` + `ssl_opts:` is the pre-0.20 Postgrex API. 0.22 warns
         # ":ssl_opts is deprecated, pass opts to :ssl instead" and IGNORES it,
         # so the connection is attempted without TLS and Neon refuses it with
         # "ssl not available" — which reads as a server problem, not a client
         # one. These deployed-only tests could not reach Neon at all until this
         # was changed, and nothing noticed because they are excluded by default.
+        hostname: uri.host,
+        port: uri.port || 5432,
+        username: user,
+        password: pass,
+        database: database,
         ssl: [verify: :verify_none]
-      )
-
-    on_exit(fn -> if Process.alive?(conn), do: GenServer.stop(conn) end)
+      })
 
     {:ok, conn: conn}
   end
