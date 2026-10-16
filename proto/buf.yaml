@@ -37,5 +37,18 @@ breaking:
     # message deletion from vision.proto goes unflagged. That is the reason it
     # is time-boxed rather than left as a permanent allowance, and why the
     # removal is tracked as its own piece of work rather than a someday note.
+    #
+    # ⚠️ EXTENDED 2026-10-16 to cover the association contract as well —
+    # `AssociateRequest`/`Response`/`Callback` and `enum AssociationStatus`,
+    # deleted when the decision to retain them unused was reversed. Same file,
+    # same deletion event, same removal trigger: both entries go when the
+    # vision.proto change lands on the default branch.
+    #
+    # `ENUM_NO_DELETE` is listed separately because it is a distinct rule from
+    # `MESSAGE_NO_DELETE` — the message suppression already standing here did
+    # NOT cover the enum, which is how the enum deletion surfaced as a failure
+    # while the three message deletions passed silently.
     MESSAGE_NO_DELETE:
+      - stacks/internal/v1/vision.proto
+    ENUM_NO_DELETE:
       - stacks/internal/v1/vision.proto

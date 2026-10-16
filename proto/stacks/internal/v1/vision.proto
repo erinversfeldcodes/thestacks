@@ -16,15 +16,21 @@ enum ClassificationResult {
   CLASSIFICATION_RESULT_AMBIGUOUS = 3;
 }
 
-// Status of an async cover association job.
-enum AssociationStatus {
-  // Zero value — status not set.
-  ASSOCIATION_STATUS_UNSPECIFIED = 0;
-  // Cover image confirmed as a valid book cover.
-  ASSOCIATION_STATUS_CONFIRMED = 1;
-  // Cover image rejected (not a book cover or download failed).
-  ASSOCIATION_STATUS_REJECTED = 2;
-}
+
+// ⚠️ The async cover-association contract — `AssociateRequest`, `AssociateResponse`,
+// `AssociateCallback` and `enum AssociationStatus` — was DELETED on 2026-10-16,
+// reversing an earlier decision to retain it unused for the vision redesign.
+//
+// Retaining it was costing live artefacts in three languages on every build with
+// zero hand-written consumers, and buying nothing in return — because the
+// messages were never deleted, standing up a served `/associate` would not have
+// been a proto change at all, so `buf breaking` would have reported NOTHING for
+// precisely the change that most needs flagging. A contract kept to protect a
+// future reintroduction was instead silencing the gate that should announce it.
+//
+// When the redesign needs this, re-derive the shape against the sidecar that
+// will actually serve it and get a contract review on the reintroduction. What
+// was here is in git history; what the service will need is a question for then.
 
 // Why a request to the vision service could not be answered.
 //
@@ -208,70 +214,3 @@ message AnalyzeResponse {
 
 // Cover association: request, response, callback and status enum.
 //
-// ⚠️ RETAINED UNUSED, deliberately (owner ruling 2026-10-15). Nothing serves or
-// calls any of these as of that date: the sidecar's `POST /associate` endpoint
-// and core's `POST /api/internal/vision/associate` callback route were both
-// deleted, together with the job runner between them, because nothing ever
-// started a verification job. They are kept because cover verification is
-// expected to return with the vision redesign and re-deriving a cross-language
-// contract is the expensive part; the endpoints are the cheap part.
-//
-// So read every "POST ..." below as the shape a rebuild SHOULD serve, not one
-// that is served today. Do not implement a client against them expecting a
-// listener.
-//
-// ⚠️ **TO WHOEVER REINTRODUCES THIS: `buf breaking` will say nothing, and that
-// is a consequence of the retention, not a sign the change is safe.** The gate
-// compares this file against the default branch. Because these messages were
-// never deleted, standing up a served `/associate` is not a proto change at
-// all — so the one gate that would normally flag a new cross-service contract
-// going live is silent for exactly the change that most needs flagging. Re-derive
-// the shape against the sidecar that will actually serve it rather than trusting
-// what is written here, and get a contract review on the reintroduction
-// specifically; the automated check cannot stand in for one.
-//
-// Retention is not free, for the record: these generate live artefacts in three
-// languages on every build — Elixir structs and Jason encoders compiled into the
-// release, Pydantic models, and an Elm module — plus an `AssociationStatus` entry
-// in the generated enum module with zero hand-written consumers. That is the
-// price of keeping the contract, paid every build until it is either served or
-// removed.
-message AssociateRequest {
-  // ISBN (digits only, no hyphens).
-  string isbn = 1 [json_name = "isbn"];
-  // UUID of the work record in the core database.
-  string book_id = 2 [json_name = "book_id"];
-  // UUID of the edition record (idempotency key).
-  string edition_id = 3 [json_name = "edition_id"];
-  // URL of the cover image to classify.
-  string cover_image_url = 4 [json_name = "cover_image_url"];
-}
-
-// Response from the (unserved) POST /associate — 202 Accepted. See the note on
-// AssociateRequest: retained unused.
-message AssociateResponse {
-  // Unique job ID for tracking the async classification.
-  string job_id = 1 [json_name = "job_id"];
-}
-
-// Callback payload from vision → core when async classification completes.
-// The route that received it, POST /api/internal/vision/associate (HMAC via the
-// X-Vision-Signature header), was DELETED on 2026-10-15 — this comment was the
-// last live assertion anywhere that it exists. Retained unused; see the note on
-// AssociateRequest.
-message AssociateCallback {
-  // ISBN (echoed from request).
-  string isbn = 1 [json_name = "isbn"];
-  // Book UUID (echoed from request).
-  string book_id = 2 [json_name = "book_id"];
-  // Edition UUID (echoed from request).
-  string edition_id = 3 [json_name = "edition_id"];
-  // Association result; see AssociationStatus enum.
-  AssociationStatus status = 4 [json_name = "status"];
-  // Job ID (echoed from AssociateResponse).
-  string job_id = 5 [json_name = "job_id"];
-  // Rejection reason (empty string or absent if status is "confirmed").
-  optional string reason = 6 [json_name = "reason"];
-  // Cover image URL (echoed from AssociateRequest).
-  string cover_image_url = 7 [json_name = "cover_image_url"];
-}
