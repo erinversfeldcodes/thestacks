@@ -16,6 +16,7 @@ defmodule Stacks.ModerationTest do
   import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
+  alias Stacks.AI.MockClient
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
   alias Stacks.Moderation
@@ -660,5 +661,62 @@ defmodule Stacks.ModerationTest do
         confidence: 0.9
       )
     ])
+  end
+
+  describe "OCR text never reaches the log" do
+    # ⚠️ The architecture doc names this risk directly: a reader photographing a
+    # bookshelf may capture other people who never consented to being processed
+    # by a vision model, and whatever text is in frame with them. The candidate
+    # log line used to `inspect/1` the model's raw OCR whole, at :info.
+    #
+    # Driven through `run_pipeline/1` rather than the private helper, and
+    # asserted on the LOG OUTPUT, because the helper being correct is not the
+    # property that matters — the property is that nothing on this path emits
+    # the text.
+    setup do
+      # ⚠️ `config/test.exs` sets the Logger to `:warning`, so the `:info` line
+      # under test is never emitted and every assertion below would pass
+      # against an empty capture. `capture_log`'s own `:level` option filters
+      # what it keeps; it does not lower the Logger's threshold. Raising it
+      # here — and restoring it — is what makes these tests able to fail.
+      previous = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: previous) end)
+      :ok
+    end
+
+    defp capture_pipeline_log(raw_text) do
+      MockClient.put_response(
+        "analyze",
+        book_response([book_candidate(raw_text: raw_text)])
+      )
+
+      # ⚠️ `level: :info` is required, not incidental: `config/test.exs` sets the
+      # Logger to `:warning`, so the line under test is filtered out entirely
+      # and every assertion below would pass against an empty capture. Without
+      # this option the test proves nothing — which is exactly the shape it
+      # exists to prevent.
+      ExUnit.CaptureLog.capture_log(fn ->
+        Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      end)
+    end
+
+    test "a candidate without an ISBN logs a shape, not the text" do
+      log = capture_pipeline_log("MEDICAL RECORD ANNA K DOB 1981 9780143127741 private note")
+
+      refute log =~ "MEDICAL RECORD",
+             "raw OCR text reached the application log: #{log}"
+
+      refute log =~ "ANNA K",
+             "a name captured in frame reached the application log: #{log}"
+
+      assert log =~ ~r/raw_text=\d+B\/\d+isbn-shaped/,
+             "expected a byte count and an ISBN-shaped-token count, got: #{log}"
+    end
+
+    test "absent and empty OCR stay distinguishable" do
+      assert capture_pipeline_log(nil) =~ "raw_text=none"
+      assert capture_pipeline_log("") =~ "raw_text=empty"
+    end
   end
 end

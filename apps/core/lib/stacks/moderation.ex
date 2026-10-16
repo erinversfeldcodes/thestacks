@@ -342,7 +342,8 @@ defmodule Stacks.Moderation do
     excluded_descriptors = Map.get(context, :excluded_books, [])
 
     Logger.info(
-      "Moderation: candidate #{idx} has no ISBN, searching (title=#{inspect(title)}, author=#{inspect(author)}, raw_text=#{inspect(raw_text)})"
+      "Moderation: candidate #{idx} has no ISBN, searching (title=#{inspect(title)}, " <>
+        "author=#{inspect(author)}, raw_text=#{ocr_shape(raw_text)})"
     )
 
     case title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
@@ -507,4 +508,33 @@ defmodule Stacks.Moderation do
 
       :ok
   end
+
+  # A SHAPE, never the text. `raw_text` is the vision model's raw OCR of a region
+  # of a user's uploaded photograph, and this line used to `inspect/1` it whole
+  # at :info.
+  #
+  # The architecture doc names the risk this realises in terms — a reader
+  # photographing a bookshelf may capture other people who never consented to
+  # being processed by a vision model, and whatever text is in frame with them —
+  # and its stated mitigation, that the service returns no raw OCR, was never
+  # true: `raw_text` is a declared proto field populated from the model.
+  #
+  # ⚠️ Deliberately NOT a redactor. An off-the-shelf PII redactor detects named
+  # entities and emits everything it does not classify, which on arbitrary OCR
+  # means most of the text still reaches the log and the failure mode is a
+  # confident miss. What the diagnostic actually needs is "was there text, how
+  # much, and did it contain anything ISBN-shaped" — which is a summary, not a
+  # redaction, and is deterministic rather than probabilistic.
+  #
+  # The exposure was logs only: `raw_text` is in-memory, with no Ecto schema,
+  # dbt model or `persisted.exs` entry, so erasure never had anything to reach.
+  defp ocr_shape(nil), do: "none"
+  defp ocr_shape(""), do: "empty"
+
+  defp ocr_shape(text) when is_binary(text) do
+    digit_runs = Regex.scan(~r/\d{10}|\d{13}/, text) |> length()
+    "#{byte_size(text)}B/#{digit_runs}isbn-shaped"
+  end
+
+  defp ocr_shape(other), do: "non-text:#{inspect(other.__struct__ || :unknown)}"
 end
