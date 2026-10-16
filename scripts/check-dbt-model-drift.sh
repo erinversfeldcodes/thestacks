@@ -416,5 +416,152 @@ else:
         f"referenced, {kept} unreferenced and explained."
     )
 
+# -- (c) dbt model names named in ELIXIR sources must exist on disk ----------
+#
+# The surface no gate protected, and the reason it needs one: a fixture naming
+# a deleted model is still a valid string. Nothing contradicts it.
+#
+# The live instance: a dbt-refresh job test used three DELETED models as the
+# fixture for its three-model join assertion and KEPT PASSING, because the job
+# forwards whatever list it is handed without checking the models exist. The
+# test asserted argv joining correctly while documenting a warehouse that was
+# gone -- and a reader, or a machine, taking that fixture as a statement about
+# the warehouse would be wrong.
+#
+# Two deletions in a row ticked "docs propagation" after sweeping only docs/.
+# The misses outside the docs tree were the ones that could mislead a machine
+# rather than merely a reader, and this is the cheapest of them to mechanise:
+# the naming convention makes the population decidable.
+#
+# ⚠️ Model names are read ONLY from STRING LITERALS in NON-COMMENT code, and
+# both narrowings were forced by measurement — the first draft scanned raw
+# lines and reported ten findings, every one of them noise.
+#
+#   * **Comments must be stripped.** All eight model-name findings were in
+#     comments *documenting those models' own deletion* — in the refresh
+#     handler and in the job test that now asserts `refute_enqueued` for them.
+#     Flagging those would punish exactly the propagation documentation this
+#     rule asks for. The sibling refresh-map gate above already says so about
+#     the same file; this gate is the fourth place in this repository where a
+#     check read a comment as configuration.
+#   * **Only string literals.** `int_param(params, "limit")` in
+#     `feedback_admin_controller.ex` is an Elixir FUNCTION, and `int_` is an
+#     ordinary abbreviation for integer. A dbt model referenced from Elixir is
+#     always a quoted string — the refresh map, a job's `models:` arg — so the
+#     quotes are the discriminator that separates a reference from an
+#     identifier that merely shares a prefix.
+#
+# `#(?!\{)` rather than `#` for the comment strip: `#{` opens an Elixir
+# interpolation, and treating it as a comment start erases the rest of the line.
+# That exact bug made `scripts/check-outbound-test-default.sh` fail open, and
+# its own comment records it.
+COMMENT = re.compile(r"#(?!\{)[^\n]*")
+STRING_LITERAL = re.compile(r'"([^"\n]*)"')
+MODEL_TOKEN = re.compile(r"^(?:stg|int|mart)_[a-z0-9_]+$")
+
+# A name may be legitimately mentioned while absent, and the two cases are a
+# deletion comment and a synthetic test fixture. Forbidding either would make
+# this gate punish the very documentation the rule asks for, and would fire on
+# a generator test whose whole job is to feed it invented names. One marker
+# covers both: it makes the mention deliberate and reviewable rather than
+# indistinguishable from drift.
+NO_MODEL_MARKER = "NO SUCH DBT MODEL"
+
+# ⚠️ The proto manifest is EXCLUDED, on the authority of its own comment: its
+# `dbt_path` entries are "the path the model returns to, not a claim that it
+# exists". A table opted out with `skip_dbt: true` keeps the key because the
+# manifest requires it, so a `dbt_path` with no `.sql` behind it is correct by
+# design there — and the layer-count gate at the top of this file already
+# governs that file from the other direction. Treating those as drift would
+# report seven non-defects, which is how a gate teaches people to delete it.
+MANIFEST_BASENAME = "persisted.exs"
+
+elixir_mentions = {}
+seen_files = set()
+for path in glob.glob("apps/core/**/*.ex", recursive=True) + glob.glob(
+    "apps/core/**/*.exs", recursive=True
+):
+    if os.path.basename(path) == MANIFEST_BASENAME:
+        continue
+    # ⚠️ Deduplicated by real path. `apps/core/assets/proto` is a SYMLINK to
+    # `proto/`, so the recursive glob walks the same files twice and would
+    # report every finding twice with two different-looking paths — which reads
+    # as two sites and is one.
+    real = os.path.realpath(path)
+    if real in seen_files:
+        continue
+    seen_files.add(real)
+    try:
+        body = open(path, encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        continue
+    lines = body.splitlines()
+    for lineno, raw in enumerate(lines, start=1):
+        # The marker counts on the line itself OR on the line directly above —
+        # the same rule `scripts/check-e2e-vacuous-guards.sh` uses for its own
+        # allow-marker, so the two gates behave the same way for a reader. An
+        # inline marker is often the wrong shape: the name usually sits inside a
+        # long expression where a trailing comment would not fit.
+        previous = lines[lineno - 2] if lineno >= 2 else ""
+        if NO_MODEL_MARKER in raw.upper() or NO_MODEL_MARKER in previous.upper():
+            continue
+        code = COMMENT.sub("", raw)
+        for literal in STRING_LITERAL.findall(code):
+            if MODEL_TOKEN.match(literal):
+                elixir_mentions.setdefault(literal, []).append(f"{path}:{lineno}")
+
+models_on_disk = {
+    os.path.basename(p)[: -len(".sql")]
+    for p in glob.glob("dbt/models/**/*.sql", recursive=True)
+}
+
+# Anti-vacuity. Both populations are derived, and either being empty makes the
+# set difference below empty too -- a clean pass over nothing. The scan finding
+# no model names at all means the convention or the tree moved, not that Elixir
+# stopped referring to the warehouse.
+if not models_on_disk:
+    failed = True
+    print(
+        "FAIL: found no dbt models under dbt/models -- the (c) check cannot mean anything.",
+        file=sys.stderr,
+    )
+elif not elixir_mentions:
+    failed = True
+    print(
+        "FAIL: found no stg_/int_/mart_ model names anywhere under apps/core.",
+        file=sys.stderr,
+    )
+    print(
+        "This app names models in its refresh map and in its job tests, so zero means this "
+        "scan stopped matching the source rather than that the references are gone.",
+        file=sys.stderr,
+    )
+else:
+    phantom = sorted(set(elixir_mentions) - models_on_disk)
+    if phantom:
+        failed = True
+        print(
+            f"FAIL: {len(phantom)} dbt model name(s) in Elixir sources do not exist on disk:",
+            file=sys.stderr,
+        )
+        for name in phantom:
+            sites = elixir_mentions[name]
+            shown = ", ".join(sites[:4])
+            more = f" (+{len(sites) - 4} more)" if len(sites) > 4 else ""
+            print(f"  {name:<40} {shown}{more}", file=sys.stderr)
+        print(
+            "\nA test fixture or comment naming a deleted model is still a valid string, so "
+            "nothing else will ever contradict it -- a job test can keep passing while "
+            "documenting a warehouse that is gone. Either restore the model, update the "
+            f"reference, or mark the line '{NO_MODEL_MARKER}' when the mention is deliberately "
+            "about something that was removed.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"OK: all {len(elixir_mentions)} dbt model name(s) referenced from Elixir "
+            "exist on disk."
+        )
+
 sys.exit(1 if failed else 0)
 PY

@@ -1431,9 +1431,15 @@ defmodule Mix.Tasks.Proto.SyncTest do
           "      - name: id\n" <>
           "        description: PK."
 
+      # `stg_new_table` is a synthetic name fed to the merge function, not a
+      # reference to a model on disk — marked so the dbt drift gate's
+      # Elixir-reference check can tell an invented fixture from a name left
+      # behind by a deletion.
+      # NO SUCH DBT MODEL
       merged = SchemaYmlGenerator.merge(existing, %{"stg_new_table" => new_block})
 
       assert merged =~ "stg_books"
+      # NO SUCH DBT MODEL
       assert merged =~ "stg_new_table"
     end
   end
