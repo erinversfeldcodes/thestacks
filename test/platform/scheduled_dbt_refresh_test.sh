@@ -96,6 +96,24 @@ else
     _record_fail "could not establish that the sweep precedes the build (sweep=$sweep_line build=$build_line)"
 fi
 
+# ⚠️ The daily pass must be a FULL refresh, and this is a correctness and
+# erasure assertion rather than a preference.
+#
+# Both incremental marts window on the surviving rows' created_at/updated_at. A
+# DELETE upstream updates no surviving row, so a deleted entity never enters the
+# window and its mart row persists forever. Measured: a book's read_count read
+# 3, one placement was hard-deleted (what an account erasure's FK cascade does),
+# the true count became 2, an incremental refresh selected nothing, and the mart
+# still read 3. With --full-refresh it reads 2.
+#
+# So without this flag every erasure permanently inflates the community read
+# count of every book that user had shelved — silently, and with
+# `test_mart_community_read_count_excludes_removed` passing throughout, because
+# that test covers the soft-removal path rather than the deletion one.
+test_case "daily_pass_is_a_full_refresh" "the daily runner rebuilds rather than appends"
+assert_contains "$(cat "$RUNNER" 2>/dev/null)" "dbt build --full-refresh" \
+    "the daily refresh is a full rebuild, so a deleted row cannot persist in an incremental mart"
+
 test_case "far_end_assertion" "the run checks the database, not just dbt's exit code"
 assert_contains "$WF" "marts.mart_community_read_count" \
     "the workflow queries the mart it is supposed to have built"

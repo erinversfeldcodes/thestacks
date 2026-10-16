@@ -161,9 +161,30 @@ fi
 # test fails does not have its downstream models built on top of it. The old
 # script ran them separately AND treated a failing test as a warning, so a mart
 # could be built from data its own test rejected.
+#
+# `--full-refresh`, and this is not belt-and-braces — it is what makes the
+# warehouse's correctness and its erasure guarantee true.
+#
+# Both incremental marts key their window on the surviving rows'
+# `created_at`/`updated_at`. A DELETE upstream updates no surviving row, so a
+# deleted entity never enters the window and its mart row persists forever.
+# Measured on a development database: a book's `read_count` read 3, one of its
+# placements was hard-deleted (which is exactly what an account erasure's FK
+# cascade does), the true count became 2, an incremental refresh ran and
+# selected nothing (`INSERT 0 0`), and the mart still read **3**.
+#
+# So without this flag every account erasure permanently inflates the community
+# read count of every book that user had shelved, with no error anywhere — and
+# `test_mart_community_read_count_excludes_removed` passes throughout, because
+# it covers the soft-removal (`removed_at`) path rather than the deletion one.
+#
+# The cost is acceptable precisely here: this is the DAILY pass over 150-ish and
+# 169-ish rows, and its job is to make the warehouse true. The event-driven
+# selective refresh (`DbtRefreshJob`) stays incremental for latency — it answers
+# "this changed just now", not "everything is correct".
 echo ""
-echo "=== dbt build ==="
-if ! dbt build; then
+echo "=== dbt build --full-refresh ==="
+if ! dbt build --full-refresh; then
     echo "ERROR: dbt build failed." >&2
     exit 1
 fi

@@ -91,22 +91,48 @@ shell/Elixir injection surface.
 
 The erasure scrubs the operational tables and event log immediately.
 
-**Warehouse copies of the erased user's data disappear within 24 hours**, and
-as of 2026-10-16 that is a live commitment rather than a vacuous one.
+**The warehouse holds no copy of the erased user's personal data, and there is
+nothing to wait for.** Verified against the deployed database on 2026-10-16,
+after the first successful dbt build there.
 
-### Why it holds
+### Why — measured, not assumed
 
-The warehouse is built entirely by `dbt build` from the operational tables. The
-erasure scrubs those tables synchronously, so the next rebuild simply does not
-find the user's rows — there is no separate deletion step in the warehouse to
-go wrong, and nothing in `staging`, `intermediate` or `marts` is appended to
-across runs except the incremental marts, which are keyed on ids the scrub
-removes.
+Of the 50 relations the warehouse builds, **48 are views**: all 40 in `staging`,
+all 8 in `intermediate`, and 2 of the 4 in `marts`. A view stores nothing. The
+personal data those views project — `stg_users.email`, `display_name`, `handle`,
+`city`; `stg_post_comments.body`; `stg_blog_posts.body`; `stg_authors.bio` —
+lives only in `op`, so the moment the erasure deletes the `op` row it is gone
+from the view too. Erasure there is **immediate**, not daily.
 
-The rebuild is `.github/workflows/scheduled-dbt-refresh.yml`, on
-`cron: "11 4 * * *"` — daily, at 04:11 UTC. **That cron line is the SLA.** If it
-is changed, the number in the heading above changes with it, and so does what is
-quoted to a data subject.
+The only two relations that hold a copy are the incremental marts, and neither
+carries personal data:
+
+| mart | columns | personal data |
+|---|---|---|
+| `marts.mart_community_read_count` | `book_id`, `read_count`, `last_refreshed_at` | none — `read_count` is a `count(distinct user_id)` aggregate and stores no identifier |
+| `marts.mart_platform_searchable` | `book_id`, `title`, `author_name`, `primary_isbn`, cover URL, `description`, `language`, `visibility_tier` | none — book metadata; `author_name` is a published author, not a platform user |
+
+So **no "warehouse copy" of a data subject's information exists to report on**, and
+an erasure needs no warehouse step. Say that, rather than quoting a window.
+
+### What the daily rebuild is actually for
+
+`.github/workflows/scheduled-dbt-refresh.yml`, `cron: "11 4 * * *"` — daily at
+04:11 UTC — runs `dbt build --full-refresh`. Its job is **correctness of the two
+mart aggregates**, not erasure.
+
+It matters here for one indirect reason worth knowing before you answer a
+question about it: those two marts are incremental, and their refresh window
+keys on surviving rows' `created_at`/`updated_at`. A deletion updates no
+surviving row, so without the full refresh a deleted placement's book keeps its
+old `read_count` **indefinitely** — measured: 3 before, 2 in truth, still 3
+after an incremental refresh. That is wrong data derived from an erased user
+rather than retained personal data, but if someone asks "does anything about me
+survive in your analytics?", the honest answer is that an aggregate count may be
+off by one for up to 24 hours and carries no identifier.
+
+**The cron line is therefore an accuracy SLA, not an erasure SLA.** If it
+changes, the 24 hours above changes with it.
 
 ### How to check it actually ran
 
@@ -115,19 +141,35 @@ for months while the warehouse stayed empty. Read the far-end value:
 
     stacks_dbt_refresh_last_success_timestamp_seconds{target="production"}
 
-`now()` minus that gauge is how stale the warehouse is. If it exceeds 24 hours,
-the erasure commitment above is **not currently being met** and the subject's
-warehouse copy may still exist — say so rather than repeating the headline.
+`now()` minus that gauge is how stale the two mart aggregates are. If it exceeds
+24 hours, say that the aggregate counts may be out of date — not that a
+warehouse copy of the subject's data may still exist, because per the table
+above there is no such copy to begin with.
 
 ### What this section used to say
 
-It promised the same ≤24h window via the daily `DbtRefreshJob` full run, and
-that promise was satisfied only by there being nothing to drop: the job fired
-from an Oban crontab entry on a machine configured to scale to zero, shelling a
-binary the runtime image does not contain, targeting schemas that did not exist.
-Verified 2026-10-16 before the fix — the `wh` schema held **zero tables**. The
-wording is restored here only because the mechanism behind it now exists and has
-been observed to run; the crontab line alone was never evidence for it.
+It promised that "warehouse copies drop within ≤24h" via the daily
+`DbtRefreshJob` full run. Two things were wrong with that, in opposite
+directions, and both are worth keeping.
+
+**The mechanism did not exist.** The job fired from an Oban crontab entry on a
+machine configured to scale to zero, shelling a binary the runtime image does
+not contain, targeting schemas that did not exist. Verified 2026-10-16 before
+the fix — the `wh` schema held **zero tables** and dbt had never run against a
+deployed database. The promise was satisfied only by there being nothing to
+drop, which is not the same as being true.
+
+**And the framing was wrong even once the mechanism worked.** "Warehouse copies
+drop within 24 hours" implies copies that need dropping. There are none: the
+layers that carry personal data are views, and the two relations that are
+materialised carry none. An intermediate draft of this section restored the ≤24h
+wording on the strength of the workflow now existing — which would have replaced
+a false claim with a pessimistic and still-inaccurate one. The table above is
+what the database actually showed.
+
+Generalisable: when restoring a claim that was previously vacuous, re-derive it
+from the system rather than reinstating the sentence. The mechanism existing is
+not evidence that the sentence about it was right.
 
 ## Verifying afterwards
 
