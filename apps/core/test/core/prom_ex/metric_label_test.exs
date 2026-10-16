@@ -37,6 +37,42 @@ defmodule Core.PromEx.MetricLabelTest do
       this project has already shipped a guard whose allowlist carried a written
       justification that was simply false, and nothing checked it. A
       justification a machine cannot check is a sentence, not a guard.
+
+      ## Scope: all six registered plugins, held to two different standards
+
+      ⚠️ This file used to read `StacksPlugin.event_metrics/1` and nothing else,
+      while describing itself as a guard on "the metrics pipeline".
+      `Core.PromEx.plugins/0` registers **six** — Application, Beam, Phoenix,
+      Ecto, Oban and Stacks — so five of six were unchecked, and
+      `MetricsPusher.push/1` POSTs `PromEx.get_metrics/1` wholesale with no
+      filtering by the audience map. Every one of those labels was reaching the
+      store this moduledoc describes as having no erasure path.
+
+      The roster is now derived from `plugins/0`, so registering a plugin
+      extends the guard automatically.
+
+      The two standards, because the remedies differ:
+
+        * **Project metrics** (`@bounded_labels`) keep the strict rule. We own
+          the emit site, so "emit the fact and leave the identifier out" is an
+          instruction someone here can follow, and a person-shaped key fails
+          outright.
+        * **Library metrics** (`@library_owned_labels`) are declared with where
+          each bound comes from, read out of `deps/prom_ex` rather than inferred
+          from the key. Nobody here can change those emit sites; the only levers
+          are to accept the label or to stop registering the plugin.
+
+      Three of those declarations are worth reading, because the key misleads in
+      every case: `:path` is the matched ROUTE PATTERN from
+      `Phoenix.Router.route_info/4`, not a request path; `:modules` is a COUNT,
+      not a list; `:author` and `:sha` read `$GIT_AUTHOR`/`$GIT_SHA`, which this
+      project never sets, so both are a single constant string. Each looked
+      dangerous and is not.
+
+      `@library_unbounded_labels` holds the one that genuinely is — `:host`, the
+      raw client-supplied Host header — accepted explicitly with its mitigation
+      and a pinned ceiling, so the map cannot become where awkward findings go
+      to be forgotten.
   """
   use ExUnit.Case, async: true
 
@@ -139,11 +175,58 @@ defmodule Core.PromEx.MetricLabelTest do
   @ambiguous_segments ~w(name code)
 
   @ambiguous_label_notes %{
-    fuse_name: "the circuit breaker's own atom, one per declared breaker — not anyone's name"
+    fuse_name: "the circuit breaker's own atom, one per declared breaker — not anyone's name",
+    name:
+      "an OTP application name (prom_ex's Application plugin) or an Oban instance name — a " <>
+        "module/atom from configuration, never a person. The key alone cannot say that, which " <>
+        "is exactly why this map exists",
+    database_name:
+      "the database name from the repo's own configuration — constant per deploy, and " <>
+        "infrastructure rather than anybody's name"
   }
 
+  # ⚠️ EVERY registered plugin, derived from `Core.PromEx.plugins/0` — not just
+  # the project's own.
+  #
+  # This read `StacksPlugin.event_metrics([])` and nothing else, under a
+  # moduledoc describing "the metrics pipeline". `plugins/0` registers six:
+  # Application, Beam, Phoenix, Ecto, Oban and Stacks. So five of six were
+  # unchecked, and `MetricsPusher.push/1` POSTs `PromEx.get_metrics/1`
+  # WHOLESALE — the audience map does not filter the push — so every one of
+  # those labels reaches the store this guard's own moduledoc describes as
+  # having no erasure path.
+  #
+  # Derived from `plugins/0` rather than listed, so registering a plugin extends
+  # the guard automatically. That is the property that makes it outlive whoever
+  # wrote it; a hand-listed roster is how it came to cover one of six.
   defp registered_metrics do
-    StacksPlugin.event_metrics([]) |> Enum.flat_map(& &1.metrics)
+    Core.PromEx.plugins()
+    |> Enum.flat_map(&plugin_metrics/1)
+  end
+
+  defp plugin_metrics({module, opts}), do: collect_metrics(module, opts)
+  defp plugin_metrics(module), do: collect_metrics(module, [])
+
+  defp collect_metrics(module, opts) do
+    Code.ensure_loaded?(module)
+
+    # `otp_app` is injected by PromEx itself when it initialises each plugin, so
+    # it is absent from the `plugins/0` entries and the library's own
+    # `Application` plugin fetches it with `Keyword.fetch!/2`. Supplying it here
+    # is what makes this harvest see the same metrics the running pipeline
+    # registers; without it the Application plugin raises
+    # `KeyError: key :otp_app not found`.
+    opts = Keyword.put_new(opts, :otp_app, :core)
+
+    # All three PromEx metric kinds. A polling or manual metric's labels reach
+    # the store exactly like an event metric's, so checking only `event_metrics`
+    # would be a narrower version of the same mistake this change fixes.
+    for kind <- [:event_metrics, :polling_metrics, :manual_metrics],
+        function_exported?(module, kind, 1),
+        group <- List.wrap(apply(module, kind, [opts])),
+        metric <- group.metrics do
+      metric
+    end
   end
 
   defp labels_in_use do
@@ -151,6 +234,94 @@ defmodule Core.PromEx.MetricLabelTest do
     |> Enum.flat_map(& &1.tags)
     |> Enum.uniq()
   end
+
+  # The project's own metrics, separated from the library plugins' — because the
+  # two are governed differently and conflating them would weaken both halves.
+  #
+  # A label on OUR metric is a choice we made at an emit site we control, so the
+  # rule can be "declare why it is bounded, and a person-shaped name fails
+  # outright". A label on a library plugin's metric is not ours to change: the
+  # only levers are to stop registering the plugin or to accept it. Holding both
+  # to the project rule would force blessing library labels into
+  # `@bounded_labels`, which is exactly the "allowlist blesses a PII-shaped
+  # name" failure this file's moduledoc warns against.
+  #
+  # So the project's labels keep the strict rule, and the library's get their own
+  # declarations below with the risk stated rather than hidden.
+  defp project_metrics do
+    StacksPlugin.event_metrics([]) |> Enum.flat_map(& &1.metrics)
+  end
+
+  defp project_labels_in_use do
+    project_metrics() |> Enum.flat_map(& &1.tags) |> Enum.uniq()
+  end
+
+  # Library-plugin labels whose value set IS bounded, each with where the bound
+  # comes from. Verified by reading `deps/prom_ex`, not inferred from the name.
+  @library_owned_labels %{
+    action: "Phoenix route action — an atom from the router, bounded by the route table",
+    author:
+      "prom_ex reads $GIT_AUTHOR and falls back to the literal \"Git author not available\"; " <>
+        "this project never sets that variable, so the value is one constant string. ⚠️ Setting " <>
+        "GIT_AUTHOR would put a person's name in a store with no erasure path — do not set it",
+    circuit_breaker: "Oban circuit-breaker name — one per configured breaker",
+    command: "Ecto query command (:select/:insert/:update/:delete) — a closed set",
+    controller: "Phoenix controller module — bounded by the router",
+    database_host:
+      "from the repo's own config, constant per deploy; infrastructure, not a person",
+    database_name: "likewise from repo config, constant per deploy",
+    error:
+      "prom_ex tags Oban job errors with the exception MODULE, never its message, so this is " <>
+        "bounded by the set of exception types rather than by their contents",
+    event: "Phoenix channel event name; this app registers no channels, so the set is empty",
+    host:
+      "⚠️ NOT bounded — see @library_unbounded_labels. Listed here only so the stale-declaration " <>
+        "check does not report it twice",
+    kind: "Oban error kind (:error/:exit/:throw) — three values",
+    method: "HTTP verb, bounded in practice by the fly-proxy in front of the app",
+    modules:
+      "a COUNT, not a list — prom_ex emits `length(Application.spec(app)[:modules])`, so one " <>
+        "integer per dependency",
+    name:
+      "the OTP application or Oban instance name — see @ambiguous_label_notes, which is what " <>
+        "this file requires for any label whose key could mean a person's name",
+    path:
+      "⚠️ NOT the request path, despite the key. prom_ex resolves it through " <>
+        "`Phoenix.Router.route_info/4` and tags the matched ROUTE PATTERN (\"/api/books/:id\"), " <>
+        "falling back to the literal \"Unknown\" when no route matches — so it is bounded by the " <>
+        "router, and an unrouted path cannot mint a series. Read in deps/prom_ex rather than " <>
+        "inferred from the name, because the name is exactly what would have made this look unsafe",
+    node: "Erlang node name — one per running instance",
+    plugins: "Oban's configured plugin list, from config; constant per deploy",
+    port: "the endpoint's configured port — one constant",
+    prefix: "Oban's schema prefix, from config; constant per deploy",
+    queue: "Oban queue name — one per configured queue",
+    queues: "Oban's configured queue list, from config; constant per deploy",
+    sha:
+      "prom_ex reads $GIT_SHA and falls back to \"Git SHA not available\"; this project never " <>
+        "sets it, so the value is one constant string",
+    state: "Oban job state (available/executing/completed/…) — a closed set",
+    transport: "Phoenix channel transport; no channels are registered, so the set is empty",
+    url: "the endpoint's configured URL — one constant",
+    version: "a dependency's version string — one per dependency"
+  }
+
+  # ⚠️ Library labels that are genuinely NOT bounded, recorded rather than
+  # blessed. Each entry says why it cannot be fixed at the emit site and what
+  # would mitigate it. The count is pinned below so a new one cannot be added
+  # quietly — this map is the one place in this file where a risk is accepted,
+  # and it has to stay small enough to read.
+  @library_unbounded_labels %{
+    host:
+      "prom_ex's Phoenix plugin tags HTTP metrics with `conn.host` — the raw Host header, " <>
+        "chosen by the CLIENT. A caller sending a distinct Host per request mints one series " <>
+        "per value, which is a cardinality attack on the metrics store rather than a PII leak " <>
+        "(a hostname is not a person). Not fixable at the emit site: the plugin offers no " <>
+        "per-tag filter, and dropping the plugin would lose the HTTP latency and request " <>
+        "metrics entirely. Mitigation if it is ever exercised: reject unknown Hosts at the " <>
+        "edge, or stop registering PromEx.Plugins.Phoenix and emit the three HTTP families " <>
+        "from the project's own plugin with a bounded host label."
+  }
 
   defp family(metric), do: Enum.join(metric.name, "_")
 
@@ -300,18 +471,25 @@ defmodule Core.PromEx.MetricLabelTest do
 
   describe "every label is bounded, by declaration" do
     test "a metric cannot attach a label that has not been declared bounded" do
+      # ⚠️ Over EVERY registered plugin, and either declaration satisfies it.
+      # This read one plugin of six, under a moduledoc describing "the metrics
+      # pipeline"; the other five were unchecked while `MetricsPusher.push/1`
+      # sent them to the store wholesale.
+      declared = Map.merge(@bounded_labels, @library_owned_labels)
+
       undeclared =
         for metric <- registered_metrics(),
             tag <- metric.tags,
-            not Map.has_key?(@bounded_labels, tag),
+            not Map.has_key?(declared, tag),
             do: "#{family(metric)} → #{inspect(tag)}"
 
       assert undeclared == [],
              "these metrics attach a label that is not declared bounded in " <>
-               "@bounded_labels: #{inspect(Enum.uniq(undeclared))}. A label is a " <>
-               "Prometheus dimension: one series per distinct value, forever. Add it " <>
-               "WITH the reason its value set is bounded, or stop attaching it — and " <>
-               "if the value can name a person, it must not be a label at all."
+               "@bounded_labels or @library_owned_labels: " <>
+               "#{inspect(Enum.uniq(undeclared))}. A label is a Prometheus dimension: " <>
+               "one series per distinct value, forever. Add it WITH the reason its " <>
+               "value set is bounded, or stop attaching it — and if the value can name " <>
+               "a person, it must not be a label at all."
     end
 
     test "no stale declarations — every declared label is still attached by something" do
@@ -321,6 +499,7 @@ defmodule Core.PromEx.MetricLabelTest do
 
       stale =
         @bounded_labels
+        |> Map.merge(@library_owned_labels)
         |> Map.keys()
         |> Enum.reject(&MapSet.member?(in_use, &1))
 
@@ -328,12 +507,49 @@ defmodule Core.PromEx.MetricLabelTest do
              "these labels are declared bounded but no metric attaches them: " <>
                inspect(Enum.sort(stale))
     end
+
+    test "the accepted-risk map stays small and every entry is still attached" do
+      # ⚠️ The ceiling on the one place this file accepts a risk instead of
+      # failing. Without it, @library_unbounded_labels is where an inconvenient
+      # finding goes to be forgotten — the allowlist-with-a-written-reason
+      # failure the moduledoc describes, one map over.
+      assert map_size(@library_unbounded_labels) <= 1,
+             "@library_unbounded_labels has grown to #{map_size(@library_unbounded_labels)} " <>
+               "entries. Each one is an unbounded Prometheus dimension this project has " <>
+               "decided to live with; a growing list of those is a cardinality incident " <>
+               "waiting for traffic. Raise this ceiling only with the mitigation written down."
+
+      in_use = MapSet.new(labels_in_use())
+
+      stale =
+        @library_unbounded_labels
+        |> Map.keys()
+        |> Enum.reject(&MapSet.member?(in_use, &1))
+
+      assert stale == [],
+             "these accepted risks describe labels nobody attaches any more, so the " <>
+               "acceptance is obsolete: " <> inspect(stale)
+    end
   end
 
   describe "the declaration cannot bless a label that names a person or a record" do
     test "no label in use has a per-person or per-record name" do
+      # ⚠️ The PROJECT's labels only, and that is a deliberate narrowing rather
+      # than a convenience. This rule's remedy is "emit the fact and leave the
+      # identifier out", which is an instruction to whoever owns the emit site —
+      # and for a library plugin nobody here owns it. Applied to all six
+      # plugins, the rule's only available outcome is to bless the name in an
+      # allowlist, which the moduledoc identifies as the way a guard stops
+      # meaning anything.
+      #
+      # Library labels are not unchecked: they are declared in
+      # `@library_owned_labels` with where their bound comes from, and the one
+      # genuinely unbounded label is accepted explicitly, with a ceiling, in
+      # `@library_unbounded_labels`. `:author` in particular was read rather
+      # than assumed — prom_ex falls back to a constant string and this project
+      # never sets $GIT_AUTHOR, so no name is emitted.
       offenders =
-        for tag <- labels_in_use(),
+        for tag <- project_labels_in_use(),
             segment <- segments(tag),
             segment in @forbidden_segments,
             do: "#{inspect(tag)} (segment #{inspect(segment)})"
@@ -628,8 +844,18 @@ defmodule Core.PromEx.MetricLabelTest do
       # Series count is the PRODUCT of the label value sets, so each extra
       # dimension multiplies. Three is the most any metric here needs, and a
       # fourth should have to argue for itself rather than arrive quietly.
+      #
+      # ⚠️ The PROJECT's metrics only. The library plugins' metrics carry up to
+      # six tags each — prom_ex's Phoenix HTTP families alone use status,
+      # method, path, controller, action and host — and that is a choice made in
+      # a dependency, not here. Applying this budget to them would leave one
+      # remedy: raise the number until it stops firing, which deletes the rule
+      # for the metrics it was actually written to govern.
+      #
+      # Their dimensionality is not unexamined; it is where the `:host` risk in
+      # @library_unbounded_labels comes from, recorded with its mitigation.
       wide =
-        for metric <- registered_metrics(),
+        for metric <- project_metrics(),
             length(metric.tags) > 3,
             do: "#{family(metric)} (#{length(metric.tags)} labels)"
 
