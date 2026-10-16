@@ -30,6 +30,7 @@ SUITES=(
     "$HERE/scheduled_dbt_refresh_test.sh"
     "$HERE/deploy_preview_gating_test.sh"
     "$HERE/wave_status_stack_guard_test.sh"
+    "$HERE/exclusion_tags_have_runners_test.sh"
     "$HERE/platform_suites_job_test.sh"
     "$HERE/check_slo_gate_test.sh"
     "$HERE/rollback_production_test.sh"

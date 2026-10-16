@@ -774,15 +774,29 @@ defmodule Stacks.UploadDbtTest do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, placement} = Shelving.place_book(user.id, book.id, "antilibrary")
 
+      # `::text` on the uuid columns, because a raw `Repo.query` returns
+      # Postgrex's 16-byte binary and the fixture's id is a string — so the
+      # comparison below failed on `<<178, 90, …>> == "b25ace52-…"`.
+      #
+      # ⚠️ That was a real defect in this test, and it survived because the test
+      # had never run: it was tagged for a precondition nothing could satisfy.
+      # The sibling cases dodged it by asserting on string columns (`title`,
+      # `status`) and never on an id. An unrunnable test is not a test that
+      # might be wrong — it is one whose wrongness nobody has had the chance to
+      # see.
       rows =
         warehouse_rows!(
-          "SELECT book_id, bookshelf_id FROM staging.stg_bookshelf_placements WHERE id = $1",
+          "SELECT book_id::text, bookshelf_id::text FROM staging.stg_bookshelf_placements WHERE id = $1",
           [placement.id],
           "staging.stg_bookshelf_placements"
         )
 
-      assert [[book_id, _bookshelf_id]] = rows
+      assert [[book_id, bookshelf_id]] = rows
       assert book_id == book.id
+
+      # The column this view exists to expose, asserted rather than ignored —
+      # the test is named for `bookshelf_id` and was discarding it.
+      assert bookshelf_id == placement.bookshelf_id
     end
 
     @tag suite: :dbt
