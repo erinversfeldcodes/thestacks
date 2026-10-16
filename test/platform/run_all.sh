@@ -43,6 +43,7 @@ SUITES=(
     "$HERE/deploy_stack_neon_lookup_test.sh"
     "$HERE/deploy_stack_eval_prereq_test.sh"
     "$HERE/deploy_stack_posture_test.sh"
+    "$HERE/deploy_stack_prod_posture_execution_test.sh"
     "$HERE/log_shipper_config_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"
