@@ -21,8 +21,10 @@
 #
 # And the roll-up checked only whether a wave OVERCLAIMED — a wave whose every
 # item was done while its own status said `in_progress` passed silently, which
-# is how wave 1 of the 10-13 campaign came to read as in-flight with all six
-# items complete, every DoD ticked and every review recorded.
+# is how a finished wave came to read as in-flight with every one of its items
+# complete, every DoD ticked and every review recorded. Understating is the
+# more expensive direction: a fresh pass reads `in_progress` and goes looking
+# for work that does not exist.
 #
 # Each case builds its own throwaway git repository, because the behaviour under
 # test IS the diff computation and a test that ran against this checkout would
@@ -68,13 +70,13 @@ new_sandbox() {
   "campaign": "probe-campaign",
   "plan": "plans/probe-campaign.md",
   "status": "in_progress",
-  "current_wave": 1,
+  "current_wave": "probe",
   "waves": {
-    "1": {
+    "probe": {
       "title": "Probe",
       "status": "in_progress",
       "items": {
-        "W1a": {
+        "alpha": {
           "status": "complete",
           "informal": true,
           "note": "a completed item, which is what turns the stack guard on",
@@ -157,9 +159,9 @@ assert_not_contains "$OUT" "touches elixir" \
 # ── 5. a wave understating itself is reported, not only one overstating ─────
 #
 # The roll-up checked only whether a wave claimed MORE than its items support.
-# Wave 1 of the 10-13 campaign sat at `in_progress` with six of six items
-# complete, every DoD ticked and every review recorded — and the roll-up called
-# it in-flight, which is what a fresh pass reads and believes.
+# A real wave sat at `in_progress` with six of six items complete, every DoD
+# ticked and every review recorded — and the roll-up called it in-flight, which
+# is what a fresh pass reads and believes.
 DIR="$(new_sandbox stale_wave '{"elixir": "LGTM"}')"
 echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
 
@@ -173,8 +175,8 @@ python3 - "$DIR/plans/probe-campaign-state.json" <<'PY2'
 import json, sys
 path = sys.argv[1]
 state = json.load(open(path))
-items = state["waves"]["1"]["items"]
-items["W1b"] = {"status": "not_started", "informal": True, "note": "still to do", "title": "second"}
+items = state["waves"]["probe"]["items"]
+items["beta"] = {"status": "not_started", "informal": True, "note": "still to do", "title": "second"}
 json.dump(state, open(path, "w"), indent=2)
 PY2
 
@@ -184,7 +186,7 @@ run_gate "$DIR"
 # produced NOTHING — a crash, a missing state file, a changed slug — and would
 # then report the opposite of what it claims. This project has the rule written
 # down because a wait-for-absence once passed that way.
-assert_contains "$OUT" "Wave 1" "the gate ran and rendered the wave"
+assert_contains "$OUT" "Wave probe" "the gate ran and rendered the wave"
 assert_not_contains "$OUT" "of its items are done" \
     "one item is not_started, so this wave is legitimately in_progress"
 

@@ -8,8 +8,9 @@
 #
 # This is not hypothetical. Eight tests in `upload_dbt_test.exs` were tagged
 # `:deployed_only` and asserted on a warehouse they could never see; the only
-# selector for that tag is `scripts/test-deployed.sh`, which #483 established
-# had no caller at all. So the tests were excluded by default, unreachable by
+# selector for that tag is `scripts/test-deployed.sh`, and a wiring sweep found
+# that script had no caller at all. So the tests were excluded by default,
+# unreachable by
 # the one runner that named them, and carried a failure message blaming a cause
 # that could not have fixed them. The first time they ran, two of them failed —
 # one on a precondition and one on a real defect (a raw binary uuid compared to

@@ -146,9 +146,24 @@ PATTERNS = [
 # containing it is skipped. Keep this list SHORT and justified — an allowlist
 # that grows without reasons is how a gate stops meaning anything.
 #
-# ⚠️ Nothing here yet, deliberately. If an entry becomes necessary, write the
-# reason beside it, and prefer rephrasing the code over adding a line.
-LINE_ALLOWLIST: list[tuple[str, str]] = []
+# Prefer rephrasing the code over adding a line. An entry earns its place only
+# when the pattern is structurally unavoidable, and it is preferred over
+# TOOLING_PATHS whenever the unavoidable thing is a SPELLING rather than a file:
+# a whole-file exemption stops checking everything else in that file, and this
+# one demonstrably leaks — a prose citation rode into `scripts/wave-status.sh`
+# on its path-operation exemption and no gate has seen it since.
+LINE_ALLOWLIST: list[tuple[str, str]] = [
+    # The campaign-status tool hardcodes the directory it reads state from, so
+    # its test has to write a state file there — a file operation, same as the
+    # tool's own, and the one thing the test cannot express another way. Scoped
+    # to the sandbox slug: `probe-campaign` names no campaign that exists, so
+    # this cannot admit a citation of a real one, and every other pattern stays
+    # live in that file.
+    (
+        "plans/probe-campaign",
+        "a throwaway sandbox state file, not a campaign that exists",
+    ),
+]
 
 # A hex colour is the classic false positive for the #NNN pattern, and getting
 # this discriminator right took three attempts. Both earlier versions were

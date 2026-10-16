@@ -231,8 +231,9 @@ failed = False
 
 # ── (a) every mart commits to a reader, or says it is still waiting ──────────
 #
-# `docs/decisions/010-contract-first-derived-data.md` names this mechanism as
-# missing. The motivating fact: of the four surviving marts only
+# The project's standing rule is that derived data is contract-first: a mart
+# exists because something reads it, and the contract says which. That rule had
+# no mechanism behind it. The motivating fact: of the four surviving marts only
 # `mart_community_read_count` has an actual consumer — the other three appear
 # only in the refresh map, each kept for a different strength of reason. So the
 # rule the next person inherits ("every mart has a named consumer") is NOT the
