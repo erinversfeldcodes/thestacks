@@ -38,6 +38,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=lib/assert.sh
 source "$HERE/lib/assert.sh"
+# shellcheck source=lib/posture-flags.sh
+source "$HERE/lib/posture-flags.sh"
 
 SCRIPT="$REPO_ROOT/scripts/deploy-stack.sh"
 
@@ -77,36 +79,62 @@ fi
 assert_contains "$(cat "$BRANCH_FILE")" "PRODUCTION mode" \
     "the extracted block is the one that announces itself as production"
 
+# ── the roster and this suite must agree ────────────────────────────────────
+
+test_case "the_hostile_map_covers_the_roster" "every rostered flag has a hostile and a production value"
+# ⚠️ A pairing, not a convenience. The roster lives in `lib/posture-flags.sh`
+# and is shared with `deploy_stack_posture_test.sh`; without this assertion a
+# flag could be added to the roster — gaining a "is it pinned?" check there —
+# while this suite silently never exercises it, which is the shape that left
+# `STACKS_E2E_TEST_HELPERS` unchecked for as long as it was.
+MISSING=""
+for flag in "${POSTURE_FLAGS[@]}"; do
+    has_hostile=0
+    has_prod=0
+    for pair in "${POSTURE_HOSTILE_VALUES[@]}"; do
+        [[ "${pair%%=*}" == "$flag" ]] && has_hostile=1 && break
+    done
+    for pair in "${POSTURE_PRODUCTION_VALUES[@]}"; do
+        [[ "${pair%%=*}" == "$flag" ]] && has_prod=1 && break
+    done
+    [[ "$has_hostile" -eq 1 && "$has_prod" -eq 1 ]] || MISSING="${MISSING}${flag} "
+done
+if [[ -n "$MISSING" ]]; then
+    _record_fail "these rostered flags have no hostile and/or production value, so this suite does not exercise them: ${MISSING}"
+else
+    _record_pass "all ${#POSTURE_FLAGS[@]} rostered flags have both values"
+fi
+
 # ── run it under a hostile environment ──────────────────────────────────────
 #
-# Every posture flag pre-set to the value production must NOT have. If the
-# script's assignment is missing, conditional, or self-referential, the value
-# below survives and the assertion fails naming it.
+# Every posture flag pre-set to the value production must NOT have, taken from
+# the shared roster. If the script's assignment is missing, conditional, or
+# self-referential, the hostile value survives and the assertion fails naming
+# it.
 run_prod_branch() {
-    env -i \
-        PATH="$PATH" \
-        HOME="$HOME" \
-        AGE_GATING_ENABLED="true" \
-        STACKS_E2E_TEST_HELPERS="1" \
-        INVITE_ONLY_REGISTRATION="false" \
-        RATE_LIMIT_PUBLIC="9999" \
-        RATE_LIMIT_E2E_HELPER="9999" \
-        RATE_LIMIT_AUTH="9999" \
-        SMOKE_TESTS_ENABLED="true" \
-        NEON_STAGING_API_KEY="leaked-staging-key" \
-        PROD_PHX_HOST="" \
+    local -a env_args=(PATH="$PATH" HOME="$HOME")
+    local pair
+    for pair in "${POSTURE_HOSTILE_VALUES[@]}"; do
+        env_args+=("$pair")
+    done
+    # Two non-posture values with their own reasons for being here:
+    # a staging credential that must not survive into a production deploy, and
+    # an EMPTY (not unset) host, because `${VAR:-default}` substitutes for an
+    # empty value while `${VAR-default}` does not — a one-character difference
+    # between deploying to the real domain and deploying to no host at all.
+    env_args+=(NEON_STAGING_API_KEY="leaked-staging-key" PROD_PHX_HOST="")
+
+    env -i "${env_args[@]}" \
         bash -c '
             set -uo pipefail
             source "$1" >/dev/null 2>&1
+            shift
             # Printed as NAME=value lines so an empty value is distinguishable
             # from an absent variable — the distinction the whole suite turns on.
-            for v in AGE_GATING_ENABLED STACKS_E2E_TEST_HELPERS INVITE_ONLY_REGISTRATION \
-                     RATE_LIMIT_PUBLIC RATE_LIMIT_E2E_HELPER RATE_LIMIT_AUTH \
-                     SMOKE_TESTS_ENABLED NEON_STAGING_API_KEY PHX_HOST_VALUE \
-                     CORE_APP MODAL_APP; do
+            for v in "$@" NEON_STAGING_API_KEY PHX_HOST_VALUE CORE_APP MODAL_APP; do
                 printf "%s=%s\n" "$v" "${!v-<<UNSET>>}"
             done
-        ' _ "$BRANCH_FILE"
+        ' _ "$BRANCH_FILE" "${POSTURE_FLAGS[@]}"
 }
 
 OUT="$(run_prod_branch 2>&1)"
@@ -120,56 +148,76 @@ assert_contains "$OUT" "CORE_APP=thestacks-core" \
 assert_contains "$OUT" "MODAL_APP=thestacks-vision" \
     "…and for MODAL_APP"
 
-# ── the dark flags must come out EMPTY, not inherited ───────────────────────
+# ── every rostered flag comes out as the SCRIPT's value, not the shell's ────
+#
+# One loop over the roster rather than a case per flag, so adding a flag to
+# `lib/posture-flags.sh` extends the coverage automatically. The failure message
+# stays specific per flag, because "a posture flag leaked" is not actionable and
+# "the endpoints that mint sessions without authentication are enabled on
+# production" is.
+posture_why() {
+    case "$1" in
+        AGE_GATING_ENABLED)
+            printf '%s' "age-gating ships DARK — the enforcement machinery is built and tested but inert until a real verification provider is integrated, so promoting it onto production enforces a gate with no way through it"
+            ;;
+        STACKS_E2E_TEST_HELPERS)
+            printf '%s' "these endpoints mint confirmed sessions and flip age-verification with no authentication; on production that is an unauthenticated account-takeover surface"
+            ;;
+        INVITE_ONLY_REGISTRATION)
+            printf '%s' "scripts/probe-production.sh fails the deploy if a codeless registration is accepted, so a deploy from the wrong shell would ship and then fail at the far end"
+            ;;
+        RATE_LIMIT_*)
+            printf '%s' "a test-tuned rate limit on production removes the metering that protects the public endpoints"
+            ;;
+        SMOKE_TESTS_ENABLED)
+            printf '%s' "the smoke-test affordances are preview scaffolding and have no business being reachable on production"
+            ;;
+        *)
+            printf '%s' "its production value would be a function of whoever ran the deploy rather than of this script"
+            ;;
+    esac
+}
 
-test_case "age_gating_is_dark_in_production" "a stale export cannot promote age-gating onto production"
-assert_contains "$OUT" "AGE_GATING_ENABLED=" \
-    "the variable is reported"
-if [[ "$OUT" == *$'\nAGE_GATING_ENABLED=true'* || "$OUT" == AGE_GATING_ENABLED=true* ]]; then
-    _record_fail "AGE_GATING_ENABLED came out as 'true' — the value this suite pre-set in the environment survived the production branch. Age-gating ships DARK: the enforcement machinery is built and inert until a real verification provider is integrated, so promoting it onto production enforces a gate with no way through it."
-else
-    _record_pass "AGE_GATING_ENABLED was overridden to empty by the script"
-fi
+expected_production_value() {
+    local flag="$1" pair
+    for pair in "${POSTURE_PRODUCTION_VALUES[@]}"; do
+        if [[ "${pair%%=*}" == "$flag" ]]; then
+            printf '%s' "${pair#*=}"
+            return 0
+        fi
+    done
+    return 1
+}
 
-test_case "e2e_helpers_never_reach_production" "the test-helper endpoints cannot be enabled on prod"
-if [[ "$OUT" == *"STACKS_E2E_TEST_HELPERS=1"* ]]; then
-    _record_fail "STACKS_E2E_TEST_HELPERS came out as '1' — the environment's value survived. These endpoints mint confirmed sessions and flip age-verification without authentication; on production that is an unauthenticated account-takeover surface."
-else
-    _record_pass "STACKS_E2E_TEST_HELPERS was overridden to empty by the script"
-fi
+test_case "every_rostered_flag_takes_the_scripts_value" \
+    "a hostile environment cannot decide any posture flag's production value"
+for flag in "${POSTURE_FLAGS[@]}"; do
+    want="$(expected_production_value "$flag")"
+    # The reported line for this flag, matched whole so an empty value is
+    # distinguishable from a prefix of a longer one.
+    actual=""
+    while IFS= read -r line; do
+        [[ "${line%%=*}" == "$flag" ]] && actual="${line#*=}" && break
+    done <<<"$OUT"
+
+    if [[ "$actual" == "<<UNSET>>" ]]; then
+        _record_fail "$flag is UNSET after the production branch ran, so it is pinned on neither path. The staging line's \${VAR:+...} expansion omits an unset variable entirely — fly is told nothing and the app keeps whatever was last staged. ($(posture_why "$flag"))"
+    elif [[ "$actual" == "$want" ]]; then
+        if [[ -z "$want" ]]; then
+            _record_pass "$flag was blanked by the script, overriding the hostile environment value"
+        else
+            _record_pass "$flag came out as '$want', overriding the hostile environment value"
+        fi
+    else
+        _record_fail "$flag came out as '$actual' but production requires '$want' — the value this suite pre-set in the environment survived the production branch. ($(posture_why "$flag"))"
+    fi
+done
 
 test_case "staging_credentials_do_not_reach_production" "a staging Neon key cannot be carried in"
 if [[ "$OUT" == *"NEON_STAGING_API_KEY=leaked-staging-key"* ]]; then
     _record_fail "NEON_STAGING_API_KEY survived into the production branch. A production deploy must not hold a staging credential, and the branch blanks it precisely so a developer's .env cannot hand one over."
 else
     _record_pass "NEON_STAGING_API_KEY was blanked by the script"
-fi
-
-test_case "rate_limit_overrides_do_not_reach_production" "test-tuned rate limits cannot leak onto prod"
-LEAKED_LIMITS=""
-for v in RATE_LIMIT_PUBLIC RATE_LIMIT_E2E_HELPER RATE_LIMIT_AUTH SMOKE_TESTS_ENABLED; do
-    if [[ "$OUT" == *"${v}=9999"* || "$OUT" == *"${v}=true"* ]]; then
-        LEAKED_LIMITS="${LEAKED_LIMITS}${v} "
-    fi
-done
-if [[ -n "$LEAKED_LIMITS" ]]; then
-    _record_fail "these flags kept their environment values on the production branch, so their production state is a function of whoever ran the deploy: ${LEAKED_LIMITS}"
-else
-    _record_pass "all four loosening flags were blanked by the script"
-fi
-
-# ── the one flag that is pinned ON ─────────────────────────────────────────
-
-test_case "the_launch_gate_is_pinned_ON_not_merely_pinned" \
-    "invite-only registration is 'true' after the branch runs, whatever the shell said"
-# The mirror of every assertion above, and the reason the suite cannot be
-# written as "all posture flags end up empty": this one is deliberately ON, and
-# the hostile environment sets it to "false" — the direction that would open
-# registration during a closed beta.
-if [[ "$OUT" == *"INVITE_ONLY_REGISTRATION=true"* ]]; then
-    _record_pass "INVITE_ONLY_REGISTRATION=true survived a hostile 'false' in the environment"
-else
-    _record_fail "INVITE_ONLY_REGISTRATION did not come out as 'true' — this suite pre-set it to 'false', which is what a clean shell or a stale export looks like. scripts/probe-production.sh fails the deploy if a codeless registration is accepted, so a deploy from the wrong shell would fail at the far end having already shipped."
 fi
 
 test_case "the_host_is_the_production_domain" "PHX_HOST falls back to the real domain, not to empty"

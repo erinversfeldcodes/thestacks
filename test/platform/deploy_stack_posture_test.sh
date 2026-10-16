@@ -24,6 +24,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=lib/assert.sh
 source "$HERE/lib/assert.sh"
+# shellcheck source=lib/posture-flags.sh
+source "$HERE/lib/posture-flags.sh"
 
 SCRIPT="$REPO_ROOT/scripts/deploy-stack.sh"
 
@@ -50,34 +52,37 @@ preview_branch() {
     ' "$SCRIPT"
 }
 
-# POSTURE flags, derived rather than listed: a variable the script assigns a
-# LITERAL value to on the preview branch. Those are the behaviour switches the
-# script decides for itself, and the invariant is that whatever it decides for
-# preview it must also decide for production.
+# Every variable either branch assigns a LITERAL to, as a set of names.
 #
-# ⚠️ NOT "every variable the staging line passes through `${VAR:+...}`". That was
-# the first version of this suite and it was wrong: most staged variables are
-# secrets and credentials — API keys, passwords, database URLs — which are
-# SUPPOSED to come from the environment and must never be pinned in a script.
-# Asserting over all of them failed against a perfectly correct script and named
-# eighteen non-defects, which is how a suite teaches people to delete it.
+# ⚠️ This is the ROSTER-STALENESS instrument, not the assertion. The assertions
+# below run over the explicit roster in `lib/posture-flags.sh`, because deriving
+# the list cannot see a flag pinned on NEITHER branch — the exact risk this
+# suite's header describes, which made the old derivation blind to its own
+# subject. But an allowlist cannot notice a flag somebody ADDS, so the two work
+# together: the roster makes the assertions precise, this keeps the roster
+# honest.
 #
-# `CORE_APP` and `MODAL_APP` are excluded: they are assigned from a derived
-# preview name, not a posture literal, and the production branch assigns them
-# too — just with `:-` defaults.
-posture_flags() {
-    awk '
-        /^else$/ { in_branch = 1; next }
-        in_branch && /^fi$/ { exit }
-        in_branch && /^[[:space:]]+[A-Z_]+="[^$]/ { print }
-    ' "$SCRIPT" |
-        sed -E 's/^[[:space:]]*([A-Z_]+)=.*/\1/' |
-        grep -vE '^(CORE_APP|MODAL_APP)$' |
+# Three things that were wrong with the version this replaces:
+#
+#   * `[A-Z_]+` excluded DIGITS, so `STACKS_E2E_TEST_HELPERS` and
+#     `RATE_LIMIT_E2E_HELPER` were invisible — the two most security-relevant
+#     flags in the set. `[A-Z0-9_]+` now.
+#   * it read the PREVIEW branch only, so a prod-only-pinned flag never
+#     appeared. It unions both branches now.
+#   * `="[^$]` matched `VAR=""`, so a secret BLANKED on the production branch
+#     (`NEON_STAGING_API_KEY=""`) was harvested as a posture flag. Empty
+#     assignments are excluded here: a blanked secret is not a posture switch,
+#     and the real posture flags are still found by their non-empty preview
+#     value.
+literal_assignments() {
+    { prod_branch; preview_branch; } |
+        grep -E '^[[:space:]]+[A-Z0-9_]+="[^"$]' |
+        sed -E 's/^[[:space:]]*([A-Z0-9_]+)=.*/\1/' |
         sort -u
 }
 
 PROD_TXT="$(prod_branch)"
-FLAGS="$(posture_flags)"
+PREVIEW_TXT="$(preview_branch)"
 
 test_case "prod_branch_readable" "the production branch can be located in the script"
 if [[ -z "$PROD_TXT" ]]; then
@@ -86,26 +91,67 @@ else
     assert_contains "$PROD_TXT" "PRODUCTION mode" "the branch is the one that announces itself as production"
 fi
 
-test_case "posture_flags_found" "the posture flags can be read from the preview branch"
-if [[ -z "$FLAGS" ]]; then
-    _record_fail "found no posture flags on the preview branch — its shape changed, so this suite is checking nothing"
+test_case "preview_branch_readable" "the preview branch can be located too"
+# ⚠️ `preview_branch/0` was defined and never called — dead code in a suite
+# whose whole subject is the difference between two branches. Both are read now,
+# and both are asserted below, which is what makes "pinned on NEITHER branch"
+# detectable at all.
+if [[ -z "$PREVIEW_TXT" ]]; then
+    _record_fail "could not locate the preview branch — it was renamed, or its shape changed"
 else
-    _record_pass "read $(printf '%s\n' "$FLAGS" | grep -c . | tr -d ' ') posture flag(s) from the preview branch"
+    _record_pass "read $(printf '%s\n' "$PREVIEW_TXT" | grep -c . | tr -d ' ') lines of the preview branch"
 fi
 
-test_case "every_posture_flag_is_pinned_for_production" \
-    "no posture flag's production value is left to the ambient environment"
-if [[ -z "$PROD_TXT" || -z "$FLAGS" ]]; then
-    _record_fail "cannot check: the branch or the flag list could not be read"
+test_case "the_roster_is_not_stale" "no literal-assigned flag is missing from the roster"
+# The half an allowlist cannot do for itself. A new posture flag added to
+# either branch shows up here rather than being quietly unchecked.
+DERIVED="$(literal_assignments)"
+if [[ -z "$DERIVED" ]]; then
+    _record_fail "derived no literal assignments from either branch — the regex no longer matches the script's shape, so this staleness check is inert"
 else
-    while IFS= read -r flag; do
-        [[ -z "$flag" ]] && continue
-        if printf '%s' "$PROD_TXT" | grep -qE "^[[:space:]]*${flag}=" ; then
-            _record_pass "$flag is pinned on the production branch"
-        else
-            _record_fail "$flag is decided for PREVIEW but left to the environment for PRODUCTION. The staging line's \${VAR:+...} expansion omits an unset variable entirely, so fly is told nothing and the prod app keeps whatever was last staged — the flag's value becomes a function of deploy history rather than of this script"
-        fi
-    done <<<"$FLAGS"
+    _record_pass "derived $(printf '%s\n' "$DERIVED" | grep -c . | tr -d ' ') literal assignment(s) across both branches"
+    UNROSTERED=""
+    while IFS= read -r name; do
+        [[ -z "$name" ]] && continue
+        # Identity and host derivations are not posture. Documented in the
+        # roster file rather than restated here.
+        case "$name" in
+            CORE_APP|MODAL_APP|PHX_HOST_VALUE|SCRAPER_APP) continue ;;
+        esac
+        found=0
+        for flag in "${POSTURE_FLAGS[@]}"; do
+            [[ "$flag" == "$name" ]] && found=1 && break
+        done
+        [[ "$found" -eq 0 ]] && UNROSTERED="${UNROSTERED}${name} "
+    done <<<"$DERIVED"
+
+    if [[ -n "$UNROSTERED" ]]; then
+        _record_fail "these variables are assigned a literal by deploy-stack.sh but are absent from POSTURE_FLAGS in test/platform/lib/posture-flags.sh, so nothing asserts their production value: ${UNROSTERED}— add each to the roster (with a hostile and a production value) or add it to the non-posture exclusions above with a reason"
+    else
+        _record_pass "every literal-assigned variable is either rostered or excluded with a reason"
+    fi
+fi
+
+test_case "every_rostered_flag_is_pinned_on_BOTH_branches" \
+    "no posture flag's value is left to the ambient environment, in either mode"
+# ⚠️ BOTH branches, which is the fix. Checking only production leaves
+# "pinned on neither" indistinguishable from "correctly absent", and a flag
+# pinned on neither is the failure mode the header describes: the staging line's
+# `${VAR:+...}` omits an unset variable ENTIRELY, so fly is told nothing and the
+# app keeps whatever was last staged — in BOTH modes.
+if [[ -z "$PROD_TXT" || -z "$PREVIEW_TXT" ]]; then
+    _record_fail "cannot check: one of the two branches could not be read"
+else
+    for flag in "${POSTURE_FLAGS[@]}"; do
+        for mode in production preview; do
+            if [[ "$mode" == production ]]; then TXT="$PROD_TXT"; else TXT="$PREVIEW_TXT"; fi
+            if printf '%s' "$TXT" | grep -qE "^[[:space:]]*${flag}="; then
+                _record_pass "$flag is pinned on the $mode branch"
+            else
+                _record_fail "$flag is not pinned on the $mode branch, so its value there is whatever the ambient shell happens to hold. The staging line's \${VAR:+...} expansion omits an unset variable entirely: fly is told nothing and the app keeps whatever was last staged, making the flag a function of deploy history rather than of this script"
+            fi
+        done
+    done
 fi
 
 test_case "invite_gate_is_on_for_production" \
