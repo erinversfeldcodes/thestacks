@@ -160,13 +160,37 @@ if re.search(r'\bmodify\b[\s\S]{0,200}?null:\s*false', src):
 if re.search(r'\bmodify\b\s*\(?\s*:[a-z_][a-z0-9_]*\s*,\s*:[a-z_]', src):
     ops.append("modify ..., <type> (column type change)")
 
-def _extract_execute_sql(text):
-    blocks = []
-    blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"""(.*?)"""', text, re.DOTALL)]
-    blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"([^"]+)"', text)]
-    return [b for b in blocks if "#{" not in b]
+# Every string literal in the migration's CODE, not just the ones sitting
+# directly inside an `execute(` call.
+#
+# The narrower version missed two whole shapes, and the migration that converted
+# every timestamp column in the database hit both at once:
+#
+#   * SQL built in a private helper. `execute(convert_columns(...))` passes a
+#     function call, so there was no literal at the call site and the linter saw
+#     NO SQL AT ALL — the sweeping type change in the repository's history
+#     passed unattested, verified by removing its `@breaking_ok` and watching
+#     the gate still exit 0.
+#   * SQL carrying interpolation. Blocks containing `#{` were DROPPED outright,
+#     which made string interpolation an escape hatch from the gate. They are
+#     now kept with the interpolations replaced by a placeholder, so the SQL
+#     keywords around them still match: `ALTER COLUMN %I TYPE #{to_type}` is
+#     exactly as destructive as the spelled-out version.
+#
+# Prose is excluded first — `@moduledoc` / `@doc` heredocs discuss destructive
+# operations as a matter of course, and this file's whole argument for being
+# broad rests on the match meaning something.
+def _strip_doc_heredocs(text):
+    return re.sub(r'@(?:module)?doc\s+(?:false\b|"""(?:.*?)""")', '', text, flags=re.DOTALL)
 
-execute_sql = "\n".join(_extract_execute_sql(src))
+def _extract_sql_literals(text):
+    body = _strip_doc_heredocs(text)
+    blocks = []
+    blocks += [m.group(1) for m in re.finditer(r'"""(.*?)"""', body, re.DOTALL)]
+    blocks += [m.group(1) for m in re.finditer(r'"([^"\n]+)"', body)]
+    return [re.sub(r'#\{[^}]*\}', ' __INTERPOLATED__ ', b) for b in blocks]
+
+execute_sql = "\n".join(_extract_sql_literals(src))
 
 if re.search(r'\bSET\s+NOT\s+NULL\b', execute_sql, re.IGNORECASE):
     ops.append("execute SET NOT NULL")

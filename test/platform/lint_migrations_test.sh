@@ -63,6 +63,28 @@ test_case "create_table_with_down" "drop table inside def down is not destructiv
 run_linter "$FIXTURES/create_table_with_down.exs"
 assert_exit_zero "$RC" "create_table_with_down.exs exits 0 (drop only in down)"
 
+# The two shapes the SQL extraction was blind to until 2026-10-16. Both were
+# found the same way: a real migration converting every timestamp column in the
+# database had its `@breaking_ok` removed, and the gate still exited 0.
+test_case "helper_built_sql" "SQL assembled in a private helper is still inspected"
+run_linter "$FIXTURES/helper_built_sql_bad.exs"
+assert_exit_nonzero "$RC" "helper_built_sql_bad.exs exits non-zero"
+assert_contains "$OUT" "DROP COLUMN" \
+    "the op is named even though no SQL literal sits at the execute call site"
+
+test_case "interpolated_sql" "SQL carrying interpolation is still inspected"
+run_linter "$FIXTURES/interpolated_sql_bad.exs"
+assert_exit_nonzero "$RC" "interpolated_sql_bad.exs exits non-zero"
+assert_contains "$OUT" "ALTER COLUMN" \
+    "interpolation does not exempt the statement around it"
+
+# The negative half. Widening the extraction is only worth having if the match
+# still means something, so prose that merely NAMES a destructive operation must
+# not demand an attestation.
+test_case "prose_only" "docs and comments naming destructive ops do not trip the gate"
+run_linter "$FIXTURES/prose_only_safe.exs"
+assert_exit_zero "$RC" "prose_only_safe.exs exits 0 despite naming DROP COLUMN in its docs"
+
 test_case "multiple_files" "argv with >1 file exits non-zero if ANY is bad"
 run_linter \
     "$FIXTURES/safe.exs" \
