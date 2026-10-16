@@ -124,6 +124,44 @@ suite =
                             Login.update (Login.InviteCodeChanged "STK-NEW") (refused 404)
                     in
                     Expect.equal model.inviteCheck NotAsked
+            , test "a refusal is ANNOUNCED and bound to the field, not only shown beside it" <|
+                \_ ->
+                    -- The four messages above are worth nothing to a reader who
+                    -- never hears them. Pressing Redeem moves no focus and
+                    -- navigates nowhere, so a span quietly appearing in an inert
+                    -- part of the page is not an event: a screen-reader user got
+                    -- silence, and the field they had just filled in still
+                    -- reported itself as valid.
+                    --
+                    -- Three separate things, for three separate moments — the
+                    -- announcement now, the reason on re-focus, the state for
+                    -- anything walking the form.
+                    rendered (refused 404)
+                        |> Expect.all
+                            [ Query.find [ Selector.attribute (attr "data-testid" "invite-refusal") ]
+                                >> Query.has
+                                    [ Selector.attribute (attr "role" "alert")
+                                    , Selector.id "invite-code-refusal"
+                                    ]
+                            , Query.find [ Selector.attribute (attr "data-testid" "invite-code-input") ]
+                                >> Query.has
+                                    [ Selector.attribute (attr "aria-invalid" "true")
+                                    , Selector.attribute (attr "aria-describedby" "invite-code-refusal")
+                                    ]
+                            ]
+            , test "an un-refused field is not marked invalid, and describes nothing" <|
+                \_ ->
+                    -- The mirror. A permanent `aria-invalid="false"` and a
+                    -- `describedby` pointing at an element that is not rendered
+                    -- would make the assertion above pass while telling every
+                    -- reader the field is broken before they have typed in it.
+                    rendered (registerCard True)
+                        |> Query.find [ Selector.attribute (attr "data-testid" "invite-code-input") ]
+                        |> Expect.all
+                            [ Query.hasNot [ Selector.attribute (attr "aria-invalid" "true") ]
+                            , Query.hasNot
+                                [ Selector.attribute (attr "aria-describedby" "invite-code-refusal") ]
+                            ]
             ]
         , describe "decodeConfig fails CLOSED"
             [ test "an absent inviteOnly field means the gate is ON" <|

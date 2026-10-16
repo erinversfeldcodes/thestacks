@@ -1207,16 +1207,18 @@ viewInviteOnlyPanel model =
             [ label [ class "login-card__label", for "invite-code" ]
                 [ text "Invitation code" ]
             , input
-                [ id "invite-code"
-                , class "login-card__input"
-                , testId "invite-code-input"
-                , type_ "text"
-                , placeholder "STK-XXXX-XXXX"
-                , value model.inviteCode
-                , onInput InviteCodeChanged
-                , attribute "autocapitalize" "characters"
-                , attribute "aria-required" "true"
-                ]
+                ([ id "invite-code"
+                 , class "login-card__input"
+                 , testId "invite-code-input"
+                 , type_ "text"
+                 , placeholder "STK-XXXX-XXXX"
+                 , value model.inviteCode
+                 , onInput InviteCodeChanged
+                 , attribute "autocapitalize" "characters"
+                 , attribute "aria-required" "true"
+                 ]
+                    ++ inviteRefusalAttrs model
+                )
                 []
             , viewInviteRefusal model
             ]
@@ -1237,11 +1239,55 @@ viewInviteOnlyPanel model =
         ]
 
 
+{-| The id the refusal is published under, so the input can point at it.
+-}
+inviteRefusalId : String
+inviteRefusalId =
+    "invite-code-refusal"
+
+
+{-| What the INPUT has to say while a refusal stands.
+
+The refusal copy was correct and unannounced: a sighted reader saw four distinct
+messages, and a screen-reader user who typed a code, pressed Redeem and got no
+focus change heard nothing at all — the span appeared in a part of the page
+nothing was watching, and the field it was about still read as valid. So the
+whole point of having four messages was lost to exactly the readers who cannot
+see the field go red.
+
+`aria-invalid` marks the field, `aria-describedby` binds the reason to it (so it
+is read when focus returns), and `role="alert"` on the span announces it on
+insertion. All three, because each covers a different moment: the announcement
+now, the association on re-focus, and the state for anything enumerating the
+form. The attributes are conditional — a permanent `aria-invalid="false"` plus a
+`describedby` pointing at nothing is noise on a field that has not been refused.
+
+The sibling login error on this page already uses a live region; this field was
+the one that did not.
+
+-}
+inviteRefusalAttrs : Model -> List (Html.Attribute Msg)
+inviteRefusalAttrs model =
+    case model.inviteCheck of
+        Failure _ ->
+            [ attribute "aria-invalid" "true"
+            , attribute "aria-describedby" inviteRefusalId
+            ]
+
+        _ ->
+            []
+
+
 viewInviteRefusal : Model -> Html Msg
 viewInviteRefusal model =
     case model.inviteCheck of
         Failure err ->
-            span [ class "login-card__invite-caption login-card__invite-caption--error" ]
+            span
+                [ class "login-card__invite-caption login-card__invite-caption--error"
+                , id inviteRefusalId
+                , testId "invite-refusal"
+                , attribute "role" "alert"
+                ]
                 [ text (inviteErrorMessage err) ]
 
         _ ->
