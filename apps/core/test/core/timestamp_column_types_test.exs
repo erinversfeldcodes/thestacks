@@ -28,15 +28,21 @@ defmodule Core.TimestampColumnTypesTest do
   # `schema_migrations`).
   @library_owned_schemas ~w(public)
 
-  # ⚠️ Library ownership does NOT follow schema boundaries, and assuming it did
-  # cost 678 test failures in one run. `guardian_db` files its table inside `op`
-  # (`config.exs` sets `schema_name: "guardian_tokens"`), so a sweep that
-  # excluded "the schemas libraries own" converted it anyway. Its
-  # `schema "virtual: token"` calls a bare `timestamps()` — `:naive_datetime`,
-  # with no option to change it — and Postgrex refuses the mismatch rather than
-  # coercing: every write raised `expected %DateTime{}, got ~N[…]`, which took
-  # out every test that authenticates.
-  @library_owned_tables ["op.guardian_tokens"]
+  # ⚠️ Library ownership does NOT follow schema boundaries, and these are BARE
+  # NAMES rather than qualified ones for a measured reason.
+  #
+  # `guardian_db` files its table inside `op` (`config.exs` sets
+  # `schema_name: "guardian_tokens"`), so a sweep that excluded "the schemas
+  # libraries own" converted it anyway — 678 test failures in one run, every one
+  # through `auth_conn/2`, because Postgrex refuses a naive/aware mismatch
+  # rather than coercing it.
+  #
+  # `schema_migrations` is worse: it lives in `public` on a development database
+  # and in `op` on the deployed one. A qualified exclusion would have been right
+  # in one environment and silently wrong in the other, and this is the table
+  # Ecto's own migration lock holds open for the duration of a migration — so
+  # converting it blocks on Ecto itself.
+  @library_owned_tables ~w(schema_migrations guardian_tokens oban_jobs oban_peers)
 
   defp columns_of_type(type, schemas) do
     {:ok, %{rows: rows}} =
@@ -64,7 +70,11 @@ defmodule Core.TimestampColumnTypesTest do
         "timestamp without time zone"
         |> columns_of_type(@owned_schemas)
         |> Enum.reject(fn column ->
-          Enum.any?(@library_owned_tables, &String.starts_with?(column, &1 <> "."))
+          # "schema.table.column" — the middle segment is the table name, and
+          # the exclusions are bare names so they hold in whichever schema the
+          # dependency happens to have filed its table under.
+          [_schema, table, _col] = String.split(column, ".", parts: 3)
+          table in @library_owned_tables
         end)
 
       assert naive == [],
@@ -196,6 +206,42 @@ defmodule Core.TimestampColumnTypesTest do
                "#{column} was converted to timestamptz. guardian_db's schema declares a " <>
                  "naive datetime and Postgrex raises on the mismatch rather than coercing, " <>
                  "so this breaks every authenticated request"
+      end
+    end
+
+    # ⚠️ Asserted WHEREVER the table lives, because where it lives differs by
+    # environment: `public` here, `op` on the deployed database. The assertion
+    # is therefore on the name, and it is satisfied by the table being naive in
+    # whichever schema this database happens to keep it.
+    #
+    # Converting it is not merely unnecessary. Ecto's migration lock holds
+    # `SELECT version FROM schema_migrations FOR UPDATE` open on a separate
+    # connection for the whole migration, so a migration asking for ACCESS
+    # EXCLUSIVE on that table blocks on Ecto itself — observed on the first
+    # deployed run, aborted by the migration's own lock_timeout with every
+    # column intact.
+    test "the Ecto migrations table stays naive, in whatever schema it lives in" do
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        SELECT c.table_schema, c.data_type
+          FROM information_schema.columns c
+          JOIN information_schema.tables t
+            ON t.table_schema = c.table_schema
+           AND t.table_name = c.table_name
+         WHERE t.table_type = 'BASE TABLE'
+           AND c.table_name = 'schema_migrations'
+           AND c.column_name = 'inserted_at'
+        """)
+
+      assert rows != [],
+             "no schema_migrations.inserted_at column found at all — this sweep is not " <>
+               "looking at a migrated database"
+
+      for [schema, type] <- rows do
+        assert type == "timestamp without time zone",
+               "#{schema}.schema_migrations.inserted_at is #{type}. Ecto owns this table " <>
+                 "and holds it locked for the duration of a migration, so converting it " <>
+                 "makes any future migration that touches it block on Ecto itself"
       end
     end
 

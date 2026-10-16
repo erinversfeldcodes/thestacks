@@ -53,24 +53,29 @@ defmodule Core.Repo.Migrations.TimestampColumnsCarryTheirTimeZone do
       coercing: a schema declaring a naive datetime against a `timestamptz`
       column raises `expected %DateTime{}, got ~N[…]` on every write.
 
-      Two owners, and they are **not** separated by schema — which is the trap
-      this migration fell into on its first run:
+      These owners are **not** separated by schema, and assuming they were cost
+      two separate failures on the way to this version:
 
-        * Oban and Ecto own `public.oban_jobs`, `public.oban_peers` and
-          `public.schema_migrations`. Naming only the schemas we own excludes
-          these for free.
-        * `guardian_db` owns `op.guardian_tokens`, and it sits **inside `op`**
-          because `config.exs` files it there. Schema-level exclusion does not
-          see it. Converting it took down 678 tests in one go, every one of them
-          through `auth_conn/2` — the library's `schema "virtual: token"` calls
-          a bare `timestamps()`, which is `:naive_datetime`, with no option to
-          change it.
+        * `guardian_db` files its table **inside `op`** (`config.exs` sets
+          `schema_name: "guardian_tokens"`), so excluding "the schemas libraries
+          own" converted it anyway. Its `schema "virtual: token"` calls a bare
+          `timestamps()` — `:naive_datetime`, with no option to change it — and
+          Postgrex refuses the mismatch rather than coercing, so every write
+          raised `expected %DateTime{}, got ~N[…]`. 678 tests failed at once,
+          every one through `auth_conn/2`.
+        * `schema_migrations` lives in `public` on a development database and in
+          **`op`** on the deployed one. So a qualified `op.schema_migrations`
+          exclusion would have been correct in one environment and silently
+          wrong in the other — and this is the table that cannot merely be left
+          alone, because Ecto's migration lock holds it open on a separate
+          connection for the duration. Asking for ACCESS EXCLUSIVE on it from
+          inside the migration blocks on Ecto itself. Observed on the first
+          deployed run, with `pg_blocking_pids` naming the lock connection.
 
-      So the exclusion is per TABLE, not per schema. `op.guardian_tokens` is the
-      only such table today: `guardian_db` and `oban` are the only dependencies
-      that define Ecto schemas at all, and no schema in this application uses a
-      naive datetime. The accompanying test asserts both halves, so the list
-      cannot quietly fall out of date.
+      So the exclusion is by BARE TABLE NAME in any schema, and the test that
+      accompanies this migration asserts both that these tables stay naive and
+      that no dependency other than `guardian_db` and `oban` defines an Ecto
+      schema at all — so the list cannot quietly fall out of date.
   """
   use Ecto.Migration
 
@@ -87,10 +92,24 @@ defmodule Core.Repo.Migrations.TimestampColumnsCarryTheirTimeZone do
   # inherits whatever exclusion list happened to be written.
   @owned_schemas ~w(op audit cache)
 
-  # Tables inside those schemas that a dependency owns. See the moduledoc: this
-  # is a table list rather than a schema list because `guardian_db` files its
-  # table in `op`, so no schema-level rule can exclude it.
-  @library_owned_tables ["op.guardian_tokens"]
+  # Tables a dependency owns, excluded by BARE NAME in any schema.
+  #
+  # Not qualified names, and that is the second lesson this migration learned
+  # the hard way. `schema_migrations` lives in `public` on a development
+  # database and in `op` on the deployed one — same repository, same config,
+  # different schema — so an `op.schema_migrations` exclusion would have been
+  # right in exactly one environment and silently wrong in the other. Oban
+  # likewise supports a `prefix`, so its tables are not guaranteed to stay in
+  # `public` either.
+  #
+  # ⚠️ `schema_migrations` is the one that cannot merely be left alone: Ecto's
+  # own migration lock holds `SELECT version FROM schema_migrations FOR UPDATE`
+  # open on a SEPARATE connection for the whole migration, so asking for
+  # ACCESS EXCLUSIVE on that table from inside the migration is a guaranteed
+  # self-block. It was observed on the first deployed run — `pg_blocking_pids`
+  # named Ecto's own lock connection — and the `lock_timeout` above is what
+  # turned an indefinite hang into a clean abort with every column intact.
+  @library_owned_tables ~w(schema_migrations guardian_tokens oban_jobs oban_peers)
 
   # dbt's output schemas. Everything in them is derived and rebuilt from the
   # models on every run, which is what makes dropping them safe here.
@@ -290,8 +309,7 @@ defmodule Core.Repo.Migrations.TimestampColumnsCarryTheirTimeZone do
   defp quoted_list(values), do: Enum.map_join(values, ", ", &"'#{&1}'")
 
   defp library_table_clause do
-    "AND c.table_schema || '.' || c.table_name " <>
-      "NOT IN (#{quoted_list(@library_owned_tables)})"
+    "AND c.table_name NOT IN (#{quoted_list(@library_owned_tables)})"
   end
 
   defp exclusion_clause([]), do: ""
