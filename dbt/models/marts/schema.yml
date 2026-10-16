@@ -37,6 +37,14 @@ models:
     description: Count of distinct shelf placements per book — consumer BookController.show (social proof).
     config:
       meta:
+        deletion_handling: >-
+          prune_absent_keys post-hook removes a book whose last placement is deleted.
+          A PARTIAL deletion leaves the key present and the count stale, because a
+          deletion updates no surviving row and the book never enters the incremental
+          window; only a HARD delete reaches this (the app's own removal sets
+          removed_at, which bumps updated_at and does recompute). Residual window:
+          counts too high by one after an account erasure until the daily
+          --full-refresh. No identifier is held, so nothing personal is retained.
         reader: StacksWeb.BookController.show
     columns:
       - name: book_id
@@ -61,6 +69,9 @@ models:
       currently built. `dbt_refresh_handler.ex:19` names it as a refresh target.
     config:
       meta:
+        deletion_handling: >-
+          prune_absent_keys post-hook. One row per book, so a book is either present
+          upstream or pruned — no residual window.
         # Platform search is recorded as not currently built; this mart is
         # its data, waiting. Refresh map names it (handler:19), which is not
         # a reader.

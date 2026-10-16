@@ -305,6 +305,58 @@ if not (undeclared or uncommitted):
         f"({readers} with a consumer, {pending} pending with a stated reason)."
     )
 
+# ── (a2) every incremental model says how a deletion reaches it ──────────────
+#
+# ⚠️ An incremental model's `is_incremental()` window selects rows whose
+# SURVIVING timestamp is newer than the last refresh. A DELETE upstream updates
+# no surviving row, so a deleted entity never enters the window and its row
+# persists. Measured: a book's `read_count` read 3, one placement was
+# hard-deleted, the truth became 2, an incremental refresh selected nothing, and
+# the mart still read 3.
+#
+# This cannot be DETECTED by reading the SQL — whether a window can observe a
+# deletion depends on what the upstream relation does with deleted rows, which
+# is a fact about the application, not the model. So it is declared, like the
+# mart readers above: every incremental model names its `deletion_handling`,
+# and the residual window if it has one. Writing that sentence is what makes
+# someone notice there IS a window.
+incremental_models = sorted(
+    os.path.basename(path)[:-4]
+    for path in glob.glob("dbt/models/**/*.sql", recursive=True)
+    if "materialized='incremental'" in open(path, encoding="utf-8").read()
+)
+
+missing_handling = [
+    name
+    for name in incremental_models
+    if not declared.get(name, {}).get("deletion_handling")
+]
+
+if missing_handling:
+    failed = True
+    print(
+        f"FAIL: {len(missing_handling)} incremental model(s) do not say how a deletion "
+        "reaches them:",
+        file=sys.stderr,
+    )
+    for name in missing_handling:
+        print(f"  {name}", file=sys.stderr)
+    print(
+        "\nAn incremental window keys on surviving rows, so a DELETE upstream is invisible "
+        "to it and the row persists — measured once as a community read count stuck at 3 "
+        "while the truth was 2. Add under the model's `config: meta:`:\n"
+        "        deletion_handling: <the mechanism, and the residual window if any>\n"
+        "\nIf the honest answer is 'nothing — it goes stale until the daily full refresh', "
+        "that is a valid declaration and is the point: it is then written down instead of "
+        "being discovered from a wrong number.",
+        file=sys.stderr,
+    )
+elif incremental_models:
+    print(
+        f"OK: all {len(incremental_models)} incremental model(s) declare how deletions "
+        "reach them."
+    )
+
 # ── (b) declared dbt sources that no model references ────────────────────────
 #
 # ⚠️ `check-source-childs` from dbt-checkpoint already performs this check and
