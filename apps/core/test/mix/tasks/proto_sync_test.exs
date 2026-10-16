@@ -688,10 +688,17 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :published_at, :timestamptz"
       refute output =~ "timestamps("
       assert output =~ "idx_event_log_type_agg"
-      assert output =~ "concurrently: true"
       assert output =~ "desc: :occurred_at"
-      assert output =~ "@disable_ddl_transaction true"
-      assert output =~ "@disable_migration_lock true"
+
+      # A create-table migration runs in a transaction, which means its indexes
+      # cannot be CONCURRENTLY — and must not be. See the generator's own note:
+      # the table is brand new, so there is no concurrent reader for a
+      # concurrent build to spare, and opting out of the transaction to get one
+      # is what turned a mid-migration failure into a half-created table with no
+      # `schema_migrations` row.
+      refute output =~ "concurrently: true"
+      refute output =~ "@disable_ddl_transaction"
+      refute output =~ "@disable_migration_lock"
       refute output =~ "CREATE INDEX idx_event_log"
       assert output =~ "DO NOT EDIT MANUALLY"
       assert output =~ "def down"
@@ -1753,10 +1760,18 @@ defmodule Mix.Tasks.Proto.SyncTest do
     # one queues every later query behind its own lock wait, turning a catalog
     # update into an outage.
     #
-    # The two shapes need DIFFERENT statements, which is why both are pinned:
-    # the create-table migration carries `@disable_ddl_transaction true`, and
-    # `SET LOCAL` outside a transaction is a no-op that only warns.
-    test "the create-table migration uses session SET, matching its disabled transaction" do
+    # Both generated shapes run inside Ecto's migration transaction, so both
+    # use `SET LOCAL` — and `SET LOCAL` is the form that must be pinned, not
+    # merely preferred. A session `SET` here would survive the migration and
+    # leak a 5s `lock_timeout` into whatever the connection does next.
+    #
+    # This test previously pinned the OPPOSITE, because the create-table shape
+    # opted out of the transaction so its indexes could build CONCURRENTLY.
+    # That bought nothing — the table is created in the same migration, so
+    # there is no concurrent session to spare — and cost atomicity: a failure
+    # partway through left the table created with no `schema_migrations` row,
+    # and the retry died on `relation already exists`.
+    test "the create-table migration uses SET LOCAL, matching its transaction" do
       sql =
         MigrationGenerator.generate_create_table(
           %{
@@ -1772,25 +1787,28 @@ defmodule Mix.Tasks.Proto.SyncTest do
           "20260101000000"
         )
 
-      assert sql =~ "@disable_ddl_transaction true"
-      assert sql =~ ~s|execute("SET lock_timeout = '5s'")|
+      refute sql =~ "@disable_ddl_transaction",
+             "this shape runs inside Ecto's migration transaction, so a failure " <>
+               "partway through rolls the new table back instead of stranding it"
 
-      # Unbounded on purpose: the indexes build CONCURRENTLY, and a timeout
-      # firing mid-build leaves an INVALID index behind.
-      assert sql =~ ~s|execute("SET statement_timeout = 0")|
+      assert sql =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+
+      # Bounded, now that nothing here builds concurrently. An index on a table
+      # created moments earlier has no rows to scan.
+      assert sql =~ ~s|execute("SET LOCAL statement_timeout = '30s'")|
 
       # Matched on the executable form, not the bare string: the generated file
-      # also carries a comment explaining why `SET LOCAL` is wrong here, and a
-      # refute over the whole text would be satisfied by that prose.
-      refute sql =~ ~s|execute("SET LOCAL|,
-             "there is no transaction for a LOCAL setting to scope to — it would " <>
-               "silently do nothing"
+      # also carries a comment explaining the choice, and a refute over the
+      # whole text would be satisfied by that prose.
+      refute sql =~ ~s|execute("SET lock_timeout|,
+             "a session SET outlives the migration and leaks the timeout into " <>
+               "whatever the connection does next"
 
       # `down` drops the table, which also takes ACCESS EXCLUSIVE. A preamble on
       # `up` alone leaves the rollback path unguarded, which is the path taken
       # when something has already gone wrong.
       [_, down] = String.split(sql, "def down do")
-      assert down =~ ~s|execute("SET lock_timeout = '5s'")|
+      assert down =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
     end
 
     test "the add-column migration uses SET LOCAL, matching its transaction" do

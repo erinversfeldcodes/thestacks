@@ -195,10 +195,13 @@ defmodule Mix.Tasks.ProtoSyncInvariantsTest do
                "a foreign-key index is explicitly named. These are named implicitly so the " <>
                  "generator's output stays uniform and predictable: #{line}"
 
-        assert line =~ "concurrently: true",
-               "a foreign-key index is not built concurrently. Every index this generator " <>
-                 "emits is, which is what keeps the migration lint clean without per-index " <>
-                 "exceptions: #{line}"
+        refute line =~ "concurrently: true",
+               "a foreign-key index in a CREATE TABLE migration is built concurrently. It " <>
+                 "cannot be: this shape is transactional, and the reason it is transactional " <>
+                 "is that the table is created here — there is no concurrent session for a " <>
+                 "concurrent build to spare, and opting out of the transaction to get one is " <>
+                 "what let a mid-migration failure strand a created table with no " <>
+                 "schema_migrations row: #{line}"
       end
     end
   end

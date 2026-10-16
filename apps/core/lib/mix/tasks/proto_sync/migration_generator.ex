@@ -31,30 +31,38 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     defmodule #{module_name} do
       use Ecto.Migration
 
-      # `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so opt
-      # out of Ecto's default migration-wide transaction.
-      @disable_ddl_transaction true
-
-      # Ecto holds its advisory migration lock on a separate idle connection
-      # for the full CONCURRENTLY build. Neon's managed Postgres drops idle
-      # TCP sockets on its own keepalive window, surfacing as a 300s hang +
-      # `ssl send: closed` on fresh envs (observed 2026-04-22 bootstrapping
-      # the staging project). Disabling the lock prevents that; deploys are
-      # already serialised by the release pipeline.
-      @disable_migration_lock true
-
-      # Plain `SET`, not `SET LOCAL` — `@disable_ddl_transaction true` above
-      # means there is no transaction for a LOCAL setting to be scoped to, and
-      # `SET LOCAL` outside one is a no-op that only emits a warning.
+      # Transactional, and the indexes below are NOT built concurrently —
+      # deliberately, because this migration CREATES the table it indexes.
       #
-      # `statement_timeout = 0` because the indexes below build CONCURRENTLY: a
-      # timeout firing mid-build aborts it and leaves an INVALID index behind.
-      # The `lock_timeout` is the one that protects availability — it makes a
-      # contended lock fail fast instead of queueing every later query behind
-      # this migration.
+      # `CREATE INDEX CONCURRENTLY` exists to avoid holding a write lock on a
+      # table other sessions are using. Nothing can be using this one: it did
+      # not exist when the migration began, and no code path can reach it until
+      # the migration that introduces it has committed. So the lock it avoids is
+      # a lock on nothing, the rows it avoids blocking are zero, and the build
+      # is instant either way.
+      #
+      # What CONCURRENTLY did cost was atomicity. It cannot run inside a
+      # transaction, so the whole migration had to opt out of one — and then a
+      # failure partway through (the third of four indexes, a dropped
+      # connection) left the table created, some indexes built, and NO
+      # `schema_migrations` row. Re-running then dies on `relation already
+      # exists`, so a transient error became a migration that can only be
+      # finished by hand, on the deploy where something had already gone wrong.
+      # Inside a transaction the same failure rolls the table back and the retry
+      # is a retry.
+      #
+      # CONCURRENTLY stays right for an index added to an EXISTING populated
+      # table. That shape is hand-written; this one is not.
+      #
+      # `SET LOCAL`, matching the transaction: the settings revert on commit
+      # rather than leaking into whatever else the connection goes on to do.
+      # The `lock_timeout` is what protects availability — it makes a contended
+      # lock fail fast instead of queueing every later query behind this
+      # migration. `statement_timeout` is bounded now that nothing here builds
+      # concurrently; an index on an empty table has no excuse to take 30s.
       def up do
-        execute("SET lock_timeout = '5s'")
-        execute("SET statement_timeout = 0")
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
 
         create table(:#{table.table_name}, prefix: "#{table.schema_prefix}", primary_key: false) do
           add :id, :binary_id, primary_key: true
@@ -63,8 +71,8 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     #{index_lines}#{grant_lines}  end
 
       def down do
-        execute("SET lock_timeout = '5s'")
-        execute("SET statement_timeout = 0")
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
 
         drop table(:#{table.table_name}, prefix: "#{table.schema_prefix}")
       end
@@ -334,7 +342,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       end)
       |> Enum.sort_by(fn {field_name, _} -> field_name end)
       |> Enum.map_join("\n", fn {field_name, _} ->
-        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\", concurrently: true)"
+        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\")"
       end)
 
     explicit_lines =
@@ -354,7 +362,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     cols = format_index_columns(idx.columns)
     prefix = table.schema_prefix
     base = "(:#{table.table_name}, #{cols}, prefix: \"#{prefix}\""
-    tail = ", name: \"#{idx.name}\", concurrently: true)"
+    tail = ", name: \"#{idx.name}\")"
 
     if Map.get(idx, :unique, false) do
       "    create unique_index" <> base <> tail
