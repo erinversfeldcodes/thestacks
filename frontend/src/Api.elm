@@ -1756,19 +1756,28 @@ just written to fix**, so read this before attempting it:
     falls back to a `PlacementRef` shape when `bookshelf_name` is absent, and
     quietly dropping that fallback is how a second defect gets introduced while
     fixing the first.
-  - `decodeBookPlacement` **cannot fail**. All eight of its fields are
-    `D.oneOf [ D.field …, D.succeed <default> ]`, so it succeeds on _any_ JSON
-    value — `null` included — returning an all-defaults struct. The generated
-    `D.maybe (D.field "placement" decodeBookPlacement)` therefore yields
-    `Just <empty placement>` for `"placement": null`, never `Nothing`. The same
-    mechanism collapses an absent `bookshelf_visibility` to `""`, which is the
-    third field this decoder lifts by hand as a `Maybe`. This is the blocker
-    `confirmResponseDecoder` cites.
+  - `decodeBookPlacement` **could not fail**. All eight of its fields are
+    `D.oneOf [ D.field …, D.succeed <default> ]`, so it succeeded on _any_ JSON
+    value — `null` included — returning an all-defaults struct, and the
+    generated `D.maybe (D.field "placement" decodeBookPlacement)` therefore
+    yielded `Just <empty placement>` for `"placement": null`, never `Nothing`.
+    This is the blocker `confirmResponseDecoder` cites. ✅ **Fixed at the source
+    as of 2026-10-16**: codegen now wraps every message decoder in
+    `requireObject`, so a non-object is refused and the `D.maybe` shape answers
+    `Nothing`. Per-field proto3 defaulting is untouched — `{}` is still a valid
+    message of all defaults — so the part of this bullet that remains true is
+    the narrow one: an absent `bookshelf_visibility` still collapses to `""`,
+    which is why this decoder lifts it by hand as a `Maybe`.
 
-All three blockers are the same shape: the generated decoder is not a drop-in
-for a hand-written one that encodes knowledge the contract does not. In each
-case the generated version succeeds and returns something wrong, rather than
-failing — which is why none of this surfaces as a decode error.
+The remaining blocker is the `PlacementRef` fallback, and it is the one codegen
+cannot help with: **any JSON object satisfies any message decoder**, so a
+`oneOf` over two untagged message shapes at the same key is undecidable without
+a discriminator in the contract. That is a contract decision, not a decoder one.
+
+The shape all of these shared is worth keeping in view: the generated decoder
+SUCCEEDED and returned something wrong rather than failing, which is why none of
+it surfaced as a decode error. The object guard restores a failure mode; it does
+not make a decoder able to answer a question the contract never asked.
 
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
@@ -2852,9 +2861,15 @@ confirmErrorFromBody statusCode bodyText =
 
 Hand-rolled over the app-level `bookDecoder` / `placementDecoder` for one of the
 reasons `bookDetailResponseDecoder` is — the third in that decoder's list:
-`decodeBookPlacement` cannot fail, so the generated
-`D.maybe (D.field "placement" decodeBookPlacement)` turns a JSON `null` into
+`decodeBookPlacement` could not fail, so the generated
+`D.maybe (D.field "placement" decodeBookPlacement)` turned a JSON `null` into
 `Just <all-defaults struct>` rather than `Nothing`.
+
+✅ **That blocker is gone as of 2026-10-16** — codegen wraps every message
+decoder in `requireObject`, so the `D.maybe` shape now answers `Nothing`. What
+still stands between this and the generated decoders is the `PlacementRef`
+fallback inside `placementDecoder`, which needs a discriminator in the contract
+rather than a better decoder.
 
 ⚠️ This is the THIRD hand-rolled decoder over the same book / placement /
 placements triple. Converging any one of them means taking all three, and

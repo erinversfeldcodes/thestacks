@@ -276,6 +276,15 @@ both proto decoders use oneOf-with-succeed defaults and would otherwise always
 match. PlacementRef is the fallback for payloads that carry position/placedAt
 but no bookshelf\_name.
 
+⚠️ The `bookshelf_name` guard is still load-bearing, and codegen cannot replace
+it. As of 2026-10-16 every generated message decoder requires a JSON object
+(`requireObject`), which fixed the related defect where a `null` decoded to a
+struct of defaults — but an OBJECT still satisfies either decoder, because
+proto3 implicit presence means neither has a required field. So two untagged
+message shapes arriving at the same key remain indistinguishable to the
+generated decoders, and the only real fix is a discriminator in the contract.
+Until there is one, this hand-written guard is the discriminator.
+
 -}
 placementWithoutBookDecoder : Decoder Placement
 placementWithoutBookDecoder =

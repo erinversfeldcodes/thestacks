@@ -145,7 +145,7 @@ import Stacks.Common.V1.Location
         , encodeCoordinates
         , encodeCountry
         )
-import Stacks.Common.V1.Placement
+import Stacks.Common.V1.Placement as ProtoPlacement
     exposing
         ( PlacementDetail
         , decodePlacementDetail
@@ -202,7 +202,98 @@ suite =
         , sourceResponseSuite
         , uploadSuite
         , adminSuite
+        , objectGuardSuite
         ]
+
+
+{-| The property that every generated message decoder has a failure mode.
+
+Proto3 gives each field implicit presence and a zero default, so codegen emits
+`D.oneOf [ D.field "k" d, D.succeed <zero> ]` per field — right by the JSON
+mapping, and the very reason it was dangerous: with every field falling back,
+the composed decoder had NO required field, so it succeeded on `null`, on a
+number, on a string, on a list, answering a struct of defaults each time.
+
+The cost was not theoretical. `D.maybe (D.field "placement" decodeBookPlacement)`
+is the generated shape for an optional message field, and against a server
+sending `"placement": null` it produced `Just <all defaults>` — "no placement"
+arriving as a placement with a blank id on a blank bookshelf, which the consumer
+then rendered. The second cost is epistemic: a decoder with no failure mode
+means "it decodes" tells you nothing, which is why hand-rolled decoders grew up
+beside these to work around them.
+
+⚠️ These cases are about the CODEGEN CONTRACT, not about `BookPlacement` — it is
+simply a convenient witness. The guard is emitted once per generated module and
+wraps every message decoder in it.
+
+-}
+objectGuardSuite : Test
+objectGuardSuite =
+    describe "every message decoder requires an object"
+        [ test "an optional message field sent as null decodes to Nothing" <|
+            \_ ->
+                -- The exact generated shape, and the exact defect.
+                D.decodeString
+                    (D.maybe (D.field "placement" ProtoPlacement.decodeBookPlacement))
+                    """{ "placement": null }"""
+                    |> Expect.equal (Ok Nothing)
+        , test "a null is refused outright rather than defaulted" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "null"
+                    |> expectDecodeFailure
+        , test "a number is refused" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "42"
+                    |> expectDecodeFailure
+        , test "a string is refused" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "\"placement\""
+                    |> expectDecodeFailure
+        , test "a list is refused" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "[]"
+                    |> expectDecodeFailure
+        , test "an EMPTY object is still accepted — proto3 defaulting is unchanged" <|
+            \_ ->
+                -- The positive control, and the boundary of the fix. Every field
+                -- has implicit presence, so `{}` is a valid message of all
+                -- defaults and must stay valid; the five refusals above would
+                -- also be satisfied by a decoder that had simply become strict
+                -- about fields, which would break the JSON mapping.
+                D.decodeString ProtoPlacement.decodeBookPlacement "{}"
+                    |> Expect.equal (Ok ProtoPlacement.defaultBookPlacement)
+        , test "a present field is still read, not defaulted away" <|
+            \_ ->
+                D.decodeString
+                    ProtoPlacement.decodeBookPlacement
+                    """{ "id": "p-1", "bookshelf_name": "antilibrary" }"""
+                    |> Result.map (\p -> ( p.id, p.bookshelfName ))
+                    |> Expect.equal (Ok ( "p-1", "antilibrary" ))
+        , test "the guard does NOT tell two message types apart — an object satisfies either" <|
+            \_ ->
+                -- Stated as a test because it is the limit of the fix and the
+                -- reason a hand-rolled `oneOf` over these two still needs a
+                -- discriminator. A PlacementRef-shaped object decodes happily as
+                -- a BookPlacement of defaults; only the contract can separate
+                -- them, not codegen.
+                D.decodeString
+                    ProtoPlacement.decodeBookPlacement
+                    """{ "position": 3, "placed_at": "2026-10-16T00:00:00Z" }"""
+                    |> Expect.equal (Ok ProtoPlacement.defaultBookPlacement)
+        ]
+
+
+expectDecodeFailure : Result D.Error a -> Expect.Expectation
+expectDecodeFailure result =
+    case result of
+        Err _ ->
+            Expect.pass
+
+        Ok _ ->
+            Expect.fail
+                ("decoded successfully, so this decoder has no failure mode — "
+                    ++ "a struct of defaults was invented for a value that is not a message"
+                )
 
 
 locationSuite : Test
