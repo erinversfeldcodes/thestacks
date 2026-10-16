@@ -166,8 +166,11 @@ defmodule Stacks.Workers.EmailDeliveryJob do
       {:ok, _} ->
         # The billable unit for the email provider, counted where it actually
         # happens. The cost page previously derived its send count from rows in
-        # `oban_jobs`, which the pruner deletes about a minute after the job
-        # finishes — so a "this month" figure only ever saw the last minute.
+        # `oban_jobs`, which are pruned — so a "this month" figure only ever saw
+        # the retention window. That window has since gone from sixty seconds to
+        # seven days, which does not rescue the old approach: seven days is not
+        # a month, and a billing figure should not depend on how long a queue
+        # table happens to keep its rows.
         # The template is a bounded set (`@known_templates`), so it is safe as a
         # label; no address, name or user id is attached.
         :telemetry.execute([:stacks, :email, :delivered], %{count: 1}, %{template: template})
@@ -285,18 +288,36 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     )
   end
 
+  # Legacy shape — jobs enqueued before the args carried ids. Kept for one
+  # release so an in-flight job does not die on FunctionClauseError.
+  defp build_email(user, :new_offer, %{"buyer_name" => buyer_name} = params) do
+    build_new_offer_email(
+      user,
+      buyer_name,
+      Map.get(params, "listing_title", "your listing"),
+      Map.get(params, "offer_amount_zar"),
+      Map.get(params, "offer_url", "/marketplace")
+    )
+  end
+
+  # ⚠️ `buyer_name` resolved at DELIVERY. It belongs to a third party — the
+  # recipient is the seller — so no args scrub keyed on the recipient could
+  # reach it.
   defp build_email(user, :new_offer, %{
-         "buyer_name" => buyer_name,
-         "listing_title" => listing_title,
+         "listing_id" => listing_id,
+         "buyer_id" => buyer_id,
          "offer_amount_zar" => offer_amount_zar,
          "offer_url" => offer_url
        }) do
-    Swoosh.Email.new()
-    |> Swoosh.Email.to(recipient(user))
-    |> Swoosh.Email.from(from_address())
-    |> Swoosh.Email.subject("New offer on your listing — The Stacks")
-    |> Swoosh.Email.html_body(
-      Templates.new_offer(buyer_name, listing_title, offer_amount_zar, offer_url)
+    listing = listing_id && Stacks.Marketplace.get_listing(listing_id)
+    listing_title = (listing && listing.book && listing.book.title) || "your listing"
+
+    build_new_offer_email(
+      user,
+      buyer_display_name(buyer_id),
+      listing_title,
+      offer_amount_zar,
+      offer_url
     )
   end
 
@@ -343,6 +364,15 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   # Both fall back to a neutral phrase rather than failing: a notification that
   # arrives saying "A member invited you to a group" is better than one that
   # does not arrive because a name lookup missed.
+  defp buyer_display_name(nil), do: "A buyer"
+
+  defp buyer_display_name(buyer_id) do
+    case Stacks.Accounts.get_user(buyer_id) do
+      %{display_name: name} when is_binary(name) and name != "" -> name
+      _ -> "A buyer"
+    end
+  end
+
   defp inviter_display_name(nil), do: "A member"
 
   defp inviter_display_name(inviter_id) do
@@ -390,6 +420,16 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.subject("A book on your WishList is available — The Stacks")
     |> Swoosh.Email.html_body(
       Templates.wishlist_available(book_title, author_name, price_zar, seller_name)
+    )
+  end
+
+  defp build_new_offer_email(user, buyer_name, listing_title, offer_amount_zar, offer_url) do
+    Swoosh.Email.new()
+    |> Swoosh.Email.to(recipient(user))
+    |> Swoosh.Email.from(from_address())
+    |> Swoosh.Email.subject("New offer on your listing — The Stacks")
+    |> Swoosh.Email.html_body(
+      Templates.new_offer(buyer_name, listing_title, offer_amount_zar, offer_url)
     )
   end
 end

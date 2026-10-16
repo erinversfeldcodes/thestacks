@@ -553,11 +553,14 @@ defmodule Stacks.CostsTest do
 
   describe "counts that must outlive the Oban pruner" do
     alias Stacks.Transparency.MockPrometheusClient
-    # Oban's Pruner runs with its default `max_age: 60`, so a completed job row
-    # is deleted about a minute after it finishes. Any month-to-date figure
-    # derived by counting rows in `oban_jobs` therefore reported roughly the
-    # last minute of activity — on the public cost page, whose whole claim is
-    # that the numbers are measured.
+    # Job rows are pruned, so any month-to-date figure derived by counting rows
+    # in `oban_jobs` reports only the retention window — on the public cost
+    # page, whose whole claim is that the numbers are measured.
+    #
+    # ⚠️ The window was Oban's default of sixty SECONDS when this was written
+    # and is now an explicit seven days. The requirement is unchanged: seven
+    # days is still not a month, and these counts must outlive any retention
+    # setting rather than depend on one.
     #
     # These pin the requirement rather than the implementation: with the job
     # table empty, both figures must still be right, which is only possible if

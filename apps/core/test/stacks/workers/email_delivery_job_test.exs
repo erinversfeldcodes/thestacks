@@ -398,9 +398,10 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
 
   describe "delivery counter" do
     # The public cost page's email line is derived from this counter. It used to
-    # be derived by counting rows in `oban_jobs`, which the pruner deletes about
-    # a minute after a job completes, so the month-to-date figure only ever saw
-    # the last minute of sends.
+    # be derived by counting rows in `oban_jobs`, which are pruned — so the
+    # month-to-date figure only ever saw the retention window. That window was
+    # sixty seconds then and is seven days now, which changes the size of the
+    # error and not its existence: seven days is not a month either.
     test "a delivered email emits the counted event, tagged with its template" do
       ref = :telemetry_test.attach_event_handlers(self(), [[:stacks, :email, :delivered]])
       user = insert(:user, recipient_opts())

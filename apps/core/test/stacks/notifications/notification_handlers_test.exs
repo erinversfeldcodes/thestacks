@@ -90,7 +90,7 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
                  event_type: "offer.opened",
                  payload: %{
                    "listing_id" => listing.id,
-                   "buyer_name" => "Bob",
+                   "buyer_id" => Ecto.UUID.generate(),
                    "offer_amount_zar" => "150.00",
                    "offer_id" => Ecto.UUID.generate()
                  }
@@ -112,7 +112,7 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
                  event_type: "offer.opened",
                  payload: %{
                    "listing_id" => listing.id,
-                   "buyer_name" => "Bob",
+                   "buyer_id" => Ecto.UUID.generate(),
                    "offer_amount_zar" => "150.00",
                    "offer_id" => Ecto.UUID.generate()
                  }
@@ -127,7 +127,7 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
                  event_type: "offer.opened",
                  payload: %{
                    "listing_id" => Ecto.UUID.generate(),
-                   "buyer_name" => "Bob",
+                   "buyer_id" => Ecto.UUID.generate(),
                    "offer_amount_zar" => "150.00",
                    "offer_id" => Ecto.UUID.generate()
                  }

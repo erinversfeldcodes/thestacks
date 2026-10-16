@@ -134,10 +134,13 @@ defmodule Stacks.Costs do
       Number of Modal vision inferences this month, counted from the per-call
       request metric.
 
-      Not from `oban_jobs`: the pruner deletes a completed job row about a
-      minute after it finishes, so counting rows there reported the last minute
-      of inferences as the month's total — and this is the figure the largest
-      compute line on the public cost page is derived from. Counts the calls
+      Not from `oban_jobs`: job rows are pruned, so counting them reports only
+      the retention window rather than the month — and this is the figure the
+      largest compute line on the public cost page is derived from. ⚠️ The window was sixty
+      seconds when this was written and is now seven days; the decision is
+      unchanged, because a MONTH-to-date figure cannot be derived from a
+      seven-day table either. Raising retention further would not rescue it —
+      the counter is the right source, not a longer-lived side effect. Counts the calls Counts the calls
       that reached Modal and returned, which is what Modal bills for; a call
       that raised before a response is counted separately as an exception.
       Returns `:error` when the metric store cannot be reached, which the cost
@@ -580,10 +583,13 @@ defmodule Stacks.Costs do
   @doc """
       Emails handed to Resend this month, counted from the delivery counter.
 
-      Not from `oban_jobs`: the pruner deletes a completed job row about a
-      minute after it finishes, so counting rows there reported the last minute
-      of sends under a "this month" heading — on the public cost page, whose
-      whole claim is that the figure is measured. Returns `:error` when the
+      Not from `oban_jobs`: job rows are pruned, so counting them reports only
+      the retention window rather than the month — and this is the figure the
+      free-tier email line on the public cost page is derived from. ⚠️ The window was sixty
+      seconds when this was written and is now seven days; the decision is
+      unchanged, because a MONTH-to-date figure cannot be derived from a
+      seven-day table either. Raising retention further would not rescue it —
+      the counter is the right source, not a longer-lived side effect. Returns `:error` when the
       metric store cannot be reached, which the cost item renders as the
       free-tier line without a count rather than as zero.
   """
