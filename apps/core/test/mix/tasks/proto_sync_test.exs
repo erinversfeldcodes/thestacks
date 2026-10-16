@@ -683,9 +683,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :metadata, :map"
 
       assert output =~
-               ~s|add :occurred_at, :utc_datetime_usec, null: false, default: fragment("NOW()")|
+               ~s|add :occurred_at, :timestamptz, null: false, default: fragment("NOW()")|
 
-      assert output =~ "add :published_at, :utc_datetime_usec"
+      assert output =~ "add :published_at, :timestamptz"
       refute output =~ "timestamps("
       assert output =~ "idx_event_log_type_agg"
       assert output =~ "concurrently: true"
@@ -712,7 +712,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :source_name, :text, null: false"
       assert output =~ "add :consecutive_failures, :integer, null: false, default: 0"
       assert output =~ ~s|add :status, :text, null: false, default: "healthy"|
-      assert output =~ "timestamps(type: :utc_datetime_usec)"
+      assert output =~ "timestamps(type: :timestamptz)"
       assert output =~ "unique_index(:source_health_checks"
       assert output =~ "GRANT SELECT ON op.source_health_checks TO stacks_dbt"
     end
@@ -825,7 +825,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
         def change do
           create table(:test_timestamps, prefix: "op") do
             add :name, :text
-            timestamps(type: :utc_datetime_usec)
+            timestamps(type: :timestamptz)
           end
         end
       end
@@ -1683,6 +1683,65 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       assert sql =~ "widgets_gadget_id_kind_index",
              "an explicitly declared index must still be emitted"
+    end
+  end
+
+  describe "timestamp columns are timestamptz" do
+    # ⚠️ The project standard is "all tables UUID PKs + TIMESTAMPTZ", and it was
+    # unreachable through this generator: Ecto maps `:utc_datetime_usec` to a
+    # bare `timestamp`, so every generated table violated it by construction.
+    # Measured on the deployed database before the fix: 149 `timestamp without
+    # time zone` columns across 56 tables, against exactly one `timestamptz`.
+    test "the timestamps() pair is timestamptz, not utc_datetime_usec" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [],
+            timestamps: :standard
+          },
+          [],
+          "20260101000000"
+        )
+
+      assert sql =~ "timestamps(type: :timestamptz)"
+
+      refute sql =~ ":utc_datetime_usec",
+             "the migration must not emit the Ecto type — that is what produced a bare " <>
+               "`timestamp` column for every table in the schema"
+    end
+
+    test "a standalone datetime column is timestamptz too" do
+      # The `timestamps()` pair is not the only route: a proto
+      # `google.protobuf.Timestamp` field becomes its own column via
+      # `format_migration_type/1`, and that path had the same defect.
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [],
+            timestamps: false
+          },
+          [
+            %{
+              name: "expires_at",
+              type: "TYPE_MESSAGE",
+              type_name: ".google.protobuf.Timestamp",
+              label: "LABEL_OPTIONAL"
+            }
+          ],
+          "20260101000000"
+        )
+
+      assert sql =~ "add :expires_at, :timestamptz"
     end
   end
 end

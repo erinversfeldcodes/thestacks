@@ -234,6 +234,24 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   defp format_migration_type({:array, inner}), do: "{:array, #{format_migration_type(inner)}}"
+
+  # ⚠️ The COLUMN type is `:timestamptz` while the ECTO type stays
+  # `:utc_datetime_usec`, and the split is deliberate.
+  #
+  # Ecto maps `:utc_datetime_usec` to a bare `timestamp` — `ecto_sql`'s Postgres
+  # adapter does `ecto_to_db(:utc_datetime_usec), do: "timestamp"` — so every
+  # table this generator produced violated the project's own TIMESTAMPTZ
+  # standard by construction. Measured before changing it: 149 `timestamp
+  # without time zone` columns across 56 tables, against exactly one
+  # `timestamptz`.
+  #
+  # The pairing below is not speculative. `op.users.password_reset_sent_at` has
+  # been `:timestamptz` in its migration and `:utc_datetime_usec` in its Ecto
+  # schema since 2026-03, and reads and writes correctly: Postgrex decodes
+  # timestamptz to a UTC `DateTime`, which is exactly what `:utc_datetime_usec`
+  # expects. Only the storage type changes; the Elixir type does not.
+  defp format_migration_type(:utc_datetime_usec), do: ":timestamptz"
+  defp format_migration_type(:utc_datetime), do: ":timestamptz"
   defp format_migration_type(type) when is_atom(type), do: ":#{type}"
 
   defp format_migration_type(type) do
@@ -248,11 +266,11 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   defp timestamps_block(%{timestamps: false}), do: ""
 
   defp timestamps_block(%{timestamps: :standard}) do
-    "\n\n      timestamps(type: :utc_datetime_usec)"
+    "\n\n      timestamps(type: :timestamptz)"
   end
 
   defp timestamps_block(%{timestamps: {:standard, updated_at: false}}) do
-    "\n\n      timestamps(type: :utc_datetime_usec, updated_at: false)"
+    "\n\n      timestamps(type: :timestamptz, updated_at: false)"
   end
 
   defp timestamps_block(_), do: ""
