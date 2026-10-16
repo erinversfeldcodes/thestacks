@@ -28,7 +28,7 @@ import Api exposing (ImportError(..), ImportRow, LibraryImport)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, button, div, h1, h2, p, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
@@ -186,7 +186,12 @@ viewChooser maybeError =
             [ text "Every book passes the same ISBN verification as one added by hand — rows without a verifiable ISBN are reported back to you, never invented." ]
         , case maybeError of
             Just importError ->
-                p [ class "import__error", testId "import-error" ]
+                p
+                    [ class "import__error"
+                    , testId "import-error"
+                    , attribute "data-refusal" (errorKind importError)
+                    , attribute "role" "alert"
+                    ]
                     [ text (errorCopy importError) ]
 
             Nothing ->
@@ -200,6 +205,37 @@ viewChooser maybeError =
         ]
 
 
+{-| Which refusal this is, as a stable token on the element.
+
+Not decoration: it makes "this refusal is NOT the wrong-format one" a structural
+claim instead of a claim about a sentence. A negative assertion written against
+copy is voided silently the moment the copy is reworded — the absence it asserts
+becomes true for the wrong reason — and five such assertions were the natural way
+to write the tests for this very change.
+
+-}
+errorKind : ImportError -> String
+errorKind importError =
+    case importError of
+        ImportInProgress ->
+            "in-progress"
+
+        ImportFileTooLarge ->
+            "too-large"
+
+        ImportUnrecognisedFormat _ ->
+            "unrecognised-format"
+
+        ImportNoRows ->
+            "no-rows"
+
+        ImportUploadIncomplete ->
+            "upload-incomplete"
+
+        ImportRequestFailed _ ->
+            "request-failed"
+
+
 errorCopy : ImportError -> String
 errorCopy importError =
     case importError of
@@ -209,8 +245,20 @@ errorCopy importError =
         ImportFileTooLarge ->
             "That file is larger than any Goodreads export we've seen (10 MB). Is it the right one?"
 
-        ImportUnrecognised ->
+        ImportUnrecognisedFormat found ->
             "That doesn't look like a Goodreads export — we need the CSV from My Books → Import and export → Export Library, with its Title, Author and ISBN13 columns."
+                ++ (if List.isEmpty found then
+                        ""
+
+                    else
+                        " The columns we found were: " ++ String.join ", " found ++ "."
+                   )
+
+        ImportNoRows ->
+            "That export is a header with nothing under it — no books. If you've just asked Goodreads for the file, it may still be generating; the email arrives with the real one attached."
+
+        ImportUploadIncomplete ->
+            "The file didn't arrive in one piece. Nothing's wrong with your export as far as we can tell — choose it again."
 
         ImportRequestFailed _ ->
             "The upload didn't get through. Your file is fine — try again in a moment."
@@ -252,7 +300,7 @@ viewReport libraryImport rows =
           else
             text ""
         , viewCounts libraryImport
-        , viewRows rows
+        , viewRows libraryImport rows
         ]
 
 
@@ -274,17 +322,47 @@ countCell id label count =
         ]
 
 
-viewRows : RemoteData Http.Error (List ImportRow) -> Html Msg
-viewRows rows =
+{-| The per-row table, or the reason there isn't one.
+
+⚠️ Takes the import as well as the rows, because the rows ALONE cannot tell
+"nothing needed your attention" from "the detail is gone". Raw import rows carry
+the reader's own free text — Goodreads reviews and private notes — and are
+deleted wholesale 30 days on; the import record and its counts survive as the
+durable summary, by design.
+
+So an import whose rows have expired arrives here as an empty list, and the
+empty list used to render "Every row made it onto a shelf." — stated to a reader
+whose counts, on the same screen, said four rows could not be verified. The
+counts were right and the sentence was false, which is the worse way round: the
+page contradicted itself and the confident half was the wrong one.
+
+-}
+viewRows : LibraryImport -> RemoteData Http.Error (List ImportRow) -> Html Msg
+viewRows libraryImport rows =
     case rows of
         Success rowList ->
             let
                 reportable =
                     List.filter (\row -> row.outcome /= Just "shelved") rowList
+
+                needingAttention =
+                    libraryImport.duplicateCount
+                        + libraryImport.unverifiedCount
+                        + libraryImport.unreadableCount
             in
             if List.isEmpty reportable then
-                p [ class "import__all-shelved", testId "import-all-shelved" ]
-                    [ text "Every row made it onto a shelf." ]
+                if needingAttention > 0 then
+                    p [ class "import__rows-expired", testId "import-rows-expired" ]
+                        [ text
+                            ("The counts above are kept, but the row-by-row detail is only held for 30 days and has since been cleared — it carried whatever you'd written about each book. "
+                                ++ String.fromInt needingAttention
+                                ++ " rows needed a look at the time."
+                            )
+                        ]
+
+                else
+                    p [ class "import__all-shelved", testId "import-all-shelved" ]
+                        [ text "Every row made it onto a shelf." ]
 
             else
                 div [ class "import__rows-wrap" ]

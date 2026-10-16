@@ -7362,6 +7362,15 @@ h4 {
     color: var(--accent);
 }
 
+/* Deliberately not --accent: this sits where "every row made it onto a shelf"
+   would, and it is not good news. Muted rather than an error colour, because
+   nothing went wrong either — the detail was deleted on schedule. */
+.import__rows-expired {
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    max-width: 60ch;
+}
+
 .import__rows-wrap {
     overflow-x: auto;
 }
