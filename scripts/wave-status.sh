@@ -271,32 +271,79 @@ STACK_PATHS = {
 }
 
 
-def touched_stacks():
-    """Stacks the branch diff actually touches, or None if git cannot say."""
+def _git(args, timeout=30):
+    """Run a git command, returning its stdout lines, or None on any failure."""
     import subprocess
 
+    try:
+        done = subprocess.run(
+            ["git"] + args, capture_output=True, text=True, timeout=timeout
+        )
+    except Exception:
+        return None
+    if done.returncode != 0:
+        return None
+    return [line for line in done.stdout.splitlines() if line.strip()]
+
+
+def _stacks_for(changed):
+    return {
+        stack
+        for stack, prefixes in STACK_PATHS.items()
+        if any(f.startswith(pre) for f in changed for pre in prefixes)
+    }
+
+
+def touched_stacks(declared_range=None):
+    """Stacks the CAMPAIGN's diff touches, or None if git cannot say.
+
+    ⚠️ Two things this got wrong, both found while closing a missing wave-11
+    review axis, and both of which made the guard report "nothing to review".
+
+    (a) IT MEASURED THE WRONG RANGE FOR A HISTORICAL CAMPAIGN. Asked about a
+        campaign whose wave merged two months ago, it diffed whatever branch is
+        checked out today — so the wave whose missing review axis prompted all
+        this was never going to be caught by the instrument that exists to catch
+        it. A campaign state may now declare its own `diff_range`
+        ("<base>..<head>"), which is the only correct instrument for work that
+        has already merged.
+
+        A declared range that git cannot read returns None (UNKNOWN) rather than
+        falling back to the branch diff. Falling back is precisely how the wrong
+        range came to be measured, and a quiet fallback to a wrong answer is
+        worse than refusing to answer.
+
+    (b) IT WAS BLIND TO UNCOMMITTED WORK, which is what an in-flight wave looks
+        like. With ten files modified and zero commits beyond main it reported
+        "0 actionable" and demanded no review at all. The in-flight path now
+        unions the committed diff with the working tree — the same three legs
+        the migration-safety gate uses (committed, staged+unstaged, untracked),
+        for the same reason: it has to be useful in the order people actually
+        work, not only after a commit.
+    """
+    if declared_range:
+        files = _git(["diff", "--name-only", declared_range])
+        if files is None:
+            return None
+        return _stacks_for(files)
+
     for base_ref in ("origin/main", "main"):
-        try:
-            base = subprocess.run(
-                ["git", "merge-base", "HEAD", base_ref],
-                capture_output=True, text=True, timeout=20,
-            )
-            if base.returncode != 0:
-                continue
-            files = subprocess.run(
-                ["git", "diff", "--name-only", f"{base.stdout.strip()}..HEAD"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if files.returncode != 0:
-                continue
-            changed = [f for f in files.stdout.splitlines() if f.strip()]
-            return {
-                stack
-                for stack, prefixes in STACK_PATHS.items()
-                if any(f.startswith(pre) for f in changed for pre in prefixes)
-            }
-        except Exception:
+        base = _git(["merge-base", "HEAD", base_ref], timeout=20)
+        if not base:
             continue
+
+        committed = _git(["diff", "--name-only", f"{base[0]}..HEAD"])
+        if committed is None:
+            continue
+
+        # Working-tree legs are additive: a failure to read them must not
+        # discard the committed answer, so they default to empty rather than
+        # aborting the whole lookup.
+        worktree = _git(["diff", "--name-only", "HEAD"]) or []
+        untracked = _git(["ls-files", "--others", "--exclude-standard"]) or []
+
+        return _stacks_for(set(committed) | set(worktree) | set(untracked))
+
     return None
 
 
@@ -309,13 +356,23 @@ if not wave_filter and any(
     for it in (w.get("items") or {}).values()
 ):
     reviews = {k.lower() for k in (state.get("domain_reviews") or {})}
-    stacks = touched_stacks()
+    declared_range = state.get("diff_range")
+    stacks = touched_stacks(declared_range)
     if stacks is None:
         # Never silently pass: an unanswerable check is not a satisfied one.
-        violations.append(
-            "  campaign: could not determine the branch diff, so stack-review coverage is "
-            "UNKNOWN — not satisfied. Run from a git checkout with main reachable."
-        )
+        if declared_range:
+            violations.append(
+                f"  campaign: the state declares diff_range \"{declared_range}\" and git cannot "
+                "read it, so stack-review coverage is UNKNOWN — not satisfied. Deliberately NOT "
+                "falling back to the branch diff: measuring today's branch for a campaign that "
+                "merged months ago is how a missing review axis went unreported in the first "
+                "place. Fix the range or fetch the commits it names."
+            )
+        else:
+            violations.append(
+                "  campaign: could not determine the branch diff, so stack-review coverage is "
+                "UNKNOWN — not satisfied. Run from a git checkout with main reachable."
+            )
     else:
         for stack in sorted(stacks - reviews):
             violations.append(
