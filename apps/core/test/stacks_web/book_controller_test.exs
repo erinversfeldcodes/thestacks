@@ -809,6 +809,38 @@ defmodule StacksWeb.BookControllerTest do
              "a draft must serialise as null; got #{inspect(entry["published_at"])}"
     end
 
+    test "the publication state is stated, not left for the client to infer", %{conn: conn} do
+      # The `published_at` null above is necessary but not sufficient: a proto3
+      # `string` has no null, so any consumer using a GENERATED decoder receives
+      # `""` and cannot tell a draft from a post published at an unknown time.
+      # `publication_state` is the field that survives that crossing, and it has
+      # to be asserted on the server side or the only thing pinning it is the
+      # client's own test helper — which is how the `published_at` claim came to
+      # live entirely inside the client's diff.
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      draft = insert(:post, user: user, title: "Half-written", published_at: nil)
+      live = insert(:post, user: user, title: "On Rereading", published_at: DateTime.utc_now())
+      {:ok, _} = Stacks.Blog.associate_book(draft, book.id, %{visible: true})
+      {:ok, _} = Stacks.Blog.associate_book(live, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"my_writing" => entries} = json_response(conn, 200)
+
+      states =
+        Map.new(entries, fn entry -> {entry["title"], entry["publication_state"]} end)
+
+      # Both in one assertion, so a serialiser that hardcodes either value is
+      # caught. Pinned separately, "draft" alone passes against a constant.
+      assert states == %{"Half-written" => "draft", "On Rereading" => "published"},
+             "publication_state must distinguish the two; got #{inspect(states)}"
+    end
+
     test "authenticated user with no associations sees empty my_writing", %{conn: conn} do
       user = insert(:user)
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")

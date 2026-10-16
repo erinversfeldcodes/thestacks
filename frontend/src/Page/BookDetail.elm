@@ -1903,16 +1903,44 @@ viewWritingEntry post =
     li [ class "book-detail__writing-entry" ]
         [ a [ href (Route.toPath (Route.BlogPost post.id)), class "book-detail__writing-link" ]
             [ text post.title ]
-        , case post.publishedAt of
-            Just published ->
-                -- `String.left 10` is this project's existing convention for an
-                -- ISO timestamp (AuthorCard, BookList, RemovalRequests all do it);
-                -- there is no date utility to reach for yet.
-                span [ class "book-detail__writing-date" ] [ text (String.left 10 published) ]
-
-            Nothing ->
-                span [ class "book-detail__writing-draft" ] [ text "Draft" ]
+        , viewWritingStatus post
         ]
+
+
+{-| The status beside a post's title.
+
+Driven by `publicationState`, which the server states, rather than by whether
+`publishedAt` happens to be absent. Those agree today; the difference is that
+the absence of a date is also what a decoder produces when a field is missing or
+unparseable, so inferring from it cannot tell "this is a draft" from "something
+went wrong on the way here".
+
+-}
+viewWritingStatus : Api.MyWriting -> Html Msg
+viewWritingStatus post =
+    case ( post.publicationState, post.publishedAt ) of
+        ( Api.Draft, _ ) ->
+            span [ class "book-detail__writing-draft" ] [ text "Draft" ]
+
+        ( Api.Published, Just published ) ->
+            -- `String.left 10` is this project's existing convention for an
+            -- ISO timestamp (AuthorCard, BookList, RemovalRequests all do it);
+            -- there is no date utility to reach for yet.
+            span [ class "book-detail__writing-date" ] [ text (String.left 10 published) ]
+
+        ( Api.Published, Nothing ) ->
+            -- Published with no date is a server contradiction, not a draft.
+            -- Labelling it "Draft" would hide a real defect behind a plausible
+            -- word; saying the date is missing points at the right place.
+            span [ class "book-detail__writing-date" ] [ text "Date unavailable" ]
+
+        ( Api.StateUnknown, Just published ) ->
+            span [ class "book-detail__writing-date" ] [ text (String.left 10 published) ]
+
+        ( Api.StateUnknown, Nothing ) ->
+            -- The server did not say and there is no date either. Both guesses
+            -- are wrong in a way the reader cannot see, so neither is made.
+            span [ class "book-detail__writing-date" ] [ text "Status unknown" ]
 
 
 viewSignupPrompt : Html Msg

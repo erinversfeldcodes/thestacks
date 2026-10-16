@@ -34,8 +34,38 @@ message BookDetailResponse {
   repeated stacks.common.v1.BookPlacement placements = 9 [json_name = "placements"];
 }
 
+// PublicationState says whether a post has been published, so that a consumer
+// never has to infer it from the shape or emptiness of a timestamp.
+//
+// It exists because `MyWritingSummary.published_at` is a plain proto3 `string`,
+// which has no null: every generated decoder falls back to the type default, so
+// a draft arrived as `""` and was indistinguishable from a post published at an
+// unknown time. The string could not be made to stop lying about its own
+// nullability, so the fact it was being asked to carry — published or not — is
+// carried explicitly here instead.
+//
+// ⚠️ `PUBLICATION_STATE_UNSPECIFIED` means "the sender did not say", and that is
+// the whole reason this is an enum rather than a `bool is_draft`. A bool's
+// default is `false`, which would have read as a confident "published" from any
+// sender that did not set it — the same lie as the empty string, one field over.
+// A consumer seeing UNSPECIFIED knows it cannot trust `published_at`'s emptiness
+// either way, and should say so rather than guess.
+//
+// Wire values (strings sent by the controller): "draft", "published".
+enum PublicationState {
+  // The sender did not say. Do not infer a publication state from
+  // `published_at` — render the uncertainty instead.
+  PUBLICATION_STATE_UNSPECIFIED = 0;
+
+  // Written but not published. `published_at` carries no meaningful value.
+  PUBLICATION_STATE_DRAFT = 1;
+
+  // Published. `published_at` carries the publication timestamp.
+  PUBLICATION_STATE_PUBLISHED = 2;
+}
+
 // MyWritingSummary is a lightweight blog post reference shown on the book detail page.
-// JSON shape: {id, title, published_at}
+// JSON shape: {id, title, published_at, publication_state}
 message MyWritingSummary {
   // UUID of the blog post.
   string id = 1 [json_name = "id"];
@@ -43,31 +73,25 @@ message MyWritingSummary {
   // Title of the blog post.
   string title = 2 [json_name = "title"];
 
-  // When the post was published. The server sends a real `null` here for a
-  // draft, and drafts are included deliberately.
+  // When the post was published, as an ISO8601 string. The server sends a real
+  // `null` for a draft, and drafts are included deliberately.
   //
-  // ⚠️ THIS FIELD CANNOT EXPRESS THAT, and the gap is not cosmetic. A plain
-  // proto3 scalar has no null, so the generated decoders fall back to the type
-  // default: the Elm one emits
-  // `D.oneOf [ D.field "published_at" D.string, D.succeed "" ]`, turning every
-  // draft into `""` — which renders as a blank date, indistinguishable from a
-  // post published at an unknown time.
+  // ⚠️ Read `publication_state`, not this field's emptiness. A plain proto3
+  // scalar has no null, so a generated decoder turns a draft's `null` into `""`
+  // — which is not distinguishable from a post published at an unknown time.
+  // That is why `publication_state` exists: it carries the fact, and this field
+  // carries only the value.
   //
-  // So any consumer that switches from a hand-written decoder to the generated
-  // one reintroduces that defect silently, and `buf breaking` stays quiet
-  // because the contract is not what changed. `Api.elm`'s `myWritingDecoder`
-  // is hand-written for exactly this reason.
-  //
-  // The fix is `optional string`, which makes the generators emit
-  // `Maybe String`. It is deliberately NOT applied here: `buf breaking` reports
-  // it as a cardinality change ("implicit presence" → "explicit presence"), and
-  // the only way past that in this repo is a FILE-scoped `ignore_only` entry
-  // that would then cover every future field change in this file. Buying that
-  // blast radius inside an unrelated bug fix is how a suppression outlives its
-  // reason. It wants its own change, where the wire-compatibility argument —
-  // that the server's JSON is byte-identical either way — gets decided on its
-  // own terms.
+  // `optional string` would also have worked and is the more direct fix, but
+  // `buf breaking` reports it as a cardinality change ("implicit presence" →
+  // "explicit presence"), and the only way past that in this repo is a
+  // FILE-scoped `ignore_only` entry covering every future field change in this
+  // file. An additive field needs no suppression at all, which is why it won.
   string published_at = 3 [json_name = "published_at"];
+
+  // Whether the post is published, stated rather than inferred. See
+  // PublicationState — in particular, UNSPECIFIED is "unknown", not "published".
+  PublicationState publication_state = 4 [json_name = "publication_state"];
 }
 
 // BookConfirmResponse is returned by POST /api/books/confirm.

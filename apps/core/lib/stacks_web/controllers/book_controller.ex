@@ -212,10 +212,27 @@ defmodule StacksWeb.BookController do
           book: ProtoJSON.book(book, community_read_count: count),
           placement: ProtoJSON.book_placement(List.first(placements)),
           placements: Enum.map(placements, &ProtoJSON.book_placement/1),
-          my_writing:
-            Enum.map(my_writing, &%{id: &1.id, title: &1.title, published_at: &1.published_at})
+          my_writing: Enum.map(my_writing, &my_writing_summary/1)
         })
     end
+  end
+
+  # `publication_state` is derived from `published_at` here, which is not the
+  # circularity it looks like. The server holds a real `nil`; the wire cannot
+  # carry one through a proto3 scalar, so a draft reaches the client as `""` and
+  # is indistinguishable from a post published at an unknown time. This field is
+  # where that fact survives the crossing — the client reads the state and never
+  # has to interpret an empty string.
+  #
+  # `published_at IS NULL` is this domain's definition of a draft, not a
+  # heuristic: `Blog.publish/1` publishes precisely by setting it.
+  defp my_writing_summary(post) do
+    %{
+      id: post.id,
+      title: post.title,
+      published_at: post.published_at,
+      publication_state: if(is_nil(post.published_at), do: "draft", else: "published")
+    }
   end
 
   defp my_writing_for(conn, book_id) do

@@ -56,6 +56,7 @@ module Api exposing
     , ProgressError(..)
     , PublicProfile
     , PublicProfileSummary
+    , PublicationState(..)
     , RegisterError(..)
     , RemovalOutcome(..)
     , RemovalRequest
@@ -1594,6 +1595,25 @@ type alias BookDetailResponse =
     }
 
 
+{-| Whether a post is published, as the server states it.
+
+Read this rather than inferring from `publishedAt`. The contract's
+`published_at` is a proto3 `string`, which has no null, so a generated decoder
+turns a draft into `""` — not distinguishable from a post published at an
+unknown time. `publication_state` is the field that carries the fact across.
+
+`StateUnknown` is "the server did not say", and it is a real case rather than a
+placeholder: an older server, or a response from somewhere this field has not
+reached yet. The view says so instead of guessing, because both guesses are
+wrong in a way a reader cannot see.
+
+-}
+type PublicationState
+    = Draft
+    | Published
+    | StateUnknown
+
+
 {-| One post the viewer has written about this book.
 
 `publishedAt` is `Nothing` for a DRAFT. The server includes drafts deliberately
@@ -1605,17 +1625,51 @@ type alias MyWriting =
     { id : String
     , title : String
     , publishedAt : Maybe String
+    , publicationState : PublicationState
     }
+
+
+publicationStateDecoder : Decoder PublicationState
+publicationStateDecoder =
+    Decode.string
+        |> Decode.andThen
+            (\s ->
+                case s of
+                    "draft" ->
+                        Decode.succeed Draft
+
+                    "PUBLICATION_STATE_DRAFT" ->
+                        Decode.succeed Draft
+
+                    "published" ->
+                        Decode.succeed Published
+
+                    "PUBLICATION_STATE_PUBLISHED" ->
+                        Decode.succeed Published
+
+                    _ ->
+                        -- Including "PUBLICATION_STATE_UNSPECIFIED" and anything
+                        -- a later contract adds. An unrecognised state is not a
+                        -- decode failure — it would discard the post's title and
+                        -- link over a label — but it must not silently become
+                        -- `Published` either.
+                        Decode.succeed StateUnknown
+            )
 
 
 myWritingDecoder : Decoder MyWriting
 myWritingDecoder =
-    Decode.map3 MyWriting
+    Decode.map4 MyWriting
         (Decode.field "id" Decode.string)
         (Decode.field "title" Decode.string)
         (Decode.oneOf
             [ Decode.field "published_at" (Decode.nullable Decode.string)
             , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "publication_state" publicationStateDecoder
+            , Decode.succeed StateUnknown
             ]
         )
 
@@ -1640,9 +1694,12 @@ just written to fix**, so read this before attempting it:
     which has no null. The generated decoder is therefore
     `D.oneOf [ D.field "published_at" D.string, D.succeed "" ]`, so a draft's
     `null` fails the inner decoder and lands as `""` — a blank date where a
-    "Draft" label belongs. `myWritingDecoder` below uses `Decode.nullable` for
-    exactly this reason. The contract needs `optional string` first; the proto
-    comment records why that is its own change and not a line in this one.
+    "Draft" label belongs. ✅ **No longer a blocker as of 2026-10-16**: the
+    contract now carries `publication_state`, so a converged decoder can read
+    the fact instead of interpreting the empty string. `myWritingDecoder` still
+    lifts `published_at` to a `Maybe` because that remains the more direct
+    representation for a view that formats a date, but nothing depends on it for
+    correctness any more.
   - `placementDecoder` is not a plain proto decode either: it is a `oneOf` that
     falls back to a `PlacementRef` shape when `bookshelf_name` is absent, and
     quietly dropping that fallback is how a second defect gets introduced while

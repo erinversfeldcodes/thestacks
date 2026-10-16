@@ -32,7 +32,13 @@ import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import TestHelpers exposing (bookDetailProgram, simulateBookDetailResponseWithWriting, testBook)
+import TestHelpers
+    exposing
+        ( bookDetailProgram
+        , simulateBookDetailResponseWithWriting
+        , simulateBookDetailResponseWithWritingStates
+        , testBook
+        )
 
 
 {-| The page as a signed-in reader sees it, with `posts` returned by the
@@ -52,6 +58,24 @@ loadedFor maybeToken posts =
 signedIn : List ( String, String, Maybe String ) -> ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 signedIn =
     loadedFor (Just "test-token")
+
+
+{-| As `signedIn`, but each post's `publication_state` is given verbatim —
+`Nothing` omits the key.
+
+For the payloads the server should never send. `signedIn` derives the state the
+way the controller does, so it cannot express "published with no date" or "no
+state at all", and those are two of the view's four branches.
+
+-}
+withStates :
+    List ( String, String, ( Maybe String, Maybe String ) )
+    -> ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
+withStates posts =
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+        |> ProgramTest.simulateHttpResponse "GET"
+            "/api/books/book-test-001"
+            (simulateBookDetailResponseWithWritingStates "book-test-001" testBook posts)
 
 
 suite : Test
@@ -88,6 +112,53 @@ suite =
                         |> ProgramTest.expectViewHas
                             [ Selector.text "Half-written"
                             , Selector.text "Draft"
+                            ]
+            , test "the Draft label comes from the stated state, not from the missing date" <|
+                \() ->
+                    -- The two agree on every payload the server produces, which
+                    -- is exactly why this needs a payload it does not produce.
+                    -- A post marked `published` with no date is a server
+                    -- contradiction; labelling it "Draft" would hide a real
+                    -- defect behind a plausible word, and would also mean the
+                    -- view is still inferring from absence.
+                    --
+                    -- Anchored on the status element's CLASS, not on the word
+                    -- "Draft". A prose absence is the weaker assertion twice
+                    -- over: it also matches "Save Draft" or "Draft saved!"
+                    -- appearing anywhere on the page, and it passes just as
+                    -- happily against a page that rendered nothing at all. The
+                    -- presence assertion on the title is what rules the second
+                    -- out, and the class rules out the first.
+                    withStates [ ( "p1", "On Rereading", ( Nothing, Just "published" ) ) ]
+                        |> ProgramTest.ensureViewHas [ Selector.text "On Rereading" ]
+                        |> ProgramTest.expectView
+                            (Query.find [ Selector.class "book-detail__writing-entry" ]
+                                >> Query.findAll [ Selector.class "book-detail__writing-draft" ]
+                                >> Query.count (Expect.equal 0)
+                            )
+            , test "a post the server sent no state for says so rather than guessing" <|
+                \() ->
+                    -- An older server, or a response from a path this field has
+                    -- not reached. Both guesses are wrong in a way the reader
+                    -- cannot see, so the view makes neither.
+                    withStates [ ( "p1", "Half-written", ( Nothing, Nothing ) ) ]
+                        |> ProgramTest.ensureViewHas [ Selector.text "Half-written" ]
+                        |> ProgramTest.expectViewHas [ Selector.text "Status unknown" ]
+            , test "an unknown state still renders the date it was given" <|
+                \() ->
+                    -- The state being unrecognised is not a reason to withhold
+                    -- a date the server did send. Paired with the case above so
+                    -- "Status unknown" cannot become the answer to everything
+                    -- the decoder does not recognise.
+                    withStates
+                        [ ( "p1"
+                          , "On Rereading"
+                          , ( Just "2026-10-01T09:00:00Z", Just "PUBLICATION_STATE_UNSPECIFIED" )
+                          )
+                        ]
+                        |> ProgramTest.expectViewHas
+                            [ Selector.text "On Rereading"
+                            , Selector.text "2026-10-01"
                             ]
             , test "every post the server sent is rendered, not just the first" <|
                 \() ->

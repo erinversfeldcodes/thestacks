@@ -25,6 +25,7 @@ module TestHelpers exposing
     , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
     , simulateBookDetailResponseWithWriting
+    , simulateBookDetailResponseWithWritingStates
     , simulateBookPricesResponse
     , simulateBookResponse
     , simulateBookshelfErrorResponse
@@ -820,30 +821,81 @@ simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibil
 
 {-| A book-detail response carrying the viewer's own posts about the book, in
 the shape `BookController.render_book_detail/3` serialises them: a list of
-`{id, title, published_at}`, with `published_at` null for a draft.
+`{id, title, published_at, publication_state}`, with `published_at` null for a
+draft.
 
 Takes the posts as `(id, title, maybeIsoDate)` triples and encodes them here
 rather than accepting ready-made JSON, so a drift between this shape and the
 controller's is a type error in the helper and not a silently-ignored key in
 the decoder under test.
 
+`publication_state` is derived from the date exactly as the controller derives
+it, so this helper only ever produces payloads the server can actually produce.
+For the states the server should NOT produce — published with no date, or no
+state at all — use `simulateBookDetailResponseWithWritingStates`, which takes
+the state verbatim. Keeping them apart matters: if this helper accepted an
+arbitrary state, every existing test would be free to drift away from the
+controller's shape without anything noticing.
+
 -}
 simulateBookDetailResponseWithWriting : String -> Book -> List ( String, String, Maybe String ) -> Http.Response String
 simulateBookDetailResponseWithWriting bookId book posts =
+    simulateBookDetailResponseWithWritingStates bookId
+        book
+        (List.map
+            (\( postId, title, maybePublishedAt ) ->
+                ( postId
+                , title
+                , ( maybePublishedAt
+                  , if maybePublishedAt == Nothing then
+                        Just "draft"
+
+                    else
+                        Just "published"
+                  )
+                )
+            )
+            posts
+        )
+
+
+{-| As `simulateBookDetailResponseWithWriting`, but the publication state is
+given verbatim rather than derived — `Nothing` omits the key entirely.
+
+This exists for the payloads the server should never send: a post marked
+published with no date, and a post with no state at all (an older server, or a
+response from a path the field has not reached). The view has a branch for each,
+and a helper that derived the state could not reach them.
+
+-}
+simulateBookDetailResponseWithWritingStates :
+    String
+    -> Book
+    -> List ( String, String, ( Maybe String, Maybe String ) )
+    -> Http.Response String
+simulateBookDetailResponseWithWritingStates bookId book posts =
     let
-        encodePost ( postId, title, maybePublishedAt ) =
+        encodePost ( postId, title, ( maybePublishedAt, maybeState ) ) =
             Encode.object
-                [ ( "id", Encode.string postId )
-                , ( "title", Encode.string title )
-                , ( "published_at"
-                  , case maybePublishedAt of
+                ([ ( "id", Encode.string postId )
+                 , ( "title", Encode.string title )
+                 , ( "published_at"
+                   , case maybePublishedAt of
                         Just publishedAt ->
                             Encode.string publishedAt
 
                         Nothing ->
                             Encode.null
-                  )
-                ]
+                   )
+                 ]
+                    ++ (case maybeState of
+                            Just state ->
+                                [ ( "publication_state", Encode.string state ) ]
+
+                            Nothing ->
+                                []
+                       )
+                )
 
         json =
             Encode.encode 0

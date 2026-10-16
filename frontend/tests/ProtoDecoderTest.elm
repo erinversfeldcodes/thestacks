@@ -69,6 +69,7 @@ import Stacks.Api.V1.BlogResponses
 import Stacks.Api.V1.BookResponses
     exposing
         ( BookDetailResponse
+        , PublicationState(..)
         , decodeBookDetailResponse
         , encodeBookDetailResponse
         )
@@ -1159,7 +1160,18 @@ responseSuite =
                                 , visibility = "platform"
                                 , bookshelfVisibility = "platform"
                                 }
-                        , myWriting = [ { id = "w-1", title = "Review", publishedAt = "2026-03-20T00:00:00Z" } ]
+                        , myWriting =
+                            [ { id = "w-1"
+                              , title = "Review"
+                              , publishedAt = "2026-03-20T00:00:00Z"
+                              , publicationState = PublicationStatePublished
+                              }
+                            , { id = "w-2"
+                              , title = "Half-written"
+                              , publishedAt = ""
+                              , publicationState = PublicationStateDraft
+                              }
+                            ]
                         , placements = []
                         }
 
@@ -1172,7 +1184,19 @@ responseSuite =
                             [ \r -> Expect.equal original.book.id r.book.id
                             , \r -> Expect.equal original.book.title r.book.title
                             , \r -> Expect.equal (Just "pl-1") (Maybe.map .id r.placement)
-                            , \r -> Expect.equal 1 (List.length r.myWriting)
+                            , \r -> Expect.equal 2 (List.length r.myWriting)
+
+                            -- ⚠️ The states, not just the count. These two
+                            -- entries differ ONLY in `publication_state` once
+                            -- the draft's `published_at` has collapsed to `""`
+                            -- on the wire — which is precisely the collapse the
+                            -- field exists to survive. A length check alone
+                            -- passes against an encoder that drops the state,
+                            -- and that is the defect, not a rounding error.
+                            , \r ->
+                                Expect.equal
+                                    [ PublicationStatePublished, PublicationStateDraft ]
+                                    (List.map .publicationState r.myWriting)
                             ]
                             decoded
 
