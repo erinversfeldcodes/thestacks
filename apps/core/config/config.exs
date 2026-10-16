@@ -30,6 +30,24 @@ config :core, Oban,
     # working week of lag before anyone looks. The pruner only touches
     # `completed`, `cancelled` and `discarded` rows, so raising this cannot
     # hide a backlog of `available`/`retryable` work.
+    #
+    # ⚠️ RAISING THIS IS NOT BEHAVIOURALLY FREE, and the reason is easy to miss
+    # because it runs the other way from the usual worry.
+    #
+    # Oban's `unique:` checks READ retained rows — `@unique_defaults` carries
+    # `states: :successful`, which includes `completed` (`deps/oban/lib/oban/
+    # job.ex:228-233, 299`). This app has NINE `unique:` declarations and every
+    # period exceeds sixty seconds: three at 86_400 (the two enrichment
+    # discovery jobs and wishlist-availability), four at 3_600, two at 300.
+    # Under the old window all nine were silently truncated to ~60s, because
+    # the rows they query had already been deleted. They now hold for the
+    # period they declare.
+    #
+    # That is a FIX in every case — the declared period was always the intent —
+    # but it is a real change: wishlist-availability dedupe goes from ~60s to a
+    # genuine 24 hours, and the two discovery jobs stop re-hitting Open Library
+    # and Google Books for a book re-added within the day. If a notification
+    # dedupe or an external-call volume moves after this, this is why.
     {Oban.Plugins.Pruner, max_age: {7, :days}},
     {Oban.Plugins.Cron,
      crontab: [

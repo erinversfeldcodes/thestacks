@@ -55,6 +55,45 @@ defmodule Core.ObanRetentionTest do
              "shorter than a week cannot show whether the last one ran."
   end
 
+  test "no uniqueness period exceeds the pruner window" do
+    # ⚠️ The half of "is this safe?" that the engine test below does NOT cover,
+    # and that the first version of this change argued past.
+    #
+    # Oban's uniqueness checks READ retained rows: `@unique_defaults` carries
+    # `states: :successful`, which includes `completed`. So a `unique:` period
+    # longer than `max_age` is silently truncated to the pruner window — the
+    # rows it would match have already been deleted. Every one of this app's
+    # nine declarations was in that state at 60 seconds.
+    #
+    # The relationship is what matters, not the numbers: a dedupe window can
+    # never outlive the evidence it depends on. This fails if someone lowers
+    # `max_age` below a declared period, which would quietly shorten a dedupe
+    # somebody is relying on.
+    max_age = Oban.Period.to_seconds(Keyword.fetch!(pruner_opts(), :max_age))
+
+    declared =
+      Path.join(@repo_root, "apps/core/lib/**/*.ex")
+      |> Path.wildcard()
+      |> Enum.flat_map(fn file ->
+        source = File.read!(file)
+
+        for [_, period] <- Regex.scan(~r/unique:\s*\[[^\]]*period:\s*([0-9_]+)/s, source) do
+          {Path.relative_to(file, @repo_root), String.to_integer(String.replace(period, "_", ""))}
+        end
+      end)
+
+    refute declared == [],
+           "no `unique:` declarations were found — the scan is matching nothing, so this test " <>
+             "is passing vacuously rather than because the periods are safe"
+
+    truncated = for {file, period} <- declared, period > max_age, do: {file, period}
+
+    assert truncated == [],
+           "these uniqueness periods outlive the pruner window (#{max_age}s), so Oban will " <>
+             "find no retained row to match against and the dedupe is silently cut short: " <>
+             "#{inspect(truncated)}"
+  end
+
   test "the pruner only deletes terminal rows, which is why a longer window is free" do
     # The reason raising `max_age` is safe, asserted rather than assumed. If
     # pruning touched `available` or `retryable`, a longer window would MASK a
