@@ -70,7 +70,10 @@ defmodule Stacks.Events.PayloadContract do
     "social.user_blocked" => %{version: 1, keys: ~w(blocked_id)},
     "social.user_unblocked" => %{version: 1, keys: ~w(blocked_id)},
     "group.created" => %{version: 1, keys: ~w(owner_id)},
-    "group.invitation_sent" => %{version: 1, keys: ~w(invited_by_id invited_user_id)},
+    "group.invitation_sent" => %{
+      version: 2,
+      keys: ~w(invited_by_id invited_user_id invitation_id)
+    },
     "group.member_joined" => %{version: 1, keys: ~w(user_id)},
     "group.member_left" => %{version: 1, keys: ~w(user_id)},
     "group.member_removed" => %{version: 1, keys: ~w(removed_by_id removed_user_id)},

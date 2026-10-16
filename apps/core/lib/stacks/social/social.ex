@@ -356,7 +356,20 @@ defmodule Stacks.Social do
             event_type: "group.invitation_sent",
             aggregate_type: "group",
             aggregate_id: group_id,
-            payload: %{invited_user_id: invitee.id, invited_by_id: inviter_id}
+            # v2 adds `invitation_id`. v1 rows in `event_log` are carried
+            # forward by `Upcaster.upcast/1` without one, because it cannot be
+            # recovered after the fact.
+            schema_version: 2,
+            # `invitation_id` is what the notification handler needs to build the
+            # accept link. It is a UUID, so it sits inside the event_log's
+            # UUID-only payload contract — unlike the inviter and group NAMES
+            # the handler used to look for here, which were never emitted and
+            # never should be.
+            payload: %{
+              invited_user_id: invitee.id,
+              invited_by_id: inviter_id,
+              invitation_id: invitation.id
+            }
           })
 
           {:ok, invitation}

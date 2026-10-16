@@ -3,6 +3,7 @@ defmodule StacksWeb.AuthControllerTest do
 
   import Ecto.Query, only: [from: 2]
   import Stacks.Factory
+  import Swoosh.TestAssertions, only: [assert_email_sent: 1]
 
   alias Core.Repo
   alias Stacks.Accounts
@@ -1075,8 +1076,22 @@ defmodule StacksWeb.AuthControllerTest do
       assert [%Oban.Job{args: %{"template" => "registration_confirmation"} = args}] =
                Repo.all(Oban.Job)
 
-      assert args["params"]["token"] == new_token,
-             "the email must carry the token that was just stored"
+      # ⚠️ The job carries NO token — it carries the user id, and the worker
+      # reads the live token off the row at delivery. This assertion used to
+      # read `args["params"]["token"]`, which was pinning a defect: a
+      # confirmation token has no expiry and is compared straight against the
+      # user row, so one sitting in `oban_jobs.args` is a usable credential for
+      # as long as the row survives — now seven days rather than sixty seconds.
+      refute Map.has_key?(args["params"], "token"),
+             "a usable confirmation token reached oban_jobs.args: #{inspect(args["params"])}"
+
+      assert args["user_id"] == user.id
+
+      # The property the old assertion was reaching for, asserted where it
+      # actually holds: what the reader receives carries the NEW token. This
+      # goes through the worker, so it covers the resolution step too.
+      assert :ok = EmailDeliveryJob.perform(%Oban.Job{args: args})
+      assert_email_sent(fn email -> email.html_body =~ new_token end)
 
       assert {:error, :invalid} = Stacks.Email.confirm_email(old_token)
       assert {:ok, confirmed} = Stacks.Email.confirm_email(new_token)

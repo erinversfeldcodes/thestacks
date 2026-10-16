@@ -267,16 +267,22 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     |> Swoosh.Email.html_body(Templates.opt_out_confirmation())
   end
 
+  # ⚠️ Names resolved at DELIVERY from ids. `inviter_name` belongs to a third
+  # party — the recipient is `user_id`, the inviter is someone else — so no
+  # args scrub keyed on the recipient could reach it. And the event_log payload
+  # is UUID-only by contract, so an id is the only thing the handler could
+  # honestly have passed on.
   defp build_email(user, :group_invitation, %{
-         "inviter_name" => inviter_name,
-         "group_name" => group_name,
-         "accept_url" => accept_url
+         "inviter_id" => inviter_id,
+         "group_id" => group_id,
+         "invitation_id" => invitation_id
        }) do
-    Swoosh.Email.new()
-    |> Swoosh.Email.to(recipient(user))
-    |> Swoosh.Email.from(from_address())
-    |> Swoosh.Email.subject("You've been invited to a group — The Stacks")
-    |> Swoosh.Email.html_body(Templates.group_invitation(inviter_name, group_name, accept_url))
+    build_group_invitation_email(
+      user,
+      inviter_display_name(inviter_id),
+      group_display_name(group_id, user.id),
+      "/groups/invitations/#{invitation_id}/accept"
+    )
   end
 
   defp build_email(user, :new_offer, %{
@@ -294,12 +300,64 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     )
   end
 
-  defp build_email(user, :wishlist_available, %{
-         "book_title" => book_title,
-         "author_name" => author_name,
-         "price_zar" => price_zar,
-         "seller_name" => seller_name
-       }) do
+  # ⚠️ Resolved from the listing at DELIVERY, not carried through the queue.
+  # `seller_name` belongs to a third party — the recipient is `user_id`, the
+  # seller is someone else — so no args scrub keyed on the recipient could ever
+  # reach it. Keeping it out of `oban_jobs.args` is the only shape that works.
+  defp build_email(user, :wishlist_available, %{"listing_id" => listing_id}) do
+    listing = Stacks.Marketplace.get_listing(listing_id)
+    book_title = (listing && listing.book && listing.book.title) || "A book"
+    author_name = listing_author_name(listing)
+    price_zar = (listing && format_price(listing.price_cents)) || "0"
+    seller_name = (listing && listing.seller && listing.seller.display_name) || "a seller"
+
+    build_wishlist_email(user, book_title, author_name, price_zar, seller_name)
+  end
+
+  # Both fall back to a neutral phrase rather than failing: a notification that
+  # arrives saying "A member invited you to a group" is better than one that
+  # does not arrive because a name lookup missed.
+  defp inviter_display_name(nil), do: "A member"
+
+  defp inviter_display_name(inviter_id) do
+    case Stacks.Accounts.get_user(inviter_id) do
+      %{display_name: name} when is_binary(name) and name != "" -> name
+      _ -> "A member"
+    end
+  end
+
+  defp group_display_name(nil, _viewer_id), do: "a group"
+
+  defp group_display_name(group_id, viewer_id) do
+    case Stacks.Social.get_group(group_id, viewer_id) do
+      {:ok, %{name: name}} when is_binary(name) and name != "" -> name
+      %{name: name} when is_binary(name) and name != "" -> name
+      _ -> "a group"
+    end
+  end
+
+  defp build_group_invitation_email(user, inviter_name, group_name, accept_url) do
+    Swoosh.Email.new()
+    |> Swoosh.Email.to(recipient(user))
+    |> Swoosh.Email.from(from_address())
+    |> Swoosh.Email.subject("You've been invited to a group — The Stacks")
+    |> Swoosh.Email.html_body(Templates.group_invitation(inviter_name, group_name, accept_url))
+  end
+
+  defp listing_author_name(nil), do: ""
+
+  defp listing_author_name(listing) do
+    case listing.book && listing.book.author do
+      %Ecto.Association.NotLoaded{} -> ""
+      nil -> ""
+      author -> author.name || ""
+    end
+  end
+
+  defp format_price(nil), do: "0"
+  defp format_price(cents), do: :erlang.float_to_binary(cents / 100, decimals: 2)
+
+  defp build_wishlist_email(user, book_title, author_name, price_zar, seller_name) do
     Swoosh.Email.new()
     |> Swoosh.Email.to(recipient(user))
     |> Swoosh.Email.from(from_address())

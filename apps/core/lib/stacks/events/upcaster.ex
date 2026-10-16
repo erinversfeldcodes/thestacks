@@ -23,6 +23,16 @@ defmodule Stacks.Events.Upcaster do
   def upcast(%{event_type: "blog.post_published", schema_version: 1} = event),
     do: drop_blog_title(event)
 
+  # v1 invitation events predate `invitation_id`. There is no way to recover it
+  # — the invitation row may be gone, and guessing one would build an accept
+  # link to the wrong invitation — so the key is simply absent and the handler
+  # must tolerate that. It does: a nil `invitation_id` yields a dead accept
+  # link, which is the honest outcome for an invitation whose id was never
+  # recorded, and is no worse than the v1 behaviour where no email was sent
+  # at all.
+  def upcast(%{event_type: "group.invitation_sent", schema_version: 1} = event),
+    do: %{event | schema_version: 2}
+
   def upcast(%{schema_version: 1} = event), do: event
 
   def upcast(event), do: event

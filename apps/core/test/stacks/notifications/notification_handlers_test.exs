@@ -17,15 +17,20 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
   describe "GroupInvitationHandler.handle_event/1" do
     test "enqueues group_invitation email when notify_group_invitations is true" do
       user = insert(:user, notify_group_invitations: true)
+      inviter = insert(:user)
       invitation_id = Ecto.UUID.generate()
 
+      # ⚠️ The shape `Social.invite_to_group/3` ACTUALLY emits. The previous
+      # version of this test invented `invitee_id`/`inviter_name`/`group_name`,
+      # none of which the emitter sets — so it passed against a handler that
+      # resolved every key to nil and sent nothing, for as long as it existed.
       assert :ok =
                GroupInvitationHandler.handle_event(%{
                  event_type: "group.invitation_sent",
+                 aggregate_id: Ecto.UUID.generate(),
                  payload: %{
-                   "invitee_id" => user.id,
-                   "inviter_name" => "Alice",
-                   "group_name" => "Book Club",
+                   "invited_user_id" => user.id,
+                   "invited_by_id" => inviter.id,
                    "invitation_id" => invitation_id
                  }
                })
@@ -42,10 +47,10 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       assert :ok =
                GroupInvitationHandler.handle_event(%{
                  event_type: "group.invitation_sent",
+                 aggregate_id: Ecto.UUID.generate(),
                  payload: %{
-                   "invitee_id" => user.id,
-                   "inviter_name" => "Alice",
-                   "group_name" => "Book Club",
+                   "invited_user_id" => user.id,
+                   "invited_by_id" => Ecto.UUID.generate(),
                    "invitation_id" => Ecto.UUID.generate()
                  }
                })
@@ -57,10 +62,10 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       assert :ok =
                GroupInvitationHandler.handle_event(%{
                  event_type: "group.invitation_sent",
+                 aggregate_id: Ecto.UUID.generate(),
                  payload: %{
-                   "invitee_id" => Ecto.UUID.generate(),
-                   "inviter_name" => "Alice",
-                   "group_name" => "Book Club",
+                   "invited_user_id" => Ecto.UUID.generate(),
+                   "invited_by_id" => Ecto.UUID.generate(),
                    "invitation_id" => Ecto.UUID.generate()
                  }
                })
@@ -150,7 +155,8 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       assert :ok =
                WishlistAvailabilityHandler.handle_event(%{
                  event_type: "listing.activated",
-                 payload: %{"listing_id" => listing.id}
+                 aggregate_id: listing.id,
+                 payload: %{"book_id" => book.id, "seller_id" => seller.id}
                })
 
       assert_enqueued(
@@ -171,7 +177,8 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       assert :ok =
                WishlistAvailabilityHandler.handle_event(%{
                  event_type: "listing.activated",
-                 payload: %{"listing_id" => listing.id}
+                 aggregate_id: listing.id,
+                 payload: %{"book_id" => book.id, "seller_id" => seller.id}
                })
 
       refute_enqueued(worker: EmailDeliveryJob)
@@ -181,7 +188,8 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       assert :ok =
                WishlistAvailabilityHandler.handle_event(%{
                  event_type: "listing.activated",
-                 payload: %{"listing_id" => Ecto.UUID.generate()}
+                 aggregate_id: Ecto.UUID.generate(),
+                 payload: %{}
                })
 
       refute_enqueued(worker: EmailDeliveryJob)
@@ -196,7 +204,7 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       wishlist = insert(:bookshelf, user: user, name: "wishlist")
       insert(:placement, book: book, bookshelf: wishlist)
 
-      event = %{event_type: "listing.activated", payload: %{"listing_id" => listing.id}}
+      event = %{event_type: "listing.activated", aggregate_id: listing.id, payload: %{}}
 
       assert :ok = WishlistAvailabilityHandler.handle_event(event)
       assert :ok = WishlistAvailabilityHandler.handle_event(event)
