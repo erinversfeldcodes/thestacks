@@ -264,10 +264,28 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     fk_columns_with_index =
       for %{columns: [col]} <- explicit_indexes, into: MapSet.new(), do: col
 
+    # ⚠️ `no_index: true` is how a declaration says "this FK does not want its
+    # own single-column index", and it exists because the alternative was a
+    # SILENT divergence.
+    #
+    # The generator's rule is that every `references_table` override gets an
+    # index, which is right by default — an unindexed FK is a slow cascade
+    # waiting to happen. But a composite index can already lead with that
+    # column, in which case the single-column one is redundant: Postgres uses a
+    # multi-column index for a leading-column lookup.
+    #
+    # Before this flag the only way to drop one was to delete it from the
+    # migration by hand, which `mix proto.sync --check` cannot see — it diffs
+    # GENERATED output against the files it would generate, and a create-table
+    # migration that already exists is not regenerated. So the manifest said
+    # "index" and the database said "no index", and the next regeneration would
+    # have silently reinstated it.
     fk_lines =
       overrides
       |> Enum.filter(fn {_, override} -> Map.has_key?(override, :references_table) end)
-      |> Enum.reject(fn {field_name, _} -> MapSet.member?(fk_columns_with_index, field_name) end)
+      |> Enum.reject(fn {field_name, override} ->
+        Map.get(override, :no_index, false) or MapSet.member?(fk_columns_with_index, field_name)
+      end)
       |> Enum.sort_by(fn {field_name, _} -> field_name end)
       |> Enum.map_join("\n", fn {field_name, _} ->
         "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\", concurrently: true)"

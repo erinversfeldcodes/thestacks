@@ -369,6 +369,15 @@
         %{
           name: "library_import_rows_import_id_outcome_index",
           columns: [:import_id, :outcome]
+        },
+        # ⚠️ Declared because the DATABASE already has it and nothing said so.
+        # It was added by a later migration by hand; `persisted.exs` did not
+        # carry it, so a regeneration would have dropped it — the other half of
+        # the same divergence `no_index` fixes above, pointing the opposite way.
+        # Serves the retention sweep's age scan.
+        %{
+          name: "library_import_rows_created_at_index",
+          columns: [:created_at]
         }
       ],
       field_overrides: %{
@@ -376,7 +385,20 @@
           belongs_to: Stacks.Imports.LibraryImport,
           references_table: :library_imports,
           on_delete: :delete_all,
-          null: false
+          null: false,
+          # No single-column index on this FK: the composite
+          # `library_import_rows_import_id_row_number_index` above LEADS with
+          # `import_id`, and Postgres serves a leading-column lookup from a
+          # multi-column index. A separate one would be dead weight on every
+          # write for a read that is already covered.
+          #
+          # ⚠️ Declared rather than hand-dropped. The index was previously
+          # removed from the migration by hand, which `mix proto.sync --check`
+          # cannot see — it diffs generated output, and an existing create-table
+          # migration is not regenerated — so the manifest claimed an index the
+          # database did not have, and the next regeneration would have
+          # reinstated it while dropping the hand-added `created_at` one.
+          no_index: true
         },
         row_number: %{null: false},
         raw_rating: %{default: 0, null: false},

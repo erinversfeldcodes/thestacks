@@ -1617,4 +1617,72 @@ defmodule Mix.Tasks.Proto.SyncTest do
       refute output =~ "password_hash: struct.password_hash"
     end
   end
+
+  describe "no_index on a foreign key" do
+    # ⚠️ This affordance cannot be proven by `mix proto.sync --check`, and that
+    # is the whole reason it was needed.
+    #
+    # `--check` diffs GENERATED output against the files it would generate. A
+    # create-table migration that already exists is not regenerated, so a
+    # single-column FK index deleted from it by hand is invisible: the manifest
+    # says "index", the database says none, and the next regeneration silently
+    # reinstates it. The only thing that can see the flag is a test that calls
+    # the generator.
+    defp table_with(overrides, indexes \\ []) do
+      %{
+        table_name: "widgets",
+        schema_prefix: "op",
+        proto_file: "test.proto",
+        proto_message: "Widget",
+        field_overrides: overrides,
+        indexes: indexes,
+        timestamps: false
+      }
+    end
+
+    defp fk(extra \\ %{}) do
+      Map.merge(%{references_table: :gadgets, on_delete: :delete_all}, extra)
+    end
+
+    test "an FK gets its own index by default" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          table_with(%{gadget_id: fk()}),
+          [%{name: "gadget_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      assert sql =~ "create index(:widgets, [:gadget_id]",
+             "the default must stay index-on-FK — an unindexed foreign key is a slow cascade"
+    end
+
+    test "no_index: true suppresses it" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          table_with(%{gadget_id: fk(%{no_index: true})}),
+          [%{name: "gadget_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      refute sql =~ "create index(:widgets, [:gadget_id]",
+             "no_index: true must suppress the generated single-column FK index"
+    end
+
+    test "no_index does not suppress an explicitly declared index on the same column" do
+      # The flag says "do not GENERATE one", not "this column may not be
+      # indexed" — a composite leading with it is the usual reason to set it.
+      sql =
+        MigrationGenerator.generate_create_table(
+          table_with(
+            %{gadget_id: fk(%{no_index: true})},
+            [%{name: "widgets_gadget_id_kind_index", columns: [:gadget_id, :kind]}]
+          ),
+          [%{name: "gadget_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      assert sql =~ "widgets_gadget_id_kind_index",
+             "an explicitly declared index must still be emitted"
+    end
+  end
 end
