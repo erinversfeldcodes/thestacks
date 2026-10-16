@@ -905,10 +905,47 @@ jobs:
         run: bash scripts/dashboard-render-gate.sh
 
   deploy-preview:
-    # TODO: restore full dependency list after deploy-preview is stable:
-    # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
-    needs: [versions, changes]
+    # The preview stack is what the IDOR gate and the deployed E2E run against,
+    # so a preview built from code whose tests have not passed makes those runs
+    # mean less than they appear to. This used to read
+    # `needs: [versions, changes]` with the real list commented out behind a
+    # "restore after deploy-preview is stable" TODO.
+    #
+    # ⚠️ RESTORING THAT LIST NAIVELY DISABLES PREVIEW DEPLOYS, which is almost
+    # certainly why it was commented out rather than fixed. Every correctness
+    # job below is itself gated on a paths-filter (`test-elixir` on
+    # `changes.outputs.elixir`, and so on), and in GitHub Actions a SKIPPED
+    # dependency skips the dependent job unless its `if:` overrides the implicit
+    # `success()`. So on a PR touching only Elm, `test-elixir` is skipped and
+    # `deploy-preview` would have been skipped with it — silently, on nearly
+    # every PR.
+    #
+    # Hence the two leading clauses: `!cancelled()` lets the job run when a
+    # dependency was skipped for not being relevant, and
+    # `!contains(needs.*.result, 'failure')` is what actually blocks — a real
+    # failure in any dependency stops the deploy.
+    #
+    # ⚠️ Scope is deliberate: the CORRECTNESS suites gate the preview, the
+    # supply-chain scanners do not. `check-licenses`, `gitleaks`, `hadolint`,
+    # `semgrep`, `checkov`, `trivy`, `trufflehog`, `syft-grype` and `dockle`
+    # were in the commented list; they gate the MERGE, and blocking an ephemeral
+    # preview on a licence scan adds latency without making the preview's E2E
+    # results more trustworthy. If that trade is ever revisited, the reason to
+    # change it is a finding about previews, not tidiness.
+    needs:
+      [
+        versions,
+        changes,
+        test-elixir,
+        test-elm,
+        test-rust,
+        test-python,
+        lint-proto,
+        test-dbt,
+      ]
     if: |
+      !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
       github.event_name == 'pull_request' && (
         needs.changes.outputs.source == 'true' ||
         needs.changes.outputs.docker == 'true' ||
