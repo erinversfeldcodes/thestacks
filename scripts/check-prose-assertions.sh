@@ -68,6 +68,13 @@ ALLOWLIST = [
     ("Page/AdminInvitesTest.elm", "STK-4F2A-9C1D-XXXX",
      "show-once code: runtime data, not source copy — the sibling test proves the SAME "
      "literal renders from the create response, so the absence here cannot pass vacuously"),
+    ("Page/InviteGateTest.elm", "Ask whoever sent it for a fresh one.",
+     "the superset IS the message being discriminated against — a revoked invitation rendering "
+     "the EXPIRED remedy is exactly the collapse this assertion exists to catch, and the sibling "
+     "positive assertion proves the withdrawn text renders, so it cannot pass vacuously"),
+    ("Page/InviteGateTest.elm", "withdrawn",
+     "same pair, other direction: an expired invitation must not render the withdrawn copy. The "
+     "sibling positive assertion pins the expired text, so an empty render fails rather than passes"),
     ("Page/BookshelfProgramTest.elm", "Fetching your Library…",
      "copy is concatenated at render — Fetching plus whose plus label — so no single source "
      "literal exists; the sibling ensureViewHas proves the exact text renders, so the "
