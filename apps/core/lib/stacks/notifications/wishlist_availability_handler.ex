@@ -78,7 +78,20 @@ defmodule Stacks.Notifications.WishlistAvailabilityHandler do
       "params" => %{"listing_id" => listing_id}
     }
 
-    opts = [unique: [fields: [:args], keys: [:book_id, :user_id], period: 86_400]]
+    # ⚠️ `keys:` reads TOP-LEVEL args only, so `book_id` and `user_id` must stay
+    # where they are. `Oban.Engines.Basic.unique_map_values/3` does
+    # `Map.take(args, keys)` — and `Map.take/2` SILENTLY DROPS absent keys. Move
+    # `book_id` into `params` as a tidy and the uniqueness quietly collapses to
+    # `user_id` alone: one wishlist email per user per 24 hours across every
+    # book, with no error and no log.
+    #
+    # `:worker` is restored to `fields:` deliberately. The default is
+    # `~w(args queue worker)a`; overriding it with `[:args]` dropped `worker`,
+    # and the comparison is JSONB CONTAINMENT (`? @> ?`), not equality — so any
+    # other job whose args merely CONTAIN this `user_id` and `book_id` would
+    # collide with this one, in whichever direction inserted second. No worker
+    # carries both keys today, but nothing stopped one from starting to.
+    opts = [unique: [fields: [:worker, :args], keys: [:book_id, :user_id], period: 86_400]]
 
     case EmailDeliveryJob.new(args, opts) |> Oban.insert() do
       {:ok, _job} ->

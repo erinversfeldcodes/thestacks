@@ -176,6 +176,47 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
              "the args must still identify the user, or the worker cannot resolve the token"
     end
 
+    test "a job enqueued before the args shape changed still delivers" do
+      # ⚠️ `build_email/3`'s clauses are hard matches on params keys, so a job
+      # already in the queue when the shape changed finds no matching head and
+      # dies on FunctionClauseError — retrying until discarded. The seven-day
+      # pruner window makes that population LARGER across a deploy, not smaller.
+      #
+      # These are the two shapes this branch changed. Both must still deliver.
+      user = insert(:user, notify_wishlist_availability: true, notify_group_invitations: true)
+
+      assert :ok =
+               EmailDeliveryJob.perform(%Oban.Job{
+                 args: %{
+                   "template" => "wishlist_available",
+                   "user_id" => user.id,
+                   "params" => %{
+                     "book_title" => "An Older Book",
+                     "author_name" => "A. Writer",
+                     "price_zar" => "120.00",
+                     "seller_name" => "A Seller"
+                   }
+                 }
+               })
+
+      assert_email_sent(fn email -> email.html_body =~ "An Older Book" end)
+
+      assert :ok =
+               EmailDeliveryJob.perform(%Oban.Job{
+                 args: %{
+                   "template" => "group_invitation",
+                   "user_id" => user.id,
+                   "params" => %{
+                     "inviter_name" => "An Older Inviter",
+                     "group_name" => "An Older Group",
+                     "accept_url" => "/groups/invitations/abc/accept"
+                   }
+                 }
+               })
+
+      assert_email_sent(fn email -> email.html_body =~ "An Older Inviter" end)
+    end
+
     test "the email-change pair carries a DIGEST, which cannot be used as a token" do
       # The two templates that genuinely need something from the enqueue: the
       # worker compares against the user row to detect a change that has been

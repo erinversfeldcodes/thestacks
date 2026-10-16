@@ -195,6 +195,44 @@ defmodule Stacks.Notifications.NotificationHandlersTest do
       refute_enqueued(worker: EmailDeliveryJob)
     end
 
+    test "dedupe is per BOOK, not per user — two books both notify" do
+      # ⚠️ The assertion that catches a silent uniqueness collapse.
+      #
+      # `unique: [keys: [:book_id, :user_id]]` reads TOP-LEVEL args, and
+      # `Oban.Engines.Basic.unique_map_values/3` uses `Map.take/2`, which drops
+      # absent keys without complaint. If `book_id` ever moves into `params` —
+      # the natural tidy when ids and their resolved data sit side by side —
+      # the key set collapses to `user_id` alone and this user would receive
+      # ONE wishlist email per day no matter how many wishlisted books became
+      # available. No error, no log; the sibling dedupe test below would still
+      # pass, because it uses a single book.
+      user = insert(:user, notify_wishlist_availability: true)
+      seller = insert(:user)
+      wishlist = insert(:bookshelf, user: user, name: "wishlist")
+
+      for _ <- 1..2 do
+        book = insert(:book)
+        insert(:placement, book: book, bookshelf: wishlist)
+        listing = insert(:listing, book: book, seller: seller, status: "active")
+
+        assert :ok =
+                 WishlistAvailabilityHandler.handle_event(%{
+                   event_type: "listing.activated",
+                   aggregate_id: listing.id,
+                   payload: %{}
+                 })
+      end
+
+      jobs = all_enqueued(worker: EmailDeliveryJob)
+
+      assert length(jobs) == 2,
+             "two different wishlisted books must each notify; got #{length(jobs)} job(s). " <>
+               "One means the uniqueness key lost `book_id` and collapsed to `user_id`."
+
+      assert jobs |> Enum.map(& &1.args["book_id"]) |> Enum.uniq() |> length() == 2,
+             "both jobs carry the same book_id — the per-book distinction is gone"
+    end
+
     test "deduplicates: second handle_event for same book+user within 24h enqueues only one job" do
       book = insert(:book)
       user = insert(:user, notify_wishlist_availability: true)

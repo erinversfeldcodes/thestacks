@@ -304,6 +304,32 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   # `seller_name` belongs to a third party — the recipient is `user_id`, the
   # seller is someone else — so no args scrub keyed on the recipient could ever
   # reach it. Keeping it out of `oban_jobs.args` is the only shape that works.
+  # ⚠️ In-flight jobs enqueued before the args shape changed carry the NAMES
+  # rather than an id. These heads are hard matches, so without a clause for
+  # the old shape such a job finds no match and dies on FunctionClauseError —
+  # retrying until discarded, and the seven-day pruner window means a larger
+  # population of them is in flight across a deploy, not a smaller one.
+  #
+  # Remove after one release, once no old-shaped job can still be retrying.
+  defp build_email(user, :wishlist_available, %{"book_title" => book_title} = params) do
+    build_wishlist_email(
+      user,
+      book_title,
+      Map.get(params, "author_name", ""),
+      Map.get(params, "price_zar", "0"),
+      Map.get(params, "seller_name", "a seller")
+    )
+  end
+
+  defp build_email(user, :group_invitation, %{"inviter_name" => inviter_name} = params) do
+    build_group_invitation_email(
+      user,
+      inviter_name,
+      Map.get(params, "group_name", "a group"),
+      Map.get(params, "accept_url", "/groups")
+    )
+  end
+
   defp build_email(user, :wishlist_available, %{"listing_id" => listing_id}) do
     listing = Stacks.Marketplace.get_listing(listing_id)
     book_title = (listing && listing.book && listing.book.title) || "A book"
