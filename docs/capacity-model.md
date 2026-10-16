@@ -169,7 +169,7 @@ All costs in South African Rand (ZAR). Exchange rates as of 2026-03.
 | `bookshelf_placements` | New books added | ~200 | ~73K | ~50MB |
 | `bookshelf_placement_history` | ~5 moves/user/month | ~5,000 | ~1.8M | ~500MB |
 | `uploaded_images` | Photo uploads | ~500/day peak | ~180K | ~100MB (metadata only) |
-| `oban_jobs` | Job processing | ~10,000/day (mostly cleared) | Steady state ~1M | Manageable |
+| `oban_jobs` | Job processing | ~10,000/day | Steady state ~70K rows (7-day retention × 10K/day) | ~13MB at ~186 bytes/row |
 | `books` (works) | New books added | ~200 | ~73K | ~50MB |
 | `book_editions` | New editions | ~250 | ~91K | ~50MB |
 | `audit_log` | Security events | ~500 | ~180K | ~100MB |
@@ -186,7 +186,7 @@ Neon's free tier includes up to 10GB of storage. At 1,000 users with a full year
 |-------|---------|-------------------|
 | `price_snapshots` | 10M rows (approximately 5–6 months at 1K users) | Partition by month on `scraped_at` |
 | `event_log` | 5M rows (approximately 3 months at 1K users) | Partition by month on `occurred_at` |
-| `oban_jobs` | Oban's built-in pruning handles this — no partitioning needed | Oban prunes completed jobs automatically |
+| `oban_jobs` | Oban's built-in pruning handles this — no partitioning needed | Pruned at `max_age: {7, :days}`, set explicitly in `config.exs`. The library DEFAULT is 60 seconds, which is what the "mostly cleared" figure above used to describe — it also made "did the nightly job run?" unanswerable, so the window is deliberate, not incidental. |
 | `review_snapshots` | No partitioning needed at projected volumes | — |
 | `bookshelf_placement_history` | No partitioning needed at projected volumes | — |
 | `audit_log` | 10M rows | Partition by year on `occurred_at` |

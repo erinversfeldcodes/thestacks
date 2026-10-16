@@ -213,7 +213,7 @@ The metrics dashboard (US-5.1.1, Phase 4 (Polish) — since superseded by the Gr
 | Price freshness by shelf | `MAX(scraped_at)` per shelf category | Yellow if WishList > 48h, Red if > 7 days |
 | Review freshness by shelf | `MAX(scraped_at)` per shelf category | Yellow if Library > 30 days |
 | Author data freshness | `MAX(updated_at)` per author attached to Reading Pile | Yellow if > 60 days |
-| dbt last run time | `oban_jobs` where `queue = 'dbt_refresh' AND state = 'completed'` | Red if > 6 hours since last completion |
+| dbt last run time | `oban_jobs` where `queue = 'dbt_refresh' AND state = 'completed'` | Red if > 6 hours since last completion. ⚠️ This query returned nothing on every stack until 2026-10-16, because `Oban.Plugins.Pruner` ran with the library default of 60 SECONDS and deleted each completion a minute after it was written. The window is now 7 days. Once the dbt refresh moves to a scheduled workflow its `last_success` gauge is the better source, since a workflow leaves no `oban_jobs` row at all. |
 
 ### Panel: Source Health Table
 

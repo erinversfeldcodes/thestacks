@@ -16,7 +16,21 @@ config :core, Core.ObanRepo,
 config :core, Oban,
   repo: Core.ObanRepo,
   plugins: [
-    Oban.Plugins.Pruner,
+    # ⚠️ `max_age` is explicit because Oban's DEFAULT is 60 — sixty SECONDS.
+    #
+    # With the default, a completed or discarded job row is deleted a minute
+    # after it finishes, so `oban_jobs` reads empty on every stack and the
+    # question "did the nightly job run?" has no answer in the database. That
+    # is not a theoretical loss: this app's crontab fires 20 jobs on a machine
+    # configured to scale to zero, so whether a given one ran at all is exactly
+    # the thing an operator needs to know — and two runbook steps tell them to
+    # check `oban_jobs`, where they will always find nothing.
+    #
+    # Seven days is chosen to span a weekly entry (the crontab has four) plus a
+    # working week of lag before anyone looks. The pruner only touches
+    # `completed`, `cancelled` and `discarded` rows, so raising this cannot
+    # hide a backlog of `available`/`retryable` work.
+    {Oban.Plugins.Pruner, max_age: {7, :days}},
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},

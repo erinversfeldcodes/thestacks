@@ -89,15 +89,29 @@ shell/Elixir injection surface.
 
 ## Warehouse propagation
 
-The erasure scrubs the operational tables and event log immediately. The
-analytics **warehouse** (dbt marts) is rebuilt from those sources by the daily
-`DbtRefreshJob` full run (`apps/core/config/config.exs` crontab — `0 5 * * *`,
-05:00 UTC). So warehouse copies of the user's data drop within **≤24h**. This
-daily full refresh is a hard requirement for erasure timeliness — if you change
-the crontab, keep a full refresh at least once every 24 hours.
+The erasure scrubs the operational tables and event log immediately.
 
-If you need faster warehouse propagation for a specific request, trigger a dbt
-full refresh manually after the erasure completes.
+⚠️ **There is currently no analytics warehouse to propagate to, and this
+section previously said otherwise.** Verified 2026-10-16 against the deployed
+database: the `wh` schema contains **zero tables**, and the `staging`,
+`intermediate` and `marts` schemas that `dbt/dbt_project.yml` targets do not
+exist. dbt has never successfully run against a deployed stack.
+
+So the honest position for an erasure today: **no warehouse copy of the user's
+data exists, because no warehouse exists.** Nothing is outstanding after the
+operational scrub completes.
+
+This section used to promise that warehouse copies drop within ≤24h via the
+daily `DbtRefreshJob` full run. That promise was satisfied only by there being
+nothing to drop — the job fires from an Oban crontab entry on a machine
+configured to scale to zero, shelling a binary the runtime image does not
+contain. Do not reinstate the ≤24h wording on the strength of the crontab line
+still being present.
+
+**When dbt starts running, this becomes a live commitment for the first time**,
+and whoever makes that change owns this paragraph: state the real refresh
+cadence, and if it is not daily, the erasure SLA quoted to a data subject
+changes with it.
 
 ## Verifying afterwards
 
