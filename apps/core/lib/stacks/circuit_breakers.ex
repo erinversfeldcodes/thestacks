@@ -72,6 +72,21 @@ defmodule Stacks.CircuitBreakers do
   end
 
   @doc """
+      Every managed fuse's name, derived from the roster rather than listed
+      again — so a new fuse is covered by anything iterating this without
+      someone remembering to add it.
+
+      Exists for the test case templates, which reset all of them between
+      tests. `:fuse` is global OTP state with no ownership, so a fuse a test
+      blows stays blown for everything that runs after it in the same run: a
+      router test asserting `422` got `503` once in four full-suite runs,
+      because an earlier test had left the ISBN resolver's breaker open and
+      `Books.merge_edition/2` reports `:resolver_unavailable` when it is.
+  """
+  @spec fuse_names() :: [atom()]
+  def fuse_names, do: Keyword.keys(@fuses)
+
+  @doc """
       Install all managed fuses. Safe to call multiple times — already-installed
       fuses are skipped without error.
 
