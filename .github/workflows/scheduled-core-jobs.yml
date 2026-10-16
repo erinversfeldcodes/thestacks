@@ -1,0 +1,249 @@
+# Scheduled work that cannot be scheduled on the core node, because the core
+# node sleeps.
+#
+# WHY THIS EXISTS  `deploy/fly.core.toml` sets `min_machines_running = 0`, and
+# `Oban.Plugins.Cron` computes due jobs on a tick from a RUNNING node with no
+# catch-up pass. So an Oban crontab entry fires only if something else happened
+# to wake the machine in that exact minute, and a machine woken at 06:03 never
+# runs the 06:00 entry. The crontab was not a schedule; it was a lottery
+# weighted by inbound traffic. A GitHub runner is always awake, so the schedule
+# moves here and the node is woken deliberately.
+#
+# ⚠️ WHY THE FILENAME IS NOT `scheduled-costs-refresh.yml`  That is the name the
+# issue filed for this work, and it is the wrong one: the same wake-plus-rpc
+# scaffolding serves every one of these duties, and a file per job would
+# duplicate the wake loop, the sentinel check and the metric push three times
+# over and then seventeen more. Named for the class so the remaining jobs can
+# join it. The rename is recorded in the issue rather than made silently.
+#
+# ⚠️ EACH ENTRY WAS MOVED, NOT DELETED. Removing an unreliable schedule on its
+# own turns "runs when the machine happens to be awake" into "never runs", which
+# is strictly worse than the defect being fixed. Any future removal from the
+# crontab owes the same pairing.
+#
+# STILL IN THE CRONTAB, STILL UNRELIABLE  Seventeen entries remain in
+# `apps/core/config/config.exs`, eight of them carrying retention or
+# account-lifecycle duties. They are not covered here. Their disposition waits
+# on evidence of which ones have ever actually run — a question that became
+# answerable only when the Oban Pruner window was widened from 60 seconds to 7
+# days, because before that `oban_jobs` read empty either way.
+#
+# THE METRIC IS PART OF THE JOB  Each duty pushes its own `last_success` gauge.
+# `now() - that gauge` is the only honest answer to "is this running?", and a
+# green workflow badge is not: this project has shipped an observability stack
+# that was structurally complete and delivered nothing, and the lesson recorded
+# from it was to assert the far-end value rather than infer it from a status.
+#
+# All secrets used here already exist in the repository configuration.
+name: scheduled-core-jobs
+
+on:
+  schedule:
+    # Costs, daily at 06:00 UTC — the hour the Oban entry named, kept so the
+    # public /costs page's month-to-date figure moves at a predictable time.
+    - cron: "0 6 * * *"
+    # Bookstore events, weekly on Monday at 07:30 UTC — the cadence the Oban
+    # entry named.
+    - cron: "30 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which duty to run"
+        required: true
+        default: costs
+        type: choice
+        options:
+          - costs
+          - bookstore-events
+          - both
+
+permissions:
+  contents: read
+
+# Two runs must not overlap: both reach the same node over `fly ssh`, and the
+# costs refresh upserts the current period's rows. Not cancel-in-progress — a
+# half-finished upsert is worse than a late one.
+concurrency:
+  group: scheduled-core-jobs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      CORE_APP: thestacks-core
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Which duties this run owes. A cron-triggered run is identified by
+      # `github.event.schedule`, matched against the expressions above; a manual
+      # run takes the input. Computed in one place so no later step re-derives
+      # it — the dbt workflow's first draft had the branch resolution written
+      # twice and they drifted.
+      - name: Decide what runs
+        id: plan
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_JOB: ${{ github.event.inputs.job }}
+        run: |
+          set -euo pipefail
+          run_costs=false
+          run_events=false
+          case "${SCHEDULE}:${INPUT_JOB}" in
+            "0 6 * * *:"*)   run_costs=true ;;
+            "30 7 * * 1:"*)  run_events=true ;;
+            *:costs)            run_costs=true ;;
+            *:bookstore-events) run_events=true ;;
+            *:both)             run_costs=true; run_events=true ;;
+            *)
+              # Neither a schedule this workflow declares nor a known input.
+              # Refused rather than defaulted: silently picking a duty here
+              # would mean a mistyped cron expression above runs the wrong job
+              # every night and reports success for it.
+              echo "::error::cannot tell what to run (schedule='${SCHEDULE}' input='${INPUT_JOB}')"
+              exit 1
+              ;;
+          esac
+          echo "costs=${run_costs}" >> "$GITHUB_OUTPUT"
+          echo "events=${run_events}" >> "$GITHUB_OUTPUT"
+          echo "plan: costs=${run_costs} bookstore-events=${run_events}"
+
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+        with:
+          version: 0.4.67
+
+      # ⚠️ `fly ssh console` does NOT trigger Fly's auto-start — only HTTP
+      # through the proxy does — so an rpc against a sleeping app dies with "no
+      # started VMs". Wake it the way a reader would. Same approach as the two
+      # GDPR workflows.
+      - name: Wake the app
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -sf --max-time 10 "https://${CORE_APP}.fly.dev/api/health" >/dev/null 2>&1; then
+              echo "app is awake (attempt $i)"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::app did not come up after 20 health attempts"
+          exit 1
+
+      - name: Refresh the platform costs
+        if: steps.plan.outputs.costs == 'true'
+        run: |
+          set -euo pipefail
+          T0=$(date +%s)
+          set +e
+          out="$(flyctl ssh console --app "$CORE_APP" \
+            -C "/app/bin/core rpc 'Stacks.Release.refresh_costs()'" 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+
+          # ⛔ BOTH conditions, and here is what each one actually catches —
+          # measured against the deployed node on 2026-10-16, not assumed.
+          #
+          # The exit code DOES propagate a raise: `rpc 'raise "..."'` came back
+          # as exit 1 with the stacktrace on stdout. So the exit code is real
+          # evidence, and an earlier version of this comment was wrong to imply
+          # otherwise.
+          #
+          # What it does NOT catch is a task that RETURNS a failure instead of
+          # raising — `{:error, _}` leaves `rpc` exiting 0. That is why
+          # `Stacks.Release.refresh_costs/0` raises rather than returning, and
+          # why the sentinel is checked as well: the sentinel is printed only on
+          # the success path, so its absence catches any route to a quiet
+          # failure, including one introduced later by someone making the task
+          # "more forgiving".
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::costs rpc failed (exit $rc)"
+            exit $rc
+          fi
+          if ! grep -q "COSTS_REFRESH_ITEMS" <<<"$out"; then
+            echo "::error::costs rpc produced no COSTS_REFRESH_ITEMS line — the task did not complete"
+            exit 1
+          fi
+
+          items="$(grep -o 'COSTS_REFRESH_ITEMS [0-9]*' <<<"$out" | tail -1 | awk '{print $2}')"
+          if [[ "${items:-0}" -lt 1 ]]; then
+            echo "::error::costs refresh wrote no rows (op.platform_costs is empty)"
+            exit 1
+          fi
+          echo "COSTS_ITEMS=${items}" >> "$GITHUB_ENV"
+          echo "COSTS_SECONDS=$(( $(date +%s) - T0 ))" >> "$GITHUB_ENV"
+
+      - name: Sweep bookstore events
+        if: steps.plan.outputs.events == 'true'
+        run: |
+          set -euo pipefail
+          T0=$(date +%s)
+          set +e
+          out="$(flyctl ssh console --app "$CORE_APP" \
+            -C "/app/bin/core rpc 'Stacks.Release.discover_bookstore_events()'" 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::bookstore-events rpc failed (exit $rc)"
+            exit $rc
+          fi
+          if ! grep -q "BOOKSTORE_EVENTS_SWEEP ok" <<<"$out"; then
+            echo "::error::bookstore-events rpc produced no completion line — the sweep did not finish"
+            exit 1
+          fi
+          echo "EVENTS_SECONDS=$(( $(date +%s) - T0 ))" >> "$GITHUB_ENV"
+
+      # Pushed even when one duty was skipped — each gauge is written only by the
+      # step that ran, so a skipped duty's gauge simply stops moving, which is
+      # exactly what "it did not run" should look like at the far end.
+      #
+      # ⚠️ `if: always()` would push after a FAILED step and stamp a success
+      # timestamp for work that did not succeed. `success()` is implicit here
+      # and is the correct gate.
+      - name: Push the freshness metrics
+        if: steps.plan.outputs.costs == 'true' || steps.plan.outputs.events == 'true'
+        run: |
+          set -euo pipefail
+          # The metrics store is 6PN-internal; expose it locally for the push —
+          # the same mechanism backup-dump.yml, refresh-billing-metrics.yml and
+          # scheduled-dbt-refresh.yml use.
+          flyctl proxy 18429:8428 thestacks-victoriametrics.flycast \
+            --app thestacks-victoriametrics &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -sf --max-time 2 "http://localhost:18429/health" >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+          NOW=$(date +%s)
+          : > metrics.prom
+          if [[ -n "${COSTS_ITEMS:-}" ]]; then
+            cat >> metrics.prom <<EOF
+          stacks_costs_refresh_last_success_timestamp_seconds{app="thestacks-core"} ${NOW}
+          stacks_costs_refresh_duration_seconds{app="thestacks-core"} ${COSTS_SECONDS}
+          stacks_costs_refresh_items{app="thestacks-core"} ${COSTS_ITEMS}
+          EOF
+          fi
+          if [[ -n "${EVENTS_SECONDS:-}" ]]; then
+            cat >> metrics.prom <<EOF
+          stacks_bookstore_events_sweep_last_success_timestamp_seconds{app="thestacks-core"} ${NOW}
+          stacks_bookstore_events_sweep_duration_seconds{app="thestacks-core"} ${EVENTS_SECONDS}
+          EOF
+          fi
+
+          # Nothing to push means a step that was supposed to run did not set its
+          # variables — a silent no-op push would leave the gauge stale and look
+          # like a successful run.
+          if [[ ! -s metrics.prom ]]; then
+            echo "::error::no metrics to push, but a duty was planned — the step did not record its result"
+            exit 1
+          fi
+
+          curl -sf --max-time 10 --data-binary @metrics.prom \
+            "http://localhost:18429/api/v1/import/prometheus"
+          cat metrics.prom

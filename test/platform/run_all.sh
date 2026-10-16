@@ -28,6 +28,7 @@ SUITES=(
     "$HERE/tracker_refs_gate_test.sh"
     "$HERE/script_wiring_test.sh"
     "$HERE/scheduled_dbt_refresh_test.sh"
+    "$HERE/scheduled_core_jobs_test.sh"
     "$HERE/deploy_preview_gating_test.sh"
     "$HERE/wave_status_stack_guard_test.sh"
     "$HERE/exclusion_tags_have_runners_test.sh"

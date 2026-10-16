@@ -49,18 +49,47 @@ config :core, Oban,
     # and Google Books for a book re-added within the day. If a notification
     # dedupe or an external-call volume moves after this, this is why.
     {Oban.Plugins.Pruner, max_age: {7, :days}},
+    # ⚠️ EVERY ENTRY BELOW IS UNRELIABLE BY CONSTRUCTION, and the three that are
+    # absent are absent for that reason.
+    #
+    # `deploy/fly.core.toml` sets `min_machines_running = 0`. Oban's `Cron`
+    # plugin computes due jobs on a tick from a RUNNING node and has no
+    # catch-up pass, so an entry fires only if something else happened to wake
+    # the machine in that minute; a machine woken at 06:03 never runs the 06:00
+    # entry. This is not a schedule, it is a lottery weighted by inbound
+    # traffic.
+    #
+    # Three duties have been moved out to GitHub Actions schedules, which run on
+    # a runner that is always awake:
+    #
+    #   * the dbt refresh    -> .github/workflows/scheduled-dbt-refresh.yml
+    #   * the costs refresh  -> .github/workflows/scheduled-core-jobs.yml
+    #   * bookstore events   -> .github/workflows/scheduled-core-jobs.yml
+    #
+    # ⚠️ Each entry was removed TOGETHER WITH its replacement, in the same
+    # change. Deleting an unreliable schedule on its own is not a fix: it turns
+    # "runs when the machine happens to be awake" into "never runs", which is
+    # strictly worse than the defect. If a future change removes an entry below,
+    # it owes the same pairing.
+    #
+    # ⚠️ The remaining SEVENTEEN have the same defect, and EIGHT of them carry
+    # retention or account-lifecycle duties — the 30-day image retention, GDPR
+    # export artefacts, reader free text, the audit log, the session-token
+    # sweep, and three account-expiry sweeps. Do not read their presence here as
+    # evidence that they run. Whether any given one has ever run became
+    # answerable only when the Pruner window above was widened from 60 seconds
+    # to 7 days; before that, `oban_jobs` read empty either way.
+    #
+    # Nothing is added to this list. A new scheduled duty gets a workflow.
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
        {"15 * * * *", Stacks.Workers.ExportRetentionJob},
        {"30 2 * * *", Stacks.Workers.LibraryImportRowRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
-       {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
-       {"30 7 * * 1", Stacks.Workers.DiscoverBookstoreEventsJob, args: %{batch: true}},
        {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
        {"0 3 * * 0", Stacks.Workers.RSSLivenessJob},
-       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}},
        {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}},
        {"30 4 * * *", Stacks.Workers.BuildScraperIndexJob},
        {"0 5 * * 0", Stacks.Workers.MatchStoreCatalogueJob},

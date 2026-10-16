@@ -14,7 +14,10 @@ defmodule Stacks.Release do
   alias Ecto.Adapters.SQL
   alias Stacks.Accounts
   alias Stacks.Accounts.User
+  alias Stacks.Costs.PlatformCost
   alias Stacks.GDPR.Deletion
+  alias Stacks.Workers.DiscoverBookstoreEventsJob
+  alias Stacks.Workers.RefreshCostsJob
 
   @app :core
 
@@ -196,6 +199,62 @@ defmodule Stacks.Release do
     end)
 
     IO.puts("GDPR_LOOKUP_COUNT #{length(matches)}")
+    :ok
+  end
+
+  @doc """
+      Refreshes the platform cost figures, for the `scheduled-core-jobs`
+      workflow.
+
+      ⚠️ This exists because the Oban crontab entry it replaces could not be
+      relied on. `deploy/fly.core.toml` sets `min_machines_running = 0`, and
+      Oban's `Cron` plugin computes due jobs on a tick from a RUNNING node with
+      no catch-up pass — so a 06:00 entry fires only if something else happened
+      to wake the machine at 06:00, and a machine woken at 06:03 never runs it.
+      The schedule was a lottery weighted by inbound traffic.
+
+      A named release task rather than an `rpc` reaching into the worker: the
+      workflow gets a stable entry point, and the contract between the two (what
+      it prints, what it raises on) lives here next to the code rather than in a
+      quoted shell string.
+
+      Returns `:ok` and prints `COSTS_REFRESH_ITEMS <n>` on success; RAISES on
+      failure, because a workflow's exit status is the only thing a schedule can
+      act on, and a task that reports a problem by printing it would be green.
+  """
+  @spec refresh_costs() :: :ok
+  def refresh_costs do
+    case RefreshCostsJob.perform(%Oban.Job{args: %{}}) do
+      :ok ->
+        # Counted at the far end, from the table, not from the job's own report
+        # of what it did. The two agreeing is the point: this project has
+        # shipped a structurally complete pipeline that delivered nothing while
+        # every status it reported was green.
+        count = Repo.aggregate(PlatformCost, :count)
+        IO.puts("COSTS_REFRESH_ITEMS #{count}")
+        :ok
+
+      {:error, reason} ->
+        IO.puts("COSTS_REFRESH_ERROR #{inspect(reason)}")
+        raise "costs refresh failed: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+      Runs the weekly bookstore-events discovery sweep, for the
+      `scheduled-core-jobs` workflow. Same reason as `refresh_costs/0`: the
+      crontab entry it replaces fired only if the sleeping machine happened to
+      be awake on a Monday at 07:30.
+
+      Prints `BOOKSTORE_EVENTS_SWEEP ok` on success. The sweep itself tolerates
+      individual store failures by design — a bookshop with no events page is
+      not an error — so this reports completion of the sweep, not a count of
+      events found; the worker logs its own per-store tally.
+  """
+  @spec discover_bookstore_events() :: :ok
+  def discover_bookstore_events do
+    :ok = DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"batch" => true}})
+    IO.puts("BOOKSTORE_EVENTS_SWEEP ok")
     :ok
   end
 
