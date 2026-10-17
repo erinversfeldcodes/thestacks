@@ -3,7 +3,15 @@ module PlacementDecoder exposing (suite)
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Placement as Placement exposing (Format(..), ReadingStatus(..), placementDecoder, placementSummaryDecoder)
+import Types.Placement as Placement
+    exposing
+        ( Format(..)
+        , ReadingStatus(..)
+        , bookPlacementDecoder
+        , placementDetailDecoder
+        , placementRefDecoder
+        , placementSummaryDecoder
+        )
 import Types.Visibility as Visibility
 
 
@@ -67,6 +75,24 @@ placementWithBookshelfNameJson =
     """
 
 
+{-| A `BookPlacement` whose `bookshelf_name` is JSON `null` — exactly what
+`proto_json.ex` emits when the bookshelf is absent, and the input that made the
+old hand-written guard fall through to the wrong shape. The other fields are
+present so their loss is observable.
+-}
+nullBookshelfNameJson : String
+nullBookshelfNameJson =
+    """
+    {
+        "id": "placement-006",
+        "bookshelf_name": null,
+        "formats": ["physical"],
+        "personal_rating": 5,
+        "notes": "kept"
+    }
+    """
+
+
 minimalIdOnlyJson : String
 minimalIdOnlyJson =
     """
@@ -106,7 +132,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder minimalPlacementJson
+                        Decode.decodeString placementRefDecoder minimalPlacementJson
                 in
                 case result of
                     Ok placement ->
@@ -132,7 +158,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder fullPlacementJson
+                        Decode.decodeString placementDetailDecoder fullPlacementJson
                 in
                 case result of
                     Ok placement ->
@@ -155,11 +181,42 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
+        , test "a BookPlacement with a NULL bookshelf_name keeps its own fields" <|
+            \_ ->
+                -- ⚠️ The defect the old `oneOf` had, and the reason using the
+                -- declared type is not merely tidier.
+                --
+                -- `placementDecoder` separated BookPlacement from PlacementRef
+                -- with a hand-written guard on the presence of
+                -- `bookshelf_name`. `proto_json.ex` emits
+                -- `bookshelf_name: bookshelf && bookshelf.name`, so the field
+                -- arrives as JSON `null` whenever the bookshelf is absent —
+                -- `Decode.field "bookshelf_name" Decode.string` FAILS on null,
+                -- and the decoder fell through to the PlacementRef branch.
+                --
+                -- Decoding a BookPlacement as a ref silently drops every field
+                -- the ref shape does not have: formats, notes, personal_rating
+                -- and visibility. No error, just a placement that forgot
+                -- things. Reading the type the response declares cannot make
+                -- that mistake, because there is no second branch to fall to.
+                case Decode.decodeString bookPlacementDecoder nullBookshelfNameJson of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal "placement-006" p.id
+                            , \p -> Expect.equal Nothing p.bookshelfName
+                            , \p -> Expect.equal [ Physical ] p.formats
+                            , \p -> Expect.equal (Just "kept") p.notes
+                            , \p -> Expect.equal (Just 5) p.personalRating
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "decodes placement with bookshelf_name" <|
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder placementWithBookshelfNameJson
+                        Decode.decodeString bookPlacementDecoder placementWithBookshelfNameJson
                 in
                 case result of
                     Ok placement ->
@@ -175,7 +232,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder minimalIdOnlyJson
+                        Decode.decodeString placementRefDecoder minimalIdOnlyJson
                 in
                 case result of
                     Ok placement ->
@@ -192,7 +249,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder missingRequiredFieldJson
+                        Decode.decodeString placementRefDecoder missingRequiredFieldJson
                 in
                 case result of
                     Ok placement ->
@@ -204,7 +261,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder placementWithReadingProgressJson
+                        Decode.decodeString placementDetailDecoder placementWithReadingProgressJson
                 in
                 case result of
                     Ok placement ->
@@ -293,7 +350,7 @@ suite =
 
 decodedPlacement : String -> Result Decode.Error Placement.Placement
 decodedPlacement json =
-    Decode.decodeString placementDecoder json
+    Decode.decodeString placementDetailDecoder json
 
 
 decodedVisibility : String -> Result Decode.Error (Maybe Visibility.Visibility)

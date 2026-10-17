@@ -275,7 +275,7 @@ import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
 import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
-import Types.Placement exposing (Placement, ReadingStatus, parseReadingStatus, placementDecoder, placementSummaryDecoder)
+import Types.Placement exposing (Placement, ReadingStatus, bookPlacementDecoder, parseReadingStatus, placementRefDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.Shelf exposing (BookshelfResponse, bookshelfResponseDecoder)
 import Url.Builder
@@ -1752,10 +1752,15 @@ just written to fix**, so read this before attempting it:
     lifts `published_at` to a `Maybe` because that remains the more direct
     representation for a view that formats a date, but nothing depends on it for
     correctness any more.
-  - `placementDecoder` is not a plain proto decode either: it is a `oneOf` that
-    falls back to a `PlacementRef` shape when `bookshelf_name` is absent, and
-    quietly dropping that fallback is how a second defect gets introduced while
-    fixing the first.
+  - `placementDecoder` was not a plain proto decode either: it was a `oneOf`
+    over all three placement shapes, with a hand-written guard on the presence
+    of `bookshelf_name` separating the two that carry no embedded book.
+    ✅ **Gone as of 2026-10-17.** The ambiguity was self-inflicted — each
+    response message declares exactly one placement type, so every caller
+    always knew which shape it was getting, and collapsing four
+    distinctly-typed responses into one decoder discarded that. This decoder
+    now reads `bookPlacementDecoder`, which is what `BookDetailResponse`
+    declares.
   - `decodeBookPlacement` **could not fail**. All eight of its fields are
     `D.oneOf [ D.field …, D.succeed <default> ]`, so it succeeded on _any_ JSON
     value — `null` included — returning an all-defaults struct, and the
@@ -1769,15 +1774,24 @@ just written to fix**, so read this before attempting it:
     the narrow one: an absent `bookshelf_visibility` still collapses to `""`,
     which is why this decoder lifts it by hand as a `Maybe`.
 
-The remaining blocker is the `PlacementRef` fallback, and it is the one codegen
-cannot help with: **any JSON object satisfies any message decoder**, so a
-`oneOf` over two untagged message shapes at the same key is undecidable without
-a discriminator in the contract. That is a contract decision, not a decoder one.
+✅ **No blockers remain, and the last one dissolved rather than being fixed.**
+It was stated as "any JSON object satisfies any message decoder, so a `oneOf`
+over two untagged shapes at one key is undecidable without a discriminator in
+the contract". Both halves are true; the conclusion was not. The contract never
+asked anything to decide between them — `BookshelfResponse.placements` is
+always `PlacementDetail`, `BookDetailResponse`/`BookConfirmResponse` always
+`BookPlacement`, `PlacementRefResponse` always `PlacementRef` — so there was
+nothing to decide, only type information to stop throwing away.
+
+Adding the discriminator was measured before being rejected: repointing a
+response field at a `oneof` envelope makes `buf breaking` exit 100 ("changed
+type from BookPlacement to PlacementPayload"), so it would have needed a gate
+suppression to re-supply what the contract already supplies.
 
 The shape all of these shared is worth keeping in view: the generated decoder
 SUCCEEDED and returned something wrong rather than failing, which is why none of
-it surfaced as a decode error. The object guard restores a failure mode; it does
-not make a decoder able to answer a question the contract never asked.
+it surfaced as a decode error. The object guard restores a failure mode; using
+the declared type removes the question.
 
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
@@ -1785,7 +1799,7 @@ bookDetailResponseDecoder =
     Decode.map5 BookDetailResponse
         (Decode.field "book" bookDecoder)
         (Decode.oneOf
-            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            [ Decode.field "placement" (Decode.nullable bookPlacementDecoder)
             , Decode.succeed Nothing
             ]
         )
@@ -1795,7 +1809,7 @@ bookDetailResponseDecoder =
             ]
         )
         (Decode.oneOf
-            [ Decode.field "placements" (Decode.list placementDecoder)
+            [ Decode.field "placements" (Decode.list bookPlacementDecoder)
             , Decode.succeed []
             ]
         )
@@ -2657,7 +2671,7 @@ placeResponseToResult response =
                 Err (PlaceHttpError (Http.BadStatus metadata.statusCode))
 
         Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString (Decode.field "placement" placementDecoder) bodyText of
+            case Decode.decodeString (Decode.field "placement" placementRefDecoder) bodyText of
                 Ok placement ->
                     Ok placement
 
@@ -2859,21 +2873,23 @@ confirmErrorFromBody statusCode bodyText =
 
 {-| Adapter: the `BookConfirmResponse` wire shape → the app-level record.
 
-Hand-rolled over the app-level `bookDecoder` / `placementDecoder` for one of the
-reasons `bookDetailResponseDecoder` is — the third in that decoder's list:
+Hand-rolled over the app-level `bookDecoder` / `bookPlacementDecoder` for one of
+the reasons `bookDetailResponseDecoder` is — the third in that decoder's list:
 `decodeBookPlacement` could not fail, so the generated
 `D.maybe (D.field "placement" decodeBookPlacement)` turned a JSON `null` into
 `Just <all-defaults struct>` rather than `Nothing`.
 
-✅ **That blocker is gone as of 2026-10-16** — codegen wraps every message
-decoder in `requireObject`, so the `D.maybe` shape now answers `Nothing`. What
-still stands between this and the generated decoders is the `PlacementRef`
-fallback inside `placementDecoder`, which needs a discriminator in the contract
-rather than a better decoder.
+✅ **Both blockers are gone.** The object guard fixed that one (2026-10-16), so
+the `D.maybe` shape now answers `Nothing`; and the `PlacementRef` ambiguity
+dissolved (2026-10-17) once each caller used the type its own response declares.
+`BookConfirmResponse.placement` is a `BookPlacement`, so that is what this reads.
 
 ⚠️ This is the THIRD hand-rolled decoder over the same book / placement /
-placements triple. Converging any one of them means taking all three, and
-`bookDetailResponseDecoder` carries the full blocker list.
+placements triple, and what remains is **not** a wire problem: it is the
+app-level `Placement` type being richer than any single proto message, so the
+mapping from each shape into it lives here. Converging further means deciding
+whether the app type should keep that shape at all — a different question from
+the one this comment used to describe.
 
 -}
 confirmResponseDecoder : Decoder ConfirmResponse
@@ -2881,12 +2897,12 @@ confirmResponseDecoder =
     Decode.map4 ConfirmResponse
         (Decode.field "book" bookDecoder)
         (Decode.oneOf
-            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            [ Decode.field "placement" (Decode.nullable bookPlacementDecoder)
             , Decode.succeed Nothing
             ]
         )
         (Decode.oneOf
-            [ Decode.field "placements" (Decode.list placementDecoder)
+            [ Decode.field "placements" (Decode.list bookPlacementDecoder)
             , Decode.succeed []
             ]
         )

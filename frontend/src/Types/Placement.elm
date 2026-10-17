@@ -2,11 +2,13 @@ module Types.Placement exposing
     ( Format(..)
     , Placement
     , ReadingStatus(..)
+    , bookPlacementDecoder
     , formatToString
     , isHidden
     , parseFormat
     , parseReadingStatus
-    , placementDecoder
+    , placementDetailDecoder
+    , placementRefDecoder
     , placementSummaryDecoder
     , readingStatusToString
     )
@@ -140,33 +142,80 @@ readingStatusToString status =
             "abandoned"
 
 
-{-| The placement decoder unifies the multiple proto placement shapes
-(PlacementDetail with embedded book, BookPlacement with bookshelf\_name,
-and PlacementRef) into the single app-level Placement type.
+{-| ONE DECODER PER WIRE SHAPE, and the caller picks — because the contract
+already says which one it is sending.
 
-It tries decoding the full shape (with embedded book) first, then
-falls back to the slim shape (with bookshelf\_name, no book).
+There used to be a single `placementDecoder` here, a `Decode.oneOf` over all
+three proto placement shapes, with a hand-written guard on the presence of
+`bookshelf_name` to separate the two that have no embedded book. That guard was
+the only thing standing between a `BookPlacement` and being decoded as a
+`PlacementRef`, and it was unsound: `proto_json.ex` emits
+`bookshelf_name: bookshelf && bookshelf.name`, so the field arrives as JSON
+`null` whenever the bookshelf is absent, `Decode.field "bookshelf_name"
+Decode.string` fails on null, and the decoder fell through to the wrong branch.
+
+⚠️ **The ambiguity was self-inflicted.** The contract never had it. Each
+response message declares exactly one placement type:
+
+    BookshelfResponse.placements    -> PlacementDetail  (embedded book)
+    BookDetailResponse.placement    -> BookPlacement    (bookshelf_name)
+    BookConfirmResponse.placement   -> BookPlacement
+    PlacementRefResponse.placement  -> PlacementRef     (slim)
+
+So every caller has always known which shape it was getting. Collapsing four
+distinctly-typed responses into one decoder threw that away, and then needed a
+runtime discriminator to recover information the types already carried.
+
+Adding a discriminator to the wire was considered and rejected on measurement:
+repointing a response field at a `oneof` envelope makes `buf breaking` exit 100
+("changed type from BookPlacement to PlacementPayload"), so it would have needed
+a gate suppression — to re-supply what the contract supplies for free.
+
+Each decoder below layers only the fields its own shape actually carries:
+`visibility` is on `PlacementDetail` and `BookPlacement` but not `PlacementRef`,
+and `has_user_writing` is added by `shelf_with_placements/3` to the detail shape
+alone.
 
 -}
-placementDecoder : Decoder Placement
-placementDecoder =
+placementDetailDecoder : Decoder Placement
+placementDetailDecoder =
     Decode.map3 (\p vis writing -> { p | visibility = vis, hasUserWriting = writing })
-        placementBaseDecoder
-        (Decode.maybe (Decode.field "visibility" Decode.string)
-            |> Decode.map (Maybe.andThen Visibility.fromString)
-        )
-        (Decode.oneOf
-            [ Decode.field "has_user_writing" Decode.bool
-            , Decode.succeed False
-            ]
-        )
+        placementWithBookDecoder
+        visibilityField
+        hasUserWritingField
 
 
-placementBaseDecoder : Decoder Placement
-placementBaseDecoder =
+{-| `BookPlacement` — the current user's placement for one book, carrying
+`bookshelf_name` and no embedded book. Sent by `BookDetailResponse` and
+`BookConfirmResponse`.
+-}
+bookPlacementDecoder : Decoder Placement
+bookPlacementDecoder =
+    Decode.map2 (\p vis -> { p | visibility = vis })
+        (Decode.map fromProtoBookPlacement Proto.decodeBookPlacement)
+        visibilityField
+
+
+{-| `PlacementRef` — the slim create/move acknowledgement. Carries no
+`visibility`, so none is layered on: a `Nothing` here means "this shape does not
+report visibility", which is the truth, rather than "visibility unknown".
+-}
+placementRefDecoder : Decoder Placement
+placementRefDecoder =
+    Decode.map fromProtoPlacementRef Proto.decodePlacementRef
+
+
+visibilityField : Decoder (Maybe Visibility)
+visibilityField =
+    Decode.maybe (Decode.field "visibility" Decode.string)
+        |> Decode.map (Maybe.andThen Visibility.fromString)
+
+
+hasUserWritingField : Decoder Bool
+hasUserWritingField =
     Decode.oneOf
-        [ placementWithBookDecoder
-        , placementWithoutBookDecoder
+        [ Decode.field "has_user_writing" Decode.bool
+        , Decode.succeed False
         ]
 
 
@@ -265,34 +314,6 @@ placementWithBookDecoder =
         )
         Proto.decodePlacementDetail
         (Decode.maybe (Decode.field "bookshelf_name" Decode.string))
-
-
-{-| Decode a placement without an embedded book.
-Handles both BookPlacement (with bookshelf\_name) and minimal PlacementRef payloads.
-Delegates to proto decoders and maps to the app-level Placement type.
-
-BookPlacement is tried first, guarded by the presence of bookshelf\_name, because
-both proto decoders use oneOf-with-succeed defaults and would otherwise always
-match. PlacementRef is the fallback for payloads that carry position/placedAt
-but no bookshelf\_name.
-
-⚠️ The `bookshelf_name` guard is still load-bearing, and codegen cannot replace
-it. As of 2026-10-16 every generated message decoder requires a JSON object
-(`requireObject`), which fixed the related defect where a `null` decoded to a
-struct of defaults — but an OBJECT still satisfies either decoder, because
-proto3 implicit presence means neither has a required field. So two untagged
-message shapes arriving at the same key remain indistinguishable to the
-generated decoders, and the only real fix is a discriminator in the contract.
-Until there is one, this hand-written guard is the discriminator.
-
--}
-placementWithoutBookDecoder : Decoder Placement
-placementWithoutBookDecoder =
-    Decode.oneOf
-        [ Decode.field "bookshelf_name" Decode.string
-            |> Decode.andThen (\_ -> Decode.map fromProtoBookPlacement Proto.decodeBookPlacement)
-        , Decode.map fromProtoPlacementRef Proto.decodePlacementRef
-        ]
 
 
 {-| Map a proto BookPlacement (has bookshelf\_name, formats, notes) to app Placement.
