@@ -75,11 +75,37 @@ defmodule StacksWeb.ProtoJSONTest do
              }
     end
 
-    test "defaults community_read_count to 0" do
+    test "OMITS community_read_count when no count was measured" do
+      # ⚠️ This asserted `== 0` and was asserting the defect.
+      #
+      # `Books.community_read_count/1` answers `{:ok, n} | :error`, and `:error`
+      # — a missing mart, a revoked `marts` grant, a query error — is
+      # NOT zero. Defaulting the option to 0 here turned every one of those
+      # states into the same confident number a reader would see for a book
+      # nobody has read.
+      #
+      # The key is left out instead, which is this project's standing
+      # preference: an absent key beats a lying one.
       book = insert(:book, author: nil)
       book = %{book | editions: []}
 
       result = ProtoJSON.book(book)
+
+      refute Map.has_key?(result, :community_read_count),
+             "no count was supplied, so the key must be absent rather than 0 — 0 is a " <>
+               "measurement, and this is the absence of one"
+    end
+
+    test "carries community_read_count when a real count WAS measured" do
+      # The positive control. Without it the refute above is satisfied by a
+      # serializer that has stopped emitting the field at all.
+      book = insert(:book, author: nil)
+      book = %{book | editions: []}
+
+      result = ProtoJSON.book(book, community_read_count: 0)
+
+      assert Map.has_key?(result, :community_read_count),
+             "a measured count must reach the payload, including a genuine zero"
 
       assert result.community_read_count == 0
     end

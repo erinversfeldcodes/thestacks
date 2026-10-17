@@ -42,11 +42,22 @@ defmodule StacksWeb.ProtoJSON do
 
   @doc """
       Serializes a book (work) into the proto `Book` shape — the richest book
-      representation. Option `:community_read_count` (integer, default 0).
+      representation.
+
+      Option `:community_read_count` (integer). ⚠️ **Omit it rather than passing
+      0 when the count could not be read.** `Books.community_read_count/1`
+      answers `{:ok, n} | :error`, and `:error` is not zero — a missing mart, a
+      revoked `marts` grant and a genuine query error all used to arrive here as
+      a confident 0, which is what a reader then saw.
+
+      Omitting leaves the key out of the map entirely. That is the honest
+      payload, though the wire cannot carry the distinction today: the field is
+      a proto3 `int32` with implicit presence, so an absent key and a real 0
+      both decode to 0. The limit is recorded at the call site in
+      `book_controller.ex`.
   """
   @spec book(map(), keyword()) :: map()
   def book(book, opts \\ []) do
-    community_read_count = Keyword.get(opts, :community_read_count, 0)
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
@@ -64,9 +75,16 @@ defmodule StacksWeb.ProtoJSON do
       author: author(book.author),
       editions: editions,
       edition_count: length(editions),
-      primary_edition: edition_or_nil(primary),
-      community_read_count: community_read_count
+      primary_edition: edition_or_nil(primary)
     })
+    |> maybe_put_read_count(opts)
+  end
+
+  defp maybe_put_read_count(payload, opts) do
+    case Keyword.fetch(opts, :community_read_count) do
+      {:ok, count} -> Map.put(payload, :community_read_count, count)
+      :error -> payload
+    end
   end
 
   @doc """

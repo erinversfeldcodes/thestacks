@@ -804,9 +804,13 @@ defmodule Stacks.UploadDbtTest do
       # Three vacuity traps sit in front of this one assertion, and the first two
       # were walked into before this version:
       #
-      #   1. `assert is_integer(count)` — `community_read_count/1` answers 0 by
-      #      design when the mart is absent (books.ex:85-88), so it passed on
-      #      every stack that had no warehouse at all.
+      #   1. `assert is_integer(count)` — `community_read_count/1` used to answer
+      #      0 when the mart was absent, so it passed on every stack that had no
+      #      warehouse at all. ✅ That trap is now closed at the source: the
+      #      function answers `{:ok, n} | :error`, and `:error` is not a number.
+      #      The assertion below compares against `{:ok, read_count}` for the
+      #      same reason it always wanted to — a real measurement, not a
+      #      shape.
       #   2. Comparing the context against a mart row *for a book the test just
       #      placed*. `mart_community_read_count` is `materialized='incremental'`
       #      — a table, not a view — so a new placement is absent until dbt runs,
@@ -835,7 +839,7 @@ defmodule Stacks.UploadDbtTest do
           assert read_count > 0,
                  "the query asked for a non-zero row and got #{inspect(read_count)}"
 
-          assert Books.community_read_count(book_id) == read_count
+          assert Books.community_read_count(book_id) == {:ok, read_count}
 
         [] ->
           flunk("""

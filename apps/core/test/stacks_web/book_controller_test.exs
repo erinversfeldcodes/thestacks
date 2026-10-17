@@ -53,7 +53,20 @@ defmodule StacksWeb.BookControllerTest do
       assert returned["primary_edition"]["isbn"] == edition.isbn
       assert is_list(returned["editions"])
       assert returned["edition_count"] == 1
-      assert is_integer(returned["community_read_count"])
+
+      # ⛔ This was `assert is_integer(returned["community_read_count"])`,
+      # and the residue ledger names it as the assertion the old confident-zero
+      # made VACUOUS — it held whether the mart existed, was missing, or
+      # errored, because every one of those produced an integer.
+      #
+      # It is now a statement about a knowable state: the test database has no
+      # `marts` schema at all (dbt never runs here), so the count genuinely
+      # cannot be read, and the honest payload omits the key. If a future
+      # change builds the mart in test, this flips to asserting the number —
+      # which is the point: the two states are finally distinguishable.
+      refute Map.has_key?(returned, "community_read_count"),
+             "the test database has no marts schema, so the count is unmeasurable here and " <>
+               "the key must be absent. A number would mean the serializer invented one."
     end
 
     test "returns placement data when user has an active placement for the book", %{conn: conn} do

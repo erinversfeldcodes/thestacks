@@ -225,18 +225,43 @@ defmodule Stacks.Insights do
 
   defp community_read_counts([]), do: %{}
 
+  # ⚠️ The same confident-zero shape as `Books.community_read_count/1` had, one
+  # module over, and it is kept here on purpose — with the difference stated.
+  #
+  # There, the caller is a book page rendering ONE number, so "I could not find
+  # out" is a distinct and reportable answer. Here the map feeds a ranking over
+  # many books, where an absent key already means "no count for this book" and
+  # the aggregate degrades rather than lies: a book missing from the map simply
+  # does not get a community-read contribution to its score.
+  #
+  # So an empty map is a legitimate degraded result, NOT a false zero — but the
+  # FAILURE still has to be visible, which it was not. It emits the same
+  # telemetry as its sibling, so one persistent cause shows up once rather than
+  # as two unrelated silences.
   defp community_read_counts(book_ids) do
     sql =
       "SELECT book_id::text, read_count FROM marts.mart_community_read_count WHERE book_id = ANY($1::uuid[])"
 
     case Repo.query(sql, [book_ids]) do
       {:ok, %{rows: rows}} -> Map.new(rows, fn [id, count] -> {id, count} end)
-      _ -> %{}
+      {:error, reason} -> read_counts_unavailable(reason)
     end
   rescue
-    e ->
-      Logger.warning("Insights.community_read_counts failed: #{inspect(e)}")
-      %{}
+    e -> read_counts_unavailable(e)
+  end
+
+  defp read_counts_unavailable(reason) do
+    Logger.warning(
+      "Insights.community_read_counts unavailable: #{inspect(reason)}. " <>
+        "Rankings degrade without the community-read signal; a missing mart means the " <>
+        "scheduled dbt refresh has not run."
+    )
+
+    :telemetry.execute([:stacks, :marts, :read_unavailable], %{count: 1}, %{
+      mart: "mart_community_read_count"
+    })
+
+    %{}
   end
 
   defp count_others_sharing_all(user_id, book_ids, sample_size) do
