@@ -21,11 +21,46 @@ defmodule Stacks.Release do
 
   @app :core
 
+  @doc """
+      Connection options every release task must start its repo with: the OWNER
+      connection, taken from `DATABASE_URL`.
+
+      ⚠️ This exists because the runtime pools no longer necessarily use that
+      role. `config/runtime.exs` points `Core.Repo` and `Core.ObanRepo` at
+      `APP_DATABASE_URL` when it is set — the least-privilege `stacks_app` role
+      — falling back to `DATABASE_URL` when it is not. Every task in this module
+      does something a least-privilege role cannot: `migrate/0` runs DDL, which
+      requires ownership; `print_applied_versions/0` and `correct_data/1` run
+      inside the deploy as operator actions.
+
+      So a release task must not inherit the repo's configured URL. Without this
+      override, setting `APP_DATABASE_URL` would make the next deploy's
+      migration step fail on `permission denied` — the change would look inert
+      right up to the moment it took the stack down, which is the worst shape a
+      flag can have.
+
+      Empty when `DATABASE_URL` is unset, so dev and test — where the repo's own
+      config is already correct and there is no second role — are untouched.
+  """
+  @spec owner_repo_opts() :: keyword()
+  def owner_repo_opts do
+    case System.get_env("DATABASE_URL") do
+      nil -> []
+      "" -> []
+      url -> [url: url]
+    end
+  end
+
   def migrate do
     load_app()
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(
+          repo,
+          &Ecto.Migrator.run(&1, :up, all: true),
+          owner_repo_opts()
+        )
     end
   end
 
@@ -56,9 +91,11 @@ defmodule Stacks.Release do
     load_app()
 
     {:ok, _, _} =
-      Ecto.Migrator.with_repo(Repo, fn _repo ->
-        run_corrections(Keyword.get(opts, :apply, false))
-      end)
+      Ecto.Migrator.with_repo(
+        Repo,
+        fn _repo -> run_corrections(Keyword.get(opts, :apply, false)) end,
+        owner_repo_opts()
+      )
 
     :ok
   end
@@ -85,7 +122,8 @@ defmodule Stacks.Release do
     load_app()
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &emit_applied_versions/1)
+      {:ok, _, _} =
+        Ecto.Migrator.with_repo(repo, &emit_applied_versions/1, owner_repo_opts())
     end
   end
 
@@ -99,7 +137,8 @@ defmodule Stacks.Release do
       load_app()
 
       for repo <- repos() do
-        {:ok, _, _} = Ecto.Migrator.with_repo(repo, fn _repo -> run_seeds() end)
+        {:ok, _, _} =
+          Ecto.Migrator.with_repo(repo, fn _repo -> run_seeds() end, owner_repo_opts())
       end
     else
       IO.puts("Seeds are disabled (ALLOW_SEEDS != \"true\"). Skipping.")
@@ -301,9 +340,11 @@ defmodule Stacks.Release do
     [primary_repo | _] = repos()
 
     {:ok, _, _} =
-      Ecto.Migrator.with_repo(primary_repo, fn _repo ->
-        do_seed_prod(email, password)
-      end)
+      Ecto.Migrator.with_repo(
+        primary_repo,
+        fn _repo -> do_seed_prod(email, password) end,
+        owner_repo_opts()
+      )
 
     :ok
   end
@@ -323,9 +364,11 @@ defmodule Stacks.Release do
     [primary_repo | _] = repos()
 
     {:ok, _, _} =
-      Ecto.Migrator.with_repo(primary_repo, fn _repo ->
-        do_seed_prober(email, password)
-      end)
+      Ecto.Migrator.with_repo(
+        primary_repo,
+        fn _repo -> do_seed_prober(email, password) end,
+        owner_repo_opts()
+      )
 
     :ok
   end

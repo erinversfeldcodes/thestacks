@@ -146,20 +146,47 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # ⚠️ TWO ROLES, deliberately, and the split is the point.
+  #
+  # `DATABASE_URL` keeps its existing meaning: the OWNER connection. Migrations
+  # need it (DDL requires ownership), `Stacks.Release` uses it explicitly, and
+  # every script and workflow that already composes it is unaffected.
+  #
+  # `APP_DATABASE_URL` is the least-privilege RUNTIME connection — the
+  # `stacks_app` role `docs/rls-design.md` specifies, which holds CRUD on `op`,
+  # SELECT on `marts` and INSERT-only on `audit`, and against which the RLS
+  # policies are evaluated. Until it exists, every one of those grants is
+  # decorative, because nothing connects as the role that has them.
+  #
+  # ⚠️ **The fallback is what makes this safe to merge.** Unset, the runtime
+  # pools use the owner URL and behaviour is byte-identical to before — so the
+  # change is inert on arrival and switching is an operator action (set one Fly
+  # secret), not a deploy. Reverting is unsetting it. That matters because this
+  # campaign merges in one go: a change that only takes effect when a secret is
+  # added cannot be the thing that breaks the merge.
+  #
+  # ⚠️ Before setting it, `stacks_app` must actually be able to serve. Verified
+  # on the development database: 49 of 49 `op` base tables grant it
+  # SELECT/INSERT/UPDATE/DELETE, `ALTER DEFAULT PRIVILEGES` covers future tables
+  # (`stacks_app=arwd`), and there are zero sequences needing USAGE. The
+  # `:deployed_only` role suite asserts the same against a real stack — run it
+  # against the target before flipping the secret, not after.
+  app_database_url = System.get_env("APP_DATABASE_URL") || database_url
+
   # Pool sizes are dimensioned for the real workload (a handful of users +
   # probe traffic on a scale-to-zero app), and their sum must stay under the
   # database's connection cap at the smallest compute size — Neon allows
   # ~112 connections at 0.25 CU, and every boot opens all pools at once
   # against a just-woken database.
   config :core, Core.Repo,
-    url: database_url,
+    url: app_database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6
 
   config :core, Core.ObanRepo,
-    url: database_url,
+    url: app_database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
     pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "20"),

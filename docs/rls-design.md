@@ -34,10 +34,44 @@ migrations ran, granted nothing, and reported success. Deployed, the application
 and the nightly dbt refresh both connect as `neondb_owner`, which owns the
 database.
 
-So read the list below as the **intended** design. Whether to realise it
-(two new secrets, passed to the migrate step, with the refresh connecting as
-`stacks_dbt`) or to delete it and state the owner-level posture honestly is an
-open decision, tracked as RL-205 in `plans/residue-ledger.md`.
+**Resolved 2026-10-17: realise the design.** The roles now exist on deployed
+stacks, the nightly refresh connects as `stacks_dbt`, and the application has a
+connection it can switch to. Two things remain operator actions, deliberately —
+each is a secret away, and each is reversible by removing that secret.
+
+### Switching the application to `stacks_app`
+
+`config/runtime.exs` reads **two** URLs:
+
+| Variable | Role | Used by |
+|---|---|---|
+| `DATABASE_URL` | the **owner** | migrations and every `Stacks.Release` task (DDL needs ownership) |
+| `APP_DATABASE_URL` | `stacks_app` | the runtime pools, `Core.Repo` and `Core.ObanRepo` |
+
+`APP_DATABASE_URL` **falls back to `DATABASE_URL` when unset**, so the split is
+inert until the secret exists and reverting is removing it. `Stacks.Release`
+pins every task to the owner through `owner_repo_opts/0`, and
+`Core.DatabaseRoleSplitTest` sweeps every `with_repo` call to keep it that way —
+without that pin, setting the secret would leave the app serving happily and
+break the *next* deploy's migration step on `permission denied`.
+
+Before setting it, run the `:deployed_only` role suite against the target stack.
+Verified on the development database: all 49 `op` base tables grant `stacks_app`
+SELECT/INSERT/UPDATE/DELETE, `ALTER DEFAULT PRIVILEGES` covers future tables,
+and there are zero sequences needing USAGE — so grants are not the blocker.
+
+### ⚠️ The policies below are active and permit everything
+
+Worth stating plainly, because the table list reads as protection that is in
+force. `FORCE ROW LEVEL SECURITY` is applied and the policies *are* evaluated on
+every deployed query — but every `ALL`-command policy begins
+`current_setting('app.current_user_id', true) IS NULL OR …`, and **nothing in
+`apps/core/lib` ever sets that GUC**. So each one evaluates true for every row.
+
+Switching the connection role does not change that; the GUC does. That is
+tracked as **#487**, which carries the measured trade-off between the three
+candidate mechanisms — the cheap one leaks across requests on a pooled
+connection, and the safe one changes request semantics.
 
 - `stacks_app` — CRUD on `op`, SELECT on `marts`, INSERT-only on `audit`. RLS policies are evaluated against it.
 - `stacks_dbt` — SELECT on `op` + `audit`, CREATE + CRUD in `staging` / `intermediate` / `marts`. Used by dbt transforms.
