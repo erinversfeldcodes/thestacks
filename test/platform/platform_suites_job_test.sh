@@ -213,5 +213,77 @@ else
     done <<<"$OUTBOUND_ROOTS"
 fi
 
+# ⚠️ THE THIRD VARIANT, and the one the two assertions above are structurally
+# blind to: a gate whose input is GENERATED and GITIGNORED.
+#
+# Both checks above derive the trees a gate READS and demand the filter cover
+# them. That is necessary and not sufficient. The serializer-completeness gate
+# reads `apps/core/lib/stacks/gen/proto_json.ex`, which IS covered — by
+# `apps/core/**` — so a roots-from-the-gate derivation reports it clean. But
+# that file is produced by `mix proto.sync` and is untracked, so its content
+# changes when a `.proto` message gains a field and NO tracked file under
+# `apps/core/**` changes with it. The lane is skipped, and the gate never runs
+# on the diff it was written for.
+#
+# So the property asserted here is PROVENANCE, not readability: if a gate the
+# lane runs reads a gitignored path, the lane must also be triggered by the tree
+# that generates it. `.gitignore` names `proto/` as the source for all four
+# generated trees, which is what makes this derivable rather than a guess.
+gitignored_inputs_of() {
+    grep -oE "['\"](apps|frontend|config|dbt|proto|scripts|test|e2e)/[A-Za-z0-9_./-]+['\"]" "$1" |
+        tr -d "'\"" |
+        sort -u |
+        while IFS= read -r candidate; do
+            [[ -z "$candidate" ]] && continue
+            if git -C "$REPO_ROOT" check-ignore -q "$candidate" 2>/dev/null; then
+                printf '%s\n' "$candidate"
+            fi
+        done
+}
+
+# The gates this lane actually runs, read from the lane rather than globbed, so
+# a gate that exists but is not wired is not credited here.
+LANE_GATES="$(grep -oE '^gate check-[A-Za-z0-9.-]+\.sh' "$REPO_ROOT/scripts/lint-elixir.sh" |
+    sed 's/^gate //' | sort -u)"
+
+test_case "generated_gate_inputs_trigger_their_lane" \
+    "a gate reading an untracked generated file is triggered by the tree that generates it"
+GENERATED_READERS=0
+if [[ -z "$LANE_GATES" ]]; then
+    _record_fail "read no gates from scripts/lint-elixir.sh — the parse has drifted, so the loop below is over an empty set and proves nothing"
+else
+    while IFS= read -r gate; do
+        [[ -z "$gate" ]] && continue
+        [[ -f "$REPO_ROOT/scripts/$gate" ]] || continue
+        ignored="$(gitignored_inputs_of "$REPO_ROOT/scripts/$gate")"
+        [[ -z "$ignored" ]] && continue
+        while IFS= read -r input; do
+            [[ -z "$input" ]] && continue
+            # `node_modules/` and friends are paths a gate EXCLUDES, not inputs.
+            case "$input" in
+                */node_modules/* | */node_modules) continue ;;
+            esac
+            GENERATED_READERS=$((GENERATED_READERS + 1))
+            if printf '%s' "$ELIXIR_FILTER_TXT" | grep -qF "'proto/**'"; then
+                _record_pass "$gate reads the untracked generated $input, and the elixir filter lists proto/** so a contract change triggers the lane"
+            else
+                _record_fail "$gate reads $input, which is GENERATED and gitignored, but the elixir filter does not list 'proto/**' — adding a field to a .proto changes this gate's input while changing no tracked file the filter matches, so the lane is skipped on exactly the diff the gate exists to catch"
+            fi
+        done <<<"$ignored"
+    done <<<"$LANE_GATES"
+fi
+
+# ⚠️ Anti-vacuity. The loop above is a no-op when no gate reads a generated
+# input — which is indistinguishable from the derivation having drifted. One
+# such gate exists today; if that stops being true this assertion must be
+# retired deliberately rather than silently passing over nothing.
+test_case "the_generated_input_derivation_found_something" \
+    "the provenance check ran against a real population"
+if [[ "$GENERATED_READERS" -ge 1 ]]; then
+    _record_pass "the derivation found $GENERATED_READERS gate input(s) that are generated and untracked"
+else
+    _record_fail "the derivation found no generated gate input. Either every gate now reads only tracked files — in which case delete this pair of assertions on purpose — or the path/ignore derivation has drifted and the check above passed over an empty set"
+fi
+
 summarise
 exit $?

@@ -149,6 +149,24 @@ jobs:
               # a gate was never exercised by the lane that executes it.
               - 'scripts/check-*.sh'
               - 'scripts/lint-elixir.sh'
+              # ⚠️ The CONTRACT tree, because one of this lane's gates reads a
+              # GENERATED, GITIGNORED file: the serializer-completeness gate
+              # compares `apps/core/lib/stacks/gen/proto_json.ex` (produced by
+              # `mix proto.sync`, untracked) against the hand-written
+              # serializers that narrow it. So adding a field to a `.proto`
+              # message changes that gate's input while changing NO tracked file
+              # under `apps/core/**` — and the lane that runs the gate was
+              # skipped on exactly the diff the gate exists to catch.
+              #
+              # This is a different hole from the two above, and the
+              # roots-from-the-gate assertion that found those would not have
+              # found it: the gate's declared inputs ARE covered by
+              # `apps/core/**`. What is not covered is their PROVENANCE. Nine of
+              # the last 112 proto-touching commits have their whole diff under
+              # `proto/`, and they include field additions to existing messages
+              # — the modal shape of the defect, since a diff that remembered to
+              # carry the field would have touched the serializer too.
+              - 'proto/**'
             elm:
               - 'frontend/**'
               # The Elm lint lane also runs the ports gate, which compares Elm
