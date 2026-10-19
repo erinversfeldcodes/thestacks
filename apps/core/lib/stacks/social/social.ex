@@ -173,7 +173,22 @@ defmodule Stacks.Social do
         join: u in User,
         on: u.id == b.blocked_id,
         where: b.blocker_id == ^blocker_id,
-        select: %{id: u.id, display_name: u.display_name, blocked_at: b.created_at},
+        # `display_name` is nullable; `handle` is NOT NULL. Coalescing here means
+        # no null ever leaves this endpoint, so one blocked reader who never set
+        # a name cannot decode-fail the whole list on the client — which is
+        # worse here than anywhere else, because this surface exists to let
+        # someone UNBLOCK people and a failed decode hides every row.
+        #
+        # ⚠️ Three sibling queries in this module already did this, and one of
+        # them carries the same reasoning in a comment. This query was missed, so
+        # the defect was fixed where it was found and left where it was not. The
+        # fix belongs on the server rather than in a tolerant decoder: a decoder
+        # that accepted null would render a nameless row instead.
+        select: %{
+          id: u.id,
+          display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
+          blocked_at: b.created_at
+        },
         order_by: [desc: b.created_at]
 
     total = Repo.aggregate(base, :count)
