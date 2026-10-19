@@ -122,4 +122,76 @@ defmodule Core.ObanRetentionTest do
                "raising the window HIDES a backlog rather than exposing one."
     end
   end
+
+  # ⛔ The other half of the same story, and the half that was missing.
+  #
+  # The test above proves the pruner leaves `executing` rows alone, which is
+  # correct — pruning live work would hide a backlog. But nothing else collected
+  # them either, and on a machine that suspends when idle an `executing` row is
+  # usually a job whose node simply vanished.
+  #
+  # Measured on production before `Lifeline` was added: all 91 `oban_jobs` rows
+  # were `executing` and nothing else. 76 were `IdentifyBookJob`, stale between
+  # 97 and 180 days, six already at `attempt = 3` of 3 so they could never be
+  # retried and never complete. The other 15 were `ImageRetentionJob`, which is
+  # why the 30-day image-retention promise had gone unmet for 151 days with
+  # every gate green.
+  #
+  # So this is a CONFIG PAIR, not a preference: `auto_stop_machines` with
+  # `min_machines_running = 0` means jobs get interrupted as normal operation,
+  # and interruption is only survivable if something returns them to
+  # `available`. Asserting the pair is what stops one half being removed on its
+  # own.
+  test "a stack that scales to zero rescues its orphaned jobs" do
+    fly_core = File.read!(Path.join(@repo_root, "deploy/fly.core.toml"))
+
+    scales_to_zero? =
+      fly_core =~ ~r/^\s*min_machines_running\s*=\s*0\s*$/m and
+        fly_core =~ ~r/^\s*auto_stop_machines\s*=\s*true\s*$/m
+
+    assert scales_to_zero?,
+           "`deploy/fly.core.toml` no longer scales to zero. That is not a failure — but this " <>
+             "test's premise is gone, so re-read it rather than deleting the plugin it guards."
+
+    lifeline =
+      :core
+      |> Application.get_env(Oban)
+      |> Keyword.fetch!(:plugins)
+      |> Enum.find_value(fn
+        {Oban.Plugins.Lifeline, opts} -> opts
+        Oban.Plugins.Lifeline -> :bare
+        _ -> nil
+      end)
+
+    refute is_nil(lifeline),
+           "`Oban.Plugins.Lifeline` is not in the plugin list, while `deploy/fly.core.toml` " <>
+             "scales the core machine to zero. A job that is `executing` when the machine " <>
+             "suspends never returns to `available` on its own, and the pruner deliberately " <>
+             "ignores `executing` — so nothing in the system collects it. Production reached 91 " <>
+             "permanently orphaned jobs this way, including the image-retention sweep, which " <>
+             "left a GDPR retention promise unmet for 151 days."
+
+    refute lifeline == :bare,
+           "`Oban.Plugins.Lifeline` is configured bare. Its default `rescue_after` is 60 " <>
+             "minutes; set it explicitly so the value is a decision about the longest " <>
+             "legitimate job rather than a library default nobody chose."
+
+    rescue_after = Keyword.fetch!(lifeline, :rescue_after)
+
+    # ⚠️ A CEILING, not a floor, and the direction matters. `rescue_after` too
+    # SHORT is the dangerous end: it returns a still-running job to `available`
+    # and a second node picks it up, turning one sweep into concurrent duplicate
+    # work. The retention job's own budgets bound it to about a minute, so a few
+    # minutes is ample headroom; an hour-plus would leave orphans sitting long
+    # enough to look exactly like the failure this guards.
+    assert rescue_after >= :timer.minutes(5),
+           "`rescue_after` is #{rescue_after}ms, under five minutes. That risks rescuing a job " <>
+             "that is still running and executing it twice — the sweeps are idempotent but the " <>
+             "duplicate storage deletions and events are not free."
+
+    assert rescue_after <= :timer.minutes(30),
+           "`rescue_after` is #{rescue_after}ms. Longer than half an hour and an orphaned job " <>
+             "sits unrescued long enough to be indistinguishable from the permanent orphans " <>
+             "this plugin was added to prevent."
+  end
 end

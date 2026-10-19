@@ -49,6 +49,29 @@ config :core, Oban,
     # and Google Books for a book re-added within the day. If a notification
     # dedupe or an external-call volume moves after this, this is why.
     {Oban.Plugins.Pruner, max_age: {7, :days}},
+    # ⛔ WITHOUT THIS, A JOB INTERRUPTED BY A MACHINE SUSPEND IS ORPHANED FOREVER.
+    #
+    # `deploy/fly.core.toml` sets `auto_stop_machines = true` and
+    # `min_machines_running = 0`. A job that is `executing` when the machine goes
+    # away never returns to `available` on its own — Oban has no way to know the
+    # node died — and the Pruner above deliberately touches only `completed`,
+    # `cancelled` and `discarded`, so nothing in the system ever collects it.
+    #
+    # Measured on production before this was added: all 91 `oban_jobs` rows were
+    # in state `executing` and nothing else. `IdentifyBookJob` held 76 of them,
+    # stale between 97 and 180 days, six already at `attempt = 3` of 3 so they
+    # could never be retried and never completed. `ImageRetentionJob` held the
+    # other 15 — which is why the 30-day image-retention promise had gone unmet
+    # for 151 days while every gate stayed green.
+    #
+    # ⚠️ `rescue_after` must exceed the longest legitimate job, or this plugin
+    # becomes a duplicate-work generator: it would return a still-running job to
+    # `available` and a second node would pick it up. The retention sweep is the
+    # longest, bounded by its own two 30s budgets plus the orphan check, and
+    # vision jobs carry their own timeouts well under this. 15 minutes clears
+    # that with room to spare while still being far shorter than the 97 days
+    # these rows actually sat for.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(15)},
     # ⚠️ EVERY ENTRY BELOW IS UNRELIABLE BY CONSTRUCTION, and the three that are
     # absent are absent for that reason.
     #
