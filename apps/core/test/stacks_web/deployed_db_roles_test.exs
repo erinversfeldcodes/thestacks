@@ -34,6 +34,18 @@ defmodule StacksWeb.DeployedDbRolesTest do
   end
 
   setup do
+    # ⛔ Refuses a LOCAL DATABASE_URL rather than failing somewhere downstream.
+    # The skip above fires only when the variable is UNSET, and this repository's
+    # `.env` sets it to localhost.
+    #
+    # ⚠️ Without this the run was still fail-closed, but only by accident: the
+    # connection below forces SSL and a default local Postgres rejects it, so the
+    # suite died on a Postgrex SSL error that says nothing about the real
+    # mistake. On a machine with local SSL enabled it would connect instead — and
+    # a sandbox has all three roles, while staging has none of them, so passing
+    # there would distinguish nothing.
+    Core.DeployedTarget.require_deployed!("DATABASE_URL")
+
     uri = URI.parse(System.get_env("DATABASE_URL"))
     [user, pass] = String.split(uri.userinfo || "", ":", parts: 2)
     database = uri.path |> String.trim_leading("/") |> String.split("?") |> hd()
