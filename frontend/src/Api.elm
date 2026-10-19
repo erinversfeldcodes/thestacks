@@ -20,6 +20,7 @@ module Api exposing
     , BlockError(..)
     , BlockedUser
     , BlockedUsersResponse
+    , BlogPostPage
     , BookDetailResponse
     , CatalogueResponse
     , CollectionHit
@@ -99,6 +100,7 @@ module Api exposing
     , authorEventsDecoder
     , awaitingConfirmationCount
     , blockUser
+    , blogPostPageDecoder
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
     , checkInviteRequest
@@ -3525,13 +3527,41 @@ getMyPlacements token toMsg =
         }
 
 
-{-| GET /api/blog/posts — fetch all blog posts.
+{-| One page of the cross-author discovery feed.
+
+`nextCursor` is `Nothing` at the end of the corpus, and it — not the length of
+`posts` — is what says whether to ask again. The server reads its window BEFORE
+applying visibility, so a page can come back short, or even empty, with more to
+read behind it.
+
+-}
+type alias BlogPostPage =
+    { posts : List BlogPostSummary
+    , nextCursor : Maybe String
+    }
+
+
+blogPostPageDecoder : Decoder BlogPostPage
+blogPostPageDecoder =
+    Decode.map2 BlogPostPage
+        (Decode.field "posts" (Decode.list blogPostSummaryDecoder))
+        -- Absent on the single-author archive, which does not page, so `maybe`
+        -- rather than `nullable`: a missing field is not a decode failure here.
+        (Decode.maybe (Decode.field "next_cursor" Decode.string))
+
+
+{-| GET /api/blog/posts — one page of the discovery feed, newest first.
+
+Pass the previous page's `nextCursor` to continue. The cursor is opaque: echo
+back what the server sent and never construct one.
+
 -}
 getBlogPosts :
     Maybe String
-    -> (Result Http.Error (List BlogPostSummary) -> msg)
+    -> Maybe String
+    -> (Result Http.Error BlogPostPage -> msg)
     -> Cmd msg
-getBlogPosts maybeToken toMsg =
+getBlogPosts maybeToken maybeCursor toMsg =
     Http.request
         { method = "GET"
         , headers =
@@ -3541,9 +3571,16 @@ getBlogPosts maybeToken toMsg =
 
                 Nothing ->
                     []
-        , url = baseUrl ++ "/api/blog/posts"
+        , url =
+            Url.Builder.crossOrigin baseUrl
+                [ "api", "blog", "posts" ]
+                (maybeCursor
+                    |> Maybe.map (Url.Builder.string "after")
+                    |> Maybe.map List.singleton
+                    |> Maybe.withDefault []
+                )
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "posts" (Decode.list blogPostSummaryDecoder))
+        , expect = Http.expectJson toMsg blogPostPageDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }

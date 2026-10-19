@@ -13,11 +13,20 @@ message BlogPostResponse {
   stacks.common.v1.BlogPost post = 1 [json_name = "post"];
 }
 
-// BlogPostListResponse is returned by GET /api/blog/posts?user_id=...
-// JSON shape: {posts: [...]}
+// BlogPostListResponse is returned by GET /api/blog/posts, with or without user_id.
+// JSON shape: {posts: [...], next_cursor: "..." | null}
 message BlogPostListResponse {
   // List of blog posts.
   repeated stacks.common.v1.BlogPost posts = 1 [json_name = "posts"];
+
+  // Opaque cursor for the next page of the cross-author discovery feed: echo it
+  // back as ?after=. Null at the end of the corpus, and absent entirely on the
+  // single-author branch (?user_id=), which is an archive and is not paginated.
+  //
+  // A page may hold fewer posts than the window without being the last one — the
+  // window is read before the visibility filter is applied — so this field, not
+  // the length of posts, is what says whether to ask for more.
+  optional string next_cursor = 2 [json_name = "next_cursor"];
 }
 
 // BlogPostShowResponse is returned by GET /api/blog/posts/:id.

@@ -6188,6 +6188,14 @@ h4 {
     border-bottom: 1px solid var(--border);
 }
 
+/* The paging affordance for the discovery feed. Centred and set apart from the
+   list, because it is the end of the page rather than another entry in it. */
+.blog-archive__load-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-4) 0 var(--space-2);
+}
+
 .blog-archive__item-meta {
     display: flex;
     flex-wrap: wrap;

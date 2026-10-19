@@ -1,6 +1,6 @@
 module Page.Blog.Archive exposing
     ( Model
-    , Msg
+    , Msg(..)
     , init
     , previewOf
     , update
@@ -9,8 +9,9 @@ module Page.Blog.Archive exposing
 
 import Api
 import Components.VisibilityBadge as VisibilityBadge
-import Html exposing (Html, a, div, h1, h2, li, p, span, text, ul)
-import Html.Attributes exposing (class, href)
+import Html exposing (Html, a, button, div, h1, h2, li, p, span, text, ul)
+import Html.Attributes exposing (class, disabled, href)
+import Html.Events exposing (onClick)
 import Http
 import Navigation.Route as Route exposing (Route(..))
 import Types.BlogPost exposing (BlogPostSummary, visibilityToString)
@@ -20,19 +21,32 @@ import Types.RemoteData exposing (RemoteData(..))
 type alias Model =
     { posts : RemoteData Http.Error (List BlogPostSummary)
     , isAuthenticated : Bool
+    , token : Maybe String
+
+    -- The server's cursor for the next page, `Nothing` once the feed is
+    -- exhausted. ⚠️ It is the ONLY end-of-feed signal: the window is read before
+    -- visibility is applied, so a page can arrive short — or completely empty —
+    -- with posts this reader may read sitting behind it. Stopping on an empty
+    -- page would leave that tail unreachable, which is what it used to be.
+    , nextCursor : Maybe String
+    , loadingMore : Bool
     }
 
 
 type Msg
-    = PostsLoaded (Result Http.Error (List BlogPostSummary))
+    = PostsLoaded (Result Http.Error Api.BlogPostPage)
+    | LoadMore
 
 
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     ( { posts = Loading
       , isAuthenticated = maybeToken /= Nothing
+      , token = maybeToken
+      , nextCursor = Nothing
+      , loadingMore = False
       }
-    , Api.getBlogPosts maybeToken PostsLoaded
+    , Api.getBlogPosts maybeToken Nothing PostsLoaded
     )
 
 
@@ -41,11 +55,46 @@ update msg model =
     case msg of
         PostsLoaded result ->
             case result of
-                Ok posts ->
-                    ( { model | posts = Success posts }, Cmd.none )
+                Ok page ->
+                    let
+                        -- Append, so a later page extends the archive instead of
+                        -- replacing it.
+                        combined =
+                            case model.posts of
+                                Success existing ->
+                                    existing ++ page.posts
+
+                                _ ->
+                                    page.posts
+                    in
+                    ( { model
+                        | posts = Success combined
+                        , nextCursor = page.nextCursor
+                        , loadingMore = False
+                      }
+                    , Cmd.none
+                    )
 
                 Err err ->
-                    ( { model | posts = Failure err }, Cmd.none )
+                    -- A failed later page must not erase the pages already read.
+                    case model.posts of
+                        Success existing ->
+                            ( { model | posts = Success existing, loadingMore = False }
+                            , Cmd.none
+                            )
+
+                        _ ->
+                            ( { model | posts = Failure err, loadingMore = False }, Cmd.none )
+
+        LoadMore ->
+            case model.nextCursor of
+                Just cursor ->
+                    ( { model | loadingMore = True }
+                    , Api.getBlogPosts model.token (Just cursor) PostsLoaded
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
 
 
 view : Model -> Html Msg
@@ -72,15 +121,57 @@ view model =
                     p [ class "error" ] [ text "Could not load posts. Please try again." ]
 
                 Success posts ->
-                    if List.isEmpty posts then
-                        p [ class "blog-archive__empty" ]
-                            [ text "No posts yet." ]
+                    div []
+                        [ if List.isEmpty posts then
+                            -- ⚠️ "No posts yet" only while there is genuinely
+                            -- nothing more to ask for. An empty FIRST page with a
+                            -- cursor behind it means this reader cannot see the
+                            -- newest window, not that nobody has written anything.
+                            if model.nextCursor == Nothing then
+                                p [ class "blog-archive__empty" ]
+                                    [ text "No posts yet." ]
 
-                    else
-                        ul [ class "blog-archive__list" ]
-                            (List.map viewPostSummary posts)
+                            else
+                                p [ class "blog-archive__empty" ]
+                                    [ text "Nothing here you can read — there is more further back." ]
+
+                          else
+                            ul [ class "blog-archive__list" ]
+                                (List.map viewPostSummary posts)
+                        , viewLoadMore model
+                        ]
             ]
         ]
+
+
+{-| "Load more" affordance, shown while the server still has a cursor for us.
+
+Driven by the cursor rather than by how many posts are on screen: a page may be
+short of the window without being the last one.
+
+-}
+viewLoadMore : Model -> Html Msg
+viewLoadMore model =
+    case model.nextCursor of
+        Just _ ->
+            div [ class "blog-archive__load-more" ]
+                [ button
+                    [ class "btn btn--small btn--secondary"
+                    , disabled model.loadingMore
+                    , onClick LoadMore
+                    ]
+                    [ text
+                        (if model.loadingMore then
+                            "Loading…"
+
+                         else
+                            "Load more"
+                        )
+                    ]
+                ]
+
+        Nothing ->
+            text ""
 
 
 {-| How much of a post the archive shows before asking the reader to open it.

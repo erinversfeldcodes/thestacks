@@ -1878,7 +1878,10 @@ blogResponseSuite =
                 let
                     original : BlogPostListResponse
                     original =
-                        { posts = [] }
+                        -- The discovery feed's paging cursor, absent at the end
+                        -- of the corpus and on the single-author archive, which
+                        -- does not page at all.
+                        { posts = [], nextCursor = Just "cursor-1" }
 
                     result =
                         D.decodeValue decodeBlogPostListResponse (encodeBlogPostListResponse original)

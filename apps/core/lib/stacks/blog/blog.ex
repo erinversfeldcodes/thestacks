@@ -216,20 +216,109 @@ defmodule Stacks.Blog do
       filter, so a reader can receive fewer than `limit` posts. That is honest for a
       feed — the alternative, over-fetching until the page is full, makes the cost
       of a request depend on how much of the corpus the reader is excluded from.
-  """
-  @spec list_public_posts(term(), keyword()) :: [Post.t()]
-  def list_public_posts(viewer, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
 
+      ⛔ What makes that honest rather than broken is the cursor, and for a long
+      time there wasn't one. A short page is fine; a short page you cannot page
+      past is a corpus with an unreachable tail. The feed read the newest 50 rows
+      and stopped there forever, so a reader blocked by the authors of those 50
+      saw an EMPTY feed with older posts they were welcome to read sitting behind
+      it, and no request could reach them.
+
+      ⚠️ `next_cursor` is therefore taken from the last row SCANNED, not the last
+      row returned. That distinction is the whole fix: a cursor derived from the
+      last VISIBLE post cannot advance past a window the reader sees none of — the
+      next request re-reads the same hidden rows and comes back empty again, which
+      is the same dead end one page further in.
+
+      The cursor is a keyset on `(published_at, id)`, not an offset: a post
+      published between two requests shifts every offset by one and makes a reader
+      see a duplicate or miss a post, whereas a keyset is stable under insertion.
+      `id` is there only as a tie-break, because `published_at` collides when posts
+      are published in the same transaction and a keyset needs a total order.
+
+      It is opaque on purpose (base64url) — clients echo it back, they do not build
+      one — and an unparseable cursor is `{:error, :invalid_cursor}` rather than a
+      silent restart from the top, which an infinite scroll would turn into a loop.
+  """
+  @feed_limit 50
+  @feed_max_limit 100
+
+  @spec page_public_posts(term(), keyword()) ::
+          {:ok, %{posts: [Post.t()], next_cursor: String.t() | nil}}
+          | {:error, :invalid_cursor}
+  def page_public_posts(viewer, opts \\ []) do
+    limit =
+      opts
+      |> Keyword.get(:limit, @feed_limit)
+      |> max(1)
+      |> min(@feed_max_limit)
+
+    with {:ok, cursor} <- decode_cursor(Keyword.get(opts, :after)) do
+      scanned =
+        feed_query()
+        |> seek_past(cursor)
+        |> limit(^limit)
+        |> Repo.all()
+        |> Repo.preload(:user)
+
+      {:ok,
+       %{
+         posts: Visibility.filter_visible(scanned, viewer),
+         next_cursor: next_cursor(scanned, limit)
+       }}
+    end
+  end
+
+  defp feed_query do
     from(p in Post,
       where: not is_nil(p.published_at) and p.visibility in ["public", "platform"],
-      order_by: [desc: p.published_at],
-      limit: ^limit
+      order_by: [desc: p.published_at, desc: p.id]
     )
-    |> Repo.all()
-    |> Repo.preload(:user)
-    |> Visibility.filter_visible(viewer)
   end
+
+  defp seek_past(query, nil), do: query
+
+  defp seek_past(query, {at, id}) do
+    # A row-value comparison, so the two columns are one keyset rather than two
+    # independent predicates — `published_at <= ? AND id < ?` would drop every
+    # older post whose id happens to sort high.
+    from(p in query,
+      where:
+        fragment(
+          "(?, ?) < (?, ?)",
+          p.published_at,
+          p.id,
+          type(^at, :utc_datetime_usec),
+          type(^id, Ecto.UUID)
+        )
+    )
+  end
+
+  # A full window means there may be more; a short one means the scan reached the
+  # end of the corpus, and a cursor then would invite one more empty request.
+  defp next_cursor(scanned, limit) when length(scanned) < limit, do: nil
+
+  defp next_cursor(scanned, _limit) do
+    last = List.last(scanned)
+    raw = "#{DateTime.to_unix(last.published_at, :microsecond)}:#{last.id}"
+    Base.url_encode64(raw, padding: false)
+  end
+
+  defp decode_cursor(blank) when blank in [nil, ""], do: {:ok, nil}
+
+  defp decode_cursor(cursor) when is_binary(cursor) do
+    with {:ok, raw} <- Base.url_decode64(cursor, padding: false),
+         [unix, id] <- String.split(raw, ":", parts: 2),
+         {micro, ""} <- Integer.parse(unix),
+         {:ok, at} <- DateTime.from_unix(micro, :microsecond),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      {:ok, {at, id}}
+    else
+      _ -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_cursor(_), do: {:error, :invalid_cursor}
 
   @doc """
       Re-evaluates all of a user's published posts against a new profile visibility ceiling.

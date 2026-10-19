@@ -162,6 +162,58 @@ defmodule StacksWeb.BlogControllerTest do
       assert %{"posts" => posts} = json_response(conn, 200)
       refute own_draft.id in Enum.map(posts, & &1["id"])
     end
+
+    test "the discovery feed hands back a cursor that reaches the next page", %{conn: conn} do
+      # The HTTP half of the paging fix: `next_cursor` out, `?after=` back in.
+      # The context tests cover the keyset itself; this one is about the wire,
+      # because a cursor the endpoint never emits is a cursor no client can use.
+      author = insert(:user, profile_visibility: "public")
+      at = DateTime.utc_now()
+
+      # One more than the endpoint's window, so there is a second page to reach.
+      for n <- 1..51 do
+        insert(:post,
+          user: author,
+          visibility: "public",
+          published_at: DateTime.add(at, -n, :second)
+        )
+      end
+
+      conn = get(conn, "/api/blog/posts")
+      assert %{"posts" => first, "next_cursor" => cursor} = json_response(conn, 200)
+      assert length(first) == 50
+      assert is_binary(cursor)
+
+      second_conn = get(build_conn(), "/api/blog/posts", %{after: cursor})
+      assert %{"posts" => second, "next_cursor" => nil} = json_response(second_conn, 200)
+      assert length(second) == 1
+
+      first_ids = Enum.map(first, & &1["id"])
+
+      refute Enum.any?(second, &(&1["id"] in first_ids)),
+             "the second page repeated a post from the first"
+    end
+
+    test "the single-author archive carries no cursor, because it does not page", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+
+      conn = get(conn, "/api/blog/posts", %{user_id: author.id})
+
+      # Absent, not null: the author branch has no window and no tail, so a
+      # cursor field there would invite a client to page something that does not.
+      assert %{"posts" => [_]} = body = json_response(conn, 200)
+      refute Map.has_key?(body, "next_cursor")
+    end
+
+    test "a malformed cursor is a 400, not the first page again", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+
+      conn = get(conn, "/api/blog/posts", %{after: "obviously-not-a-cursor"})
+
+      assert %{"error" => _} = json_response(conn, 400)
+    end
   end
 
   describe "GET /api/blog/posts/:id" do

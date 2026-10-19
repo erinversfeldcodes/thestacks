@@ -23,6 +23,14 @@ defmodule StacksWeb.BlogController do
   The bare call used to be a 422 demanding `user_id`, which left the platform
   with no answer to "what is written here" for a reader who does not already
   know whose blog they want. It now answers with what that reader may read.
+
+  The discovery branch is paginated by an opaque `after` cursor and returns
+  `next_cursor`, null at the end of the corpus. A page may be SHORT of the window
+  without being the last one — the visibility filter runs after the window is
+  read — so `next_cursor`, not the post count, is what says whether to ask again.
+
+  The author branch (`user_id`) is one author's archive and is not paginated, so
+  it carries no cursor.
   """
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, %{"user_id" => user_id}) do
@@ -31,10 +39,23 @@ defmodule StacksWeb.BlogController do
     json(conn, %{posts: Enum.map(posts, &ProtoJSON.blog_post/1)})
   end
 
-  def index(conn, _params) do
+  def index(conn, params) do
     viewer = build_viewer(conn)
-    posts = Blog.list_public_posts(viewer)
-    json(conn, %{posts: Enum.map(posts, &ProtoJSON.blog_post/1)})
+
+    case Blog.page_public_posts(viewer, after: params["after"]) do
+      {:ok, %{posts: posts, next_cursor: next_cursor}} ->
+        json(conn, %{
+          posts: Enum.map(posts, &ProtoJSON.blog_post/1),
+          next_cursor: next_cursor
+        })
+
+      # Not a silent restart from the top: a client looping on a cursor it cannot
+      # form would page the first window forever and look like a slow feed.
+      {:error, :invalid_cursor} ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: "invalid cursor"})
+    end
   end
 
   @doc "GET /api/blog/posts/:id — show a single post."

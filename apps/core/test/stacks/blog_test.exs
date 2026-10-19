@@ -394,6 +394,160 @@ defmodule Stacks.BlogTest do
     end
   end
 
+  describe "public post listing — paging past what the reader cannot see" do
+    # ⛔ The feed read the newest window and stopped there, with no cursor of any
+    # kind. A short page is fine and deliberate — the window is read before the
+    # visibility filter runs — but a short page nobody can page past means the
+    # corpus has an unreachable tail. A reader excluded from the newest window saw
+    # an EMPTY feed while older posts they were welcome to read sat behind it, and
+    # no request they could make would reach them.
+    #
+    # ⚠️ These tests drive the window at `limit: 2` rather than the production 50.
+    # Seeding 51 posts to exercise the real default would be slow and would prove
+    # the same thing; what matters is that more than one window exists.
+
+    defp author_with_public_profile do
+      insert(:user, profile_visibility: "public")
+    end
+
+    defp published_post(author, visibility, seconds_ago) do
+      insert(:post,
+        user: author,
+        visibility: visibility,
+        published_at: DateTime.add(DateTime.utc_now(), -seconds_ago, :second)
+      )
+    end
+
+    test "a reader invisible to the whole first window still reaches the posts behind it" do
+      # This is the defect, in the smallest shape that holds it. The two newest
+      # posts are `platform`, which an anonymous reader may not see; the third is
+      # `public` and is theirs to read. With a window of two, the first page
+      # therefore returns NOTHING — and before the cursor existed, nothing was
+      # also the final answer.
+      author = author_with_public_profile()
+      _newest = published_post(author, "platform", 30)
+      _second = published_post(author, "platform", 60)
+      oldest = published_post(author, "public", 90)
+
+      assert {:ok, %{posts: [], next_cursor: cursor}} =
+               Blog.page_public_posts(:unauthenticated, limit: 2)
+
+      # ⚠️ The cursor has to come from the last row SCANNED, not the last row
+      # returned. There is no last returned row here, so a cursor derived from the
+      # visible posts could not exist — and a feed that stopped on an empty page
+      # would be the same dead end one window further in.
+      assert is_binary(cursor),
+             "an empty page with more corpus behind it must still carry a cursor, or the " <>
+               "reader is stuck on a window they can see none of"
+
+      assert {:ok, %{posts: [found], next_cursor: nil}} =
+               Blog.page_public_posts(:unauthenticated, limit: 2, after: cursor)
+
+      assert found.id == oldest.id
+    end
+
+    test "walking the cursor to the end yields every visible post exactly once" do
+      # Guards the two ways a keyset goes wrong even when each page looks right:
+      # a boundary that re-reads its own last row (duplicates) or skips past it
+      # (a post nobody can ever see).
+      author = author_with_public_profile()
+      posts = for n <- 1..7, do: published_post(author, "public", n * 10)
+
+      collected = walk_feed(:unauthenticated, nil, [], 0)
+
+      assert Enum.sort(collected) == Enum.sort(Enum.map(posts, & &1.id))
+      assert length(Enum.uniq(collected)) == length(collected), "a post was returned twice"
+    end
+
+    test "posts sharing a published_at to the microsecond are both reachable" do
+      # `published_at` alone is not a total order — two posts published in one
+      # transaction collide — so the keyset carries `id` as a tie-break. Without
+      # it the boundary row is either repeated forever or dropped.
+      author = author_with_public_profile()
+      at = DateTime.utc_now()
+
+      a = insert(:post, user: author, visibility: "public", published_at: at)
+      b = insert(:post, user: author, visibility: "public", published_at: at)
+
+      # ⚠️ A window of ONE, so the page boundary falls INSIDE the tie. At two the
+      # pair fits in one window and a keyset that compared only `published_at`
+      # would look correct; the row it loses is the one it hands the cursor over.
+      collected = walk_feed(:unauthenticated, nil, [], 0, 1)
+
+      assert Enum.sort(collected) == Enum.sort([a.id, b.id]),
+             "a post sharing its published_at with the page's last row was lost at the " <>
+               "boundary, so it is reachable by no request at all"
+    end
+
+    test "the last page says it is the last one" do
+      author = author_with_public_profile()
+      published_post(author, "public", 10)
+
+      assert {:ok, %{posts: [_], next_cursor: nil}} =
+               Blog.page_public_posts(:unauthenticated, limit: 2)
+    end
+
+    test "a cursor the client could not have produced is refused, not silently restarted" do
+      author = author_with_public_profile()
+      published_post(author, "public", 10)
+
+      for bad <- ["not-base64!!", Base.url_encode64("nonsense", padding: false)] do
+        assert {:error, :invalid_cursor} =
+                 Blog.page_public_posts(:unauthenticated, after: bad),
+               "#{inspect(bad)} was accepted — a client looping on a cursor it cannot form " <>
+                 "would re-read the first window forever and see a feed that never advances"
+      end
+    end
+
+    test "a caller cannot ask for an unbounded window" do
+      # Seeds past the ceiling on purpose. A handful of posts would satisfy any
+      # limit at all, so the assertion would hold against no clamp whatsoever —
+      # the corpus has to be larger than the cap for the cap to be visible.
+      author = author_with_public_profile()
+      at = DateTime.utc_now()
+
+      for n <- 1..101 do
+        insert(:post,
+          user: author,
+          visibility: "public",
+          published_at: DateTime.add(at, -n, :second)
+        )
+      end
+
+      assert {:ok, %{posts: posts, next_cursor: cursor}} =
+               Blog.page_public_posts(:unauthenticated, limit: 1_000_000)
+
+      assert length(posts) == 100,
+             "asked for a million rows and got #{length(posts)} — the window is whatever the " <>
+               "caller says it is, so one request can read the whole corpus"
+
+      assert is_binary(cursor), "the 101st post must still be reachable"
+
+      # The floor, too: a window of zero reads nothing and would page forever.
+      assert {:ok, %{posts: [_]}} = Blog.page_public_posts(:unauthenticated, limit: 0)
+    end
+
+    # Pages the whole feed, with a hard stop so a boundary bug becomes a failing
+    # assertion rather than a test that never returns.
+    defp walk_feed(viewer, cursor, acc, depth, limit \\ 2)
+
+    defp walk_feed(_viewer, _cursor, _acc, depth, _limit) when depth > 20 do
+      flunk("the cursor did not reach the end of the feed in 20 pages — it is not advancing")
+    end
+
+    defp walk_feed(viewer, cursor, acc, depth, limit) do
+      {:ok, %{posts: posts, next_cursor: next}} =
+        Blog.page_public_posts(viewer, limit: limit, after: cursor)
+
+      acc = acc ++ Enum.map(posts, & &1.id)
+
+      case next do
+        nil -> acc
+        _ -> walk_feed(viewer, next, acc, depth + 1, limit)
+      end
+    end
+  end
+
   describe "public post listing — cost per request" do
     # The public archive is anonymous and the list is capped at 50, so the
     # per-request query count is the whole cost story. Filtering visibility one
@@ -413,7 +567,7 @@ defmodule Stacks.BlogTest do
         )
       end
 
-      count = count_queries(fn -> Blog.list_public_posts({:platform_user, viewer.id}) end)
+      count = count_queries(fn -> Blog.page_public_posts({:platform_user, viewer.id}) end)
 
       # 20 posts by 10 authors. One post query, one preload, and block lookups
       # that must be per-author at worst — not per-post.
