@@ -122,12 +122,28 @@ if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]] && comma
     # So the two cases are now distinguished before anything is claimed.
     if [[ "${modal_stop_failed:-0}" == "1" ]]; then
         if ! python3 -m modal --version >/dev/null 2>&1; then
-            echo "FAIL cleanup: the modal CLI is not installed, so no Modal app was stopped." >&2
-            echo "       This is a refusal, not a pass — 'already gone' cannot be distinguished" >&2
-            echo "       from 'never tried' without it." >&2
-            exit 1
+            # ⚠️ `SKIP_VISION` is the one case where a missing modal is correct
+            # rather than a misconfiguration: it is the flag that says "do not
+            # deploy the vision app", and CLAUDE.md records that it exists
+            # precisely to drop the modal dependency. There is then no Modal app
+            # for this branch to stop, so refusing would block every core-only
+            # preview deploy — which it did, once, immediately after this
+            # refusal was added.
+            if [[ -n "${SKIP_VISION:-}" ]]; then
+                echo "    SKIP: SKIP_VISION is set and modal is unavailable here — no vision app"
+                echo "          was deployed for this branch, so there is none to stop."
+            else
+                echo "FAIL cleanup: the modal CLI is not available to this python3, so no Modal" >&2
+                echo "       app was stopped." >&2
+                echo "       This is a refusal, not a pass — 'already gone' cannot be" >&2
+                echo "       distinguished from 'never tried' without it. Install it (CI does:" >&2
+                echo "       pip install modal), or pass SKIP_VISION=1 if this branch has no" >&2
+                echo "       vision app." >&2
+                exit 1
+            fi
+        else
+            echo "    Modal app ${MODAL_APP} not found (already gone)."
         fi
-        echo "    Modal app ${MODAL_APP} not found (already gone)."
     fi
 else
     echo "    SKIP: MODAL_TOKEN_ID not set — skipping Modal cleanup."
