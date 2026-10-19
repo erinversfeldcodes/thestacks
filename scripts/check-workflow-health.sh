@@ -156,7 +156,16 @@ for path in sorted(paths):
 
     # A workflow in PR CI already fails somebody's pull request. This check is
     # for the ones that cannot.
-    if "pull_request" in trig:
+    #
+    # ⛔ BUT a workflow can have BOTH, and then only half of it is watched. The
+    # first version of this check excluded anything with a `pull_request`
+    # trigger, which let exactly the hole it was built to close stay open:
+    # `cleanup-preview.yml` is PR-triggered AND scheduled, its SCHEDULED job had
+    # been failing with `flyctl not on PATH`, and no pull request ever goes red
+    # for that job because it is `if: github.event_name != 'pull_request'`.
+    # `codeql.yml` has the same shape. So a schedule is always watched; only a
+    # purely PR-triggered workflow is skipped.
+    if "pull_request" in trig and "schedule" not in trig:
         continue
 
     watched += 1

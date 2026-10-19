@@ -164,6 +164,35 @@ assert_contains "$GATE_SRC" "pull_request" "PR-triggered workflows are identifie
 assert_contains "$GATE_SRC" "already fails somebody's pull request" \
     "and skipped, with the reason stated"
 
+test_case "a_workflow_with_BOTH_triggers_is_still_watched" \
+    "a scheduled job inside a PR-triggered workflow is nobody's pull request"
+# ⛔ This is the hole the first version of this gate left open, and it let
+# through exactly the kind of failure the gate exists for.
+#
+# `cleanup-preview.yml` is PR-triggered AND scheduled. Its sweep job is
+# `if: github.event_name != 'pull_request'`, so no pull request ever runs it —
+# and it had been failing with `flyctl not on PATH`, leaving orphaned preview
+# apps and an unattached volume behind. Excluding any workflow with a
+# `pull_request` trigger hid that completely. `codeql.yml` has the same shape.
+assert_contains "$GATE_SRC" 'if "pull_request" in trig and "schedule" not in trig' \
+    "a workflow carrying a schedule is watched even when it is also PR-triggered"
+
+BOTH="$(git -C "$REPO_ROOT" ls-tree -r --name-only origin/main .github/workflows 2>/dev/null |
+    while IFS= read -r wf; do
+        src="$(git -C "$REPO_ROOT" show "origin/main:$wf" 2>/dev/null)"
+        block="$(printf '%s\n' "$src" | awk '/^on:$/{f=1;next} f&&/^[a-z]/{exit} f')"
+        if printf '%s\n' "$block" | grep -qE '^  pull_request:' &&
+            printf '%s\n' "$block" | grep -qE '^  schedule:'; then
+            printf '%s\n' "$wf"
+        fi
+    done | wc -l | tr -d ' ')"
+
+if [[ "${BOTH:-0}" -ge 1 ]]; then
+    _record_pass "origin/main holds $BOTH workflow(s) with both triggers, so this case is real"
+else
+    _record_fail "no workflow on origin/main carries both a pull_request and a schedule trigger. If that is now true the assertion above guards nothing — retire it deliberately rather than leaving it to pass over an empty case"
+fi
+
 test_case "never_run_is_scoped_to_scheduled_workflows" \
     "a dispatch-only operator tool is not reported for never having run"
 # Otherwise every manual GDPR tool reads as broken, and two scheduled workflows
