@@ -446,6 +446,21 @@ http_5xx_count = sum(1 for _, _, k in all_samples if k == "http_5xx")
 http_4xx_count = sum(1 for _, _, k in all_samples if k == "http_4xx")
 timeout_count = sum(1 for _, _, k in all_samples if k == "timeout")
 
+# ⛔ THE FIFTH KIND, which the summary used to omit entirely.
+#
+# `_classify` emits five: ok, http_4xx, http_5xx, timeout, and `error` — any
+# non-zero curl exit that is not 28. Only the first four were counted, so every
+# `error` sample reduced availability and then appeared in NO counter. Against a
+# mock that accepts and never replies, the summary read
+# `availability=0.0 4xx=0 5xx=0 timeouts=0`: six failures, all invisible, and an
+# operator with no way to tell a refused connection from a slow one.
+#
+# ⚠️ It also made the suite's own assertion vacuous. The test checked that the
+# word "timeout" appeared in the summary, and `timeouts=0` contains it — so the
+# assertion passed on a run where the count was zero, which is every run. Its
+# one observed failure was the summary happening not to contain the word at all.
+error_count = sum(1 for _, _, k in all_samples if k == "error")
+
 availability = (succeeded / total) if total else 0.0
 
 p95_per_probe = {
@@ -473,6 +488,7 @@ summary = {
         "http_4xx_count": http_4xx_count,
         "http_5xx_count": http_5xx_count,
         "timeout_count": timeout_count,
+        "error_count": error_count,
     },
     "upload_outcome": upload_outcome,
 }
@@ -480,7 +496,7 @@ summary = {
 print(
     f"probe summary: availability={availability * 100:.1f}% "
     f"total={total} 4xx={http_4xx_count} 5xx={http_5xx_count} "
-    f"timeouts={timeout_count} upload_outcome={upload_outcome}"
+    f"timeouts={timeout_count} errors={error_count} upload_outcome={upload_outcome}"
 )
 print("probe-summary-json:", json.dumps(summary))
 
@@ -503,6 +519,12 @@ flat = {
     ],
     "synthetic_probes_timeout_count": summary["synthetic_probes"][
         "timeout_count"
+    ],
+    # Carried into the flat metrics too, so the dashboards can see the bucket
+    # that used to be dropped — a failure counted nowhere is a failure nobody
+    # alerts on.
+    "synthetic_probes_error_count": summary["synthetic_probes"][
+        "error_count"
     ],
     "upload_outcome": summary["upload_outcome"],
 }
