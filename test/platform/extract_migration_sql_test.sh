@@ -123,4 +123,90 @@ test_case "create_table_stub_first" "CREATE TABLE stubs precede the statements"
 assert_contains "$FIRST_LINE" "CREATE TABLE op.gadgets" \
     "the table stub is emitted before the ALTER that references it"
 
+# ⛔ PARTIAL EXTRACTION MUST DECLARE ITSELF.
+#
+# A migration that yields NOTHING makes `security-squawk.sh` print
+# "(no raw SQL — skipping)", so a reader can see it was not analysed. A
+# migration that yields SOME statements was analysed, found clean, and counted
+# toward the coverage number — so the summary claimed a file had been inspected
+# when only part of its SQL had been.
+#
+# Measured when this was found: 7 of 13 changed migrations on this branch
+# extracted only partially, and two of them yielded nothing but their `SET LOCAL`
+# timeout declarations — the one kind of statement that cannot itself be unsafe.
+# squawk reported "Found 0 issues" for both.
+cat > "$WORKDIR/partial.exs" <<'FIXTURE'
+defmodule Core.Repo.Migrations.Partial do
+  use Ecto.Migration
+
+  @role "stacks_app"
+
+  def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+
+    # Discarded: Elixir interpolation.
+    execute("GRANT SELECT ON op.widgets TO #{@role}")
+
+    # Discarded: anonymous procedure.
+    execute("""
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'x') THEN
+        GRANT INSERT ON op.widgets TO x;
+      END IF;
+    END $$;
+    """)
+
+    # Never matched at all: the argument is not a literal.
+    execute(grants_up(), grants_down())
+  end
+
+  def down do
+    execute("SET LOCAL lock_timeout = '9s'")
+  end
+
+  defp grants_up, do: "GRANT UPDATE ON op.widgets TO x"
+  defp grants_down, do: "REVOKE UPDATE ON op.widgets FROM x"
+end
+FIXTURE
+
+PARTIAL_OUT="$(python3 "$EXTRACTOR" "$WORKDIR/partial.exs" 2>&1)"
+
+test_case "partial_extraction_declares_itself" \
+    "a migration whose SQL was only partly extracted says so"
+assert_contains "$PARTIAL_OUT" "-- UNANALYSABLE" \
+    "the stream carries a marker naming the gap"
+assert_contains "$PARTIAL_OUT" "Elixir interpolation" \
+    "an interpolated statement is counted as dropped"
+assert_contains "$PARTIAL_OUT" "DO \$\$ block" \
+    "a DO block is counted as dropped"
+assert_contains "$PARTIAL_OUT" "non-literal argument" \
+    "⛔ execute(helper()) is counted — the one variant that left no trace, because the regex never matched it at all"
+
+test_case "the_marker_is_a_sql_comment" "declaring the gap changes nothing squawk analyses"
+# If the marker were not a comment it would alter the statements under analysis,
+# which would be a worse cure than the disease.
+MARKER_LINE="$(printf '%s\n' "$PARTIAL_OUT" | grep -- '-- UNANALYSABLE' | head -1)"
+case "$MARKER_LINE" in
+    "--"*) _record_pass "the marker is a SQL comment, so squawk ignores it" ;;
+    *) _record_fail "the marker is not a comment: $MARKER_LINE" ;;
+esac
+
+test_case "def_down_is_stripped" "only the forward migration reaches squawk"
+# ⚠️ `lint-migrations.sh` has always stripped `down`; this extractor did not, so
+# the stream carried up and down interleaved. That contradicts this file's own
+# header: the reason both execute forms share one alternation is that squawk's
+# analysis is ORDER-SENSITIVE, and a rollback's `SET lock_timeout` appearing
+# mid-stream can look like it covers a forward statement it will never precede.
+assert_not_contains "$PARTIAL_OUT" "lock_timeout = '9s'" \
+    "the down/0 statement is not in the stream"
+assert_contains "$PARTIAL_OUT" "lock_timeout = '5s'" \
+    "while the up/0 statement still is"
+
+test_case "a_fully_extracted_migration_carries_no_marker" "the signal is not always on"
+# Anti-vacuity for the assertions above: a marker that appeared unconditionally
+# would satisfy every `assert_contains` while meaning nothing.
+CLEAN_OUT="$(python3 "$EXTRACTOR" "$WORKDIR/mixed.exs" 2>&1)"
+assert_not_contains "$CLEAN_OUT" "-- UNANALYSABLE" \
+    "a migration whose SQL extracts completely says nothing about gaps"
+
 summarise

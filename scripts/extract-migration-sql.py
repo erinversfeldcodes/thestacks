@@ -25,19 +25,57 @@ _EXECUTE_RE = re.compile(
 )
 
 
-def _execute_statements(src: str) -> list[tuple[int, str]]:
-    """Every analysable `execute(...)` string, paired with its source offset."""
+# ⛔ WHAT GETS DISCARDED HAS TO BE COUNTED, because partial extraction is worse
+# than none.
+#
+# When a file yields NOTHING, `security-squawk.sh` prints
+# "(no raw SQL — skipping)" and a reader can see it was not analysed. When a
+# file yields SOME statements, squawk analyses those, finds nothing wrong, and
+# the file is reported as inspected — so the summary's coverage count is a
+# number of files looked at rather than of SQL examined.
+#
+# Measured on this repository: `20261019120000_grant_the_app_role_its_own_job_queue`
+# yields exactly three statements — two `SET LOCAL` from `up/0` and one from
+# `down/0` — while five `DO $$` blocks carrying twelve GRANT/REVOKE statements,
+# an `ALTER DEFAULT PRIVILEGES` pair and two far-end assertions are discarded.
+# squawk then reports "Found 0 issues in 1 file" with exit 0. The only SQL it
+# saw was the timeout declarations, which are the one thing that cannot itself
+# be unsafe. `20261016150000` has the identical shape.
+UNANALYSABLE_MARKER = "-- UNANALYSABLE"
+
+
+def _unmatched_execute_count(src: str) -> int:
+    """`execute(` calls the regex never matched at all.
+
+    ⚠️ The third blindness, and the only one that leaves no trace: a migration
+    that builds its SQL in a helper — `execute(grants_up(), grants_down())` —
+    matches neither alternation, so it is not "discarded" but never seen. Both
+    other cases at least pass through the loop below.
+    """
+    return len(re.findall(r"execute\s*\(", src)) - len(_EXECUTE_RE.findall(src))
+
+
+def _execute_statements(src: str) -> tuple[list[tuple[int, str]], list[str]]:
+    """Analysable `execute(...)` strings with offsets, plus why anything was dropped."""
     out: list[tuple[int, str]] = []
+    dropped: list[str] = []
     for m in _EXECUTE_RE.finditer(src):
         body = m.group("heredoc") if m.group("heredoc") is not None else m.group("single")
         if "#{" in body:  # Elixir interpolation — not analysable
+            dropped.append("Elixir interpolation")
             continue
         if re.search(r"DO\s*\$\$", body, re.IGNORECASE):  # anonymous procedure
+            dropped.append("DO $$ block")
             continue
         stmt = body.strip()
         if stmt:
             out.append((m.start(), stmt))
-    return out
+
+    unmatched = _unmatched_execute_count(src)
+    if unmatched > 0:
+        dropped.extend(["execute() with a non-literal argument"] * unmatched)
+
+    return out, dropped
 
 
 def _balanced_args(src: str, open_paren_pos: int) -> str:
@@ -159,17 +197,52 @@ def _translate_index_dsl(src: str) -> list[tuple[int, str]]:
     return out
 
 
+def _strip_def_down(text: str) -> str:
+    """Drop `def down`, so only the forward migration reaches squawk.
+
+    ⚠️ `lint-migrations.sh` has always done this and this file did not, so the
+    stream carried `up` and `down` statements interleaved. That contradicts the
+    header above: the whole reason both `execute` forms share one alternation is
+    that squawk's analysis is ORDER-SENSITIVE, and a rollback's statements
+    appearing mid-stream is exactly the out-of-order hazard it warns about — a
+    `SET lock_timeout` from `down/0` can appear to cover an `up/0` statement it
+    will never run before.
+    """
+    m = re.search(r"^([ \t]*)def down(?:\([^)]*\))?\s+do\s*$", text, re.MULTILINE)
+    if not m:
+        return text
+    indent = m.group(1)
+    close = re.compile(r"^" + re.escape(indent) + r"end[ \t]*$", re.MULTILINE).search(text, m.end())
+    if not close:
+        return text
+    return text[: m.start()] + text[close.end() :]
+
+
 def extract(path: str) -> list[str]:
     with open(path) as f:
         src = f.read()
+    src = _strip_def_down(src)
     # Sorted by source offset, so the stream squawk reads is the order the
     # migration executes. The CREATE TABLE stubs are the one deliberate
     # exception: they are context declarations rather than statements under
     # analysis, and must precede anything that references the table.
-    positioned = sorted(_execute_statements(src) + _translate_index_dsl(src))
+    positioned_execs, dropped = _execute_statements(src)
+    positioned = sorted(positioned_execs + _translate_index_dsl(src))
     subject = [stmt for _, stmt in positioned]
     statements = (_translate_create_table_dsl(src) + subject) if subject else []
-    return [s if s.rstrip().endswith(";") else s + ";" for s in statements]
+    out = [s if s.rstrip().endswith(";") else s + ";" for s in statements]
+
+    # ⛔ Declared in the stream itself, as a SQL comment. squawk ignores
+    # comments, so this changes nothing it analyses — but it makes the gap
+    # VISIBLE to the caller, which is the whole point. Without it a partially
+    # extracted migration is indistinguishable from a fully extracted one.
+    if dropped:
+        tally = ", ".join(f"{dropped.count(r)}x {r}" for r in sorted(set(dropped)))
+        out.insert(
+            0, f"{UNANALYSABLE_MARKER}: {len(dropped)} statement(s) not extracted ({tally});"
+        )
+
+    return out
 
 
 def main() -> int:
