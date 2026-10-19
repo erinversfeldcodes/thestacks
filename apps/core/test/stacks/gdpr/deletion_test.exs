@@ -242,6 +242,47 @@ defmodule Stacks.GDPR.DeletionTest do
       assert Enum.all?(rows, &(&1.metadata == %{}))
     end
 
+    test "a self-redeemed invitation is counted once, not once per role" do
+      # ⚠️ This count is CORRECT BY ORDERING, and nothing said so until now.
+      #
+      # `scrub_invites/3` sums two `update_all` results: rows naming the user as
+      # REDEEMER (or by invited address) and rows naming them as ISSUER. One row
+      # can be both — you redeemed your own invitation — and the naive reading
+      # is that it is counted twice.
+      #
+      # It is not, because the subject update runs FIRST and nulls `note` and
+      # `invited_email`, so the author update's `not is_nil(note) or not
+      # is_nil(invited_email)` no longer matches that row. Swap the two blocks
+      # and the author update runs while `redeemed_by_id` is still set, the
+      # subject update then matches, and the sum becomes 2 for one row.
+      #
+      # So the correctness is real and fragile, and depends on an ordering no
+      # comment required. Measured at 1 before this test was written; this is
+      # what keeps it there.
+      user = insert(:user, email: "self-invite-counted-once@stacks.test")
+
+      {:ok, _invite} =
+        %Stacks.Accounts.InviteCode{}
+        |> Ecto.Changeset.change(%{
+          code_hash: "hash-#{System.unique_integer([:positive])}",
+          code_prefix: "SELF",
+          issued_by_id: user.id,
+          redeemed_by_id: user.id,
+          invited_email: "self-invite-counted-once@stacks.test",
+          note: "mine as issuer and as redeemer",
+          max_uses: 1
+        })
+        |> Core.Repo.insert()
+
+      assert {:ok, %{settle_invites_naming_user: %{scrubbed: scrubbed}}} =
+               Deletion.delete_user_data(user.id)
+
+      assert scrubbed == 1,
+             "one invitation row was touched, so the count must be 1. A 2 means the two " <>
+               "update_all results are being summed over the same row — reorder the blocks " <>
+               "and that is exactly what happens."
+    end
+
     test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
       user = insert(:user)
       other_id = Ecto.UUID.generate()

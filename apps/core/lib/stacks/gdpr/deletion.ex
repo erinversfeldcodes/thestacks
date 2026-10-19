@@ -336,6 +336,20 @@ defmodule Stacks.GDPR.Deletion do
   # Hence two statements. The rule is that a row's `set` must answer the same
   # question its `where` asked.
   defp scrub_invites(repo, user_id, user_email) do
+    # ⚠️ THE ORDER OF THESE TWO BLOCKS IS LOAD-BEARING, and the sum at the end
+    # is what makes it so.
+    #
+    # One row can satisfy both predicates — you redeemed your own invitation —
+    # and the results are summed. It counts once rather than twice only because
+    # the SUBJECT update runs first and nulls `note` and `invited_email`, so the
+    # author update's `not is_nil(note) or not is_nil(invited_email)` no longer
+    # matches that row. Swap them and the author update runs while
+    # `redeemed_by_id` is still set, the subject update then matches, and one row
+    # reports as two.
+    #
+    # Measured, and pinned by a test that swaps them to confirm it fails. If
+    # either WHERE widens, re-check the sum rather than trusting this note.
+    #
     # Named as the REDEEMER, or by the address the invitation was written to:
     # the redemption link is this person's own, so it goes with them.
     {as_subject, _} =
