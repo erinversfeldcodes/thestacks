@@ -5,6 +5,8 @@ import Expect
 import Http
 import Page.Login as Login exposing (FieldValidation(..), Msg(..), SubmitError(..))
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
+import Test.Html.Selector exposing (text)
 import Types.PasswordRule as PasswordRule
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -134,6 +136,43 @@ suite =
                             Login.update (ModeSwitched Login.RegisterMode) failing
                     in
                     model.submitState |> Expect.equal NotAsked
+            ]
+        , describe "the invitation refusal tells the reader which refusal it was"
+            [ -- ⛔ Four server statuses, four messages, and the one that matters
+              -- most is 403. This function previously rendered revoked (403) as
+              -- expired (410) on the reasoning that a reader learns nothing from
+              -- the distinction. They learn the thing that decides what to do
+              -- next: an expired invitation is reissued by asking again and a
+              -- revoked one is not, so "ask for a fresh one" sends someone to ask
+              -- a question already answered and the sender gets to refuse twice.
+              --
+              -- ⚠️ The fix was in place and UNPINNED. Nothing failed if 403
+              -- collapsed back into the 410 branch, and the mapping lives in an
+              -- unexposed function, so this drives the VIEW — what a reader
+              -- actually sees — rather than the mapping in isolation.
+              test "a withdrawn invitation does not read as an expired one" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 403)
+                        |> Query.has [ text "withdrawn" ]
+            , test "an expired invitation says expired, and says a fresh one can be asked for" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 410)
+                        |> Query.has [ text "expired" ]
+            , test "an unrecognised code is not reported as either" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 404)
+                        |> Query.has [ text "don't recognise" ]
+            , test "an already-used invitation says so" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 409)
+                        |> Query.has [ text "already been used" ]
+            , -- The point is DISTINGUISHABILITY, so assert the pair directly:
+              -- a 403 that rendered the 410 copy would satisfy every
+              -- single-status test above except this one.
+              test "the withdrawn message is not the expired message" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 403)
+                        |> Query.hasNot [ text "Ask whoever sent it for a fresh one." ]
             ]
         , describe "submit"
             [ test "FormSubmitted sets submitState to Loading" <|
@@ -534,3 +573,16 @@ forgotPasswordModeSuite =
                 in
                 m3.forgotState |> Expect.equal (Failure (RequestFailed Http.NetworkError))
         ]
+
+
+{-| The login view with the invitation card holding a refusal, as a reader sees it.
+-}
+inviteRefusalView : Http.Error -> Query.Single Login.Msg
+inviteRefusalView err =
+    let
+        base =
+            Login.init Login.Fresh
+    in
+    { base | inviteOnly = True, inviteCheck = Failure err, mode = Login.RegisterMode }
+        |> Login.view
+        |> Query.fromHtml

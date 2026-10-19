@@ -98,4 +98,41 @@ suite =
 
                     Err _ ->
                         Expect.pass
+        , -- ⚠️ `textOrBlank`'s THIRD tolerance case, which its own doc comment
+          -- describes and nothing asserted. `oneOf` falls through on a type
+          -- MISMATCH as well as on absent-or-null, so `"title": 42` becomes ""
+          -- rather than failing the row — and because the report decodes as a
+          -- `Decode.list`, one failing row fails the whole response and the page
+          -- reads "The report didn't load" permanently.
+          --
+          -- Documented-but-unasserted is the gap: a future tightening of
+          -- `textOrBlank` to `Decode.nullable Decode.string` would still pass
+          -- every other test in this file while turning one odd cell into a
+          -- dead report.
+          test "a wrong-typed text field degrades to blank rather than failing the row" <|
+            \_ ->
+                case
+                    decode """
+                    { "row_number": 3, "title": 42, "author": true,
+                      "isbn13": 9780441013593, "goodreads_shelf": [],
+                      "outcome": "unverified", "reason": null }
+                    """
+                of
+                    Ok row ->
+                        Expect.all
+                            [ \r -> Expect.equal 3 r.rowNumber
+                            , \r -> Expect.equal "" r.title
+                            , \r -> Expect.equal "" r.author
+                            , \r -> Expect.equal "" r.isbn13
+                            , \r -> Expect.equal "" r.goodreadsShelf
+                            , \r -> Expect.equal (Just "unverified") r.outcome
+                            ]
+                            row
+
+                    Err e ->
+                        Expect.fail
+                            ("a type mismatch in a text field failed the whole row, which "
+                                ++ "fails the whole report: "
+                                ++ Decode.errorToString e
+                            )
         ]
