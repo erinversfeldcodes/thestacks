@@ -39,6 +39,28 @@ jobs:
         with:
           version: 0.4.67
 
+      # ⚠️ The repo's scripts call `fly`; this action installs `flyctl` ONLY.
+      # `deploy-production.yml` has carried this alias step for exactly that
+      # reason, and both jobs here were missing it — with opposite symptoms. The
+      # weekly sweep failed loudly (`FAIL sweep: flyctl not on PATH`), which is
+      # how this was found. The closed-PR job FAILED OPEN: `cleanup-preview.sh`
+      # guards its teardown with `command -v fly`, so it skipped every Fly
+      # deletion and still reported success. Two orphaned preview apps from a
+      # merged branch survived that way.
+      - name: Alias fly -> flyctl
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # ⚠️ Without this, the Modal teardown in `cleanup-preview.sh` runs
+      # `python3 -m modal app stop` with no modal installed. It fails, the
+      # script's `|| echo "not found (already gone)"` swallows it, and the run
+      # reports the app as already cleaned up. 24 orphaned vision apps
+      # accumulated that way, the oldest from 20 July.
+      - name: Install Modal
+        run: pip install modal==1.5.2
+
       - name: Tear down preview for closed PR branch
         env:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -62,6 +84,20 @@ jobs:
         uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
         with:
           version: 0.4.67
+
+      # ⚠️ The repo's scripts call `fly`; this action installs `flyctl` ONLY.
+      # `deploy-production.yml` has carried this alias step for exactly that
+      # reason, and both jobs here were missing it — with opposite symptoms. The
+      # weekly sweep failed loudly (`FAIL sweep: flyctl not on PATH`), which is
+      # how this was found. The closed-PR job FAILED OPEN: `cleanup-preview.sh`
+      # guards its teardown with `command -v fly`, so it skipped every Fly
+      # deletion and still reported success. Two orphaned preview apps from a
+      # merged branch survived that way.
+      - name: Alias fly -> flyctl
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Sweep preview orphans
         run: bash scripts/sweep-preview-orphans.sh

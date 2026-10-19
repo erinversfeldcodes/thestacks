@@ -71,21 +71,64 @@ echo "    Metrics app: ${VM_APP}"
 echo "    Grafana app: ${GRAFANA_APP}"
 echo "    Modal app:   ${MODAL_APP}"
 
-if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
+# ⛔ A MISSING TOOL IS A FAILURE, not a skip.
+#
+# This used to be one `if command -v fly … else SKIP` branch, and it failed open
+# in the worst possible way: in GitHub Actions the setup action installs
+# `flyctl` and NOT `fly`, so the condition was false on every run, the Fly
+# teardown was skipped in silence, and the workflow reported success. Two
+# preview apps from a merged branch survived that way until a Fly listing turned
+# them up by hand — one of them still holding an unattached volume.
+#
+# The weekly orphan sweep hit the identical cause and failed LOUDLY, which is
+# the only reason any of it was visible. A cleanup script that deletes nothing
+# must not be the quiet one.
+#
+# Still skips when the TOKEN is absent, because that is a legitimate local
+# invocation with nothing to authenticate against — but it says which of the two
+# reasons applied rather than collapsing them into one message.
+if ! command -v fly &>/dev/null; then
+    echo "FAIL cleanup: 'fly' is not on PATH." >&2
+    echo "       In CI the flyctl action installs 'flyctl' only; alias it to 'fly' first." >&2
+    echo "       Nothing was destroyed. This is a refusal, not a pass." >&2
+    exit 1
+fi
+
+if [[ -n "${FLY_API_TOKEN:-}" ]]; then
     fly apps destroy "${CORE_APP}" --yes 2>/dev/null && echo "    Destroyed ${CORE_APP}." || echo "    ${CORE_APP} not found (already gone)."
     fly apps destroy "${SCRAPER_APP}" --yes 2>/dev/null && echo "    Destroyed ${SCRAPER_APP}." || echo "    ${SCRAPER_APP} not found (already gone)."
     fly apps destroy "${SEARXNG_APP}" --yes 2>/dev/null && echo "    Destroyed ${SEARXNG_APP}." || echo "    ${SEARXNG_APP} not found (already gone)."
     fly apps destroy "${VM_APP}" --yes 2>/dev/null && echo "    Destroyed ${VM_APP}." || echo "    ${VM_APP} not found (already gone)."
     fly apps destroy "${GRAFANA_APP}" --yes 2>/dev/null && echo "    Destroyed ${GRAFANA_APP}." || echo "    ${GRAFANA_APP} not found (already gone)."
 else
-    echo "    SKIP: flyctl not available or FLY_API_TOKEN not set — skipping Fly cleanup."
+    echo "    SKIP: FLY_API_TOKEN not set — skipping Fly cleanup (nothing to authenticate with)."
 fi
 
 if [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]] && command -v python3 &>/dev/null; then
     MODAL_TOKEN_ID="${MODAL_TOKEN_ID}" MODAL_TOKEN_SECRET="${MODAL_TOKEN_SECRET}" \
         python3 -m modal app stop "${MODAL_APP}" 2>/dev/null \
         && echo "    Modal app ${MODAL_APP} stopped." \
-        || echo "    Modal app ${MODAL_APP} not found (already gone)."
+        || modal_stop_failed=1
+
+    # ⛔ "not found (already gone)" USED TO BE PRINTED HERE unconditionally, and
+    # it was a lie in the one case that mattered.
+    #
+    # `python3 -m modal` fails identically whether the app is genuinely absent
+    # or the modal CLI is not installed — and the cleanup workflow did not
+    # install it. So every closed-PR run reported the Modal app as already
+    # cleaned up while stopping nothing. 24 orphaned vision apps accumulated,
+    # the oldest from 20 July, and only a hand-run `modal app list` found them.
+    #
+    # So the two cases are now distinguished before anything is claimed.
+    if [[ "${modal_stop_failed:-0}" == "1" ]]; then
+        if ! python3 -m modal --version >/dev/null 2>&1; then
+            echo "FAIL cleanup: the modal CLI is not installed, so no Modal app was stopped." >&2
+            echo "       This is a refusal, not a pass — 'already gone' cannot be distinguished" >&2
+            echo "       from 'never tried' without it." >&2
+            exit 1
+        fi
+        echo "    Modal app ${MODAL_APP} not found (already gone)."
+    fi
 else
     echo "    SKIP: MODAL_TOKEN_ID not set — skipping Modal cleanup."
 fi
