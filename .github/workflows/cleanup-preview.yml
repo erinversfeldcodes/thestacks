@@ -99,5 +99,13 @@ jobs:
           ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # ⚠️ The sweep now has a Modal leg, and it REFUSES rather than skips when
+      # the CLI is absent. That is deliberate: the closed-PR job above once ran
+      # for months with no modal installed, swallowing every failure as "already
+      # gone". Pinned to the same version as that job so the two cannot drift
+      # into disagreeing about the CLI's behaviour.
+      - name: Install Modal
+        run: pip install modal==1.5.2
+
       - name: Sweep preview orphans
         run: bash scripts/sweep-preview-orphans.sh
