@@ -174,6 +174,40 @@ suite =
                     inviteRefusalView (Http.BadStatus 403)
                         |> Query.hasNot [ text "Ask whoever sent it for a fresh one." ]
             ]
+        , describe "the two places the invitation refusals are spelled agree"
+            [ -- ⛔ A STATED INVARIANT WITH NO MACHINE HOLDING IT. The second
+              -- mapping's own docstring says "Both mappings must agree", and it
+              -- says so because they once did not: `inviteErrorMessage` stopped
+              -- collapsing revoked onto expired and `inviteRefusalMessage` was
+              -- missed, so the sign-in card said "withdrawn" while the
+              -- registration path still said "expired" for the SAME invitation.
+              --
+              -- ⚠️ Asserting each copy separately would not catch that. Four
+              -- tests on one function and four on the other both pass while the
+              -- two disagree — it is the AGREEMENT that is the property, so that
+              -- is what is asserted: the text a reader sees on the invite card
+              -- must be the exact string the registration path produces for the
+              -- paired reason.
+              test "a withdrawn invitation reads the same on both paths" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 403)
+                        |> Query.has [ text (refusalCopyFor "invite_revoked") ]
+            , test "an expired invitation reads the same on both paths" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 410)
+                        |> Query.has [ text (refusalCopyFor "invite_expired") ]
+            , test "an exhausted invitation reads the same on both paths" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 409)
+                        |> Query.has [ text (refusalCopyFor "invite_exhausted") ]
+            , test "an unrecognised code reads the same on both paths" <|
+                \_ ->
+                    -- The reason-keyed mapping reaches this through its fallback,
+                    -- which is correct: an unknown reason and an unrecognised
+                    -- code are the same situation for the reader.
+                    inviteRefusalView (Http.BadStatus 404)
+                        |> Query.has [ text (refusalCopyFor "something_unmapped") ]
+            ]
         , describe "submit"
             [ test "FormSubmitted sets submitState to Loading" <|
                 \_ ->
@@ -586,3 +620,11 @@ inviteRefusalView err =
     { base | inviteOnly = True, inviteCheck = Failure err, mode = Login.RegisterMode }
         |> Login.view
         |> Query.fromHtml
+
+
+{-| The registration path's copy for a server refusal reason, reached through the
+exposed `errorMessage` rather than by exposing the mapping itself.
+-}
+refusalCopyFor : String -> String
+refusalCopyFor reason =
+    Login.errorMessage Login.RegisterMode (SubmitInviteRefused reason)
