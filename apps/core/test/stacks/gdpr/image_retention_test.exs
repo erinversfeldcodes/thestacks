@@ -21,6 +21,77 @@ defmodule Stacks.GDPR.ImageRetentionTest do
     )
   end
 
+  describe "the sweeps are bounded, and the drain is what clears a backlog" do
+    # ⛔ These pin the fix for a 151-day production retention breach, and the
+    # thing they pin is a BOUND rather than a behaviour, so it is easy to delete
+    # by accident. Before it, both sweeps took every matching row in one pass:
+    # 6,655 expired rows on production meant 6,655 storage deletions and as many
+    # event inserts in a single Oban job, on a machine that suspends when idle.
+    # The run never finished, nothing rescued the orphaned job, and the backlog
+    # grew faster than any run could clear it.
+    #
+    # So "deletes fewer than exist" is the assertion. A test that only checked
+    # the backlog eventually empties would pass against the unbounded version
+    # that caused the outage.
+    defp expired_image do
+      insert(:uploaded_image,
+        expires_at: DateTime.add(DateTime.utc_now(), -1, :day),
+        uploaded_at: DateTime.add(DateTime.utc_now(), -31, :day)
+      )
+    end
+
+    test "one sweep deletes at most its limit, leaving the rest for the next run" do
+      for _ <- 1..5, do: expired_image()
+
+      assert {:ok, 2} = ImageRetention.cleanup_expired_images(limit: 2),
+             "an unbounded sweep would return 5 here — that is the shape that could not finish"
+
+      assert Repo.aggregate(Stacks.Books.UploadedImage, :count) == 3
+    end
+
+    test "the stuck sweep is bounded the same way" do
+      for _ <- 1..4 do
+        insert(:uploaded_image,
+          status: "pending",
+          uploaded_at: DateTime.add(DateTime.utc_now(), -3, :hour)
+        )
+      end
+
+      assert {:ok, 2} = ImageRetention.cleanup_stuck_images(limit: 2)
+      assert Repo.aggregate(Stacks.Books.UploadedImage, :count) == 2
+    end
+
+    test "drain clears the whole backlog in batches and reports it drained" do
+      for _ <- 1..5, do: expired_image()
+
+      assert {:ok, 5, :drained} =
+               ImageRetention.drain(&ImageRetention.cleanup_expired_images/1, limit: 2)
+
+      assert Repo.aggregate(Stacks.Books.UploadedImage, :count) == 0
+    end
+
+    test "drain reports :deadline rather than claiming a backlog it did not clear" do
+      for _ <- 1..5, do: expired_image()
+
+      # A budget already spent: the first batch runs, then the deadline check
+      # fires. The point is the RETURN VALUE — a sweep that stopped early must
+      # not be indistinguishable from one that finished, because the job logs
+      # `:ok` either way and that is precisely how the backlog stayed invisible.
+      assert {:ok, 2, :deadline} =
+               ImageRetention.drain(&ImageRetention.cleanup_expired_images/1,
+                 limit: 2,
+                 budget_ms: 0
+               )
+
+      assert Repo.aggregate(Stacks.Books.UploadedImage, :count) == 3
+    end
+
+    test "drain on an empty backlog is a no-op that still reports drained" do
+      assert {:ok, 0, :drained} =
+               ImageRetention.drain(&ImageRetention.cleanup_expired_images/1, limit: 2)
+    end
+  end
+
   describe "cleanup_expired_images/0" do
     test "deletes images past their expires_at" do
       _expired =
