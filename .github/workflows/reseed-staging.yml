@@ -78,6 +78,45 @@ jobs:
       - name: Generate inter-service Elixir proto structs
         run: bash scripts/gen-elixir-proto.sh
 
+      # ⚠️ BEFORE the migrations, and that order is the whole point of this step.
+      #
+      # This job was red for two months and would have stayed red forever. Three
+      # seeded book_editions carry an ISBN whose EAN-13 check digit is wrong;
+      # one migration adds the checksum constraint NOT VALID and the next
+      # VALIDATEs it, and the validate scans those rows and aborts:
+      #
+      #   ERROR 23514 (check_violation) check constraint
+      #   "book_editions_isbn_ean13_checksum" ... is violated by some row
+      #
+      # The repair already existed and was already wired — into the DEPLOY path
+      # only. `deploy-stack.sh` runs the corrections and then migrates, which is
+      # why a preview branch, copy-on-write from this very database and carrying
+      # the same three rows, migrates to the newest version with the constraint
+      # validated while staging sits stuck at the migration before the validate.
+      # Same data, two pipelines, one step different.
+      #
+      # So this is not a workaround for a stuck database. It is the step that
+      # makes a correction-dependent migration reach staging at all, and leaving
+      # it out is what froze staging's schema — and with it the least-privilege
+      # roles, which a later migration creates and which staging therefore never
+      # got.
+      #
+      # DRY-RUN BY DEFAULT is the task's own contract, hence --apply. The
+      # corrections match on id AND the stale value, so a row that has drifted
+      # is refused rather than overwritten, and a second run is a no-op.
+      - name: Apply data corrections to staging
+        working-directory: apps/core
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.uri }}
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VISION_SERVICE_URL: http://localhost:8000
+        run: mix stacks.data.correct --apply
+
       - name: Apply migrations to staging
         working-directory: apps/core
         env:
