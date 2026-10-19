@@ -142,6 +142,49 @@ defmodule Stacks.Accounts.Invites do
   end
 
   @doc """
+      The metric label for an invite-gate refusal — a bounded name for a reason.
+
+      ⚠️ It lives HERE, next to the atoms, rather than in the controller that
+      emits the metric, and the placement is the point. Every atom below is
+      declared and produced in this module (`lock_invite/2`,
+      `check_email_binding/2`, `status/1`), so a reason added here shows a reader
+      a mapping sitting one screen away that does not know about it. On a
+      controller the drift was invisible except to a test, and the mapping had in
+      fact already drifted once.
+
+      ⚠️ The catch-all is load-bearing and is NOT the six atoms being optional.
+      This is reached from an unauthenticated registration path, through
+      `Accounts.do_register/3`, which ends in `{:error, _, reason, _} ->
+      {:error, reason}` — a pass-through over EVERY step of the registration
+      Multi, present or future, not just the invite steps. So the input set is
+      any atom any step of that Multi returns. `Accounts.register/2`'s spec lists
+      the six and is therefore narrower than its own body, and dialyzer will not
+      flag a spec narrower than the success typing without `--overspecs`, so that
+      spec is documentation rather than a guarantee.
+
+      Without the catch-all an unexpected atom raises `FunctionClauseError` and
+      registration answers 500 — both the worst place for one and a
+      distinguishable response on an endpoint designed to tell a prober nothing.
+      `:other` keeps the label bounded, which is what a Prometheus label must be,
+      while still recording that a refusal happened: an unexpected atom appearing
+      as `other` is a signal to come and add a clause.
+
+      ⚠️ An earlier version of this argument named `:invite_not_found` as "one
+      `with` clause away from reaching here". That was plausible, unchecked and
+      false — it is produced only by `check/1` and consumed only by the invite
+      controller, which answers 404. Recorded rather than quietly removed,
+      because it is the kind of claim the next reader would re-derive.
+  """
+  @spec telemetry_label(atom()) :: atom()
+  def telemetry_label(:invite_required), do: :required
+  def telemetry_label(:invite_invalid), do: :invalid
+  def telemetry_label(:invite_expired), do: :expired
+  def telemetry_label(:invite_revoked), do: :revoked
+  def telemetry_label(:invite_exhausted), do: :exhausted
+  def telemetry_label(:invite_email_mismatch), do: :email_mismatch
+  def telemetry_label(_unexpected), do: :other
+
+  @doc """
       Prepends the invite gate to a registration `Ecto.Multi`:
 
         1. `:lock_invite` — `SELECT … FOR UPDATE` by hash; the lock is the

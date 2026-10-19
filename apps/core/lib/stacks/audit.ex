@@ -54,11 +54,17 @@ defmodule Stacks.Audit do
     placement user unknown
   )
 
-  defp bounded_label(value, allowed) when is_binary(value) do
-    if value in allowed, do: value, else: "other"
-  end
+  # ⚠️ A GUARD, not a runtime membership test inside an `if`, and the difference
+  # is not style. `when value in @list` expands at COMPILE time, so the list is
+  # fixed where it is declared and cannot be handed in by a caller — a bound is
+  # not a bound if the caller chooses it. It also removes the `is_binary/1`
+  # clause the runtime version needed: a `nil` or an atom simply matches no
+  # literal in the list and falls through to `other` on its own.
+  defp bounded_action(action) when action in @telemetry_actions, do: action
+  defp bounded_action(_action), do: "other"
 
-  defp bounded_label(_value, _allowed), do: "other"
+  defp bounded_resource_type(type) when type in @telemetry_resource_types, do: type
+  defp bounded_resource_type(_type), do: "other"
 
   @doc "The action values the write counter may label. Anything else labels as `other`."
   @spec telemetry_actions() :: [String.t()]
@@ -126,8 +132,8 @@ defmodule Stacks.Audit do
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
       {1, _} ->
         :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
-          action: bounded_label(action, @telemetry_actions),
-          resource_type: bounded_label(resource_type, @telemetry_resource_types)
+          action: bounded_action(action),
+          resource_type: bounded_resource_type(resource_type)
         })
 
         {:ok, result_params}

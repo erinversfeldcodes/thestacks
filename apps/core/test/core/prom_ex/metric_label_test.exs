@@ -77,6 +77,7 @@ defmodule Core.PromEx.MetricLabelTest do
   use ExUnit.Case, async: true
 
   alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
+  alias Stacks.Accounts.Invites
 
   # Every label key any registered metric attaches, and why its value set is
   # bounded. The reason is the point: it names where the boundedness comes from,
@@ -764,12 +765,16 @@ defmodule Core.PromEx.MetricLabelTest do
 
     test "the invite-gate label is total, so an unexpected refusal cannot raise" do
       # Reached from an UNAUTHENTICATED registration path. Its sibling status
-      # function is total; this one was not, and the gate module already defines
-      # a seventh refusal atom one `with` clause away from reaching it. A
-      # `FunctionClauseError` there is a 500 on registration — both the worst
-      # place for one and a distinguishable response on an endpoint designed to
-      # tell a prober nothing.
-      assert StacksWeb.AuthController.invite_label_for(:invite_expired) == :expired
+      # function is total; this one was not. A `FunctionClauseError` there is a
+      # 500 on registration — both the worst place for one and a distinguishable
+      # response on an endpoint designed to tell a prober nothing.
+      #
+      # ⚠️ It is asserted on `Stacks.Accounts.Invites` and not on the controller,
+      # because the mapping MOVED to sit beside the atoms it maps. It used to be
+      # private to the controller with a public shim existing only so this
+      # assertion could reach it — a function whose sole caller was a test, which
+      # is what a mapping in the wrong module costs.
+      assert Invites.telemetry_label(:invite_expired) == :expired
 
       # NOT `:invite_not_found` as an example of something that can arrive here.
       # It cannot: it is produced only by `Invites.check/1`, consumed only by
@@ -782,12 +787,12 @@ defmodule Core.PromEx.MetricLabelTest do
       # ends in `{:error, _, reason, _} -> {:error, reason}`, a pass-through over
       # EVERY step of the registration Multi. So the input set is any atom any
       # step returns, present or future — not the invite gate's vocabulary.
-      assert StacksWeb.AuthController.invite_label_for(:a_future_multi_step_failure) == :other,
+      assert Invites.telemetry_label(:a_future_multi_step_failure) == :other,
              "an atom from some other step of the registration Multi has no clause and no " <>
                "catch-all, so it would raise a FunctionClauseError on an unauthenticated " <>
                "registration path"
 
-      assert StacksWeb.AuthController.invite_label_for(:something_nobody_has_added_yet) == :other
+      assert Invites.telemetry_label(:something_nobody_has_added_yet) == :other
     end
   end
 

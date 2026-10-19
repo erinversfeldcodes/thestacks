@@ -146,14 +146,49 @@ defmodule Stacks.SwallowToSafeDefaultTest do
     end
 
     test "put against an absent table does not raise and does not resurrect it" do
-      assert Cache.put(:live_signals, [%{key: :whatever}]) == :ok,
-             "writing to an absent table raised instead of being inert. The write path is " <>
-               "reached from the same request as the read, so a raise here is the same 500."
+      # ⛔ This used to assert `== :ok`, and that assertion WAS the defect. The
+      # write was swallowed and reported success, so a cache that had stopped
+      # accepting anything was indistinguishable from one that was working — on
+      # the one code path where "it silently did nothing" is also what a correct
+      # cache miss looks like from the outside.
+      #
+      # It must still not raise: the write path is reached from the same request
+      # as the read, so a raise here is the 500 the rescue exists to avoid. The
+      # fix is that it is now inert AND says so.
+      assert Cache.put(:live_signals, [%{key: :whatever}]) ==
+               {:error, :cache_unavailable},
+             "writing to an absent table either raised, or reported success for a write that " <>
+               "did not happen. Reporting success is the worse of the two: a cache that " <>
+               "accepts nothing then looks exactly like a cache that is working."
 
       assert :ets.whereis(:transparency_cache) == :undefined,
              "the put recreated the ETS table from the calling process. That would make the " <>
                "table owned by whoever happened to write first and die with them, which is " <>
                "a worse failure than the miss it was avoiding."
+    end
+  end
+
+  describe "the cache's write access is a precondition, not a detail" do
+    test "the table is :public, because writes run in the request process" do
+      # ⛔ The other half of the same finding. `:ets.insert/2` raises
+      # `ArgumentError` both when the table is GONE and when it exists and
+      # refuses the caller, and the rescue used to treat those as one thing.
+      #
+      # Only the first is a race. The second is what narrowing `init/1`'s
+      # `:public` to `:protected` would produce — and because `put/2` and
+      # `get/2` run in the calling web-request process rather than in the
+      # GenServer that owns the table, EVERY write would be refused, forever,
+      # while every page-load silently recomputed from Prometheus.
+      #
+      # So the access mode is pinned here. `put/2` now distinguishes the two
+      # causes and shouts about the second, but a narrowing should fail a test
+      # rather than rely on somebody reading a log line from a surface whose
+      # only symptom is being slower than it used to be.
+      assert :ets.info(:transparency_cache, :protection) == :public,
+             "the transparency cache table is no longer :public. Writes happen in the " <>
+               "calling request process, not in the table's owner, so a narrower access " <>
+               "mode means no request can ever write to the cache again — and the page " <>
+               "keeps working, just by recomputing everything on every load."
     end
   end
 end

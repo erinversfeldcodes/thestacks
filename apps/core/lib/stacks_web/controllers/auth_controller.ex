@@ -11,6 +11,7 @@ defmodule StacksWeb.AuthController do
 
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+  alias Stacks.Accounts.Invites
   alias Stacks.Audit
   alias Stacks.Duration
   alias Stacks.Email
@@ -38,7 +39,7 @@ defmodule StacksWeb.AuthController do
 
       {:error, invite_error} when is_atom(invite_error) ->
         :telemetry.execute([:stacks, :auth, :invite], %{count: 1}, %{
-          result: invite_telemetry_label(invite_error)
+          result: Invites.telemetry_label(invite_error)
         })
 
         conn
@@ -365,63 +366,11 @@ defmodule StacksWeb.AuthController do
 
   defp get_ip(conn), do: StacksWeb.ClientIP.get(conn)
 
+  # The HTTP answer to a refusal is a web concern and stays here. The METRIC
+  # label for the same refusal is not, and now lives in `Stacks.Accounts.Invites`
+  # beside the atoms it maps — on a controller its drift from those atoms was
+  # invisible to a reader and caught only by a test.
   defp invite_error_status(:invite_expired), do: 410
   defp invite_error_status(:invite_exhausted), do: 409
   defp invite_error_status(_), do: 403
-
-  defp invite_telemetry_label(:invite_required), do: :required
-  defp invite_telemetry_label(:invite_invalid), do: :invalid
-  defp invite_telemetry_label(:invite_expired), do: :expired
-  defp invite_telemetry_label(:invite_revoked), do: :revoked
-  defp invite_telemetry_label(:invite_exhausted), do: :exhausted
-  defp invite_telemetry_label(:invite_email_mismatch), do: :email_mismatch
-
-  # A catch-all, because this function is reached from an UNAUTHENTICATED
-  # registration path and its only job is to produce a metric label.
-  #
-  # Its sibling `invite_error_status/1` two clauses below is total — it ends in
-  # `_ -> 403`. This one was not, and the asymmetry is the whole point.
-  #
-  # ⚠️ An earlier version of this comment justified the catch-all by naming
-  # `:invite_not_found` as "one `with` clause away from reaching here". That was
-  # plausible, unchecked and false: `:invite_not_found` is produced only by
-  # `Invites.check/1` and consumed only by `InviteController`, which answers it
-  # with a 404 — a different controller behind a different context function
-  # whose declared return type does not include it. Recorded rather than quietly
-  # rewritten, because the argument is the kind that would be re-derived from the
-  # same wrong premise by the next person to consider deleting the clause.
-  #
-  # The real exposure is WIDER than that claim, which is why the catch-all earns
-  # its place. `Accounts.do_register/3` ends in
-  # `{:error, _, reason, _} -> {:error, reason}` — a pass-through over EVERY step
-  # of the registration Multi, not just the invite steps. So the input set here
-  # is "any atom any step of that Multi returns, present or future", not the
-  # invite gate's six refusal atoms. `Accounts.register/2`'s `@spec` lists those
-  # six and is therefore narrower than its own body; dialyzer will not flag a
-  # spec narrower than the success typing without `--overspecs`, so that spec is
-  # documentation rather than a guarantee, and it is exactly what a reader would
-  # use to conclude this function's input set is closed. It is not.
-  #
-  # Without the catch-all, a future `Multi.run` step returning `{:error, :atom}`
-  # raises `FunctionClauseError` here — a 500 on registration, which is both the
-  # worst place for one and a distinguishable response on an endpoint designed
-  # to tell a prober nothing. (No such step exists today: the only atom-returning
-  # ones are the six invite steps, `:set_confirmation` fails with a changeset,
-  # and `consume_invite/3` raises rather than returning a tuple.)
-  #
-  # `:other` keeps the label BOUNDED, which is what a Prometheus label has to be,
-  # while still recording that a refusal happened. An unexpected atom showing up
-  # as `other` in the metric is a signal to come and add a clause; a 500 is not.
-
-  defp invite_telemetry_label(_unexpected), do: :other
-
-  @doc """
-      The invite-gate label mapping, exposed so its TOTALITY can be asserted.
-
-      Its sibling status function is total and this one was not; the label guard
-      declares this label bounded, and that declaration is only true while every
-      input maps to something.
-  """
-  @spec invite_label_for(atom()) :: atom()
-  def invite_label_for(reason), do: invite_telemetry_label(reason)
 end

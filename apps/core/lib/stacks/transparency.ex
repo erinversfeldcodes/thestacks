@@ -210,7 +210,12 @@ defmodule Stacks.Transparency do
   defp refresh_live_signals do
     case compute_live_signals() do
       {:ok, entries} ->
-        Cache.put(@live_cache_key, entries)
+        # Deliberately discarded, and explicitly so. The page renders from the
+        # entries just computed whether or not the cache accepted them — a cache
+        # that will not take a write is slower, not broken. `Cache.put/2` now
+        # reports the difference between the restart race and a table that
+        # refuses writes permanently, and shouts about the second itself.
+        _ = Cache.put(@live_cache_key, entries)
         entries
 
       :unavailable ->

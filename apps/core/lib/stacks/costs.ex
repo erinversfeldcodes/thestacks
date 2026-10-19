@@ -184,13 +184,12 @@ defmodule Stacks.Costs do
   @spec telemetry_services() :: [String.t()]
   def telemetry_services, do: @telemetry_services
 
-  # Same shape as the audit writer's bounding, deliberately: one helper, one
-  # rule, so a reader who has met one has met both.
-  defp bounded_label(value, allowed) when is_binary(value) do
-    if value in allowed, do: value, else: "other"
-  end
-
-  defp bounded_label(_value, _allowed), do: "other"
+  # Same shape as the audit writer's bounding, deliberately: one rule, so a
+  # reader who has met one has met both. A compile-time guard rather than a
+  # runtime membership test, so the allowed set is fixed where it is declared
+  # instead of being passed in by the caller it is meant to constrain.
+  defp bounded_service(service) when service in @telemetry_services, do: service
+  defp bounded_service(_service), do: "other"
 
   @doc "Changeset for creating or updating a platform cost line item."
   def platform_cost_changeset(cost, attrs) do
@@ -250,7 +249,7 @@ defmodule Stacks.Costs do
           %{amount_cents: cost.amount_cents},
           %{
             category: cost.category,
-            service: bounded_label(cost.service, @telemetry_services)
+            service: bounded_service(cost.service)
           }
         )
 

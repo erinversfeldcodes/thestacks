@@ -14,6 +14,8 @@ defmodule Stacks.Transparency.Cache do
 
   use GenServer
 
+  require Logger
+
   @table :transparency_cache
   @cleanup_interval 60_000
 
@@ -48,11 +50,35 @@ defmodule Stacks.Transparency.Cache do
     end
   end
 
-  @doc "Store a value under `key` with the current monotonic timestamp."
-  @spec put(term(), term()) :: :ok
+  @doc """
+      Store a value under `key` with the current monotonic timestamp.
+
+      ⚠️ Reports whether the write landed, and this used to be the one thing it
+      could not do. `safe_insert/1` returned a boolean and `put/2` discarded it,
+      so a refused write was indistinguishable from a successful one — on a
+      cache, that reads as "the page is fast" right up until it isn't, with
+      nothing anywhere saying the cache had stopped accepting anything.
+
+      The caller may still ignore the result; a failed cache write is not a
+      failed request. What it may no longer do is ignore it *unknowingly*.
+
+      Two failures, told apart on purpose:
+
+      - `:cache_unavailable` — the table is gone, i.e. the owning GenServer is
+        restarting. Transient, self-healing, and expected.
+      - `:cache_not_writable` — the table EXISTS and refused us. That is a
+        configuration defect, not a race: it is what a narrowing of `init/1`'s
+        `:public` to `:protected` would produce, because these functions run in
+        the calling web-request process and not in the owner. Every write would
+        then be refused forever while the page quietly recomputed from Prometheus
+        on every load, so this branch is loud.
+  """
+  @spec put(term(), term()) :: :ok | {:error, :cache_unavailable | :cache_not_writable}
   def put(key, value) do
-    safe_insert({key, value, System.monotonic_time(:millisecond)})
-    :ok
+    case safe_insert({key, value, System.monotonic_time(:millisecond)}) do
+      true -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc "Clear the entire cache (used by tests and manual invalidation)."
@@ -127,6 +153,31 @@ defmodule Stacks.Transparency.Cache do
   defp safe_insert(tuple) do
     :ets.insert(@table, tuple)
   rescue
-    ArgumentError -> false
+    ArgumentError -> classify_insert_failure()
+  end
+
+  # ⚠️ `ArgumentError` from `:ets.insert/2` has two causes and the rescue used to
+  # conflate them: the table does not exist, or it exists and this process may
+  # not write to it. One is a millisecond-long restart window; the other is
+  # permanent and means the cache never caches again.
+  #
+  # `:ets.whereis/1` separates them after the fact, which is the only place it
+  # can be done without reintroducing a check in front of the operation — and a
+  # check in front cannot close the race anyway, which is the argument above.
+  defp classify_insert_failure do
+    case :ets.whereis(@table) do
+      :undefined ->
+        {:error, :cache_unavailable}
+
+      _tid ->
+        Logger.error(
+          "Transparency.Cache: the cache table exists and REFUSED a write. Every " <>
+            "transparency page-load will recompute from Prometheus from now on. This is not " <>
+            "the restart race the rescue is for — it is what narrowing the table's :public " <>
+            "access would cause, since writes run in the calling request process."
+        )
+
+        {:error, :cache_not_writable}
+    end
   end
 end
