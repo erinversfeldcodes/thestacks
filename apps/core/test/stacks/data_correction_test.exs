@@ -415,10 +415,16 @@ defmodule Stacks.DataCorrectionTest do
     test "runs every registered correction and is a no-op on clean data" do
       assert {:ok, outcomes} = DataCorrection.run_all(DataCorrection.Registry.all())
 
+      # ⚠️ The ORDER is asserted, not just the set: the registry's order is
+      # load-bearing, and `unrunnable_image_job` is last on purpose. It discards
+      # image jobs that can never succeed, and must run before anything rescues
+      # them back to `available` — so a reordering that moved it is a behaviour
+      # change, not a cosmetic one.
       assert Enum.map(outcomes, & &1.correction) == [
                "normalise_edition_isbn10",
                "stale_seed_edition_isbn",
-               "seed_edition_verification_source"
+               "seed_edition_verification_source",
+               "unrunnable_image_job"
              ]
 
       assert Enum.all?(outcomes, &(&1.count == 0))

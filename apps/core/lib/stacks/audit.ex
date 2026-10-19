@@ -50,8 +50,8 @@ defmodule Stacks.Audit do
   )
 
   @telemetry_resource_types ~w(
-    admin_endpoint admin_session book_edition bookshelf deploy invite placement
-    user unknown
+    admin_endpoint admin_session book_edition bookshelf deploy invite oban_job
+    placement user unknown
   )
 
   defp bounded_label(value, allowed) when is_binary(value) do
