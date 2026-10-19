@@ -62,6 +62,26 @@ defmodule StacksWeb.FeedController do
         |> put_status(404)
         |> json(%{error: "Bookshelf not found"})
 
+      # ⚠️ 403 HERE, AND 404 ON THE GROUP FEED — the difference is deliberate and
+      # keeps being re-found as a defect, so here is why it is not one.
+      #
+      # Four places in this codebase state a "404, not 403" rule, because a 403
+      # confirms a resource exists to a caller not entitled to know that. It is a
+      # real rule and the group feed follows it: an invite-only group's EXISTENCE
+      # is confidential, so a stranger gets 404.
+      #
+      # A bookshelf's existence is not. Every reader has all five of the named
+      # bookshelves from registration — measured: five distinct names, five
+      # shelves per user — and handles are public, appearing in profile URLs. So
+      # `GET /api/feeds/u/alice/wishlist` answering 403 rather than 404 discloses
+      # nothing beyond "the handle alice exists", which the profile page already
+      # says. What 403 buys instead is an honest answer to the owner and to a
+      # feed reader: the shelf is there and is not shared with the platform,
+      # which is actionable, where 404 would send them looking for a typo.
+      #
+      # ⛔ So the rule is conditional on confidentiality of EXISTENCE, not
+      # universal. If bookshelves ever become optional or renameable, this
+      # branch becomes a leak and should move to 404.
       {:error, :not_public} ->
         conn
         |> put_status(403)

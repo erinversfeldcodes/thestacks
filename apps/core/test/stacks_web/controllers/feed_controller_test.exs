@@ -42,7 +42,13 @@ defmodule StacksWeb.FeedControllerTest do
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
       conn = get(as_reader(conn), "/api/feeds/u/private-erin/library")
-      assert conn.status == 403
+
+      assert conn.status == 403,
+             "403 here is DELIBERATE and differs from the group feed's 404 on purpose. The " <>
+               "404-not-403 rule guards resources whose EXISTENCE is confidential; every reader " <>
+               "has all five named bookshelves from registration and handles are public, so 403 " <>
+               "discloses nothing the profile page does not. If bookshelves ever become optional " <>
+               "or renameable this becomes a leak and should move to 404 — see the controller."
     end
 
     test "\"u\" is not swallowed as a user id", %{conn: conn} do

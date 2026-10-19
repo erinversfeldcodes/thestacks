@@ -222,6 +222,63 @@ defmodule StacksWeb.AdminControllerTest do
     end
   end
 
+  describe "GET /api/admin/degraded_accounts" do
+    test "lists a degraded account through the real admin pipeline", %{conn: conn} do
+      # ⚠️ Its sibling POST had a controller test and this GET had none, so the
+      # pair was half-covered — and the half with no test is the one an operator
+      # reaches FIRST. A reader cannot restore an account they cannot see listed,
+      # so an unreachable or mis-authorised listing breaks the runbook just as
+      # completely as a broken restore, and nothing would have failed.
+      #
+      # Driven through the real `:admin` pipeline rather than calling the context,
+      # which is the lesson its sibling's comment already records about asserting
+      # a guarantee the controller is supposed to provide.
+      {conn, _admin, _session} = setup_full_admin(conn)
+
+      degraded =
+        insert(:user,
+          email_confirmed: false,
+          pending_email: "pending@example.com",
+          pending_email_token: "tok",
+          pending_email_sent_at: DateTime.add(DateTime.utc_now(), -40, :day),
+          pending_email_revert_token: "revert-tok"
+        )
+
+      healthy = insert(:user, email_confirmed: true)
+
+      conn = get(conn, "/api/admin/degraded_accounts")
+      assert %{"accounts" => accounts} = json_response(conn, 200)
+
+      listed = Enum.map(accounts, & &1["user_id"])
+
+      assert degraded.id in listed, "a degraded account must appear, or it cannot be restored"
+
+      refute healthy.id in listed,
+             "a healthy account appeared in the degraded listing — an operator reaching into " <>
+               "one of those would be un-degrading an account that was never degraded"
+    end
+
+    test "requires the admin pipeline, not merely a session", %{conn: conn} do
+      # The listing carries email addresses and pending addresses for accounts
+      # the reader did not consent to expose to another user, so the gate on it
+      # matters as much as the gate on the restore.
+      # A plain reader token, deliberately NOT the admin one: no `admin` token
+      # type, no MFA-verified session. `setup_full_admin/1` builds both, so
+      # reusing it here would assert nothing.
+      user = insert(:user, email_confirmed: true)
+      {:ok, token, _} = Guardian.encode_and_sign(user, %{}, ttl: {30, :minute})
+
+      conn =
+        conn
+        |> Plug.Conn.put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/admin/degraded_accounts")
+
+      assert conn.status in [401, 403, 404],
+             "a plain authenticated reader reached the degraded-account listing, which exposes " <>
+               "other readers' email and pending-email addresses"
+    end
+  end
+
   describe "POST /api/admin/degraded_accounts/restore" do
     test "restores the account and records WHO reached into it", %{conn: conn} do
       # Through the real endpoint and the real :admin pipeline.
