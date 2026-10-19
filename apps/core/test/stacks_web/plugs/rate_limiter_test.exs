@@ -130,13 +130,23 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
   end
 
   describe "call/2 upload bucket" do
+    # ⛔ `Guardian.Plug.put_current_resource/2`, not `assign/3`. Guardian keeps its
+    # pipeline state in `conn.private`, and an earlier version of this file set the
+    # same name in `conn.assigns` — which is where the plug used to read it.
+    #
+    # So the test built the world the code expected and both were wrong together:
+    # the resource was never found, all three "per user" buckets keyed on the IP,
+    # and the limit assertions below still passed because the conns they built
+    # also carried a fixed IP. Using the real writer is what makes these tests
+    # claims about the pipeline rather than about each other.
+    defp as_user(conn, user, ip) do
+      conn |> Guardian.Plug.put_current_resource(user) |> Map.put(:remote_ip, ip)
+    end
+
     test "allows first upload for authenticated user", %{conn: conn} do
       user = insert(:user)
 
-      conn =
-        conn |> assign(:guardian_default_resource, user) |> Map.put(:remote_ip, {10, 2, 0, 1})
-
-      result = RateLimiter.call(conn, bucket: :upload)
+      result = RateLimiter.call(as_user(conn, user, {10, 2, 0, 1}), bucket: :upload)
       refute result.halted
     end
 
@@ -149,15 +159,75 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
 
     test "blocks the 121st upload for the same authenticated user", %{conn: conn} do
       user = insert(:user)
-
-      conn =
-        conn |> assign(:guardian_default_resource, user) |> Map.put(:remote_ip, {10, 2, 0, 3})
+      conn = as_user(conn, user, {10, 2, 0, 3})
 
       for _ <- 1..120, do: RateLimiter.call(conn, bucket: :upload)
 
       result = RateLimiter.call(conn, bucket: :upload)
       assert result.halted
       assert result.status == 429
+    end
+
+    test "two readers behind ONE IP do not share an upload budget", %{conn: conn} do
+      # ⛔ The assertion that finds the defect, and the one no test here made.
+      #
+      # Every per-user test above also fixes the IP, so each passes just as
+      # happily against a plug keyed on the IP — which is what this plug did. The
+      # consequence was not theoretical: signed-in readers sharing a NAT or a
+      # corporate proxy shared one budget, so a hundred and twenty uploads, twenty
+      # social actions or ten feedback submissions a minute were the total for
+      # everyone behind that address.
+      ip = {10, 2, 0, 9}
+      one = insert(:user)
+      two = insert(:user)
+
+      for _ <- 1..120, do: RateLimiter.call(as_user(conn, one, ip), bucket: :upload)
+
+      exhausted = RateLimiter.call(as_user(conn, one, ip), bucket: :upload)
+
+      assert exhausted.halted,
+             "the first reader's own budget did not run out, so the next assertion " <>
+               "cannot distinguish a per-user key from a per-IP one"
+
+      fresh = RateLimiter.call(as_user(conn, two, ip), bucket: :upload)
+
+      refute fresh.halted,
+             "a second reader on the same IP was refused on their FIRST upload — the bucket " <>
+               "is keyed on the address, not the reader, so everyone behind one NAT shares " <>
+               "a single budget"
+    end
+
+    test "one reader across two IPs shares one budget", %{conn: conn} do
+      # The other direction, and the reason the test above is not satisfied by
+      # keying on the pair. A reader who changes network mid-session — a phone
+      # leaving wifi — must not be handed a fresh allowance by doing so.
+      user = insert(:user)
+
+      for _ <- 1..120, do: RateLimiter.call(as_user(conn, user, {10, 2, 1, 1}), bucket: :upload)
+
+      moved = RateLimiter.call(as_user(conn, user, {10, 2, 2, 2}), bucket: :upload)
+
+      assert moved.halted,
+             "the same reader got a fresh budget by arriving from a different address"
+    end
+
+    test "the feedback bucket is keyed the same way", %{conn: conn} do
+      # ⚠️ Asserted for `:feedback` specifically because that is the bucket where
+      # the shared-key behaviour was first observed, driving the admin feedback
+      # queue against a deployed stack: three freshly minted users submitting
+      # from one address were refused as though they were one reader.
+      Application.put_env(:core, :rate_limit_feedback, 2)
+      on_exit(fn -> Application.delete_env(:core, :rate_limit_feedback) end)
+
+      ip = {10, 2, 3, 3}
+      one = insert(:user)
+      two = insert(:user)
+
+      for _ <- 1..2, do: RateLimiter.call(as_user(conn, one, ip), bucket: :feedback)
+      assert RateLimiter.call(as_user(conn, one, ip), bucket: :feedback).halted
+
+      refute RateLimiter.call(as_user(conn, two, ip), bucket: :feedback).halted,
+             "a second reader on the same IP could not submit feedback because the first had"
     end
   end
 

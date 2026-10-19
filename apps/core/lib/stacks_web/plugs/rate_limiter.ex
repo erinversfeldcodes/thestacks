@@ -84,8 +84,25 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(_), do: @global_limit
 
+  # ⛔ `Guardian.Plug.current_resource/1`, NOT `conn.assigns[:guardian_default_resource]`.
+  #
+  # Guardian keeps its pipeline state in `conn.private`, so reading the same name
+  # out of `conn.assigns` returned `nil` on EVERY request and these three buckets
+  # silently fell back to the IP — against a moduledoc two screens up that says
+  # "per user" for all three. Signed-in readers behind one NAT or corporate proxy
+  # therefore shared a single budget: ten feedback submissions a minute, twenty
+  # social actions and a hundred and twenty uploads between all of them.
+  #
+  # ⚠️ The tests agreed with the bug because they built the world the code
+  # expected — `assign(:guardian_default_resource, user)` is not what the real
+  # pipeline does, so "blocks the 121st upload for the same authenticated user"
+  # passed while keyed on the fixed IP those conns also carried. The assertion
+  # that finds this is two DIFFERENT users on ONE IP, which is below.
+  #
+  # The IP fallback stays for an unauthenticated request. All three of these
+  # routes are authenticated, so it is defence rather than a path.
   defp get_key(conn, bucket) when bucket in [:upload, :social, :feedback] do
-    case conn.assigns[:guardian_default_resource] do
+    case Guardian.Plug.current_resource(conn) do
       nil -> get_ip(conn)
       user -> "user:#{user.id}"
     end
