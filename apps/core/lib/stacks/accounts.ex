@@ -718,11 +718,18 @@ defmodule Stacks.Accounts do
           {:ok, restored} ->
             revoke_all_user_sessions(restored.id)
 
+            # `initiated_by: "operator"` is what separates this from a reader
+            # undoing their own email change, which emits the same event type.
+            # Without it a consumer counting reader-initiated reverts included
+            # operator interventions, and the only attribution lived in an audit
+            # row no event consumer reads. The value names the PATH, never the
+            # operator, so no personal data enters event_log.
             Events.emit_safe(%{
               event_type: "user.email_change_reverted",
               aggregate_type: "user",
               aggregate_id: restored.id,
-              payload: %{}
+              payload: %{initiated_by: "operator"},
+              schema_version: 2
             })
 
             {:ok, restored}

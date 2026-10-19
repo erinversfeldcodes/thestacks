@@ -33,6 +33,15 @@ defmodule Stacks.Events.Upcaster do
   def upcast(%{event_type: "group.invitation_sent", schema_version: 1} = event),
     do: %{event | schema_version: 2}
 
+  # v1 reverts predate `initiated_by` and there is no way to recover it: the
+  # audit log records operator restores, but a v1 event carries no link to an
+  # audit row and matching on timestamps would invent attribution. So the key
+  # is absent and a consumer must tolerate that — which is the honest outcome
+  # for an event that genuinely did not record who acted, and no worse than v1,
+  # where the distinction did not exist at all.
+  def upcast(%{event_type: "user.email_change_reverted", schema_version: 1} = event),
+    do: %{event | schema_version: 2}
+
   def upcast(%{schema_version: 1} = event), do: event
 
   def upcast(event), do: event

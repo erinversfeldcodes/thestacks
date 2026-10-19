@@ -57,7 +57,25 @@ defmodule Stacks.Events.PayloadContract do
     # append-only — erasure blanks a payload where it can delete a row.
     "user.email_change_requested" => %{version: 1, keys: ~w()},
     "user.email_change_confirmed" => %{version: 1, keys: ~w()},
-    "user.email_change_reverted" => %{version: 1, keys: ~w()},
+    # ⛔ v2 adds `initiated_by`, because v1 could not tell the two reverts apart.
+    #
+    # An operator restoring a degraded account (`Accounts.restore_degraded_account/1`)
+    # and a reader undoing their own email change (`Email.revert_email_change/1`)
+    # emitted the SAME event type with the SAME empty payload. A consumer
+    # counting reader-initiated reverts silently included operator
+    # interventions, and operator attribution existed only in the
+    # `admin.account_restored` audit row — a different table, which no event
+    # consumer reads.
+    #
+    # ⚠️ A discriminator rather than a second event type, deliberately. A new
+    # type would mean every existing consumer keeps matching the old one and
+    # silently stops seeing operator reverts — the same invisible undercount,
+    # moved. A key forces the question at the point of reading.
+    #
+    # The value is an enum, not an identifier: `"operator"` or `"reader"`. It
+    # says which PATH ran, never WHICH operator, so the UUID-only PII rule holds
+    # and no new personal data enters `event_log`.
+    "user.email_change_reverted" => %{version: 2, keys: ~w(initiated_by)},
     "user.email_change_expired" => %{version: 1, keys: ~w()},
     "invite.issued" => %{version: 1, keys: ~w(max_uses expires_at email_bound)},
     "invite.redeemed" => %{version: 1, keys: ~w(user_id use_count)},

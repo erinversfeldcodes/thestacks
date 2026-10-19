@@ -195,11 +195,15 @@ defmodule Stacks.Email do
          {:ok, updated} <- Repo.update(Accounts.revert_email_change_changeset(user)) do
       Accounts.revoke_all_user_sessions(updated.id)
 
+      # The reader's own undo. Tagged explicitly rather than left implicit by
+      # omission: an absent key would make a v1 event and a reader revert
+      # indistinguishable, which is the defect this discriminator exists to end.
       Events.emit_safe(%{
         event_type: "user.email_change_reverted",
         aggregate_type: "user",
         aggregate_id: updated.id,
-        payload: %{}
+        payload: %{initiated_by: "reader"},
+        schema_version: 2
       })
 
       email_change_outcome(:reverted, {:ok, updated})
