@@ -33,6 +33,21 @@ defmodule Stacks.Accounts do
 
   @unverified_account_ttl_seconds 24 * 60 * 60
 
+  # ⚠️ A BOUND on the reap, because its caller runs a full GDPR erasure per id it
+  # returns, on a machine configured to scale to zero.
+  #
+  # This is the same shape that let the image-retention sweep fail for 151 days:
+  # load every candidate, do expensive per-row work, and never finish before the
+  # machine suspends. Here the per-row work is `Phoenix.Token.verify/4` plus
+  # `delete_user_data/2` — heavier than a storage delete, not lighter.
+  #
+  # The bound is on CANDIDATES EXAMINED per run, not on ids returned: the live-link
+  # filter below runs after the query, so a run can examine 200 and return none.
+  # That is the right place for it — the cost this protects against is the
+  # examination and the erasures, and a daily schedule drains any backlog that a
+  # tiny signup population could build.
+  @reap_batch_size 200
+
   @unverified_account_max_lifetime_seconds 7 * 24 * 60 * 60
 
   @email_change_grace_seconds 7 * 24 * 60 * 60
@@ -436,9 +451,10 @@ defmodule Stacks.Accounts do
       and they have no email change in flight. An abandoned signup satisfies both;
       a degraded account satisfies neither.
   """
-  @spec expired_unverified_ids(DateTime.t()) :: [binary()]
-  def expired_unverified_ids(now \\ DateTime.utc_now()) do
+  @spec expired_unverified_ids(DateTime.t(), keyword()) :: [binary()]
+  def expired_unverified_ids(now \\ DateTime.utc_now(), opts \\ []) do
     cutoff = DateTime.add(now, -@unverified_account_ttl_seconds, :second)
+    limit = Keyword.get(opts, :limit, @reap_batch_size)
 
     candidates =
       Repo.all(
@@ -446,6 +462,8 @@ defmodule Stacks.Accounts do
           where:
             u.email_confirmed == false and u.created_at < ^cutoff and
               not is_nil(u.email_confirmation_token) and is_nil(u.pending_email),
+          order_by: [asc: u.created_at],
+          limit: ^limit,
           select: {u.id, u.email_confirmation_token}
       )
 

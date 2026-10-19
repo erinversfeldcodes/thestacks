@@ -124,6 +124,7 @@ gate check-dbt-model-drift.sh
 gate check-phase-scheme.sh
 gate check-tracker-refs.sh
 gate check-protojson-completeness.sh
+gate check-unbounded-sweeps.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict
