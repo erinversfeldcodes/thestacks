@@ -48,6 +48,7 @@ SUITES=(
     "$HERE/dbt_elixir_reference_test.sh"
     "$HERE/protojson_completeness_test.sh"
     "$HERE/workflow_health_test.sh"
+    "$HERE/deployed_posture_test.sh"
     "$HERE/log_shipper_config_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"
