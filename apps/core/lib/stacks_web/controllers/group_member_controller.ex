@@ -69,13 +69,17 @@ defmodule StacksWeb.GroupMemberController do
       route, so the members tab could only ever render the owner's raw id. Its
       own authorisation check is the gate: platform-visible groups are readable
       by anyone, invite-only ones only by members.
+
+      The roster row is `stacks.common.v1.GroupMemberSummary`. It used to be a
+      private map built here, matching no message in `proto/` — so the fields the
+      server sent were tied to the fields the client requires by nothing at all.
   """
   def index(conn, %{"group_id" => group_id}) do
     user = Guardian.Plug.current_resource(conn)
 
     case Social.list_group_members(group_id, user.id) do
       {:ok, members} ->
-        json(conn, %{members: Enum.map(members, &member_json/1)})
+        json(conn, %{members: Enum.map(members, &ProtoJSON.group_member_summary/1)})
 
       # An invite-only group answers 404, not 403, to someone outside it — the
       # same answer `GET /api/groups/:id` already gives. A 403 would confirm the
@@ -83,15 +87,6 @@ defmodule StacksWeb.GroupMemberController do
       {:error, reason} when reason in [:not_found, :unauthorized] ->
         conn |> put_status(:not_found) |> json(%{error: "not found"})
     end
-  end
-
-  defp member_json(m) do
-    %{
-      user_id: m.user_id,
-      role: m.role,
-      display_name: m.display_name,
-      joined_at: m.joined_at
-    }
   end
 
   def remove(conn, %{"group_id" => group_id, "user_id" => member_user_id}) do

@@ -415,6 +415,21 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
+      Serializes one row of a group's member roster.
+
+      Carries the whole message — the narrowing this module usually does is
+      already in the contract, because `GroupMemberSummary` was written to be
+      exactly what the roster endpoint sends.
+
+      ⚠️ The input is a join projection from `Social.list_group_members/2`, not an
+      Ecto struct, so `display_name` is already coalesced to the member's handle
+      before it arrives here. Serialising a raw `GroupMember` through this would
+      compile and then emit `nil` for a field the client requires.
+  """
+  @spec group_member_summary(map()) :: map()
+  def group_member_summary(member), do: Gen.group_member_summary(member)
+
+  @doc """
       Serializes a group invitation struct.
   """
   @spec group_invitation(map()) :: map()

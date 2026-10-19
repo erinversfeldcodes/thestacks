@@ -1486,6 +1486,13 @@
       function_name: :listing,
       skip_fields: [:book, :seller_id],
       field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/social.proto",
+      proto_message: "GroupMemberSummary",
+      function_name: :group_member_summary,
+      skip_fields: [],
+      field_overrides: %{}
     }
   ]
 }
