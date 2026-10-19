@@ -96,6 +96,24 @@ defmodule Core.Repo.Migrations.RawImportRowsCannotEscapeTheirRetention do
   # `lock_timeout` is what actually protects availability here: every statement
   # below wants a lock, and waiting for one is how a fast DDL turns into an
   # outage. Failing fast is recoverable; queueing is not.
+  #
+  # ⚠️ `@disable_migration_lock true` makes the DROP-then-ADD pair below racy
+  # across CONCURRENT migrators, and that is accepted rather than unnoticed.
+  # Two migrators can both pass the `DROP ... IF EXISTS` and then race the
+  # `ADD CONSTRAINT`; the loser gets Postgres `42710` (duplicate_object) and
+  # fails its deploy.
+  #
+  # It is reachable, not theoretical: `deploy_with_retry` in
+  # `scripts/deploy-stack.sh` can retry an `exec` whose first attempt timed out
+  # on the client while still running on the machine, and Fly's own
+  # `release_command` is a second, separate migrator invocation.
+  #
+  # Accepted because the failure is loud and self-healing in the direction that
+  # matters — every statement here is re-runnable, so the losing migrator's
+  # retry succeeds and nothing is left half-applied. The alternative, taking the
+  # migration lock, cannot be combined with `@disable_ddl_transaction`, which the
+  # CONCURRENTLY index build below requires. Same trade as every other
+  # concurrent-index migration in this directory.
   def up do
     execute("SET lock_timeout = '5s'")
     execute("SET statement_timeout = 0")
