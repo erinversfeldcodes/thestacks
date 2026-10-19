@@ -175,6 +175,26 @@ defmodule Stacks.GDPR.ExportDelivery do
         :ok
 
       undated ->
+        # ⛔ METERED, not just logged — and this was the last of the three alarms
+        # in this module still emitting into nothing.
+        #
+        # Its two siblings (`:expired` and `:orphan`) were given metrics when
+        # someone noticed they were "declared at the call site, reported by no
+        # plugin, so unobservable outside a log line". This one was missed in the
+        # same pass, which is the recurring shape: the fix landed where it was
+        # found and not at the sibling beside it.
+        #
+        # ⚠️ It is also the most consequential of the three to leave invisible.
+        # An object with no parseable deadline is not merely late — the sweep
+        # cannot ever select it, so it is a copy of a reader's personal data that
+        # stays in the bucket permanently. A log line is read when somebody is
+        # already suspicious, and nothing here would ever make them suspicious.
+        :telemetry.execute(
+          [:stacks, :gdpr, :export, :undated],
+          %{count: length(undated)},
+          %{}
+        )
+
         Logger.error(
           "ExportDelivery: ALARM — #{length(undated)} export object(s) carry no deadline and will never be swept"
         )

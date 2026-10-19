@@ -86,6 +86,7 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_blog_association_count_total" => :public,
     "stacks_gdpr_export_expired_count_total" => :public,
     "stacks_gdpr_export_orphan_count_total" => :public,
+    "stacks_gdpr_export_undated_count_total" => :public,
     "stacks_gdpr_image_expired_count_total" => :public,
     "stacks_gdpr_image_orphan_count_total" => :public,
     "stacks_gdpr_image_stuck_count_total" => :public,

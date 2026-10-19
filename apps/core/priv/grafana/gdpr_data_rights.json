@@ -551,6 +551,52 @@
           "legendFormat": "{{outcome}}"
         }
       ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Export archives with NO deadline \u2014 never sweepable (ALARM)",
+      "description": "An export key carrying no parseable deadline. The sweep selects by deadline, so these objects are not late \u2014 they can never be selected at all, and the copy of the reader's personal data stays in the bucket permanently. Distinct from the orphan panel beside it, where deletion was attempted and failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_gdpr_export_undated_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "orphan"
+        }
+      ]
     }
   ]
 }

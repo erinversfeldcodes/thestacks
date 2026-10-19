@@ -481,6 +481,17 @@ defmodule Core.PromEx.Plugins.Stacks do
           description:
             "Export archives past expiry that could NOT be deleted — a copy of a reader's personal data outliving its deadline (retention-gap alarm)."
         ),
+        # The third of this module's alarms, and the one that was still
+        # log-only. An export object whose key carries no parseable deadline
+        # can never be selected by the sweep, so it is not late — it is
+        # permanent. That makes it the retention gap most worth a number.
+        sum(
+          [:stacks, :gdpr, :export, :undated, :count, :total],
+          event_name: [:stacks, :gdpr, :export, :undated],
+          measurement: :count,
+          description:
+            "Export archives whose key carries no deadline, so the TTL sweep can never select them — a permanent retention gap, not a late one."
+        ),
         counter(
           [:stacks, :gdpr, :audit, :write, :count, :total],
           event_name: [:stacks, :gdpr, :audit, :write],
