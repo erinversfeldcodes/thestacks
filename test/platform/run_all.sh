@@ -50,6 +50,7 @@ SUITES=(
     "$HERE/workflow_health_test.sh"
     "$HERE/deployed_posture_test.sh"
     "$HERE/unbounded_sweeps_test.sh"
+    "$HERE/ports_wired_test.sh"
     "$HERE/log_shipper_config_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"
