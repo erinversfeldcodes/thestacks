@@ -54,37 +54,119 @@ defmodule Stacks.Workers.AuditRetentionJob do
   @spec retention_months() :: pos_integer()
   def retention_months, do: @retention_months
 
+  # ⚠️ A BOUND per statement, because the alternative was one unbounded DELETE
+  # over a table designed to grow forever.
+  #
+  # The moduledoc above records that both reasons given for the unbounded form
+  # were false: batching IS available (the erasure grant is per-statement, not
+  # per-transaction, probed with two authorised DELETEs in one transaction), and
+  # the timestamp was NOT indexed. The index now exists, so the sweep can select
+  # its rows; this is the other half.
+  #
+  # 5,000 keeps each statement's lock window short on a table written from the
+  # request path, while still clearing a year of ordinary volume in a handful of
+  # iterations.
+  @batch_size 5_000
+
+  @doc """
+      Rows deleted per statement. Configurable so a test can drive the LOOP
+      rather than the constant.
+
+      ⚠️ Not a convenience. With the production size, any test small enough to
+      be fast runs exactly one batch — and a one-batch test passes against the
+      unbounded DELETE this replaced, which makes it worthless as a guard on the
+      batching. The first version of that test claimed to exercise the loop and
+      did not.
+  """
+  @spec batch_size() :: pos_integer()
+  def batch_size, do: Application.get_env(:core, :audit_retention_batch_size, @batch_size)
+
+  # Enough iterations to drain a long backlog, bounded so a job run always ends.
+  # Reaching this is not an error — the next scheduled run continues, and the
+  # log says so rather than implying the sweep finished.
+  @max_batches 50
+
   @impl true
   def perform(_job) do
     cutoff = DateTime.add(DateTime.utc_now(), -@retention_months * 30 * 24 * 3600, :second)
 
-    result =
-      Repo.transaction(fn ->
-        Repo.query!("SET LOCAL app.audit_gdpr_erasure = 'true'")
+    # ⛔ ONE TRANSACTION PER BATCH, and the GUC re-armed inside each one.
+    #
+    # `SET LOCAL` is scoped to its transaction, so a single outer transaction
+    # would make the loop one long lock-holder — which is the shape this change
+    # exists to end. Re-arming per batch is what the probe in the moduledoc
+    # established is permitted: the append-only trigger authorises per
+    # statement, not per transaction.
+    {deleted, batches} = delete_in_batches(cutoff, 0, 0)
 
-        %{num_rows: deleted} =
-          Repo.query!(
-            "DELETE FROM audit.audit_log WHERE occurred_at < $1",
-            [cutoff]
-          )
-
-        deleted
-      end)
-
-    case result do
-      {:ok, 0} ->
+    cond do
+      deleted == 0 ->
         :ok
 
-      {:ok, deleted} ->
+      batches >= @max_batches ->
+        # ⚠️ Said explicitly. The run succeeded and the sweep did NOT finish —
+        # conflating those is how a retention backlog stays invisible behind a
+        # job that keeps reporting :ok.
+        Logger.warning(
+          "AuditRetentionJob: deleted #{deleted} audit row(s) and hit the #{@max_batches}-batch " <>
+            "ceiling with rows still older than #{@retention_months} months. The backlog is " <>
+            "being worked down across runs, not cleared in this one."
+        )
+
+        :ok
+
+      true ->
         Logger.info(
           "AuditRetentionJob: deleted #{deleted} audit row(s) older than #{@retention_months} months"
         )
 
         :ok
+    end
+  rescue
+    # ⚠️ A `rescue`, because the branch this replaces could never run.
+    #
+    # It matched `{:error, reason}` from `Repo.transaction/1`, which only returns
+    # that for an explicit `Repo.rollback/1`. Nothing here rolls back, and
+    # `Repo.query!` RAISES — so the failure path was a raise propagating past a
+    # case clause written to catch it. The clause read as error handling and
+    # handled nothing.
+    error ->
+      Logger.error("AuditRetentionJob: sweep failed: #{Exception.message(error)}")
+      {:error, Exception.message(error)}
+  end
 
-      {:error, reason} ->
-        Logger.error("AuditRetentionJob: sweep failed: #{inspect(reason)}")
-        {:error, reason}
+  defp delete_in_batches(_cutoff, deleted, batches) when batches >= @max_batches,
+    do: {deleted, batches}
+
+  defp delete_in_batches(cutoff, deleted, batches) do
+    {:ok, count} =
+      Repo.transaction(fn ->
+        Repo.query!("SET LOCAL app.audit_gdpr_erasure = 'true'")
+
+        %{num_rows: count} =
+          Repo.query!(
+            """
+            DELETE FROM audit.audit_log
+             WHERE id IN (
+               SELECT id FROM audit.audit_log
+                WHERE occurred_at < $1
+                ORDER BY occurred_at
+                LIMIT $2
+             )
+            """,
+            [cutoff, batch_size()]
+          )
+
+        count
+      end)
+
+    # Fewer than a full batch means the predicate is now empty. A count equal to
+    # the batch size says nothing about what remains, so only this proves it is
+    # finished.
+    if count < batch_size() do
+      {deleted + count, batches + 1}
+    else
+      delete_in_batches(cutoff, deleted + count, batches + 1)
     end
   end
 end
