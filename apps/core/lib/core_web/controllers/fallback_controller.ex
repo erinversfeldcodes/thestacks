@@ -47,7 +47,7 @@ defmodule CoreWeb.FallbackController do
   def call(conn, {:error, :placement_not_found}) do
     conn
     |> put_status(422)
-    |> json(%{error: "placement not found"})
+    |> json(%{error: "placement_not_found"})
   end
 
   def call(conn, {:error, :not_public}) do

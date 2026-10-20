@@ -221,7 +221,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
         |> auth_conn(user)
         |> put("/api/placements/#{Ecto.UUID.generate()}/move", %{bookshelf: "wishlist"})
 
-      assert %{"error" => "not found"} = json_response(conn, 404)
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
     test "returns 422 for an invalid bookshelf name", %{
@@ -357,7 +357,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
         |> auth_conn(user)
         |> delete("/api/placements/#{Ecto.UUID.generate()}")
 
-      assert %{"error" => "not found"} = json_response(conn, 404)
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
     test "returns 401 when not authenticated", %{conn: conn, placement: placement} do
@@ -429,7 +429,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
         |> auth_conn(user)
         |> post("/api/placements/#{Ecto.UUID.generate()}/restore")
 
-      assert %{"error" => "not found"} = json_response(conn, 404)
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
     test "401 when not authenticated", %{conn: conn, placement: placement} do
@@ -552,7 +552,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       conn =
         put(conn, "/api/placements/#{Ecto.UUID.generate()}/formats", %{formats: ["hardcover"]})
 
-      assert %{"error" => "not found"} = json_response(conn, 404)
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
   end
 

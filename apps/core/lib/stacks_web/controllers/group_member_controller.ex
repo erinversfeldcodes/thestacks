@@ -22,7 +22,7 @@ defmodule StacksWeb.GroupMemberController do
         conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
 
       {:error, :user_not_found} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "user not found"})
+        conn |> put_status(:unprocessable_entity) |> json(%{error: "user_not_found"})
 
       {:error, :already_member} ->
         conn |> put_status(:unprocessable_entity) |> json(%{error: "already a member"})
@@ -40,7 +40,7 @@ defmodule StacksWeb.GroupMemberController do
         json(conn, %{ok: true})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not found"})
+        conn |> put_status(:not_found) |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
@@ -55,7 +55,7 @@ defmodule StacksWeb.GroupMemberController do
         json(conn, %{ok: true})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not found"})
+        conn |> put_status(:not_found) |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
@@ -85,7 +85,7 @@ defmodule StacksWeb.GroupMemberController do
       # same answer `GET /api/groups/:id` already gives. A 403 would confirm the
       # group exists to a caller not entitled to know that.
       {:error, reason} when reason in [:not_found, :unauthorized] ->
-        conn |> put_status(:not_found) |> json(%{error: "not found"})
+        conn |> put_status(:not_found) |> json(%{error: "not_found"})
     end
   end
 
@@ -100,7 +100,7 @@ defmodule StacksWeb.GroupMemberController do
         conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
 
       {:error, :not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "not found"})
+        conn |> put_status(:not_found) |> json(%{error: "not_found"})
     end
   end
 
@@ -115,7 +115,7 @@ defmodule StacksWeb.GroupMemberController do
         conn |> put_status(:unprocessable_entity) |> json(%{error: "cannot leave as owner"})
 
       {:error, :not_member} ->
-        conn |> put_status(:not_found) |> json(%{error: "not found"})
+        conn |> put_status(:not_found) |> json(%{error: "not_found"})
     end
   end
 end

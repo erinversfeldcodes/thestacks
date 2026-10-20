@@ -25,7 +25,7 @@ defmodule StacksWeb.BlogFeedController do
       nil ->
         conn
         |> put_status(404)
-        |> json(%{error: "Reader not found"})
+        |> json(%{error: "reader_not_found"})
 
       user ->
         {xml, etag} = Syndication.feed_xml(user)

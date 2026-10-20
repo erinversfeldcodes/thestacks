@@ -98,7 +98,7 @@ defmodule StacksWeb.BlogFeedControllerTest do
 
     test "an unknown handle is a 404", %{conn: conn} do
       conn = get(conn, "/api/feeds/u/nobody-here/blog")
-      assert json_response(conn, 404)["error"] == "Reader not found"
+      assert json_response(conn, 404)["error"] == "reader_not_found"
     end
 
     test "route ordering: /blog reaches BlogFeedController, not a bookshelf named blog", %{

@@ -105,7 +105,7 @@ defmodule StacksWeb.FeedControllerTest do
     test "returns 404 for nonexistent bookshelf", %{conn: conn} do
       conn = get(as_reader(conn), "/api/feeds/#{Ecto.UUID.generate()}/library")
 
-      assert %{"error" => "Bookshelf not found"} = json_response(conn, 404)
+      assert %{"error" => "bookshelf_not_found"} = json_response(conn, 404)
     end
 
     test "returns 403 for a bookshelf the reader has not shared", %{conn: conn} do

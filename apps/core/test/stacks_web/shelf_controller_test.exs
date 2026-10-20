@@ -277,7 +277,7 @@ defmodule StacksWeb.ShelfControllerTest do
         |> auth_conn(user)
         |> put("/api/placements/#{Ecto.UUID.generate()}/shelf", %{shelf_id: shelf_b.id})
 
-      assert %{"error" => "not found"} = json_response(conn, 404)
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
     test "returns 404 for a nonexistent target shelf id", %{
@@ -294,7 +294,7 @@ defmodule StacksWeb.ShelfControllerTest do
         |> auth_conn(user)
         |> put("/api/placements/#{placement.id}/shelf", %{shelf_id: Ecto.UUID.generate()})
 
-      assert %{"error" => "not found"} = json_response(conn, 404)
+      assert %{"error" => "not_found"} = json_response(conn, 404)
     end
   end
 end

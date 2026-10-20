@@ -370,7 +370,7 @@ defmodule StacksWeb.UploadController do
     case result do
       nil ->
         Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")
-        conn |> put_status(404) |> json(%{error: "not found"})
+        conn |> put_status(404) |> json(%{error: "not_found"})
 
       %{user_id: owner_id} when not is_nil(owner_id) and owner_id != user.id ->
         Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")

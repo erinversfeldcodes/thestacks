@@ -44,7 +44,7 @@ defmodule StacksWeb.InternalController do
     else
       conn
       |> put_status(404)
-      |> json(%{error: "not found"})
+      |> json(%{error: "not_found"})
     end
   end
 

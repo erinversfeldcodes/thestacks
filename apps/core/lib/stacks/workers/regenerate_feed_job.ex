@@ -56,7 +56,7 @@ defmodule Stacks.Workers.RegenerateFeedJob do
           "RegenerateFeedJob: bookshelf #{bookshelf_name} for user=#{user_id} not found"
         )
 
-        {:cancel, "bookshelf not found"}
+        {:cancel, "bookshelf_not_found"}
 
       {:error, {:cache_write_failed, changeset}} ->
         Logger.error(

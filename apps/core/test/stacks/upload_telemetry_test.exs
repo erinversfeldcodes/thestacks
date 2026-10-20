@@ -603,7 +603,7 @@ defmodule Stacks.UploadTelemetryTest do
         conn
         |> get("/api/upload/#{fake_id}/stream?token=#{token}")
 
-      assert json_response(conn, 404)["error"] == "not found"
+      assert json_response(conn, 404)["error"] == "not_found"
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000

@@ -31,7 +31,7 @@ defmodule StacksWeb.FeedController do
       nil ->
         conn
         |> put_status(404)
-        |> json(%{error: "Reader not found"})
+        |> json(%{error: "reader_not_found"})
 
       user ->
         show(conn, %{"user_id" => user.id, "bookshelf_name" => bookshelf_name})
@@ -60,7 +60,7 @@ defmodule StacksWeb.FeedController do
       {:error, :not_found} ->
         conn
         |> put_status(404)
-        |> json(%{error: "Bookshelf not found"})
+        |> json(%{error: "bookshelf_not_found"})
 
       # ⚠️ 403 HERE, AND 404 ON THE GROUP FEED — the difference is deliberate and
       # keeps being re-found as a defect, so here is why it is not one.
