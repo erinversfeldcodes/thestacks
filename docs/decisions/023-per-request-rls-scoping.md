@@ -144,6 +144,24 @@ Therefore: `op.current_scope()` takes no arguments and returns the scope, the co
 role-scoped policy, never as a value in the policy body.** A policy written `TO <role>` is applied
 only when `current_user` matches, so the runtime role's plan keeps exactly one indexable qual.
 
+⚠️ **Correction, measured after this ADR was first written.** The sentence above is true of the
+owner policy *alone*, and that is not the whole story for reads. Postgres combines PERMISSIVE
+policies with `OR`, and three of these four tables carry a second permissive policy for `SELECT`
+(`bookshelves_platform_select`, `bookshelf_placements_platform_select`,
+`visibility_grants_grantee_select`). So a read evaluates
+`user_id = op.current_scope() OR visibility = 'platform'`, which **sequentially scans** when only
+`user_id` is indexed — measured on 50,000 rows. Writes, and everything on `user_blocks` (a single
+policy), keep the index.
+
+✅ It is fixable, and the fix is an index rather than a policy change: with **both** columns
+indexed the planner builds a `BitmapOr` of two index scans, and a *partial* index on the platform
+rows is enough since that arm only ever asks for them. The migration therefore adds four:
+partial `visibility` indexes on `bookshelves` and `bookshelf_placements`, and plain indexes on
+`visibility_grants.granted_by_id` (which had none) and `.granted_to_id` (which was only the third
+column of a composite). ⚠️ This seq scan is **pre-existing** — today's policies already OR the same
+second arm — so the indexes repair something enforcement would otherwise inherit, rather than
+compensating for a regression this change introduces.
+
 ### 5. Background work: every RLS query is scoped to someone — no exceptions, no sentinel
 
 Measured: 37 workers exist, 7 carry a `user_id`, and only four touch an RLS table at all.
@@ -213,6 +231,15 @@ No `STACKS_RLS_ENFORCE`. The justification is the detection path, measured rathe
 |---|---|---|
 | Unscoped path (raises `42501`) | caught | 5xx breaches the 0.99 success-rate threshold → automatic rollback |
 | Over-permissive path (wrong rows) | caught — `privacy-placement` and `privacy-block` assert the cross-user direction | not detected |
+
+⚠️ **One claim elsewhere in this document needed correcting, and the measurement is the reason.**
+"A scoped connection cannot read another user's bookshelf" is **false as stated**: it cannot read
+another user's *private* bookshelf, while a platform-visible one is readable by any signed-in
+reader — that is what `bookshelves_platform_select` says, and narrowing it would change the
+product's visibility rule rather than enforce it. Measured as `stacks_app` on 2026-10-20: scoped to
+one user, **0 of 82** other users' private shelves were visible, their 3 platform-visible shelves
+were, and the user's own 5 were. The proof obligation is therefore stated against *private* rows,
+and any test asserting the broader claim would fail for the right reason on the wrong grounds.
 
 The deployed E2E runs on the pull request against the preview stack, **before** merge, and the six
 specs covering these tables carry **48 presence assertions and zero `count > 0` guards**
