@@ -102,6 +102,7 @@ gate check-route-reachability.sh
 gate check-http-timeouts.sh
 gate check-ports-wired.sh
 gate check-decoder-coverage.sh
+gate check-book-adapter-coverage.sh
 gate check-css.sh
 gate check-css-values.sh
 

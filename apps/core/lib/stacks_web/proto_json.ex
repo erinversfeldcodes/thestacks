@@ -61,14 +61,39 @@ defmodule StacksWeb.ProtoJSON do
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
+    # ⛔ `:language` and `:bisac_codes` were REMOVED from this take, and the
+    # reason in each case is a measurement rather than a design preference.
+    #
+    # Both were serialised here, decoded correctly by the generated proto
+    # decoder, and then dropped by `Types.Book.fromProtoBook` — a hand-written
+    # adapter that builds the app record field by field and does not mention
+    # them. So no view could reference either one: there was no record field to
+    # reference. This is the only payload that carried them; search, catalogue
+    # and bookshelf already omit all three of the wide fields.
+    #
+    # `:language` — the ONLY writer in the tree is `seeds.exs`. The ISBN
+    # resolver caches a language from Open Library but never passes it into book
+    # creation, so: 169 of 169 local rows say "en" because the seed set it, and
+    # 55 of 55 production rows are NULL. There is nothing to render. Recorded as
+    # its own finding; re-adding this key is one line once something populates
+    # the column.
+    #
+    # `:bisac_codes` — real production data (12 of 55 rows) and empty locally,
+    # which is the opposite way round. It already reaches its consumer: the
+    # insights profile reads `b.bisac_codes` on a different endpoint. The
+    # reader-facing form of this information on a book page is `subjects`, which
+    # is carried below. So the detail payload does not need it.
+    #
+    # ⚠️ `:community_read_count` stays, and is still unread by the adapter — it
+    # has a per-request warehouse query behind it and a separate owner. The
+    # adapter gate names it as the one declared exception, so it is a decision
+    # on record rather than the same silence.
     Gen.book(book)
     |> Map.take([
       :id,
       :title,
       :description,
-      :language,
       :subjects,
-      :bisac_codes,
       :visibility_tier
     ])
     |> Map.merge(%{

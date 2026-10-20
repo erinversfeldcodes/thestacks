@@ -32,13 +32,25 @@ defmodule StacksWeb.ProtoJSONTest do
 
       result = ProtoJSON.book(book, community_read_count: 42)
 
+      # ⛔ `language` and `bisac_codes` are NOT here, and this golden assertion is
+      # the test that caught their removal — which is what a golden snapshot is
+      # for. Both were serialised, decoded by the generated proto decoder, and
+      # then dropped by `Types.Book.fromProtoBook`, so no client ever held
+      # either one. Removed on a measurement rather than a preference: the only
+      # writer of `books.language` in the tree is `seeds.exs` (169 of 169 local
+      # rows "en", 55 of 55 production rows NULL), and `bisac_codes` already
+      # reaches its only consumer through the insights endpoint while the
+      # reader-facing form on a book page is `subjects`.
+      #
+      # ⚠️ `community_read_count` IS still here and is still unread by the
+      # adapter — it has a per-request warehouse query behind it and a separate
+      # owner. `scripts/check-book-adapter-coverage.sh` names it as the one
+      # declared exception, so it is a decision on record rather than a silence.
       assert result == %{
                id: book.id,
                title: book.title,
                description: book.description,
-               language: book.language,
                subjects: ["fiction", "philosophy"],
-               bisac_codes: book.bisac_codes,
                visibility_tier: "public",
                author: %{
                  id: author.id,

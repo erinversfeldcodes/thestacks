@@ -59,7 +59,15 @@ BASELINE = {
     "blog_association:visible",
     "blog_post:visibility_group_id",
     "book:author_id",
+    # Removed from the detail payload 2026-10-20, each on a measurement rather
+    # than a preference: `language` is written by seeds.exs and nothing else (169
+    # of 169 local rows "en", 55 of 55 production rows NULL), and `bisac_codes`
+    # already reaches its only consumer through the insights endpoint while the
+    # reader-facing form on a book page is `subjects`. Both were dropped by the
+    # SPA's hand-written adapter anyway, so no client lost anything.
+    "book:bisac_codes",
     "book:created_at",
+    "book:language",
     "book:updated_at",
     "book_placement:book_edition_id",
     "book_placement:bookshelf_id",
@@ -149,6 +157,49 @@ BASELINE = {
 }
 
 
+# ⛔ COMMENTS ARE NOT CODE, and this gate learned that the hard way — from a
+# comment written to EXPLAIN a removal, which then hid it.
+#
+# The carried-field harvest below regexes `:atom` out of a serializer's body. A
+# comment saying why `:language` was dropped spells `:language`, so the harvest
+# counted the field as still carried and the gate reported 98 omissions, all
+# pinned, over a payload that had just lost two fields. A green run for a change
+# the gate exists to notice.
+#
+# ⚠️ This is the same defect class the repository already records five instances
+# of, arrived at from the other direction: there, an ABSENCE assertion matched
+# the prose explaining why a pattern was banned; here, a PRESENCE harvest
+# matched the prose explaining why a field was removed. Both are a gate reading
+# its own documentation as configuration.
+#
+# Elixir has no block comments, so `#` to end of line is the whole job — but
+# `#{` is interpolation, not a comment, and stripping from it would eat live
+# code. A `#` inside a string is left alone for the same reason: the harvest
+# only cares about atoms, and an atom inside a string is not a carried field
+# either way.
+def _strip_comments(src):
+    out = []
+    for line in src.split("\n"):
+        cleaned = []
+        in_string = False
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == '"':
+                in_string = not in_string
+            elif ch == "#" and not in_string:
+                # `#{` is interpolation and keeps its line.
+                if i + 1 < len(line) and line[i + 1] == "{":
+                    cleaned.append(line[i:])
+                    i = len(line)
+                    continue
+                break
+            cleaned.append(ch)
+            i += 1
+        out.append("".join(cleaned))
+    return "\n".join(out)
+
+
 def read(path):
     try:
         return pathlib.Path(path).read_text(encoding="utf-8")
@@ -206,7 +257,7 @@ for match in re.finditer(r"\n  def ([a-z_]+)\(([^)]*)\) do\n(.*?)\n  end\n", han
     if not gen_call or gen_call.group(1) not in gen_fields:
         continue
     narrowing += 1
-    carried = set(re.findall(r":([a-z_0-9]+)", body))
+    carried = set(re.findall(r":([a-z_0-9]+)", _strip_comments(body)))
     for attr in re.findall(r"@([a-z_]+)", body):
         carried |= attrs.get(attr, set())
     for field in gen_fields[gen_call.group(1)] - carried:

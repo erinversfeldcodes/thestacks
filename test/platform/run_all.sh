@@ -53,6 +53,7 @@ SUITES=(
     "$HERE/ports_wired_test.sh"
     "$HERE/sweep_preview_orphans_test.sh"
     "$HERE/decoder_coverage_test.sh"
+    "$HERE/book_adapter_coverage_test.sh"
     "$HERE/log_shipper_config_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"
