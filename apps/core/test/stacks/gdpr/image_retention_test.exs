@@ -92,6 +92,91 @@ defmodule Stacks.GDPR.ImageRetentionTest do
     end
   end
 
+  describe "the per-image event costs a round-trip, and that is what bounded the drain" do
+    # ⛔ The sweeps emitted `image.expired` one row at a time, and `Events.emit/1`
+    # is TWO round-trips each — the `event_log` insert plus the subscriber
+    # enqueue. Measured on a deployed stack: 200 deletions meant 400 sequential
+    # round-trips to a networked Postgres, which ate the sweep's whole
+    # 30-second budget, so one run cleared exactly one batch no matter how large
+    # the backlog was. Production's 6,655 expired rows were 34 nightly runs from
+    # being gone — and the cron fires on roughly a quarter of nights.
+    #
+    # ⚠️ The property is that the cost does NOT grow with the number of images.
+    # A test that only counted events would pass against the per-row version,
+    # which emitted exactly the same events; the query count is the only thing
+    # that tells the two apart.
+
+    defp count_queries(fun) do
+      ref = make_ref()
+      test_pid = self()
+
+      # Count only this process's queries. A telemetry handler runs in the
+      # process that emitted the event, so comparing against the test pid keeps
+      # every other async test's queries out of the number.
+      :telemetry.attach(
+        "image-retention-query-counter-#{inspect(ref)}",
+        [:core, :repo, :query],
+        fn _, _, _, _ ->
+          if self() == test_pid, do: send(test_pid, {ref, :query})
+        end,
+        nil
+      )
+
+      fun.()
+      :telemetry.detach("image-retention-query-counter-#{inspect(ref)}")
+
+      drain_count(ref, 0)
+    end
+
+    defp drain_count(ref, acc) do
+      receive do
+        {^ref, :query} -> drain_count(ref, acc + 1)
+      after
+        0 -> acc
+      end
+    end
+
+    defp seed_expired(n) do
+      for _ <- 1..n do
+        insert(:uploaded_image,
+          expires_at: DateTime.add(DateTime.utc_now(), -86_400, :second),
+          uploaded_at: DateTime.add(DateTime.utc_now(), -40 * 86_400, :second)
+        )
+      end
+    end
+
+    test "sweeping twice as many images does not cost twice as many queries" do
+      seed_expired(4)
+      few = count_queries(fn -> {:ok, 4} = ImageRetention.cleanup_expired_images(limit: 50) end)
+
+      seed_expired(16)
+      many = count_queries(fn -> {:ok, 16} = ImageRetention.cleanup_expired_images(limit: 50) end)
+
+      # Four times the rows. Per-row emission made the query count scale with
+      # `n`; batched emission makes the difference a small constant.
+      assert many - few <= 3,
+             "sweeping 16 images cost #{many} queries against #{few} for 4 — the per-image " <>
+               "round-trip is back, so a large backlog will again spend its whole time budget " <>
+               "on one batch (measured on production: 6,655 rows at 200 a run)"
+    end
+
+    test "every deleted image is still recorded, which is what the batch must not lose" do
+      # Anti-vacuity for the test above: a batch that emitted NOTHING would have
+      # the flattest query count of all, and the immutable log is meant to be
+      # the record that these deletions happened.
+      before = event_count("image.expired")
+      seed_expired(7)
+
+      assert {:ok, 7} = ImageRetention.cleanup_expired_images(limit: 50)
+      assert event_count("image.expired") - before == 7
+    end
+
+    test "an empty sweep writes no events and asks the database for nothing extra" do
+      assert {:ok, 0} = ImageRetention.cleanup_expired_images(limit: 50)
+      assert event_count("image.expired") == 0
+    end
+  end
+
   describe "cleanup_expired_images/0" do
     test "deletes images past their expires_at" do
       _expired =

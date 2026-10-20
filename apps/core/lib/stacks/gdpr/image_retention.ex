@@ -77,14 +77,7 @@ defmodule Stacks.GDPR.ImageRetention do
       |> where([i], i.id in ^expired_ids)
       |> Repo.delete_all()
 
-    Enum.each(expired_ids, fn image_id ->
-      Events.emit_safe(%{
-        event_type: "image.expired",
-        aggregate_type: "image",
-        aggregate_id: image_id,
-        payload: %{}
-      })
-    end)
+    emit_expiry_events(expired_ids, %{})
 
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "expired"})
 
@@ -123,14 +116,7 @@ defmodule Stacks.GDPR.ImageRetention do
       |> where([i], i.id in ^stuck_ids)
       |> Repo.delete_all()
 
-    Enum.each(stuck_ids, fn image_id ->
-      Events.emit_safe(%{
-        event_type: "image.expired",
-        aggregate_type: "image",
-        aggregate_id: image_id,
-        payload: %{reason: "stuck"}
-      })
-    end)
+    emit_expiry_events(stuck_ids, %{reason: "stuck"})
 
     :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: count}, %{reason: "stuck"})
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "stuck"})
@@ -248,5 +234,49 @@ defmodule Stacks.GDPR.ImageRetention do
       _ ->
         :ok
     end)
+  end
+
+  # ⛔ ONE statement for the whole batch, not one per image — and this is the
+  # difference between a backlog that clears and one that does not.
+  #
+  # These sweeps used to call `Events.emit_safe/1` per deleted row, and
+  # `emit/1` costs TWO round-trips each (the event_log insert plus the
+  # subscriber enqueue). Measured on a deployed stack: 200 deletions meant 400
+  # sequential round-trips to a networked Postgres and consumed the sweep's
+  # entire 30-second budget, so one run cleared exactly one batch however large
+  # the backlog was. Production's 6,655 expired rows were 34 nightly runs away
+  # from being gone.
+  #
+  # ⚠️ Still best-effort, exactly as `emit_safe/1` was: the images are already
+  # deleted by the time this runs, so a failed event must not fail the sweep and
+  # undo nothing. What changes is that the failure is now LOGGED WITH ITS SIZE
+  # rather than once per row — a batch that silently emitted nothing would leave
+  # the deletions unrecorded in an immutable log that is supposed to be the
+  # record of them.
+  defp emit_expiry_events([], _payload), do: :ok
+
+  defp emit_expiry_events(image_ids, payload) do
+    events =
+      Enum.map(image_ids, fn image_id ->
+        %{
+          event_type: "image.expired",
+          aggregate_type: "image",
+          aggregate_id: image_id,
+          payload: payload
+        }
+      end)
+
+    case Events.emit_many(events) do
+      {:ok, _count} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ImageRetention: #{length(image_ids)} image.expired event(s) were not recorded: " <>
+            "#{inspect(reason)}"
+        )
+
+        :ok
+    end
   end
 end
