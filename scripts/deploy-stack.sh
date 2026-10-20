@@ -717,27 +717,7 @@ if [[ -n "${STACKS_APP_DB_PASSWORD:-}" && -n "${EFFECTIVE_DATABASE_URL}" ]]; the
     APP_DATABASE_URL_VALUE="$(
         EFFECTIVE_DATABASE_URL="$EFFECTIVE_DATABASE_URL" \
         STACKS_APP_DB_PASSWORD="$STACKS_APP_DB_PASSWORD" \
-        python3 - <<'PYEOF'
-import os
-import sys
-from urllib.parse import urlsplit, urlunsplit, quote
-
-url = os.environ["EFFECTIVE_DATABASE_URL"]
-password = os.environ["STACKS_APP_DB_PASSWORD"]
-
-parts = urlsplit(url)
-if not parts.hostname:
-    # Not a URL we can rewrite. Emit nothing: the caller treats an empty value
-    # as "do not set the secret", which leaves the runtime fallback in place.
-    sys.exit(0)
-
-host = parts.hostname
-if parts.port:
-    host = f"{host}:{parts.port}"
-
-netloc = f"stacks_app:{quote(password, safe='')}@{host}"
-print(urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)))
-PYEOF
+        python3 "${REPO_ROOT}/scripts/lib/derive-app-database-url.py"
     )" || APP_DATABASE_URL_VALUE=""
 
     if [[ -n "$APP_DATABASE_URL_VALUE" ]]; then

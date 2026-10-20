@@ -30,31 +30,11 @@ DEPLOY_SRC="$(cat "$DEPLOY" 2>/dev/null)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# The derivation, extracted from the deploy script so the test drives the real
-# logic rather than a copy of it. ⚠️ Extracting by markers means an edit that
-# changes the derivation changes what is tested; a hand-copied duplicate would
-# have gone stale silently, which is this repository's own recorded lesson about
-# instruments that drift from the thing they measure.
-DERIVE="$WORK/derive.py"
-python3 - "$DEPLOY" "$DERIVE" <<'PY'
-import pathlib
-import sys
-
-src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-start = src.index("<<'PYEOF'") + len("<<'PYEOF'")
-end = src.index("PYEOF", start)
-body = src[start:end]
-
-if "urlsplit" not in body or "stacks_app" not in body:
-    print("FAIL: the extracted block is not the URL derivation", file=sys.stderr)
-    raise SystemExit(1)
-
-pathlib.Path(sys.argv[2]).write_text(body, encoding="utf-8")
-PY
-
-if [[ -s "$DERIVE" ]]; then
-    _record_pass_setup=1
-fi
+# ⚠️ The derivation is its own script now, so this suite RUNS it rather than
+# extracting it from the deploy script by string markers. The extraction was a
+# test whose first job was parsing the thing it tested — it would have reported
+# a clean pass over nothing the moment those markers moved.
+DERIVE="$REPO_ROOT/scripts/lib/derive-app-database-url.py"
 
 derive() {
     EFFECTIVE_DATABASE_URL="$1" STACKS_APP_DB_PASSWORD="$2" python3 "$DERIVE"
@@ -67,11 +47,27 @@ if bash -n "$DEPLOY" 2>/dev/null; then
 else
     _record_fail "it does NOT parse, so it has never run here"
 fi
-if [[ -s "$DERIVE" ]]; then
-    _record_pass "the derivation block was extracted from the real script"
+assert_path_exists "$DERIVE" "scripts/lib/derive-app-database-url.py exists"
+
+# ⛔ RUNS it under bare `python3`, which is what the deploy script calls — and
+# not `ast.parse`, which is what used to be here. A 3.10-only annotation
+# (`str | None`) PARSES fine on 3.9 and raises `TypeError` at import, so the
+# parse check passed on the one interpreter where the file was unusable. The
+# caller's `|| APP_DATABASE_URL_VALUE=""` then swallowed it, the deploy set no
+# secret, and the stack ran as the owner with every least-privilege grant
+# decorative. The system python3 on macOS is 3.9, so this is the live case, not
+# a hypothetical one.
+#
+# Invoked with no environment, where the contract is a clean exit and no output.
+DERIVE_SMOKE="$(python3 "$DERIVE" 2>&1)"
+DERIVE_SMOKE_RC=$?
+if [[ $DERIVE_SMOKE_RC -eq 0 && -z "$DERIVE_SMOKE" ]]; then
+    _record_pass "it RUNS under $(python3 --version 2>&1), the interpreter the deploy script calls"
 else
-    _record_fail "could not extract the derivation — the markers moved, so every case below would be testing nothing"
+    _record_fail "it does not run under $(python3 --version 2>&1) (rc=$DERIVE_SMOKE_RC): ${DERIVE_SMOKE:-no output}. Every case below would derive nothing and the deploy would silently keep the owner role"
 fi
+assert_not_contains "$DEPLOY_SRC" "PYEOF" \
+    "the deploy script no longer embeds the derivation in a heredoc, so shellcheck can see past it"
 
 test_case "the_host_and_database_survive" "only the credentials change"
 # ⛔ The case that matters most. If the host were rewritten, a preview deploy
