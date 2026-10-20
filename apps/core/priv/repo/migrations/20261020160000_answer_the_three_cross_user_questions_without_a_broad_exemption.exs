@@ -119,7 +119,27 @@ defmodule Core.Repo.Migrations.AnswerTheThreeCrossUserQuestionsWithoutABroadExem
     $$
     """)
 
+    # ⚠️ `ALTER FUNCTION … OWNER TO` requires the current role to be a MEMBER of
+    # the role it is handing ownership to — creating a role does not by itself
+    # confer that everywhere. Granted explicitly so the transfer below does not
+    # depend on which Postgres version's implicit-admin rules apply.
+    execute("""
+    DO $$
+    BEGIN
+      EXECUTE format('GRANT rls_reader TO %I', current_user);
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE NOTICE 'could not grant rls_reader to %, relying on implicit admin', current_user;
+    END $$
+    """)
+
     for fun <- ["op.blocked_pair(uuid, uuid)", "op.wishlist_user_ids(uuid)"] do
+      # ⛔ NOT swallowed if it fails. A function left owned by the migrating role
+      # still works — that role can read every row — but it works by being
+      # broadly privileged rather than by the narrow grant this design rests on,
+      # and on a deployed database the owner holds BYPASSRLS. A deploy that
+      # stops here and says so is better than one that quietly ships a
+      # cross-user read with no boundary around it.
       execute("ALTER FUNCTION #{fun} OWNER TO rls_reader")
       execute("GRANT EXECUTE ON FUNCTION #{fun} TO stacks_app")
     end

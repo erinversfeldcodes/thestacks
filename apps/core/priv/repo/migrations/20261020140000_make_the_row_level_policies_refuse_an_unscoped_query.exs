@@ -98,12 +98,33 @@ defmodule Core.Repo.Migrations.MakeTheRowLevelPoliciesRefuseAnUnscopedQuery do
     # ⚠️ Guarded on the role existing: `stacks_app` is created by an earlier
     # migration only when its password is in the environment, so a developer
     # database may legitimately not have it.
+    # ⛔ BEST EFFORT, and the reason is a deploy that failed on exactly this.
+    #
+    # `ALTER ROLE … SET` on a custom parameter requires SUPERUSER, and the
+    # deployed database owner is not one — measured: the release command aborted
+    # with `ERROR 42501 permission denied to set parameter "app.current_user_id"`.
+    # It works locally only because a developer connects as a superuser, which
+    # is exactly the "works here, fails on the first real deploy" shape the
+    # notes above warn about for BYPASSRLS.
+    #
+    # ⚠️ Kept as an attempt rather than deleted, because where it DOES apply it
+    # improves an error message — and swallowed only for the single error that
+    # means "this database will not let me". Anything else still aborts.
+    #
+    # ⚠️ It was never load-bearing, which the failure made clear:
+    # `op.current_scope()` treats an unset parameter AND an empty one as
+    # unscoped, so the refusal is deterministic with or without this default.
+    # The default only decides whether the error names itself or arrives as a
+    # cast failure.
     execute("""
     DO $$
     BEGIN
       IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stacks_app') THEN
         EXECUTE 'ALTER ROLE stacks_app SET app.current_user_id = ''unset''';
       END IF;
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE NOTICE 'no role default for app.current_user_id (not superuser) — unaffected';
     END $$
     """)
 
