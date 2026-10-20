@@ -127,14 +127,82 @@ defmodule Core.DatabaseRoleSplitTest do
   end
 
   describe "release tasks pin the owner connection" do
-    test "owner_repo_opts/0 reads DATABASE_URL and is empty when it is absent" do
-      # Empty-when-absent keeps dev and test untouched: there is one role there,
-      # the repo's own config is already right, and an override would have to
-      # invent a URL.
-      assert Stacks.Release.owner_repo_opts() == [] or
-               Keyword.has_key?(Stacks.Release.owner_repo_opts(), :url),
-             "owner_repo_opts/0 returned something that is neither empty nor a url override"
+    # ⛔ These three are BEHAVIOURAL, and that is the whole point of them.
+    #
+    # The assertion they replace was `owner_repo_opts() == [] or
+    # Keyword.has_key?(..., :url)` — satisfied by almost any keyword list, and
+    # it never set `APP_DATABASE_URL` at all, so it could not tell the owner URL
+    # from the app URL even in principle. Everything else about this split was
+    # asserted from SOURCE TEXT, which is the exact weakness the
+    # least-privilege work recorded as its open risk: if the selection were ever
+    # wrong, setting one secret would leave the app serving happily and break
+    # the NEXT deploy's migration step, separating the failure from its cause by
+    # however long it is until someone deploys.
+    #
+    # ⚠️ `async: false` is not available here (the module is `async: true`), so
+    # these set and restore the two variables around each assertion rather than
+    # in a setup block, and they use values no real URL could collide with.
+    defp with_env(vars, fun) do
+      previous = Map.new(vars, fn {name, _} -> {name, System.get_env(name)} end)
 
+      try do
+        Enum.each(vars, fn {name, value} -> System.put_env(name, value) end)
+        fun.()
+      after
+        Enum.each(previous, fn
+          {name, nil} -> System.delete_env(name)
+          {name, value} -> System.put_env(name, value)
+        end)
+      end
+    end
+
+    test "a release task takes the OWNER url even while the app url is set" do
+      with_env(
+        [
+          {"DATABASE_URL", "ecto://owner:x@db.test/owner_db"},
+          {"APP_DATABASE_URL", "ecto://stacks_app:x@db.test/app_db"}
+        ],
+        fn ->
+          opts = Stacks.Release.owner_repo_opts()
+
+          assert Keyword.fetch!(opts, :url) == "ecto://owner:x@db.test/owner_db",
+                 "a release task would connect as the RUNTIME role. `migrate/0` runs DDL and " <>
+                   "needs ownership, so setting APP_DATABASE_URL would break the next deploy's " <>
+                   "migration step while the app kept serving — the failure arriving whenever " <>
+                   "somebody next deploys, not when the secret was set"
+        end
+      )
+    end
+
+    test "it is empty when the owner url is absent, so dev and test are untouched" do
+      # Empty-when-absent is what keeps one-role environments alone: the repo's
+      # own config is already right there, and an override would have to invent
+      # a URL. Asserted with APP_DATABASE_URL SET, because that is the case
+      # where a naive implementation would reach for the wrong one.
+      with_env([{"APP_DATABASE_URL", "ecto://stacks_app:x@db.test/app_db"}], fn ->
+        previous = System.get_env("DATABASE_URL")
+        System.delete_env("DATABASE_URL")
+
+        try do
+          assert Stacks.Release.owner_repo_opts() == [],
+                 "with no owner url, a release task must not fall back to the app url"
+        after
+          if previous, do: System.put_env("DATABASE_URL", previous)
+        end
+      end)
+    end
+
+    test "an empty owner url is treated as absent, not as a url" do
+      with_env([{"DATABASE_URL", ""}], fn ->
+        assert Stacks.Release.owner_repo_opts() == [],
+               "an empty DATABASE_URL became a url override, which would make a release task " <>
+                 "try to connect to nothing"
+      end)
+    end
+
+    test "the helper still exists and still reads the owner variable" do
+      # Kept as a source assertion deliberately: it guards the NAME the
+      # deploy scripts and workflows compose, which no behavioural test can see.
       src = release_src()
       assert src =~ ~s|System.get_env("DATABASE_URL")|, "it does not read DATABASE_URL"
       assert src =~ "def owner_repo_opts", "the helper is gone"
