@@ -170,13 +170,20 @@ Measured: 37 workers exist, 7 carry a `user_id`, and only four touch an RLS tabl
 |---|---|
 | `regenerate_feed_job` | per-user — scopes to its `user_id` |
 | `visibility_recap_job` | per-user — scopes to its `user_id` |
-| `expired_unverified_accounts_job` | **refactored to iterate users and scope to each in turn** |
-| `goodreads_import_job` | **refactored to iterate users and scope to each in turn** |
+| `expired_unverified_accounts_job` | ⚠️ needs NOTHING — see the correction below |
+| `goodreads_import_job` | ⚠️ needs NOTHING — see the correction below |
 
-The two system-wide jobs are restructured rather than exempted. They already iterate over users, so
-scoping per user is a loop restructure, and it preserves a total invariant — *no connection ever
-reads every user's rows* — which is worth more than the two saved loops. There is no sentinel GUC
-value and no `BYPASSRLS` role anywhere in this design.
+⚠️ **Correction, measured during implementation: neither of those two needed refactoring, and the
+claim that they did came from a grep matching prose.** `expired_unverified_accounts_job`'s only
+mention of these tables is a code COMMENT; it queries `op.users`, which carries no policy, and then
+calls `GDPR.Deletion.delete_user_data/2`, which scopes itself. `goodreads_import_job` reaches the
+tables only through `Shelving.place_book/5` and `Shelving.get_placements_for_book/2`, both of which
+now scope themselves. So the real worker surface was two other jobs — `visibility_recap_job`, which
+runs its own `update_all` and is scoped in `perform/1`, and `regenerate_feed_job`, scoped at its
+`Feeds.regenerate/2` context boundary.
+
+The invariant still holds and still has no exemption for application work: no sentinel GUC value and
+no `BYPASSRLS` role anywhere in this design.
 
 ⚠️ `Core.Repo` and `Core.ObanRepo` both use `APP_DATABASE_URL`, so Oban workers and web requests are
 the **same database role**; no policy can distinguish them. That is a reason this decision avoids
@@ -251,6 +258,26 @@ system as healthier.
 
 A flag's remaining value would be an operator lever, and the SLO gate's automatic rollback already is
 one.
+
+### 9. Two consequences of the mechanism that every caller inherits
+
+⛔ **An insert relying on constraint-error recovery must pass `mode: :savepoint`.** Measured: a
+declared `unique_constraint` violation inside an EXPLICIT transaction returns `{:error, :rollback}`
+from the transaction rather than `{:error, changeset}` from the insert — Ecto does not savepoint
+automatically there. So `block_user/2`'s duplicate case and `grant_visibility/3`'s `:already_granted`
+both lost the changeset that identified them the moment they ran inside a scope. Any new write that
+distinguishes a constraint failure from other failures owes the same option.
+
+⛔ **A function that owns its transaction must use `set!/1` or `multi_step/2`, never `with_user/2`.**
+`with_user/2` opens a transaction; a `Repo.rollback/1` inside a nested one aborts the outer and
+discards the value rolled back with, so a context using rollback for control flow silently returns
+`:rollback` instead of its reason. Six `Shelving` functions and `GDPR.Deletion.delete_user_data/2`
+take the Multi form for this reason.
+
+⚠️ **`is_binary/1` is not a sufficient guard for a scope value.** A raw 16-byte UUID is a binary, and
+passing one through reaches the database as invalid UTF-8 — the lucky case. Sixteen bytes that happen
+to be valid UTF-8 would set a scope matching no user, so every query in the operation would return
+nothing while reporting success. `Stacks.Scope` normalises through `Ecto.UUID.cast/1`.
 
 ## Consequences
 
