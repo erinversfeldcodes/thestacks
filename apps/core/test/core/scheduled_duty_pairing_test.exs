@@ -31,13 +31,26 @@ defmodule Core.ScheduledDutyPairingTest do
   @moved_duties [
     {Stacks.Workers.RefreshCostsJob, "Stacks.Release.refresh_costs"},
     {Stacks.Workers.DiscoverBookstoreEventsJob, "Stacks.Release.discover_bookstore_events"},
-    {Stacks.Workers.DbtRefreshJob, "scripts/dbt-deployed.sh"}
+    {Stacks.Workers.DbtRefreshJob, "scripts/dbt-deployed.sh"},
+    # The eight retention and account-lifecycle duties. ⚠️ Each is anchored on
+    # its own release function rather than on the shared runner script, and that
+    # is the point: eight duties sharing one anchor would let any of them be
+    # dropped from its schedule while the guard still found the one reference
+    # and reported every duty paired.
+    {Stacks.Workers.ImageRetentionJob, "Stacks.Release.sweep_images"},
+    {Stacks.Workers.ExportRetentionJob, "Stacks.Release.sweep_exports"},
+    {Stacks.Workers.LibraryImportRowRetentionJob, "Stacks.Release.sweep_import_rows"},
+    {Stacks.Workers.AuditRetentionJob, "Stacks.Release.sweep_audit_log"},
+    {Stacks.Workers.GuardianTokenSweepJob, "Stacks.Release.sweep_guardian_tokens"},
+    {Stacks.Workers.ExpiredUnverifiedAccountsJob, "Stacks.Release.sweep_unverified_accounts"},
+    {Stacks.Workers.ExpiredInvitesSweepJob, "Stacks.Release.sweep_expired_invites"},
+    {Stacks.Workers.ExpiredEmailChangesJob, "Stacks.Release.sweep_lapsed_email_changes"}
   ]
 
   # Not a target and not an assertion about this number being right — it is the
   # size of the problem that remains, pinned so it cannot grow silently and so
   # closing the follow-up has a number to move.
-  @remaining_entries 17
+  @remaining_entries 9
 
   defp crontab do
     :core

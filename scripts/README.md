@@ -11,12 +11,16 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/bootstrap-worktree.sh` | `justfile` |  |
 | `scripts/campaign-residue.sh` | `justfile`, `scripts/check-tracker-refs.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh` | A hand-written adapter that is narrower than its payload loses fields in |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented dbt model counts must match the models on disk. |
+| `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
+| `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml` | Asserts, against a real deployed database, the invariants that a per-diff gate |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
+| `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh` | Two spellings of one error token is a client that matches on one of them. |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
@@ -36,14 +40,16 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml` |  |
 | `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Code must not cite tracker artefacts — state the substance instead. |
+| `scripts/check-unbounded-sweeps.sh` | `scripts/lint-elixir.sh` | A retention sweep whose cost grows with how long it has been failing cannot |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
+| `scripts/check-workflow-health.sh` | `.github/workflows/workflow-health.yml` | A workflow nobody's pull request depends on can stay red indefinitely. |
 | `scripts/ci.sh` | `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push`, `scripts/lib/python-tools.sh` |  |
 | `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/dashboard-render-gate.sh` | `.github/workflows/ci.yml`, `justfile` |  |
 | `scripts/dbt-deployed.sh` | `.github/workflows/scheduled-dbt-refresh.yml`, `scripts/test-deployed.sh` |  |
 | `scripts/deploy-preview.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/deploy-stack.sh` … |  |
-| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-preview.sh` |  |
+| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-preview.sh`, `scripts/lib/derive-app-database-url.py` |  |
 | `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh` | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
 | `scripts/format.sh` | `justfile` |  |
 | `scripts/gen-ecto-proto.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml` … |  |
@@ -65,6 +71,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
 | `scripts/install-flyctl.sh` | `justfile` |  |
 | `scripts/install-hooks.sh` | `justfile` |  |
+| `scripts/lib/derive-app-database-url.py` | `scripts/deploy-stack.sh` | Derive the least-privilege runtime connection URL from the owner's. |
 | `scripts/lib/postgres.sh` | `scripts/test-dbt.sh`, `scripts/test-e2e.sh`, `scripts/test-elixir.sh` |  |
 | `scripts/lib/preview-names.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `scripts/cleanup-preview.sh`, `scripts/deploy-preview.sh` … |  |
 | `scripts/lib/python-tools.sh` | `scripts/lint-dbt.sh`, `scripts/lint-sql.sh`, `scripts/test-dbt.sh` |  |
@@ -72,7 +79,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/lint-migrations.sh` | `.github/workflows/ci.yml` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
+| `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
 | `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` |  |
 | `scripts/lint-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
@@ -88,6 +95,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/push_billing_metrics.py` | `.github/workflows/refresh-billing-metrics.yml` | Compute month-to-date provider costs from the same inputs the providers |
 | `scripts/regen-proto.sh` | `justfile`, `scripts/bootstrap-worktree.sh` |  |
 | `scripts/rollback-production.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/deploy-production.yml` |  |
+| `scripts/run-scheduled-duty.sh` | `.github/workflows/scheduled-core-jobs.yml` | scripts/run-scheduled-duty.sh — run one scheduled duty on the deployed node |
 | `scripts/security-squawk-test-wrapper.sh` | `justfile` |  |
 | `scripts/security-squawk.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/extract-migration-sql.py` |  |
 | `scripts/security.sh` | `justfile`, `scripts/ci.sh` |  |

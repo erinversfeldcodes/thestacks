@@ -45,6 +45,29 @@ on:
     # Bookstore events, weekly on Monday at 07:30 UTC — the cadence the Oban
     # entry named.
     - cron: "30 7 * * 1"
+    # ⚠️ The eight below are the retention and account-lifecycle duties, each
+    # kept on the exact cadence its Oban entry named. Keeping the hour is
+    # deliberate: a cadence change is a separate decision from a trigger
+    # change, and bundling the two would mean a duty that started running at a
+    # different time of day for no recorded reason.
+    #
+    # ⛔ These were firing from `Oban.Plugins.Cron` on an app whose
+    # `min_machines_running` is 0. The plugin computes due jobs on a tick from a
+    # running node and has no catch-up pass, so an entry fired only if something
+    # else happened to wake the machine in that minute — a machine woken at
+    # 02:03 never ran the 02:00 entry. Production's `oban_jobs` showed the
+    # result: every retention row inserted at exactly 02:00:00, picked up within
+    # a second, frozen at attempt 1 with a different node UUID each night.
+    # Eight of them carried retention or account-lifecycle duties, which is what
+    # made this a data-protection question rather than a tidiness one.
+    - cron: "0 0 * * *"
+    - cron: "0 2 * * *"
+    - cron: "30 2 * * *"
+    - cron: "0 3 * * *"
+    - cron: "15 * * * *"
+    - cron: "0 9 * * *"
+    - cron: "30 9 * * *"
+    - cron: "45 9 * * *"
   workflow_dispatch:
     inputs:
       job:
@@ -56,6 +79,15 @@ on:
           - costs
           - bookstore-events
           - both
+          - images
+          - exports
+          - import-rows
+          - audit-log
+          - guardian-tokens
+          - unverified-accounts
+          - expired-invites
+          - lapsed-email-changes
+          - all-retention
 
 permissions:
   contents: read
@@ -91,24 +123,55 @@ jobs:
           set -euo pipefail
           run_costs=false
           run_events=false
+          duties=""
+
+          # The eight retention duties, named once. Both the `all-retention`
+          # dispatch and the single-duty validation read this, so neither can
+          # drift into recognising a duty the other does not.
+          RETENTION_DUTIES="images exports import-rows audit-log guardian-tokens unverified-accounts expired-invites lapsed-email-changes"
+
+          # ⚠️ Every retention cadence appears exactly once here, and a schedule
+          # with no case below is REFUSED rather than defaulted. That matters
+          # more than it looks: a mistyped cron expression would otherwise run
+          # whichever duty the default picked, every night, and report success
+          # for it — a scheduled job doing the wrong thing reliably is harder to
+          # notice than one doing nothing.
           case "${SCHEDULE}:${INPUT_JOB}" in
             "0 6 * * *:"*)   run_costs=true ;;
             "30 7 * * 1:"*)  run_events=true ;;
+            "0 2 * * *:"*)   duties="images" ;;
+            "15 * * * *:"*)  duties="exports" ;;
+            "30 2 * * *:"*)  duties="import-rows" ;;
+            "0 3 * * *:"*)   duties="audit-log" ;;
+            "0 0 * * *:"*)   duties="guardian-tokens" ;;
+            "0 9 * * *:"*)   duties="unverified-accounts" ;;
+            "30 9 * * *:"*)  duties="expired-invites" ;;
+            "45 9 * * *:"*)  duties="lapsed-email-changes" ;;
             *:costs)            run_costs=true ;;
             *:bookstore-events) run_events=true ;;
             *:both)             run_costs=true; run_events=true ;;
+            *:all-retention)
+              duties="$RETENTION_DUTIES"
+              ;;
             *)
-              # Neither a schedule this workflow declares nor a known input.
-              # Refused rather than defaulted: silently picking a duty here
-              # would mean a mistyped cron expression above runs the wrong job
-              # every night and reports success for it.
-              echo "::error::cannot tell what to run (schedule='${SCHEDULE}' input='${INPUT_JOB}')"
-              exit 1
+              # A single-duty manual dispatch. Membership-tested against the
+              # same list `all-retention` uses, so the two cannot disagree about
+              # which duties exist.
+              case " ${RETENTION_DUTIES} " in
+                *" ${INPUT_JOB} "*) duties="${INPUT_JOB}" ;;
+                *)
+                  echo "::error::cannot tell what to run (schedule='${SCHEDULE}' input='${INPUT_JOB}')"
+                  exit 1
+                  ;;
+              esac
               ;;
           esac
-          echo "costs=${run_costs}" >> "$GITHUB_OUTPUT"
-          echo "events=${run_events}" >> "$GITHUB_OUTPUT"
-          echo "plan: costs=${run_costs} bookstore-events=${run_events}"
+          {
+            echo "costs=${run_costs}"
+            echo "events=${run_events}"
+            echo "duties=${duties}"
+          } >> "$GITHUB_OUTPUT"
+          echo "plan: costs=${run_costs} bookstore-events=${run_events} retention='${duties}'"
 
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
         with:
@@ -197,6 +260,59 @@ jobs:
           fi
           echo "EVENTS_SECONDS=$(( $(date +%s) - T0 ))" >> "$GITHUB_ENV"
 
+      # ⛔ ONE step for eight duties, not eight copies of one step.
+      #
+      # The verification each duty needs is identical — exit code, sentinel,
+      # remaining count, metric — and the failure mode of duplicated
+      # verification is not verbosity, it is drift: a missing sentinel check in
+      # the eighth block looks exactly like the other seven until that duty
+      # fails quietly. `scripts/run-scheduled-duty.sh` holds it once and is
+      # driven by `test/platform/scheduled_duty_runner_test.sh`, including the
+      # two refusals that matter most — exit 0 with no sentinel, and a sentinel
+      # with no count.
+      #
+      # ⚠️ The release function NAMES stay here rather than in the script. The
+      # pairing guard searches the workflow corpus for each function it expects
+      # to be invoked, so a manifest hidden in the script would let a duty be
+      # dropped from its schedule while the guard still found one shared
+      # reference and reported every duty paired.
+      - name: Run the due retention duties
+        if: steps.plan.outputs.duties != ''
+        env:
+          DUTY_METRICS_FILE: ${{ github.workspace }}/metrics.prom
+        run: |
+          set -euo pipefail
+          for duty in ${{ steps.plan.outputs.duties }}; do
+            case "$duty" in
+              images)
+                spec="Stacks.Release.sweep_images IMAGE_RETENTION image_retention" ;;
+              exports)
+                spec="Stacks.Release.sweep_exports EXPORT_RETENTION export_retention" ;;
+              import-rows)
+                spec="Stacks.Release.sweep_import_rows IMPORT_ROW_RETENTION import_row_retention" ;;
+              audit-log)
+                spec="Stacks.Release.sweep_audit_log AUDIT_RETENTION audit_retention" ;;
+              guardian-tokens)
+                spec="Stacks.Release.sweep_guardian_tokens GUARDIAN_TOKEN_SWEEP guardian_token_sweep" ;;
+              unverified-accounts)
+                spec="Stacks.Release.sweep_unverified_accounts UNVERIFIED_ACCOUNTS_SWEEP unverified_accounts_sweep" ;;
+              expired-invites)
+                spec="Stacks.Release.sweep_expired_invites EXPIRED_INVITES_SWEEP expired_invites_sweep" ;;
+              lapsed-email-changes)
+                spec="Stacks.Release.sweep_lapsed_email_changes EMAIL_CHANGES_SWEEP email_changes_sweep" ;;
+              *)
+                # Unreachable via the plan step, which validates against the
+                # same roster. Refused anyway: a duty key with no spec must not
+                # become a silently skipped retention sweep.
+                echo "::error::no spec for duty '$duty'"
+                exit 1
+                ;;
+            esac
+            # shellcheck disable=SC2086 # the spec is three deliberate words
+            bash scripts/run-scheduled-duty.sh $spec
+          done
+          echo "RETENTION_RAN=1" >> "$GITHUB_ENV"
+
       # Pushed even when one duty was skipped — each gauge is written only by the
       # step that ran, so a skipped duty's gauge simply stops moving, which is
       # exactly what "it did not run" should look like at the far end.
@@ -205,7 +321,7 @@ jobs:
       # timestamp for work that did not succeed. `success()` is implicit here
       # and is the correct gate.
       - name: Push the freshness metrics
-        if: steps.plan.outputs.costs == 'true' || steps.plan.outputs.events == 'true'
+        if: steps.plan.outputs.costs == 'true' || steps.plan.outputs.events == 'true' || steps.plan.outputs.duties != ''
         run: |
           set -euo pipefail
           # The metrics store is 6PN-internal; expose it locally for the push —
@@ -221,7 +337,12 @@ jobs:
           done
 
           NOW=$(date +%s)
-          : > metrics.prom
+          # ⛔ `touch`, not `: >`. The retention step has already appended this
+          # run's gauges to this file via `run-scheduled-duty.sh`, and
+          # truncating here would discard every one of them while the push
+          # still reported success — a freshness gauge that silently stops
+          # moving is the exact failure this workflow exists to end.
+          touch metrics.prom
           if [[ -n "${COSTS_ITEMS:-}" ]]; then
             cat >> metrics.prom <<EOF
           stacks_costs_refresh_last_success_timestamp_seconds{app="thestacks-core"} ${NOW}

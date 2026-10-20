@@ -106,9 +106,6 @@ config :core, Oban,
     # Nothing is added to this list. A new scheduled duty gets a workflow.
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
-       {"15 * * * *", Stacks.Workers.ExportRetentionJob},
-       {"30 2 * * *", Stacks.Workers.LibraryImportRowRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
        {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
@@ -117,12 +114,7 @@ config :core, Oban,
        {"30 4 * * *", Stacks.Workers.BuildScraperIndexJob},
        {"0 5 * * 0", Stacks.Workers.MatchStoreCatalogueJob},
        {"0 6 * * 0", Stacks.Workers.GeocodeBookstoresJob},
-       {"30 3 * * *", Stacks.Workers.CacheSweepJob},
-       {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob},
-       {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob},
-       {"30 9 * * *", Stacks.Workers.ExpiredInvitesSweepJob},
-       {"45 9 * * *", Stacks.Workers.ExpiredEmailChangesJob},
-       {"0 3 * * *", Stacks.Workers.AuditRetentionJob}
+       {"30 3 * * *", Stacks.Workers.CacheSweepJob}
      ]}
   ],
   queues: [default: 10, events: 20, vision: 20, scraper: 5, notifications: 3, dbt_refresh: 1]

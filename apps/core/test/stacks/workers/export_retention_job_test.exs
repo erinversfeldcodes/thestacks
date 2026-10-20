@@ -45,7 +45,7 @@ defmodule Stacks.Workers.ExportRetentionJobTest do
              perform_job(ExportRetentionJob, %{})
   end
 
-  test "runs hourly so an object outlives its link by an hour at most" do
+  test "⛔ is NOT in the Oban crontab, because that node scales to zero" do
     crontab =
       :core
       |> Application.get_env(Oban)
@@ -55,10 +55,24 @@ defmodule Stacks.Workers.ExportRetentionJobTest do
         _ -> nil
       end)
 
-    assert Enum.any?(crontab, fn
-             {expression, ExportRetentionJob} -> String.ends_with?(expression, " * * * *")
-             _ -> false
-           end)
+    refute ExportRetentionJob in Enum.map(crontab, &elem(&1, 1)),
+           "GDPR export artefacts are back on a trigger that fires only when the machine " <>
+             "happens to be awake"
+  end
+
+  test "runs hourly, by the workflow that replaced the crontab entry" do
+    # ⚠️ The cadence claim is kept, not dropped. An hourly sweep is what bounds
+    # how long a download link outlives its artefact, so it is a property worth
+    # asserting wherever the trigger lives.
+    workflow =
+      File.read!(Path.expand("../../../../../.github/workflows/scheduled-core-jobs.yml", __DIR__))
+
+    assert workflow =~ ~s(- cron: "15 * * * *"),
+           "the hourly cadence is gone from the workflow, so an export object could outlive " <>
+             "its link by far more than an hour"
+
+    assert workflow =~ "Stacks.Release.sweep_exports",
+           "the workflow carries the cadence but never invokes the duty"
   end
 
   test "is configured with max_attempts of 3" do
