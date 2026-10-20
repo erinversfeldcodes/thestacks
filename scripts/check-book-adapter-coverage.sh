@@ -37,11 +37,14 @@ ADAPTER = pathlib.Path("frontend/src/Types/Book.elm")
 # Each needs an owner, because "deliberately" is only true while somebody can
 # say who decided it.
 #
-#   community_read_count — campaign item W9e ("community_read_count carried
-#   through Types.Book and rendered"). It has a per-request warehouse query
-#   behind it, which is why it was sized as its own item rather than absorbed
-#   into the adapter fix. ⚠️ When W9e lands, DELETE this entry — the gate fails
-#   on a declared exception that no longer exists, so it cannot rot.
+#   community_read_count — carrying this one into the record is a separate,
+#   already-planned piece of work: reading it costs a per-request warehouse
+#   query (`SELECT read_count FROM wh.mart_community_read_count WHERE
+#   book_id = $1`), and the plan is to carry it through `Types.Book` AND render
+#   it, which is a surface decision rather than an adapter fix. That is why it
+#   was not absorbed here. ⚠️ When the adapter starts reading it, DELETE this
+#   entry — the gate fails on a declared exception that no longer describes the
+#   code, so the list cannot rot into a place things go to be forgotten.
 DECLARED = {"community_read_count"}
 
 

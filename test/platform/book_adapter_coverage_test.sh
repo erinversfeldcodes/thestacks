@@ -159,8 +159,8 @@ test_case "a_declared_exception_PASSES_and_a_stale_one_FAILS" "the exception lis
 # declaration stops describing the code, or an exception list becomes a place
 # where things go to be forgotten.
 assert_contains "$GATE_SRC" "community_read_count" "the exception is declared"
-assert_contains "$GATE_SRC" "DELETE this entry" \
-    "with the instruction to remove it when its owner lands"
+assert_contains "$GATE_SRC" "DELETE this" \
+    "with the instruction to remove it once the adapter reads the field"
 
 DIR="$(build_fixture '' '
     , communityReadCount = pb.communityReadCount')"
