@@ -170,10 +170,29 @@ test_case "a_missing_modal_cli_is_a_FAILURE" "not a skip"
 # The per-PR teardown swallowed exactly this as "already gone" and reported
 # success on every run for months.
 rm -f "$STUBS/modal"
+
+# ⛔ Trimming PATH does NOT make Modal absent, and believing it did made this
+# case machine-dependent: the sweep falls back to `python3 -m modal`, and a
+# module is resolved through the interpreter's site-packages, which PATH has no
+# say over. On a developer machine with `modal` pip-installed into the system
+# python the fallback SUCCEEDS, the sweep proceeds, and this case fails while
+# the script it is testing is perfectly correct. It passed only where modal
+# happened not to be installed — a green that was reporting the machine, not
+# the code.
+#
+# So absence is made real: a `python3` stub that fails the module probe and
+# delegates everything else to the real interpreter.
+cat > "$STUBS/python3" <<'PYSTUB'
+#!/usr/bin/env bash
+case "$*" in
+    *"-m modal"*) exit 1 ;;
+esac
+exec /usr/bin/python3 "$@"
+PYSTUB
+chmod +x "$STUBS/python3"
+
 OUT_NOCLI="$(
     cd "$REPO_ROOT" || exit 1
-    # An empty PATH but for the stubs, so neither a `modal` binary nor a python3
-    # carrying the module can be found.
     PATH="$STUBS:/usr/bin:/bin" FLY_API_TOKEN=stub \
         bash "$SWEEP" --dry-run 2>&1
 )"
