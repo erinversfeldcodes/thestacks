@@ -90,6 +90,8 @@ module Api exposing
     , adminMfaSetup
     , adminSetBookAgeGate
     , adminSetBookAgeGateRequest
+    , adminSourceDecoder
+    , adminSourcesResponseDecoder
     , adminVerifyMfa
     , approveSource
     , auditLogResponseDecoder
@@ -100,6 +102,8 @@ module Api exposing
     , authorEventsDecoder
     , awaitingConfirmationCount
     , blockUser
+    , blockedUserDecoder
+    , blockedUsersResponseDecoder
     , blogPostPageDecoder
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
@@ -109,6 +113,7 @@ module Api exposing
     , completeOnboardingStep
     , confirmAssociation
     , confirmBookRequest
+    , confirmResponseDecoder
     , confirmResponseToResult
     , createAdminInvite
     , createBlogPost
@@ -166,11 +171,15 @@ module Api exposing
     , getUploadInbox
     , getUserPlacements
     , getUserPlacementsRequest
+    , groupMemberDecoder
     , honourRemovalRequest
     , importRefusal
     , importRowDecoder
+    , inboxItemDecoder
+    , inboxKindDecoder
     , initUploadRequest
     , interpretAuthed
+    , inviteErrorDecoder
     , inviteStatusDecoder
     , inviteToGroup
     , isNotFound
@@ -186,13 +195,19 @@ module Api exposing
     , moveBookRequest
     , movePlacementToShelfRequest
     , moveResponseToResult
+    , notificationPreferencesDecoder
+    , onboardingStatusDecoder
     , peopleSearchDecoder
     , personalInferencesDecoder
     , placeBook
     , placeBookRequest
     , placeResponseToResult
     , placementFormatsDecoder
+    , placementShelfDecoder
     , placementsMineDecoder
+    , privacySettingsDecoder
+    , profileSavedDecoder
+    , progressDecoder
     , progressErrorMessage
     , progressResponseToResult
     , publicProfileDecoder
@@ -202,9 +217,13 @@ module Api exposing
     , recordSyndication
     , refresh
     , refreshRequest
+    , registerErrorsDecoder
     , registerRequest
+    , registrationResponseDecoder
     , rejectIdentificationRequest
     , rejectSource
+    , removalOutcomeDecoder
+    , removalRequestDecoder
     , removeBookRequest
     , removeGroupMember
     , reorderShelvesRequest
@@ -233,7 +252,10 @@ module Api exposing
     , setPostSyndicated
     , shelfMoveErrorMessage
     , shelfMoveResponseToResult
+    , shelfVisibilitySettingDecoder
     , soldListing
+    , sourceHealthDecoder
+    , sourceHealthListDecoder
     , specHttpBody
     , standardTimeout
     , storedVisibilityDecoder
@@ -252,6 +274,7 @@ module Api exposing
     , updateProgressRequest
     , updateShelfVisibility
     , updateSyndicationUrl
+    , uploadInboxDecoder
     , uploadTimeout
     )
 
