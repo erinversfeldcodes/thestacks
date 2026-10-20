@@ -62,7 +62,23 @@ defmodule Core.Repo.Migrations.AnswerTheThreeCrossUserQuestionsWithoutABroadExem
     END $$
     """)
 
-    execute("GRANT USAGE ON SCHEMA op TO rls_reader")
+    # ⚠️ USAGE to read, and CREATE because of a rule that is easy to miss:
+    # transferring ownership of a function requires the NEW OWNER to hold CREATE
+    # on the schema that function lives in. Without it the deploy aborts with
+    # `permission denied for schema op` on the `ALTER FUNCTION … OWNER TO`
+    # below — measured, on the release command of a real deploy.
+    #
+    # ⛔ Granting CREATE on `op` to a role is worth justifying rather than
+    # waving through. `rls_reader` is NOLOGIN, so the only ways to act as it are
+    # `SET ROLE` — which needs membership, held only by the migrating owner,
+    # who can already create in `op` directly — and the two definer functions
+    # below, which are fixed SQL with no dynamic execution. So this adds no
+    # capability to anybody who did not already have it.
+    #
+    # ⚠️ The narrower alternative was a schema of its own for these functions,
+    # rejected only because it renames them at four call sites and in the scope
+    # gate; if a third definer function ever appears, that trade flips.
+    execute("GRANT USAGE, CREATE ON SCHEMA op TO rls_reader")
 
     for table <- @cross_user_tables do
       execute("GRANT SELECT ON op.#{table} TO rls_reader")
@@ -204,7 +220,7 @@ defmodule Core.Repo.Migrations.AnswerTheThreeCrossUserQuestionsWithoutABroadExem
       execute("REVOKE SELECT ON op.#{table} FROM rls_reader")
     end
 
-    execute("REVOKE USAGE ON SCHEMA op FROM rls_reader")
+    execute("REVOKE USAGE, CREATE ON SCHEMA op FROM rls_reader")
 
     execute("""
     DO $$
