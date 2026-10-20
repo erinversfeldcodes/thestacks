@@ -9,7 +9,7 @@ defmodule Stacks.Workers.ExportRetentionJob do
       nightly so the object outlives its own link by an hour at worst.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

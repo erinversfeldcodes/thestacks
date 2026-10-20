@@ -28,7 +28,6 @@ defmodule Stacks.Accounts do
   alias Stacks.Email
   alias Stacks.Events
   alias Stacks.GDPR.Deletion
-  alias Stacks.Social.UserBlock
   alias Stacks.Workers.VisibilityRecapJob
 
   @unverified_account_ttl_seconds 24 * 60 * 60
@@ -781,16 +780,23 @@ defmodule Stacks.Accounts do
 
   defp exclude_blocked(query, nil), do: query
 
+  # ⛔ Asked through `op.blocked_pair/2` rather than as a subquery over
+  # `op.user_blocks`, and the reason is row-level security.
+  #
+  # The predicate is SYMMETRIC — a candidate is excluded if either party blocked
+  # the other — while the `user_blocks` policy shows a scoped connection only
+  # its OWN block rows. A subquery written here would therefore see the viewer's
+  # blocks and not the candidate's, so somebody who had blocked the viewer would
+  # reappear in their search results. Silently, and in the direction that
+  # matters: blocking is a safety feature, and half of it working is the half
+  # that does not protect the person who asked for it.
+  #
+  # ⚠️ One function call per candidate row, which a `SECURITY DEFINER` function
+  # cannot avoid — it is not inlinable. Acceptable here because the candidate
+  # set is already a filtered search result, not a table scan.
   defp exclude_blocked(query, viewer_id) do
     from(u in query,
-      where:
-        not exists(
-          from(b in UserBlock,
-            where:
-              (b.blocker_id == ^viewer_id and b.blocked_id == parent_as(:candidate).id) or
-                (b.blocker_id == parent_as(:candidate).id and b.blocked_id == ^viewer_id)
-          )
-        )
+      where: not fragment("op.blocked_pair(?, ?)", ^viewer_id, u.id)
     )
   end
 

@@ -10,7 +10,7 @@ defmodule Stacks.Workers.DiscoverEditionsJob do
       recorded `verification_source: "open_library"`, never primary.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

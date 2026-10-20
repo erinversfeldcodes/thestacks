@@ -11,7 +11,8 @@ defmodule Stacks.Workers.GoodreadsImportJob do
       the import and emits `import.completed`.
   """
 
-  use Oban.Worker,
+  use Stacks.Worker,
+    scope: :user,
     queue: :default,
     max_attempts: 5,
     unique: [fields: [:args], keys: [:import_id, :offset], period: 300]

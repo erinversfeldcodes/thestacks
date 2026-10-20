@@ -14,7 +14,7 @@ defmodule Stacks.Workers.ExpiredInvitesSweepJob do
       `config/config.exs`.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   import Ecto.Query
 

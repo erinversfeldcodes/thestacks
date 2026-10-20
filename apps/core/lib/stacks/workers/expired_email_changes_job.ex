@@ -20,7 +20,7 @@ defmodule Stacks.Workers.ExpiredEmailChangesJob do
       line and cost the ability to reason about either.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

@@ -6,7 +6,7 @@ defmodule Stacks.Workers.EmailDeliveryJob do
       transactional emails that must always be delivered regardless of prefs.
   """
 
-  use Oban.Worker, queue: :notifications, max_attempts: 3
+  use Stacks.Worker, scope: :user, queue: :notifications, max_attempts: 3
 
   alias Core.Repo
   alias Stacks.Accounts.User

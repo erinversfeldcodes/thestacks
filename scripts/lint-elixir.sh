@@ -124,6 +124,7 @@ gate check-dbt-model-drift.sh
 gate check-phase-scheme.sh
 gate check-tracker-refs.sh
 gate check-error-token-spelling.sh
+gate check-rls-scope.sh
 gate check-protojson-completeness.sh
 gate check-unbounded-sweeps.sh
 

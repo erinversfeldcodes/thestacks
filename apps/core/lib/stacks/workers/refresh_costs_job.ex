@@ -12,7 +12,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
       The worker emits a `costs.refreshed` event on success.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

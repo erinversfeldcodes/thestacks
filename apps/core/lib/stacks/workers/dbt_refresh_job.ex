@@ -1,7 +1,8 @@
 defmodule Stacks.Workers.DbtRefreshJob do
   @moduledoc false
 
-  use Oban.Worker,
+  use Stacks.Worker,
+    scope: :system,
     queue: :dbt_refresh,
     max_attempts: 3,
     unique: [period: 300, keys: [:models]]

@@ -22,7 +22,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
       rather than only as a line in the log.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

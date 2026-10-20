@@ -33,6 +33,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-protojson-completeness.sh` | `scripts/lint-elixir.sh` | A proto field that reaches no surface is a field that was added for nothing. |
 | `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | An anonymously-reachable route must be metered, or say why it is not. |
+| `scripts/check-rls-scope.sh` | `scripts/lint-elixir.sh` | scripts/check-rls-scope.sh — every query against a row-level-secured table |
 | `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh` |  |
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
 | `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml` |  |

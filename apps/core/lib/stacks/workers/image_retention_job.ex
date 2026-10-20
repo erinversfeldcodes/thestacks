@@ -7,7 +7,7 @@ defmodule Stacks.Workers.ImageRetentionJob do
       This job handles edge cases where that didn't happen.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

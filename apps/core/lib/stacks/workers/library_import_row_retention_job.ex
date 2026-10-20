@@ -9,7 +9,7 @@ defmodule Stacks.Workers.LibraryImportRowRetentionJob do
       deleted when the purpose is served, on a schedule, without being asked.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

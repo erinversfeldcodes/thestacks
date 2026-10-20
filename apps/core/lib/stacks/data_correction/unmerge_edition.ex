@@ -23,6 +23,8 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.BookEdition
   alias Stacks.DataCorrection.Column
+  alias Stacks.Scope
+  alias Stacks.Shelving.Bookshelf
   alias Stacks.Shelving.Placement
 
   @work {"op.book_editions", "book_id"}
@@ -78,17 +80,66 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     with {:ok, work} <- mint_work(to),
          :ok <- Column.swap(@work, edition_id, uuid(work_id), uuid(work.id)),
          :ok <- Column.swap(@primary, edition_id, false, true) do
-      {moved, _} =
-        Repo.update_all(
-          from(p in Placement, where: p.book_edition_id == ^edition_id),
-          set: [book_id: work.id, updated_at: DateTime.utc_now()]
-        )
+      moved = repoint_placements(edition_id, work.id)
 
       BookDetailCache.invalidate(work_id)
       BookDetailCache.invalidate(work.id)
 
       {:ok, %{new_work_id: work.id, placements_moved: moved}}
     end
+  end
+
+  # ⛔ Once per owner, inside that owner's scope — not one `update_all` across
+  # everybody.
+  #
+  # These placements belong to whichever users hold the split edition, and the
+  # row-level policies show a scoped connection only its own user's rows. A
+  # single update would therefore re-point one user's placements and silently
+  # leave every other user's naming an edition that no longer means what it
+  # did — a correction that reports a count and half-does the job.
+  #
+  # ⛔ The `where` clause narrows to the owner AND the scope is set. Both, and
+  # the first draft had only the second — it relied on the policy to confine
+  # each pass, which makes the code correct ONLY where the policy is enforced.
+  # A test caught it immediately: under the superuser the suite runs as, row-level
+  # security is bypassed, so every pass updated every matching row and a
+  # two-owner fixture reported four placements moved instead of two.
+  #
+  # ⚠️ The general lesson is worth more than the fix. Code whose correctness
+  # depends on row-level security being active is wrong in development, wrong
+  # in the test suite, and wrong for any superuser — and it fails there by
+  # over-reaching, which is the direction that does damage. The policy is the
+  # backstop; the query still has to be right on its own.
+  defp repoint_placements(edition_id, new_book_id) do
+    edition_id
+    |> placement_owners()
+    |> Enum.reduce(0, fn owner_id, moved ->
+      Scope.with_user(owner_id, fn ->
+        owned =
+          from(bs in Bookshelf, where: bs.user_id == ^owner_id, select: bs.id)
+
+        {count, _} =
+          Repo.update_all(
+            from(p in Placement,
+              where: p.book_edition_id == ^edition_id,
+              where: p.bookshelf_id in subquery(owned)
+            ),
+            set: [book_id: new_book_id, updated_at: DateTime.utc_now()]
+          )
+
+        moved + count
+      end)
+    end)
+  end
+
+  # The one fact the correction cannot learn for itself: whose rows these are.
+  # Answered by a `SECURITY DEFINER` read owned by a role that cannot log in,
+  # rather than by exempting this path from the policies.
+  defp placement_owners(edition_id) do
+    %{rows: rows} =
+      Repo.query!("SELECT user_id FROM op.placement_owners_for_edition($1::uuid)", [edition_id])
+
+    Enum.map(rows, fn [raw] -> Ecto.UUID.cast!(raw) end)
   end
 
   defp fetch_edition(edition_id) do

@@ -8,7 +8,7 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorker do
       Idempotent (`delete_all` over `user_id`); audit-logged on completion.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :user, queue: :default, max_attempts: 3
 
   import Ecto.Query
 

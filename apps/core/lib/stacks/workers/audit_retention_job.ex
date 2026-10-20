@@ -39,7 +39,7 @@ defmodule Stacks.Workers.AuditRetentionJob do
       fix is an `occurred_at` index plus a batched loop that re-arms per batch.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

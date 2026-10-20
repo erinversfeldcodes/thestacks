@@ -10,7 +10,7 @@ defmodule Stacks.Workers.ScoreSourceJob do
       Sources scoring above 0.8 are logged for platform owner review.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

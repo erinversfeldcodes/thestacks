@@ -12,7 +12,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
       replaced looked nothing alike.
   """
 
-  use Oban.Worker, queue: :vision, max_attempts: 3
+  use Stacks.Worker, scope: :user, queue: :vision, max_attempts: 3
 
   require Logger
 
