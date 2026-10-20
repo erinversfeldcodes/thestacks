@@ -38,15 +38,30 @@ defmodule Stacks.Worker do
       and this declaration is what makes "did anyone decide?" a fact on disk
       rather than a question for a reviewer.
 
+      ⚠️ The `user_id` assertion went the same way for a duller reason: this
+      macro receives the `use` options and nothing else, so it cannot see the
+      `perform/1` head where the args pattern lives. The gate can, and does.
+
       ## The declaration
 
-        * `scope: :user` — acts for one user. Its `args` must carry a
-          `user_id`, asserted below, because a job declaring `:user` with no
-          user to scope to is a contradiction that would otherwise surface as a
+        * `scope: :user` — acts for one user and scopes to them. Its `args`
+          must carry a `user_id`, because a job declaring `:user` with no user
+          to scope to is a contradiction that would otherwise surface as a
           `42501` at three in the morning.
         * `scope: :system` — acts across users and touches **no**
-          row-level-secured table. The gate checks that claim rather than
-          trusting it.
+          row-level-secured table.
+
+      ⚠️ **Both claims are checked by `scripts/check-rls-scope.sh`, not by this
+      macro**, and the distinction is not pedantry: a macro sees only the `use`
+      options, so it cannot tell whether `perform/1` names a user or whether the
+      module touches a secured table. What the macro can do is refuse to compile
+      without a declaration; what the gate can do is test whether the
+      declaration is true. Neither covers the other.
+
+      ⛔ An earlier plan had this macro assert the `user_id` and wrap `perform/1`
+      itself. Both were dropped for measured reasons — see below — and the doc
+      that still described them was wrong for a day, which is exactly the shape
+      of staleness this project keeps finding in its own documentation.
   """
 
   @valid_scopes [:user, :system]
@@ -86,9 +101,12 @@ defmodule Stacks.Worker do
   @doc """
       Every worker module, with the scope it declared.
 
-      Used by the scope gate and by the pairing tests, so "which jobs may see a
-      user's rows" is answerable by running something rather than by reading
-      37 files.
+      ⚠️ Its caller is `Stacks.WorkerScopeDeclarationTest`, and that test exists
+      because this function asserts something `scripts/check-rls-scope.sh`
+      structurally cannot: the gate reads source TEXT, so it would keep passing
+      if this macro silently stopped emitting `__rls_scope__/0`. This reports
+      the runtime fact. (An earlier version of this docstring claimed the gate
+      was a caller. It is a shell script that greps; it calls nothing.)
   """
   @spec declared_scopes() :: [{module(), :user | :system}]
   def declared_scopes do

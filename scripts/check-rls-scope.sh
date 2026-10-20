@@ -118,7 +118,23 @@ for file in apps/core/lib/stacks/workers/*.ex; do
             echo "    FALSE CLAIM ${name} — declares scope: :system but references a secured schema" >&2
             fail=1
         fi
-    elif ! grep -q "scope: :user" "$file"; then
+    elif grep -q "scope: :user" "$file"; then
+        # ⚠️ A job declaring `:user` with no user to scope to is a contradiction,
+        # and it would surface as a 42501 at whatever hour the job runs. Checked
+        # here rather than in the macro: a macro sees only the `use` options, not
+        # the `perform/1` head, so it cannot tell.
+        if ! sed 's/#.*//' "$file" | grep -qE 'user_id'; then
+            case "$name" in
+                goodreads_import_job.ex)
+                    # Derives the user from `import.user_id`; its args carry an
+                    # `import_id`, so the literal does not appear in the head.
+                    echo "    ALLOWED ${name} — derives its user from the import it is given" ;;
+                *)
+                    echo "    NO USER  ${name} — declares scope: :user but names no user_id" >&2
+                    fail=1 ;;
+            esac
+        fi
+    else
         echo "    UNDECLARED ${name} — no scope declaration" >&2
         fail=1
     fi

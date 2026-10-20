@@ -215,12 +215,30 @@ the same migration as the policy change.
 Three layers, because the author must not have to remember:
 
 1. **Compile-time.** Workers declare `use Stacks.Worker, scope: :user | :system` in place of bare
-   `use Oban.Worker`. Omitting `scope:` **fails to compile**. For `:user` the macro asserts
-   `user_id` is present in args and wraps `perform/1` in the scoped transaction, so declaring the
-   intent *is* the implementation.
-2. **A sweep gate.** `scripts/check-rls-scope.sh` asserts that every module referencing the four RLS
-   schemas routes through the scope wrapper, with a pinned count so a new unscoped module fails the
-   gate. Its DoD quotes the planted-violation red run.
+   `use Oban.Worker`. Omitting `scope:` **fails to compile**, naming the module.
+
+   ⛔ **Correction, after implementing it: the macro does NOT wrap `perform/1`, and does not assert
+   the `user_id` either.** This paragraph originally said it would do both. Wrapping was dropped
+   because the measurements in §9 make it unsafe — a `Repo.rollback/1` inside a nested transaction
+   discards the value rolled back with, and a declared `unique_constraint` violation inside an
+   explicit transaction returns `{:error, :rollback}` instead of the changeset. A macro cannot tell
+   which jobs rely on either, so it would break some of them invisibly; six `Shelving` functions and
+   `GDPR.Deletion.delete_user_data/2` are exactly those cases. The `user_id` assertion was dropped
+   for a duller reason: a macro receives the `use` options and cannot see the `perform/1` head where
+   the args pattern lives.
+
+   ⚠️ So the division of labour is: **the macro refuses to compile without a declaration; the gate
+   tests whether the declaration is true.** Neither covers the other, and a plan that had the macro
+   doing both would have left the gate looking redundant.
+2. **A sweep gate.** `scripts/check-rls-scope.sh` checks four things, each with a planted-red run
+   recorded in the issue: every module referencing the four secured schemas and running a Repo call
+   establishes a scope (or is allowlisted **with its reason**); every `scope: :system` worker
+   references none of those schemas, comments stripped, because `:system` is the easy answer when
+   somebody does not want to decide; every `scope: :user` worker names a `user_id`; and **nothing but
+   `Stacks.Scope` touches `app.current_user_id`**, since a bare `SET LOCAL` outside a transaction
+   warns and does nothing. It carries an anti-vacuity floor on the number of modules and workers
+   examined — the first version of the gate errored on a bash 3.2 incompatibility and still exited 0,
+   which is the failure it now refuses to have.
 3. **Runtime.** The `42501` errcode is a named, alertable signal meaning a path was missed.
 
 ⛔ **Layer 3 is deliberately last, because the test suite cannot see any of this.** Measured: the
