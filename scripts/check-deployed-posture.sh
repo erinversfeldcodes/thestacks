@@ -134,7 +134,32 @@ No migration table was found in either 'op' or 'public', or it is empty. That
 means this is not the database anyone thinks it is, and every other assertion
 here was evaluated against the wrong thing.")
 
-EXPECTED_ASSERTIONS=4
+# ⛔ The assertion without which every row-level policy on this stack could be
+# decorative, and nothing else would say so.
+#
+# BYPASSRLS outranks FORCE ROW LEVEL SECURITY: a role holding it is exempt from
+# every policy on every table, and so is any superuser regardless of the flag.
+# Production's owner role, `neondb_owner`, HAS `rolbypassrls = true` — measured —
+# which is why the application was moved onto `stacks_app` at all. If that role
+# ever acquires the attribute, by a Neon role template or by somebody granting
+# it, the policies keep existing, keep looking correct in `pg_policies`, and
+# enforce nothing.
+#
+# ⚠️ No test can catch this. The test suite connects as a superuser and bypasses
+# row-level security itself, so an exempt runtime role passes every one of the
+# 4000+ tests. This gate runs against a deployed database, which is the only
+# place the question is answerable.
+ASSERTIONS+=("app_role_exempt_from_rls
+SELECT count(*) FROM pg_roles WHERE rolname = 'stacks_app' AND (rolbypassrls OR rolsuper)
+0
+The runtime role is EXEMPT from row-level security, so every policy on
+op.bookshelves, op.bookshelf_placements, op.user_blocks and op.visibility_grants
+is decorative — they are evaluated for nobody. The policies will still look
+correct in pg_policies and every test will still pass, because the test role
+bypasses RLS too. Revoke BYPASSRLS from stacks_app, or stop calling this
+enforcement.")
+
+EXPECTED_ASSERTIONS=5
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an
