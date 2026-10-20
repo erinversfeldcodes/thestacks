@@ -136,10 +136,33 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   # Answered by a `SECURITY DEFINER` read owned by a role that cannot log in,
   # rather than by exempting this path from the policies.
   defp placement_owners(edition_id) do
-    %{rows: rows} =
-      Repo.query!("SELECT user_id FROM op.placement_owners_for_edition($1::uuid)", [edition_id])
+    # ⛔ The function may not exist yet, and that is by DESIGN of the deploy
+    # rather than an oversight. `Stacks.Release.deploy/0` runs corrections,
+    # then migrations, then corrections again — repairs come first because a
+    # migration adding a constraint is a claim about existing data. So the
+    # first pass can run against a database where the migration that creates
+    # this function has not been applied.
+    #
+    # ⚠️ The fallback is safe precisely in that window: before the migration,
+    # the policies are still the permissive ones that short-circuit on an unset
+    # scope, so a direct cross-user read succeeds. After it, the function
+    # exists and is used. Neither path is ever the wrong one for the database
+    # it runs on.
+    case Repo.query("SELECT user_id FROM op.placement_owners_for_edition($1::uuid)", [edition_id]) do
+      {:ok, %{rows: rows}} ->
+        Enum.map(rows, fn [raw] -> Ecto.UUID.cast!(raw) end)
 
-    Enum.map(rows, fn [raw] -> Ecto.UUID.cast!(raw) end)
+      {:error, %Postgrex.Error{postgres: %{code: :undefined_function}}} ->
+        Repo.all(
+          from(bs in Bookshelf,
+            join: p in Placement,
+            on: p.bookshelf_id == bs.id,
+            where: p.book_edition_id == ^edition_id,
+            distinct: true,
+            select: bs.user_id
+          )
+        )
+    end
   end
 
   defp fetch_edition(edition_id) do
