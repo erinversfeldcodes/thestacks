@@ -13,6 +13,7 @@ defmodule Stacks.Social do
   alias Stacks.Blog.Post
   alias Stacks.Books.Book
   alias Stacks.Events
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
@@ -87,33 +88,35 @@ defmodule Stacks.Social do
   """
   @spec block_user(String.t(), String.t()) :: {:ok, UserBlock.t()} | {:error, Ecto.Changeset.t()}
   def block_user(blocker_id, blocked_id) do
-    result =
-      %UserBlock{}
-      |> user_block_changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
-      |> Repo.insert()
+    Scope.with_user(blocker_id, fn ->
+      result =
+        %UserBlock{}
+        |> user_block_changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
+        |> Repo.insert()
 
-    case result do
-      {:ok, block} ->
-        :telemetry.execute([:stacks, :social, :block], %{count: 1}, %{})
+      case result do
+        {:ok, block} ->
+          :telemetry.execute([:stacks, :social, :block], %{count: 1}, %{})
 
-        Events.emit_safe(%{
-          event_type: "social.user_blocked",
-          aggregate_type: "user",
-          aggregate_id: blocker_id,
-          payload: %{blocked_id: blocked_id}
-        })
+          Events.emit_safe(%{
+            event_type: "social.user_blocked",
+            aggregate_type: "user",
+            aggregate_id: blocker_id,
+            payload: %{blocked_id: blocked_id}
+          })
 
-        {:ok, block}
+          {:ok, block}
 
-      {:error, changeset} ->
-        :telemetry.execute(
-          [:stacks, :social, :block_error],
-          %{count: 1},
-          %{reason: block_error_reason(changeset)}
-        )
+        {:error, changeset} ->
+          :telemetry.execute(
+            [:stacks, :social, :block_error],
+            %{count: 1},
+            %{reason: block_error_reason(changeset)}
+          )
 
-        {:error, changeset}
-    end
+          {:error, changeset}
+      end
+    end)
   end
 
   @spec block_error_reason(Ecto.Changeset.t()) :: :already_blocked | :invalid
@@ -133,29 +136,31 @@ defmodule Stacks.Social do
   """
   @spec unblock_user(String.t(), String.t()) :: {:ok, :unblocked} | {:error, :not_found}
   def unblock_user(blocker_id, blocked_id) do
-    query =
-      from(b in UserBlock,
-        where: b.blocker_id == ^blocker_id and b.blocked_id == ^blocked_id
-      )
+    Scope.with_user(blocker_id, fn ->
+      query =
+        from(b in UserBlock,
+          where: b.blocker_id == ^blocker_id and b.blocked_id == ^blocked_id
+        )
 
-    case Repo.one(query) do
-      nil ->
-        {:error, :not_found}
+      case Repo.one(query) do
+        nil ->
+          {:error, :not_found}
 
-      block ->
-        {:ok, _} = Repo.delete(block)
+        block ->
+          {:ok, _} = Repo.delete(block)
 
-        :telemetry.execute([:stacks, :social, :unblock], %{count: 1}, %{})
+          :telemetry.execute([:stacks, :social, :unblock], %{count: 1}, %{})
 
-        Events.emit_safe(%{
-          event_type: "social.user_unblocked",
-          aggregate_type: "user",
-          aggregate_id: blocker_id,
-          payload: %{blocked_id: blocked_id}
-        })
+          Events.emit_safe(%{
+            event_type: "social.user_unblocked",
+            aggregate_type: "user",
+            aggregate_id: blocker_id,
+            payload: %{blocked_id: blocked_id}
+          })
 
-        {:ok, :unblocked}
-    end
+          {:ok, :unblocked}
+      end
+    end)
   end
 
   @doc """
@@ -165,41 +170,43 @@ defmodule Stacks.Social do
   """
   @spec list_blocked_users(String.t(), keyword()) :: {[map()], non_neg_integer()}
   def list_blocked_users(blocker_id, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    per_page = 20
+    Scope.with_user(blocker_id, fn ->
+      page = Keyword.get(opts, :page, 1)
+      per_page = 20
 
-    base =
-      from b in UserBlock,
-        join: u in User,
-        on: u.id == b.blocked_id,
-        where: b.blocker_id == ^blocker_id,
-        # `display_name` is nullable; `handle` is NOT NULL. Coalescing here means
-        # no null ever leaves this endpoint, so one blocked reader who never set
-        # a name cannot decode-fail the whole list on the client — which is
-        # worse here than anywhere else, because this surface exists to let
-        # someone UNBLOCK people and a failed decode hides every row.
-        #
-        # ⚠️ Three sibling queries in this module already did this, and one of
-        # them carries the same reasoning in a comment. This query was missed, so
-        # the defect was fixed where it was found and left where it was not. The
-        # fix belongs on the server rather than in a tolerant decoder: a decoder
-        # that accepted null would render a nameless row instead.
-        select: %{
-          id: u.id,
-          display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
-          blocked_at: b.created_at
-        },
-        order_by: [desc: b.created_at]
+      base =
+        from b in UserBlock,
+          join: u in User,
+          on: u.id == b.blocked_id,
+          where: b.blocker_id == ^blocker_id,
+          # `display_name` is nullable; `handle` is NOT NULL. Coalescing here means
+          # no null ever leaves this endpoint, so one blocked reader who never set
+          # a name cannot decode-fail the whole list on the client — which is
+          # worse here than anywhere else, because this surface exists to let
+          # someone UNBLOCK people and a failed decode hides every row.
+          #
+          # ⚠️ Three sibling queries in this module already did this, and one of
+          # them carries the same reasoning in a comment. This query was missed, so
+          # the defect was fixed where it was found and left where it was not. The
+          # fix belongs on the server rather than in a tolerant decoder: a decoder
+          # that accepted null would render a nameless row instead.
+          select: %{
+            id: u.id,
+            display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
+            blocked_at: b.created_at
+          },
+          order_by: [desc: b.created_at]
 
-    total = Repo.aggregate(base, :count)
+      total = Repo.aggregate(base, :count)
 
-    blocked =
-      base
-      |> limit(^per_page)
-      |> offset(^((page - 1) * per_page))
-      |> Repo.all()
+      blocked =
+        base
+        |> limit(^per_page)
+        |> offset(^((page - 1) * per_page))
+        |> Repo.all()
 
-    {blocked, total}
+      {blocked, total}
+    end)
   end
 
   @doc """
@@ -252,11 +259,13 @@ defmodule Stacks.Social do
   """
   @spec blocked_by?(String.t(), String.t()) :: boolean()
   def blocked_by?(viewer_id, owner_id) do
-    Repo.exists?(
-      from(b in UserBlock,
-        where: b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id
+    Scope.with_user(viewer_id, fn ->
+      Repo.exists?(
+        from(b in UserBlock,
+          where: b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id
+        )
       )
-    )
+    end)
   end
 
   @dialyzer {:no_opaque, create_group: 2}
@@ -588,6 +597,12 @@ defmodule Stacks.Social do
       Returns {:error,:already_granted} if grant already exists.
   """
   def grant_visibility(bookshelf_id, caller_id, grantee_user_id) do
+    Scope.with_user(caller_id, fn ->
+      do_grant_visibility(bookshelf_id, caller_id, grantee_user_id)
+    end)
+  end
+
+  defp do_grant_visibility(bookshelf_id, caller_id, grantee_user_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
       nil ->
         {:error, :not_found}
@@ -621,6 +636,12 @@ defmodule Stacks.Social do
       Returns {:error,:not_found} if no grant exists.
   """
   def revoke_visibility(bookshelf_id, caller_id, grantee_user_id) do
+    Scope.with_user(caller_id, fn ->
+      do_revoke_visibility(bookshelf_id, caller_id, grantee_user_id)
+    end)
+  end
+
+  defp do_revoke_visibility(bookshelf_id, caller_id, grantee_user_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
       nil ->
         {:error, :not_found}
@@ -652,37 +673,41 @@ defmodule Stacks.Social do
       Lists all visibility grants for a bookshelf. Returns {:error,:unauthorized} if caller doesn't own bookshelf.
   """
   def list_visibility_grants(bookshelf_id, caller_id) do
-    case Repo.get(Bookshelf, bookshelf_id) do
-      nil ->
-        {:error, :not_found}
+    Scope.with_user(caller_id, fn ->
+      case Repo.get(Bookshelf, bookshelf_id) do
+        nil ->
+          {:error, :not_found}
 
-      %Bookshelf{user_id: user_id} when user_id != caller_id ->
-        {:error, :unauthorized}
+        %Bookshelf{user_id: user_id} when user_id != caller_id ->
+          {:error, :unauthorized}
 
-      %Bookshelf{} ->
-        grants =
-          from(g in VisibilityGrant,
-            where: g.resource_type == "bookshelf" and g.resource_id == ^bookshelf_id,
-            order_by: [desc: g.created_at]
-          )
-          |> Repo.all()
+        %Bookshelf{} ->
+          grants =
+            from(g in VisibilityGrant,
+              where: g.resource_type == "bookshelf" and g.resource_id == ^bookshelf_id,
+              order_by: [desc: g.created_at]
+            )
+            |> Repo.all()
 
-        {:ok, grants}
-    end
+          {:ok, grants}
+      end
+    end)
   end
 
   @doc """
       Returns true if viewer_id has an explicit visibility grant for the given bookshelf_id.
   """
   def has_visibility_grant?(bookshelf_id, viewer_id) do
-    Repo.exists?(
-      from(g in VisibilityGrant,
-        where:
-          g.resource_type == "bookshelf" and
-            g.resource_id == ^bookshelf_id and
-            g.granted_to_id == ^viewer_id
+    Scope.with_user(viewer_id, fn ->
+      Repo.exists?(
+        from(g in VisibilityGrant,
+          where:
+            g.resource_type == "bookshelf" and
+              g.resource_id == ^bookshelf_id and
+              g.granted_to_id == ^viewer_id
+        )
       )
-    )
+    end)
   end
 
   @doc """

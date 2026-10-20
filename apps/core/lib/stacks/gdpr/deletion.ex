@@ -60,6 +60,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.GDPR.ExportDelivery
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Imports.LibraryImport
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
@@ -151,6 +152,11 @@ defmodule Stacks.GDPR.Deletion do
     audit_metadata = opts |> Keyword.take([:reason, :actor]) |> Map.new()
 
     Multi.new()
+    # ⚠️ FIRST, before any step touches a row-level-secured table. Erasure
+    # reads and deletes this user's bookshelves and placements, and those
+    # policies refuse a query with no scope — so a Multi that set the erasure
+    # GUC first and the RLS scope later would fail on its second step.
+    |> Scope.multi_step(user_id)
     |> Multi.run(:set_gdpr_guc, fn repo, _ ->
       repo.query!("SET LOCAL app.audit_gdpr_erasure = 'true'")
       {:ok, :set}
