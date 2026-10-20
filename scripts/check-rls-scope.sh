@@ -130,6 +130,28 @@ if (( workers < 30 )); then
 fi
 echo "    (${workers} worker(s) checked)"
 
+echo "==> Checking nothing sets the scope except Stacks.Scope"
+# ⛔ A bare `SET LOCAL app.current_user_id = …` outside `Stacks.Scope` is the
+# one way to defeat all of the above, and it fails in the worst possible
+# manner: measured, `SET LOCAL` outside a transaction emits a WARNING and does
+# NOTHING, so the code reads as wired, enforces nothing, and every query it
+# guards is then refused with 42501 somewhere that does not name this as the
+# cause. `Stacks.Scope` is the only place allowed to set it, because it is the
+# only place that guarantees a transaction.
+setters=0
+while IFS= read -r file; do
+    case "$file" in
+        */stacks/scope.ex) continue ;;
+    esac
+    echo "    FORBIDDEN ${file#apps/core/lib/} — sets the scope directly; use Stacks.Scope" >&2
+    setters=$(( setters + 1 ))
+    fail=1
+done < <(grep -rlE "app\.current_user_id" apps/core/lib 2>/dev/null | sort)
+
+if (( setters == 0 )); then
+    echo "    ok      only Stacks.Scope sets app.current_user_id"
+fi
+
 if (( fail )); then
     echo "FAIL: a query against a row-level-secured table has no scope." >&2
     echo "      Establish one with Stacks.Scope.with_user/2 (or set!/1 inside a transaction" >&2
