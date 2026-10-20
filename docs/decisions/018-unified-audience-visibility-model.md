@@ -36,7 +36,7 @@ that is never a stored value**:
 
 ### Concrete harm this has already caused
 
-1. **A live E2E bug** (caught during the #122 epic): the shelf-visibility UI sends a
+1. **A live E2E bug** (caught during the proto-sync/E2E epic of 2026-07): the shelf-visibility UI sends a
    shelf *name*, the backend fetched by *id*, producing a `CastError` → 400. The
    name/id confusion was masked by the vocabulary drift.
 2. **`public` is a phantom tier** for shelves/placements — it exists in the ceiling
@@ -229,7 +229,8 @@ overlay types are defined **once** in proto and generated everywhere:
 | `visibility_tier = unlisted` | book | *(audience unchanged)* | `Unlisted` — **⚠️ proto-only, ZERO rows** |
 | `visibility_tier = private` | book | `AUDIENCE_OWNER` | **⚠️ proto-only, ZERO rows** |
 
-> **Correction (2026-07-14, from the #209 characterization test).** The DB type is
+> **Correction (2026-07-14, from the visibility-tier characterization test —
+> `apps/core/test/.../visibility_tier_characterization_test.exs`).** The DB type is
 > `CREATE TYPE op.visibility_tier AS ENUM ('public', 'age_gated')` — the proto's
 > `unlisted`/`private` were never added to it and are **impossible to store**
 > (insert raises `invalid input value for enum`). So the book decomposition has only
@@ -247,7 +248,9 @@ overlay types are defined **once** in proto and generated everywhere:
 - RLS role-switching integration tests must be updated in the *same* change as the
   application-layer rank function.
 
-**Deferred / Open questions (resolved in the implementation issue, #209)**
+**Deferred / Open questions** — ⚠️ these were deferred to an implementation issue whose number
+no longer resolves to anything; they are now carried by **#490**, which records each decision
+rather than citing one. Each item below is a RECOMMENDATION, not a ruling.
 1. **Multi-group visibility.** Today `visibility_group_id` is a single FK — a resource
    is scoped to exactly one group; US-11.1.5 only needs "this group or broader."
    Recommendation: **keep single-FK now**; design the `Audience.GROUP` type so
@@ -259,6 +262,21 @@ overlay types are defined **once** in proto and generated everywhere:
 3. **Discoverability as a stored per-resource field now, or keep global?**
    Recommendation: **model the type now, keep the global `noindex` behavior** as the
    default; wire per-user/per-visibility opt-in when Phase 6 anti-scraping lands.
-4. **Phasing.** The refactor is too large for one atomic change (see #209 for the
-   phase plan: proto+codegen → resolver+rank → controllers/Elm → dbt/warehouse → RLS
-   + data migration, each behind the property suite).
+4. **Phasing.** The refactor is too large for one atomic change. The phase plan is
+   proto+codegen → resolver+rank → controllers/Elm → dbt/warehouse → RLS + data
+   migration, each behind the property suite — stated here rather than by reference,
+   because the issue it used to point at had gone.
+
+---
+
+> ⚠️ **Citation note, 2026-10-20.** This ADR used to defer its open questions and its phase plan to
+> "the implementation issue, #209", and referred to "the #122 epic". **Neither number resolves.**
+> Local `issues/NNN-*.md` numbering is independent of GitHub's, and the GitHub issues with those
+> numbers are unrelated work — so following the citation produced a confident wrong answer rather
+> than a dead end. Issue files below roughly #190 are no longer on disk, so these were almost
+> certainly real local issues whose files have gone; the rule against citing a number with no
+> backing file failed from the other end, because the file existed when this was written.
+>
+> The deferred questions and the phase plan are now stated here in full, and the remaining work is
+> tracked by **#490**. Recorded rather than silently rewritten, because an ADR whose deferrals
+> point nowhere reads as though they are tracked — and for two years nobody noticed they were not.
