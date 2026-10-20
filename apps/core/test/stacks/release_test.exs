@@ -421,4 +421,89 @@ defmodule Stacks.ReleaseTest do
     import Ecto.Query
     from(u in User, where: u.email == ^email)
   end
+
+  describe "print_connection_posture/0" do
+    # ⚠️ The function this covers exists because remote inspection by ad-hoc
+    # expression does not survive the quoting — a shell, an ssh command string
+    # and Elixir in sequence. So what is asserted here is the thing an operator
+    # reads off a production node: that the line appears, that its fields carry
+    # real answers, and that a wrong posture would look different from a right
+    # one.
+
+    test "it prints one posture line per repo, naming the role actually connected" do
+      output = capture_io(fn -> assert Release.print_connection_posture() == :ok end)
+
+      lines =
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "CONNECTION_POSTURE"))
+
+      repos = Application.fetch_env!(:core, :ecto_repos)
+
+      assert length(lines) == length(repos),
+             "expected one line per repo (#{length(repos)}), got #{length(lines)}:\n#{output}"
+
+      refute output =~ "CONNECTION_POSTURE_ERROR",
+             "the probe could not run, so every field below would be unasserted:\n#{output}"
+
+      Enum.each(repos, fn repo ->
+        assert Enum.any?(lines, &(&1 =~ "repo=#{inspect(repo)}")),
+               "#{inspect(repo)} has no posture line, so its connection is unreported"
+      end)
+    end
+
+    test "⛔ the role field reports the role, not a fixed string" do
+      # ⛔ The assertion that gives the rest of them meaning. A posture printer
+      # whose role field is constant would read as correct on a stack where the
+      # app is connected as the owner — the exact misconfiguration it exists to
+      # reveal — so the field is checked against the role the database says this
+      # connection has, from a separate query.
+      [[role]] = Repo.query!("SELECT current_user", []).rows
+
+      output = capture_io(fn -> Release.print_connection_posture() end)
+
+      assert output =~ "role=#{role}",
+             "the posture line does not name the role this connection actually has " <>
+               "(#{role}), so it cannot tell an app pool from an owner pool:\n#{output}"
+    end
+
+    test "every claimed privilege is answered, and `unknown` is distinguishable from `false`" do
+      # ⚠️ A privilege that could not be asked about must not read as denied.
+      # The split's claims are CRUD on `op`, SELECT on `marts`, INSERT-only on
+      # `audit`, and no rewriting of migration history — so each has a field,
+      # and each field has to say something.
+      output = capture_io(fn -> Release.print_connection_posture() end)
+
+      for field <- [
+            "op_usage",
+            "op_write",
+            "marts_usage",
+            "audit_insert",
+            "audit_delete",
+            "can_rewrite_migrations"
+          ] do
+        assert output =~ ~r/#{field}=(true|false|unknown)/,
+               "#{field} is missing or carries something that is not an answer:\n#{output}"
+      end
+    end
+
+    test "⛔ it prints no connection string and no password" do
+      # ⛔ Non-negotiable: this function's whole purpose is to be run against
+      # production, and a credential reaching an operator's terminal is how one
+      # reached a transcript. The posture is reported as role and database name
+      # only — never the URL those came from.
+      output = capture_io(fn -> Release.print_connection_posture() end)
+
+      refute output =~ "://",
+             "the output contains a URL, which is where a password travels:\n#{output}"
+
+      for secret_var <- ["DATABASE_URL", "APP_DATABASE_URL", "STACKS_APP_DB_PASSWORD"] do
+        case System.get_env(secret_var) do
+          nil -> :ok
+          "" -> :ok
+          value -> refute output =~ value, "the output contains the value of #{secret_var}"
+        end
+      end
+    end
+  end
 end

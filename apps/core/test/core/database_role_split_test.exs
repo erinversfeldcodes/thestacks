@@ -156,6 +156,32 @@ defmodule Core.DatabaseRoleSplitTest do
       end
     end
 
+    # ⚠️ A repo NAME that is not started, which is the state every caller of the
+    # wrapper runs in — all six are invoked with `eval`, in their own BEAM.
+    #
+    # Nothing here needs it to be a real repo: the swap is keyed by module name
+    # in the application environment, and the started-ness guard asks
+    # `GenServer.whereis/1`, which answers `nil` for an unregistered name. Using
+    # the live `Core.Repo` instead would now RAISE — see the refusal test below,
+    # which is the one case that deliberately uses the started repo.
+    @unstarted_repo Core.Repo.UnstartedForConfigAssertions
+
+    # Reads the url the wrapper leaves in config while the function runs, which
+    # is the only thing that decides where a pool would connect.
+    defp url_seen_inside(repo, configured) do
+      previous = Application.get_env(:core, repo, [])
+
+      try do
+        Application.put_env(:core, repo, Keyword.put(previous, :url, configured))
+
+        Stacks.Release.with_owner_repo_config(repo, fn ->
+          Application.get_env(:core, repo)[:url]
+        end)
+      after
+        Application.put_env(:core, repo, previous)
+      end
+    end
+
     test "a release task takes the OWNER url even while the app url is set" do
       with_env(
         [
@@ -163,9 +189,9 @@ defmodule Core.DatabaseRoleSplitTest do
           {"APP_DATABASE_URL", "ecto://stacks_app:x@db.test/app_db"}
         ],
         fn ->
-          opts = Stacks.Release.owner_repo_opts()
+          seen = url_seen_inside(@unstarted_repo, "ecto://stacks_app:x@db.test/app_db")
 
-          assert Keyword.fetch!(opts, :url) == "ecto://owner:x@db.test/owner_db",
+          assert seen == "ecto://owner:x@db.test/owner_db",
                  "a release task would connect as the RUNTIME role. `migrate/0` runs DDL and " <>
                    "needs ownership, so setting APP_DATABASE_URL would break the next deploy's " <>
                    "migration step while the app kept serving — the failure arriving whenever " <>
@@ -174,18 +200,24 @@ defmodule Core.DatabaseRoleSplitTest do
       )
     end
 
-    test "it is empty when the owner url is absent, so dev and test are untouched" do
-      # Empty-when-absent is what keeps one-role environments alone: the repo's
-      # own config is already right there, and an override would have to invent
-      # a URL. Asserted with APP_DATABASE_URL SET, because that is the case
-      # where a naive implementation would reach for the wrong one.
+    test "with no owner url the repo's own config is left alone, so dev and test are untouched" do
+      # ⚠️ Stronger than the `== []` this replaces, and that is the point of
+      # driving the wrapper rather than the helper behind it: an empty option
+      # list is a claim about an intermediate value, while the property
+      # one-role environments actually depend on is that their configured url
+      # SURVIVES the call. Asserted with APP_DATABASE_URL set, because that is
+      # the case where a naive implementation reaches for the wrong one.
       with_env([{"APP_DATABASE_URL", "ecto://stacks_app:x@db.test/app_db"}], fn ->
         previous = System.get_env("DATABASE_URL")
         System.delete_env("DATABASE_URL")
 
         try do
-          assert Stacks.Release.owner_repo_opts() == [],
-                 "with no owner url, a release task must not fall back to the app url"
+          seen = url_seen_inside(@unstarted_repo, "ecto://dev:x@localhost/stacks_dev")
+
+          assert seen == "ecto://dev:x@localhost/stacks_dev",
+                 "with no owner url the wrapper still rewrote the repo's config — dev and test " <>
+                   "have one role and their own config is already right, so there is nothing to " <>
+                   "override and no url to invent"
         after
           if previous, do: System.put_env("DATABASE_URL", previous)
         end
@@ -194,85 +226,99 @@ defmodule Core.DatabaseRoleSplitTest do
 
     test "an empty owner url is treated as absent, not as a url" do
       with_env([{"DATABASE_URL", ""}], fn ->
-        assert Stacks.Release.owner_repo_opts() == [],
+        seen = url_seen_inside(@unstarted_repo, "ecto://dev:x@localhost/stacks_dev")
+
+        assert seen == "ecto://dev:x@localhost/stacks_dev",
                "an empty DATABASE_URL became a url override, which would make a release task " <>
                  "try to connect to nothing"
       end)
     end
 
-    test "⛔ the override reaches the CONNECTION, not just the option list" do
-      # ⛔ THE TEST THAT WAS MISSING, and its absence took a preview deploy down.
+    test "⛔ it REFUSES to run against a started repo while the split is active" do
+      # ⛔ The shape in which this defect comes back. With the split active the
+      # started pool is on the least-privilege role, so writing the owner url
+      # into config cannot move it: the swap succeeds, the task runs as
+      # `stacks_app` anyway, and the only symptom is a `permission denied`
+      # later, somewhere that does not name the config as the cause. Silently
+      # doing nothing useful is worse than stopping, so it stops.
       #
-      # The tests above prove `owner_repo_opts/0` RETURNS the owner url. They do
-      # not prove anything USES it — and nothing did.
-      # `Ecto.Migrator.with_repo/3` reads only `:mode` and `:pool_size` from its
-      # options and starts the repo with `repo.start_link(pool_size: pool_size)`,
-      # discarding `:url` (ecto_sql 3.14.0, `migrator.ex:817`). So every release
-      # task passed an override that was thrown away.
-      #
-      # It was invisible while `APP_DATABASE_URL` was unset, because then the
-      # config pointed at `DATABASE_URL` anyway and the override agreed with the
-      # config it was failing to override. The first deploy that set the secret
-      # ran the release command as `stacks_app` and aborted on `28P01`.
-      #
-      # ⚠️ This asserts the only thing that decides where the pool connects: the
-      # repo's own config, at the moment `with_owner_repo/2` runs its function.
+      # ⚠️ The `whereis` assertion is the anti-vacuity floor. If the repo were
+      # not started in this environment, the raise could never fire and this
+      # test would pass while proving nothing at all.
+      assert GenServer.whereis(Core.Repo),
+             "Core.Repo is not started here, so this test cannot tell a working guard from a " <>
+               "missing one"
+
       with_env(
         [
           {"DATABASE_URL", "ecto://owner:x@db.test/owner_db"},
           {"APP_DATABASE_URL", "ecto://stacks_app:x@db.test/app_db"}
         ],
         fn ->
-          previous = Application.get_env(:core, Core.Repo, [])
+          before = Application.get_env(:core, Core.Repo)[:url]
 
-          try do
-            Application.put_env(
-              :core,
-              Core.Repo,
-              Keyword.put(previous, :url, "ecto://stacks_app:x@db.test/app_db")
-            )
+          error =
+            assert_raise RuntimeError, fn ->
+              Stacks.Release.with_owner_repo_config(Core.Repo, fn -> :never_runs end)
+            end
 
-            seen =
-              Stacks.Release.with_owner_repo_config(Core.Repo, fn ->
-                Application.get_env(:core, Core.Repo)[:url]
-              end)
+          assert error.message =~ "already started",
+                 "it raised, but not about the thing that is wrong"
 
-            assert seen == "ecto://owner:x@db.test/owner_db",
-                   "the repo would have STARTED on #{inspect(seen)} — the runtime role. " <>
-                     "`with_repo/3` discards a `:url` option, so config is the only channel " <>
-                     "that decides where the pool connects"
-          after
-            Application.put_env(:core, Core.Repo, previous)
-          end
+          assert error.message =~ "eval",
+                 "the message does not say how to run a release task correctly, which is the " <>
+                   "whole reason to raise instead of proceeding"
+
+          assert Application.get_env(:core, Core.Repo)[:url] == before,
+                 "the refusal still rewrote the live repo's config on its way out"
         end
       )
     end
 
-    test "the owner config is restored even when the task raises" do
-      # ⚠️ A release task is usually the only thing in its BEAM, but a leaked
-      # owner url in config is a credential left pointing at the wrong role for
-      # whatever runs next. The restore belongs in an `after`, not after the call.
-      with_env([{"DATABASE_URL", "ecto://owner:x@db.test/owner_db"}], fn ->
-        previous = Application.get_env(:core, Core.Repo, [])
+    test "⚠️ a started repo is NOT refused while the split is inactive" do
+      # ⛔ The condition that had to be added after the broad guard broke six
+      # passing tests. `seed_prod/0` and `seed_prober/0` are called in-process
+      # by `release_test.exs` against the started test repo — a correct caller,
+      # because with `APP_DATABASE_URL` unset the runtime pools are on the owner
+      # already and the swap had nothing to achieve.
+      #
+      # ⚠️ So this is not a convenience case. A guard that fires where the
+      # override was never needed is a block on correct callers, which is worse
+      # than the silent no-op it set out to prevent.
+      assert GenServer.whereis(Core.Repo), "the floor: an unstarted repo proves nothing here"
 
-        try do
-          Application.put_env(
-            :core,
-            Core.Repo,
-            Keyword.put(previous, :url, "ecto://stacks_app:x@db.test/app_db")
-          )
+      previous_app = System.get_env("APP_DATABASE_URL")
+      System.delete_env("APP_DATABASE_URL")
 
-          assert_raise RuntimeError, fn ->
-            Stacks.Release.with_owner_repo_config(Core.Repo, fn -> raise "boom" end)
-          end
+      try do
+        with_env([{"DATABASE_URL", "ecto://owner:x@db.test/owner_db"}], fn ->
+          assert Stacks.Release.with_owner_repo_config(Core.Repo, fn -> :ran end) == :ran,
+                 "a started repo was refused with the split inactive, so every in-process " <>
+                   "caller — and the suite that tests them — cannot run a release task at all"
+        end)
+      after
+        if previous_app, do: System.put_env("APP_DATABASE_URL", previous_app)
+      end
+    end
 
-          assert Application.get_env(:core, Core.Repo)[:url] ==
-                   "ecto://stacks_app:x@db.test/app_db",
-                 "a raising task left the repo config pointed at the owner"
-        after
-          Application.put_env(:core, Core.Repo, previous)
+    test "⚠️ an APP_DATABASE_URL equal to the owner url is not a split at all" do
+      # The fallback shape. `runtime.exs` resolves an unset APP_DATABASE_URL to
+      # the owner url, so a stack that sets the secret to the SAME value has
+      # pools on the owner — identical to not setting it. Refusing there would
+      # read as the split being active when it is not.
+      assert GenServer.whereis(Core.Repo), "the floor: an unstarted repo proves nothing here"
+
+      with_env(
+        [
+          {"DATABASE_URL", "ecto://owner:x@db.test/owner_db"},
+          {"APP_DATABASE_URL", "ecto://owner:x@db.test/owner_db"}
+        ],
+        fn ->
+          assert Stacks.Release.with_owner_repo_config(Core.Repo, fn -> :ran end) == :ran,
+                 "an APP_DATABASE_URL identical to the owner url was treated as a live split, " <>
+                   "so a stack whose pools are already the owner is refused"
         end
-      end)
+      )
     end
 
     test "every release task goes through the wrapper, not with_repo plus options" do
@@ -287,12 +333,21 @@ defmodule Core.DatabaseRoleSplitTest do
       assert src =~ "def with_owner_repo", "the wrapper is gone"
     end
 
-    test "the helper still exists and still reads the owner variable" do
+    test "the helper still exists, is PRIVATE, and still reads the owner variable" do
       # Kept as a source assertion deliberately: it guards the NAME the
       # deploy scripts and workflows compose, which no behavioural test can see.
       src = release_src()
       assert src =~ ~s|System.get_env("DATABASE_URL")|, "it does not read DATABASE_URL"
-      assert src =~ "def owner_repo_opts", "the helper is gone"
+      assert src =~ "defp owner_repo_opts", "the helper is gone"
+
+      # ⚠️ Private on purpose. A public options-returning function invited the
+      # original defect — it reads as the thing that applies the override, and
+      # it was passed to a function that discarded it from seven call sites. The
+      # only safe way to reach it is through the wrapper that also APPLIES it,
+      # so the options never exist as something a caller can hold and misuse.
+      refute src =~ ~r/\n  def owner_repo_opts/,
+             "the options helper is public again, which is the surface the discarded-option " <>
+               "defect was written against"
     end
 
     test "⚠️ the sweep this replaces was pinning the BROKEN mechanism" do

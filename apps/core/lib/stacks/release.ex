@@ -21,47 +21,45 @@ defmodule Stacks.Release do
 
   @app :core
 
-  @doc """
-      Connection options every release task must start its repo with: the OWNER
-      connection, taken from `DATABASE_URL`.
-
-      ⚠️ This exists because the runtime pools no longer necessarily use that
-      role. `config/runtime.exs` points `Core.Repo` and `Core.ObanRepo` at
-      `APP_DATABASE_URL` when it is set — the least-privilege `stacks_app` role
-      — falling back to `DATABASE_URL` when it is not. Every task in this module
-      does something a least-privilege role cannot: `migrate/0` runs DDL, which
-      requires ownership; `print_applied_versions/0` and `correct_data/1` run
-      inside the deploy as operator actions.
-
-      So a release task must not inherit the repo's configured URL. Without this
-      override, setting `APP_DATABASE_URL` would make the next deploy's
-      migration step fail on `permission denied` — the change would look inert
-      right up to the moment it took the stack down, which is the worst shape a
-      flag can have.
-
-      Empty when `DATABASE_URL` is unset, so dev and test — where the repo's own
-      config is already correct and there is no second role — are untouched.
-
-      ⛔ **These options are NOT enough on their own, and believing they were
-      took a preview deploy down.** `Ecto.Migrator.with_repo/3` reads only
-      `:mode` and `:pool_size` from the options it is given — it starts the repo
-      with `repo.start_link(pool_size: pool_size)` and discards everything else,
-      `:url` included (ecto_sql 3.14.0, `migrator.ex:817`). So passing these as
-      `with_repo`'s third argument had no effect whatsoever.
-
-      That was invisible for as long as `APP_DATABASE_URL` was unset, because
-      then `config/runtime.exs` pointed the repo at `DATABASE_URL` anyway and the
-      override agreed with the config it was failing to override. The first
-      deploy that set the secret ran the release command as `stacks_app`, which
-      on a fresh preview branch does not even exist yet — the role is created by
-      a migration that this very command runs. `28P01`, twice, deploy aborted.
-
-      ⚠️ So use `with_owner_repo/2` below, never `with_repo` plus these options.
-      The only thing that changes where the repo connects is the repo's own
-      CONFIG, which is why that function sets it.
-  """
+  # Connection options every release task must start its repo with: the OWNER
+  # connection, taken from `DATABASE_URL`.
+  #
+  # ⚠️ This exists because the runtime pools no longer necessarily use that
+  # role. `config/runtime.exs` points `Core.Repo` and `Core.ObanRepo` at
+  # `APP_DATABASE_URL` when it is set — the least-privilege `stacks_app` role
+  # — falling back to `DATABASE_URL` when it is not. Every task in this module
+  # does something a least-privilege role cannot: `migrate/0` runs DDL, which
+  # requires ownership; `print_applied_versions/0` and `correct_data/1` run
+  # inside the deploy as operator actions.
+  #
+  # So a release task must not inherit the repo's configured URL. Without this
+  # override, setting `APP_DATABASE_URL` would make the next deploy's
+  # migration step fail on `permission denied` — the change would look inert
+  # right up to the moment it took the stack down, which is the worst shape a
+  # flag can have.
+  #
+  # Empty when `DATABASE_URL` is unset, so dev and test — where the repo's own
+  # config is already correct and there is no second role — are untouched.
+  #
+  # ⛔ **These options are NOT enough on their own, and believing they were
+  # took a preview deploy down.** `Ecto.Migrator.with_repo/3` reads only
+  # `:mode` and `:pool_size` from the options it is given — it starts the repo
+  # with `repo.start_link(pool_size: pool_size)` and discards everything else,
+  # `:url` included (ecto_sql 3.14.0, `migrator.ex:817`). So passing these as
+  # `with_repo`'s third argument had no effect whatsoever.
+  #
+  # That was invisible for as long as `APP_DATABASE_URL` was unset, because
+  # then `config/runtime.exs` pointed the repo at `DATABASE_URL` anyway and the
+  # override agreed with the config it was failing to override. The first
+  # deploy that set the secret ran the release command as `stacks_app`, which
+  # on a fresh preview branch does not even exist yet — the role is created by
+  # a migration that this very command runs. `28P01`, twice, deploy aborted.
+  #
+  # ⚠️ So use `with_owner_repo/2` below, never `with_repo` plus these options.
+  # The only thing that changes where the repo connects is the repo's own
+  # CONFIG, which is why that function sets it.
   @spec owner_repo_opts() :: keyword()
-  def owner_repo_opts do
+  defp owner_repo_opts do
     case System.get_env("DATABASE_URL") do
       nil -> []
       "" -> []
@@ -83,8 +81,8 @@ defmodule Stacks.Release do
       node. A release task is usually the only thing in its BEAM, but "usually"
       is not a reason to leak a credential-bearing config.
 
-      A no-op pass-through when `owner_repo_opts/0` is empty: dev and test have
-      one role and the repo's own config is already right.
+      A no-op pass-through when `DATABASE_URL` is unset: dev and test have one
+      role and the repo's own config is already right.
   """
   @spec with_owner_repo(module(), (module() -> any())) :: {:ok, any(), [atom()]}
   def with_owner_repo(repo, fun) do
@@ -100,7 +98,14 @@ defmodule Stacks.Release do
       a real pool. A test that had to connect could only verify this against a
       live database, which is how it went unverified in the first place.
 
-      A no-op pass-through when `owner_repo_opts/0` is empty.
+      A no-op pass-through when `DATABASE_URL` is unset.
+
+      ⛔ Raises when `repo` is already started AND the role split is active
+      (`APP_DATABASE_URL` set to something other than the owner). A started
+      repo holds its pool already, so the swap cannot move it — it would
+      succeed and achieve nothing, which is the shape this defect returns in.
+      With the split inactive a started pool is already the owner, so there is
+      nothing to refuse and in-process callers are untouched.
   """
   @spec with_owner_repo_config(module(), (-> any())) :: any()
   def with_owner_repo_config(repo, fun) do
@@ -109,6 +114,8 @@ defmodule Stacks.Release do
         fun.()
 
       opts ->
+        refuse_if_already_started!(repo)
+
         previous = Application.get_env(@app, repo, [])
 
         try do
@@ -117,6 +124,62 @@ defmodule Stacks.Release do
         after
           Application.put_env(@app, repo, previous)
         end
+    end
+  end
+
+  # ⛔ A started repo already holds its pool, so changing config cannot move it.
+  # Proceeding would run the task on whatever connection the pool was opened
+  # with — the runtime role — and SUCCEED at the config swap while failing at
+  # the only thing it is for. That silent no-op is the exact shape this defect
+  # returns in: the override appears applied and has no effect.
+  #
+  # ⚠️ Two conditions, not one, and the second is what makes this safe to add.
+  # A started repo is only a problem when its pool is on a DIFFERENT connection
+  # than the owner — which is the case precisely when the role split is active,
+  # because `config/runtime.exs` points the runtime pools at `APP_DATABASE_URL`
+  # when it is set and at `DATABASE_URL` when it is not. With the split
+  # inactive, a started pool is already the owner, so there is nothing the swap
+  # needed to achieve and nothing to refuse.
+  #
+  # ⛔ Refusing on started-ness ALONE breaks six passing tests, which is how
+  # this got narrowed: `seed_prod/0` and `seed_prober/0` are called in-process
+  # by `release_test.exs` against the started test repo. "Release tasks run
+  # before the app boots" is true of how they are INVOKED in a deploy — all six
+  # callers of the wrapper go through `eval`, in their own BEAM — and false of
+  # the suite that tests them. The broad guard would have been a block on a
+  # correct caller, which is a worse defect than the silent no-op it prevents.
+  #
+  # ⚠️ The second condition is a proxy, stated as one. Which role a live pool
+  # actually holds is not readable from config — it would take a `current_user`
+  # query against that pool — so this asks whether the split is active instead,
+  # using the same variable `runtime.exs` decides with. It is the right proxy
+  # for the case that matters and it will not fire for a pool that is already
+  # the owner by some route this does not model.
+  #
+  # ⚠️ Raising rather than falling back: a release task doing DDL as the
+  # least-privilege role fails on `permission denied` somewhere further in, at a
+  # point that does not name the cause. Better to stop here and say why.
+  defp refuse_if_already_started!(repo) do
+    if GenServer.whereis(repo) && runtime_pools_are_not_the_owner?() do
+      raise """
+      #{inspect(repo)} is already started, so pointing it at the owner connection is impossible: \
+      its pool is open on the runtime role and a config change cannot move it.
+
+      A release task needing the owner must run in its own BEAM — `bin/core eval` or \
+      `fly machine exec` — not via `rpc` against a live node. Invoked from a running node it \
+      would silently execute as the least-privilege role and fail later on `permission denied`, \
+      somewhere that does not name this as the cause.
+      """
+    end
+
+    :ok
+  end
+
+  defp runtime_pools_are_not_the_owner? do
+    case System.get_env("APP_DATABASE_URL") do
+      nil -> false
+      "" -> false
+      app_url -> app_url != System.get_env("DATABASE_URL")
     end
   end
 
@@ -191,6 +254,115 @@ defmodule Stacks.Release do
   defp emit_applied_versions(started_repo) do
     %{rows: rows} = SQL.query!(started_repo, "SELECT version FROM schema_migrations", [])
     Enum.each(rows, fn [version] -> IO.puts("APPLIED_VERSION #{version}") end)
+  end
+
+  @doc """
+      Prints one `CONNECTION_POSTURE` line per repo: the role each pool is
+      actually connected as, and what that role may do.
+
+      ⚠️ A NAMED function because the alternative is an ad-hoc expression piped
+      through `fly ssh console -C "… rpc '…'"`, where the quoting has to survive
+      a shell, an ssh command string, and Elixir — and it does not. Nine
+      attempts at one such expression failed on quoting alone, which is time
+      spent on syntax rather than on the question. Anything worth asking a
+      deployed node twice belongs here, where the invocation is a bare call:
+
+          fly ssh console -a <app> -C "/app/bin/core rpc 'Stacks.Release.print_connection_posture()'"
+
+      ⚠️ Deliberately NOT wrapped in `with_owner_repo/2`. The question is what
+      the RUNTIME pools are connected as; overriding them to the owner first
+      would answer a question nobody asked and report the posture as correct
+      whatever it is.
+
+      ⛔ Prints no error text, only a classification. This function exists to be
+      run against production, and an error stream is exactly where a credential
+      resurfaces — a connection string quoted back inside a failure message is
+      how one got into a transcript. The postgres code says what went wrong
+      without quoting anything back.
+  """
+  @spec print_connection_posture() :: :ok
+  def print_connection_posture do
+    load_app()
+
+    Enum.each(repos(), &emit_connection_posture/1)
+
+    :ok
+  end
+
+  # The privileges the role split claims, asked of the catalogue rather than by
+  # attempting them: a probe that INSERTs to find out whether it may INSERT has
+  # to be undone, and a posture check must not write. `to_regclass` guards each
+  # table lookup, because `has_table_privilege` raises on a table that does not
+  # exist yet and a posture check must not fail for being run early.
+  @posture_query """
+  SELECT current_user,
+         current_database(),
+         has_schema_privilege('op', 'usage'),
+         CASE WHEN to_regclass('op.users') IS NULL THEN NULL
+              ELSE has_table_privilege('op.users', 'insert') END,
+         has_schema_privilege('marts', 'usage'),
+         CASE WHEN to_regclass('audit.audit_log') IS NULL THEN NULL
+              ELSE has_table_privilege('audit.audit_log', 'insert') END,
+         CASE WHEN to_regclass('audit.audit_log') IS NULL THEN NULL
+              ELSE has_table_privilege('audit.audit_log', 'delete') END,
+         CASE WHEN to_regclass('public.schema_migrations') IS NULL THEN NULL
+              ELSE has_table_privilege('public.schema_migrations', 'update') END
+  """
+
+  defp emit_connection_posture(repo) do
+    # `with_repo` runs the function directly when the repo is already started,
+    # which is the `rpc` case, and starts it on its OWN config otherwise, which
+    # is the `eval` case. Both report the runtime connection, which is the point.
+    case Ecto.Migrator.with_repo(repo, &probe_posture(repo, &1)) do
+      {:ok, :ok, _apps} -> :ok
+      {:error, reason} -> emit_posture_error(repo, reason)
+    end
+  rescue
+    error -> emit_posture_error(repo, error)
+  end
+
+  defp probe_posture(repo, started_repo) do
+    %{rows: [row]} = SQL.query!(started_repo, @posture_query, [])
+
+    [
+      role,
+      database,
+      op_usage,
+      op_write,
+      marts_usage,
+      audit_insert,
+      audit_delete,
+      migrations_write
+    ] =
+      row
+
+    IO.puts(
+      "CONNECTION_POSTURE repo=#{inspect(repo)} role=#{role} database=#{database} " <>
+        "op_usage=#{posture_value(op_usage)} op_write=#{posture_value(op_write)} " <>
+        "marts_usage=#{posture_value(marts_usage)} " <>
+        "audit_insert=#{posture_value(audit_insert)} audit_delete=#{posture_value(audit_delete)} " <>
+        "can_rewrite_migrations=#{posture_value(migrations_write)}"
+    )
+
+    :ok
+  end
+
+  # `unknown` rather than `false` for an absent table: a privilege that could
+  # not be asked about is not a privilege denied, and reading one as the other
+  # is how a posture check reports a correct stack as broken, or the reverse.
+  defp posture_value(nil), do: "unknown"
+  defp posture_value(value), do: to_string(value)
+
+  defp emit_posture_error(repo, %Postgrex.Error{postgres: %{code: code}}) do
+    IO.puts("CONNECTION_POSTURE_ERROR repo=#{inspect(repo)} kind=Postgrex.Error code=#{code}")
+  end
+
+  defp emit_posture_error(repo, error) when is_exception(error) do
+    IO.puts("CONNECTION_POSTURE_ERROR repo=#{inspect(repo)} kind=#{inspect(error.__struct__)}")
+  end
+
+  defp emit_posture_error(repo, _reason) do
+    IO.puts("CONNECTION_POSTURE_ERROR repo=#{inspect(repo)} kind=unknown")
   end
 
   def seed do
