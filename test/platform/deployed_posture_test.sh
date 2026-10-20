@@ -97,16 +97,46 @@ else
 fi
 
 test_case "a_breached_ceiling_fails_and_explains" "it does not merely print a number"
-# The local database genuinely holds a past-expiry image fixture, so the
-# retention ceiling really is breached here — which makes this a behavioural
-# check rather than a source grep.
+# ⛔ PLANTS the breach rather than assuming it. This case used to rely on a
+# past-expiry image that `seeds.exs` happens to insert, and the reliance was
+# invisible until somebody ran the image-retention sweep against their
+# development database — which is a correct thing to do, and which deletes that
+# row. The suite then failed with "the ceiling comparison is not working" while
+# the gate under test was perfectly fine: a green that was reporting the
+# contents of one machine rather than the behaviour of the code, and a red for
+# the same reason.
+#
+# ⚠️ Planted and removed here, so the precondition is true by construction and
+# no legitimate operation elsewhere can take it away. The `POSTURE_ALLOW_LOCAL`
+# escape above exists precisely so this suite has a database it may dirty.
+PLANTED_IMAGE_ID="$(uuidgen 2>/dev/null || python3 -c 'import uuid;print(uuid.uuid4())')"
+psql "$LOCAL_URL" -q -c "
+  INSERT INTO op.uploaded_images (id, storage_path, status, uploaded_at, expires_at, created_at, updated_at)
+  VALUES ('${PLANTED_IMAGE_ID}', 'uploads/posture-suite-planted', 'pending',
+          now() - interval '40 days', now() - interval '10 days',
+          now() - interval '40 days', now() - interval '40 days')
+" >/dev/null 2>&1 || _record_fail "could not plant the past-expiry fixture this case needs"
+
+PLANTED_COUNT="$(psql "$LOCAL_URL" -tAc \
+    "SELECT count(*) FROM op.uploaded_images WHERE expires_at < now()" 2>/dev/null)"
+if [[ "${PLANTED_COUNT:-0}" -ge 1 ]]; then
+    _record_pass "the breach is planted (${PLANTED_COUNT} image(s) past expiry), so the ceiling really is exceeded"
+else
+    _record_fail "the fixture did not land, so this case would pass or fail for the wrong reason"
+fi
+
+OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1)"
+
 if printf '%s' "$OUT" | grep -qE "^FAIL images_past_expiry"; then
     _record_pass "a breached ceiling is reported as a failure"
     assert_contains "$OUT" "retention promise is not being kept" \
         "and carries the sentence a reader needs, not just a count"
 else
-    _record_fail "the local database holds a past-expiry image fixture and the retention assertion did not fire — the ceiling comparison is not working"
+    _record_fail "a past-expiry image was planted and the retention assertion did not fire — the ceiling comparison is not working"
 fi
+
+psql "$LOCAL_URL" -q -c \
+    "DELETE FROM op.uploaded_images WHERE id = '${PLANTED_IMAGE_ID}'" >/dev/null 2>&1 || true
 
 test_case "the_assertion_count_is_declared" "a dropped assertion shows up in the diff"
 # Retrofitted from a real regression in the sibling posture suite: a roster built
