@@ -39,11 +39,34 @@ PREFIX="${3:?missing metric prefix}"
 FLYCTL="${FLYCTL:-flyctl}"
 METRICS_FILE="${DUTY_METRICS_FILE:-metrics.prom}"
 
-echo "==> ${FUNCTION} on ${CORE_APP}"
+echo "==> ${FUNCTION} on ${CORE_APP} (${DUTY_INVOCATION:-rpc})"
+
+# ⛔ `rpc` or `eval`, and the difference is which ROLE the duty runs as.
+#
+# `rpc` lands in the running node, which connects as the least-privilege
+# runtime role — right for almost everything, and the reason the 512MB preview
+# does not OOM. But a duty needing the OWNER cannot use it: measured on a
+# deployed stack, the audit-retention sweep came back
+# `ERROR 42501 permission denied for table audit_log`, because the runtime role
+# holds INSERT and nothing else there. That is the append-only guarantee
+# working, not a misconfiguration.
+#
+# `eval` spawns its own BEAM where the repo is not yet started, which is the
+# only state in which `Stacks.Release.with_owner_repo/2` can point it at the
+# owner connection.
+#
+# ⚠️ `eval` is NOT the default. It costs a second BEAM, and on the preview's
+# 512MB machine a heavy task that way OOMs with no stacktrace — this project
+# has that on record. Opt in per duty, for the duties that need the owner.
+MODE="${DUTY_INVOCATION:-rpc}"
+case "$MODE" in
+    rpc|eval) ;;
+    *) echo "::error::DUTY_INVOCATION must be rpc or eval, got '${MODE}'"; exit 1 ;;
+esac
 
 T0=$(date +%s)
 out="$("$FLYCTL" ssh console --app "$CORE_APP" \
-    -C "/app/bin/core rpc '${FUNCTION}()'" 2>&1)"
+    -C "/app/bin/core ${MODE} '${FUNCTION}()'" 2>&1)"
 rc=$?
 elapsed=$(( $(date +%s) - T0 ))
 

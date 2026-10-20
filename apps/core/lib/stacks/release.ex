@@ -565,8 +565,35 @@ defmodule Stacks.Release do
   @spec sweep_import_rows() :: :ok
   def sweep_import_rows, do: run_duty(LibraryImportRowRetentionJob, "IMPORT_ROW_RETENTION")
 
+  @doc """
+      ⛔ The one duty in this group that needs the OWNER, and it is the
+      least-privilege design working rather than failing.
+
+      `stacks_app` holds INSERT and nothing else on `audit.audit_log` — the
+      append-only guarantee is the point — so it can neither read the rows it
+      would sweep nor delete them. Measured on a deployed stack: invoked with
+      `rpc`, which runs in the app's node as the runtime role, this returned
+      `ERROR 42501 permission denied for table audit_log`.
+
+      ⚠️ So it must be invoked with `eval`, which spawns its own BEAM where the
+      repo is not yet started and `with_owner_repo/2` can point it at the owner
+      connection. That puts audit retention in the same family as `migrate/0`
+      and `correct_data/1`: an operator action, not application work.
+
+      ⚠️ Had this been wired as `rpc` AND wrapped in `with_owner_repo/2`, the
+      guard in that function would have refused with a message naming the cause
+      instead of a privilege error from three frames down — which is what the
+      guard is for.
+  """
   @spec sweep_audit_log() :: :ok
-  def sweep_audit_log, do: run_duty(AuditRetentionJob, "AUDIT_RETENTION")
+  def sweep_audit_log do
+    load_app()
+
+    {:ok, :ok, _apps} =
+      with_owner_repo(Repo, fn _repo -> run_duty(AuditRetentionJob, "AUDIT_RETENTION") end)
+
+    :ok
+  end
 
   @spec sweep_guardian_tokens() :: :ok
   def sweep_guardian_tokens, do: run_duty(GuardianTokenSweepJob, "GUARDIAN_TOKEN_SWEEP")

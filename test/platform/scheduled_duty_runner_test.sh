@@ -156,6 +156,49 @@ assert_contains "$(cat "$WORK/metrics.prom")" \
     "stacks_audit_retention_pending_items{app=\"stub-app\"} 7" \
     "and the metric prefix follows the duty rather than being fixed"
 
+test_case "the_invocation_mode_is_selectable_and_validated" "rpc by default, eval for owner duties"
+# ⛔ The mode decides which ROLE the duty runs as, which is why it is explicit
+# rather than inferred. Measured on a deployed stack: the audit-retention sweep
+# invoked with `rpc` returned `permission denied for table audit_log`, because
+# the runtime role holds INSERT only there — the append-only guarantee working.
+# Only `eval`, in its own BEAM with the repo unstarted, can reach the owner
+# connection.
+: > "$WORK/metrics.prom"
+write_flyctl_stub "AUDIT_RETENTION remaining=0" 0
+OUT_MODE="$(
+    cd "$REPO_ROOT" || exit 1
+    CORE_APP=stub-app FLYCTL="$WORK/flyctl" DUTY_METRICS_FILE="$WORK/metrics.prom" \
+    DUTY_INVOCATION=eval \
+        bash "$RUNNER" Stacks.Release.sweep_audit_log AUDIT_RETENTION audit_retention 2>&1
+)"
+if [[ $? -eq 0 ]]; then
+    _record_pass "eval mode is accepted"
+else
+    _record_fail "eval mode was rejected: $OUT_MODE"
+fi
+assert_contains "$OUT_MODE" "(eval)" "and the run says which mode it used"
+
+OUT_DEFAULT="$(
+    cd "$REPO_ROOT" || exit 1
+    CORE_APP=stub-app FLYCTL="$WORK/flyctl" DUTY_METRICS_FILE="$WORK/metrics.prom" \
+        bash "$RUNNER" Stacks.Release.sweep_audit_log AUDIT_RETENTION audit_retention 2>&1
+)"
+assert_contains "$OUT_DEFAULT" "(rpc)" \
+    "and rpc is the default, so a duty does not silently get a second BEAM"
+
+OUT_BAD="$(
+    cd "$REPO_ROOT" || exit 1
+    CORE_APP=stub-app FLYCTL="$WORK/flyctl" DUTY_METRICS_FILE="$WORK/metrics.prom" \
+    DUTY_INVOCATION=sideways \
+        bash "$RUNNER" Stacks.Release.sweep_audit_log AUDIT_RETENTION audit_retention 2>&1
+)"
+RC_BAD=$?
+if [[ $RC_BAD -ne 0 ]]; then
+    _record_pass "an unknown mode is refused rather than defaulted (exit $RC_BAD)"
+else
+    _record_fail "an unknown invocation mode was accepted: $OUT_BAD"
+fi
+
 test_case "the_workflow_actually_calls_it" "a runner nothing invokes proves nothing"
 # ⛔ The complement every gate in this repository owes: this suite proves the
 # runner refuses correctly, and that is worth nothing if no workflow runs it.

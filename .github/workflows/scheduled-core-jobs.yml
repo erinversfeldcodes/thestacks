@@ -283,6 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           for duty in ${{ steps.plan.outputs.duties }}; do
+            mode="rpc"
             case "$duty" in
               images)
                 spec="Stacks.Release.sweep_images IMAGE_RETENTION image_retention" ;;
@@ -291,6 +292,13 @@ jobs:
               import-rows)
                 spec="Stacks.Release.sweep_import_rows IMPORT_ROW_RETENTION import_row_retention" ;;
               audit-log)
+                # ⛔ eval, not rpc. The runtime role holds INSERT and nothing
+                # else on audit.audit_log — the append-only guarantee — so an
+                # rpc invocation returns `permission denied for table
+                # audit_log`, measured on a deployed stack. Only eval's own
+                # BEAM, where the repo is unstarted, can be pointed at the
+                # owner connection.
+                mode="eval"
                 spec="Stacks.Release.sweep_audit_log AUDIT_RETENTION audit_retention" ;;
               guardian-tokens)
                 spec="Stacks.Release.sweep_guardian_tokens GUARDIAN_TOKEN_SWEEP guardian_token_sweep" ;;
@@ -309,7 +317,7 @@ jobs:
                 ;;
             esac
             # shellcheck disable=SC2086 # the spec is three deliberate words
-            bash scripts/run-scheduled-duty.sh $spec
+            DUTY_INVOCATION="$mode" bash scripts/run-scheduled-duty.sh $spec
           done
           echo "RETENTION_RAN=1" >> "$GITHUB_ENV"
 
