@@ -61,7 +61,23 @@
 - **Pipeline**: `:api` -> `:optional_auth`
 - **Controller**: `StacksWeb.BookController.show/2`
 - **Request body**: N/A
-- **Response (success)**: `{ book: { id, title, description, language, subjects, bisac_codes, visibility_tier, author: { id, name, bio, website }, editions: [...], edition_count, primary_edition: {...}, community_read_count }, placement: { id, book_id, bookshelf_name, formats, personal_rating, notes } | null, my_writing: [{ id, title, published_at }] }` -- HTTP 200
+- **Response (success)**: `{ book: { id, title, description, subjects, visibility_tier, author: { id, name, bio, website }, editions: [...], edition_count, primary_edition: {...}, community_read_count }, placement: { id, book_id, bookshelf_name, formats, personal_rating, notes } | null, my_writing: [{ id, title, published_at }] }` -- HTTP 200
+
+> ⚠️ **`language` and `bisac_codes` left this response on 2026-10-20**, and the response shape
+> above is narrower by two keys than it was. Both were serialised, decoded correctly by the
+> generated proto decoder, and then discarded by `Types.Book.fromProtoBook` — the SPA's
+> hand-written adapter builds its record field by field and never mentioned them — so no client
+> ever held either one and nothing rendered them.
+>
+> Each was removed on a measurement, not a preference: the only writer of `op.books.language` in
+> the tree is `seeds.exs`, so 169 of 169 local rows read "en" while 55 of 55 production rows are
+> NULL; and `bisac_codes` already reaches its only consumer through the insights endpoint, while
+> the reader-facing form of that information on a book page is `subjects`, which this response
+> still carries. `scripts/check-book-adapter-coverage.sh` now fails when a payload key has no
+> adapter field, so the next proto field added to `Book` cannot be lost the same way.
+>
+> `community_read_count` is still in the payload and still unread by the adapter — it is owned
+> separately and declared as the gate's one known exception.
 - **Response (error)**: `{ error: "not_found" }` -- HTTP 404; HTTP 403 for age-gated content
 - **FallbackController handling**: 404 for missing book or hidden visibility; 403 for age-gated books via `AgeGate.enforce/2`
 
