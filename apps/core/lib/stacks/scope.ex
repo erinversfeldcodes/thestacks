@@ -55,6 +55,17 @@ defmodule Stacks.Scope do
 
   alias Core.Repo
 
+  # ⛔ Nesting is a property of the CALL STACK, so it is tracked per process
+  # rather than by reading the scope back from the connection — and that
+  # distinction is not academic. `SET LOCAL` reverts when its transaction ends,
+  # but under ExUnit's sandbox the enclosing transaction is the sandbox's and
+  # lasts for the whole test, so the connection still reports the previous
+  # scope after a call has returned. Asking the connection therefore reports
+  # two sequential calls for different users as an illegal re-scope, which is
+  # true of nothing: a test exercising two users in turn is the ordinary case,
+  # and so is a worker iterating over them.
+  @nesting_key :stacks_rls_scope
+
   @doc """
       Runs `fun` with the row-level-security scope set to `user_id`.
 
@@ -71,13 +82,19 @@ defmodule Stacks.Scope do
   """
   @spec with_user(Ecto.UUID.t(), (-> result)) :: result when result: var
   def with_user(user_id, fun) when is_binary(user_id) and is_function(fun, 0) do
-    case current() do
+    case Process.get(@nesting_key) do
       nil ->
-        {:ok, result} = Repo.transaction(fn -> set_and_run(user_id, fun) end)
-        result
+        Process.put(@nesting_key, user_id)
+
+        try do
+          {:ok, result} = Repo.transaction(fn -> set_and_run(user_id, fun) end)
+          result
+        after
+          Process.delete(@nesting_key)
+        end
 
       ^user_id ->
-        # Already scoped to this same user by an outer wrapper. Running `fun`
+        # Already scoped to this same user by an enclosing call. Running `fun`
         # directly keeps the transaction depth flat, which matters because an
         # unnecessary savepoint per nested context call is pure overhead.
         fun.()
@@ -115,6 +132,53 @@ defmodule Stacks.Scope do
       {:ok, %{rows: [[value]]}} -> value
       _ -> nil
     end
+  end
+
+  @doc """
+      Sets the scope inside a transaction the caller already owns.
+
+      ⛔ **Use this, not `with_user/2`, in any function that opens its own
+      `Repo.transaction` or builds an `Ecto.Multi` — and the reason is a
+      measured Ecto behaviour, not a preference.** `with_user/2` opens a
+      transaction; if the function it wraps then opens its own, that becomes a
+      SAVEPOINT, and a `Repo.rollback/1` inside a nested transaction aborts the
+      OUTER one and returns `{:error, :rollback}` — **discarding the value the
+      inner code rolled back with**. A context using rollback for control flow
+      (`{:error, :reading_pile_full}`) silently loses its reason and the caller
+      sees `:rollback` instead. Four tests caught exactly that.
+
+      ⚠️ Raises outside a transaction rather than returning an error, because
+      the alternative is worse than either: `set_config(..., true)` outside a
+      transaction is a no-op that reports success, so the scope would appear set
+      and the next query on an RLS table would refuse with `42501` somewhere
+      that does not name this as the cause.
+  """
+  @spec set!(Ecto.UUID.t()) :: :ok
+  def set!(user_id) when is_binary(user_id) do
+    unless Repo.in_transaction?() do
+      raise ArgumentError,
+            "Stacks.Scope.set!/1 was called outside a transaction, where the setting is a " <>
+              "no-op that reports success. Use Stacks.Scope.with_user/2, which opens one."
+    end
+
+    Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
+
+    :ok
+  end
+
+  @doc """
+      An `Ecto.Multi` step that sets the scope, for contexts built as a Multi.
+
+      Named `:rls_scope` and intended as the FIRST step: a Multi runs its steps
+      in order inside one transaction, so any step touching a row-level-secured
+      table before this one would refuse.
+  """
+  @spec multi_step(Ecto.Multi.t(), Ecto.UUID.t()) :: Ecto.Multi.t()
+  def multi_step(multi, user_id) when is_binary(user_id) do
+    Ecto.Multi.run(multi, :rls_scope, fn repo, _changes ->
+      repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
+      {:ok, user_id}
+    end)
   end
 
   defp set_and_run(user_id, fun) do

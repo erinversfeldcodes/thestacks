@@ -210,13 +210,25 @@ defmodule Stacks.Social do
   """
   @spec blocked?(String.t(), String.t()) :: boolean()
   def blocked?(viewer_id, owner_id) do
-    Repo.exists?(
-      from(b in UserBlock,
-        where:
-          (b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id) or
-            (b.blocker_id == ^owner_id and b.blocked_id == ^viewer_id)
-      )
-    )
+    # ⛔ Asked through `op.blocked_pair/2`, not with a query of our own, and the
+    # reason is row-level security rather than tidiness.
+    #
+    # This predicate is symmetric — it answers "has EITHER of these two blocked
+    # the other" — while the `user_blocks` policy only ever shows a caller its
+    # OWN block rows. So a direct query scoped to the viewer cannot see a block
+    # the owner created, and would answer `false` for a pair that really is
+    # blocked. It would do so SILENTLY, in the authorisation gate, which is the
+    # worst place for a quiet wrong answer: two people who blocked each other
+    # would become mutually visible again.
+    #
+    # `op.blocked_pair/2` is `SECURITY DEFINER`, owned by a role that cannot log
+    # in and has no `BYPASSRLS`, and it returns one boolean. Measured: scoped as
+    # the blocked party a direct read of `user_blocks` returns 0 rows while this
+    # returns `true`, and an unrelated pair still returns `false`.
+    %{rows: [[blocked?]]} =
+      Repo.query!("SELECT op.blocked_pair($1::uuid, $2::uuid)", [viewer_id, owner_id])
+
+    blocked?
   end
 
   @doc """

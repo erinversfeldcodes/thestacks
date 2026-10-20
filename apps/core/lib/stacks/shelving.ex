@@ -21,6 +21,7 @@ defmodule Stacks.Shelving do
   alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Events
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
 
   @valid_bookshelf_names ~w(antilibrary library wishlist reading_pile looking_for_home)
@@ -139,12 +140,14 @@ defmodule Stacks.Shelving do
   """
   @spec book_on_any_shelf?(binary(), binary()) :: boolean()
   def book_on_any_shelf?(user_id, book_id) do
-    from(p in Placement,
-      join: s in Bookshelf,
-      on: s.id == p.bookshelf_id,
-      where: s.user_id == ^user_id and p.book_id == ^book_id and is_nil(p.removed_at)
-    )
-    |> Repo.exists?()
+    Scope.with_user(user_id, fn ->
+      from(p in Placement,
+        join: s in Bookshelf,
+        on: s.id == p.bookshelf_id,
+        where: s.user_id == ^user_id and p.book_id == ^book_id and is_nil(p.removed_at)
+      )
+      |> Repo.exists?()
+    end)
   end
 
   @doc """
@@ -156,13 +159,15 @@ defmodule Stacks.Shelving do
   def shelved_book_ids(_user_id, []), do: []
 
   def shelved_book_ids(user_id, book_ids) when is_list(book_ids) do
-    from(p in Placement,
-      join: s in Bookshelf,
-      on: s.id == p.bookshelf_id,
-      where: s.user_id == ^user_id and p.book_id in ^book_ids and is_nil(p.removed_at),
-      select: p.book_id
-    )
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      from(p in Placement,
+        join: s in Bookshelf,
+        on: s.id == p.bookshelf_id,
+        where: s.user_id == ^user_id and p.book_id in ^book_ids and is_nil(p.removed_at),
+        select: p.book_id
+      )
+      |> Repo.all()
+    end)
   end
 
   @doc """
@@ -171,10 +176,12 @@ defmodule Stacks.Shelving do
   """
   @spec get_bookshelf(binary(), String.t()) :: Bookshelf.t() | nil
   def get_bookshelf(user_id, bookshelf_name) do
-    Bookshelf
-    |> where([b], b.user_id == ^user_id and b.name == ^bookshelf_name)
-    |> preload(:user)
-    |> Repo.one()
+    Scope.with_user(user_id, fn ->
+      Bookshelf
+      |> where([b], b.user_id == ^user_id and b.name == ^bookshelf_name)
+      |> preload(:user)
+      |> Repo.one()
+    end)
   end
 
   @doc """
@@ -184,11 +191,13 @@ defmodule Stacks.Shelving do
   """
   @spec list_user_bookshelves(binary()) :: [%{name: String.t(), visibility: String.t()}]
   def list_user_bookshelves(user_id) do
-    Bookshelf
-    |> where([b], b.user_id == ^user_id)
-    |> order_by([b], b.name)
-    |> select([b], %{name: b.name, visibility: b.visibility})
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      Bookshelf
+      |> where([b], b.user_id == ^user_id)
+      |> order_by([b], b.name)
+      |> select([b], %{name: b.name, visibility: b.visibility})
+      |> Repo.all()
+    end)
   end
 
   @doc """
@@ -197,14 +206,16 @@ defmodule Stacks.Shelving do
   """
   @spec get_bookshelf_books(binary(), String.t()) :: [Placement.t()]
   def get_bookshelf_books(user_id, bookshelf_name) do
-    Placement
-    |> join(:inner, [p], bs in Bookshelf,
-      on: p.bookshelf_id == bs.id and bs.user_id == ^user_id and bs.name == ^bookshelf_name
-    )
-    |> where([p], is_nil(p.removed_at))
-    |> order_by([p], [p.position, p.placed_at])
-    |> preload(book: [:author, :editions])
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      Placement
+      |> join(:inner, [p], bs in Bookshelf,
+        on: p.bookshelf_id == bs.id and bs.user_id == ^user_id and bs.name == ^bookshelf_name
+      )
+      |> where([p], is_nil(p.removed_at))
+      |> order_by([p], [p.position, p.placed_at])
+      |> preload(book: [:author, :editions])
+      |> Repo.all()
+    end)
   end
 
   @doc """
@@ -216,34 +227,36 @@ defmodule Stacks.Shelving do
           %{book: Book.t(), bookshelf_name: String.t()}
         ]
   def search_collection(user_id, query, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 20)
-    scope = Keyword.get(opts, :scope, :title)
+    Scope.with_user(user_id, fn ->
+      limit = Keyword.get(opts, :limit, 20)
+      scope = Keyword.get(opts, :scope, :title)
 
-    rows =
-      Book
-      |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
-      |> join(:inner, [b, p], bs in Bookshelf,
-        on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
-      )
-      |> collection_scope_where(scope, query)
-      |> collection_scope_order(scope, query)
-      |> select([b, p, bs], {b, bs.name})
-      |> Repo.all()
+      rows =
+        Book
+        |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
+        |> join(:inner, [b, p], bs in Bookshelf,
+          on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
+        )
+        |> collection_scope_where(scope, query)
+        |> collection_scope_order(scope, query)
+        |> select([b, p, bs], {b, bs.name})
+        |> Repo.all()
 
-    by_book = Enum.group_by(rows, fn {book, _name} -> book.id end)
+      by_book = Enum.group_by(rows, fn {book, _name} -> book.id end)
 
-    ordered_ids =
-      rows |> Enum.map(fn {book, _name} -> book.id end) |> Enum.uniq() |> Enum.take(limit)
+      ordered_ids =
+        rows |> Enum.map(fn {book, _name} -> book.id end) |> Enum.uniq() |> Enum.take(limit)
 
-    grouped = Enum.map(ordered_ids, &Map.fetch!(by_book, &1))
+      grouped = Enum.map(ordered_ids, &Map.fetch!(by_book, &1))
 
-    books =
-      grouped |> Enum.map(fn [{book, _} | _] -> book end) |> Repo.preload([:author, :editions])
+      books =
+        grouped |> Enum.map(fn [{book, _} | _] -> book end) |> Repo.preload([:author, :editions])
 
-    Enum.zip_with(books, grouped, fn book, book_rows ->
-      names = book_rows |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.sort()
+      Enum.zip_with(books, grouped, fn book, book_rows ->
+        names = book_rows |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.sort()
 
-      %{book: book, bookshelf_name: List.first(names), bookshelf_names: names}
+        %{book: book, bookshelf_name: List.first(names), bookshelf_names: names}
+      end)
     end)
   end
 
@@ -302,13 +315,18 @@ defmodule Stacks.Shelving do
   @doc "Returns all users who have the given book on their wishlist."
   @spec users_with_book_on_wishlist(binary()) :: [User.t()]
   def users_with_book_on_wishlist(book_id) do
+    # ⛔ The wishlist half is asked through `op.wishlist_user_ids/1` rather than
+    # joined here, because this question is inherently about OTHER people's
+    # shelves: it exists to tell someone a book they wanted has become
+    # available. Under the per-user row-level policies a join written here would
+    # see only the caller's own wishlist and quietly notify nobody.
+    #
+    # The function is `SECURITY DEFINER`, owned by a role that cannot log in and
+    # holds no `BYPASSRLS`, and it returns user ids and nothing else — so it
+    # cannot become a general way to read other people's shelves. `op.users`
+    # carries no row-level policy, so the join back to it needs no exemption.
     from(u in User,
-      join: bs in Bookshelf,
-      on: bs.user_id == u.id and bs.name == "wishlist",
-      join: p in Placement,
-      on: p.bookshelf_id == bs.id and p.book_id == ^book_id,
-      where: is_nil(p.removed_at),
-      distinct: true
+      where: fragment("? IN (SELECT user_id FROM op.wishlist_user_ids(?))", u.id, ^book_id)
     )
     |> Repo.all(prefix: "op")
   end
@@ -359,6 +377,7 @@ defmodule Stacks.Shelving do
     visibility_tier = lookup_book_visibility_tier(book_id)
 
     Multi.new()
+    |> Scope.multi_step(user_id)
     |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
       check_reading_pile_capacity(repo, bookshelf)
     end)
@@ -443,6 +462,7 @@ defmodule Stacks.Shelving do
     to_shelf = get_or_create_default_shelf(to_bookshelf.id)
 
     Multi.new()
+    |> Scope.multi_step(user_id)
     |> Multi.run(:reading_pile_capacity, fn repo, _changes ->
       check_move_capacity(repo, from_bookshelf, to_bookshelf)
     end)
@@ -520,6 +540,7 @@ defmodule Stacks.Shelving do
     default_shelf = get_or_create_default_shelf(library_bookshelf.id)
 
     Multi.new()
+    |> Scope.multi_step(user_id)
     |> Multi.insert(
       :placement,
       placement_changeset(%Placement{}, %{
@@ -585,6 +606,7 @@ defmodule Stacks.Shelving do
       {:error, :unauthorized}
     else
       Multi.new()
+      |> Scope.multi_step(user_id)
       |> Multi.update(
         :placement,
         placement_changeset(placement, %{removed_at: DateTime.utc_now()})
@@ -646,6 +668,7 @@ defmodule Stacks.Shelving do
 
   defp do_restore_placement(placement, user_id) do
     Multi.new()
+    |> Scope.multi_step(user_id)
     |> Multi.run(:no_active_duplicate, fn repo, _changes ->
       if active_duplicate?(repo, placement) do
         {:error, :already_shelved}
@@ -710,6 +733,10 @@ defmodule Stacks.Shelving do
           | {:error, :not_found | :unauthorized}
           | {:error, Ecto.Changeset.t()}
   def update_placement_formats(placement_id, user_id, formats) when is_list(formats) do
+    Scope.with_user(user_id, fn -> do_update_placement_formats(placement_id, user_id, formats) end)
+  end
+
+  defp do_update_placement_formats(placement_id, user_id, formats) do
     case Repo.get(Placement, placement_id) do
       nil ->
         {:error, :not_found}
@@ -735,12 +762,16 @@ defmodule Stacks.Shelving do
   """
   @spec get_placements_for_book(binary(), binary()) :: [Placement.t()]
   def get_placements_for_book(user_id, book_id) do
-    Placement
-    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
-    |> where([p], p.book_id == ^book_id and is_nil(p.removed_at))
-    |> order_by([p], asc: p.created_at, asc: p.id)
-    |> preload(:bookshelf)
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      Placement
+      |> join(:inner, [p], bs in Bookshelf,
+        on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
+      )
+      |> where([p], p.book_id == ^book_id and is_nil(p.removed_at))
+      |> order_by([p], asc: p.created_at, asc: p.id)
+      |> preload(:bookshelf)
+      |> Repo.all()
+    end)
   end
 
   @doc """
@@ -749,12 +780,16 @@ defmodule Stacks.Shelving do
   """
   @spec get_user_placements_summary(binary()) :: [map()]
   def get_user_placements_summary(user_id) do
-    Placement
-    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
-    |> join(:inner, [p], b in Book, on: b.id == p.book_id)
-    |> where([p], is_nil(p.removed_at))
-    |> select([p, bs, b], %{book_id: p.book_id, bookshelf_name: bs.name, title: b.title})
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      Placement
+      |> join(:inner, [p], bs in Bookshelf,
+        on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
+      )
+      |> join(:inner, [p], b in Book, on: b.id == p.book_id)
+      |> where([p], is_nil(p.removed_at))
+      |> select([p, bs, b], %{book_id: p.book_id, bookshelf_name: bs.name, title: b.title})
+      |> Repo.all()
+    end)
   end
 
   @doc """
@@ -764,19 +799,21 @@ defmodule Stacks.Shelving do
   @spec update_bookshelf_visibility(binary(), binary(), String.t()) ::
           {:ok, Bookshelf.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_bookshelf_visibility(bookshelf_id, user_id, visibility) do
-    case Repo.get(Bookshelf, bookshelf_id) do
-      nil ->
-        {:error, :not_found}
+    Scope.with_user(user_id, fn ->
+      case Repo.get(Bookshelf, bookshelf_id) do
+        nil ->
+          {:error, :not_found}
 
-      %Bookshelf{user_id: owner_id} when owner_id != user_id ->
-        {:error, :unauthorized}
+        %Bookshelf{user_id: owner_id} when owner_id != user_id ->
+          {:error, :unauthorized}
 
-      bookshelf ->
-        bookshelf
-        |> bookshelf_changeset(%{visibility: visibility})
-        |> validate_bookshelf_profile_ceiling(user_id, visibility)
-        |> Repo.update()
-    end
+        bookshelf ->
+          bookshelf
+          |> bookshelf_changeset(%{visibility: visibility})
+          |> validate_bookshelf_profile_ceiling(user_id, visibility)
+          |> Repo.update()
+      end
+    end)
   end
 
   @doc """
@@ -788,17 +825,19 @@ defmodule Stacks.Shelving do
   @spec set_bookshelf_visibility(binary(), String.t(), String.t()) ::
           {:ok, Bookshelf.t()} | {:error, Ecto.Changeset.t()}
   def set_bookshelf_visibility(user_id, bookshelf_name, visibility) do
-    if visibility in @valid_visibilities do
-      get_or_create_bookshelf(user_id, bookshelf_name)
-      |> bookshelf_changeset(%{visibility: visibility})
-      |> validate_bookshelf_profile_ceiling(user_id, visibility)
-      |> Repo.update()
-    else
-      {:error,
-       %Bookshelf{user_id: user_id, name: bookshelf_name}
-       |> cast(%{visibility: visibility}, [:visibility])
-       |> validate_inclusion(:visibility, @valid_visibilities)}
-    end
+    Scope.with_user(user_id, fn ->
+      if visibility in @valid_visibilities do
+        get_or_create_bookshelf(user_id, bookshelf_name)
+        |> bookshelf_changeset(%{visibility: visibility})
+        |> validate_bookshelf_profile_ceiling(user_id, visibility)
+        |> Repo.update()
+      else
+        {:error,
+         %Bookshelf{user_id: user_id, name: bookshelf_name}
+         |> cast(%{visibility: visibility}, [:visibility])
+         |> validate_inclusion(:visibility, @valid_visibilities)}
+      end
+    end)
   end
 
   defp validate_bookshelf_profile_ceiling(changeset, user_id, visibility)
@@ -877,13 +916,18 @@ defmodule Stacks.Shelving do
       end
 
     case placement do
-      nil -> {:error, :not_found}
-      %Placement{bookshelf: %Bookshelf{user_id: id}} when id != user_id -> {:error, :unauthorized}
-      %Placement{} -> do_update_reading_progress(placement, attrs)
+      nil ->
+        {:error, :not_found}
+
+      %Placement{bookshelf: %Bookshelf{user_id: id}} when id != user_id ->
+        {:error, :unauthorized}
+
+      %Placement{} ->
+        do_update_reading_progress(placement, user_id, attrs)
     end
   end
 
-  defp do_update_reading_progress(placement, attrs) do
+  defp do_update_reading_progress(placement, user_id, attrs) do
     key_map = %{
       "reading_status" => :reading_status,
       "current_page" => :current_page,
@@ -908,6 +952,7 @@ defmodule Stacks.Shelving do
     page_ceiling = placement_page_count(placement)
 
     Multi.new()
+    |> Scope.multi_step(user_id)
     |> Multi.update(
       :placement,
       placement
@@ -968,11 +1013,15 @@ defmodule Stacks.Shelving do
   """
   @spec list_in_progress(binary()) :: [Placement.t()]
   def list_in_progress(user_id) do
-    Placement
-    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
-    |> where([p], p.reading_status == "reading" and is_nil(p.removed_at))
-    |> order_by([p], desc: p.updated_at)
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      Placement
+      |> join(:inner, [p], bs in Bookshelf,
+        on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
+      )
+      |> where([p], p.reading_status == "reading" and is_nil(p.removed_at))
+      |> order_by([p], desc: p.updated_at)
+      |> Repo.all()
+    end)
   end
 
   defp maybe_set_started_at(attrs, true), do: Map.put(attrs, :started_at, DateTime.utc_now())
@@ -993,64 +1042,74 @@ defmodule Stacks.Shelving do
   @doc "Creates a new shelf on a bookshelf at the next available position."
   @spec create_shelf(binary(), binary()) :: {:ok, Shelf.t()} | {:error, :unauthorized}
   def create_shelf(bookshelf_id, user_id) do
-    case Repo.get(Bookshelf, bookshelf_id) do
-      nil ->
-        {:error, :unauthorized}
+    Scope.with_user(user_id, fn ->
+      case Repo.get(Bookshelf, bookshelf_id) do
+        nil ->
+          {:error, :unauthorized}
 
-      %Bookshelf{user_id: owner_id} when owner_id != user_id ->
-        {:error, :unauthorized}
+        %Bookshelf{user_id: owner_id} when owner_id != user_id ->
+          {:error, :unauthorized}
 
-      _bookshelf ->
-        max_pos = shelf_max_position(bookshelf_id)
+        _bookshelf ->
+          max_pos = shelf_max_position(bookshelf_id)
 
-        %Shelf{}
-        |> shelf_changeset(%{bookshelf_id: bookshelf_id, position: max_pos + 1})
-        |> Repo.insert()
-    end
+          %Shelf{}
+          |> shelf_changeset(%{bookshelf_id: bookshelf_id, position: max_pos + 1})
+          |> Repo.insert()
+      end
+    end)
   end
 
   @doc "Deletes a shelf if empty. Returns:not_empty if it has active placements."
   @spec delete_shelf(binary(), binary()) ::
           :ok | {:error, :unauthorized | :not_found | :not_empty}
   def delete_shelf(shelf_id, user_id) do
-    shelf = Repo.get(Shelf, shelf_id) |> Repo.preload(:bookshelf)
+    Scope.with_user(user_id, fn ->
+      shelf = Repo.get(Shelf, shelf_id) |> Repo.preload(:bookshelf)
 
-    cond do
-      is_nil(shelf) ->
-        {:error, :not_found}
+      cond do
+        is_nil(shelf) ->
+          {:error, :not_found}
 
-      shelf.bookshelf.user_id != user_id ->
-        {:error, :unauthorized}
+        shelf.bookshelf.user_id != user_id ->
+          {:error, :unauthorized}
 
-      shelf_has_active_placements?(shelf_id) ->
-        {:error, :not_empty}
+        shelf_has_active_placements?(shelf_id) ->
+          {:error, :not_empty}
 
-      true ->
-        Repo.delete!(shelf)
-        :ok
-    end
+        true ->
+          Repo.delete!(shelf)
+          :ok
+      end
+    end)
   end
 
   @doc "Reorders shelves to match the given list of IDs."
   @spec reorder_shelves(binary(), binary(), [binary()]) ::
           :ok | {:error, :unauthorized | :invalid_ids}
   def reorder_shelves(bookshelf_id, user_id, shelf_ids_in_order) do
-    case Repo.get(Bookshelf, bookshelf_id) do
-      nil ->
-        {:error, :unauthorized}
+    Scope.with_user(user_id, fn ->
+      case Repo.get(Bookshelf, bookshelf_id) do
+        nil ->
+          {:error, :unauthorized}
 
-      %Bookshelf{user_id: owner_id} when owner_id != user_id ->
-        {:error, :unauthorized}
+        %Bookshelf{user_id: owner_id} when owner_id != user_id ->
+          {:error, :unauthorized}
 
-      _bookshelf ->
-        do_reorder_shelves(bookshelf_id, shelf_ids_in_order)
-    end
+        _bookshelf ->
+          do_reorder_shelves(bookshelf_id, shelf_ids_in_order)
+      end
+    end)
   end
 
   @doc "Moves a placement to a different shelf within the same bookshelf."
   @spec move_placement_to_shelf(binary(), binary(), binary()) ::
           {:ok, Placement.t()} | {:error, :not_found | :unauthorized | :wrong_bookshelf}
   def move_placement_to_shelf(placement_id, shelf_id, user_id) do
+    Scope.with_user(user_id, fn -> do_move_placement_to_shelf(placement_id, shelf_id, user_id) end)
+  end
+
+  defp do_move_placement_to_shelf(placement_id, shelf_id, user_id) do
     with placement when not is_nil(placement) <- Repo.get(Placement, placement_id),
          shelf when not is_nil(shelf) <- Repo.get(Shelf, shelf_id) do
       placement = Repo.preload(placement, :bookshelf)
@@ -1075,13 +1134,15 @@ defmodule Stacks.Shelving do
   @doc "Returns shelves with preloaded placements for a bookshelf."
   @spec get_bookshelf_shelves(binary(), String.t()) :: [Shelf.t()]
   def get_bookshelf_shelves(user_id, bookshelf_name) do
-    Shelf
-    |> join(:inner, [s], bs in Bookshelf,
-      on: s.bookshelf_id == bs.id and bs.user_id == ^user_id and bs.name == ^bookshelf_name
-    )
-    |> order_by([s], s.position)
-    |> preload(placements: ^active_placements_query())
-    |> Repo.all()
+    Scope.with_user(user_id, fn ->
+      Shelf
+      |> join(:inner, [s], bs in Bookshelf,
+        on: s.bookshelf_id == bs.id and bs.user_id == ^user_id and bs.name == ^bookshelf_name
+      )
+      |> order_by([s], s.position)
+      |> preload(placements: ^active_placements_query())
+      |> Repo.all()
+    end)
   end
 
   defp active_placements_query do

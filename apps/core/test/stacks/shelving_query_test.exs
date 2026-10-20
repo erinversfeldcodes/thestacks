@@ -157,8 +157,21 @@ defmodule Stacks.ShelvingQueryTest do
 
       assert placement_count(shelves) == 40
 
-      assert queries <= 8,
-             "expected <= 8 queries for the shelf browse read path, got #{queries}"
+      # ⚠️ Raised from 8 to 10 when per-request row-level-security scoping
+      # landed, and the two extra queries are named rather than absorbed: a
+      # `BEGIN` and the `set_config` that sets the scope. `SET LOCAL` only takes
+      # effect inside a transaction, so a scoped READ now costs a transaction it
+      # did not need before. That is the price of the mechanism and it is
+      # CONSTANT — it does not grow with shelves or placements, which is the
+      # property this file exists to protect and which the neighbouring
+      # "query count does not grow with the number of shelves" test pins
+      # directly by comparing two fixture sizes.
+      #
+      # ⛔ A bound raised without naming what filled it is how an N+1 gets
+      # absorbed one query at a time. If this number moves again, find the
+      # query before changing the figure.
+      assert queries <= 10,
+             "expected <= 10 queries for the shelf browse read path, got #{queries}"
     end
 
     test "every association the serializer touches is preloaded (no lazy fetch)" do
