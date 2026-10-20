@@ -152,6 +152,32 @@ defmodule Stacks.ScopeTest do
     end
   end
 
+  describe "⛔ the scope value is normalised, not trusted" do
+    test "a RAW 16-byte uuid is accepted and canonicalised" do
+      # ⛔ Found by the seed, not by a test: `Seeds.uuid/1` and
+      # `Ecto.UUID.dump/1` both yield the 16-byte form, and `is_binary/1`
+      # cannot tell it from the string form. Passed through untouched it failed
+      # at the database with `invalid byte sequence for encoding "UTF8"` — and
+      # that was the LUCKY case. Sixteen bytes that happened to be valid UTF-8
+      # would have been accepted silently, setting a scope matching no user, so
+      # every query in the operation would return nothing while reporting
+      # success.
+      {:ok, raw} = Ecto.UUID.dump(@user_a)
+
+      assert Scope.with_user(raw, fn -> guc() end) == @user_a,
+             "a raw 16-byte uuid did not reach the database as its canonical string form"
+    end
+
+    test "⚠️ a non-uuid is REFUSED rather than set" do
+      # A scope that is not a uuid would be set without complaint by
+      # `set_config` and then match no row, which is the silent-empty-result
+      # failure this whole mechanism exists to remove.
+      assert_raise ArgumentError, ~r/must be a UUID/, fn ->
+        Scope.with_user("not-a-uuid", fn -> :unreachable end)
+      end
+    end
+  end
+
   describe "what the test environment cannot show" do
     test "⚠️ this suite's role BYPASSES row-level security, and says so" do
       # ⛔ An explicit assertion rather than a comment, because the alternative

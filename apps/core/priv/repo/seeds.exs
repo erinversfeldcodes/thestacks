@@ -591,7 +591,26 @@ bookshelf_rows =
     end)
   end)
 
-Repo.insert_all("bookshelves", bookshelf_rows,
+# ⛔ Bookshelves and placements are row-level secured, and their policies carry
+# `WITH CHECK (user_id = op.current_scope())` — so a single `insert_all`
+# spanning several users cannot satisfy them: whichever user the scope names,
+# every other user's rows are rejected. The fixtures are therefore grouped by
+# owner and each group inserted inside that owner's scope.
+#
+# ⚠️ Harmless where it is not required. In development the seed connects as a
+# superuser, which bypasses row-level security entirely, so the grouping only
+# costs a few extra statements; on a deployed stack, where the application
+# connects as the least-privilege role, it is the difference between a seeded
+# preview and a failed one.
+insert_owned = fn table, rows, owner_of, opts ->
+  rows
+  |> Enum.group_by(owner_of)
+  |> Enum.each(fn {owner_id, group} ->
+    Stacks.Scope.with_user(owner_id, fn -> Repo.insert_all(table, group, opts) end)
+  end)
+end
+
+insert_owned.("bookshelves", bookshelf_rows, & &1.user_id,
   prefix: "op",
   on_conflict: {:replace, [:visibility, :updated_at]},
   conflict_target: :id
@@ -613,7 +632,18 @@ e2e_bookshelf_rows =
     end)
   end)
 
-Repo.insert_all("bookshelves", e2e_bookshelf_rows, prefix: "op", on_conflict: :nothing)
+insert_owned.("bookshelves", e2e_bookshelf_rows, & &1.user_id,
+  prefix: "op",
+  on_conflict: :nothing
+)
+
+# The owner of every seeded bookshelf, so placements — which carry only a
+# `bookshelf_id` — can be grouped by the user whose scope the policy will check.
+# ⚠️ `fetch!` on purpose: a placement pointing at a bookshelf this map does not
+# know is a seed defect, and failing here names it rather than letting the
+# insert be refused later by a policy for reasons that look unrelated.
+bookshelf_owner = Map.new(bookshelf_rows ++ e2e_bookshelf_rows, &{&1.id, &1.user_id})
+placement_owner = fn row -> Map.fetch!(bookshelf_owner, row.bookshelf_id) end
 
 shelf_rows =
   Enum.flat_map([{1, 301}, {2, 306}], fn {_user_n, start_idx} ->
@@ -737,7 +767,7 @@ e2e_placement_rows =
     library_placements ++ antilibrary_placements ++ reading_pile_placements
   end)
 
-Repo.insert_all("bookshelf_placements", e2e_placement_rows,
+insert_owned.("bookshelf_placements", e2e_placement_rows, placement_owner,
   prefix: "op",
   on_conflict: :nothing
 )
@@ -867,7 +897,10 @@ user2_placements =
 
 all_placements = user1_placements ++ user2_placements
 
-Repo.insert_all("bookshelf_placements", all_placements, prefix: "op", on_conflict: :nothing)
+insert_owned.("bookshelf_placements", all_placements, placement_owner,
+  prefix: "op",
+  on_conflict: :nothing
+)
 
 seeded_placements =
   Repo.all(

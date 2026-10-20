@@ -89,10 +89,19 @@ defmodule Stacks.Social do
   @spec block_user(String.t(), String.t()) :: {:ok, UserBlock.t()} | {:error, Ecto.Changeset.t()}
   def block_user(blocker_id, blocked_id) do
     Scope.with_user(blocker_id, fn ->
+      # ⛔ `mode: :savepoint` is load-bearing now that this runs inside a
+      # row-level-security scope, and the reason is a measured Ecto
+      # behaviour. A declared `unique_constraint` violation inside an
+      # EXPLICIT transaction returns `{:error, :rollback}` from that
+      # transaction rather than `{:error, changeset}` from the insert — Ecto
+      # does not savepoint automatically here — so the duplicate-block case
+      # would lose its changeset and the caller could not tell a duplicate
+      # from any other failure. The savepoint keeps constraint recovery
+      # working inside the scope's transaction.
       result =
         %UserBlock{}
         |> user_block_changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
-        |> Repo.insert()
+        |> Repo.insert(mode: :savepoint)
 
       case result do
         {:ok, block} ->
@@ -622,7 +631,11 @@ defmodule Stacks.Social do
             granted_to_id: grantee_user_id,
             granted_by_id: caller_id
           })
-          |> Repo.insert()
+          # ⛔ Savepointed for the same reason as the block insert: a declared
+          # unique_constraint violation inside the scope's transaction would
+          # otherwise surface as `{:error, :rollback}` and the :already_granted
+          # case would lose the changeset that identifies it.
+          |> Repo.insert(mode: :savepoint)
 
         case result do
           {:ok, grant} -> {:ok, grant}

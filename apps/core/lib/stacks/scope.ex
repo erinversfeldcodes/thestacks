@@ -81,7 +81,24 @@ defmodule Stacks.Scope do
       is a bug wearing the shape of a nested call.
   """
   @spec with_user(Ecto.UUID.t(), (-> result)) :: result when result: var
+  def with_user(nil, fun) when is_function(fun, 0) do
+    # ⚠️ An absent user id runs UNSCOPED rather than raising here, and that is
+    # safe for a precise reason: the database still refuses. A context function
+    # can legitimately be called with a nil user — its changeset validation is
+    # what should report that, and a `validate_required` failure never reaches
+    # the database at all. If such a call did reach a row-level-secured table,
+    # `op.current_scope()` raises `42501`, which is the designed answer to an
+    # unscoped query.
+    #
+    # ⛔ What this must NOT become is a way to opt out. It runs `fun` with no
+    # scope set, so every RLS query inside it fails; it buys a clean changeset
+    # error for a nil argument, nothing more.
+    fun.()
+  end
+
   def with_user(user_id, fun) when is_binary(user_id) and is_function(fun, 0) do
+    user_id = normalise!(user_id)
+
     case Process.get(@nesting_key) do
       nil ->
         Process.put(@nesting_key, user_id)
@@ -155,6 +172,8 @@ defmodule Stacks.Scope do
   """
   @spec set!(Ecto.UUID.t()) :: :ok
   def set!(user_id) when is_binary(user_id) do
+    user_id = normalise!(user_id)
+
     unless Repo.in_transaction?() do
       raise ArgumentError,
             "Stacks.Scope.set!/1 was called outside a transaction, where the setting is a " <>
@@ -175,10 +194,38 @@ defmodule Stacks.Scope do
   """
   @spec multi_step(Ecto.Multi.t(), Ecto.UUID.t()) :: Ecto.Multi.t()
   def multi_step(multi, user_id) when is_binary(user_id) do
+    user_id = normalise!(user_id)
+
     Ecto.Multi.run(multi, :rls_scope, fn repo, _changes ->
       repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
       {:ok, user_id}
     end)
+  end
+
+  # ⛔ `is_binary/1` cannot tell a UUID STRING from a raw 16-byte UUID, and both
+  # are binaries that reach here in practice: Ecto hands back the string form,
+  # while `Ecto.UUID.dump/1` and the seed fixtures produce the 16-byte form.
+  #
+  # Passing the raw form through to `set_config` fails at the database with
+  # `invalid byte sequence for encoding "UTF8"` — which is how this was found —
+  # and that is the LUCKY case. A 16-byte UUID whose bytes happen to be valid
+  # UTF-8 would be accepted silently and set a scope matching no user, so every
+  # query in that operation would return nothing while reporting success.
+  #
+  # `Ecto.UUID.cast/1` accepts both representations and yields the canonical
+  # string, so this is total over what callers actually pass and loud about
+  # anything else.
+  defp normalise!(user_id) do
+    case Ecto.UUID.cast(user_id) do
+      {:ok, canonical} ->
+        canonical
+
+      :error ->
+        raise ArgumentError,
+              "the row-level-security scope must be a UUID, got #{inspect(user_id, limit: 8)}. " <>
+                "A non-UUID scope would be set without complaint and then match no row, so " <>
+                "every query in the operation would quietly return nothing."
+    end
   end
 
   defp set_and_run(user_id, fun) do

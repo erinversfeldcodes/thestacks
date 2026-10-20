@@ -11,6 +11,7 @@ defmodule Stacks.Feeds do
 
   alias Core.Repo
   alias Stacks.Feeds.FeedCacheEntry
+  alias Stacks.Scope
   alias Stacks.Shelving
   alias Stacks.Shelving.PlacementHistory
   alias Stacks.Visibility
@@ -62,6 +63,10 @@ defmodule Stacks.Feeds do
           {:ok, String.t(), String.t()}
           | {:error, :not_found | :not_public | {:cache_write_failed, Ecto.Changeset.t()}}
   def regenerate(user_id, bookshelf_name) do
+    Scope.with_user(user_id, fn -> do_regenerate(user_id, bookshelf_name) end)
+  end
+
+  defp do_regenerate(user_id, bookshelf_name) do
     with {:ok, bookshelf} <- resolve_shared_bookshelf(user_id, bookshelf_name) do
       {xml, etag} = render_feed(bookshelf)
 
