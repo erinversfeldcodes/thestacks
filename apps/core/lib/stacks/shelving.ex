@@ -435,12 +435,12 @@ defmodule Stacks.Shelving do
           | {:error, :unauthorized | :not_found}
           | {:error, atom(), term(), map()}
   def move_book(placement_id, user_id, to_bookshelf_name) do
-    case Repo.get(Placement, placement_id) do
+    case scoped_get_placement(placement_id, user_id) do
       nil ->
         {:error, :not_found}
 
       placement ->
-        placement = Repo.preload(placement, :bookshelf)
+        placement = scoped_preload(placement, :bookshelf, user_id)
 
         cond do
           placement.bookshelf.user_id != user_id ->
@@ -519,12 +519,12 @@ defmodule Stacks.Shelving do
           {:ok, Placement.t()}
           | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def reread_book(placement_id, user_id) do
-    case Repo.get(Placement, placement_id) do
+    case scoped_get_placement(placement_id, user_id) do
       nil ->
         {:error, :not_found}
 
       placement ->
-        placement = Repo.preload(placement, :bookshelf)
+        placement = scoped_preload(placement, :bookshelf, user_id)
 
         if placement.bookshelf.user_id != user_id do
           {:error, :unauthorized}
@@ -592,12 +592,12 @@ defmodule Stacks.Shelving do
           | {:error, :not_found | :unauthorized}
           | {:error, Ecto.Changeset.t()}
   def remove_book(placement_id, user_id) do
-    case Repo.get(Placement, placement_id) do
+    case scoped_get_placement(placement_id, user_id) do
       nil ->
         {:error, :not_found}
 
       placement ->
-        do_remove_book(Repo.preload(placement, :bookshelf), user_id)
+        do_remove_book(scoped_preload(placement, :bookshelf, user_id), user_id)
     end
   end
 
@@ -648,12 +648,12 @@ defmodule Stacks.Shelving do
           | {:error, :not_found | :unauthorized | :already_shelved}
           | {:error, Ecto.Changeset.t()}
   def restore_placement(placement_id, user_id) do
-    case Repo.get(Placement, placement_id) do
+    case scoped_get_placement(placement_id, user_id) do
       nil ->
         {:error, :not_found}
 
       placement ->
-        do_restore_placement(Repo.preload(placement, :bookshelf), user_id)
+        do_restore_placement(scoped_preload(placement, :bookshelf, user_id), user_id)
     end
   end
 
@@ -737,12 +737,12 @@ defmodule Stacks.Shelving do
   end
 
   defp do_update_placement_formats(placement_id, user_id, formats) do
-    case Repo.get(Placement, placement_id) do
+    case scoped_get_placement(placement_id, user_id) do
       nil ->
         {:error, :not_found}
 
       placement ->
-        placement = Repo.preload(placement, :bookshelf)
+        placement = scoped_preload(placement, :bookshelf, user_id)
 
         if placement.bookshelf.user_id != user_id do
           {:error, :unauthorized}
@@ -871,9 +871,9 @@ defmodule Stacks.Shelving do
           | {:error, :unauthorized | :not_found | String.t() | Ecto.Changeset.t()}
   def update_placement_visibility(placement_id, user_id, visibility) do
     placement =
-      case Repo.get(Placement, placement_id) do
+      case scoped_get_placement(placement_id, user_id) do
         nil -> nil
-        p -> Repo.preload(p, :bookshelf)
+        p -> scoped_preload(p, :bookshelf, user_id)
       end
 
     case placement do
@@ -910,9 +910,9 @@ defmodule Stacks.Shelving do
           {:ok, Placement.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
   def update_reading_progress(placement_id, user_id, attrs) do
     placement =
-      case Repo.get(Placement, placement_id) do
+      case scoped_get_placement(placement_id, user_id) do
         nil -> nil
-        p -> Repo.preload(p, [:bookshelf, book: :editions])
+        p -> scoped_preload(p, [:bookshelf, book: :editions], user_id)
       end
 
     case placement do
@@ -1112,7 +1112,7 @@ defmodule Stacks.Shelving do
   defp do_move_placement_to_shelf(placement_id, shelf_id, user_id) do
     with placement when not is_nil(placement) <- Repo.get(Placement, placement_id),
          shelf when not is_nil(shelf) <- Repo.get(Shelf, shelf_id) do
-      placement = Repo.preload(placement, :bookshelf)
+      placement = scoped_preload(placement, :bookshelf, user_id)
 
       cond do
         placement.bookshelf.user_id != user_id ->
@@ -1302,15 +1302,56 @@ defmodule Stacks.Shelving do
   defp check_move_capacity(repo, _from_bookshelf, to_bookshelf),
     do: check_reading_pile_capacity(repo, to_bookshelf)
 
-  defp get_or_create_bookshelf(user_id, bookshelf_name) do
-    case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do
-      nil ->
-        %Bookshelf{}
-        |> bookshelf_changeset(%{user_id: user_id, name: bookshelf_name})
-        |> Repo.insert!()
+  # ⛔ Scopes itself, because its CALLERS cannot.
+  #
+  # `place_book/5`, `do_move_book/3` and `do_reread_book/2` all call this BEFORE
+  # building their `Ecto.Multi`, so the scope step inside that Multi has not run
+  # yet — every one of them read `op.bookshelves` with no scope and returned a
+  # 500. Measured on the deployed preview: `POST /api/bookshelves/library/placements`
+  # → HTTP 500, `ERROR 42501 query on a row-level-secured table with no request
+  # scope set`.
+  #
+  # ⚠️ The module-level gate could not catch this, and that limit is worth
+  # naming: `check-rls-scope.sh` asks whether a module establishes a scope
+  # ANYWHERE, not whether every query inside it is covered. `shelving.ex`
+  # passed because it scopes in twenty other places. Intra-function ordering is
+  # beyond what a grep can see, which is why the deployed drive mattered.
+  #
+  # ⚠️ Scoped here rather than in each caller: one place that cannot be
+  # forgotten beats three that can, and this helper always knows its user.
+  # ⛔ Every placement lookup that precedes a Multi goes through these.
+  #
+  # Six public functions look a placement up and preload its bookshelf before
+  # delegating to a `do_*` helper that builds the Multi — so the Multi's scope
+  # step has not run, and both reads hit row-level-secured tables with no scope.
+  # Measured on the deployed preview before this existed: HTTP 500 and
+  # `ERROR 42501 query on a row-level-secured table with no request scope set`.
+  #
+  # ⚠️ Deliberately NOT solved by wrapping those functions whole. Each one owns
+  # a Multi that uses rollback for control flow — the reading-pile capacity
+  # rejection, for one — and a `Repo.rollback/1` inside a nested transaction
+  # aborts the outer one and DISCARDS the value rolled back with, so the caller
+  # would get `:rollback` instead of `{:error, :reading_pile_full}`. Scoping the
+  # lookup separately keeps the Multi's own transaction unnested.
+  defp scoped_get_placement(placement_id, user_id) do
+    Scope.with_user(user_id, fn -> Repo.get(Placement, placement_id) end)
+  end
 
-      bookshelf ->
-        bookshelf
-    end
+  defp scoped_preload(record, preloads, user_id) do
+    Scope.with_user(user_id, fn -> Repo.preload(record, preloads) end)
+  end
+
+  defp get_or_create_bookshelf(user_id, bookshelf_name) do
+    Scope.with_user(user_id, fn ->
+      case Repo.get_by(Bookshelf, user_id: user_id, name: bookshelf_name) do
+        nil ->
+          %Bookshelf{}
+          |> bookshelf_changeset(%{user_id: user_id, name: bookshelf_name})
+          |> Repo.insert!()
+
+        bookshelf ->
+          bookshelf
+      end
+    end)
   end
 end
