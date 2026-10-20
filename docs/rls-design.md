@@ -10,13 +10,31 @@ A first slice of policies — bookshelves, bookshelf_placements, user_blocks, an
 
 ### Execution model
 
-All API requests arrive through the Phoenix application. Before executing any query the connection pool sets a session variable carrying the authenticated user's UUID:
+⛔ **This section described a mechanism that was never built, and the description is why
+nobody noticed.** It said the connection pool sets a session variable carrying the authenticated
+user's UUID before executing any query. It does not: `app.current_user_id` appears **zero times**
+under `apps/core/lib`. The seven activated policies therefore short-circuit on their NULL guard and
+permit every row — on every environment, including production. Verified 2026-10-20.
 
-```sql
-SET LOCAL app.current_user_id = '<uuid>';
-```
+⚠️ **The NULL guard is also non-deterministic, not merely inert.** `current_setting('app.current_user_id', true)`
+returns NULL on a connection where the variable has never been set — the guard fires and the policy
+permits everything — but the **empty string** on a connection where any transaction has set it, even
+one that rolled back, because `SET LOCAL` reverts to the variable's default. On that connection the
+guard does not fire, the `::uuid` cast receives `''`, and the query raises. So on a pooled connection
+the same unscoped query either grants every row or 500s, decided by which connection serves it.
 
-Policies read this variable via `current_setting('app.current_user_id', true)` with a NULL guard so that sessions without the variable set (migrations, test sandbox) are not blocked. The cast to `uuid` happens only after the NULL check. The expression is inlined in every policy (no wrapper function) so each policy is self-contained and auditable.
+The intended execution model — `SET LOCAL` inside an explicit transaction established at each
+context boundary, a role-level default making the unscoped case raise deterministically, and the
+exemptions for `stacks_dbt` / `stacks_readonly` — is decided in
+[ADR 023](decisions/023-per-request-rls-scoping.md). Read that before changing a policy.
+
+⚠️ **One design statement below is reversed by that ADR.** This document previously recorded that
+the scope expression is "inlined in every policy (no wrapper function) so each policy is
+self-contained and auditable". ADR 023 replaces the inlined expression with a single
+`op.current_scope()` function, because the rule needs one place to raise a named error from, and
+because the measurement that matters constrains the shape: a policy calling a function **with the
+row's `user_id`** sequentially scans the table, while one comparing `user_id` to a parameterless
+function's return value uses the index. Self-containment lost that trade.
 
 ### Database roles
 
