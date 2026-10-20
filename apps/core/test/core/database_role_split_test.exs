@@ -200,6 +200,93 @@ defmodule Core.DatabaseRoleSplitTest do
       end)
     end
 
+    test "⛔ the override reaches the CONNECTION, not just the option list" do
+      # ⛔ THE TEST THAT WAS MISSING, and its absence took a preview deploy down.
+      #
+      # The tests above prove `owner_repo_opts/0` RETURNS the owner url. They do
+      # not prove anything USES it — and nothing did.
+      # `Ecto.Migrator.with_repo/3` reads only `:mode` and `:pool_size` from its
+      # options and starts the repo with `repo.start_link(pool_size: pool_size)`,
+      # discarding `:url` (ecto_sql 3.14.0, `migrator.ex:817`). So every release
+      # task passed an override that was thrown away.
+      #
+      # It was invisible while `APP_DATABASE_URL` was unset, because then the
+      # config pointed at `DATABASE_URL` anyway and the override agreed with the
+      # config it was failing to override. The first deploy that set the secret
+      # ran the release command as `stacks_app` and aborted on `28P01`.
+      #
+      # ⚠️ This asserts the only thing that decides where the pool connects: the
+      # repo's own config, at the moment `with_owner_repo/2` runs its function.
+      with_env(
+        [
+          {"DATABASE_URL", "ecto://owner:x@db.test/owner_db"},
+          {"APP_DATABASE_URL", "ecto://stacks_app:x@db.test/app_db"}
+        ],
+        fn ->
+          previous = Application.get_env(:core, Core.Repo, [])
+
+          try do
+            Application.put_env(
+              :core,
+              Core.Repo,
+              Keyword.put(previous, :url, "ecto://stacks_app:x@db.test/app_db")
+            )
+
+            seen =
+              Stacks.Release.with_owner_repo_config(Core.Repo, fn ->
+                Application.get_env(:core, Core.Repo)[:url]
+              end)
+
+            assert seen == "ecto://owner:x@db.test/owner_db",
+                   "the repo would have STARTED on #{inspect(seen)} — the runtime role. " <>
+                     "`with_repo/3` discards a `:url` option, so config is the only channel " <>
+                     "that decides where the pool connects"
+          after
+            Application.put_env(:core, Core.Repo, previous)
+          end
+        end
+      )
+    end
+
+    test "the owner config is restored even when the task raises" do
+      # ⚠️ A release task is usually the only thing in its BEAM, but a leaked
+      # owner url in config is a credential left pointing at the wrong role for
+      # whatever runs next. The restore belongs in an `after`, not after the call.
+      with_env([{"DATABASE_URL", "ecto://owner:x@db.test/owner_db"}], fn ->
+        previous = Application.get_env(:core, Core.Repo, [])
+
+        try do
+          Application.put_env(
+            :core,
+            Core.Repo,
+            Keyword.put(previous, :url, "ecto://stacks_app:x@db.test/app_db")
+          )
+
+          assert_raise RuntimeError, fn ->
+            Stacks.Release.with_owner_repo_config(Core.Repo, fn -> raise "boom" end)
+          end
+
+          assert Application.get_env(:core, Core.Repo)[:url] ==
+                   "ecto://stacks_app:x@db.test/app_db",
+                 "a raising task left the repo config pointed at the owner"
+        after
+          Application.put_env(:core, Core.Repo, previous)
+        end
+      end)
+    end
+
+    test "every release task goes through the wrapper, not with_repo plus options" do
+      # ⛔ A sweep rather than a list of known sites. The defect was that SEVEN
+      # call sites each passed an option that did nothing; a task added later
+      # that reaches for `with_repo` directly would reintroduce it silently.
+      src = release_src()
+
+      refute src =~ ~r/Ecto\.Migrator\.with_repo\([^)]*owner_repo_opts\(\)/s,
+             "a release task still passes owner_repo_opts() to with_repo/3, which discards it"
+
+      assert src =~ "def with_owner_repo", "the wrapper is gone"
+    end
+
     test "the helper still exists and still reads the owner variable" do
       # Kept as a source assertion deliberately: it guards the NAME the
       # deploy scripts and workflows compose, which no behavioural test can see.
@@ -208,43 +295,30 @@ defmodule Core.DatabaseRoleSplitTest do
       assert src =~ "def owner_repo_opts", "the helper is gone"
     end
 
-    test "EVERY with_repo call in Stacks.Release passes the owner options" do
-      # ⚠️ The load-bearing assertion, and it is deliberately a sweep rather
-      # than a list of known call sites. A task added later that forgets the
-      # override is the exact regression this file is about, and a hand-listed
-      # roster would not see it — the same instance-not-class error this
-      # campaign has hit repeatedly.
+    test "⚠️ the sweep this replaces was pinning the BROKEN mechanism" do
+      # ⛔ Worth recording rather than silently deleting. The test that used to
+      # sit here asserted that EVERY `Ecto.Migrator.with_repo` call in
+      # `Stacks.Release` passed `owner_repo_opts()` as its third argument. It was
+      # a careful test — a sweep rather than a hand-listed roster, with an
+      # anti-vacuity floor on the number of call sites it found — and it held
+      # firmly for as long as it existed.
+      #
+      # It was guarding the wrong thing. `with_repo/3` discards that argument, so
+      # the test pinned seven call sites into a pattern that did nothing, and
+      # made the real defect harder to see: anyone checking "is the override
+      # applied?" found a green, thorough-looking assertion saying yes.
+      #
+      # ⚠️ The lesson is not "write better tests". It is that a test asserting a
+      # CALL SHAPE cannot tell you the call has an EFFECT, however rigorous it is
+      # about the shape. The replacement above asserts the effect — what the
+      # repo's config says at the moment the function runs.
       src = release_src()
 
-      calls =
-        src
-        |> String.split("Ecto.Migrator.with_repo")
-        |> tl()
+      refute src =~ "owner_repo_opts()\n        )",
+             "a with_repo call is passing the discarded options argument again"
 
-      assert length(calls) >= 6,
-             "found #{length(calls)} with_repo call(s) in Stacks.Release — expected at least six, " <>
-               "so this sweep is no longer reading the module it is written for"
-
-      unpinned =
-        calls
-        |> Enum.with_index(1)
-        |> Enum.reject(fn {tail, _index} ->
-          # The options are the third argument, so they appear before the call's
-          # own closing — look only at the text up to the next `end`-of-call
-          # marker rather than at the whole rest of the file.
-          tail
-          |> String.split(~r/\n  (?:end|@doc|def |defp )/, parts: 2)
-          |> hd()
-          |> String.contains?("owner_repo_opts()")
-        end)
-        |> Enum.map(fn {_tail, index} -> index end)
-
-      assert unpinned == [],
-             "with_repo call(s) #{inspect(unpinned)} in Stacks.Release do not pass " <>
-               "owner_repo_opts(). A release task that inherits the runtime URL runs as " <>
-               "stacks_app, which cannot execute DDL — so setting APP_DATABASE_URL would leave " <>
-               "the app serving and break the next deploy's migration step, separating the " <>
-               "failure from its cause by however long it is until someone deploys."
+      assert src =~ "def with_owner_repo_config",
+             "the config swap — the only thing that changes where a pool connects — is gone"
     end
   end
 

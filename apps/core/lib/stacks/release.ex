@@ -41,6 +41,24 @@ defmodule Stacks.Release do
 
       Empty when `DATABASE_URL` is unset, so dev and test — where the repo's own
       config is already correct and there is no second role — are untouched.
+
+      ⛔ **These options are NOT enough on their own, and believing they were
+      took a preview deploy down.** `Ecto.Migrator.with_repo/3` reads only
+      `:mode` and `:pool_size` from the options it is given — it starts the repo
+      with `repo.start_link(pool_size: pool_size)` and discards everything else,
+      `:url` included (ecto_sql 3.14.0, `migrator.ex:817`). So passing these as
+      `with_repo`'s third argument had no effect whatsoever.
+
+      That was invisible for as long as `APP_DATABASE_URL` was unset, because
+      then `config/runtime.exs` pointed the repo at `DATABASE_URL` anyway and the
+      override agreed with the config it was failing to override. The first
+      deploy that set the secret ran the release command as `stacks_app`, which
+      on a fresh preview branch does not even exist yet — the role is created by
+      a migration that this very command runs. `28P01`, twice, deploy aborted.
+
+      ⚠️ So use `with_owner_repo/2` below, never `with_repo` plus these options.
+      The only thing that changes where the repo connects is the repo's own
+      CONFIG, which is why that function sets it.
   """
   @spec owner_repo_opts() :: keyword()
   def owner_repo_opts do
@@ -51,16 +69,63 @@ defmodule Stacks.Release do
     end
   end
 
+  @doc """
+      Runs `fun` with `repo` connected as the OWNER, whatever the runtime pools
+      are configured to use.
+
+      The owner URL is written into the repo's application config for the
+      duration and restored afterwards, because `Ecto.Migrator.with_repo/3`
+      honours only `:mode` and `:pool_size` from its options — config is the one
+      channel that actually decides where the pool connects.
+
+      ⚠️ Restores the previous config in an `after`, so a raising task cannot
+      leave the repo pointed at the owner for whatever runs next in the same
+      node. A release task is usually the only thing in its BEAM, but "usually"
+      is not a reason to leak a credential-bearing config.
+
+      A no-op pass-through when `owner_repo_opts/0` is empty: dev and test have
+      one role and the repo's own config is already right.
+  """
+  @spec with_owner_repo(module(), (module() -> any())) :: {:ok, any(), [atom()]}
+  def with_owner_repo(repo, fun) do
+    with_owner_repo_config(repo, fn -> Ecto.Migrator.with_repo(repo, fun) end)
+  end
+
+  @doc """
+      Runs `fun` with `repo`'s application config pointed at the owner URL, and
+      restores the previous config afterwards.
+
+      ⚠️ Separated from `with_owner_repo/2` so the config swap — the part that
+      actually decides where a pool connects — can be asserted without starting
+      a real pool. A test that had to connect could only verify this against a
+      live database, which is how it went unverified in the first place.
+
+      A no-op pass-through when `owner_repo_opts/0` is empty.
+  """
+  @spec with_owner_repo_config(module(), (-> any())) :: any()
+  def with_owner_repo_config(repo, fun) do
+    case owner_repo_opts() do
+      [] ->
+        fun.()
+
+      opts ->
+        previous = Application.get_env(@app, repo, [])
+
+        try do
+          Application.put_env(@app, repo, Keyword.merge(previous, opts))
+          fun.()
+        after
+          Application.put_env(@app, repo, previous)
+        end
+    end
+  end
+
   def migrate do
     load_app()
 
     for repo <- repos() do
       {:ok, _, _} =
-        Ecto.Migrator.with_repo(
-          repo,
-          &Ecto.Migrator.run(&1, :up, all: true),
-          owner_repo_opts()
-        )
+        with_owner_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
     end
   end
 
@@ -91,11 +156,7 @@ defmodule Stacks.Release do
     load_app()
 
     {:ok, _, _} =
-      Ecto.Migrator.with_repo(
-        Repo,
-        fn _repo -> run_corrections(Keyword.get(opts, :apply, false)) end,
-        owner_repo_opts()
-      )
+      with_owner_repo(Repo, fn _repo -> run_corrections(Keyword.get(opts, :apply, false)) end)
 
     :ok
   end
@@ -123,7 +184,7 @@ defmodule Stacks.Release do
 
     for repo <- repos() do
       {:ok, _, _} =
-        Ecto.Migrator.with_repo(repo, &emit_applied_versions/1, owner_repo_opts())
+        with_owner_repo(repo, &emit_applied_versions/1)
     end
   end
 
@@ -138,7 +199,7 @@ defmodule Stacks.Release do
 
       for repo <- repos() do
         {:ok, _, _} =
-          Ecto.Migrator.with_repo(repo, fn _repo -> run_seeds() end, owner_repo_opts())
+          with_owner_repo(repo, fn _repo -> run_seeds() end)
       end
     else
       IO.puts("Seeds are disabled (ALLOW_SEEDS != \"true\"). Skipping.")
@@ -340,11 +401,7 @@ defmodule Stacks.Release do
     [primary_repo | _] = repos()
 
     {:ok, _, _} =
-      Ecto.Migrator.with_repo(
-        primary_repo,
-        fn _repo -> do_seed_prod(email, password) end,
-        owner_repo_opts()
-      )
+      with_owner_repo(primary_repo, fn _repo -> do_seed_prod(email, password) end)
 
     :ok
   end
@@ -364,11 +421,7 @@ defmodule Stacks.Release do
     [primary_repo | _] = repos()
 
     {:ok, _, _} =
-      Ecto.Migrator.with_repo(
-        primary_repo,
-        fn _repo -> do_seed_prober(email, password) end,
-        owner_repo_opts()
-      )
+      with_owner_repo(primary_repo, fn _repo -> do_seed_prober(email, password) end)
 
     :ok
   end
