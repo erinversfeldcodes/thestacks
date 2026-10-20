@@ -55,6 +55,7 @@ SUITES=(
     "$HERE/decoder_coverage_test.sh"
     "$HERE/book_adapter_coverage_test.sh"
     "$HERE/error_token_spelling_test.sh"
+    "$HERE/app_database_url_derivation_test.sh"
     "$HERE/log_shipper_config_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"

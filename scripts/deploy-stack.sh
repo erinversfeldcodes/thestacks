@@ -692,6 +692,64 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 # is never committed here. Runbook: docs/runbooks/email-delivery-failure.md.
 EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
 
+# ── The least-privilege runtime connection ───────────────────────────────────
+#
+# `config/runtime.exs` points both runtime pools at `APP_DATABASE_URL` when it is
+# set, falling back to `DATABASE_URL` when it is not. The fallback is what makes
+# the whole split inert until this secret exists, so setting it here is the
+# operator action that turns the grants on.
+#
+# ⛔ DERIVED, never a literal. The host and database differ per environment — a
+# preview gets its own Neon branch — so a fixed value in `.env` would point every
+# preview at whichever branch it was written for, which is a worse failure than
+# not setting it at all: the app would serve, against the wrong database.
+#
+# So it is the owner URL with the role and password substituted. Same host, same
+# database, same query string (`sslmode`, channel binding and friends survive),
+# different credentials.
+#
+# ⚠️ Gated on the password being present, because `CREATE ROLE … PASSWORD` is
+# what gave `stacks_app` a password in the first place (migration
+# 20261016150000 RAISES without it). No password, no role worth connecting as,
+# no secret — and the fallback keeps the stack byte-identical to before.
+APP_DATABASE_URL_VALUE=""
+if [[ -n "${STACKS_APP_DB_PASSWORD:-}" && -n "${EFFECTIVE_DATABASE_URL}" ]]; then
+    APP_DATABASE_URL_VALUE="$(
+        EFFECTIVE_DATABASE_URL="$EFFECTIVE_DATABASE_URL" \
+        STACKS_APP_DB_PASSWORD="$STACKS_APP_DB_PASSWORD" \
+        python3 - <<'PYEOF'
+import os
+import sys
+from urllib.parse import urlsplit, urlunsplit, quote
+
+url = os.environ["EFFECTIVE_DATABASE_URL"]
+password = os.environ["STACKS_APP_DB_PASSWORD"]
+
+parts = urlsplit(url)
+if not parts.hostname:
+    # Not a URL we can rewrite. Emit nothing: the caller treats an empty value
+    # as "do not set the secret", which leaves the runtime fallback in place.
+    sys.exit(0)
+
+host = parts.hostname
+if parts.port:
+    host = f"{host}:{parts.port}"
+
+netloc = f"stacks_app:{quote(password, safe='')}@{host}"
+print(urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)))
+PYEOF
+    )" || APP_DATABASE_URL_VALUE=""
+
+    if [[ -n "$APP_DATABASE_URL_VALUE" ]]; then
+        echo "==> APP_DATABASE_URL will be set (runtime pools connect as stacks_app)"
+    else
+        echo "WARN: STACKS_APP_DB_PASSWORD is set but the owner URL could not be rewritten —"
+        echo "      APP_DATABASE_URL will NOT be set, so the runtime pools keep the owner role."
+    fi
+else
+    echo "==> APP_DATABASE_URL not set — runtime pools use the owner role (the documented fallback)"
+fi
+
 # The telemetry keepalive that wakes the log shipper (prod only — previews
 # don't ship logs). Set only when the shipper will actually be deployed, so
 # a shipper-less stack doesn't ping a nonexistent Flycast name every 10s.
@@ -727,6 +785,7 @@ fly secrets set \
     ${BRAVE_SEARCH_API_KEY:+BRAVE_SEARCH_API_KEY="${BRAVE_SEARCH_API_KEY}"} \
     ${GOOGLE_BOOKS_API_KEY:+GOOGLE_BOOKS_API_KEY="${GOOGLE_BOOKS_API_KEY}"} \
     ${RESEND_API_KEY:+RESEND_API_KEY="${RESEND_API_KEY}" EMAIL_PROVIDER="resend"} \
+    ${APP_DATABASE_URL_VALUE:+APP_DATABASE_URL="${APP_DATABASE_URL_VALUE}"} \
     ${STACKS_APP_DB_PASSWORD:+STACKS_APP_DB_PASSWORD="${STACKS_APP_DB_PASSWORD}"} \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
