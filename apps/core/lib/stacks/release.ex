@@ -16,7 +16,15 @@ defmodule Stacks.Release do
   alias Stacks.Accounts.User
   alias Stacks.Costs.PlatformCost
   alias Stacks.GDPR.Deletion
+  alias Stacks.Workers.AuditRetentionJob
   alias Stacks.Workers.DiscoverBookstoreEventsJob
+  alias Stacks.Workers.ExpiredEmailChangesJob
+  alias Stacks.Workers.ExpiredInvitesSweepJob
+  alias Stacks.Workers.ExpiredUnverifiedAccountsJob
+  alias Stacks.Workers.ExportRetentionJob
+  alias Stacks.Workers.GuardianTokenSweepJob
+  alias Stacks.Workers.ImageRetentionJob
+  alias Stacks.Workers.LibraryImportRowRetentionJob
   alias Stacks.Workers.RefreshCostsJob
 
   @app :core
@@ -527,6 +535,75 @@ defmodule Stacks.Release do
   def discover_bookstore_events do
     :ok = DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"batch" => true}})
     IO.puts("BOOKSTORE_EVENTS_SWEEP ok")
+    :ok
+  end
+
+  @doc """
+      The retention and account-lifecycle duties, each invoked by name from
+      `scheduled-core-jobs.yml`.
+
+      ⚠️ These exist because `Oban.Plugins.Cron` computed them on a tick from a
+      running node, on an app whose `min_machines_running` is 0. The plugin has
+      no catch-up pass, so an entry fired only if something else happened to
+      wake the machine in that minute — a machine woken at 02:03 never ran the
+      02:00 entry. Production's `oban_jobs` showed what that looked like: every
+      retention row inserted at exactly 02:00:00, picked up within a second,
+      and frozen at attempt 1 with a different node UUID each night.
+
+      ⚠️ Named functions rather than one `run_duty(SomeWorker)` entry point,
+      because the caller is a shell inside an ssh command string inside a
+      workflow, and every layer of that chain re-reads quoting. A bare call
+      survives it; a call with a module argument is where nine attempts at one
+      remote expression were lost.
+  """
+  @spec sweep_images() :: :ok
+  def sweep_images, do: run_duty(ImageRetentionJob, "IMAGE_RETENTION")
+
+  @spec sweep_exports() :: :ok
+  def sweep_exports, do: run_duty(ExportRetentionJob, "EXPORT_RETENTION")
+
+  @spec sweep_import_rows() :: :ok
+  def sweep_import_rows, do: run_duty(LibraryImportRowRetentionJob, "IMPORT_ROW_RETENTION")
+
+  @spec sweep_audit_log() :: :ok
+  def sweep_audit_log, do: run_duty(AuditRetentionJob, "AUDIT_RETENTION")
+
+  @spec sweep_guardian_tokens() :: :ok
+  def sweep_guardian_tokens, do: run_duty(GuardianTokenSweepJob, "GUARDIAN_TOKEN_SWEEP")
+
+  @spec sweep_unverified_accounts() :: :ok
+  def sweep_unverified_accounts,
+    do: run_duty(ExpiredUnverifiedAccountsJob, "UNVERIFIED_ACCOUNTS_SWEEP")
+
+  @spec sweep_expired_invites() :: :ok
+  def sweep_expired_invites, do: run_duty(ExpiredInvitesSweepJob, "EXPIRED_INVITES_SWEEP")
+
+  @spec sweep_lapsed_email_changes() :: :ok
+  def sweep_lapsed_email_changes, do: run_duty(ExpiredEmailChangesJob, "EMAIL_CHANGES_SWEEP")
+
+  # ⛔ Prints the count of work REMAINING, read back from the far end after the
+  # sweep, not the count the job reports having done.
+  #
+  # Several of these drain under a budget or a batch ceiling and return `:ok`
+  # with rows still past their window — `ImageRetentionJob` logs that it hit its
+  # deadline, `AuditRetentionJob` that it hit `@max_batches`. So "the job
+  # succeeded" and "the sweep is finished" are different facts, and a workflow
+  # that checked only the former would report green over a growing backlog.
+  # That is not hypothetical: production held 6,655 expired image rows behind a
+  # nightly `:ok`, the oldest 151 days past expiry.
+  #
+  # ⚠️ Each `pending_count/0` lives beside its own sweep and shares that sweep's
+  # predicate, so this number cannot drift into disagreeing with the thing it
+  # measures. The drift direction is what matters: a restated predicate reports
+  # all-clear while the sweep disagrees, hiding exactly the backlog it exists
+  # to reveal.
+  @spec run_duty(module(), String.t()) :: :ok
+  defp run_duty(worker, sentinel) do
+    :ok = worker.perform(%Oban.Job{args: %{}})
+
+    remaining = worker.pending_count()
+    IO.puts("#{sentinel} remaining=#{remaining}")
+
     :ok
   end
 

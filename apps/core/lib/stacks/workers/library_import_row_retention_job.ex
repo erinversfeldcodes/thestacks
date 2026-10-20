@@ -25,4 +25,16 @@ defmodule Stacks.Workers.LibraryImportRowRetentionJob do
 
     :ok
   end
+
+  @doc """
+      How many raw import rows remain past the retention window. Zero after a
+      complete run.
+
+      ⚠️ Reader free text, so a non-zero number here is a data-minimisation
+      finding rather than untidiness. Delegates to
+      `Imports.expired_row_count/0`, which shares its cutoff with
+      `Imports.delete_expired_rows/0`.
+  """
+  @spec pending_count() :: non_neg_integer()
+  def pending_count, do: Imports.expired_row_count()
 end

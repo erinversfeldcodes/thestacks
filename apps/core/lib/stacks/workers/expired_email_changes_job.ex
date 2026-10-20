@@ -55,4 +55,13 @@ defmodule Stacks.Workers.ExpiredEmailChangesJob do
 
     if failed > 0, do: {:error, :partial_failure}, else: :ok
   end
+
+  @doc """
+      How many lapsed pending email changes remain. Zero after a complete run.
+
+      Delegates to `Accounts.lapsed_email_change_ids/0`, the query `perform/1`
+      iterates, so the count and the sweep share one definition of "lapsed".
+  """
+  @spec pending_count() :: non_neg_integer()
+  def pending_count, do: length(Accounts.lapsed_email_change_ids())
 end

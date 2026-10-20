@@ -294,13 +294,24 @@ defmodule Stacks.Imports do
   """
   @spec delete_expired_rows() :: non_neg_integer()
   def delete_expired_rows do
-    cutoff = DateTime.add(DateTime.utc_now(), -@row_retention_days, :day)
-
-    {deleted, _} =
-      LibraryImportRow
-      |> where([r], r.created_at < ^cutoff)
-      |> Repo.delete_all()
-
+    {deleted, _} = Repo.delete_all(expired_rows())
     deleted
+  end
+
+  @doc """
+      How many raw import rows are past the retention window — the far-end
+      check for the retention sweep, zero when it is caught up.
+
+      ⚠️ Shares `expired_rows/0` with `delete_expired_rows/0` on purpose. These
+      rows are reader free text, so a count that drifted from the sweep's own
+      predicate would under-report a data-minimisation gap rather than a tidy-up
+      backlog.
+  """
+  @spec expired_row_count() :: non_neg_integer()
+  def expired_row_count, do: Repo.aggregate(expired_rows(), :count)
+
+  defp expired_rows do
+    cutoff = DateTime.add(DateTime.utc_now(), -@row_retention_days, :day)
+    where(LibraryImportRow, [r], r.created_at < ^cutoff)
   end
 end

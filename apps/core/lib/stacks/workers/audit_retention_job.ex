@@ -88,7 +88,7 @@ defmodule Stacks.Workers.AuditRetentionJob do
 
   @impl true
   def perform(_job) do
-    cutoff = DateTime.add(DateTime.utc_now(), -@retention_months * 30 * 24 * 3600, :second)
+    cutoff = cutoff()
 
     # ⛔ ONE TRANSACTION PER BATCH, and the GUC re-armed inside each one.
     #
@@ -168,5 +168,30 @@ defmodule Stacks.Workers.AuditRetentionJob do
     else
       delete_in_batches(cutoff, deleted + count, batches + 1)
     end
+  end
+
+  @doc """
+      How many audit rows remain older than the retention window. Zero after a
+      complete run.
+
+      ⚠️ Not decoration: `perform/1` stops at `@max_batches` and still returns
+      `:ok`, so "the job succeeded" and "the sweep finished" are different
+      facts here by design. This is the one that distinguishes them, and it
+      shares `cutoff/0` with the sweep so it cannot drift into disagreeing
+      about what "old" means.
+  """
+  @spec pending_count() :: non_neg_integer()
+  def pending_count do
+    # Raw SQL against `audit.audit_log` because that is what the sweep itself
+    # deletes from — the audit schema has no Ecto schema module here, and
+    # introducing one just to count would add a second description of the table.
+    %{rows: [[count]]} =
+      Repo.query!("SELECT count(*) FROM audit.audit_log WHERE occurred_at < $1", [cutoff()])
+
+    count
+  end
+
+  defp cutoff do
+    DateTime.add(DateTime.utc_now(), -@retention_months * 30 * 24 * 3600, :second)
   end
 end

@@ -64,4 +64,21 @@ defmodule Stacks.Workers.ImageRetentionJob do
         {:error, reason}
     end
   end
+
+  @doc """
+      How many uploaded images remain past their expiry. Zero when the sweep is
+      caught up.
+
+      ⚠️ This is the number that matters most in this group, because
+      `perform/1` drains under a 30-second budget per sweep and returns `:ok`
+      when it hits that deadline with work remaining. The job completing and
+      the backlog being clear are different facts; production once held 6,655
+      expired rows behind a job reporting success every night, with the oldest
+      151 days past expiry.
+
+      Delegates to `ImageRetention.missing_purge_check/0` — the same check the
+      job itself alarms on — rather than restating what "past expiry" means.
+  """
+  @spec pending_count() :: non_neg_integer()
+  def pending_count, do: length(ImageRetention.missing_purge_check())
 end

@@ -55,4 +55,15 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJob do
 
     if failed > 0, do: {:error, :partial_failure}, else: :ok
   end
+
+  @doc """
+      How many unverified registrations remain past the window. Zero after a
+      complete run.
+
+      Delegates to `Accounts.expired_unverified_ids/0`, which is the very query
+      `perform/1` iterates — so the count cannot disagree with the sweep about
+      what it should have collected.
+  """
+  @spec pending_count() :: non_neg_integer()
+  def pending_count, do: length(Accounts.expired_unverified_ids())
 end

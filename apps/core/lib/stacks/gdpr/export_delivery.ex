@@ -93,6 +93,24 @@ defmodule Stacks.GDPR.ExportDelivery do
   end
 
   @doc """
+      How many export artefacts are past their deadline — the far-end check for
+      the retention sweep, zero when it is caught up.
+
+      ⚠️ Reuses `past_deadline?/2`, the same predicate `sweep_expired/1` splits
+      on, rather than recomputing a TTL. Returns 0 when the object store cannot
+      be listed, because a count is not the place to decide what an outage
+      means; `sweep_expired/1` already fails loudly on that path and is the
+      caller that should.
+  """
+  @spec expired_count(DateTime.t()) :: non_neg_integer()
+  def expired_count(now \\ DateTime.utc_now()) do
+    case Storage.list_objects(@prefix <> "/") do
+      {:ok, keys} -> Enum.count(keys, &past_deadline?(&1, now))
+      _ -> 0
+    end
+  end
+
+  @doc """
       Delete every export object whose deadline has passed.
 
       A delete that fails is the leak this job exists to prevent, so the count
