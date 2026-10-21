@@ -202,8 +202,12 @@ defmodule Stacks.ScopeTest do
       # 'anonymous'` clause inside op.current_scope() — with nothing but a
       # comment asking them to match. It fails closed if they diverge (an
       # unrecognised value falls through to `::uuid` and raises), so this is
-      # cheap insurance rather than a live risk. Asserted by behaviour rather
-      # than by comparing strings, so it cannot pass on a shared typo.
+      # cheap insurance rather than a live risk.
+      #
+      # ⚠️ Asserted by behaviour rather than by comparing the two strings — so
+      # what it cannot pass on is a DIVERGENT change. A shared one means the
+      # two still agree, which is the invariant, so passing is correct. (An
+      # earlier version of this comment had that backwards.)
       Scope.anonymous(fn ->
         assert %{rows: [[nil]]} = Repo.query!("SELECT op.current_scope()", [])
       end)
