@@ -32,6 +32,7 @@ SUITES=(
     "$HERE/scheduled_duty_runner_test.sh"
     "$HERE/deploy_preview_gating_test.sh"
     "$HERE/wave_status_stack_guard_test.sh"
+    "$HERE/campaign_residue_ledger_test.sh"
     "$HERE/rls_scope_gate_test.sh"
     "$HERE/sigpipe_hazard_gate_test.sh"
     "$HERE/exclusion_tags_have_runners_test.sh"

@@ -9,7 +9,7 @@ on drift, so a script with no caller cannot sit here silently.
 | script | called by | purpose |
 |---|---|---|
 | `scripts/bootstrap-worktree.sh` | `justfile` |  |
-| `scripts/campaign-residue.sh` | `justfile`, `scripts/check-tracker-refs.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/campaign-residue.sh` | `justfile`, `scripts/check-tracker-refs.sh`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
