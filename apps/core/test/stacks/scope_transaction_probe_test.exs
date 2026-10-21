@@ -19,6 +19,15 @@ defmodule Stacks.ScopeTransactionProbeTest do
       only part of this reachable from inside the sandbox. End-to-end
       behaviour off the sandbox was observed on the deployed preview drive.
 
+      ⚠️ And the table alone was not enough either, which is the second half
+      of the split. The old condition did not get `or` wrong — it omitted the
+      second argument — so a truth table over `must_restore?/2` cannot see the
+      actual regression: reverting the private combiner to `sandboxed?/0` alone
+      leaves all four rows AND both end-to-end cases green. The inputs are
+      therefore pinned separately via `restore_inputs/0`, leaving a pattern
+      match as the only unpinned step. That is as far down as this is worth
+      taking; past it the instrument is a deployed drive, not more scaffolding.
+
       ⛔ Why this is a test and not a comment: the decision rests on whether a
       COMMIT will intervene to revert `SET LOCAL`, and getting it wrong is
       invisible. An earlier version keyed on the pool instead, on the premise
@@ -79,6 +88,80 @@ defmodule Stacks.ScopeTransactionProbeTest do
       # arrives.
       assert Stacks.Scope.must_restore?(true, false)
       assert Stacks.Scope.must_restore?(true, true)
+    end
+  end
+
+  describe "restore_inputs/0 — the facts fed to the decision" do
+    # ⛔ WHY THIS BLOCK EXISTS, and it is the sharpest thing in this file.
+    # The truth table above pins the COMBINATION, and the old bug was not in
+    # the combination: it omitted the second argument entirely. Revert the
+    # private combiner to `sandboxed?()` alone and every test above stays
+    # green — the four rows because `must_restore?/2` is untouched, the two
+    # end-to-end cases because `sandboxed?/0` is always true here. The
+    # regression would come back under a fully green file.
+    #
+    # Pinning the inputs separately closes that: the only step left unpinned
+    # is a pattern match destructuring the tuple.
+
+    test "at the top of a sandboxed test the inputs are {true, false}" do
+      # Which is the quadrant that makes the suite unable to see the bug: the
+      # first term alone is already enough to demand a restore here.
+      assert Stacks.Scope.restore_inputs() == {true, false}
+    end
+
+    test "inside a caller-owned transaction the inputs are {true, true}" do
+      Repo.transaction(fn ->
+        assert Stacks.Scope.restore_inputs() == {true, true},
+               "the second term must flip inside a transaction — if it does not, " <>
+                 "`in_transaction?/0` is not reporting what the decision needs"
+      end)
+    end
+
+    test "⚠️ the second term is the one the suite cannot vary to false-with-production-shape" do
+      # The honest statement of the limit, asserted rather than left in prose:
+      # `sandboxed?/0` is pinned true for the whole suite, so {false, _} — every
+      # production quadrant — is unreachable from here by construction. The
+      # table covers it as data; the behaviour is covered by the deployed drive.
+      {sandboxed?, _} = Stacks.Scope.restore_inputs()
+
+      assert sandboxed?,
+             "if this is ever false the suite is no longer sandboxed, and the end-to-end " <>
+               "cases in this file would finally be able to fail on the production bug — " <>
+               "at which point they, not the truth table, become the primary evidence"
+    end
+
+    test "⛔ the private combiner reads BOTH inputs — the one thing only the source can show" do
+      # ⛔ MEASURED, and it is why this assertion is structural rather than
+      # behavioural. Pinning the inputs and pinning the combination still does
+      # NOT catch the regression that shipped: replace the private
+      # `must_restore?/0` with `sandboxed?()` alone and all 31 tests in this
+      # file stay GREEN — the four table rows because `must_restore?/2` is
+      # untouched, the end-to-end cases and the input tests above because
+      # `sandboxed?/0` is true here.
+      #
+      # The reason is arithmetic, not oversight: inside the sandbox
+      # `sandboxed?()` is true, so `sandboxed?() or anything` IS `sandboxed?()`.
+      # The composition is unobservable in this environment for EVERY possible
+      # second term, so no behavioural assertion written here can distinguish
+      # the two implementations. Decomposing further just moves the hole.
+      #
+      # What remains observable is the source: that the composed decision is
+      # expressed in terms of `restore_inputs/0` rather than one term of it.
+      # That is a weaker claim than behaviour and is stated as such — it catches
+      # the regression by shape, and it is the only instrument in the suite that
+      # catches it at all. The behavioural evidence is the deployed drive.
+      source = File.read!("lib/stacks/scope.ex")
+
+      [combiner] =
+        Regex.run(~r/defp must_restore\? do\n(.*?)\n  end/s, source, capture: :all_but_first)
+
+      assert combiner =~ "restore_inputs()",
+             "the composed decision no longer reads restore_inputs/0, so it may be using one " <>
+               "term where two are needed — the exact regression that leaked a scope in " <>
+               "production, and one that every behavioural test in this file passes under"
+
+      assert combiner =~ "must_restore?(sandboxed?, in_transaction?)",
+             "the composed decision no longer passes BOTH inputs to must_restore?/2"
     end
   end
 

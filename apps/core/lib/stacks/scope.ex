@@ -457,7 +457,29 @@ defmodule Stacks.Scope do
   @spec must_restore?(boolean(), boolean()) :: boolean()
   def must_restore?(sandboxed?, in_transaction?), do: sandboxed? or in_transaction?
 
-  defp must_restore?, do: must_restore?(sandboxed?(), Repo.in_transaction?())
+  @doc """
+      The two facts `must_restore?/2` decides from, as data.
+
+      ⛔ Separated from the decision because the decision was never the bug. The
+      old condition did not get `or` wrong — it **omitted the second argument**,
+      and a truth table over `/2` cannot see that: reverting the private
+      combiner to `sandboxed?()` alone leaves all four rows green, because `/2`
+      is untouched, and leaves the two end-to-end cases green too, because
+      `sandboxed?/0` is always true in the suite. The regression would reappear
+      under a fully green file.
+
+      So the inputs are pinned here and the combination is pinned by the table.
+      What is left unpinned is a pattern match, which is as far down as this is
+      worth taking: past this point the instrument is a deployed drive, not more
+      scaffolding.
+  """
+  @spec restore_inputs() :: {boolean(), boolean()}
+  def restore_inputs, do: {sandboxed?(), Repo.in_transaction?()}
+
+  defp must_restore? do
+    {sandboxed?, in_transaction?} = restore_inputs()
+    must_restore?(sandboxed?, in_transaction?)
+  end
 
   defp sandboxed?, do: Repo.config()[:pool] == Ecto.Adapters.SQL.Sandbox
 end
