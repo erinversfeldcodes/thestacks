@@ -1,4 +1,4 @@
-module ProgressSaveContract exposing (Outcome(..), label, outcomes, response)
+module ProgressSaveContract exposing (Outcome(..), label, outcomes, reportsAnError, response)
 
 {-| The outcomes a reading-progress save can end in, written once and driven
 against every host that owns a progress card.
@@ -104,3 +104,33 @@ response endpoint savedBody outcome =
                 , headers = Dict.empty
                 }
                 "{\"error\":\"unauthorized\"}"
+
+
+{-| Whether the host must have an error on screen after this outcome.
+
+⛔ "Not stuck" and "says why" are different claims, and asserting only the first
+let the minimal wrong fix through: settle the in-flight flag, surface nothing,
+and the reader gets a re-enabled Save button with a save that silently vanished.
+`ensureViewHasNot "Saving…"` says nothing at all about the message.
+
+Both hosts render their failure through a `progress-error` test id — `ReadingPile`
+via `viewSaveState`, `BookDetail` via `viewProgressSaveState` — so this is a
+claim a shared table can make about either of them.
+
+⚠️ `SessionRejected` reports an error like any other failure, deliberately. The
+save did not happen, and the session hand-off may be CANCELLED a tick later when
+another tab's token is adopted — so a reader who stays on the page must be told,
+not left to infer it from a button that went quiet.
+
+-}
+reportsAnError : Outcome -> Bool
+reportsAnError outcome =
+    case outcome of
+        Saved ->
+            False
+
+        ServerRefused ->
+            True
+
+        SessionRejected ->
+            True

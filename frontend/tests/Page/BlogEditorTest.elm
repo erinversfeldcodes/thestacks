@@ -163,6 +163,13 @@ carries, and the test would pass against the defect it exists to catch — which
 is how the sibling hosts' 401 path went unnoticed while their 500 path was
 covered.
 
+⛔ And each asserts the EXACT settled value, not merely `notEqual Loading`.
+`notEqual Loading` is satisfied by `NotAsked` and by `Success ()` too, so the
+minimal wrong fix — settle the flag, surface nothing — passed all three cases
+while leaving the reader a re-enabled button and a save that had silently
+vanished. "Not stuck" and "says why" are different claims and the weaker one
+was standing in for both.
+
 -}
 sessionExpiryStillSettlesTheFlag : Test
 sessionExpiryStillSettlesTheFlag =
@@ -178,7 +185,7 @@ sessionExpiryStillSettlesTheFlag =
                 in
                 Expect.all
                     [ \_ -> inFlight.saving |> Expect.equal Loading
-                    , \_ -> settled.saving |> Expect.notEqual Loading
+                    , \_ -> settled.saving |> Expect.equal (Failure (Http.BadStatus 401))
                     , \_ -> out |> Expect.equal Editor.SessionExpired
                     ]
                     ()
@@ -193,7 +200,7 @@ sessionExpiryStillSettlesTheFlag =
                 in
                 Expect.all
                     [ \_ -> inFlight.publishing |> Expect.equal Loading
-                    , \_ -> settled.publishing |> Expect.notEqual Loading
+                    , \_ -> settled.publishing |> Expect.equal (Failure (Http.BadStatus 401))
                     , \_ -> out |> Expect.equal Editor.SessionExpired
                     ]
                     ()
@@ -208,7 +215,7 @@ sessionExpiryStillSettlesTheFlag =
                 in
                 Expect.all
                     [ \_ -> inFlight.loading |> Expect.equal Loading
-                    , \_ -> settled.loading |> Expect.notEqual Loading
+                    , \_ -> settled.loading |> Expect.equal (Failure (Http.BadStatus 401))
                     , \_ -> out |> Expect.equal Editor.SessionExpired
                     ]
                     ()
