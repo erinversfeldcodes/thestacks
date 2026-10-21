@@ -196,7 +196,8 @@ test_case "every_hand_found_breach_is_covered" \
 # and the assertion simply stops existing.
 for needle in "images_past_expiry" "orphaned_executing_jobs" "warehouse_schemas_missing" \
     "unmigrated" "app_role_exempt_from_rls" "definer_function_executable_by_public" \
-    "widening_policy_is_not_read_only" "rls_table_without_warehouse_policy"; do
+    "widening_policy_is_not_read_only" "rls_table_without_warehouse_policy" \
+    "definer_takes_a_user_list_as_its_subject"; do
     assert_contains "$GATE_SRC" "$needle" "the roster covers ${needle}"
 done
 

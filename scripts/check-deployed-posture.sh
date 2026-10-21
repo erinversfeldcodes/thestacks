@@ -224,7 +224,37 @@ nightly warehouse refresh reads ZERO rows from it instead of failing. The grant 
 inherited from ALTER DEFAULT PRIVILEGES; the policy is not. Add a role-scoped
 USING (true) policy for stacks_dbt and stacks_readonly.")
 
-EXPECTED_ASSERTIONS=8
+# ⛔ A `SECURITY DEFINER` function may take an identifier of the THING BEING
+# ASKED ABOUT — a book, an edition, a placement, a group — but never a list of
+# the USERS WHOSE ROWS TO RETURN.
+#
+# ⚠️ The rule exists because one function broke it and the body looked fine.
+# `op.group_feed_placements(member_ids uuid[], …)` was created taking the list
+# of users whose shelf activity to return, so the caller chose the subject and
+# the function — definer-owned, reading every row — simply obeyed. Measured: an
+# anonymous session could call it with every user id on the platform. The
+# authorisation lived entirely in the application code that computed the
+# argument, and `group` visibility is admitted by NO policy arm, so it
+# disclosed rows the policy set deliberately withholds.
+#
+# ⛔ The virtue of the rule is that it is checkable from the SIGNATURE, without
+# reading the body or trusting a sentence about callers — which is what the
+# previous moduledoc's claim to be "in the same family as the boolean and the
+# id-list" amounted to. So it is enforced by NAME: a `uuid[]` parameter on a
+# definer function must be called `exclude_…`, because an exclusion list
+# narrows a result while a subject list chooses it. Every other definer here
+# takes a scalar identifier and satisfies the rule trivially.
+ASSERTIONS+=("definer_takes_a_user_list_as_its_subject
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, unnest(coalesce(p.proargnames, ARRAY[]::text[])) WITH ORDINALITY AS a(argname, ord) WHERE n.nspname = 'op' AND p.prosecdef AND format_type(p.proargtypes[ord - 1], NULL) = 'uuid[]' AND a.argname NOT LIKE 'exclude%'
+0
+A SECURITY DEFINER function in op takes a uuid[] parameter that is not named
+exclude_*, which means the caller is naming WHOSE ROWS to return rather than what
+is being asked about. A definer function reads every row, so an argument that
+chooses the subject moves the whole authorisation decision into the caller — and
+an anonymous session is a caller. Take an identifier of the subject and read the
+asker from op.scope_user() instead.")
+
+EXPECTED_ASSERTIONS=9
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an

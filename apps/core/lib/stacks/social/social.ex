@@ -778,7 +778,19 @@ defmodule Stacks.Social do
     end
   end
 
+  # ⚠️ Scoped to the VIEWER around the whole read, which this needs for a
+  # reason beyond the usual one: `op.group_feed_placements` asks the scope who
+  # is calling and refuses a caller that is not a member of the group. The
+  # viewer cannot be passed as an argument, because an argument is something a
+  # caller asserts and the scope is something the request established.
+  #
+  # ⚠️ It also flattens what used to be two transactions: `blocked_user_ids/1`
+  # scopes to the same viewer, so nested inside this it runs directly.
   defp build_feed(group_id, viewer_id, opts) do
+    Scope.with_user(viewer_id, fn -> do_build_feed(group_id, viewer_id, opts) end)
+  end
+
+  defp do_build_feed(group_id, viewer_id, opts) do
     limit = min(Keyword.get(opts, :limit, 20), 50)
     before_dt = Keyword.get(opts, :before)
     blocked_ids = blocked_user_ids(viewer_id)
@@ -791,7 +803,12 @@ defmodule Stacks.Social do
     if member_ids == [] do
       {:ok, []}
     else
-      placement_items = feed_placements(member_ids, before_dt, limit)
+      # ⛔ `group_id` and an EXCLUSION list, never the member list. The function
+      # derives the members itself from `op.group_members`; handing it the
+      # subject would let any caller name whose shelf activity to return, which
+      # is what the previous signature did. `blocked_ids` narrows the result and
+      # must be applied before the limit, or a page comes back short.
+      placement_items = feed_placements(group_id, blocked_ids, before_dt, limit)
       post_items = feed_posts(member_ids, before_dt, limit)
 
       items =
@@ -817,11 +834,16 @@ defmodule Stacks.Social do
   # moved the failure here rather than fixing the endpoint — the stacked-defect
   # pattern this project has on record, so re-drive the surface rather than
   # trusting a fixed neighbour.
-  defp feed_placements(member_ids, before_dt, limit) do
+  defp feed_placements(group_id, excluded_ids, before_dt, limit) do
     rows =
       Repo.query!(
-        "SELECT placement_id, book_id, owner_id, placed_at FROM op.group_feed_placements($1, $2, $3)",
-        [Enum.map(member_ids, &Ecto.UUID.dump!/1), before_dt, limit]
+        "SELECT placement_id, book_id, owner_id, placed_at FROM op.group_feed_placements($1, $2, $3, $4)",
+        [
+          Ecto.UUID.dump!(group_id),
+          Enum.map(excluded_ids, &Ecto.UUID.dump!/1),
+          before_dt,
+          limit
+        ]
       ).rows
 
     rows
