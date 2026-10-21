@@ -42,10 +42,15 @@ defmodule StacksWeb.ProtoJSON do
                         # from the core list, so putting a consent flag there
                         # would publish it on other people's pages. It is the
                         # reader's own consent and belongs only in the reader's
-                        # own record. (`consent_analytics` sits in the core list
-                        # and arguably has the same problem — not moved here,
-                        # because changing what an embedded user exposes is a
-                        # separate question from closing this gap.)
+                        # own record.
+                        #
+                        # ⛔ `consent_analytics` sits in the core list and has
+                        # the SAME problem — stated plainly rather than hedged,
+                        # because by the principle one line above there is no
+                        # ambiguity about it, only a change that had not been
+                        # made yet. It has since been made: the embed path now
+                        # takes `@listing_seller_fields`, so neither consent
+                        # flag leaves the owner's own record.
                         #
                         # ⚠️ Added because its ABSENCE lost data, not for
                         # completeness. `Api.elm` decodes
@@ -75,7 +80,41 @@ defmodule StacksWeb.ProtoJSON do
                         # asymmetry with `consent_analytics` had no reason.
                         :consent_writing_assistant
                       ]
-  @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
+  # ⛔ `@user_embed_fields` lived here and is DELETED rather than left unused.
+  # It was `@user_core_fields ++ [:created_at, :updated_at]` and had exactly one
+  # caller — `listing_seller/1`, below — which now has its own narrow list. A
+  # take-list that inherits the owner's fields and is named for somebody else's
+  # view is the defect itself, so leaving it in place for a future caller would
+  # leave the trap armed and the next person would reach for it by name.
+  #
+  # ⛔ A SELLER ON A PUBLIC LISTING, and a separate list because reusing
+  # `@user_embed_fields` served personal data to anonymous callers.
+  #
+  # MEASURED before changing it, through the controller rather than the
+  # serializer, as an unauthenticated `GET /api/listings`:
+  #
+  #     seller keys: age_verified, consent_analytics, created_at, display_name,
+  #                  email, id, profile_visibility, role, updated_at
+  #     seller.email == the real account address  -> true
+  #     profile_visibility                        -> "owner"
+  #
+  # So a seller's ACCOUNT EMAIL reached unauthenticated callers on a paginated,
+  # enumerable index — together with their consent flag, their age-verification
+  # state and their role — including for a seller whose profile visibility is
+  # `owner`, i.e. who chose the most private setting available.
+  #
+  # ⚠️ The cause is a list reused across a trust boundary rather than a missing
+  # redaction. `@user_embed_fields` derives from `@user_core_fields`, which is
+  # the CALLER'S OWN record (login / refresh / me) — a set where `email` is
+  # correct. Inheriting it for "how a user appears inside somebody else's view"
+  # carried the owner's fields outward, and the comment protecting
+  # `pending_email` as "a private address" sat three lines below `:email` in the
+  # list it was protecting.
+  #
+  # `Gen.listing` already carries `contact_info` as the deliberate way to reach
+  # a seller, so nothing is lost: no Elm consumer read the embedded email, and
+  # none existed anywhere in `frontend/` or `e2e/`.
+  @listing_seller_fields [:id, :display_name]
 
   @doc """
       Serializes a book (work) into the proto `Book` shape — the richest book
@@ -816,6 +855,6 @@ defmodule StacksWeb.ProtoJSON do
 
   defp listing_seller(seller) do
     Gen.user(seller)
-    |> Map.take(@user_embed_fields)
+    |> Map.take(@listing_seller_fields)
   end
 end

@@ -952,11 +952,39 @@ defmodule StacksWeb.ProtoJSONTest do
       refute Map.has_key?(result.book, :editions)
 
       assert result.seller.id == seller.id
-      assert result.seller.email == seller.email
       assert result.seller.display_name == "Alice"
-      assert result.seller.role == seller.role
-      assert Map.has_key?(result.seller, :created_at)
-      assert Map.has_key?(result.seller, :updated_at)
+
+      # ⛔ These assertions were INVERTED, and the originals are why the
+      # exposure survived: they pinned a seller's account email, role,
+      # consent flag and timestamps as the contract of a payload served to
+      # ANONYMOUS callers. `GET /api/listings` and `/listings/:id` sit in the
+      # router's "Anonymous reads" scope, so this is what an unauthenticated
+      # request received — measured through the controller before the change:
+      #
+      #     seller.email == the real account address  -> true
+      #     profile_visibility                        -> "owner"
+      #
+      # i.e. the email was served even for a seller who had chosen the most
+      # private profile setting available. `Gen.listing` carries `contact_info`
+      # as the deliberate way to reach a seller, and nothing in `frontend/` or
+      # `e2e/` read the embedded email.
+      #
+      # ⚠️ A test pinning a defect as contract is the hardest kind to notice,
+      # because changing it looks like breaking something.
+      refute Map.has_key?(result.seller, :email),
+             "a seller's account email is served to anonymous callers on an enumerable index"
+
+      refute Map.has_key?(result.seller, :consent_analytics),
+             "a seller's analytics consent flag is nobody else's business"
+
+      refute Map.has_key?(result.seller, :age_verified),
+             "whether a seller verified their age is not part of a listing"
+
+      refute Map.has_key?(result.seller, :profile_visibility),
+             "a seller's own privacy setting is not part of a listing"
+
+      refute Map.has_key?(result.seller, :role),
+             "the embed should not disclose which accounts are privileged"
     end
 
     test "listing/1 includes all expected scalar fields and embedded book/seller" do
