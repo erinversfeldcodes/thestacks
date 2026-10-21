@@ -185,6 +185,27 @@ runs its own `update_all` and is scoped in `perform/1`, and `regenerate_feed_job
 The invariant still holds and still has no exemption for application work: no sentinel GUC value and
 no `BYPASSRLS` role anywhere in this design.
 
+⛔ **Correction, measured on a real database after this ADR was written: the three `SECURITY
+DEFINER` functions were executable by `PUBLIC`, so the narrow grant this design rests on did not
+exist.** `CREATE FUNCTION` grants `EXECUTE` to `PUBLIC` by default and nothing revoked it. Two
+consequences, both worse than they look. First, the explicit grants to the runtime role were
+**decorative** — it already held the privilege through `PUBLIC`, so the list that reads like an
+allowlist constrained nothing, and removing a name from it would have changed nothing. Second,
+`op.placement_owners_for_edition`, written for a correction that runs on the owner connection and
+deliberately *not* granted to the runtime role, was reachable by it anyway: as `stacks_app` with no
+scope set it returned three user ids, while the same question asked directly against the table was
+refused by the policy these functions exist to work around.
+
+It was not a regression — before this change the runtime role could read those tables outright. It
+is worse than a regression in one specific way: **the narrow grant is the whole justification for
+keeping three privileged cross-user reads at all**, and a reviewer reading the grant list would
+have concluded a boundary was there. Closed by `REVOKE ALL … FROM PUBLIC` plus grants by name, and
+now asserted on every deployed stack by the `definer_function_executable_by_public` row in
+`scripts/check-deployed-posture.sh` — which treats a `NULL` `proacl` as an offender, because the
+Postgres default is the absence of a decision rather than a decision. Planted-red recorded: one
+offender with the grant restored, two with an additional default-ACL function present, zero when
+closed.
+
 ⚠️ `Core.Repo` and `Core.ObanRepo` both use `APP_DATABASE_URL`, so Oban workers and web requests are
 the **same database role**; no policy can distinguish them. That is a reason this decision avoids
 role-based exemptions for application work, not an obstacle to be engineered around.
@@ -247,6 +268,24 @@ entirely** — so all 4097 tests pass whether or not a path is scoped. Layers 1 
 what hold before merge, and the first environment that genuinely enforces is the preview stack, where
 the application connects as `stacks_app`. Any future claim that "the tests prove scoping works" is
 false by construction unless the suite is given a non-superuser role.
+
+⛔ **Correction, measured by a planted probe after this ADR was written: layers 1 and 2 do NOT make
+an unscoped query catchable, and the paragraph above overstated what they hold.** The gate's
+granularity is the **module**; the defect's granularity is the **query**. A module that scopes in
+twenty places satisfies layer 2's first check, so an unscoped read added to it exits 0 — planted in
+the largest scoped context, the gate reported `OK: every module querying a secured table scopes`.
+The macro does not cover the gap either: it applies to workers, and the contexts are not workers.
+The probe's other half is worth recording too, because the gate is not useless — a worker falsely
+declaring `scope: :system` while reading a per-user table was caught with two distinct messages and
+a non-zero exit.
+
+So the honest division is: **the gate catches a module that scopes nowhere and a `:system`
+declaration that is false. Nothing before the preview stack catches an unscoped query inside an
+otherwise-scoped module.** This is not hypothetical — it is what actually happened. A shared helper
+in `Stacks.Shelving` was left unscoped, 4122 tests and nineteen gates stayed green, and the defect
+surfaced as HTTP 500 on **every** bookshelf write against the deployed preview. The gate's success
+message now says this out loud; a reviewer reading a diff remains a load-bearing part of the
+design rather than a courtesy.
 
 ### 8. Rollout: straight to enforcing, with no flag
 

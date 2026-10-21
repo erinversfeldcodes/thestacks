@@ -24,6 +24,21 @@
 #      ⚠️ That claim is checked rather than trusted: `:system` is the easy
 #      answer when somebody does not want to think about which user a job acts
 #      for, and it is the answer that silently breaks on a deployed stack.
+#
+# ⛔ WHAT THIS GATE CANNOT SEE, stated here because overstating it is worse than
+# the gap. Its granularity is the MODULE; the defect's granularity is the QUERY.
+# A module that scopes in twenty places satisfies check 1, so a single unscoped
+# read added to it passes — measured, by planting exactly that in the largest
+# scoped context and getting a clean exit 0. The compile-time `Stacks.Worker`
+# macro does not cover it either: that applies to workers, and the contexts are
+# not workers.
+#
+# So the honest claim is: this gate catches a module that scopes NOWHERE and a
+# worker whose `:system` declaration is false. It does NOT make every unscoped
+# query catchable, and nothing in this repository does — the one instrument that
+# caught a real one was a deployed preview stack returning HTTP 500 on every
+# bookshelf write. Read "OK" below as "no module-level omission", and keep
+# reviewing diffs.
 
 set -uo pipefail
 
@@ -175,4 +190,7 @@ if (( fail )); then
     exit 1
 fi
 
-echo "OK: every module querying a secured table scopes, and every :system claim holds."
+echo "OK: every module querying a secured table scopes somewhere, and every :system claim holds."
+echo "    (module-level, not query-level: an unscoped read inside an otherwise-scoped"
+echo "     module passes this gate. Reviewing the diff is still the only thing that"
+echo "     catches that before a deployed stack does.)"
