@@ -73,8 +73,18 @@ fi
 # planted defect in the working tree. The gate discovers its corpus with
 # `git ls-files`, so the copy is made inside the repo and removed after.
 PLANT_DIR="$REPO_ROOT/.sigpipe-probe"
-cleanup() { rm -rf "$PLANT_DIR"; }
+PLANT_DIR_JF="$PLANT_DIR/justfile.orig"
+# ⚠️ The justfile backup is restored by the trap as well as inline, because a
+# failing assertion between the two would otherwise leave the repo's justfile
+# carrying a planted zsh shell. A probe that can outlive its test is how this
+# project has lost uncommitted work before.
+cleanup() {
+    [[ -f "$PLANT_DIR_JF" ]] && cp "$PLANT_DIR_JF" "$REPO_ROOT/justfile"
+    rm -rf "$PLANT_DIR"
+    rm -f "$REPO_ROOT/scripts/zz-sigpipe-suite-probe.sh"
+}
 trap cleanup EXIT
+mkdir -p "$PLANT_DIR"
 
 plant() {
     # $1 = the line to plant. Written into a tracked-looking script that the
@@ -158,6 +168,53 @@ if [[ $PLANT_RC -eq 0 ]]; then
     _record_pass "the banned form in a comment does not trip the gate"
 else
     _record_fail "the gate read its own explanatory comment as a violation: ${PLANT_OUT}"
+fi
+
+test_case "it_reads_untracked_scripts_too" \
+    "a corpus that excludes the file being added passes every new script"
+# ⛔ MEASURED on this gate itself. The discovery was `git ls-files` alone, which
+# cannot see an untracked file — so the gate was invisible to ITSELF until it
+# was committed, and the first run that included it found two violations in its
+# own guidance text that had been there all along. A new script would likewise
+# go unchecked until someone happened to commit it.
+PROBE="$REPO_ROOT/scripts/zz-sigpipe-suite-probe.sh"
+{
+    echo '#!/usr/bin/env bash'
+    echo 'set -uo pipefail'
+    echo 'out="x"'
+    echo 'if echo "$out" | grep -q PAT; then'
+    echo '    :'
+    echo 'fi'
+} > "$PROBE"
+UNTRACKED_OUT="$(bash "$GATE" 2>&1)"
+UNTRACKED_RC=$?
+rm -f "$PROBE"
+if [[ $UNTRACKED_RC -ne 0 ]] && grep -q "zz-sigpipe-suite-probe" <<< "$UNTRACKED_OUT"; then
+    _record_pass "an untracked script's violation is found and named"
+else
+    _record_fail "an untracked script was not read, so a newly added one would go unchecked"
+fi
+
+test_case "it_refuses_a_zsh_shell_in_the_justfile" \
+    "several gates depend on bash word-splitting an unquoted parameter"
+# ⛔ The ambient assumption the whole corpus rests on. `for entry in
+# $RLS_SCOPE_TEST_ALLOWLIST` and `for _stale in $_STALE_IDS` are correct ONLY
+# under a splitting shell; under zsh each would iterate once over the whole
+# string and report an empty result rather than failing — the same
+# empty-work-set-read-as-success shape this gate exists for.
+cp "$REPO_ROOT/justfile" "$PLANT_DIR_JF"
+{
+    echo 'set shell := ["zsh", "-cu"]'
+    cat "$PLANT_DIR_JF"
+} > "$REPO_ROOT/justfile"
+ZSH_OUT="$(bash "$GATE" 2>&1)"
+ZSH_RC=$?
+cp "$PLANT_DIR_JF" "$REPO_ROOT/justfile"
+rm -f "$PLANT_DIR_JF"
+if [[ $ZSH_RC -ne 0 ]] && grep -q "zsh shell" <<< "$ZSH_OUT"; then
+    _record_pass "a zsh shell in the justfile is refused, and the message says an array is the fix"
+else
+    _record_fail "a zsh shell was accepted, leaving every word-splitting loop silently broken"
 fi
 
 test_case "the_anti_vacuity_floor_refuses_an_empty_corpus" \

@@ -69,7 +69,13 @@ while IFS= read -r file; do
     ${text}
 "
     done < <(sed 's/#.*//' "$file" | grep -nE "$CONSUMER" || true)
-done < <(git ls-files '*.sh' | sort)
+    # ⛔ Tracked AND untracked-but-not-ignored, deduplicated. `git ls-files`
+    # alone cannot see a new script, which is not hypothetical: this gate was
+    # invisible to ITSELF until it was committed, and the run that first
+    # included it found two violations in its own guidance text. A gate whose
+    # corpus excludes the file being added is a gate that passes every new
+    # script until someone happens to commit it.
+done < <({ git ls-files '*.sh'; git ls-files --others --exclude-standard '*.sh'; } | sort -u)
 
 # ⚠️ Anti-vacuity. If the discovery stops finding scripts — a renamed
 # directory, a changed shebang convention, `git ls-files` run outside a repo —
@@ -83,6 +89,32 @@ if [[ "${SCANNED}" -lt "${FLOOR}" ]]; then
     exit 1
 fi
 
+# ⛔ The corpus is safe partly because of a fact outside it: every script here
+# is bash-shebanged, and bash word-splits an unquoted parameter. Several gates
+# rely on that — `for entry in $RLS_SCOPE_TEST_ALLOWLIST` and
+# `for _stale in $_STALE_IDS` are both correct ONLY under a splitting shell.
+#
+# Under zsh an unquoted parameter is NOT split, so those loops would silently
+# iterate once over the whole string: `git diff -- $paths` becomes one pathspec
+# matching nothing, exits 0, and reports an empty result. That is this file's
+# own failure mode — a work set that is empty for the wrong reason — and it is
+# how a reviewer's five stale reviews got dispatched as four narrow ones.
+#
+# ⚠️ The fix for such a site is an ARRAY, not quoting: `"$paths"` reproduces
+# the single-argument bug under bash too, which is the opposite of the
+# glob-quoting convention this repo otherwise follows. Nothing in the corpus
+# needs changing today; what needs guarding is the ambient assumption.
+if grep -qE '^[[:space:]]*set[[:space:]]+shell[[:space:]]*:=' "$REPO_ROOT/justfile" 2>/dev/null; then
+    if grep -qE '^[[:space:]]*set[[:space:]]+shell[[:space:]]*:=.*zsh' "$REPO_ROOT/justfile"; then
+        echo "FAIL check-sigpipe-hazards: the justfile sets a zsh shell." >&2
+        echo "  Several gates rely on an unquoted parameter being word-split, which zsh does" >&2
+        echo "  not do — those loops would iterate once over the whole string and report an" >&2
+        echo "  empty result rather than failing. Use bash, or convert every such site to an" >&2
+        echo "  array (quoting is NOT the fix — it reproduces the bug under bash)." >&2
+        exit 1
+    fi
+fi
+
 if [[ "${FOUND}" -ne 0 ]]; then
     echo "FAIL check-sigpipe-hazards: ${FOUND} pipeline(s) whose status is read can return 141 instead of an answer." >&2
     printf '%s' "${REPORT}" >&2
@@ -91,10 +123,18 @@ if [[ "${FOUND}" -ne 0 ]]; then
   Under `pipefail`, an early-exiting consumer kills the producer with SIGPIPE
   and the pipeline reports 141 — so the test goes the WRONG WAY on a match.
 
-  Rewrite to drop the pipe:
-      if echo "$out" | grep -q PAT;  ->  if grep -q PAT <<< "$out";
-      X="$(cmd | head -5)"           ->  cmd_out="$(cmd)"; X="${cmd_out:0:2000}"
-      if cmd | grep -q PAT;          ->  out="$(cmd || true)"; if grep -q PAT <<< "$out";
+  Rewrite to drop the pipe. (Described rather than shown: this guidance is
+  printed by the gate, not commented out, so spelling the banned form here
+  literally would make the gate report itself -- which it did once.)
+
+      a pipe from echo/printf into `grep -q PAT`
+          -> drop the producer, feed grep a here-string: grep -q PAT <<< "$out"
+
+      a pipe from any command into `grep -q PAT`
+          -> capture first: out="$(cmd || true)", then the here-string form
+
+      a pipe into `head -N` used for truncation
+          -> capture, then slice: cmd_out="$(cmd)"; X="${cmd_out:0:2000}"
 
   If a site is genuinely safe, it still has to stop reading the status —
   `| grep -q … || true` is not a fix, it discards the answer.
