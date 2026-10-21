@@ -239,7 +239,7 @@ updateWithEffect msg model =
                                 --
                                 -- BookDetail's equivalent branch calls
                                 -- `Card.stopSaving` for the same reason.
-                                ( { model | cards = clearSaving placementId model.cards }
+                                ( { model | cards = clearSaving placementId updatedCards }
                                 , Effect.none
                                 , NoOut
                                 )
@@ -260,7 +260,7 @@ updateWithEffect msg model =
                         -- clear, because no token on a save IS an expired
                         -- session, which this page reports on every other
                         -- failing path.
-                        ( { model | cards = clearSaving placementId model.cards }
+                        ( { model | cards = clearSaving placementId updatedCards }
                         , Effect.none
                         , SessionExpired
                         )
