@@ -68,6 +68,57 @@ suite =
                             Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False }) Nothing
                     in
                     model.saving |> Expect.equal NotAsked
+            , test "⛔ the writing toggle does NOT touch the Save button's state" <|
+                -- ⛔ The two controls on this page have different durability:
+                -- analytics is a draft until Save is pressed, the writing
+                -- toggle writes immediately. They used to share `saving`, which
+                -- made the shared button LIE — flipping the writing toggle put
+                -- "Save Preferences" into its saving-then-saved state for a
+                -- save the reader never asked for.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update Consent.ToggleWritingAssistant
+                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Just "tok")
+                    in
+                    Expect.all
+                        [ \m -> m.writingAssistantSaving |> Expect.equal Loading
+                        , \m -> m.saving |> Expect.equal NotAsked
+                        ]
+                        model
+            , test "⛔ a FAILED writing toggle does not surface under the Save button" <|
+                -- ⛔ The worse half: a writing-toggle failure used to render an
+                -- error message underneath a button that had not been pressed.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveWritingAssistantCompleted (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = True })
+                                (Just "tok")
+                    in
+                    Expect.all
+                        [ \m -> m.writingAssistantSaving |> Expect.equal (Failure (Http.BadStatus 500))
+                        , \m -> m.saving |> Expect.equal NotAsked
+                        ]
+                        model
+            , test "and a SaveConsent failure still surfaces under the Save button" <|
+                -- The positive control: splitting the state must not make the
+                -- button stop reporting the save it does govern.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveCompleted (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = True, writingAssistant = False })
+                                (Just "tok")
+                    in
+                    Expect.all
+                        [ \m -> m.saving |> Expect.equal (Failure (Http.BadStatus 500))
+                        , \m -> m.writingAssistantSaving |> Expect.equal NotAsked
+                        ]
+                        model
             , test "ToggleAnalytics flips analyticsConsent" <|
                 \_ ->
                     let

@@ -23,6 +23,22 @@ type alias Model =
     { analyticsConsent : Bool
     , writingAssistantConsent : Bool
     , saving : RemoteData Http.Error ()
+
+    {- ⛔ The writing toggle's OWN save state, separate from `saving`.
+
+       The two controls on this page have different durability: analytics is a
+       draft until "Save Preferences" is pressed, while the writing toggle
+       writes immediately on click. That is a design asymmetry and is recorded
+       as one — but they also used to SHARE `saving`, which turned it into a
+       lie: flipping the writing toggle made "Save Preferences" show its
+       saving-then-saved state for a save the reader never asked for, and a
+       writing-toggle FAILURE rendered an error message underneath a button that
+       had not been pressed.
+
+       Splitting them means each control reports its own outcome, so the Save
+       button speaks only for what it actually governs.
+    -}
+    , writingAssistantSaving : RemoteData Http.Error ()
     }
 
 
@@ -79,6 +95,7 @@ init consent =
     { analyticsConsent = consent.analytics
     , writingAssistantConsent = consent.writingAssistant
     , saving = NotAsked
+    , writingAssistantSaving = NotAsked
     }
 
 
@@ -98,7 +115,10 @@ update msg model maybeToken =
             in
             case maybeToken of
                 Just token ->
-                    ( { model | writingAssistantConsent = newValue, saving = Loading }
+                    ( { model
+                        | writingAssistantConsent = newValue
+                        , writingAssistantSaving = Loading
+                      }
                     , Api.saveWritingAssistantConsent newValue token SaveWritingAssistantCompleted
                     , NoOut
                     )
@@ -120,14 +140,14 @@ update msg model maybeToken =
         SaveWritingAssistantCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | saving = Success () }, Cmd.none, NoOut )
+                    ( { model | writingAssistantSaving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | saving = Failure err }, Cmd.none, NoOut )
+                        ( { model | writingAssistantSaving = Failure err }, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
@@ -223,6 +243,10 @@ viewSection locked model =
                     , disabled locked
                     , onClick ToggleWritingAssistant
                     ]
+                    -- ⚠️ Placed in the list below, after the label, so the
+                    -- outcome of THIS control renders beside it. It used to
+                    -- surface under "Save Preferences", which meant a failed
+                    -- toggle showed an error beneath a button nobody pressed.
                     [ text
                         (if model.writingAssistantConsent then
                             "On"
@@ -231,6 +255,13 @@ viewSection locked model =
                             "Off"
                         )
                     ]
+                , case model.writingAssistantSaving of
+                    Failure err ->
+                        p [ class "error", attribute "data-testid" "writing-assistant-consent-error" ]
+                            [ text (FailureCopy.saveFailure "your book-linking preference" err) ]
+
+                    _ ->
+                        text ""
                 ]
             ]
         , div [ class "settings-actions" ]
