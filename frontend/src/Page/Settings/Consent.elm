@@ -193,11 +193,26 @@ update msg model maybeToken =
                     ( { model | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
+                    let
+                        -- ⛔ SETTLED BEFORE the error is classified, exactly as
+                        -- `SaveWritingAssistantCompleted` above does.
+                        --
+                        -- ⚠️ This handler was MISSED when that one was fixed,
+                        -- in this same module, twelve lines away. The 401 arm
+                        -- returned `model` untouched, so an expired session left
+                        -- `saving` on `Loading` and the Save button disabled
+                        -- forever, while the `else` branch recorded a `Failure`.
+                        -- It was found by sweeping the shape across the whole
+                        -- frontend, not by re-reading this file — which is the
+                        -- argument for sweeping rather than for reading harder.
+                        settled =
+                            { model | saving = Failure err }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | saving = Failure err }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
 
 {-| The standalone-page wrapper. Since TR-4 the consent controls live as a

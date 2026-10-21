@@ -22,6 +22,7 @@ import Html.Attributes
 import Http
 import Page.Bookshelf.ReadingPile as ReadingPile
 import ProgramTest exposing (ProgramTest, SimulatedEffect)
+import ProgressSaveContract
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
 import TestHelpers exposing (ReadingPileTestModel, namedPlacement, readingPileProgram, simulateBookshelfResponse)
@@ -126,7 +127,62 @@ suite =
         , finishedTransitionSurfacesBridge
         , errorResponseSurfacesMessage
         , saveWithNoChosenStatusIssuesNoRequest
+        , progressSaveContract
         ]
+
+
+{-| The shared outcome table from `ProgressSaveContract`, driven through this
+host's own UI. `Page.BookDetail` runs the same list.
+
+⛔ These two hosts share a card component and have diverged four times in four
+review rounds. They were then found to be wrong IDENTICALLY on the 401 branch,
+which the fix-one-check-the-other reflex cannot catch, because checking the
+other host shows you the same code. The list lives in one module so a case is
+added to both hosts at once; `expectedOut` below is exhaustive so the compiler
+makes this host say what a new outcome means.
+
+-}
+progressSaveContract : Test
+progressSaveContract =
+    describe "progress_save_contract: every terminal outcome clears the in-flight flag"
+        (List.map contractCase ProgressSaveContract.outcomes)
+
+
+{-| What this host must emit for each outcome.
+-}
+expectedOut : ProgressSaveContract.Outcome -> ReadingPile.OutMsg
+expectedOut outcome =
+    case outcome of
+        ProgressSaveContract.Saved ->
+            ReadingPile.NoOut
+
+        ProgressSaveContract.ServerRefused ->
+            ReadingPile.NoOut
+
+        ProgressSaveContract.SessionRejected ->
+            ReadingPile.SessionExpired
+
+
+contractCase : ProgressSaveContract.Outcome -> Test
+contractCase outcome =
+    test (ProgressSaveContract.label outcome) <|
+        \() ->
+            startPile
+                |> openAndSave
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    progressEndpoint
+                    (ProgressSaveContract.response progressEndpoint savedProgressBody outcome)
+                -- The in-flight flag, asserted through the button a reader
+                -- sees. A host that leaves it set shows "Saving…" with Save
+                -- disabled and no response ever coming.
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Saving…" ]
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal (expectedOut outcome) model.lastOut)
+
+
+savedProgressBody : String
+savedProgressBody =
+    "{\"placement\":{\"id\":\"placement-book-1\",\"reading_status\":\"reading\",\"current_page\":142,\"started_at\":\"2026-07-22T10:00:00Z\",\"finished_at\":null}}"
 
 
 {-| ⛔ Saving a pile card whose status was never recorded must issue NO request.

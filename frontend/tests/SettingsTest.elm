@@ -69,6 +69,40 @@ suite =
                             Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False }) Nothing
                     in
                     model.saving |> Expect.equal NotAsked
+            , test "⛔ a 401 on Save Preferences settles `saving` and hands off the session" <|
+                -- ⛔ The SECOND handler in this module with this defect. The
+                -- writing-assistant toggle's 401 path was fixed first, and this
+                -- one — the Save Preferences button — was left returning the
+                -- model untouched, so an expired session left `saving` on
+                -- `Loading` and the button disabled forever while the sibling
+                -- `else` branch recorded a `Failure`.
+                --
+                -- ⚠️ Found by sweeping the shape rather than by reading this
+                -- file, which is the point: the earlier fix was made IN this
+                -- module and did not notice the handler twelve lines below it.
+                --
+                -- ⚠️ The precondition is asserted first. `saving` starts as
+                -- `NotAsked`, so "no longer Loading" would otherwise be
+                -- satisfied by a fresh model and pass against the defect.
+                \_ ->
+                    let
+                        ( inFlight, _, _ ) =
+                            Consent.update Consent.SaveConsent
+                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Just "tok")
+
+                        ( settled, _, out ) =
+                            Consent.update
+                                (Consent.SaveCompleted (Err (Http.BadStatus 401)))
+                                inFlight
+                                (Just "tok")
+                    in
+                    Expect.all
+                        [ \_ -> inFlight.saving |> Expect.equal Loading
+                        , \_ -> settled.saving |> Expect.notEqual Loading
+                        , \_ -> out |> Expect.equal Consent.SessionExpired
+                        ]
+                        ()
             , test "⛔ the writing toggle does NOT touch the Save button's state" <|
                 -- ⛔ The two controls on this page have different durability:
                 -- analytics is a draft until Save is pressed, the writing

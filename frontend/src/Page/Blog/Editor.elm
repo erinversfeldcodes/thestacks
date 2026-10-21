@@ -195,11 +195,21 @@ update msg model maybeToken =
                     )
 
                 Err err ->
+                    let
+                        -- ⛔ SETTLED BEFORE the error is classified. The 401 arm
+                        -- used to return `model` untouched, leaving `saving` on
+                        -- `Loading` — a disabled Save with no response ever
+                        -- coming — and `SessionExpired` does not guarantee the
+                        -- reader leaves this page: the deferred expiry net adopts
+                        -- a token another tab refreshed and cancels the logout.
+                        settled =
+                            { model | saving = Failure err, publishing = NotAsked }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | saving = Failure err, publishing = NotAsked }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
         PublishCompleted result ->
             case result of
@@ -207,11 +217,16 @@ update msg model maybeToken =
                     ( { model | publishing = Success () }, Cmd.none, NoOut )
 
                 Err err ->
+                    let
+                        -- Settled before classification, as above.
+                        settled =
+                            { model | publishing = Failure err }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | publishing = Failure err }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
         PostLoaded result ->
             case result of
@@ -227,11 +242,18 @@ update msg model maybeToken =
                     )
 
                 Err err ->
+                    let
+                        -- Settled before classification, as above. On this arm
+                        -- the stuck state is a spinner rather than a disabled
+                        -- button, which is quieter and no more correct.
+                        settled =
+                            { model | loading = Failure err }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | loading = Failure err }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

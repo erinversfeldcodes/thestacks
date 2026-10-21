@@ -1081,17 +1081,35 @@ updateWithEffect msg model maybeToken =
                     )
 
                 Err (Api.ProgressRequestFailed err) ->
+                    let
+                        -- ⛔ STOPPED BEFORE the error is classified, so the 401
+                        -- and the 500 cannot disagree about it.
+                        --
+                        -- The 401 branch used to return `model` untouched, which
+                        -- left the card on "Saving…" with Save disabled and no
+                        -- response ever coming. That is not hidden behind a
+                        -- redirect: `SessionExpired` enters the DEFERRED expiry
+                        -- net, which asks JS for the stored auth and ADOPTS a
+                        -- token another tab refreshed — cancelling the logout and
+                        -- leaving the reader on this page, which is exactly when
+                        -- the stuck flag becomes permanent.
+                        --
+                        -- ⚠️ `Page.Bookshelf.ReadingPile` had the same defect, not
+                        -- a different one. Both hosts are driven by the shared
+                        -- case list in `tests/ProgressSaveContract.elm`, because
+                        -- checking the sibling host cannot find a defect they
+                        -- share.
+                        stopped =
+                            { model
+                                | progressCard = Maybe.map Card.stopSaving model.progressCard
+                                , progressSaveState = Failure (Api.ProgressRequestFailed err)
+                            }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Effect.none, SessionExpired )
+                        ( stopped, Effect.none, SessionExpired )
 
                     else
-                        ( { model
-                            | progressCard = Maybe.map Card.stopSaving model.progressCard
-                            , progressSaveState = Failure (Api.ProgressRequestFailed err)
-                          }
-                        , Effect.none
-                        , NoOut
-                        )
+                        ( stopped, Effect.none, NoOut )
 
                 Err other ->
                     ( { model

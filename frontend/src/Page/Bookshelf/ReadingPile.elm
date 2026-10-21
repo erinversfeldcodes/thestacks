@@ -305,11 +305,31 @@ updateWithEffect msg model =
                     )
 
                 Err (Api.ProgressRequestFailed err) ->
+                    let
+                        -- ⛔ STOPPED BEFORE the error is classified, so the 401
+                        -- and the 500 cannot disagree about it. See the matching
+                        -- comment in `Page.BookDetail`: the 401 branch used to
+                        -- return `model` untouched, leaving the card on "Saving…"
+                        -- with Save disabled, and `SessionExpired` does not
+                        -- guarantee a redirect — the deferred expiry net may
+                        -- adopt a token another tab refreshed and keep the
+                        -- reader here.
+                        --
+                        -- ⚠️ Both hosts had this identically, which is why the
+                        -- shared case list in `tests/ProgressSaveContract.elm`
+                        -- exists rather than another round of checking the
+                        -- sibling by hand.
+                        stopped =
+                            { model
+                                | cards = clearSaving placementId model.cards
+                                , saveState = Failure (Api.ProgressRequestFailed err)
+                            }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Effect.none, SessionExpired )
+                        ( stopped, Effect.none, SessionExpired )
 
                     else
-                        ( { model | cards = clearSaving placementId model.cards, saveState = Failure (Api.ProgressRequestFailed err) }, Effect.none, NoOut )
+                        ( stopped, Effect.none, NoOut )
 
                 Err other ->
                     ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Effect.none, NoOut )

@@ -14,13 +14,16 @@ import Html.Attributes
 import Http
 import Page.BookDetail as BookDetail
 import ProgramTest exposing (ProgramTest, SimulatedEffect)
+import ProgressSaveContract
 import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
     exposing
-        ( bookDetailProgram
+        ( BookDetailTestModel
+        , bookDetailProgram
+        , bookDetailProgramWithOut
         , simulateBookDetailResponseWithPlacement
         , testBook
         , testPlacement
@@ -119,7 +122,77 @@ suite =
         , finishedOnPileSurfacesBridge
         , finishedOnLibraryHasNoBridge
         , saveWithNoChosenStatusIssuesNoRequest
+        , progressSaveContract
         ]
+
+
+{-| The shared outcome table from `ProgressSaveContract`, driven through this
+host's own UI. The Reading Pile runs the same list.
+
+⛔ Written as a `List.map` over `ProgressSaveContract.outcomes` rather than as
+hand-listed cases, so a new outcome cannot be added to one host and forgotten in
+the other — and `expectedOut` below stops compiling until this host says what
+the new outcome should produce.
+
+-}
+progressSaveContract : Test
+progressSaveContract =
+    describe "progress_save_contract: every terminal outcome clears the in-flight flag"
+        (List.map contractCase ProgressSaveContract.outcomes)
+
+
+{-| What this host must emit for each outcome.
+
+Exhaustive on purpose: this is the per-host half of the contract, and the
+compiler is what keeps it complete.
+
+-}
+expectedOut : ProgressSaveContract.Outcome -> BookDetail.OutMsg
+expectedOut outcome =
+    case outcome of
+        ProgressSaveContract.Saved ->
+            BookDetail.NoOut
+
+        ProgressSaveContract.ServerRefused ->
+            BookDetail.NoOut
+
+        ProgressSaveContract.SessionRejected ->
+            BookDetail.SessionExpired
+
+
+contractCase : ProgressSaveContract.Outcome -> Test
+contractCase outcome =
+    test (ProgressSaveContract.label outcome) <|
+        \() ->
+            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook libraryPlacement)
+                |> openAndSaveWithOut
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    progressEndpoint
+                    (ProgressSaveContract.response progressEndpoint completedBody outcome)
+                -- The in-flight flag, asserted through the button a reader sees.
+                -- A host that leaves it set shows "Saving…" with Save disabled
+                -- and no response ever coming.
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Saving…" ]
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal (expectedOut outcome) model.lastOut)
+
+
+{-| `openAndSave`, against the out-recording harness.
+-}
+openAndSaveWithOut :
+    ProgramTest BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+    -> ProgramTest BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+openAndSaveWithOut program =
+    program
+        |> ProgramTest.clickButton "Not recorded"
+        |> ProgramTest.simulateDomEvent
+            (Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ])
+            (Event.input "reading")
+        |> ProgramTest.fillIn "" "Current page" "142"
+        |> ProgramTest.clickButton "Save"
 
 
 {-| ⛔ Saving a card whose status was never recorded must issue NO request.
