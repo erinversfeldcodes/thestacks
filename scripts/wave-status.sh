@@ -149,6 +149,29 @@ def staff_reviewed(path):
 
 violations, actionable, informal = [], [], []
 waves = state.get("waves") or {}
+
+# ⛔ ANTI-VACUITY. A missing key, a renamed key and an explicitly empty `{}` all
+# collapsed onto the same path here, and that path printed "All completion
+# claims are backed. 0/0 items done" and exited 0. This script is the project's
+# stated authority on campaign progress — ask it, never a human — so a
+# malformed state file reported a fully green campaign, which is the single
+# most expensive thing it could get wrong. Measured both spellings.
+#
+# ⚠️ The whole stack-review block below is additionally gated on "some item is
+# done", so an empty `waves` silenced that check too: one typo disabled both
+# halves of the file's guarantees at once.
+if not waves:
+    print("=" * 78)
+    print(f'{os.path.basename(state_file)}: the "waves" key is missing or empty.')
+    print()
+    print("  Nothing was examined, so nothing can be reported as backed. A campaign")
+    print("  state file with no waves is malformed, not finished — and the two")
+    print("  spellings that reach here (absent key, renamed key) are exactly how a")
+    print("  green report over an unread file happens.")
+    print()
+    print("Fix the artifact or fix the status. Do not ask a human which it is.")
+    print("=" * 78)
+    sys.exit(1)
 print(f"campaign: {state.get('campaign', os.path.basename(state_file))}")
 print(f"state:    {state_file}")
 print(f"updated:  {state.get('updated_at', '—')}\n")
@@ -342,6 +365,15 @@ def touched_stacks(declared_range=None):
     if declared_range:
         files = _git(["diff", "--name-only", declared_range])
         if files is None:
+            return None
+        # ⛔ An EMPTY-but-readable range is UNKNOWN, not "nothing to review".
+        # The `None` path above was given a refusal and this one was not, which
+        # is the same asymmetry the sweep's legs had: the case somebody thought
+        # about got a guard, the neighbouring case did not. `HEAD..HEAD` — a
+        # typo resolving to one commit twice — exits 0 with no output, which
+        # produced an empty stack set, which satisfied every stack-review check
+        # vacuously and printed full coverage.
+        if not files:
             return None
         return _stacks_for(files)
 
