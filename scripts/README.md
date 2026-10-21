@@ -6,6 +6,16 @@ Every script here is either invoked by the listed callers or allowlisted as
 a manual tool with a reason. The wiring gate regenerates this file and fails
 on drift, so a script with no caller cannot sit here silently.
 
+**What "called by" measures.** A caller is a file that names this script on a
+line of code — comments are stripped, and in a `.sh` or `.py` source a line that
+is only a quoted string is treated as data rather than an invocation (an
+exemption list, a fixture pairing, a generated-file banner). That is deliberately
+narrower than asking what an invocation *looks like*, which reported 11 live
+scripts as orphans here because this repo dispatches through its own shell
+functions. The residue: a script named inside a longer data string, with code
+around it, still counts as called. So read a single surprising caller as "named
+in code by" and check it before relying on it.
+
 | script | called by | purpose |
 |---|---|---|
 | `scripts/bootstrap-worktree.sh` | `justfile` |  |

@@ -219,4 +219,42 @@ run_gate
 assert_exit_zero "$RC" "the gate passes: 'gate orphan.sh' is still a call"
 assert_contains "$OUT" "all wired" "no script is reported as an orphan"
 
+# --- and in DECLARATIVE config a quoted string IS the invocation -----------
+
+# ⛔ The condition on the data rule, and the reason it is a condition rather
+# than caution. In a shell or Python file a bare string literal on its own line
+# is never how anything runs a script. In a declarative config it is the only
+# way: this repo wires its Stop hook as `"command": "…/pre-stop-lint.sh"` in
+# `.claude/settings.json`, and a config listing commands one per line would put
+# a bare quoted path there legitimately.
+#
+# MEASURED: the ungated rule does not actually strip the real settings.json
+# line — it carries a key prefix and internal escaped quotes, so the
+# no-internal-quote class cannot span it. But the shape BELOW is stripped by
+# it, and there are zero instances of it in the declarative corpus today, which
+# is why the gate went in before one appeared rather than after.
+rm -f "$SANDBOX/scripts/lister.sh"
+write_justfile <<'EOF'
+build:
+    echo building
+EOF
+mkdir -p "$SANDBOX/.claude"
+cat > "$SANDBOX/.claude/settings.json" <<'EOF'
+{
+  "hooks": {
+    "Stop": [
+      "scripts/orphan.sh"
+    ]
+  }
+}
+EOF
+
+test_case "a_quoted_command_in_declarative_config_is_a_caller" "the data rule is gated on source kind"
+(cd "$SANDBOX" && bash scripts/check-script-wiring.sh --write >/dev/null 2>&1)
+run_gate
+assert_exit_zero "$RC" "the gate passes: a bare quoted path in config is an invocation"
+assert_contains "$OUT" "all wired" "the script is not reported as an orphan"
+assert_contains "$(cat "$SANDBOX/scripts/README.md")" ".claude/settings.json" \
+    "and the config is recorded as its caller"
+
 summarise

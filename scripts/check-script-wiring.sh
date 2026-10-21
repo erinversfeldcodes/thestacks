@@ -82,7 +82,7 @@ for pat in ["justfile", ".github/workflows/*.yml", ".github/actions/**/*.yml",
 # lines whose first non-space characters begin a comment — because the
 # alternative is parsing four languages, and a commented-out invocation is not
 # an invocation either.
-def _code_lines(txt):
+def _code_lines(txt, path=""):
     out = []
     for line in txt.split("\n"):
         stripped = line.lstrip()
@@ -112,7 +112,24 @@ def _code_lines(txt):
         # bare string literal on its own line is never how anything here runs a
         # script. The stated limit is that a longer data string with code around
         # it stays unclassifiable.
-        if re.fullmatch(r"""(['"])[^'"]*\1,?""", stripped):
+        #
+        # ⛔ GATED ON EXTENSION, and the condition is not caution — it is the
+        # difference between imperative and declarative source. In a shell or
+        # Python file a bare string literal on its own line is never how
+        # anything runs a script. In a declarative config a quoted string IS
+        # the invocation: `.claude/settings.json` wires the Stop hook as
+        # `"command": "…/pre-stop-lint.sh"`, and a config that listed commands
+        # one per line would put a bare quoted path there legitimately.
+        #
+        # MEASURED both ways. The ungated rule does NOT in fact strip that
+        # settings.json line — it carries a key prefix and internal escaped
+        # quotes, so `[^'"]*` cannot span it, and `pre-stop-lint.sh` keeps its
+        # caller either way. But `"scripts/foo.sh"` alone on a line IS stripped
+        # by it, and in declarative config that would be a real invocation
+        # discarded. There are ZERO such lines in the declarative corpus today,
+        # which is the cheapest moment to close it rather than the moment it
+        # manufactures an orphan.
+        if path.endswith((".sh", ".py")) and re.fullmatch(r"""(['"])[^'"]*\1,?""", stripped):
             continue
         out.append(line)
     return out
@@ -128,7 +145,7 @@ def callers(path):
     for f, txt in corpus.items():
         if f == path:
             continue
-        code = "\n".join(_code_lines(txt))
+        code = "\n".join(_code_lines(txt, f))
         if any(n in code for n in needles):
             found.append(f)
     return sorted(found)
@@ -162,6 +179,16 @@ def render():
            "Every script here is either invoked by the listed callers or allowlisted as",
            "a manual tool with a reason. The wiring gate regenerates this file and fails",
            "on drift, so a script with no caller cannot sit here silently.",
+           "",
+           "**What \"called by\" measures.** A caller is a file that names this script on a",
+           "line of code — comments are stripped, and in a `.sh` or `.py` source a line that",
+           "is only a quoted string is treated as data rather than an invocation (an",
+           "exemption list, a fixture pairing, a generated-file banner). That is deliberately",
+           "narrower than asking what an invocation *looks like*, which reported 11 live",
+           "scripts as orphans here because this repo dispatches through its own shell",
+           "functions. The residue: a script named inside a longer data string, with code",
+           "around it, still counts as called. So read a single surprising caller as \"named",
+           "in code by\" and check it before relying on it.",
            "",
            "| script | called by | purpose |",
            "|---|---|---|"]
