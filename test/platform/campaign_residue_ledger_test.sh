@@ -67,7 +67,7 @@ cp "$SWEEP" "$SANDBOX/scripts/"
 write_ledger() {
     {
         printf '# Residue Ledger\n\n'
-        printf '| id | finding | source | status | due_when | disposition |\n'
+        printf '%s\n' "${LEDGER_HEADER:-| id | finding | source | status | due_when | disposition |}"
         printf '|---|---|---|---|---|---|\n'
         cat
     } > "$SANDBOX/$LEDGER_REL"
@@ -161,5 +161,57 @@ run_sweep
 assert_exit_nonzero "$RC" "the sweep refuses to report a clean sweep over nothing"
 assert_contains "$OUT" "parsed 0 ledger rows" "the refusal says what happened"
 assert_not_contains "$OUT" "(none open)" "it does not report an empty residue list"
+
+# --- a reordered or renamed header is a refusal, not 300 open rows ----------
+
+# ⛔ Reading by COLUMN is only as good as knowing which column is which. Every
+# verdict here indexes `status` at position 3, so a reordered header makes each
+# row parse cleanly and mean something else.
+#
+# ⚠️ That failure IS loud on its own — a reorder prints every row as open — but
+# loud is not interpretable, and "300 open rows" invites the reading that the
+# ledger exploded rather than that the header moved. The same distinction as a
+# floor refusal versus a hazard verdict: both red, only one tells you what to do.
+# This case asserts the message, not just the exit code, for that reason.
+LEDGER_HEADER='| id | finding | status | source | due_when | disposition |'
+write_ledger <<'EOF'
+| RL-010 | a finding | closed | a review | — | fixed |
+EOF
+
+test_case "a_reordered_header_is_refused" "a positional read must check its positions"
+run_sweep
+# ⚠️ The exit code alone does NOT discriminate here, measured: with the header
+# check defeated, the reordered row's `status` cell holds `a review`, which the
+# status-vocabulary check then refuses — so the sweep still exits non-zero for a
+# different reason. Only the message assertion below separates the two.
+assert_exit_nonzero "$RC" "the sweep refuses rather than reading the wrong cells"
+assert_contains "$OUT" "column header is not the one this reader indexes" \
+    "the refusal names the cause, so it is not mistaken for an exploded ledger"
+assert_not_contains "$OUT" "row(s) parsed" "it stops before reporting verdicts it cannot trust"
+unset LEDGER_HEADER
+
+# --- an unrecognised status is a refusal ------------------------------------
+
+# ⛔ The status test is `!= "closed"`, so ANY unrecognised value reads as OPEN.
+# That is the safe direction for a typo and silent in both: a misspelled
+# `clsoed` becomes permanent residue nobody can discharge, and nothing says the
+# word is wrong.
+write_ledger <<'EOF'
+| RL-011 | a finding whose status is misspelled | a review | clsoed | — | fixed |
+| RL-012 | a finding that really is open | a review | open | now | unfixed |
+EOF
+
+test_case "an_unrecognised_status_is_refused" "a misspelled status cannot become silent residue"
+run_sweep
+assert_exit_nonzero "$RC" "the sweep refuses"
+assert_contains "$OUT" "unrecognised status value" "the refusal says what is wrong"
+# ⚠️ Asserted on the QUOTED form, measured. With the check defeated, `clsoed`
+# reads as open and the row is printed verbatim — so a bare `clsoed` / `RL-011`
+# assertion is satisfied by the row LISTING rather than by the refusal, and
+# passes against the defect. The refusal is the only thing that prints the value
+# in quotes.
+assert_contains "$OUT" "'clsoed'" "and quotes the offending value in the refusal, not merely lists the row"
+assert_contains "$OUT" "(RL-011)" "and names the row carrying it, in the refusal's own form"
+assert_not_contains "$OUT" "RL-012" "the genuinely open row is not blamed for it"
 
 summarise

@@ -40,6 +40,44 @@ if [ -f plans/residue-ledger.md ]; then
 import re, sys
 
 SPLIT = re.compile(r"(?<!\\)\|")
+
+# ⛔ THE HEADER IS VALIDATED, because reading by COLUMN is only as good as
+# knowing which column is which.
+#
+# Everything below indexes `status` at position 3. If someone reorders or
+# renames the columns, every row parses cleanly and the verdicts are read off
+# the wrong cells. That failure IS loud — a reorder prints all 300 rows as open
+# — but loud is not the same as interpretable, and "300 open rows" invites the
+# reading that the ledger exploded rather than that the header moved. Same
+# distinction as a floor refusal versus a hazard verdict: both are red, only one
+# tells you what to do.
+EXPECTED_HEADER = ["id", "finding", "source", "status", "due_when", "disposition"]
+
+header = None
+for line in open("plans/residue-ledger.md"):
+    if line.startswith("|") and "---" not in line:
+        cells = [c.strip() for c in SPLIT.split(line.rstrip("\n"))]
+        if len(cells) >= 3 and not re.match(r"^RL-\d+$", cells[1]):
+            header = cells[1:-1]
+            break
+
+if header != EXPECTED_HEADER:
+    print("!! REFUSING: the ledger's column header is not the one this reader indexes.", file=sys.stderr)
+    print(f"   expected: {EXPECTED_HEADER}", file=sys.stderr)
+    print(f"   found:    {header}", file=sys.stderr)
+    print("   Every verdict below is read off a column POSITION, so a reordered or renamed", file=sys.stderr)
+    print("   header makes each row parse cleanly and mean something else. Fix the header,", file=sys.stderr)
+    print("   or update EXPECTED_HEADER and the indices together.", file=sys.stderr)
+    raise SystemExit(1)
+
+# ⚠️ The status vocabulary is closed, so a typo cannot quietly become residue.
+# `r[STATUS].lower() != "closed"` treats ANY unrecognised value as open, which
+# is the safe direction for a misspelling but silent either way: `clsoed` would
+# show up as an open row with no hint that the word is wrong, and `Closed` with
+# a capital would be swallowed by the lower(). Measured vocabulary in use:
+# closed (275), open (17), scheduled (10), deferred (9).
+KNOWN_STATUSES = {"closed", "open", "scheduled", "deferred"}
+
 malformed, rows = [], []
 for n, line in enumerate(open("plans/residue-ledger.md"), 1):
     if not re.match(r"^\| RL-\d+ ", line):
@@ -77,6 +115,20 @@ if not rows:
     raise SystemExit(1)
 
 _id, _finding, _source, STATUS, _due, _disp = range(6)
+
+unknown = sorted({r[STATUS] for r in rows if r[STATUS].lower() not in KNOWN_STATUSES})
+if unknown:
+    print(f"!! REFUSING: {len(unknown)} unrecognised status value(s) in the ledger:", file=sys.stderr)
+    for value in unknown:
+        ids = [r[0] for r in rows if r[STATUS] == value]
+        print(f"     {value!r}  ({', '.join(ids[:6])}{' …' if len(ids) > 6 else ''})", file=sys.stderr)
+    print(f"   Known: {', '.join(sorted(KNOWN_STATUSES))}.", file=sys.stderr)
+    print("   An unrecognised value reads as OPEN here, which is the safe direction for a", file=sys.stderr)
+    print("   typo but says nothing — so a misspelled `closed` becomes permanent residue", file=sys.stderr)
+    print("   nobody can discharge, and a capitalised one is swallowed silently. Fix the", file=sys.stderr)
+    print("   value, or add it to KNOWN_STATUSES with the reason it is a distinct state.", file=sys.stderr)
+    raise SystemExit(1)
+
 open_rows = [r for r in rows if r[STATUS].lower() != "closed"]
 if open_rows:
     for r in open_rows:
