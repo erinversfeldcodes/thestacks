@@ -281,15 +281,68 @@ asker from op.scope_user() instead.")
 # op.f(uuid[]) …` with positional parameters contributes zero rows to the
 # assertion above and passes it entirely — a subject selector that is simply
 # never named is invisible to a check keyed on names.
+#
+# ⛔ MEASURED CORRECTION. The first version of this compared
+# `array_length(proargnames)` against `array_length(proargtypes)`, and that is
+# wrong in a way that made the assertion fire on healthy functions:
+# `proargnames` carries IN **plus OUT plus TABLE column** names, while
+# `proargtypes` carries only IN args. So every `RETURNS TABLE(...)` definer is
+# longer on the left by construction. Measured against the real corpus it
+# returned **4**, not 0 — `group_feed_placements` (8 vs 4),
+# `unmerge_placement_counts` (4 vs 2), `placement_owners_for_edition` and
+# `wishlist_user_ids` (2 vs 1), the last two predating this work entirely. It
+# would have turned the daily monitor red on its first run against the deployed
+# stack, for nothing.
+#
+# `pronargs` is the INPUT-argument count, and `proargnames[1:pronargs]` is
+# exactly the input names, so this asks the question actually intended: is any
+# INPUT parameter unnamed? Measured 0 on the real corpus, and 1 against a
+# planted `op.f(uuid)` with a positional parameter while correctly ignoring a
+# planted well-named `RETURNS TABLE` definer.
 ASSERTIONS+=("definer_with_unnamed_parameters
-SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND coalesce(array_length(p.proargtypes, 1), 0) > 0 AND coalesce(array_length(p.proargnames, 1), 0) IS DISTINCT FROM coalesce(array_length(p.proargtypes, 1), 0)
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND p.pronargs > 0 AND (p.proargnames IS NULL OR (SELECT count(*) FROM unnest(p.proargnames[1:p.pronargs]) AS nm WHERE nm IS NULL OR nm = '') > 0)
 0
-A SECURITY DEFINER function in op has parameters that are not all named. The
-assertion that a definer may not take a list of users as its subject is keyed on
-parameter NAMES, so an unnamed parameter is invisible to it — the check would
-pass over exactly the function it exists to catch. Name every parameter.")
+A SECURITY DEFINER function in op has INPUT parameters that are not all named.
+The assertion that a definer may not take a list of users as its subject is keyed
+on parameter NAMES, so an unnamed parameter is invisible to it — the check would
+pass over exactly the function it exists to catch. Name every input parameter.")
 
-EXPECTED_ASSERTIONS=10
+#
+# ⛔ The two assertions below exist because the deployed owner role has
+# `rolbypassrls = true`, which means the definer functions work there through
+# BOTH the `rls_reader` membership they are designed to use AND the exemption —
+# so a change that dropped the membership would not surface on that stack. The
+# general rule, and this session's recurring shape: WHEN TWO INDEPENDENT CAUSES
+# PRODUCE THE SAME OBSERVABLE, DO NOT STRENGTHEN THE ASSERTION ON THE
+# OBSERVABLE. Assert the cause you depend on, or remove the cause you do not.
+#
+# ⚠️ `pg_has_role` is the trap here, and it is MEASURED: it returns **true with
+# zero membership rows** for a superuser, because superusers are treated as
+# members of every role. It is an effect test wearing a catalog test's clothes.
+# `pg_auth_members` is the cause and nothing masks it.
+ASSERTIONS+=("rls_reader_membership_is_real
+SELECT count(*) FROM (SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = 'rls_reader'::regrole AND member = current_user::regrole AND inherit_option)) t
+0
+The connecting role is NOT an inheriting member of rls_reader. The SECURITY
+DEFINER functions are owned by rls_reader, so on a stack whose owner holds
+BYPASSRLS they would still appear to work — through the exemption rather than
+through the grant. This asserts the grant itself, from pg_auth_members, which
+no role attribute can mask. Expect this to be RED on any local database, where
+the membership has never existed and every definer-related pass is therefore
+uninformative.")
+
+# EXECUTE is an ACL fact and BYPASSRLS confers no function privileges, so this
+# is an honest test even on the bypassing owner — measured: all seven definers
+# deny EXECUTE to `stacks_dbt`, which has neither the grant nor the exemption.
+ASSERTIONS+=("definer_execute_comes_from_the_grant_not_the_role
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND NOT has_function_privilege(current_user, p.oid, 'EXECUTE')
+0
+A SECURITY DEFINER function in op cannot be executed by the connecting role.
+BYPASSRLS grants no function privileges, so unlike a row read this cannot be
+masked by the owner's exemption: if this is red the EXECUTE grant is genuinely
+missing and the calling path is broken however the rows behave.")
+
+EXPECTED_ASSERTIONS=12
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an
@@ -336,6 +389,7 @@ parse_conn() {
     # `options=endpoint=…`, which some Neon endpoints require.
     local parsed
     parsed="$(POSTURE_URL="$POSTURE_DATABASE_URL" python3 - <<'PARSE'
+import base64
 import os
 import sys
 from urllib.parse import urlsplit, unquote
@@ -343,26 +397,69 @@ from urllib.parse import urlsplit, unquote
 u = urlsplit(os.environ["POSTURE_URL"])
 if not u.hostname:
     sys.exit(1)
+# ⛔ urlsplit(...).port RAISES ValueError on a non-numeric port rather than
+# returning None, and an unguarded read made the refusal below report
+# "missing: user host database" — naming three fields that were all present.
+# Failing closed is correct; naming the wrong cause is not, and this file
+# already carries one misattribution on record.
+try:
+    port = u.port or 5432
+except ValueError:
+    sys.stderr.write("unparseable port in POSTURE_DATABASE_URL\n")
+    sys.exit(2)
 # unquote() is the whole point: these arrive percent-encoded.
-print(unquote(u.username or ""))
-print(unquote(u.password or ""))
-print(u.hostname)
-print(u.port or 5432)
-print(unquote((u.path or "").lstrip("/")))
-print(u.query or "")
+# ⛔ Each field BASE64-ENCODED, one per line. The workflow composes this URL
+# with quote(pw, safe=''), which encodes a literal newline as %0A — and
+# unquote() faithfully restores it. Emitting raw values one per LINE meant such
+# a password truncated at its first newline and every later field shifted up by
+# one: the host would be read from the password's second line. That is the same
+# defect class as the sed parse this replaced — a transport that cannot
+# represent its own data.
+#
+# ⚠️ NUL delimiters were the obvious fix and do NOT work here: bash discards
+# null bytes in command substitution, so `$(…)` would collapse all six fields
+# into one string. Base64's alphabet excludes the newline, which makes the
+# line-per-field transport safe for arbitrary field content without changing
+# its shape.
+for _field in [
+    unquote(u.username or ""),
+    unquote(u.password or ""),
+    u.hostname,
+    str(port),
+    unquote((u.path or "").lstrip("/")),
+    u.query or "",
+]:
+    print(base64.b64encode(_field.encode()).decode())
 PARSE
-)" || {
+)"
+    local parse_rc=$?
+    # ⚠️ The parser's exit code is CLASSIFIED rather than collapsed, so the
+    # refusal names the actual cause. Exit 2 is "the URL parsed but the port is
+    # not a number" — previously that fell through to the field-presence check
+    # below and reported three fields missing that were all present.
+    if [[ $parse_rc -eq 2 ]]; then
+        echo "FAIL deployed-posture: POSTURE_DATABASE_URL has an unparseable port." >&2
+        echo "       Nothing was measured. This is a refusal, not a pass." >&2
+        exit 1
+    elif [[ $parse_rc -ne 0 ]]; then
         echo "FAIL deployed-posture: POSTURE_DATABASE_URL is not a parseable connection URL." >&2
         echo "       Nothing was measured. This is a refusal, not a pass." >&2
         exit 1
-    }
+    fi
 
-    POSTURE_PGUSER="$(printf '%s' "$parsed" | sed -n '1p')"
-    POSTURE_PGPASSWORD="$(printf '%s' "$parsed" | sed -n '2p')"
-    POSTURE_PGHOST="$(printf '%s' "$parsed" | sed -n '3p')"
-    POSTURE_PGPORT="$(printf '%s' "$parsed" | sed -n '4p')"
-    POSTURE_PGDATABASE="$(printf '%s' "$parsed" | sed -n '5p')"
-    POSTURE_PGQUERY="$(printf '%s' "$parsed" | sed -n '6p')"
+    # One base64 field per line, decoded positionally. A newline inside any
+    # field — a rotated password is the realistic case — now stays inside that
+    # field instead of shifting every subsequent one up by a line.
+    local _fields=()
+    while IFS= read -r _f; do
+        _fields+=("$(printf '%s' "$_f" | base64 --decode)")
+    done <<< "$parsed"
+    POSTURE_PGUSER="${_fields[0]:-}"
+    POSTURE_PGPASSWORD="${_fields[1]:-}"
+    POSTURE_PGHOST="${_fields[2]:-}"
+    POSTURE_PGPORT="${_fields[3]:-}"
+    POSTURE_PGDATABASE="${_fields[4]:-}"
+    POSTURE_PGQUERY="${_fields[5]:-}"
 
     # ⚠️ A refusal, not a pass. If the url did not parse, nothing below can be
     # measured and saying so is the only honest outcome. Reports WHICH field is
