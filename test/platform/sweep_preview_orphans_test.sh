@@ -205,6 +205,19 @@ fi
 assert_contains "$OUT_NOCLI" "modal CLI is not available" \
     "and it names what is missing"
 
+# ⛔ REMOVED, and leaving it behind was a real defect in this suite. The stub
+# above delegates with `exec /usr/bin/python3 "$@"`, and `$STUBS` stays first on
+# PATH for every case below — so once this case had run, every later `python3`
+# in the sweep routed through the stub to the SYSTEM interpreter rather than the
+# pinned one, and `BOTH_modal_key_spellings_parse` failed with
+# `error: unable to execute tool 'python3'` / "could not list Fly apps".
+#
+# ⚠️ The shape is what made it hard to see: the failure was ORDER-DEPENDENT, so
+# probing `/usr/bin/python3` directly looked fine and the case looked flaky. A
+# stub that outlives the case it was built for is a fixture leaking into its
+# neighbours — the same class as a probe that outlives its test.
+rm -f "$STUBS/python3"
+
 test_case "BOTH_modal_key_spellings_parse" "the CLI renamed its JSON keys once already"
 # ⛔ Measured, not hypothetical. Modal 1.2.6 emitted `Description`/`State`/
 # `Created at`; 1.6.2 emits `description`/`state`/`created_at`. Against the
