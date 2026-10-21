@@ -1003,17 +1003,34 @@ updateWithEffect msg model maybeToken =
                     in
                     case ( out, maybeToken ) of
                         ( Card.ProgressUpdateRequested, Just token ) ->
-                            ( { model | progressCard = Just newCard, progressSaveState = Loading }
-                            , Effect.authed
-                                (Api.updateProgressRequest newCard.placement.id
-                                    { readingStatus = readingStatusToString newCard.draftStatus
-                                    , currentPage = String.toInt newCard.draftPage
-                                    }
-                                )
-                                token
-                                (Api.progressResponseToResult >> ProgressSaved)
-                            , NoOut
-                            )
+                            -- ⛔ Only sent when the reader has actually chosen a
+                            -- status. `draftStatus` is a Maybe precisely so an
+                            -- unrecorded one cannot be invented here: the card
+                            -- used to seed it with `ToRead`, so opening the card
+                            -- and pressing Save wrote `to_read` over whatever
+                            -- the server held. The card disables Save while this
+                            -- is Nothing, and this clause is the second half of
+                            -- that guarantee — the server requires the field
+                            -- (422 without it), so there is nothing safe to send.
+                            case newCard.draftStatus of
+                                Just chosen ->
+                                    ( { model | progressCard = Just newCard, progressSaveState = Loading }
+                                    , Effect.authed
+                                        (Api.updateProgressRequest newCard.placement.id
+                                            { readingStatus = readingStatusToString chosen
+                                            , currentPage = String.toInt newCard.draftPage
+                                            }
+                                        )
+                                        token
+                                        (Api.progressResponseToResult >> ProgressSaved)
+                                    , NoOut
+                                    )
+
+                                Nothing ->
+                                    ( { model | progressCard = Just (Card.stopSaving newCard) }
+                                    , Effect.none
+                                    , NoOut
+                                    )
 
                         ( Card.EditClosed, _ ) ->
                             ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )

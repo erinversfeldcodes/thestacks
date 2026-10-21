@@ -212,6 +212,50 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
+        , test "⛔ carries a PRESENT reading status and page — red before the fix" <|
+            -- The one assertion that would have failed before this change. The
+            -- decoder nulled both fields, so the book-detail progress card read
+            -- "To Read" for a reader 150 pages in, and Save wrote `to_read`
+            -- back over the real status.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-prog","book_id":"b-1","reading_status":"reading","current_page":150}""" of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal (Just Reading) p.readingStatus
+                            , \p -> Expect.equal (Just 150) p.currentPage
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "⛔ current_page 0 decodes to Just 0, NOT Nothing" <|
+            -- ⚠️ This is the only thing holding the `optional` decision against
+            -- a tidy-up. `fromProtoBookPlacement` assigns `currentPage` straight
+            -- through, two lines below `personalRating = zeroToNothing …`, so the
+            -- line that deliberately does not collapse zero looks like an
+            -- oversight beside its neighbour. Collapsing it would make page 0
+            -- indistinguishable from "not recorded" and every other test would
+            -- stay green.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-zero","book_id":"b-1","reading_status":"reading","current_page":0}""" of
+                    Ok placement ->
+                        Expect.equal (Just 0) placement.currentPage
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "a reading status the server cannot send decodes to Nothing, and the badge says so" <|
+            -- ⚠️ The remaining conflation, pinned rather than fixed: an
+            -- unparseable status and an absent one both become Nothing. That is
+            -- tolerable ONLY because the consumer now renders Nothing as "Not
+            -- recorded" and refuses to save it — if either of those changes,
+            -- this case becomes a silent downgrade again.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-bad","book_id":"b-1","reading_status":"finished"}""" of
+                    Ok placement ->
+                        Expect.equal Nothing placement.readingStatus
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "decodes placement with bookshelf_name" <|
             \_ ->
                 let

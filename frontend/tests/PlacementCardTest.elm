@@ -74,6 +74,42 @@ suite =
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
                         |> Query.has [ Selector.text "Reading" ]
+            , test "⛔ with NO recorded status, Save is DISABLED — the destructive half" <|
+                -- ⛔ The assertion that matters most, and the one that was
+                -- missing. A badge rendering the wrong label is wrong on screen;
+                -- a card that SAVES the wrong label is wrong in the database.
+                -- `init` used to seed `draftStatus` with `ToRead`, so opening
+                -- the card and pressing Save without touching the dropdown
+                -- wrote `to_read` over whatever the server held — including
+                -- over a status this build could not parse.
+                --
+                -- ⚠️ Probed: restoring that default leaves 2147 of 2148 tests
+                -- green, so nothing else in the suite holds this.
+                \_ ->
+                    Card.update Card.BadgeClicked noStatusModel
+                        |> Tuple.first
+                        |> Card.view
+                        |> Query.fromHtml
+                        |> Query.find
+                            [ Selector.attribute
+                                (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                            ]
+                        |> Query.has [ Selector.disabled True ]
+            , test "once a status is chosen, Save becomes available" <|
+                -- The other half: the guard must not make the form unusable.
+                \_ ->
+                    noStatusModel
+                        |> Card.update Card.BadgeClicked
+                        |> Tuple.first
+                        |> Card.update (Card.StatusChanged "reading")
+                        |> Tuple.first
+                        |> Card.view
+                        |> Query.fromHtml
+                        |> Query.find
+                            [ Selector.attribute
+                                (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                            ]
+                        |> Query.has [ Selector.disabled False ]
             , test "Reading status badge has class 'placement-card__badge--reading'" <|
                 \_ ->
                     Card.view readingModel
@@ -83,7 +119,13 @@ suite =
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
                         |> Query.has [ Selector.class "placement-card__badge--reading" ]
-            , test "Nothing readingStatus shows badge label 'To Read'" <|
+            , test "an ABSENT readingStatus shows 'Not recorded', not 'To Read'" <|
+                -- ⛔ This asserted "To Read" and was pinning the defect as the
+                -- contract. An absent status and `to_read` are different facts:
+                -- the card defaulted one to the other, so a reader mid-book saw
+                -- "To Read" and pressing Save wrote `to_read` over the real
+                -- value. The same conflation also swallowed a status this build
+                -- cannot parse, which is an ordinary deploy-skew window.
                 \_ ->
                     Card.view noStatusModel
                         |> Query.fromHtml
@@ -91,7 +133,10 @@ suite =
                             [ Selector.attribute
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
-                        |> Query.has [ Selector.text "To Read" ]
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Not recorded" ]
+                            , Query.hasNot [ Selector.text "To Read" ]
+                            ]
             , test "Completed status shows badge label 'Finished'" <|
                 \_ ->
                     Card.view completedModel

@@ -34,7 +34,7 @@ type alias Model =
     , editing : Bool
     , saving : Bool
     , showTitle : Bool
-    , draftStatus : ReadingStatus
+    , draftStatus : Maybe ReadingStatus
     , draftPage : String
     }
 
@@ -59,7 +59,7 @@ init placement =
     , editing = False
     , saving = False
     , showTitle = True
-    , draftStatus = Maybe.withDefault ToRead placement.readingStatus
+    , draftStatus = placement.readingStatus
     , draftPage = placement.currentPage |> Maybe.map String.fromInt |> Maybe.withDefault ""
     }
 
@@ -95,7 +95,7 @@ update msg model =
             ( { model | editing = True }, NoOut )
 
         StatusChanged s ->
-            ( { model | draftStatus = readingStatusFromString s }, NoOut )
+            ( { model | draftStatus = Just (readingStatusFromString s) }, NoOut )
 
         PageChanged s ->
             ( { model | draftPage = s }, NoOut )
@@ -109,7 +109,7 @@ update msg model =
             ( { model
                 | editing = False
                 , saving = False
-                , draftStatus = Maybe.withDefault ToRead model.placement.readingStatus
+                , draftStatus = model.placement.readingStatus
                 , draftPage = model.placement.currentPage |> Maybe.map String.fromInt |> Maybe.withDefault ""
               }
             , EditClosed
@@ -148,21 +148,37 @@ viewHeader model =
 viewStatusBadge : Model -> Html Msg
 viewStatusBadge model =
     let
-        status =
-            Maybe.withDefault ToRead model.placement.readingStatus
-
+        -- ⛔ An unrecorded status is rendered as unrecorded, NOT as "To Read".
+        -- `Maybe.withDefault ToRead` here was the original defect re-entering
+        -- through a narrower door: three input cases reach the decoder — key
+        -- absent, parseable, and present-but-unparseable — and only the first
+        -- two are distinguishable afterwards, so a status this build cannot
+        -- parse rendered as a specific, wrong, reader-visible claim.
+        --
+        -- ⚠️ Reachability is an ordinary deploy-skew window: the server adds a
+        -- fifth status and ships before the SPA has the matching parse arm.
+        -- This file already records the same hazard for the sibling field —
+        -- see `formatToString`'s note that "a spelling these two disagree on
+        -- round-trips as silence".
+        --
+        -- The page makes the opposite choice two files away for the same
+        -- situation (`BookDetail` renders "Status unknown" rather than guess),
+        -- and the project standard is that an absent value beats a lying one.
         ( label_, cls ) =
-            case status of
-                ToRead ->
+            case model.placement.readingStatus of
+                Nothing ->
+                    ( "Not recorded", "placement-card__badge--unrecorded" )
+
+                Just ToRead ->
                     ( "To Read", "placement-card__badge--to-read" )
 
-                Reading ->
+                Just Reading ->
                     ( "Reading", "placement-card__badge--reading" )
 
-                Completed ->
+                Just Completed ->
                     ( "Finished", "placement-card__badge--completed" )
 
-                Abandoned ->
+                Just Abandoned ->
                     ( "Abandoned", "placement-card__badge--abandoned" )
     in
     button
@@ -235,13 +251,28 @@ viewEditForm model =
                 , onInput StatusChanged
                 , testId "status-select"
                 ]
-                [ option [ value "to_read", selected (model.draftStatus == ToRead) ] [ text "To Read" ]
-                , option [ value "reading", selected (model.draftStatus == Reading) ] [ text "Reading" ]
-                , option [ value "completed", selected (model.draftStatus == Completed) ] [ text "Finished" ]
-                , option [ value "abandoned", selected (model.draftStatus == Abandoned) ] [ text "Abandoned" ]
-                ]
+                -- ⚠️ A placeholder option exists ONLY while no status is
+                -- recorded, and it is not selectable back into. Without it the
+                -- browser would show the first real option as selected and the
+                -- reader would believe a status had been chosen for them.
+                ((case model.draftStatus of
+                    Nothing ->
+                        [ option
+                            [ value "", selected True, disabled True ]
+                            [ text "Not recorded — choose one" ]
+                        ]
+
+                    Just _ ->
+                        []
+                 )
+                    ++ [ option [ value "to_read", selected (model.draftStatus == Just ToRead) ] [ text "To Read" ]
+                       , option [ value "reading", selected (model.draftStatus == Just Reading) ] [ text "Reading" ]
+                       , option [ value "completed", selected (model.draftStatus == Just Completed) ] [ text "Finished" ]
+                       , option [ value "abandoned", selected (model.draftStatus == Just Abandoned) ] [ text "Abandoned" ]
+                       ]
+                )
             ]
-        , if model.draftStatus == Reading then
+        , if model.draftStatus == Just Reading then
             label [ class "placement-card__field" ]
                 [ span [ class "placement-card__label" ] [ text "Current page" ]
                 , input
@@ -262,7 +293,16 @@ viewEditForm model =
             [ button
                 [ class "btn btn--primary"
                 , onClick SaveClicked
-                , disabled model.saving
+
+                -- ⛔ Disabled until a status is actually chosen. This is the
+                -- destructive half of the original defect: `init` used to seed
+                -- `draftStatus` with `ToRead`, so opening the card and pressing
+                -- Save without touching the dropdown WROTE `to_read` over
+                -- whatever the server held — including over a status this build
+                -- could not parse. The server requires `reading_status` on a
+                -- progress update (422 without it), so the client cannot omit
+                -- it; refusing to send an un-chosen one is the honest answer.
+                , disabled (model.saving || model.draftStatus == Nothing)
                 , testId "save-progress-btn"
                 ]
                 [ text

@@ -82,8 +82,15 @@ badProgress status body =
 
 
 {-| Walk the whole affordance the way a reader does: click the status badge
-(which reads "To Read" on load — the server sends no status here), pick
-"Reading" from the select, type a page, and Save.
+(which reads "Not recorded" on load — this fixture's payload carries no
+`reading_status`), pick "Reading" from the select, type a page, and Save.
+
+⚠️ It used to read "To Read", and that was the defect rather than the contract:
+the card defaulted an absent status to a specific one, so a reader mid-book saw
+"To Read" and pressing Save wrote `to_read` over the real value. The badge now
+distinguishes "not recorded" from "to read", and Save is disabled until a status
+is chosen — which is why this walkthrough must pick one from the select before
+clicking Save, as a reader would.
 
 The `<select>` is labelled implicitly (nested inside its `<label>`, no id), so
 `ProgramTest.selectOption` — which requires a `for`/`id` pair — cannot reach it;
@@ -93,7 +100,7 @@ the `input` event is simulated directly on the test-id'd node instead.
 openAndSave : ProgramTest BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg) -> ProgramTest BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 openAndSave program =
     program
-        |> ProgramTest.clickButton "To Read"
+        |> ProgramTest.clickButton "Not recorded"
         |> ProgramTest.simulateDomEvent
             (Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ])
             (Event.input "reading")
@@ -114,12 +121,18 @@ suite =
 
 cardRendersForReadableShelf : Test
 cardRendersForReadableShelf =
-    test "card_mounts: the progress card renders at its To Read default, because the book-detail contract carries no progress" <|
+    test "card_mounts: an absent reading status renders as NOT RECORDED, never as To Read" <|
         \() ->
             startDetailWith libraryPlacement
                 |> ProgramTest.ensureViewHas [ Selector.class "book-detail__progress" ]
                 |> ProgramTest.ensureViewHas [ Selector.text "Reading Progress" ]
                 |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-status-badge")
+                    , Selector.text "Not recorded"
+                    ]
+                -- ⛔ The assertion that would have been RED before this change:
+                -- the badge must not claim a status the server never sent.
+                |> ProgramTest.ensureViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-status-badge")
                     , Selector.text "To Read"
                     ]

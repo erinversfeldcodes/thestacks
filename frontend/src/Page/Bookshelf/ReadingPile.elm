@@ -80,12 +80,32 @@ fetchPile maybeToken =
             Effect.none
 
 
-cardProgressWrite : Card.Model -> Api.RequestSpec
+{-| `Nothing` when the reader has not chosen a status, so there is nothing
+honest to send.
+
+⛔ The card seeds `draftStatus` from the placement and no longer invents
+`ToRead`, so an unrecorded status stays unrecorded. The server requires
+`reading_status` on a progress update (422 without it), which means the only
+alternatives are to send a guess or not to send — and sending a guess is the
+destructive half of the original defect: it wrote `to_read` over whatever the
+server held, including over a status this build could not parse.
+
+⚠️ The card also disables Save while this would be `Nothing`. This is the second
+half of that guarantee rather than a duplicate of it: the type is what makes the
+unguarded path unwritable, and the compiler found a second call site in this file
+that the first fix had missed.
+
+-}
+cardProgressWrite : Card.Model -> Maybe Api.RequestSpec
 cardProgressWrite card =
-    Api.updateProgressRequest card.placement.id
-        { readingStatus = readingStatusToString card.draftStatus
-        , currentPage = String.toInt card.draftPage
-        }
+    card.draftStatus
+        |> Maybe.map
+            (\chosen ->
+                Api.updateProgressRequest card.placement.id
+                    { readingStatus = readingStatusToString chosen
+                    , currentPage = String.toInt card.draftPage
+                    }
+            )
 
 
 init : Maybe String -> ( Model, Cmd Msg )
@@ -196,12 +216,17 @@ updateWithEffect msg model =
             if List.member Card.ProgressUpdateRequested outMsgs then
                 case ( requestedCard, model.token ) of
                     ( Just c, Just token ) ->
-                        ( { model | cards = updatedCards, saveState = Loading }
-                        , Effect.authed (cardProgressWrite c)
-                            token
-                            (Api.progressResponseToResult >> ProgressSaved c.placement.id)
-                        , NoOut
-                        )
+                        case cardProgressWrite c of
+                            Just spec ->
+                                ( { model | cards = updatedCards, saveState = Loading }
+                                , Effect.authed spec
+                                    token
+                                    (Api.progressResponseToResult >> ProgressSaved c.placement.id)
+                                , NoOut
+                                )
+
+                            Nothing ->
+                                ( { model | cards = updatedCards }, Effect.none, NoOut )
 
                     _ ->
                         ( { model | cards = updatedCards }, Effect.none, NoOut )
