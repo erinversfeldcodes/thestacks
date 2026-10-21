@@ -109,8 +109,9 @@ run_gate_over_plant() {
     # that neutralised only the first call left the copy discovering ITSELF and
     # four "does NOT flag" cases failed against a site in the wrong file. The
     # harness has to isolate the corpus completely or it is testing itself.
-    sed -e "s|^done < <({ git ls-files.*$|done < <(printf '%s\\\\n' .sigpipe-probe/planted.sh)|" \
-        -e "s|^FLOOR=30|FLOOR=1|" \
+    sed -e "s|^    { git ls-files.*$|    printf '%s\\\\n' .sigpipe-probe/planted.sh|" \
+        -e "s|^ABSOLUTE_MIN=30|ABSOLUTE_MIN=1|" \
+        -e "s|^FLOOR=\$(( TOTAL_SH / 2 ))|FLOOR=1|" \
         "$GATE" > "$PLANT_DIR/gate.sh"
 
     # Anti-vacuity on the substitution itself: if the discovery line is ever
@@ -200,6 +201,73 @@ if [[ $PLANT_RC -ne 0 ]] && grep -q "assignment" <<< "$PLANT_OUT"; then
     _record_pass "refused, and the message distinguishes assignment from argument position"
 else
     _record_fail "an assignment from a piped \$() under set -e was ACCEPTED: ${PLANT_OUT}"
+fi
+
+test_case "it_refuses_every_assignment_SHAPE_under_set_e" \
+    "a narrow inclusion test is only safe when the fall-through defaults to hazard"
+# ⛔ The P1 in the previous version of this gate, and the finding is the rule
+# rather than the four shapes. It paired a NARROW "is this an assignment" test
+# with a BROAD "is this an argument" test meaning SAFE, in that order — so every
+# assignment shape the narrow test declined to match fell through to exempt.
+#
+# All four MEASURED under `set -euo pipefail` with a SIGPIPE'd producer: rc=141,
+# script dies. All four are live shapes in this tree; they simply do not yet
+# contain an early-exit consumer, which is why the gate stayed green while
+# blind to them.
+_shapes_caught=0
+_shapes=(
+    'X="prefix$(cat /etc/hosts | head -1)"'
+    'X="${V:-$(cat /etc/hosts | head -1)}"'
+    'X[0]="$(cat /etc/hosts | head -1)"'
+    'arr+=("$(cat /etc/hosts | head -1)")'
+    # ⚠️ The second instance of the same hole, found by testing the rule against
+    # itself: an assignment that is not at LINE start. Both measured at rc=141.
+    'case x in x) V="$(cat /etc/hosts | head -1)" ;; esac'
+    'if true; then V="$(cat /etc/hosts | head -1)"; fi'
+)
+for _shape in "${_shapes[@]}"; do
+    plant "$_shape
+echo done"
+    sed -i.bak 's/^set -uo pipefail$/set -euo pipefail/' "$PLANT_DIR/planted.sh"
+    rm -f "$PLANT_DIR/planted.sh.bak"
+    run_gate_over_plant
+    if [[ $PLANT_RC -ne 0 ]]; then
+        _shapes_caught=$((_shapes_caught + 1))
+    else
+        _record_fail "ACCEPTED an assignment shape that dies under set -e: ${_shape}"
+    fi
+done
+if [[ "${_shapes_caught}" -eq 6 ]]; then
+    _record_pass "all 6 assignment shapes refused (prefix, default-expansion, indexed, append, case arm, then branch)"
+fi
+
+test_case "it_does_NOT_flag_a_declaring_builtin_assignment" \
+    "the builtin's own status wins, so these are safe — for the RIGHT reason now"
+# ⚠️ R5-2's trap. These were already exempt in the previous version, but only
+# because they failed its narrow assignment test and fell through to safe — the
+# right outcome from the wrong reason. Inverting the fall-through would have
+# turned five live sites into false positives without an explicit branch.
+#
+# MEASURED: `local X="$(cmd | head -1)"` and the same with `export` and
+# `declare` all return 0 and survive under `set -e`, unlike bare `X="$(…)"`.
+_builtins_allowed=0
+for _decl in 'local X="$(cat /etc/hosts | head -1)"' \
+             'export X="$(cat /etc/hosts | head -1)"' \
+             'declare X="$(cat /etc/hosts | head -1)"'
+do
+    plant "$_decl
+echo done"
+    sed -i.bak 's/^set -uo pipefail$/set -euo pipefail/' "$PLANT_DIR/planted.sh"
+    rm -f "$PLANT_DIR/planted.sh.bak"
+    run_gate_over_plant
+    if [[ $PLANT_RC -eq 0 ]]; then
+        _builtins_allowed=$((_builtins_allowed + 1))
+    else
+        _record_fail "flagged a declaring builtin, whose status is provably discarded: ${_decl}"
+    fi
+done
+if [[ "${_builtins_allowed}" -eq 3 ]]; then
+    _record_pass "local/export/declare assignments correctly allowed"
 fi
 
 test_case "it_does_NOT_flag_argument_position_under_set_e" \
@@ -326,9 +394,111 @@ else
     _record_fail "a zsh shell was accepted, leaving every word-splitting loop silently broken"
 fi
 
+test_case "a_fixture_exemption_is_a_CHECKED_claim" \
+    "an exemption whose reason has lapsed is worse than no reason at all"
+# ⛔ Each exempted file is exempt because its job is to spell the banned form as
+# test data — so the exemption is valid only while that remains true. A file
+# that stops testing this gate and keeps its exemption becomes a blind spot
+# WITH A REASON ATTACHED, which the next reader trusts.
+#
+# The cheapest proof is that the file still references the gate it tests. This
+# case breaks that reference and asserts the gate refuses rather than quietly
+# carrying the exemption.
+EXEMPT_VICTIM="$REPO_ROOT/test/platform/rls_scope_gate_test.sh"
+cp "$EXEMPT_VICTIM" "$PLANT_DIR/exempt.orig"
+sed 's|check-rls-scope|check-SOMETHING-ELSE|g' "$PLANT_DIR/exempt.orig" > "$EXEMPT_VICTIM"
+LAPSED_OUT="$(bash "$GATE" 2>&1)"
+LAPSED_RC=$?
+cp "$PLANT_DIR/exempt.orig" "$EXEMPT_VICTIM"
+rm -f "$PLANT_DIR/exempt.orig"
+if [[ $LAPSED_RC -ne 0 ]] && grep -q "a fixture exemption has lapsed" <<< "$LAPSED_OUT"; then
+    _record_pass "an exempted file that stopped testing this gate is refused, not silently trusted"
+else
+    _record_fail "a lapsed fixture exemption was honoured, so the file is now a blind spot: ${LAPSED_OUT}"
+fi
+
+test_case "the_gate_itself_is_not_wholesale_exempt" \
+    "exempting the gate would hide a real hazard in its own executable code"
+# ⚠️ The narrowing the reviewer asked for, and it is free because it is a no-op
+# today: every pipeline in the gate's executable code is already a here-string,
+# so the only matches are the pattern DEFINITIONS and the printed guidance. A
+# file-wide pass would have covered future code as well.
+GATE_CODE="$(sed 's/#.*//' "$GATE")"
+assert_not_contains "$GATE_CODE" 'FIXTURE_FILES=(
+    "scripts/check-sigpipe-hazards.sh"' \
+    "the gate is not listed among the whole-file fixture exemptions"
+
+# ⛔ The discriminating half: the narrow rule must match the pattern DEFINITIONS
+# (which are data) and must NOT match an arbitrary line of the gate's code. A
+# rule loose enough to cover both is a whole-file exemption wearing a narrower
+# name.
+_narrow_rule="$(sed -n "s/^    grep -qE \"\(.*\)\" <<< \"\$2\"$/\1/p" <<< "$GATE_CODE")"
+if [[ -n "$_narrow_rule" ]]; then
+    _record_pass "the narrow self-exemption rule was found and is non-empty"
+
+    if grep -qE "$_narrow_rule" <<< "CONSUMER_STATUS_ONLY='[^|]\\| *grep [^|]*-[a-zA-Z]*q'"; then
+        _record_pass "it matches a pattern definition, which is data"
+    else
+        _record_fail "it no longer matches the gate's own pattern definitions, so the gate reports itself"
+    fi
+
+    if grep -qE "$_narrow_rule" <<< '    if echo "$out" | grep -q PAT; then'; then
+        _record_fail "the narrow rule matches an ordinary line of code — it is a whole-file exemption in disguise"
+    else
+        _record_pass "it does NOT match ordinary code, so a real hazard in the gate would still be reported"
+    fi
+else
+    _record_fail "could not lift the narrow self-exemption rule from the gate — this case is testing nothing"
+fi
+
+test_case "BOTH_consumer_patterns_still_match_something" \
+    "two patterns means losing one leaves the gate looking alive on the other"
+# ⛔ The positive control a pattern-absence check structurally lacks, and the
+# consumer split made it sharper rather than redundant: with one pattern, a
+# pattern that stopped matching showed up as a suspiciously clean corpus. With
+# two, losing `CONSUMER_STATUS_ONLY` — the unconditional class, and the one that
+# caught the security-scan fail-open — leaves `CONSUMER_OUTPUT` still firing, so
+# the gate keeps producing plausible verdicts while blind to the worse half.
+#
+# Driven as data rather than by grepping the gate's source: each pattern is
+# lifted from the gate and applied to a line it must match.
+GATE_SRC="$(sed 's/#.*//' "$GATE")"
+_pat_status_only="$(sed -n "s/^CONSUMER_STATUS_ONLY='\(.*\)'$/\1/p" <<< "$GATE_SRC")"
+_pat_output="$(sed -n "s/^CONSUMER_OUTPUT='\(.*\)'$/\1/p" <<< "$GATE_SRC")"
+
+if [[ -n "$_pat_status_only" && -n "$_pat_output" ]]; then
+    _record_pass "both consumer patterns were found in the gate and are non-empty"
+else
+    _record_fail "could not lift both patterns from the gate — this case is testing nothing (status_only='${_pat_status_only}' output='${_pat_output}')"
+fi
+
+if grep -qE "$_pat_status_only" <<< 'if echo "$out" | grep -q PAT; then'; then
+    _record_pass "CONSUMER_STATUS_ONLY still matches a pipe into grep -q"
+else
+    _record_fail "CONSUMER_STATUS_ONLY matches nothing — the unconditional class is unguarded"
+fi
+
+if grep -qE "$_pat_output" <<< 'X="$(cat f | head -1)"'; then
+    _record_pass "CONSUMER_OUTPUT still matches a pipe into head"
+else
+    _record_fail "CONSUMER_OUTPUT matches nothing — every output-consumer site is unguarded"
+fi
+
+# ⚠️ And they must not match each other's territory, or the split is cosmetic.
+if grep -qE "$_pat_status_only" <<< 'X="$(cat f | head -1)"'; then
+    _record_fail "CONSUMER_STATUS_ONLY matches a head pipeline, so the two classes are not separated"
+else
+    _record_pass "the two patterns are disjoint, which is what makes the unconditional class meaningful"
+fi
+
 test_case "the_anti_vacuity_floor_refuses_an_empty_corpus" \
     "zero hazards and zero files read must not look the same"
-sed "s|git ls-files '\*\.sh'|printf '%s' ''|" "$GATE" > "$PLANT_DIR/gate-empty.sh"
+# ⚠️ Replaces the DISCOVERY FUNCTION's body, so both the scan loop and the
+# floor's denominator see the empty corpus. Substituting a `git ls-files` call
+# directly stopped working once the gate routed both through one function, and
+# an empty-corpus case that only empties one of two readers is not testing the
+# floor at all.
+sed "s|^    { git ls-files.*$|    printf '%s' ''|" "$GATE" > "$PLANT_DIR/gate-empty.sh"
 EMPTY_OUT="$(bash "$PLANT_DIR/gate-empty.sh" 2>&1)"
 EMPTY_RC=$?
 if [[ $EMPTY_RC -ne 0 ]] && grep -q "floor is" <<< "$EMPTY_OUT"; then

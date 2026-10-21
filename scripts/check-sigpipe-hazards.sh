@@ -71,26 +71,111 @@ CONSUMER_OUTPUT='[^|]\| *(grep [^|]*-m *[0-9]|head( |$)|sed -n [^|]*q|awk [^|]*e
 # is why `success "$(brew --version | head -1)"` is correctly left alone.
 STATUS_READ_SYNTACTICALLY='^[[:space:]]*(if|elif|while|until|!)[[:space:]]|^[[:space:]]*(\|\||&&)|(\|\||&&)[[:space:]]*$'
 STATUS_DISCARDED='\|\|[[:space:]]*(true|echo|:|\{)'
-# An assignment whose entire right-hand side is the command substitution.
-ASSIGNED_FROM='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*="?\$\('
-# A pipeline inside $( ) that is embedded in a larger word — argument position.
-IN_ARGUMENT='[^=[:space:]]"?\$\(|"[^"]*\$\('
+
+# ⛔ ANY assignment, not just one whose entire RHS is the substitution — and the
+# difference was a P1 in the previous version of this gate. It paired a
+# deliberately NARROW "is this an assignment" test with a broad "is this an
+# argument" test meaning SAFE, in that order, so every assignment shape the
+# narrow test declined to match fell through and was silently exempted.
+#
+# MEASURED, all four under `set -euo pipefail` with a SIGPIPE'd producer, all
+# rc=141 and all dying:
+#
+#     X="prefix$(cmd | head -1)"      X="${V:-$(cmd | head -1)}"
+#     X[0]="$(cmd | head -1)"         arr+=("$(cmd | head -1)")
+#
+# The general rule, which is the finding rather than the four shapes: **a
+# deliberately-narrow inclusion test is only safe when the fall-through defaults
+# to HAZARD.** Here it defaulted to safe, so narrowness became exemption.
+# ⚠️ Anchored at any point a STATEMENT can begin, not just at line start — and
+# that was a second instance of the same hole, found by testing the rule against
+# itself rather than by review. An assignment inside a `case` arm or a
+# `then`/`else`/`do` branch is not at line start, so the line-anchored version
+# fell through to argument position and was exempted. Both MEASURED at rc=141
+# under `set -euo pipefail`:
+#
+#     case x in x) V="$(cmd | head -1)" ;; esac
+#     if true; then V="$(cmd | head -1)"; fi
+#
+# ⚠️ Known over-match, in the safe direction: `A=1 CMD "$(cmd | head -1)"` — a
+# variable prefixed onto a command — reads as an assignment here and is actually
+# argument position (measured rc=0). No such site exists in the corpus; if one
+# appears it will be a false positive rather than a miss, which is the direction
+# this gate is supposed to err in.
+IS_ASSIGNMENT='(^|;|&&|\|\||\bthen|\belse|\bdo|\{|\))[[:space:]]*[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?='
+
+# ⚠️ A declaring BUILTIN discards the substitution's status, because the
+# builtin's own status is the command's. MEASURED: `local X="$(cmd | head -1)"`,
+# and the same with `export` and `declare`, all rc=0 and all surviving under
+# `set -e` — unlike the bare `X="$(…)"` form, which dies.
+#
+# These were already exempt in the previous version, but for the WRONG reason
+# (they failed the narrow assignment test and fell through to safe). Branching
+# on them explicitly keeps the right outcome once the fall-through is inverted.
+IS_BUILTIN_DECL='^[[:space:]]*(local|export|declare|readonly|typeset)[[:space:]]'
 
 # ⚠️ Files whose JOB is to contain the banned form as DATA, with the reason
 # stated. This is the exemption list the reviewer asked for, and it is kept to
 # whole files rather than line numbers deliberately: line numbers rot on the
 # next edit, and a rotted exemption silently covers something else. Every entry
 # here is a file that tests this pattern and must therefore spell it.
+# ⛔ ONE place the corpus is defined, and that is not tidiness. It was two call
+# sites — the scan loop and the floor's denominator — and the suite isolates the
+# corpus by substituting the discovery, so it neutralised one and left the other
+# reaching the real repository. The suite's own anti-vacuity check caught it,
+# which is the only reason it did not silently half-work.
+#
+# Tracked AND untracked-but-not-ignored: `git ls-files` alone cannot see a new
+# script, and this gate was invisible to ITSELF until it was committed — the run
+# that first included it found two violations in its own guidance text.
+discover_shell_scripts() {
+    { git ls-files '*.sh'; git ls-files --others --exclude-standard '*.sh'; } | sort -u
+}
+
+# ⚠️ A CHECKED claim, not a bare list. Each exempted file is exempt because its
+# job is to spell the banned form as test data — so the exemption is only valid
+# while that is still true, and the cheapest proof of it is that the file still
+# references this gate. A test file that stops testing this gate and keeps its
+# exemption is a blind spot with a reason attached, which is worse than no
+# reason at all: the next reader trusts it.
+#
+# ⛔ `scripts/check-sigpipe-hazards.sh` is NOT in this list. Exempting the gate
+# wholesale would hide a real hazard in its own executable code, and it does not
+# need the exemption: every pipeline in it is already a here-string, so the only
+# matches are the pattern DEFINITIONS and the GUIDE heredoc. Those are handled
+# by the narrower rule below rather than by a file-wide pass.
+FIXTURE_FILES=(
+    # Plants the banned form to prove this gate refuses it.
+    "test/platform/sigpipe_hazard_gate_test.sh"
+    # Carries five spellings of it as anti-vacuity data for its own pattern.
+    "test/platform/rls_scope_gate_test.sh"
+)
+
 is_fixture_file() {
-    case "$1" in
-        # Defines the patterns above; the GUIDE text names the banned form.
-        scripts/check-sigpipe-hazards.sh) return 0 ;;
-        # Plants the banned form to prove this gate refuses it.
-        test/platform/sigpipe_hazard_gate_test.sh) return 0 ;;
-        # Carries five spellings of it as anti-vacuity data for its own pattern.
-        test/platform/rls_scope_gate_test.sh) return 0 ;;
-        *) return 1 ;;
-    esac
+    local candidate="$1" fixture
+    for fixture in "${FIXTURE_FILES[@]}"; do
+        [[ "$candidate" == "$fixture" ]] || continue
+        # The claim, checked: it is still a test of this gate's subject.
+        if grep -q "check-sigpipe-hazards\|check-rls-scope" "$candidate" 2>/dev/null; then
+            return 0
+        fi
+        # ⚠️ The lapse phrase is kept on ONE line, so a grep for it cannot be
+        # defeated by the wrap. A test asserting this message straddled two
+        # lines and reported the gate as having accepted what it had refused.
+        echo "FAIL check-sigpipe-hazards: a fixture exemption has lapsed." >&2
+        echo "  ${candidate} is exempted as a fixture file but no longer references the gate it tests," >&2
+        echo "  so its exemption is now hiding whatever the file contains." >&2
+        echo "  Remove the exemption, or restore the test." >&2
+        exit 1
+    done
+    return 1
+}
+
+# The gate's own file: only the pattern definitions and the printed guidance may
+# contain the banned form, because those are data. Anything else in it is code.
+is_own_pattern_definition() {
+    [[ "$1" == "scripts/check-sigpipe-hazards.sh" ]] || return 1
+    grep -qE "^(CONSUMER_STATUS_ONLY|CONSUMER_OUTPUT)=|^      a pipe (from|into)" <<< "$2"
 }
 
 FOUND=0
@@ -125,7 +210,9 @@ while IFS= read -r file; do
         [ -n "${lineno:-}" ] || continue
 
         why=""
-        if grep -qE "$CONSUMER_STATUS_ONLY" <<< "$text"; then
+        if is_own_pattern_definition "$file" "$text"; then
+            why=""
+        elif grep -qE "$CONSUMER_STATUS_ONLY" <<< "$text"; then
             # No escape hatch: the status IS the answer.
             why="pipes into grep -q, whose answer is only its exit status"
         elif grep -qE "$CONSUMER_OUTPUT" <<< "$text"; then
@@ -138,10 +225,17 @@ while IFS= read -r file; do
                 # No `-e`, and nothing reads it: the 141 goes nowhere and the
                 # stdout this site wanted is correct.
                 why=""
-            elif grep -qE "$ASSIGNED_FROM" <<< "$text"; then
-                why="assignment from \$( ) under set -e — the pipeline's status becomes the script's"
-            elif grep -qE "$IN_ARGUMENT" <<< "$text"; then
-                # Argument position: the outer command's status wins. Measured.
+            elif grep -qE "$IS_BUILTIN_DECL" <<< "$text"; then
+                # local/export/declare: the builtin's status wins. Measured.
+                why=""
+            elif grep -qE "$IS_ASSIGNMENT" <<< "$text"; then
+                # ⛔ EVERY assignment shape, because this branch is now the one
+                # that catches the shapes nobody enumerated. Prefix-concatenated,
+                # default-expanded, indexed and append-assigned all die here.
+                why="assignment under set -e — the pipeline's status becomes the script's"
+            elif grep -qE '\$\(' <<< "$text"; then
+                # A command substitution that is NOT an assignment, i.e. argument
+                # position: the outer command's status wins. Measured.
                 why=""
             else
                 why="bare pipeline under set -e — its status is taken with no syntax at all"
@@ -154,21 +248,32 @@ while IFS= read -r file; do
     ${text}
 "
     done < <(sed 's/#.*//' "$file" | grep -nE "$CONSUMER_STATUS_ONLY|$CONSUMER_OUTPUT" || true)
-    # ⛔ Tracked AND untracked-but-not-ignored, deduplicated. `git ls-files`
-    # alone cannot see a new script, which is not hypothetical: this gate was
-    # invisible to ITSELF until it was committed, and the run that first
-    # included it found two violations in its own guidance text. A gate whose
-    # corpus excludes the file being added is a gate that passes every new
-    # script until someone happens to commit it.
-done < <({ git ls-files '*.sh'; git ls-files --others --exclude-standard '*.sh'; } | sort -u)
+done < <(discover_shell_scripts)
 
 # ⚠️ Anti-vacuity. If the discovery stops finding scripts — a renamed
 # directory, a changed shebang convention, `git ls-files` run outside a repo —
 # "0 hazards" is indistinguishable from "0 files read". The floor makes the
 # difference visible, which is the failure mode this whole class keeps taking.
-FLOOR=30
+#
+# ⛔ A FRACTION of the shell corpus, not a constant, and the denominator needs
+# no guessing because this gate already computes it: 137 of 147 tracked `.sh`
+# files carry `pipefail` today, i.e. 93%. A constant floor of 30 would have sat
+# happily through a migration that moved strict mode into a sourced helper and
+# took the pipefail-bearing count from 137 to 40 — the discovery eroding by two
+# thirds while the gate reported clean.
+TOTAL_SH="$(discover_shell_scripts | grep -c . || true)"
+
+# ⛔ A fraction AND an absolute minimum, because a fraction alone is vacuous at
+# zero: with an empty corpus `TOTAL_SH / 2` is 0 and `SCANNED=0 >= 0` passes.
+# The proportional floor catches gradual erosion (strict mode moving into a
+# sourced helper); the absolute one catches total discovery failure, which is
+# the case that produces a confident "no hazards" over nothing at all. The
+# suite's empty-corpus case found this in the first version of this very check.
+ABSOLUTE_MIN=30
+FLOOR=$(( TOTAL_SH / 2 ))
+[[ "${FLOOR}" -lt "${ABSOLUTE_MIN}" ]] && FLOOR="${ABSOLUTE_MIN}"
 if [[ "${SCANNED}" -lt "${FLOOR}" ]]; then
-    echo "FAIL check-sigpipe-hazards: only ${SCANNED} pipefail-bearing scripts discovered, floor is ${FLOOR}." >&2
+    echo "FAIL check-sigpipe-hazards: only ${SCANNED} of ${TOTAL_SH} shell script(s) carry pipefail; floor is ${FLOOR} (half the corpus)." >&2
     echo "  Either the discovery broke or the convention changed. A clean result from" >&2
     echo "  a broken search is the defect this gate exists to catch, so refusing." >&2
     exit 1
@@ -221,8 +326,9 @@ if [[ "${FOUND}" -ne 0 ]]; then
       a pipe into `head -N` used for truncation
           -> capture, then slice: cmd_out="$(cmd)"; X="${cmd_out:0:2000}"
 
-  If a site is genuinely safe, it still has to stop reading the status —
-  `| grep -q … || true` is not a fix, it discards the answer.
+  If a site is genuinely safe, it still has to stop reading the status. And for
+  a status-only consumer there is no such fix: defusing it with a logical-or
+  discards the only answer it has, rather than rescuing it.
 GUIDE
     exit 1
 fi
