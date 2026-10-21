@@ -286,13 +286,15 @@ viewSection locked model =
                     -- value that is no longer the one the server is deciding
                     -- about. `locked` covers the host still learning the stored
                     -- state; this covers the window the control itself opens.
+                    --
+                    -- ⚠️ The analytics toggle above needs no in-flight term
+                    -- ONLY while it stays a draft — it writes nothing on click,
+                    -- so there is no request to race. If it is ever made
+                    -- save-on-click, it needs this same second term, and the
+                    -- absence of one there is not evidence that it is unnecessary.
                     , disabled (locked || model.writingAssistantSaving == Loading)
                     , onClick ToggleWritingAssistant
                     ]
-                    -- ⚠️ Placed in the list below, after the label, so the
-                    -- outcome of THIS control renders beside it. It used to
-                    -- surface under "Save Preferences", which meant a failed
-                    -- toggle showed an error beneath a button nobody pressed.
                     [ text
                         (if model.writingAssistantConsent then
                             "On"
@@ -302,6 +304,17 @@ viewSection locked model =
                         )
                     ]
                 ]
+            , case model.writingAssistantSaving of
+                Failure err ->
+                    p
+                        [ class "error"
+                        , attribute "role" "alert"
+                        , attribute "data-testid" "writing-assistant-consent-error"
+                        ]
+                        [ text (FailureCopy.saveFailure "your book-linking preference" err) ]
+
+                _ ->
+                    text ""
 
             -- ⛔ A SIBLING of `.toggle-row`, not a child of it, and that is a
             -- measured layout fix rather than tidiness. `.toggle-row` is
@@ -315,17 +328,6 @@ viewSection locked model =
             -- ⚠️ `role="alert"` because a failure here has to be announced, not
             -- merely rendered — the same treatment this project gives
             -- `syndication-url-error` and `invite-refusal`.
-            , case model.writingAssistantSaving of
-                Failure err ->
-                    p
-                        [ class "error"
-                        , attribute "role" "alert"
-                        , attribute "data-testid" "writing-assistant-consent-error"
-                        ]
-                        [ text (FailureCopy.saveFailure "your book-linking preference" err) ]
-
-                _ ->
-                    text ""
             ]
         , div [ class "settings-actions" ]
             [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]
