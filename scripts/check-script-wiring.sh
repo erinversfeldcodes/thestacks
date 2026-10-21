@@ -91,6 +91,29 @@ def _code_lines(txt):
         # gate's own generated inventory.
         if stripped.startswith(("#", "//", "*", "|")):
             continue
+        # ⛔ A LINE THAT IS ONLY A QUOTED STRING IS DATA, NOT A CALL.
+        #
+        # Comment-stripping closes the prose route and leaves the data route
+        # open: an exemption list, a fixture pairing, an assertion description
+        # or a generated-file banner names a script on a line of code, and the
+        # caller search counts it. MEASURED on this repository, three live
+        # false callers of exactly this shape:
+        #
+        #   check-sigpipe-hazards.sh's FIXTURE_FILES entries  -> check-rls-scope.sh
+        #   gen-elm-proto.py's "Regenerate via …" banner      -> gen-elm-proto.sh
+        #   rollback_action_composite_test.sh's assertion text -> rollback-production.sh
+        #
+        # None of those files invokes the script it was recorded as calling.
+        #
+        # ⚠️ This is NOT the stricter fix the comment above refutes. That one
+        # asked what an invocation looks like and reported 11 live scripts as
+        # orphans, because this repo dispatches through its own shell functions.
+        # This asks what DATA looks like, which is a much narrower question: a
+        # bare string literal on its own line is never how anything here runs a
+        # script. The stated limit is that a longer data string with code around
+        # it stays unclassifiable.
+        if re.fullmatch(r"""(['"])[^'"]*\1,?""", stripped):
+            continue
         out.append(line)
     return out
 

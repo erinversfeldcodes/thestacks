@@ -9,7 +9,7 @@ on drift, so a script with no caller cannot sit here silently.
 | script | called by | purpose |
 |---|---|---|
 | `scripts/bootstrap-worktree.sh` | `justfile` |  |
-| `scripts/campaign-residue.sh` | `justfile`, `scripts/check-tracker-refs.sh`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/campaign-residue.sh` | `justfile`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-api-only-is-skipped.sh` | `scripts/lint-elixir.sh`, `test/platform/api_only_is_skipped_test.sh` | An api_only field must also be skipped by its message's JSON serializer. |
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
@@ -20,7 +20,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
-| `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
+| `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh`, `test/platform/error_token_spelling_test.sh` | Two spellings of one error token is a client that matches on one of them. |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml`, `test/platform/idor_gate_test.sh` |  |
@@ -34,10 +34,10 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-protojson-completeness.sh` | `scripts/lint-elixir.sh`, `test/platform/protojson_completeness_test.sh` | A proto field that reaches no surface is a field that was added for nothing. |
 | `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | An anonymously-reachable route must be metered, or say why it is not. |
-| `scripts/check-rls-scope.sh` | `scripts/check-sigpipe-hazards.sh`, `scripts/lint-elixir.sh`, `test/platform/rls_scope_gate_test.sh` | scripts/check-rls-scope.sh — every query against a row-level-secured table |
+| `scripts/check-rls-scope.sh` | `scripts/lint-elixir.sh`, `test/platform/rls_scope_gate_test.sh` | scripts/check-rls-scope.sh — every query against a row-level-secured table |
 | `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh` |  |
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
-| `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml`, `test/platform/ci_migration_safety_job_test.sh`, `test/platform/schema_diff_test.sh` |  |
+| `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml`, `test/platform/schema_diff_test.sh` |  |
 | `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/script_wiring_test.sh` | Every script has a caller, and the inventory that says so is generated. |
 | `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-sigpipe-hazards.sh` | `scripts/lint-elixir.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Refuse a pipeline whose exit status is read but can be 141 instead of the |
@@ -56,11 +56,11 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/extract_migration_sql_test.sh` … | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
 | `scripts/format.sh` | `justfile` |  |
 | `scripts/gen-ecto-proto.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml` … |  |
-| `scripts/gen-elixir-proto.sh` | `.github/workflows/reseed-staging.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
+| `scripts/gen-elixir-proto.sh` | `.github/workflows/reseed-staging.yml`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
 | `scripts/gen-elm-proto.py` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-stack.sh` … | Generate Elm JSON decoder/encoder modules from a buf JSON FileDescriptorSet. |
 | `scripts/gen-elm-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-stack.sh` … |  |
-| `scripts/gen-python-proto.sh` | `.github/workflows/deploy-production.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
-| `scripts/gen-rust-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` … |  |
+| `scripts/gen-python-proto.sh` | `.github/workflows/deploy-production.yml`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
+| `scripts/gen-rust-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
 | `scripts/gen_python_proto.py` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-enum-coverage.py` … |  |
 | `scripts/generate-textures.py` | `justfile` | Generate cinematic textures and assets for The Stacks WebGL bookshelf. |
 | `scripts/generated-file-class.sh` | `scripts/gen-elm-proto.sh`, `scripts/gen_python_proto.py` |  |
@@ -68,7 +68,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/hooks/lib/create-issue-and-pr.sh` | `scripts/hooks/pre-push` | shellcheck source=scripts/hooks/lib/issue-file.sh |
 | `scripts/hooks/lib/issue-file.sh` | `scripts/hooks/lib/create-issue-and-pr.sh` |  |
 | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh` | `.github/workflows/ci.yml` |  |
-| `scripts/hooks/lib/pre-stop-lint.sh` | `.claude/settings.json`, `scripts/install-hooks.sh` |  |
+| `scripts/hooks/lib/pre-stop-lint.sh` | `.claude/settings.json` |  |
 | `scripts/hooks/lib/update-pr-ci.sh` | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` |  |
 | `scripts/hooks/pre-commit` | `scripts/install-hooks.sh` | pre-commit — Git pre-commit hook: lint gate on staged files. |
 | `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
@@ -82,7 +82,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/platform_suites_job_test.sh` … |  |
 | `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/ci_migration_safety_job_test.sh`, `test/platform/lint_migrations_test.sh` … | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
+| `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/lint_migrations_test.sh`, `test/platform/migration_gate_syntax_test.sh` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
 | `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` |  |
 | `scripts/lint-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
@@ -94,7 +94,7 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/parse-fly-image.py` | `.github/workflows/deploy-production.yml` |  |
 | `scripts/parse-rollback-output.sh` | `.github/actions/rollback-production/action.yml`, `test/platform/parse_rollback_output_test.sh` |  |
 | `scripts/preflight-resolver-health.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-stack.sh` |  |
-| `scripts/probe-production.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-slo-gate.sh`, `test/platform/deploy_stack_posture_test.sh` … |  |
+| `scripts/probe-production.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-slo-gate.sh`, `test/platform/deploy_stack_prod_posture_execution_test.sh` … |  |
 | `scripts/push_billing_metrics.py` | `.github/workflows/refresh-billing-metrics.yml` | Compute month-to-date provider costs from the same inputs the providers |
 | `scripts/regen-proto.sh` | `justfile`, `scripts/bootstrap-worktree.sh` |  |
 | `scripts/rollback-production.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/deploy_production_workflow_test.sh`, `test/platform/deploy_stack_eval_prereq_test.sh` … |  |
@@ -112,4 +112,4 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
 | `scripts/test-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/wave-status.sh` | `justfile`, `scripts/check-tracker-refs.sh`, `test/platform/tracker_refs_gate_test.sh`, `test/platform/wave_status_stack_guard_test.sh` |  |
+| `scripts/wave-status.sh` | `justfile`, `test/platform/tracker_refs_gate_test.sh`, `test/platform/wave_status_stack_guard_test.sh` |  |

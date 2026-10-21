@@ -165,4 +165,58 @@ assert_exit_nonzero "$RC" "the gate fails: prose in a fixture is not an invocati
 assert_contains "$OUT" "NO caller" "the failure is the orphan check, not a stale inventory"
 assert_contains "$OUT" "scripts/orphan.sh" "the orphan is named"
 
+# --- a bare quoted string is DATA, not a call ------------------------------
+
+# ⛔ The route comment-stripping leaves open. An exemption list, a fixture
+# pairing, an assertion description or a generated-file banner names a script on
+# a line of CODE, so the caller search counts it and the inventory records an
+# invocation that does not exist.
+#
+# MEASURED on the real repository: the discriminator removed ELEVEN false
+# callers, including this gate recording `check-sigpipe-hazards.sh` as a caller
+# of `check-rls-scope.sh` (a fixture pairing), `gen_python_proto.py` as a caller
+# of three `gen-*-proto.sh` scripts (a "Regenerate: …" banner it writes into
+# generated files), and `install-hooks.sh` as a caller of `pre-stop-lint.sh` (a
+# path in a `chmod +x` array — it makes the hook executable and never runs it).
+# No script lost its only caller, so nothing became an orphan.
+write_script "orphan.sh" "orphan.sh — named as data, called by nobody"
+cat > "$SANDBOX/scripts/lister.sh" <<'EOF'
+#!/usr/bin/env bash
+# lister.sh — names the script in a data array without ever running it
+EXEMPT_FILES=(
+    "scripts/orphan.sh"
+)
+echo "${EXEMPT_FILES[@]}"
+EOF
+write_justfile <<'EOF'
+build:
+    bash scripts/lister.sh
+EOF
+
+test_case "a_bare_quoted_string_is_not_a_caller" "naming a script in a data array wires nothing"
+run_gate
+assert_exit_nonzero "$RC" "the gate still reports the orphan"
+assert_contains "$OUT" "scripts/orphan.sh" "the orphan is named despite appearing in code"
+assert_contains "$OUT" "NO caller" "the failure is the orphan check, not a stale inventory"
+
+# --- but a dispatcher's bare WORD still counts -----------------------------
+
+# ⚠️ The anti-over-reach control, and it is why the rule is "a line that is only
+# a quoted string" rather than "a line mentioning a script". This repo dispatches
+# gates through its own shell functions — `gate check-css.sh` — and the stricter
+# fix that asked what an invocation looks like reported 11 live scripts as
+# orphans. `gate orphan.sh` is an unquoted argument and must keep counting.
+cat > "$SANDBOX/scripts/lister.sh" <<'EOF'
+#!/usr/bin/env bash
+# lister.sh — dispatches through a local function
+gate() { bash "scripts/$1"; }
+gate orphan.sh
+EOF
+
+test_case "an_unquoted_dispatcher_argument_still_counts" "the data rule did not swallow the dispatcher idiom"
+(cd "$SANDBOX" && bash scripts/check-script-wiring.sh --write >/dev/null 2>&1)
+run_gate
+assert_exit_zero "$RC" "the gate passes: 'gate orphan.sh' is still a call"
+assert_contains "$OUT" "all wired" "no script is reported as an orphan"
+
 summarise
