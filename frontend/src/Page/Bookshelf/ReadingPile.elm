@@ -244,19 +244,32 @@ updateWithEffect msg model =
                                 , NoOut
                                 )
 
-                    _ ->
-                        -- Same reasoning: no token means no request, so the
-                        -- card must not be left mid-save.
+                    ( _, Nothing ) ->
+                        -- ⛔ EXPLICIT, mirroring BookDetail. Putting this on the
+                        -- catch-all was a third divergence between these two
+                        -- hosts, in the opposite direction from the last one:
+                        -- the catch-all also matches `( Nothing, Just token )`,
+                        -- so a card that could not be found — with a perfectly
+                        -- good token — reported an expired session and drove the
+                        -- parked-logout machinery for a cause that was not the
+                        -- cause.
                         --
-                        -- ⛔ And `SessionExpired`, not `NoOut`. Clearing the flag
-                        -- silently leaves the reader looking at a Save button
-                        -- that will never work, with nothing explaining why —
-                        -- the cause is an expired session, which this page
-                        -- already reports on every other failing path.
+                        -- Same reasoning as the branch above for the clear: no
+                        -- token means no request, so the card must not be left
+                        -- mid-save. And `SessionExpired` rather than a silent
+                        -- clear, because no token on a save IS an expired
+                        -- session, which this page reports on every other
+                        -- failing path.
                         ( { model | cards = clearSaving placementId model.cards }
                         , Effect.none
                         , SessionExpired
                         )
+
+                    _ ->
+                        -- A card not found for this id, with a token in hand.
+                        -- Nothing was sent and nothing is in flight, so there is
+                        -- no saving flag to clear and no session to report.
+                        ( { model | cards = updatedCards }, Effect.none, NoOut )
 
             else if List.member Card.EditClosed outMsgs then
                 ( { model | cards = updatedCards }, focusBadge placementId, NoOut )
