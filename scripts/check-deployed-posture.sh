@@ -367,7 +367,64 @@ BYPASSRLS grants no function privileges, so unlike a row read this cannot be
 masked by the owner's exemption: if this is red the EXECUTE grant is genuinely
 missing and the calling path is broken however the rows behave.")
 
-EXPECTED_ASSERTIONS=12
+#
+# ⛔ THE THREE BELOW GUARD A SEED LINE'S CORRECTNESS FROM A DISTANCE.
+# `apps/core/priv/repo/seeds.exs` has two lines whose correctness rests on a
+# policy decision about a table they do not mention, and they share all four
+# epistemics: both fail ON DEPLOY ONLY, both are invisible locally because the
+# seed runs as a superuser, both would be broken by an edit to a MIGRATION with
+# nothing in the diff touching the seed, and both sit outside
+# `check-rls-scope.sh`, which scans `apps/core/lib/**/*.ex` and never looks at
+# `seeds.exs` at all. That last point is why no existing gate catches either.
+#
+# So the remedy is not to fix the seed lines — neither is broken — but to fail
+# when the PRECONDITION changes.
+#
+# ⚠️ Keyed on `relrowsecurity`, NOT `relforcerowsecurity`. FORCE only affects
+# the table OWNER, and the seed connects as `stacks_app`, so plain enablement is
+# what changes its behaviour. Measured: all four carry `rls=true force=true`
+# today and the two give an identical set, so this is about future correctness —
+# conflating them would make the first assertion miss an enabled-but-unFORCEd
+# table, which is exactly the case that breaks the seed.
+
+# ⚠️ SPLIT from the regression check below rather than expressed as one
+# symmetric difference, because the two have DIFFERENT remediation and a single
+# count cannot say which happened: a fifth table gaining RLS means "go re-read
+# the seed and add a warehouse policy"; one of the four losing it is a
+# disclosure. An unactionable message is a message nobody acts on.
+ASSERTIONS+=("rls_coverage_has_no_unexpected_table
+WITH expected(relname) AS (VALUES ('bookshelves'),('bookshelf_placements'),('user_blocks'),('visibility_grants')), actual AS (SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname='op' AND c.relkind='r' AND c.relrowsecurity) SELECT count(*) FROM (SELECT relname FROM actual EXCEPT SELECT relname FROM expected) t
+0
+A newly secured op table changes two things nothing else checks: seeds.exs reads
+at least one op table UNSCOPED and is correct only because that table carries no
+row-level security, and the warehouse roles need their own read policy or the
+nightly dbt refresh silently returns zero rows. Add both, then extend the
+expected list here. Do not extend the list first.")
+
+ASSERTIONS+=("rls_coverage_has_not_regressed
+WITH expected(relname) AS (VALUES ('bookshelves'),('bookshelf_placements'),('user_blocks'),('visibility_grants')), actual AS (SELECT c.relname::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname='op' AND c.relkind='r' AND c.relrowsecurity) SELECT count(*) FROM (SELECT relname FROM expected EXCEPT SELECT relname FROM actual) t
+0
+Row-level security was DISABLED on a table that carries user rows. This is not a
+seed concern and not a performance decision; it is a disclosure. Every policy on
+that table is now decorative.")
+
+# ⛔ The UNION ALL's second arm is the load-bearing half, and it is why this is
+# not written the obvious way. `WHERE policyname IN (…) AND cmd <> 'ALL'`
+# returns ZERO when someone DELETES an owner policy or splits it into two
+# differently-named ones, because no row matches the names — absence reads as
+# clean, which is this campaign's recurring shape appearing inside the gate
+# meant to catch it. MEASURED: with one expected policy absent from the catalog,
+# the EXCEPT arm reports 1 and the naive form reports 0.
+ASSERTIONS+=("owner_policies_are_for_all
+WITH expected(policyname) AS (VALUES ('bookshelves_owner'),('bookshelf_placements_owner'),('user_blocks_owner'),('visibility_grants_granter')) SELECT count(*) FROM ((SELECT p.policyname::text FROM pg_policies p JOIN expected e ON e.policyname = p.policyname WHERE p.schemaname='op' AND p.cmd <> 'ALL') UNION ALL (SELECT policyname FROM expected EXCEPT SELECT policyname::text FROM pg_policies WHERE schemaname='op')) t
+0
+RETURNING on a row-level-secured table applies SELECT policies to the new row,
+and seeds.exs depends on returning: [:id]. These owner policies being FOR ALL is
+what supplies that SELECT policy. Splitting one into FOR INSERT + FOR SELECT
+breaks the seed on deploy only. A MISSING policy counts as a violation here —
+do not 'fix' this by removing a name from the expected list.")
+
+EXPECTED_ASSERTIONS=15
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an

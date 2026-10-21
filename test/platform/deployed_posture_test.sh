@@ -194,11 +194,46 @@ test_case "every_hand_found_breach_is_covered" \
 # observe, because the test role is a superuser and is exempt from the thing
 # being asserted. If either is dropped from the roster, every suite stays green
 # and the assertion simply stops existing.
+# ⚠️ The last five are a third kind again, and the reason they must be pinned by
+# NAME is sharper than for the privilege facts above. They guard a line in
+# `seeds.exs` whose correctness rests on a policy decision about a table it does
+# not mention — so there is no diff that touches the seed when the guarantee
+# breaks, and `check-rls-scope.sh` never reads `seeds.exs` at all. Drop one of
+# these from the roster and nothing anywhere notices: not the seed, not the
+# scope gate, not this suite's count if the count is adjusted with it.
 for needle in "images_past_expiry" "orphaned_executing_jobs" "warehouse_schemas_missing" \
     "unmigrated" "app_role_exempt_from_rls" "definer_function_executable_by_public" \
     "widening_policy_is_not_read_only" "rls_table_without_warehouse_policy" \
-    "definer_takes_a_user_list_as_its_subject" "definer_with_unnamed_parameters"; do
+    "definer_takes_a_user_list_as_its_subject" "definer_with_unnamed_parameters" \
+    "rls_reader_membership_is_real" "definer_execute_comes_from_the_grant_not_the_role" \
+    "rls_coverage_has_no_unexpected_table" "rls_coverage_has_not_regressed" \
+    "owner_policies_are_for_all"; do
     assert_contains "$GATE_SRC" "$needle" "the roster covers ${needle}"
 done
+
+test_case "the_rls_coverage_pair_is_two_assertions_not_one" \
+    "a symmetric difference cannot say which direction broke"
+# ⛔ Deliberately TWO, and the suite pins that rather than leaving it to style.
+# A fifth table gaining row-level security means "re-read the seed and add a
+# warehouse policy"; one of the four LOSING it is a disclosure. One count cannot
+# say which happened, and a message that cannot say what to do is a message
+# nobody acts on. Collapsing them later would look like a simplification.
+if grep -q "rls_coverage_has_no_unexpected_table" <<< "$GATE_SRC" &&
+    grep -q "rls_coverage_has_not_regressed" <<< "$GATE_SRC"; then
+    _record_pass "both directions are separate assertions with their own remediation"
+else
+    _record_fail "the two RLS-coverage directions were collapsed into one assertion"
+fi
+
+test_case "the_owner_policy_check_catches_a_MISSING_policy" \
+    "the obvious form reads a deleted policy as clean"
+# ⛔ MEASURED, and the whole reason this assertion is not written the obvious
+# way. `WHERE policyname IN (…) AND cmd <> 'ALL'` returns ZERO when an owner
+# policy is DELETED or split into two differently-named ones, because no row
+# matches the names — absence reads as clean, which is this campaign's recurring
+# shape appearing inside the gate built to catch it. With one expected policy
+# absent from the catalog the EXCEPT arm reports 1 and the naive form reports 0.
+assert_contains "$GATE_SRC" "EXCEPT SELECT policyname" \
+    "the owner-policy assertion carries the arm that catches an absent policy"
 
 summarise
