@@ -46,6 +46,22 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     "consent_writing_assistant"
   ]
 
+  defp anonymous_book_payloads do
+    listing = insert(:listing, status: "active")
+
+    index =
+      build_conn()
+      |> get("/api/listings")
+      |> json_response(200)
+
+    show =
+      build_conn()
+      |> get("/api/listings/#{listing.id}")
+      |> json_response(200)
+
+    Enum.map(index["listings"], & &1["book"]) ++ [show["listing"]["book"]]
+  end
+
   defp anonymous_seller_payloads do
     seller =
       insert(:user,
@@ -130,6 +146,40 @@ defmodule CoreWeb.AnonymousListingExposureTest do
                "an anonymous listings read exposes `#{field}` — personal data on an " <>
                  "enumerable public index"
       end
+    end
+  end
+
+  test "⛔ the listing still carries its book, which NOTHING asserted before" do
+    # ⛔ `book` is the precedent `seller` was built to copy — both are embedded
+    # by a hand-written projection and both are therefore skipped from the
+    # generated serializer. But only `seller` had a boundary assertion, so
+    # `seller` ended up better guarded than the pattern it was modelled on, and
+    # a serializer that stopped carrying `book` would have broken every
+    # marketplace card with no test failing.
+    #
+    # ⚠️ Deliberately a PRESENCE-AND-SHAPE assertion rather than an exact key
+    # set. `seller` is a narrow projection across a trust boundary, where an
+    # exact set is right because every addition is a disclosure. `book` is
+    # public catalogue data on a public listing, so additions are not
+    # disclosures and pinning its exact set would fail on every ordinary
+    # catalogue change — a test that cries wolf gets deleted. What matters here
+    # is that the embed exists and is usable.
+    books = anonymous_book_payloads()
+
+    assert length(books) == 2,
+           "expected a book payload from both endpoints, got #{length(books)} — the " <>
+             "assertions below would be comparing against nothing"
+
+    for book <- books do
+      assert is_map(book),
+             "the listing payload carries no `book` object. The marketplace card renders " <>
+               "from it, so this is a broken surface rather than a serialisation detail."
+
+      assert is_binary(book["id"]) and book["id"] != "",
+             "the embedded book has no id, so nothing can link to it"
+
+      assert is_binary(book["title"]) and book["title"] != "",
+             "the embedded book has no title, so the card has nothing to show"
     end
   end
 
