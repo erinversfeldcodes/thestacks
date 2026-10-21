@@ -233,8 +233,17 @@ for match in re.finditer(r"@([a-z_]+)\s+@([a-z_]+)\s*\+\+\s*\[([^\]]*)\]", hand_
 
 # What each generated serializer emits — the contract's field set for that message.
 gen_fields = {}
+# The emitting SOURCE LINE for each generated field, kept so a failure can show
+# what codegen actually wrote rather than only the field's name. See the FAIL
+# block below for why that turned out to matter.
+gen_lines = {}
 for match in re.finditer(r"\n  def ([a-z_]+)\(struct\) do\n    %\{(.*?)\n    \}", gen_src, re.S):
-    gen_fields[match.group(1)] = set(re.findall(r"^\s+([a-z_0-9]+):", match.group(2), re.M))
+    body = match.group(2)
+    gen_fields[match.group(1)] = set(re.findall(r"^\s+([a-z_0-9]+):", body, re.M))
+    for line in body.split("\n"):
+        m = re.match(r"^\s+([a-z_0-9]+):", line)
+        if m:
+            gen_lines[(match.group(1), m.group(1))] = line.strip().rstrip(",")
 
 # ⚠️ Anti-vacuity on both populations. Every comparison below is a set
 # difference, which is empty when everything is correct AND when nothing was
@@ -253,6 +262,7 @@ if len(gen_fields) < 5:
     raise SystemExit(1)
 
 omissions = set()
+operands = {}
 narrowing = 0
 for match in re.finditer(r"\n  def ([a-z_]+)\(([^)]*)\) do\n(.*?)\n  end\n", hand_src, re.S):
     name, body = match.group(1), match.group(3)
@@ -263,6 +273,7 @@ for match in re.finditer(r"\n  def ([a-z_]+)\(([^)]*)\) do\n(.*?)\n  end\n", han
     carried = set(re.findall(r":([a-z_0-9]+)", _strip_comments(body)))
     for attr in re.findall(r"@([a-z_]+)", body):
         carried |= attrs.get(attr, set())
+    operands[name] = (gen_call.group(1), gen_fields[gen_call.group(1)], carried)
     for field in gen_fields[gen_call.group(1)] - carried:
         omissions.add(f"{name}:{field}")
 
@@ -293,8 +304,32 @@ if added:
     for pair in added:
         serializer, field = pair.split(":", 1)
         by_serializer[serializer].append(field)
+    # ⛔ NAME BOTH SETS, NOT THE DIFFERENCE.
+    #
+    # This used to print only `listing drops seller` — a set difference naming
+    # neither operand. That line was produced for a REAL defect (codegen was
+    # emitting `seller: struct.seller`, the raw Ecto association) and was very
+    # nearly dismissed as a known false positive of this script's own harvest
+    # regex, which does miss keyword keys supplied via `Map.merge`. Both
+    # explanations fit the message equally well, because the message carried no
+    # evidence to tell them apart.
+    #
+    # The generated line is the evidence. `seller: struct.seller` in the error
+    # text says at a glance that the generated side emits the association
+    # itself, which no amount of knowing about the regex would have suggested.
     for serializer, fields in sorted(by_serializer.items()):
+        gen_name, gen_set, carried_set = operands.get(serializer, (serializer, set(), set()))
         print(f"  {serializer:<22} drops {', '.join(sorted(fields))}", file=sys.stderr)
+        print(
+            f"    generated Gen.{gen_name}/1 emits {len(gen_set)} field(s); "
+            f"the hand-written {serializer}/1 carries {len(carried_set)}",
+            file=sys.stderr,
+        )
+        for field in sorted(fields):
+            line = gen_lines.get((gen_name, field))
+            if line:
+                print(f"    codegen wrote: {line}", file=sys.stderr)
+        print("", file=sys.stderr)
     print(
         "\nThe generated side carries every contract field automatically; a hand-written\n"
         "allowlist does not. So a field added to the proto is emitted by codegen, dropped\n"

@@ -91,6 +91,47 @@ assert_contains "$GATE_SRC" "reach no client through their serializer" \
 assert_contains "$GATE_SRC" "name an omission that no longer exists" \
     "a STALE baseline entry fails too"
 
+# --- the FAIL path names both operands, not just the difference -------------
+
+# ⛔ BEHAVIOURAL, unlike the source assertions around it, because the thing under
+# test is what a reader SEES when the gate fires.
+#
+# The gate once printed `listing drops seller` and nothing else — a set
+# difference naming neither set. That line was produced by a real defect
+# (codegen was emitting `seller: struct.seller`, the raw Ecto association) and
+# was very nearly dismissed as a known false positive of this script's own
+# harvest regex, which genuinely does miss keyword keys supplied via
+# `Map.merge`. Both explanations fit the message equally well, because the
+# message carried no evidence to tell them apart.
+#
+# ⚠️ Driven by removing one entry from a COPY of the gate's BASELINE and running
+# that copy against the real tree, so the case exercises the real FAIL path over
+# real inputs. `book:created_at` is the entry used: a long-standing, legitimately
+# narrowed field, so it is a stable choice that asserts nothing about whether any
+# particular field should be carried.
+test_case "the_failure_names_both_operands" "a set difference is unreadable without its sets"
+UNPINNED_GATE="$(mktemp)"
+sed 's|^    "book:created_at",$||' "$GATE" > "$UNPINNED_GATE"
+# ⚠️ ANCHORED. The first version of this check was `grep -q 'book:created_at'`,
+# which matches `bookshelf_book:created_at`, `catalogue_book:created_at` and
+# `search_book:created_at` as substrings — so the precondition reported failure
+# while the unpinning had in fact worked. A loose match in the test for a gate
+# whose own defects are loose matches.
+if ! grep -qE '^    "book:created_at",$' "$UNPINNED_GATE"; then
+    _record_pass "the baseline entry was removed from the copy, so the omission is unpinned"
+else
+    _record_fail "could not unpin the entry — this case would pass for the wrong reason"
+fi
+OUT="$(cd "$REPO_ROOT" && bash "$UNPINNED_GATE" 2>&1)"
+RC=$?
+rm -f "$UNPINNED_GATE"
+assert_exit_nonzero "$RC" "the unpinned omission fails the gate"
+assert_contains "$OUT" "drops created_at" "the difference is named"
+assert_contains "$OUT" "codegen wrote: created_at: struct.created_at" \
+    "and the generated line is quoted, which is what distinguishes a codegen cause from a harvest miss"
+assert_contains "$OUT" "the hand-written" \
+    "and both populations are sized, so neither side is left implicit"
+
 test_case "the_module_attribute_lists_are_resolved" \
     "a serializer using an @attr roster is not reported as dropping everything in it"
 # Without this the `user` serializer alone showed 29 phantom omissions against
