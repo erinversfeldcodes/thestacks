@@ -91,44 +91,25 @@ defmodule Stacks.ScopeTransactionProbeTest do
     end
   end
 
-  describe "restore_inputs/0 — the facts fed to the decision" do
-    # ⛔ WHY THIS BLOCK EXISTS, and it is the sharpest thing in this file.
-    # The truth table above pins the COMBINATION, and the old bug was not in
-    # the combination: it omitted the second argument entirely. Revert the
-    # private combiner to `sandboxed?()` alone and every test above stays
-    # green — the four rows because `must_restore?/2` is untouched, the two
-    # end-to-end cases because `sandboxed?/0` is always true here. The
-    # regression would come back under a fully green file.
+  describe "the composition between the inputs and the decision" do
+    # ⛔ WHY THIS BLOCK EXISTS. The truth table above pins the COMBINATION, and
+    # the old bug was not in the combination: it omitted the second argument
+    # entirely. Revert the private combiner to `sandboxed?()` alone and every
+    # test above stays green — the four rows because `must_restore?/2` is
+    # untouched, the two end-to-end cases because `sandboxed?/0` is always true
+    # here. The regression would come back under a fully green file.
     #
-    # Pinning the inputs separately closes that: the only step left unpinned
-    # is a pattern match destructuring the tuple.
-
-    test "at the top of a sandboxed test the inputs are {true, false}" do
-      # Which is the quadrant that makes the suite unable to see the bug: the
-      # first term alone is already enough to demand a restore here.
-      assert Stacks.Scope.restore_inputs() == {true, false}
-    end
-
-    test "inside a caller-owned transaction the inputs are {true, true}" do
-      Repo.transaction(fn ->
-        assert Stacks.Scope.restore_inputs() == {true, true},
-               "the second term must flip inside a transaction — if it does not, " <>
-                 "`in_transaction?/0` is not reporting what the decision needs"
-      end)
-    end
-
-    test "⚠️ the second term is the one the suite cannot vary to false-with-production-shape" do
-      # The honest statement of the limit, asserted rather than left in prose:
-      # `sandboxed?/0` is pinned true for the whole suite, so {false, _} — every
-      # production quadrant — is unreachable from here by construction. The
-      # table covers it as data; the behaviour is covered by the deployed drive.
-      {sandboxed?, _} = Stacks.Scope.restore_inputs()
-
-      assert sandboxed?,
-             "if this is ever false the suite is no longer sandboxed, and the end-to-end " <>
-               "cases in this file would finally be able to fail on the production bug — " <>
-               "at which point they, not the truth table, become the primary evidence"
-    end
+    # ⚠️ An earlier version of this block also exercised the input-gathering
+    # through a public `restore_inputs/0`, and those three tests are GONE
+    # deliberately. Two duplicated assertions already in this file (the two
+    # `in_transaction?/0` probes at the top), and the planted red showed none of
+    # the three discriminated: reverting the combiner left them all green, for
+    # the same arithmetic reason everything else here is blind — in-suite
+    # `sandboxed?()` is true, so `sandboxed?() or anything` IS `sandboxed?()`.
+    # They bought coverage that did not exist at the price of making an
+    # internal detail public, so the function went back to `defp` and the
+    # structural assertion below reads the source instead. It needs the name,
+    # not the visibility.
 
     test "⛔ the private combiner reads BOTH inputs — the one thing only the source can show" do
       # ⛔ MEASURED, and it is why this assertion is structural rather than
@@ -152,8 +133,30 @@ defmodule Stacks.ScopeTransactionProbeTest do
       # catches it at all. The behavioural evidence is the deployed drive.
       source = File.read!("lib/stacks/scope.ex")
 
-      [combiner] =
+      [raw_combiner] =
         Regex.run(~r/defp must_restore\? do\n(.*?)\n  end/s, source, capture: :all_but_first)
+
+      # ⛔ COMMENTS STRIPPED, and this is not a precaution — it is the repo's
+      # most-recorded gate failure: five instances of a check reading its own
+      # explanatory prose as the thing it checks for, four of them on one day.
+      # Without this, `# was: restore_inputs()` above a body of `sandboxed?()`
+      # satisfies both assertions below. `scope.ex` is the most comment-dense
+      # file in the app, which makes it the likeliest place for that to happen
+      # by accident rather than by malice.
+      combiner =
+        raw_combiner
+        |> String.split("\n")
+        |> Enum.map_join("\n", &Regex.replace(~r/#.*$/, &1, ""))
+
+      # ⚠️ Anti-vacuity on the strip itself. If the stripping ever removed
+      # everything — a regex change, a reformat that moves the body onto a
+      # comment line — the assertions below would be checking an empty string,
+      # and `"" =~ "x"` is false, so they would fail LOUDLY rather than pass.
+      # That is the safe direction, but assert it anyway so the failure names
+      # the strip rather than the implementation.
+      assert String.trim(combiner) != "",
+             "stripping comments emptied the captured body, so the assertions below are " <>
+               "about nothing — fix the capture before reading their verdict"
 
       assert combiner =~ "restore_inputs()",
              "the composed decision no longer reads restore_inputs/0, so it may be using one " <>
