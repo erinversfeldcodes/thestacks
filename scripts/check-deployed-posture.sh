@@ -92,13 +92,31 @@ fi
 # Each entry: name | sql | ceiling | explanation
 ASSERTIONS=()
 
+# ⚠️ The `expires_at IS NOT NULL` clause this query used to carry was DEAD, and
+# worse than dead: it told a reader that a null expiry is a legitimate state
+# being deliberately skipped, which would mean the retention promise rested on
+# an arm the assertion lacked. It does not. The column is `null: false` at
+# creation (20260305000008) and no later migration relaxes it, so an image with
+# no expiry cannot exist and the row count is already complete.
+#
+# The clause is gone and the guarantee it was standing in for is now CHECKED
+# instead, by the second arm below. That matters here specifically because this
+# gate runs against a deployed database, where "the migration says so" is a
+# claim about a different machine than the one being measured.
 ASSERTIONS+=("images_past_expiry
-SELECT count(*) FROM op.uploaded_images WHERE expires_at IS NOT NULL AND expires_at < now()
+SELECT (SELECT count(*) FROM op.uploaded_images WHERE expires_at < now()) + (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'op' AND table_name = 'uploaded_images' AND column_name = 'expires_at' AND is_nullable = 'YES')
 0
-The 30-day image-retention promise is not being kept. These rows are past their
-expiry and still present, with their storage paths and user attribution intact.
-This reached 6,655 rows overdue by up to 151 days before anyone noticed, because
-the sweep that clears them could not finish and nothing rescued it.")
+An image can outlive the 30-day retention promise, by one of two routes.
+
+Either rows are past their expiry and still present, with their storage paths
+and user attribution intact — this reached 6,655 rows overdue by up to 151 days
+before anyone noticed, because the sweep that clears them could not finish and
+nothing rescued it.
+
+Or expires_at has become NULLABLE, in which case an image can be stored with no
+expiry at all and the count above would never see it. The column is created
+NOT NULL; if that has changed on this database, the retention guarantee is gone
+and the row count is no longer the whole question.")
 
 ASSERTIONS+=("orphaned_executing_jobs
 SELECT count(*) FROM public.oban_jobs WHERE state = 'executing' AND attempted_at < now() - interval '2 hours'
@@ -149,15 +167,40 @@ here was evaluated against the wrong thing.")
 # row-level security itself, so an exempt runtime role passes every one of the
 # 4000+ tests. This gate runs against a deployed database, which is the only
 # place the question is answerable.
+# ⛔ THE ROLE'S ABSENCE IS COUNTED, AND IT IS THE WORSE STATE OF THE TWO.
+#
+# This was `WHERE rolname = 'stacks_app' AND (rolbypassrls OR rolsuper)` alone,
+# which returns 0 — compliance — when there is no `stacks_app` role at all. That
+# is not a benign gap: `runtime.exs` falls back to the OWNER when the runtime
+# role is unavailable, and production's owner holds `rolbypassrls`. So the state
+# the old form reported as clean is strictly worse than the state it reported as
+# a failure — exempt by fallback rather than exempt by attribute, with nothing
+# in `pg_roles` to look at.
+#
+# The second arm is therefore load-bearing in the same way the coverage
+# assertion's `EXCEPT` arm is, and for the same reason: an inclusion test over a
+# catalog has to make the empty result a HAZARD, or the gate's verdict on a
+# missing object is indistinguishable from its verdict on a correct one.
+#
+# MEASURED, all four states, against a real database:
+#   old form, role absent                  → 0   ← the false clean
+#   new form, role absent                  → 1
+#   new form, role present and exempt      → 1   (asked of `postgres`, rolsuper)
+#   new form, role present and not exempt  → 0   (asked of `stacks_app`)
 ASSERTIONS+=("app_role_exempt_from_rls
-SELECT count(*) FROM pg_roles WHERE rolname = 'stacks_app' AND (rolbypassrls OR rolsuper)
+SELECT (SELECT count(*) FROM pg_roles WHERE rolname = 'stacks_app' AND (rolbypassrls OR rolsuper)) + (SELECT count(*) FROM (SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stacks_app')) t)
 0
-The runtime role is EXEMPT from row-level security, so every policy on
-op.bookshelves, op.bookshelf_placements, op.user_blocks and op.visibility_grants
-is decorative — they are evaluated for nobody. The policies will still look
-correct in pg_policies and every test will still pass, because the test role
-bypasses RLS too. Revoke BYPASSRLS from stacks_app, or stop calling this
-enforcement.")
+Either the runtime role is EXEMPT from row-level security, or it DOES NOT EXIST.
+
+If it is exempt, every policy on op.bookshelves, op.bookshelf_placements,
+op.user_blocks and op.visibility_grants is decorative — they are evaluated for
+nobody. The policies will still look correct in pg_policies and every test will
+still pass, because the test role bypasses RLS too. Revoke BYPASSRLS from
+stacks_app, or stop calling this enforcement.
+
+If it does not exist, the same thing is true by a different route and with less
+to see: runtime.exs falls back to the owner, and the owner holds BYPASSRLS. Run
+the migration that creates the role rather than reading this as a clean bill.")
 
 # ⛔ The cross-user functions are the deliberate holes in per-user scoping, and
 # their whole safety argument is that each is reachable only by the roles that
@@ -272,8 +315,30 @@ Keying on relrowsecurity is correct and strictly broader.")
 # appears only under a negated `ANY`/`NOT IN`, which is more SQL parsing than
 # the problem deserves. This converts a judgement into a grep; it does not
 # replace reading the body.
+# ⛔ PAIRED BY MODE, NOT BY POSITION — the same correction its sibling
+# `definer_with_unnamed_parameters` already carries, which this assertion was
+# left behind by.
+#
+# `proargnames` holds IN + INOUT + VARIADIC + OUT + TABLE names; `proargtypes`
+# holds only the input ones. So `proargnames[ord]` against `proargtypes[ord-1]`
+# is sound only while every input is declared before every output, and Postgres
+# does not require that. FIVE of the seven definers in `op` already have OUT or
+# TABLE columns, so this is a live surface rather than a hypothetical one.
+#
+# MEASURED with a planted definer — `(OUT exclude_total int, IN subject_ids
+# uuid[])`, a real violation:
+#   positional form  → 0   ← the OUT name absorbed the `exclude%` exemption and
+#                            the real uuid[] input fell off the end of the vector
+#   mode-paired form → 1
+# With the OUT named `total` instead, both return 1 — but the positional form
+# gets there by attributing the uuid[] to `total`, so even its agreement is for
+# the wrong reason.
+#
+# `coalesce(a.argname, '')` is deliberate: an UNNAMED uuid[] input is not named
+# `exclude%`, so it must count as a violation. Left as a bare NULL comparison it
+# would evaluate to NULL and drop out, which is absence reading as clean.
 ASSERTIONS+=("definer_takes_a_user_list_as_its_subject
-SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, unnest(coalesce(p.proargnames, ARRAY[]::text[])) WITH ORDINALITY AS a(argname, ord) WHERE n.nspname = 'op' AND p.prosecdef AND format_type(p.proargtypes[ord - 1], NULL) = 'uuid[]' AND a.argname NOT LIKE 'exclude%'
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, unnest(coalesce(p.proargnames, array_fill(''::text, ARRAY[p.pronargs])), coalesce(p.proallargtypes, p.proargtypes::oid[]), coalesce(p.proargmodes, array_fill('i'::\"char\", ARRAY[p.pronargs]))) AS a(argname, argtype, argmode) WHERE n.nspname = 'op' AND p.prosecdef AND a.argmode IN ('i','b','v') AND format_type(a.argtype, NULL) = 'uuid[]' AND coalesce(a.argname, '') NOT LIKE 'exclude%'
 0
 A SECURITY DEFINER function in op takes a uuid[] parameter that is not named
 exclude_*, which means the caller is naming WHOSE ROWS to return rather than what
@@ -431,7 +496,40 @@ what supplies that SELECT policy. Splitting one into FOR INSERT + FOR SELECT
 breaks the seed on deploy only. A MISSING policy counts as a violation here —
 do not 'fix' this by removing a name from the expected list.")
 
+# ⛔ TWO KINDS OF ASSERTION LIVE IN ONE ROSTER, AND THEY DO NOT MEAN THE SAME
+# THING WHEN THEY FIRE.
+#
+# Thirteen of the fifteen are STRUCTURAL: they ask about roles, policies,
+# grants, function signatures and schema shape, so their answer is a property
+# of the database's configuration and is the same the moment after a deploy as
+# it is a month later. Two are DATA conditions: they count rows that a backlog
+# produces, so they go red because work accumulated, not because the posture
+# changed.
+#
+# MEASURED against a real database, all fifteen: 13 green, and the only two red
+# are exactly the data conditions — `images_past_expiry` at 1 (a seeded image
+# 249 days overdue) and `orphaned_executing_jobs` at 27. Both were red before
+# this distinction was drawn; neither was introduced by it.
+#
+# ⚠️ Why the split is worth the lines rather than a caveat on the whole file:
+# this suite already shipped one assertion that was red the day it was written
+# and would have reddened the production monitor on its first run. The lesson
+# taken from that was "measure before you ship", and the lesson missed was that
+# a roster mixing the two kinds cannot express WHICH ONES a clean local or
+# preview run is evidence about. A structural assertion passing on a preview is
+# real evidence, because a preview is a branch of staging and carries the real
+# role set. A data assertion passing on a preview says nothing about
+# production's backlog.
+#
+# So: a firing assertion is labelled, and the label tells a reader whether they
+# are looking at a posture regression or at a queue that needs draining.
+DATA_CONDITION_ASSERTIONS=(
+    images_past_expiry
+    orphaned_executing_jobs
+)
+
 EXPECTED_ASSERTIONS=15
+EXPECTED_DATA_CONDITIONS=2
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an
@@ -442,6 +540,33 @@ if [[ "${#ASSERTIONS[@]}" -ne "$EXPECTED_ASSERTIONS" ]]; then
     echo "       Update EXPECTED_ASSERTIONS in the same change that adds or removes one." >&2
     exit 1
 fi
+
+# ⛔ The data-condition list is checked against the roster, BOTH WAYS, because a
+# name list that has stopped matching anything is the failure mode this whole
+# file keeps finding elsewhere. A renamed assertion would otherwise silently
+# lose its label and be read as structural — which is the direction that
+# matters, since it would turn "a queue needs draining" into "the posture
+# regressed". Its size is pinned for the same reason the roster's is.
+if [[ "${#DATA_CONDITION_ASSERTIONS[@]}" -ne "$EXPECTED_DATA_CONDITIONS" ]]; then
+    echo "FAIL deployed-posture: declared $EXPECTED_DATA_CONDITIONS data condition(s), listed ${#DATA_CONDITION_ASSERTIONS[@]}." >&2
+    exit 1
+fi
+
+ROSTER_NAMES=""
+for entry in "${ASSERTIONS[@]}"; do
+    ROSTER_NAMES="${ROSTER_NAMES} $(printf '%s' "$entry" | sed -n '1p')"
+done
+for dc in "${DATA_CONDITION_ASSERTIONS[@]}"; do
+    case " ${ROSTER_NAMES} " in
+        *" ${dc} "*) ;;
+        *)
+            echo "FAIL deployed-posture: '${dc}' is listed as a data condition but is not in the roster." >&2
+            echo "       Either it was renamed or it was removed. A label pointing at nothing would" >&2
+            echo "       make its assertion read as structural, which is the wrong way to be wrong." >&2
+            exit 1
+            ;;
+    esac
+done
 
 # ⛔ THE CONNECTION STRING NEVER REACHES psql's ARGV, AND psql's STDERR NEVER
 # REACHES THIS LOG.
@@ -658,13 +783,27 @@ for entry in "${ASSERTIONS[@]}"; do
 
     CHECKED=$((CHECKED + 1))
 
+    kind="structural"
+    case " ${DATA_CONDITION_ASSERTIONS[*]} " in
+        *" ${name} "*) kind="data condition" ;;
+    esac
+
     if [[ "$value" -gt "$ceiling" ]]; then
-        echo "FAIL ${name}: ${value} (ceiling ${ceiling})" >&2
+        echo "FAIL ${name} [${kind}]: ${value} (ceiling ${ceiling})" >&2
         printf '     %s\n' "$why" >&2
+        if [[ "$kind" == "data condition" ]]; then
+            echo "     ⚠️ This is a DATA condition: it counts rows a backlog produced, so it" >&2
+            echo "        went red because work accumulated, not because the posture changed." >&2
+            echo "        Drain it; do not read it as a configuration regression." >&2
+        else
+            echo "     ⛔ This is a STRUCTURAL assertion: it describes the database's" >&2
+            echo "        configuration, so it does not go red on its own over time. Something" >&2
+            echo "        changed the posture." >&2
+        fi
         echo "" >&2
         FAILURES=$((FAILURES + 1))
     else
-        echo "ok   ${name}: ${value} (ceiling ${ceiling})"
+        echo "ok   ${name} [${kind}]: ${value} (ceiling ${ceiling})"
     fi
 done
 

@@ -129,14 +129,65 @@ OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1
 
 if grep -qE "^FAIL images_past_expiry" <<< "$OUT"; then
     _record_pass "a breached ceiling is reported as a failure"
-    assert_contains "$OUT" "retention promise is not being kept" \
+    assert_contains "$OUT" "past their expiry and still present" \
         "and carries the sentence a reader needs, not just a count"
+    # The roster mixes assertions about CONFIGURATION with assertions that count
+    # a backlog, and the two mean different things when they fire. This one is a
+    # backlog, so a reader must not be sent looking for a posture regression.
+    assert_contains "$OUT" "images_past_expiry [data condition]" \
+        "and says which kind of assertion it is"
+    assert_contains "$OUT" "went red because work accumulated" \
+        "and says what that kind of failure means"
 else
     _record_fail "a past-expiry image was planted and the retention assertion did not fire — the ceiling comparison is not working"
 fi
 
 psql "$LOCAL_URL" -q -c \
     "DELETE FROM op.uploaded_images WHERE id = '${PLANTED_IMAGE_ID}'" >/dev/null 2>&1 || true
+
+test_case "a_nullable_expiry_is_itself_the_breach" "the retention guarantee is checked, not assumed"
+# ⛔ PLANTS THE SCHEMA CHANGE, because the arm under test cannot be reached any
+# other way. The query used to carry `expires_at IS NOT NULL`, which was dead —
+# the column is created `null: false` — but which told a reader that a null
+# expiry was a legitimate state being skipped. If that ever became true, an
+# image could be stored with no expiry and the row count would never see it.
+#
+# ⚠️ The restore runs through a trap as well as inline, so an interrupted run
+# cannot leave the development database's schema relaxed. Re-adding NOT NULL is
+# safe here because nothing in this case inserts a row while it is dropped.
+_restore_expiry_not_null() {
+    psql "$LOCAL_URL" -q -c \
+        "ALTER TABLE op.uploaded_images ALTER COLUMN expires_at SET NOT NULL" >/dev/null 2>&1 || true
+}
+trap '_restore_expiry_not_null' EXIT
+
+if psql "$LOCAL_URL" -q -c \
+    "ALTER TABLE op.uploaded_images ALTER COLUMN expires_at DROP NOT NULL" >/dev/null 2>&1; then
+    RELAXED="$(psql "$LOCAL_URL" -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='op' AND table_name='uploaded_images' AND column_name='expires_at'" 2>/dev/null | tr -d '[:space:]')"
+    if [[ "$RELAXED" == "YES" ]]; then
+        _record_pass "the column really is nullable now, so this case tests the arm and not the fixture"
+        OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1)"
+        if grep -qE "^FAIL images_past_expiry" <<< "$OUT"; then
+            _record_pass "a nullable expires_at fires the retention assertion on its own"
+            assert_contains "$OUT" "has become NULLABLE" \
+                "and names the route, so it is not mistaken for an overdue backlog"
+        else
+            _record_fail "expires_at was made nullable and the retention assertion stayed green — the guarantee is assumed, not checked"
+        fi
+    else
+        _record_fail "could not relax the column, so this case would pass for the wrong reason"
+    fi
+else
+    _record_fail "could not relax the column, so this case would pass for the wrong reason"
+fi
+
+_restore_expiry_not_null
+RESTORED="$(psql "$LOCAL_URL" -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='op' AND table_name='uploaded_images' AND column_name='expires_at'" 2>/dev/null | tr -d '[:space:]')"
+if [[ "$RESTORED" == "NO" ]]; then
+    _record_pass "NOT NULL is restored, so this case left the schema as it found it"
+else
+    _record_fail "expires_at is still nullable after this case — the development schema has been left relaxed"
+fi
 
 test_case "the_assertion_count_is_declared" "a dropped assertion shows up in the diff"
 # Retrofitted from a real regression in the sibling posture suite: a roster built
