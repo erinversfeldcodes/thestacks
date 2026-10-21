@@ -57,13 +57,19 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJob do
   end
 
   @doc """
-      How many unverified registrations remain past the window. Zero after a
-      complete run.
+      How many unverified registrations remain past the window.
 
-      Delegates to `Accounts.expired_unverified_ids/0`, which is the very query
-      `perform/1` iterates — so the count cannot disagree with the sweep about
-      what it should have collected.
+      ⛔ NOT zero after a complete run, and the previous claim that it was is
+      what made this number useless. The sweep takes at most one batch per run,
+      so a backlog larger than a batch survives a complete run by design.
+
+      ⚠️ It delegates to `Accounts.pending_unverified_count/1` rather than to
+      the id-listing the sweep iterates. Sharing that listing kept the count
+      honest about WHICH accounts qualify and silently shared its `limit`, so
+      the figure could never exceed the batch size — ten thousand abandoned
+      signups reported as the batch ceiling, every night, green. The two share
+      their predicate and differ only in that this one does not stop counting.
   """
   @spec pending_count() :: non_neg_integer()
-  def pending_count, do: length(Accounts.expired_unverified_ids())
+  def pending_count, do: Accounts.pending_unverified_count()
 end

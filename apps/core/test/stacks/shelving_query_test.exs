@@ -170,8 +170,25 @@ defmodule Stacks.ShelvingQueryTest do
       # ⛔ A bound raised without naming what filled it is how an N+1 gets
       # absorbed one query at a time. If this number moves again, find the
       # query before changing the figure.
-      assert queries <= 10,
-             "expected <= 10 queries for the shelf browse read path, got #{queries}"
+      #
+      # ⚠️ Raised again from 10 to 11, and the eleventh query DOES NOT EXIST IN
+      # PRODUCTION — so read this bound as "10 in production, plus one the test
+      # environment adds". `Stacks.Scope.with_user/2` restores the previous
+      # scope with an explicit `set_config` when the repo is running on the
+      # sandbox pool, because the sandbox holds the connection inside one
+      # transaction and a released SAVEPOINT does not revert a `SET LOCAL` made
+      # inside it. Without that restore a scope outlives its own block and a
+      # later unrelated query sees it — measured, and it made three profile
+      # tests fail against a guard that was behaving correctly.
+      #
+      # The restore is skipped entirely off the sandbox pool, where the
+      # transaction commit reverts the setting on its own. It is also constant
+      # per request rather than per row, so the property this file protects is
+      # untouched — the neighbouring test comparing two fixture sizes is what
+      # pins that directly.
+      assert queries <= 11,
+             "expected <= 11 queries for the shelf browse read path (10 in production " <>
+               "plus the sandbox-only scope restore), got #{queries}"
     end
 
     test "every association the serializer touches is preloaded (no lazy fetch)" do
