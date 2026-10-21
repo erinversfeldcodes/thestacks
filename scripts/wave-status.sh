@@ -401,6 +401,60 @@ if not wave_filter and any(
                 f"\"domain_reviews\" in the campaign state."
             )
 
+        # ⛔ A RECORDED REVIEW IS NOT A CURRENT ONE, and checking only for the
+        # presence of a key reproduced — inside this very guard — the failure it
+        # was written to prevent.
+        #
+        # Measured 2026-10-21: all five core stacks carried a verdict dated
+        # 2026-10-14 whose `range` was the literal text
+        # "cc17d2302…..HEAD". `HEAD` is a moving target stored as a string, so
+        # the row kept READING as current while 166 further commits touching 178
+        # files in those stacks landed behind it. The campaign reported the
+        # stack-review axis as covered for a week of work nobody reviewed, and
+        # the row's own text is what made it invisible.
+        #
+        # So a review must record the SHA it actually saw, and any later change
+        # under that stack's paths makes it stale. Staleness is a violation and
+        # not a warning: the whole point of this guard is that an unreviewed axis
+        # must not be reportable as a reviewed one.
+        for stack in sorted(stacks & reviews):
+            entry = (state.get("domain_reviews") or {}).get(stack) or {}
+            if not isinstance(entry, dict):
+                entry = {}
+            seen = entry.get("reviewed_at_sha")
+
+            if not seen:
+                violations.append(
+                    f"  campaign: the {stack} review records no `reviewed_at_sha`, so whether it "
+                    f"covers the current diff is UNKNOWN — not satisfied. A `range` ending in "
+                    f"\"HEAD\" is not evidence: HEAD moves and the text does not, which is how "
+                    f"this axis went unreported while 178 files changed behind it. Re-record the "
+                    f"verdict with the resolved commit the reviewer actually saw."
+                )
+                continue
+
+            since = _git(["diff", "--name-only", f"{seen}..HEAD"])
+            if since is None:
+                violations.append(
+                    f"  campaign: the {stack} review names `reviewed_at_sha` {seen[:12]} and git "
+                    f"cannot read it, so its currency is UNKNOWN — not satisfied. Fetch the "
+                    f"commit it names or re-record the verdict."
+                )
+                continue
+
+            prefixes = STACK_PATHS[stack]
+            stale = [f for f in since if any(f.startswith(p) for p in prefixes)]
+            if stale:
+                shown = ", ".join(sorted(stale)[:3])
+                more = f" (+{len(stale) - 3} more)" if len(stale) > 3 else ""
+                violations.append(
+                    f"  campaign: the {stack} review is STALE — {len(stale)} file(s) under "
+                    f"{', '.join(p.rstrip('/') for p in prefixes)} changed since it saw "
+                    f"{seen[:12]}: {shown}{more}. "
+                    f"Re-run docs/agents/reviewers/{stack}-reviewer.md over the new work and "
+                    f"re-record the verdict with the SHA it saw."
+                )
+
 if violations:
     print("=" * 78)
     print(f"{len(violations)} UNBACKED COMPLETION CLAIM(S) — the campaign is not where it says it is:\n")

@@ -115,6 +115,70 @@ run_gate "$DIR"
 assert_not_contains "$OUT" "touches elixir" \
     "elixir is touched and reviewed, so it must not be demanded again"
 
+# ── 2b–2d. a RECORDED review is not necessarily a CURRENT one ────────────────
+#
+# ⛔ The guard originally tested only for the PRESENCE of a stack's key, which
+# reproduced inside itself the failure it exists to prevent. Measured on the
+# real campaign: all five core stacks carried a verdict dated 2026-10-14 whose
+# recorded `range` was the literal text "<sha>..HEAD" — and `HEAD` is a moving
+# target stored as a string, so the row kept READING as current while 166
+# further commits touching 178 files in those stacks landed behind it. The axis
+# was reported as covered for a week of unreviewed work, and the row's own text
+# is what made it invisible.
+#
+# ⚠️ Case 2c is the anti-vacuity half and is not optional: a staleness check
+# that fired on everything would pass 2b and 2d while making the guard useless,
+# and "always red" is as uninformative as "always green".
+
+test_case "a_review_with_no_sha_is_UNKNOWN" "a range ending in HEAD is not evidence of currency"
+assert_contains "$OUT" "records no \`reviewed_at_sha\`" \
+    "the string-only verdict above is reported as UNKNOWN rather than silently accepted"
+assert_exit_nonzero "$RC" "and UNKNOWN is a violation — an unanswerable check is not a satisfied one"
+
+DIR="$(new_sandbox sha_current '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "an elixir commit"
+CURRENT_SHA="$(git -C "$DIR" rev-parse HEAD)"
+python3 - "$DIR/plans/probe-campaign-state.json" "$CURRENT_SHA" <<'PY'
+import sys
+
+path, sha = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    body = f.read()
+with open(path, "w") as f:
+    f.write(body.replace("SHA_PLACEHOLDER", sha))
+PY
+
+test_case "a_review_at_the_current_sha_satisfies" "the green half — this must not fire on everything"
+run_gate "$DIR"
+assert_not_contains "$OUT" "is STALE" \
+    "nothing changed under apps/core/lib since the reviewer saw it, so the review stands"
+assert_not_contains "$OUT" "records no \`reviewed_at_sha\`" \
+    "and a recorded SHA is not reported as missing"
+
+DIR="$(new_sandbox sha_stale '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
+STALE_SHA="$(git -C "$DIR" rev-parse main)"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "an elixir commit the reviewer never saw"
+python3 - "$DIR/plans/probe-campaign-state.json" "$STALE_SHA" <<'PY'
+import sys
+
+path, sha = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    body = f.read()
+with open(path, "w") as f:
+    f.write(body.replace("SHA_PLACEHOLDER", sha))
+PY
+
+test_case "a_review_predating_a_change_is_STALE" "work landing after a review is unreviewed work"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a stale review is a violation, not a warning"
+assert_contains "$OUT" "elixir review is STALE" "the stack is named"
+assert_contains "$OUT" "apps/core/lib/probe.ex" \
+    "and so is the file the reviewer never saw — a count alone is the thing that gets ignored"
+
 # ── 3. a declared diff_range wins over the working tree ──────────────────────
 #
 # The historical-campaign case. The working tree touches elixir; the declared
