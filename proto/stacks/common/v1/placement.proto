@@ -141,7 +141,23 @@ message BookPlacement {
   string bookshelf_visibility = 8 [json_name = "bookshelf_visibility"];
 
   // Where the reader is in this book: "to_read", "reading", "completed" or
-  // "abandoned". See ReadingStatus below for the closed set.
+  // "abandoned". ReadingStatus below DOCUMENTS that closed set; it is not this
+  // field's type and nothing in this schema enforces it. The set is enforced on
+  // the write path (validate_inclusion in shelving.ex), in the warehouse (a dbt
+  // accepted_values test) and on read (parseReadingStatus maps a non-member to
+  // Nothing) — so a new consumer must validate against the enum itself rather
+  // than assume deserialisation rejects an out-of-set value.
+  //
+  // ⚠️ DELIBERATE, decided while the choice was still free: this stays a string
+  // rather than becoming `ReadingStatus reading_status = 9`. Enum-typing would
+  // work — the Elm generator derives the lowercase wire form by stripping the
+  // enum-name prefix — but that moves the wire spellings onto a DERIVATION, so
+  // renaming the enum would silently change every wire value in every language
+  // with no `buf breaking` signal, since renaming an enum type is not a field
+  // change. For the one field whose defect was a manufactured value overwriting
+  // a reader's real status, the spellings stay written down here. The option
+  // closes on merge: field 9 does not exist on the default branch, so switching
+  // the type is free today and becomes FIELD_SAME_TYPE on a shipped field after.
   //
   // ⛔ Added because its ABSENCE lost data. The book-detail progress card is
   // built from this message, so without the field the client could only show
