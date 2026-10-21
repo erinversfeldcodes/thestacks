@@ -47,44 +47,116 @@ cd "$REPO_ROOT" || exit 1
 
 LIB="apps/core/lib/stacks"
 SCHEMAS='Bookshelf|Placement|UserBlock|VisibilityGrant'
-SCOPE_MARKERS='Scope\.with_user|Scope\.set!|Scope\.multi_step|op\.blocked_pair|op\.wishlist_user_ids|op\.placement_owners_for_edition'
+SCOPE_MARKERS='Scope\.with_user|Scope\.set!|Scope\.multi_step|Scope\.anonymous|Scope\.for_viewer|op\.blocked_pair|op\.wishlist_user_ids|op\.placement_owners_for_edition|op\.placement_owner|op\.platform_row_counts'
 REPO_CALLS='Repo\.(all|one|get|get!|get_by|aggregate|exists\?|insert|insert!|update|update!|delete|delete_all|update_all|insert_all|query!|query)'
 
-# ⚠️ An allowlist as a `case`, not an associative array — ⛔ `declare -A` does
-# not exist in bash 3.2, which is the system bash here, and the failure mode is
-# the one this gate exists to prevent: the script errored on the declaration and
-# still exited 0, reporting a clean pass having checked nothing.
+# ⛔ THE ALLOWLIST IS A CLAIM THIS SCRIPT CHECKS, NOT A SENTENCE IT PRINTS.
 #
-# Each entry carries its reason. A module here is one whose reference to a
-# secured schema is not a query against it — an alias used only in a typespec,
-# a mention in prose, or a module that hands the work to a context that scopes
-# for itself. Reasons are required, because an allowlist without them becomes a
-# place to put whatever is inconvenient.
-allow_reason() {
+# It used to hold a free-text reason per module, echoed next to `ALLOWED`. Of
+# eight entries, SEVEN were factually false — each true of *part* of its
+# module's behaviour (the read half, the enqueue half, the prose half) while the
+# uncovered part rode along on a true-sounding sentence. Every one was a real
+# refused query on a deployed stack: the public transparency page, the admin
+# dashboard, the marketplace write path, the reader insights page, the group
+# feed, the visibility gate, and a feed handler that swallowed the refusal into
+# a silent nil.
+#
+# ⚠️ What makes this worth restructuring rather than rewording: a reviewer
+# briefed to be adversarial about exactly this ran the discovery predicate, got
+# the complete failing set in its own output, and then cleared three modules by
+# reading these reasons instead of the code. Prose beside a verdict reads as
+# VERIFIED. A corrected sentence would rot the same way, because nothing
+# re-checks a sentence.
+#
+# So an entry now names a KIND, and each kind is a check:
+#
+#   no-queries   the file makes no Repo call at all. Checked.
+#   definer      every secured-table access goes through an `op.*` SECURITY
+#                DEFINER function, and the file contains no direct query form.
+#                Checked, including the pipeline and bare-schema-argument forms.
+#   policy:NAME  a named policy makes this read public. Checked by grepping
+#                `CREATE POLICY NAME` across priv/repo/migrations — so dropping
+#                the policy turns this gate red.
+#
+# ⛔ What is NOT available as a kind: "delegates to something that scopes", which
+# is what four of the seven false reasons claimed. It is unverifiable from one
+# file, and it was wrong every time it was claimed.
+#
+# ⚠️ Three query forms, not one. The first draft of the textual check matched
+# only `from(x in Schema)` and would have passed `visibility.ex` (pipeline head,
+# `Bookshelf |> where(...)`) and `admin/data.ex` (`Repo.aggregate(Bookshelf, …)`)
+# — the dominant styles in this codebase, not edge cases.
+#
+# ⛔ And a limit this gate cannot fix, stated because overstating it is how the
+# last version did damage: a secured table reached through an ASSOCIATION ATOM
+# names no schema module at the call site. `Repo.preload(placement, :bookshelf)`
+# reads `op.bookshelves` with the word "bookshelves" nowhere in the line. No
+# textual check reaches it; one such site existed and was found by connecting as
+# the runtime role, not by any grep. The companion ExUnit check walks Ecto's
+# association graph for that class. Neither is a substitute for driving the
+# surfaces as the least-privilege role, which is the only instrument that found
+# all seven of these.
+# ⚠️ EMPTY, and that is the honest state. The eight prose entries are gone: seven
+# were false, and the eighth — `events/registry.ex`, claiming "runs no query of
+# its own" — was TRUE and also pointless. Discovery requires both a secured
+# schema name and a Repo call, and that module makes no Repo call, so it was
+# never discovered and allowlisting it excluded nothing. The anti-vacuity check
+# below is what revealed that, on its first run.
+#
+# The lesson is the one the false seven teach from the other side: an allowlist
+# entry nobody checks is not a small risk, it is an absence of information. Four
+# modules that used to sit here now scope or call a definer instead; one is
+# unfixed and reports MISSING, which is correct.
+allow_kind() {
     case "$1" in
-        "events/registry.ex")
-            echo "names schemas in subscription metadata; runs no query of its own" ;;
-        "visibility.ex")
-            echo "asks op.blocked_pair and delegates every row read to Shelving/Social, which scope" ;;
-        "admin/data.ex")
-            echo "operator surface reached only through the admin pipeline, which scopes per request" ;;
-        "feeds/handlers/placement_handler.ex")
-            echo "enqueues RegenerateFeedJob; the job scopes at its context boundary" ;;
-        "insights.ex")
-            echo "reads marts, not op; the schema names appear in doc prose" ;;
-        "costs.ex")
-            echo "reads op.platform_costs; the schema names appear in doc prose" ;;
-        "books.ex")
-            echo "book-side reads; placement access goes through Shelving, which scopes" ;;
-        "marketplace/marketplace.ex")
-            echo "listing reads are governed by the active-listing policy, not a per-user scope" ;;
         *) echo "" ;;
     esac
 }
 
+# The three query forms that reach a secured table by naming its schema module.
+# ⚠️ Comments stripped before matching: this codebase has five recorded cases of
+# an absence assertion satisfied by the prose explaining the pattern it bans.
+DIRECT_QUERY_FORMS='from\([a-z_]+ in (Bookshelf|Placement|UserBlock|VisibilityGrant)|^[[:space:]]*(Bookshelf|Placement|UserBlock|VisibilityGrant)[[:space:]]*$|(Bookshelf|Placement|UserBlock|VisibilityGrant)[[:space:]]*\|>|Repo\.[a-z_!?]+\((Bookshelf|Placement|UserBlock|VisibilityGrant)[,)]'
+
+DEFINERS='op\.blocked_pair|op\.wishlist_user_ids|op\.placement_owners_for_edition|op\.placement_owner|op\.platform_row_counts'
+
 fail=0
 checked=0
+kinds_resolved=0
 echo "==> Checking every module that queries a row-level-secured table"
+
+verify_kind() {
+    # $1 = relative path, $2 = file, $3 = kind. Echoes a failure reason, or
+    # nothing when the claim holds.
+    local rel="$1" file="$2" kind="$3" code
+    code="$(sed 's/#.*//' "$file")"
+
+    case "$kind" in
+        no-queries)
+            if printf '%s' "$code" | grep -qE "$REPO_CALLS"; then
+                echo "claims no-queries but makes a Repo call"
+            fi
+            ;;
+        definer)
+            if ! printf '%s' "$code" | grep -qE "$DEFINERS"; then
+                echo "claims definer but calls no op.* definer function"
+            elif printf '%s' "$code" | grep -qE "$DIRECT_QUERY_FORMS"; then
+                echo "claims definer but also queries a secured schema directly"
+            fi
+            ;;
+        policy:*)
+            local policy="${kind#policy:}"
+            if ! grep -rqE "CREATE POLICY[[:space:]]+${policy}\b" apps/core/priv/repo/migrations; then
+                echo "names policy '${policy}', which no migration creates"
+            elif printf '%s' "$code" | grep -qE 'Repo\.(update|update!|insert|insert!|delete|delete_all|update_all|insert_all)'; then
+                echo "names a read policy but writes to a secured table"
+            fi
+            ;;
+        *)
+            echo "unknown kind '${kind}' — kinds are: no-queries, definer, policy:NAME"
+            ;;
+    esac
+}
 
 while IFS= read -r file; do
     rel="${file#"$LIB"/}"
@@ -94,9 +166,16 @@ while IFS= read -r file; do
 
     checked=$(( checked + 1 ))
 
-    reason="$(allow_reason "$rel")"
-    if [[ -n "$reason" ]]; then
-        echo "    ALLOWED ${rel} — ${reason}"
+    kind="$(allow_kind "$rel")"
+    if [[ -n "$kind" ]]; then
+        problem="$(verify_kind "$rel" "$file" "$kind")"
+        if [[ -n "$problem" ]]; then
+            echo "    FALSE CLAIM ${rel} — ${problem}" >&2
+            fail=1
+        else
+            echo "    allowed ${rel} — ${kind} (checked)"
+            kinds_resolved=$(( kinds_resolved + 1 ))
+        fi
         continue
     fi
 
@@ -107,6 +186,22 @@ while IFS= read -r file; do
         fail=1
     fi
 done < <(find "$LIB" -name '*.ex' -type f ! -path '*/gen/*' | sort)
+
+# ⛔ Anti-vacuity for the kinds themselves, not just for discovery. If the
+# pattern behind a kind stops matching — a definer renamed, a query form
+# rewritten — every entry claiming that kind passes silently and this gate
+# reports clean while checking nothing. The gate's own history is the argument:
+# its first version errored on a bash-4 builtin and still exited 0.
+declared_kinds=$(grep -cE '^[[:space:]]+"[^"]+\.ex"\) echo "' "$0" || true)
+if (( kinds_resolved != declared_kinds )); then
+    echo "FAIL: ${declared_kinds} allowlist entr(ies) declared, ${kinds_resolved} resolved." >&2
+    echo "      An entry that never matched a discovered module is not being checked at all," >&2
+    echo "      so it excludes nothing and tells a reader something untrue." >&2
+    fail=1
+fi
+if (( declared_kinds > 0 )); then
+    echo "    (${declared_kinds} allowlist entr(ies), all verified against the code)"
+fi
 
 # ⛔ Anti-vacuity. If the discovery above matched nothing — a moved directory, a
 # renamed schema module — every assertion would pass over an empty set and this
