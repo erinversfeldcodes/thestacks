@@ -25,6 +25,7 @@ defmodule Stacks.Books do
   alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
+  alias Stacks.Scope
   alias Stacks.Shelving
 
   @book_required_fields [:title]
@@ -741,7 +742,13 @@ defmodule Stacks.Books do
   defp create_placement_for_existing(user_id, book, shelf_name, existing, book_edition_id) do
     case Shelving.place_book(user_id, book.id, shelf_name, book_edition_id) do
       {:ok, placement} ->
-        placement = Repo.preload(placement, :bookshelf)
+        # ⚠️ Scoped even though it reads as a plain association load. `:bookshelf`
+        # resolves to `op.bookshelves`, which is row-level secured, so this is a
+        # secured read that names no schema module anywhere at the call site —
+        # the reason a grep over schema aliases cannot find it, and the reason it
+        # survived the scoping sweep. `place_book/4` scopes internally and has
+        # already committed by the time this runs.
+        placement = Scope.with_user(user_id, fn -> Repo.preload(placement, :bookshelf) end)
         {:ok, :existing, book, placement, existing ++ [placement]}
 
       {:error, reason} ->

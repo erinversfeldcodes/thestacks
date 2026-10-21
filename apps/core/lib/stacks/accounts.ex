@@ -28,6 +28,7 @@ defmodule Stacks.Accounts do
   alias Stacks.Email
   alias Stacks.Events
   alias Stacks.GDPR.Deletion
+  alias Stacks.Scope
   alias Stacks.Workers.VisibilityRecapJob
 
   @unverified_account_ttl_seconds 24 * 60 * 60
@@ -470,6 +471,42 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
+      How many abandoned signups are still waiting, with NO batch ceiling.
+
+      ⛔ Separate from `expired_unverified_ids/2` on purpose, and the reason is
+      the whole value of the number. The sweep is budgeted — it takes at most a
+      batch per run — so "how much did this run do" and "how much is left" are
+      different facts. Reusing the bounded query to answer the second one makes
+      the answer unable to exceed the batch size, which is precisely the
+      blindness the remaining-count was introduced to end: a nightly success
+      over a growing backlog.
+
+      ⚠️ It shares the SQL prefilter and the link check with the sweep, so it
+      cannot drift into disagreeing about WHICH accounts count — it differs only
+      in refusing to stop counting. Sharing the whole query would have shared
+      the ceiling, which is the mistake this replaces.
+
+      ⚠️ Unbounded by design, and that is affordable here: the prefilter is
+      indexed and the link check runs only over rows it returns. If this ever
+      becomes expensive, the fix is a cheaper exact count, never a ceiling —
+      a capped backlog figure is worse than none, because it reads as a real
+      measurement.
+  """
+  @spec pending_unverified_count(DateTime.t()) :: non_neg_integer()
+  def pending_unverified_count(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -@unverified_account_ttl_seconds, :second)
+
+    Repo.all(
+      from u in User,
+        where:
+          u.email_confirmed == false and u.created_at < ^cutoff and
+            not is_nil(u.email_confirmation_token) and is_nil(u.pending_email),
+        select: u.email_confirmation_token
+    )
+    |> Enum.count(&(not confirmation_link_live?(&1)))
+  end
+
+  @doc """
       Verify a confirmation token and return the user id it was signed over.
 
       The ONE place the `"email_confirm"` salt and its `max_age` are spoken. Both
@@ -770,9 +807,18 @@ defmodule Stacks.Accounts do
           limit: ^@search_limit
         )
 
-      query
-      |> exclude_blocked(viewer_id)
-      |> Repo.all()
+      # ⚠️ Scoped to the viewer around the read. The query itself touches only
+      # `op.users`, which carries no policy — but `exclude_blocked/2` puts
+      # `op.blocked_pair/2` in the WHERE clause, and that function refuses a
+      # question about two users when a scope is set and neither is the scoped
+      # user. Stating the viewer here means the guard sees the viewer it is
+      # being asked on behalf of, rather than whatever scope happened to be
+      # left behind by an earlier call on the same connection.
+      Scope.for_viewer(viewer_id, fn ->
+        query
+        |> exclude_blocked(viewer_id)
+        |> Repo.all()
+      end)
     end
   end
 

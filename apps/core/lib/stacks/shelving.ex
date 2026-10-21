@@ -870,6 +870,16 @@ defmodule Stacks.Shelving do
           {:ok, Placement.t()}
           | {:error, :unauthorized | :not_found | String.t() | Ecto.Changeset.t()}
   def update_placement_visibility(placement_id, user_id, visibility) do
+    Scope.with_user(user_id, fn ->
+      do_update_placement_visibility(placement_id, user_id, visibility)
+    end)
+  end
+
+  # ⚠️ Wrapped as a whole, not read-by-read. `scoped_get_placement/2` and
+  # `scoped_preload/3` each open and COMMIT their own scope, so a write placed
+  # after them runs with no scope live — which is a refused write rather than an
+  # unscoped one, and so a 500 on the only path that reaches it.
+  defp do_update_placement_visibility(placement_id, user_id, visibility) do
     placement =
       case scoped_get_placement(placement_id, user_id) do
         nil -> nil

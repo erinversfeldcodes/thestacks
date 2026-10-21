@@ -16,7 +16,8 @@ defmodule Stacks.Costs do
   alias Stacks.Accounts.User
   alias Stacks.Books.{Book, UploadedImage}
   alias Stacks.Costs.PlatformCost
-  alias Stacks.Shelving.Placement
+
+  require Logger
 
   @fly_core_cents 534
   # always-on support services (Grafana, VictoriaMetrics, SearXNG, scraper):
@@ -101,10 +102,32 @@ defmodule Stacks.Costs do
     Repo.one(from(i in UploadedImage, select: count(i.id))) || 0
   end
 
-  @doc "Total bookshelf placements."
+  @doc """
+      Total bookshelf placements, platform-wide.
+
+      ⛔ Answered through `op.platform_row_counts()` rather than by counting the
+      table, because counting it directly is wrong twice over. Unscoped it is
+      refused outright — `op.bookshelf_placements` is row-level secured and this
+      number is published on the PUBLIC transparency page, so the page 500s. And
+      under the anonymous scope it succeeds while returning the count of
+      publicly-visible placements, which on this database is 0 of 220: a
+      plausible smaller number no reader could tell from the truth, on the one
+      page whose entire purpose is being trustworthy about figures.
+  """
   @spec placement_count() :: non_neg_integer()
   def placement_count do
-    Repo.one(from(p in Placement, select: count(p.id))) || 0
+    case Repo.query("SELECT placements FROM op.platform_row_counts()") do
+      {:ok, %{rows: [[count]]}} when is_integer(count) -> count
+      other -> log_and_zero(other, "placement_count")
+    end
+  end
+
+  # ⚠️ Zero is a defensible degraded answer for a cost-breakdown denominator,
+  # but ONLY if the failure is visible. A silent zero here is the shape that
+  # made the metrics pipeline report a complete system delivering nothing.
+  defp log_and_zero(other, what) do
+    Logger.warning("Costs.#{what} could not read the platform totals: #{inspect(other)}")
+    0
   end
 
   @doc "Database size in bytes (pg_database_size)."

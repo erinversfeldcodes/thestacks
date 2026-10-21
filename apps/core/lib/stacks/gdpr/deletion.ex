@@ -68,39 +68,48 @@ defmodule Stacks.GDPR.Deletion do
       anything — the read-only counterpart used by the operator dry-run
       (`Stacks.Release.gdpr_erase_user/1`).
 
-      Returns `{:ok, counts}` with a per-target row count (using the exact same
-      scopes the erasure uses, so the preview cannot drift from the real thing), or
+      Returns `{:ok, counts}` with a per-target row count, or
       `{:error,:user_not_found}` if no user has that id.
+
+      ⚠️ The claim that this uses "the exact same scopes the erasure uses" was
+      false when written: the erasure leads with `Scope.multi_step/2` and this
+      read nothing at all. The operator dry-run runs through `rpc` on a live
+      node — as the least-privilege role — so the two secured reads below were
+      refused, and a dry-run that cannot read is worse than none: it precedes an
+      irreversible action and the operator reads its output as the plan. Now
+      genuinely scoped to the same user, so the preview and the erasure see one
+      row set.
   """
   @spec preview_user_data(binary()) :: {:ok, map()} | {:error, :user_not_found}
   def preview_user_data(user_id) do
     case Repo.get(User, user_id) do
-      nil ->
-        {:error, :user_not_found}
-
-      _user ->
-        bookshelf_ids =
-          Repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id, select: bs.id)
-
-        {:ok,
-         %{
-           bookshelves: length(bookshelf_ids),
-           placements: count(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids),
-           placement_history:
-             count(
-               from h in PlacementHistory,
-                 where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
-             ),
-           feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
-           uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
-           library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
-           feedback_entries: count(from f in FeedbackEntry, where: f.user_id == ^user_id),
-           comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
-           event_log_rows_scrubbed: count(user_event_log_query(user_id)),
-           audit_log_rows_scrubbed: count(user_audit_log_query(user_id)),
-           sessions_revoked: session_row_count(Repo, user_id)
-         }}
+      nil -> {:error, :user_not_found}
+      _user -> Scope.with_user(user_id, fn -> do_preview_user_data(user_id) end)
     end
+  end
+
+  defp do_preview_user_data(user_id) do
+    bookshelf_ids =
+      Repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id, select: bs.id)
+
+    {:ok,
+     %{
+       bookshelves: length(bookshelf_ids),
+       placements: count(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids),
+       placement_history:
+         count(
+           from h in PlacementHistory,
+             where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
+         ),
+       feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
+       uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
+       library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
+       feedback_entries: count(from f in FeedbackEntry, where: f.user_id == ^user_id),
+       comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
+       event_log_rows_scrubbed: count(user_event_log_query(user_id)),
+       audit_log_rows_scrubbed: count(user_audit_log_query(user_id)),
+       sessions_revoked: session_row_count(Repo, user_id)
+     }}
   end
 
   defp count(query), do: Repo.aggregate(query, :count)

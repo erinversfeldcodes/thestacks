@@ -132,36 +132,56 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     end)
   end
 
+  defp split_counts(edition_id, work_id) do
+    case Repo.query(
+           "SELECT movers, retained FROM op.unmerge_placement_counts($1::uuid, $2::uuid)",
+           [
+             Ecto.UUID.dump!(edition_id),
+             Ecto.UUID.dump!(work_id)
+           ]
+         ) do
+      {:ok, %{rows: [[movers, retained]]}} ->
+        {movers, retained}
+
+      other ->
+        # ⚠️ Raised, never defaulted. These two numbers are the entire blast
+        # radius an operator is shown before approving an irreversible change,
+        # so a zero that means "could not count" is indistinguishable on screen
+        # from a zero that means "nothing will move".
+        raise "the unmerge preview could not count the placements on either side of " <>
+                "edition #{inspect(edition_id)}: #{inspect(other)}"
+    end
+  end
+
   # The one fact the correction cannot learn for itself: whose rows these are.
   # Answered by a `SECURITY DEFINER` read owned by a role that cannot log in,
   # rather than by exempting this path from the policies.
+  #
+  # ⛔ There is NO fallback for a missing function, and removing the one that was
+  # here closed a way to wedge a deploy unrecoverably. The old fallback read the
+  # two secured tables directly, justified by "before the migration the policies
+  # are still the permissive ones". That sentence stopped being true two
+  # migrations before this function was created — the policies tighten first. So
+  # on any database rolled back past this function but not past the policies,
+  # the fallback fired and raised `42501` instead of returning rows;
+  # `run_corrections/1` re-raised; and because `deploy/0` runs corrections
+  # BEFORE migrate, the deploy aborted before it could migrate forward out of
+  # the state. An unavailable function must therefore say so plainly.
   defp placement_owners(edition_id) do
-    # ⛔ The function may not exist yet, and that is by DESIGN of the deploy
-    # rather than an oversight. `Stacks.Release.deploy/0` runs corrections,
-    # then migrations, then corrections again — repairs come first because a
-    # migration adding a constraint is a claim about existing data. So the
-    # first pass can run against a database where the migration that creates
-    # this function has not been applied.
-    #
-    # ⚠️ The fallback is safe precisely in that window: before the migration,
-    # the policies are still the permissive ones that short-circuit on an unset
-    # scope, so a direct cross-user read succeeds. After it, the function
-    # exists and is used. Neither path is ever the wrong one for the database
-    # it runs on.
     case Repo.query("SELECT user_id FROM op.placement_owners_for_edition($1::uuid)", [edition_id]) do
       {:ok, %{rows: rows}} ->
         Enum.map(rows, fn [raw] -> Ecto.UUID.cast!(raw) end)
 
-      {:error, %Postgrex.Error{postgres: %{code: :undefined_function}}} ->
-        Repo.all(
-          from(bs in Bookshelf,
-            join: p in Placement,
-            on: p.bookshelf_id == bs.id,
-            where: p.book_edition_id == ^edition_id,
-            distinct: true,
-            select: bs.user_id
-          )
-        )
+      {:error, %Postgrex.Error{postgres: %{code: code}} = error} ->
+        # ⚠️ `insufficient_privilege` is named alongside `undefined_function`
+        # because the two are one operational fact — the correction cannot ask
+        # whose rows these are — and the second is reachable whenever the
+        # function-owner role exists without the membership the grant assumed.
+        # Matching only the first left that case unhandled.
+        raise "the unmerge correction cannot determine which users hold edition " <>
+                "#{inspect(edition_id)}: op.placement_owners_for_edition is unavailable " <>
+                "(#{inspect(code)}). Apply the migrations before running corrections. " <>
+                "#{inspect(error)}"
     end
   end
 
@@ -189,17 +209,19 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   end
 
   defp change(edition, work, title) do
-    movers =
-      Repo.aggregate(from(p in Placement, where: p.book_edition_id == ^edition.id), :count)
-
-    retained =
-      Repo.aggregate(
-        from(p in Placement,
-          where: p.book_id == ^work.id,
-          where: p.book_edition_id != ^edition.id or is_nil(p.book_edition_id)
-        ),
-        :count
-      )
+    # ⚠️ Both counts come from one definer function. Unscoped aggregates over
+    # `op.bookshelf_placements` are refused, so `plan/1` raised and the
+    # correction could not be previewed or approved at all on a deployed stack.
+    #
+    # ⛔ The obvious fix — mirror `repoint_placements/2` and count per owner
+    # inside each owner's scope — is correct for `movers` and WRONG for
+    # `retained`, which is why it is not what this does. `retained` counts
+    # placements on the work that do not name the split edition, and those
+    # belong to holders of the work's OTHER editions: a different, possibly
+    # disjoint set of users. Iterating the edition's owners reported 0 for every
+    # such placement, putting a false "0 placements stay" in front of an
+    # operator about to approve an irreversible split.
+    {movers, retained} = split_counts(edition.id, work.id)
 
     %{
       id: edition.id,

@@ -224,8 +224,27 @@ defmodule Stacks.Social do
       `blocked?(viewer_id, owner_id)` returns true if viewer blocked owner
       OR owner blocked viewer.
   """
-  @spec blocked?(String.t(), String.t()) :: boolean()
+  @spec blocked?(String.t() | nil, String.t() | nil) :: boolean()
+  def blocked?(nil, _owner_id), do: false
+  def blocked?(_viewer_id, nil), do: false
+
   def blocked?(viewer_id, owner_id) do
+    # ⚠️ Deliberately NOT wrapped in a scope of its own. `op.blocked_pair/2`
+    # refuses a question about two users when a scope is set and neither is the
+    # scoped user, and the obvious response — scope to the viewer right here —
+    # costs a transaction per call. Measured: the public blog listing resolves
+    # visibility once per author, and that wrap took a bounded 13 queries for
+    # twenty posts to 43, breaking the bound its own test exists to hold.
+    #
+    # So the scope belongs at the request boundary, where one transaction serves
+    # the whole read, and this function is correct whether or not one is set: no
+    # scope is the public path, the viewer's scope is the signed-in path, and a
+    # THIRD user's scope being active while asking about two others is a genuine
+    # bug that should surface rather than be absorbed.
+    #
+    # ⛔ Relying on the transaction to revert the scope was itself the defect
+    # that made this look fragile — see `Stacks.Scope.with_user/2`, which now
+    # restores the previous value explicitly instead.
     # ⛔ Asked through `op.blocked_pair/2`, not with a query of our own, and the
     # reason is row-level security rather than tidiness.
     #
@@ -252,12 +271,19 @@ defmodule Stacks.Social do
   """
   @spec blocked_user_ids(binary()) :: [binary()]
   def blocked_user_ids(user_id) do
-    Repo.all(
-      from(b in UserBlock,
-        where: b.blocker_id == ^user_id,
-        select: b.blocked_id
+    # ⚠️ Scopeable, and scoped rather than routed through a definer function:
+    # the rows wanted are exactly the ones the owner policy admits when scoped
+    # to this user, because the predicate IS `blocker_id = <this user>`. The
+    # both-directions question is the one that needs `op.blocked_pair/2`; this
+    # one-direction list does not.
+    Scope.with_user(user_id, fn ->
+      Repo.all(
+        from(b in UserBlock,
+          where: b.blocker_id == ^user_id,
+          select: b.blocked_id
+        )
       )
-    )
+    end)
   end
 
   @doc """

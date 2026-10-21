@@ -16,6 +16,7 @@ defmodule Stacks.Insights do
   alias Core.Repo
   alias Stacks.Accounts.User
   alias Stacks.Books.Book
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @fingerprint_size 5
@@ -36,12 +37,27 @@ defmodule Stacks.Insights do
   def personal_inferences(%User{id: user_id}, opts \\ []) do
     reveal_risk? = Keyword.get(opts, :reveal_risk, false)
 
-    placements = active_placements(user_id)
-    history_times = history_move_times(user_id)
+    # ⚠️ Scoped once at the context boundary rather than inside each helper: both
+    # of these read row-level-secured tables, and a per-helper scope would open
+    # and commit two transactions to answer one question about one user.
+    {placements, history_times} =
+      Scope.with_user(user_id, fn ->
+        {active_placements(user_id), history_move_times(user_id)}
+      end)
+
+    # ⛔ DELIBERATELY OUTSIDE the scope above. `deanonymisation/2` asks how many
+    # OTHER users shelve the same rare books — `bs.user_id <> $1` — which is the
+    # whole point of a uniqueness fingerprint and cannot be answered from one
+    # user's rows. Scoped, the owner policy admits only this user's rows and the
+    # `<>` then excludes them, so it returns a confident ZERO and the page tells
+    # every reader they are maximally identifiable. Left unscoped it raises,
+    # which its own rescue logs and reports as "could not compute" — a worse
+    # user experience and a far better failure. It needs a definer function, the
+    # same mechanism as the wishlist question.
+    deanon = deanonymisation(user_id, placements)
 
     interest = interest_profile(placements)
     behaviour = behaviour(placements, history_times)
-    deanon = deanonymisation(user_id, placements)
 
     base = %{
       interest_profile: interest,
