@@ -922,11 +922,17 @@ defmodule Stacks.Social do
         }
       end)
 
-    dropped = length(rows) - length(decorated)
-
-    if dropped > 0 do
-      :telemetry.execute([:stacks, :social, :feed_row_undecorated], %{count: dropped}, %{})
-    end
+    # ⚠️ Emitted UNCONDITIONALLY, including the zero. Guarding on `dropped > 0`
+    # looks like the thrifty choice and defeats the purpose: with no emission
+    # the series never comes into existence, so the panel's `increase()` renders
+    # **No data** — and renders it identically for a healthy system, a feed
+    # nobody has loaded, a broken emitter, and a deleted metric. A counter whose
+    # whole job is to show a zero has to emit the zero.
+    :telemetry.execute(
+      [:stacks, :social, :feed_row_undecorated],
+      %{count: length(rows) - length(decorated)},
+      %{}
+    )
 
     decorated
   end
