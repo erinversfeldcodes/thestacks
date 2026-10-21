@@ -339,6 +339,22 @@ fromProtoBookPlacement bp =
     -- `parseReadingStatus` is applied rather than the string being trusted, so
     -- a value the server cannot emit becomes Nothing instead of a silently
     -- wrong badge.
+    --
+    -- ⛔ TWO causes collapse into this one `Nothing`, and the collapse is safe
+    -- only because of a DATABASE CONSTRAINT. `op.bookshelf_placements.
+    -- reading_status` is `NOT NULL DEFAULT 'to_read'` with
+    -- `CHECK (reading_status IN ('to_read','reading','completed','abandoned'))`,
+    -- so a stored value is always one of the four and always present. That
+    -- makes both producers of `Nothing` here — an absent key, and a value this
+    -- build cannot parse — signatures of a SERIALISER GAP rather than states a
+    -- reader can be in. Nothing actionable distinguishes them, which is why
+    -- there is no third constructor.
+    --
+    -- ⚠️ If that CHECK is ever widened to add a fifth status, the second cause
+    -- becomes reachable as a real reader state — a status the server legitimately
+    -- holds and this build cannot name — and the two stop being equivalent. At
+    -- that point this collapse needs revisiting, and this comment is the only
+    -- thing that will tell whoever writes that migration.
     , readingStatus = Maybe.andThen parseReadingStatus bp.readingStatus
     , currentPage = bp.currentPage
     , startedAt = Nothing

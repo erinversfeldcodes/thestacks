@@ -56,12 +56,23 @@ defmodule StacksWeb.ProtoJSON do
                         # default appears in the source, which is why this hid
                         # where the equivalent reading-status defect did not.
                         #
-                        # The consequence is a race on a GDPR consent flag:
-                        # `Main.elm` seeds the privacy toggles from this payload
-                        # and the settings fetch (whose decoder REQUIRES the
-                        # field) corrects them only once it resolves, so a save
-                        # inside that window — or after a failed fetch — submits
-                        # `false` and withdraws a consent the reader granted.
+                        # ⚠️ NOT a live data-loss bug, and the first version
+                        # of this comment overstated it. Traced end to end: the
+                        # writing toggle is not saved by the privacy page's Save
+                        # button at all — it issues its own request on click, so
+                        # the only value ever written comes from the model at
+                        # click time, and the control is disabled while the
+                        # settings fetch is Loading OR Failed. So the window in
+                        # which the model holds this payload's `false` is a
+                        # window in which the control cannot be clicked.
+                        #
+                        # `Main.elm` is the sole reader of the field in the whole
+                        # SPA, and its seed is replaced before the control it
+                        # seeds becomes usable. So the field was DEAD — decoded
+                        # as a lie no live path could act on. Carried anyway,
+                        # because a dead field that decodes as a confident
+                        # `false` is a loaded gun for the next consumer, and the
+                        # asymmetry with `consent_analytics` had no reason.
                         :consent_writing_assistant
                       ]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
