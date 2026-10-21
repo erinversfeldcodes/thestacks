@@ -7,7 +7,9 @@ progress in place. Covers the mount predicate, the request lifecycle,
 and the completed-read bridge into the Reading Pile flow.
 -}
 
+import Components.PlacementCard as Card
 import Dict
+import Expect
 import Html.Attributes
 import Http
 import Page.BookDetail as BookDetail
@@ -116,7 +118,50 @@ suite =
         , errorResponseKeepsFormOpen
         , finishedOnPileSurfacesBridge
         , finishedOnLibraryHasNoBridge
+        , saveWithNoChosenStatusIssuesNoRequest
         ]
+
+
+{-| ⛔ Saving a card whose status was never recorded must issue NO request.
+
+This is the destructive half of the original defect, asserted at the host rather
+than at the screen. The card seeded an absent status with `ToRead`, so opening
+the card and pressing Save wrote `to_read` over whatever the server held —
+including over a status this build could not parse.
+
+⚠️ Why this test exists even though Save is disabled: a `disabled` attribute is
+the screen, not the write. **Measured** — defeating both host guards while
+keeping `draftStatus : Maybe ReadingStatus` (so the type still looks protective)
+reintroduced the destructive write with **zero** of the then-2150 tests failing.
+The `disabled` assertion was the whole of the suite's protection, and it does
+not cover the path a `SaveClicked` message takes.
+
+So this drives `SaveClicked` directly instead of clicking the rendered button:
+going through the button would assert the `disabled` attribute again rather than
+the guard behind it, and would pass against a host with no guard at all.
+
+-}
+saveWithNoChosenStatusIssuesNoRequest : Test
+saveWithNoChosenStatusIssuesNoRequest =
+    test "save_guard: Save on a card with NO recorded status issues no PUT at all" <|
+        \() ->
+            startDetailWith libraryPlacement
+                -- Open the card without choosing a status, so draftStatus is
+                -- Nothing — the state the fixture's payload actually describes.
+                |> ProgramTest.clickButton "Not recorded"
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ]
+                -- ⛔ Driven as the card's own SaveClicked, routed through the
+                -- host's ProgressCardMsg — the exact path a click takes once
+                -- the button is enabled. Clicking the rendered button instead
+                -- would assert the `disabled` attribute, which is the half
+                -- already covered and the half that is not the write.
+                |> ProgramTest.update (BookDetail.ProgressCardMsg Card.SaveClicked)
+                |> ProgramTest.ensureHttpRequests "PUT"
+                    progressEndpoint
+                    (List.length >> Expect.equal 0)
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ]
 
 
 cardRendersForReadableShelf : Test

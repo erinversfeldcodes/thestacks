@@ -15,7 +15,9 @@ The draft-to-request mapping itself is covered by PlacementCardTest.
 
 -}
 
+import Components.PlacementCard as Card
 import Dict
+import Expect
 import Html.Attributes
 import Http
 import Page.Bookshelf.ReadingPile as ReadingPile
@@ -54,12 +56,34 @@ readingPlacement =
     }
 
 
+{-| ⛔ The same pile placement with NO recorded reading status — the fixture
+this module did not have.
+
+Every other fixture here carries `readingStatus = Just Reading`, so until this
+existed the Reading Pile host had never been driven on the unrecorded path at
+all. That is why the badge-label change needed no update in this file, and why
+defeating this host's save guard produced no failing test.
+
+-}
+unrecordedPlacement : Placement
+unrecordedPlacement =
+    { readingPlacement | readingStatus = Nothing, currentPage = Nothing }
+
+
 startPile : ProgramTest ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
 startPile =
     ProgramTest.start () (readingPileProgram (Just "test-token"))
         |> ProgramTest.simulateHttpResponse "GET"
             pileUrl
             (simulateBookshelfResponse [ readingPlacement ])
+
+
+startPileUnrecorded : ProgramTest ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
+startPileUnrecorded =
+    ProgramTest.start () (readingPileProgram (Just "test-token"))
+        |> ProgramTest.simulateHttpResponse "GET"
+            pileUrl
+            (simulateBookshelfResponse [ unrecordedPlacement ])
 
 
 {-| Open the card (click the status badge) and click Save, leaving the PUT
@@ -101,7 +125,44 @@ suite =
         , editAndSaveFoldsResult
         , finishedTransitionSurfacesBridge
         , errorResponseSurfacesMessage
+        , saveWithNoChosenStatusIssuesNoRequest
         ]
+
+
+{-| ⛔ Saving a pile card whose status was never recorded must issue NO request.
+
+The destructive half of the original defect, asserted at this host. The card
+seeded an absent status with `ToRead`, so opening the card and pressing Save
+wrote `to_read` over whatever the server held.
+
+⚠️ **Measured before this test existed**: keeping `draftStatus` a `Maybe` but
+making `cardProgressWrite` return `Just (… Maybe.withDefault ToRead …)`
+reintroduced the destructive write with **zero** of the then-2150 tests failing.
+This host was the less-covered of the two — its every other fixture carries a
+real status, so the no-status path had never been exercised here.
+
+Driven as `CardMsg` carrying the card's own `SaveClicked`, which is the path a
+click takes once the button is enabled. Clicking the rendered button instead
+would assert the `disabled` attribute — the screen rather than the write — and
+would pass against a host with no guard at all.
+
+-}
+saveWithNoChosenStatusIssuesNoRequest : Test
+saveWithNoChosenStatusIssuesNoRequest =
+    test "save_guard: Save on a pile card with NO recorded status issues no PUT at all" <|
+        \() ->
+            startPileUnrecorded
+                |> ProgramTest.ensureViewHas [ Selector.text "Not recorded" ]
+                |> ProgramTest.clickButton "Not recorded"
+                |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
+                |> ProgramTest.update
+                    (ReadingPile.CardMsg "placement-book-1" Card.SaveClicked)
+                |> ProgramTest.ensureHttpRequests "PUT"
+                    progressEndpoint
+                    (List.length >> Expect.equal 0)
+                -- The form stays open, so the reader can still choose a status
+                -- rather than being told the save succeeded.
+                |> ProgramTest.expectViewHas [ Selector.class "placement-card__edit-form" ]
 
 
 progressRendersOnCard : Test

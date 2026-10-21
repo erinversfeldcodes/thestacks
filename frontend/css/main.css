@@ -4907,6 +4907,20 @@ h4 {
     opacity: 0.9;
 }
 
+/* An absent status, which is NOT the same as "to read" — the two were once
+   rendered identically and that was the defect. A dashed border reads as
+   "nothing recorded here" rather than as a value, and keeps it distinct from
+   --to-read below, which is a real status the reader chose and so carries a
+   solid border. Both use --text-muted, so the distinction is the border style
+   rather than a second muted colour. */
+.placement-card__badge--unrecorded {
+    background-color: transparent;
+    color: var(--text-muted);
+    border-color: var(--text-muted);
+    border-style: dashed;
+    font-weight: 500;
+}
+
 .placement-card__badge--to-read {
     background-color: var(--shelf-bg);
     color: var(--text-muted);
