@@ -151,7 +151,7 @@ note_live_component() {
     printf '%s\n' "${app#stacks-core-pr-}" >> "$LIVE_FILE"
 }
 
-swept=0 kept=0
+swept=0 kept=0 failed=0
 while IFS= read -r app; do
     [[ -z "$app" ]] && continue
     if allowed "$app"; then
@@ -234,13 +234,42 @@ modal_json="$("${MODAL[@]}" app list --json 2>/dev/null)" \
 #
 # Stopped apps are already in their terminal state and are not listed as
 # deployed; `app stop` is the whole action available here, there being no delete.
+# ⛔ KEY LOOKUP IS CASE- AND SPACE-INSENSITIVE, because it has already broken.
+#
+# Modal 1.2.6 emitted `Description`, `State`, `Created at`; 1.6.2 emits
+# `description`, `state`, `created_at`. Against the newer CLI the old parser
+# read every field as empty — so it iterated the rows, matched no name, swept
+# nothing, and REPORTED SUCCESS. Measured 2026-10-21 with two deployed apps
+# present, one of them a genuine orphan.
+#
+# ⚠️ The anti-vacuity counter did not catch it and could not: it counts rows
+# EXAMINED, and the rows were examined. What was missing was a check that a row
+# PARSED. A renamed upstream key is invisible to a count of lines.
+#
+# ⚠️ Nor could the stubbed suite catch it — the stub emitted the old spelling,
+# so it encoded the contract rather than testing it. This is the thing only a
+# run against the real CLI could find, which is the argument for that run.
 modal_rows="$(printf '%s' "$modal_json" | python3 -c "
 import datetime, json, sys
 
+def field(app, *names):
+    norm = {k.lower().replace(' ', '_'): v for k, v in app.items()}
+    for n in names:
+        v = norm.get(n.lower().replace(' ', '_'))
+        if v:
+            return v
+    return ''
+
+unparsed = 0
 for app in json.load(sys.stdin):
-    name = app.get('Description') or ''
-    state = (app.get('State') or '').lower()
-    created = app.get('Created at') or ''
+    name = field(app, 'Description', 'name')
+    state = field(app, 'State').lower()
+    created = field(app, 'Created at', 'created_at')
+
+    if not name:
+        unparsed += 1
+        continue
+
     try:
         epoch = int(datetime.datetime.fromisoformat(created).timestamp())
     except ValueError:
@@ -248,7 +277,21 @@ for app in json.load(sys.stdin):
         # live app on the strength of a format change.
         epoch = 0
     print(f'{name}\t{state}\t{epoch}')
+
+if unparsed:
+    # ⛔ A row we could not name is a refusal, not a skip. It means the listing
+    # shape changed, and every decision below would be made on empty strings.
+    print(f'UNPARSED\t{unparsed}\t0')
 ")" || { echo "FAIL sweep: could not parse the Modal app listing" >&2; exit 1; }
+
+if printf '%s' "$modal_rows" | grep -q "^UNPARSED"; then
+    count="$(printf '%s' "$modal_rows" | grep "^UNPARSED" | cut -f2)"
+    echo "FAIL sweep: ${count} Modal app(s) in the listing have no readable name." >&2
+    echo "       The CLI's JSON keys have changed shape. Every decision below would be" >&2
+    echo "       made on empty strings — matching no app, sweeping nothing, and reporting" >&2
+    echo "       success. Refusing instead." >&2
+    exit 1
+fi
 
 modal_examined=0
 while IFS=$'\t' read -r mname mstate mepoch; do
@@ -277,12 +320,34 @@ while IFS=$'\t' read -r mname mstate mepoch; do
     fi
     if (( DRY_RUN )); then
         echo "    WOULD STOP modal:${mname}"
+        swept=$(( swept + 1 ))
     else
-        "${MODAL[@]}" app stop "$mname" >/dev/null 2>&1 \
-            && echo "    STOPPED modal:${mname}" \
-            || echo "    WARN: failed to stop modal app ${mname}" >&2
+        # ⛔ `--yes` is not optional, and its absence meant this leg had NEVER
+        # stopped anything. Modal 1.6.2's `app stop` PROMPTS for confirmation
+        # and aborts non-interactively with "Rerun with --yes (-y) to skip
+        # confirmation" — so in CI, and in every unattended weekly run, the stop
+        # failed. Measured 2026-10-21 against a real orphan.
+        #
+        # ⚠️ The error was invisible because it was discarded. `2>/dev/null`
+        # plus a WARN turned a total failure of the leg into a line nobody
+        # reads, and the counter below called it a success anyway.
+        # ⚠️ An `if`, not an assignment followed by `$?`. This script runs under
+        # `set -e`, so a bare failing assignment exits immediately — silently,
+        # before any of the handling below, which is exactly what it did on the
+        # first attempt at this fix. The original `cmd && … || …` form hid the
+        # failure from `set -e` and from the reader at the same time.
+        if stop_err="$("${MODAL[@]}" app stop --yes "$mname" 2>&1 >/dev/null)"; then
+            echo "    STOPPED modal:${mname}"
+            swept=$(( swept + 1 ))
+        else
+            # ⛔ NOT counted as swept. A failed stop that increments the total
+            # is the script reporting work it did not do — the precise defect
+            # this sweep exists to prevent, reproduced in its own summary.
+            # `failed` is reported separately and makes the run exit non-zero.
+            echo "    FAILED to stop modal:${mname} — ${stop_err}" >&2
+            failed=$(( failed + 1 ))
+        fi
     fi
-    swept=$(( swept + 1 ))
 done <<< "$modal_rows"
 
 # ⛔ ANTI-VACUITY. Every verdict above is a set difference, which is empty when
@@ -298,4 +363,13 @@ fi
 echo "    Modal apps examined: ${modal_examined}"
 
 echo ""
-echo "Sweep complete: ${swept} orphan(s) $( (( DRY_RUN )) && echo 'found' || echo 'removed'), ${kept} kept."
+echo "Sweep complete: ${swept} orphan(s) $( (( DRY_RUN )) && echo 'found' || echo 'removed'), ${kept} kept, ${failed} failed."
+
+# ⛔ A sweep that could not collect something has not succeeded, and must not
+# exit 0. The whole point of this script is that "nothing to do" and "could not
+# do it" are different answers; an exit code that conflated them is how the
+# teardown it replaces failed open for months.
+if (( failed )); then
+    echo "FAIL sweep: ${failed} resource(s) could not be collected — see the errors above." >&2
+    exit 1
+fi

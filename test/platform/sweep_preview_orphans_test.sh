@@ -205,6 +205,59 @@ fi
 assert_contains "$OUT_NOCLI" "modal CLI is not available" \
     "and it names what is missing"
 
+test_case "BOTH_modal_key_spellings_parse" "the CLI renamed its JSON keys once already"
+# ⛔ Measured, not hypothetical. Modal 1.2.6 emitted `Description`/`State`/
+# `Created at`; 1.6.2 emits `description`/`state`/`created_at`. Against the
+# newer CLI the old parser read every field empty, matched no app, swept
+# nothing and reported SUCCESS — with a real orphan present.
+#
+# ⚠️ Neither existing guard could catch it. The anti-vacuity counter counts
+# rows EXAMINED and the rows were examined; and this very stub emitted the old
+# spelling, so the suite encoded the contract instead of testing it. Both
+# spellings are now driven.
+for spelling in old new; do
+    if [[ "$spelling" == old ]]; then
+        write_modal_stub "[
+  {\"App ID\": \"ap-1\", \"Description\": \"thestacks-vision-gone\", \"State\": \"deployed\",
+   \"Tasks\": \"0\", \"Created at\": \"${OLD_ISO}\", \"Stopped at\": null}
+]"
+    else
+        write_modal_stub "[
+  {\"app_id\": \"ap-1\", \"description\": \"thestacks-vision-gone\", \"state\": \"deployed\",
+   \"tasks\": \"0\", \"created_at\": \"${OLD_ISO}\", \"stopped_at\": null}
+]"
+    fi
+
+    OUT_SPELL="$(
+        cd "$REPO_ROOT" || exit 1
+        PATH="$STUBS:/usr/bin:/bin" FLY_API_TOKEN=stub bash "$SWEEP" --dry-run 2>&1
+    )"
+    assert_contains "$OUT_SPELL" "WOULD STOP modal:thestacks-vision-gone" \
+        "the ${spelling} key spelling is parsed and the orphan is found"
+done
+
+test_case "an_UNREADABLE_modal_row_is_a_REFUSAL" "a renamed key must not read as 'nothing to do'"
+# ⛔ The guard the counter could not be. A row whose name cannot be read means
+# the listing shape changed; continuing would make every decision below on
+# empty strings and collect nothing while exiting 0.
+write_modal_stub "[
+  {\"app_id\": \"ap-1\", \"totally_renamed_field\": \"thestacks-vision-gone\", \"state\": \"deployed\",
+   \"created_at\": \"${OLD_ISO}\"}
+]"
+OUT_UNREADABLE="$(
+    cd "$REPO_ROOT" || exit 1
+    PATH="$STUBS:/usr/bin:/bin" FLY_API_TOKEN=stub bash "$SWEEP" --dry-run 2>&1
+)"
+RC_UNREADABLE=$?
+if [[ $RC_UNREADABLE -ne 0 ]]; then
+    _record_pass "an unreadable row fails the sweep (exit $RC_UNREADABLE)"
+else
+    _record_fail "a listing the sweep could not parse was reported as success: $OUT_UNREADABLE"
+fi
+assert_contains "$OUT_UNREADABLE" "no readable name" "and the refusal names the cause"
+assert_contains "$OUT_UNREADABLE" "reporting" \
+    "and says what it would otherwise have done, which is the part worth knowing"
+
 test_case "a_modal_app_follows_its_fly_stack" \
     "the three resources of one preview are decided together"
 # ⚠️ Modal reports no last-deploy time, only creation. So a long-lived branch's
@@ -262,5 +315,49 @@ assert_not_contains "$OUT_STOPPED" "thestacks-vision-already-stopped" \
     "an already-stopped app is neither selected nor reported"
 assert_contains "$OUT_STOPPED" "Modal apps examined: 2" \
     "but it still counts toward the population, so the anti-vacuity check is honest"
+
+test_case "a_FAILED_stop_is_not_counted_as_removed" "the summary must not claim work it did not do"
+# ⛔ Measured on the real account, 2026-10-21. Modal 1.6.2's `app stop` PROMPTS
+# for confirmation and aborts non-interactively, so the leg had never stopped
+# anything — in CI or in any unattended weekly run. The script discarded the
+# error, printed a WARN nobody reads, and INCREMENTED the removed count anyway:
+# "7 orphan(s) removed" when six were. A sweep that reports work it did not do
+# is the exact defect it exists to prevent, reproduced in its own summary.
+cat > "$STUBS/modal" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+    *"--version"*) echo "modal 9.9.9" ;;
+    *"app list"*) cat <<'JSON'
+[{"app_id":"ap-1","description":"thestacks-vision-gone","state":"deployed","created_at":"REPLACE_ISO"}]
+JSON
+    ;;
+    *"app stop"*) echo "Aborted: no interactive terminal detected." >&2; exit 1 ;;
+esac
+STUB
+sed -i.bak "s/REPLACE_ISO/${OLD_ISO}/" "$STUBS/modal" && rm -f "$STUBS/modal.bak"
+chmod +x "$STUBS/modal"
+
+OUT_FAILSTOP="$(
+    cd "$REPO_ROOT" || exit 1
+    PATH="$STUBS:/usr/bin:/bin" FLY_API_TOKEN=stub bash "$SWEEP" 2>&1
+)"
+RC_FAILSTOP=$?
+
+if [[ $RC_FAILSTOP -ne 0 ]]; then
+    _record_pass "a stop that failed makes the sweep exit non-zero (exit $RC_FAILSTOP)"
+else
+    _record_fail "the sweep exited 0 having failed to collect an orphan: $OUT_FAILSTOP"
+fi
+assert_contains "$OUT_FAILSTOP" "FAILED to stop modal:thestacks-vision-gone" \
+    "the failure names the app and carries the CLI's own error"
+assert_contains "$OUT_FAILSTOP" "0 orphan(s) removed" \
+    "and the count reports ZERO removed, not one"
+assert_contains "$OUT_FAILSTOP" "1 failed" "with the failure counted separately"
+
+test_case "the_stop_passes_the_confirmation_flag" "non-interactive by construction"
+# Without `--yes` the modern CLI aborts in every unattended context, which is
+# every context this script runs in.
+assert_contains "$SWEEP_SRC" "app stop --yes" \
+    "the stop is invoked with --yes, so no prompt can abort it"
 
 summarise
