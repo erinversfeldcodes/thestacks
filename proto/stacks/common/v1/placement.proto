@@ -142,22 +142,40 @@ message BookPlacement {
 
   // Where the reader is in this book: "to_read", "reading", "completed" or
   // "abandoned". ReadingStatus below DOCUMENTS that closed set; it is not this
-  // field's type and nothing in this schema enforces it. The set is enforced on
-  // the write path (validate_inclusion in shelving.ex), in the warehouse (a dbt
-  // accepted_values test) and on read (parseReadingStatus maps a non-member to
-  // Nothing) — so a new consumer must validate against the enum itself rather
-  // than assume deserialisation rejects an out-of-set value.
+  // field's type and nothing in this schema enforces it. Four layers do, and
+  // the fourth is the only one nothing can bypass:
   //
-  // ⚠️ DELIBERATE, decided while the choice was still free: this stays a string
-  // rather than becoming `ReadingStatus reading_status = 9`. Enum-typing would
-  // work — the Elm generator derives the lowercase wire form by stripping the
-  // enum-name prefix — but that moves the wire spellings onto a DERIVATION, so
-  // renaming the enum would silently change every wire value in every language
-  // with no `buf breaking` signal, since renaming an enum type is not a field
-  // change. For the one field whose defect was a manufactured value overwriting
-  // a reader's real status, the spellings stay written down here. The option
-  // closes on merge: field 9 does not exist on the default branch, so switching
-  // the type is free today and becomes FIELD_SAME_TYPE on a shipped field after.
+  //   1. the write path — validate_inclusion on both changesets in shelving.ex
+  //   2. the warehouse — a dbt accepted_values test on the persisted message
+  //   3. the read path — parseReadingStatus maps a non-member to Nothing
+  //   4. the column itself — CHECK (reading_status IN (…)) with NOT NULL
+  //      DEFAULT 'to_read', which no application path can go around
+  //
+  // ⛔ Layer 4 also settles what absence MEANS here: the column can never hold
+  // NULL, so a `Nothing` on the client is only ever "this payload omitted the
+  // field", never "the reader has no status". A consumer that treats the two as
+  // the same is reading a serialiser gap as a user state.
+  //
+  // A new consumer must therefore validate against the enum itself rather than
+  // assume deserialisation rejects an out-of-set value — protobuf cannot do that
+  // for a string whether the enum is present or absent.
+  //
+  // ⚠️ DELIBERATE: this stays a string rather than becoming
+  // `ReadingStatus reading_status = 9`. Enum-typing would work — the Elm
+  // generator derives the lowercase wire form by stripping the enum-name prefix
+  // — but that moves the wire spellings onto a DERIVATION, so renaming the enum
+  // would silently change every wire value in every language with no
+  // `buf breaking` signal, since renaming an enum type is not a field change.
+  // For the one field whose defect was a manufactured value overwriting a
+  // reader's real status, the spellings stay written down here.
+  //
+  // ⏰ On the cost of revisiting that: changing the type is a `FIELD_SAME_TYPE`
+  // break once this field exists on the default branch, which needs a
+  // file-scoped `buf breaking` suppression — the same instrument this repo is
+  // trying to retire elsewhere. Stated as a standing property rather than as
+  // "free today", because a dated claim in a comment goes false with nothing to
+  // notice: check the field's presence on the default branch rather than
+  // trusting this sentence about when it was written.
   //
   // ⛔ Added because its ABSENCE lost data. The book-detail progress card is
   // built from this message, so without the field the client could only show
