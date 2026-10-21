@@ -102,7 +102,13 @@ STATUS_DISCARDED='\|\|[[:space:]]*(true|echo|:|\{)'
 # argument position (measured rc=0). No such site exists in the corpus; if one
 # appears it will be a false positive rather than a miss, which is the direction
 # this gate is supposed to err in.
-IS_ASSIGNMENT='(^|;|&&|\|\||\bthen|\belse|\bdo|\{|\))[[:space:]]*[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?='
+# ⚠️ `\(` is in the list too, and its absence was easy to miss precisely
+# because `\)` was already there — the closing paren of a `case` arm looks like
+# the paren case is handled. A SUBSHELL-opened assignment, `( V="$(cmd | head
+# -1)"; … )`, is a statement beginning after `(`. Measured NOMATCH against the
+# version without it and rc=141 under `set -euo pipefail`, so it was exempted
+# and it dies.
+IS_ASSIGNMENT='(^|;|&&|\|\||\bthen|\belse|\bdo|\{|\(|\))[[:space:]]*[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?='
 
 # ⚠️ A declaring BUILTIN discards the substitution's status, because the
 # builtin's own status is the command's. MEASURED: `local X="$(cmd | head -1)"`,
@@ -144,26 +150,39 @@ discover_shell_scripts() {
 # need the exemption: every pipeline in it is already a here-string, so the only
 # matches are the pattern DEFINITIONS and the GUIDE heredoc. Those are handled
 # by the narrower rule below rather than by a file-wide pass.
+# Each entry pairs the exempted file with the gate it must EXECUTE. Paired
+# rather than a shared disjunction, because a disjunction let either file
+# justify its exemption with a reference to the OTHER gate — so a suite that
+# stopped testing this pattern entirely kept its exemption by mentioning its
+# neighbour.
 FIXTURE_FILES=(
     # Plants the banned form to prove this gate refuses it.
-    "test/platform/sigpipe_hazard_gate_test.sh"
-    # Carries five spellings of it as anti-vacuity data for its own pattern.
-    "test/platform/rls_scope_gate_test.sh"
+    "test/platform/sigpipe_hazard_gate_test.sh:check-sigpipe-hazards.sh"
+    # Carries several spellings of it as anti-vacuity data for its own pattern.
+    "test/platform/rls_scope_gate_test.sh:check-rls-scope.sh"
 )
 
 is_fixture_file() {
-    local candidate="$1" fixture
-    for fixture in "${FIXTURE_FILES[@]}"; do
+    local candidate="$1" entry fixture required
+    for entry in "${FIXTURE_FILES[@]}"; do
+        fixture="${entry%%:*}"
+        required="${entry#*:}"
         [[ "$candidate" == "$fixture" ]] || continue
-        # The claim, checked: it is still a test of this gate's subject.
-        if grep -q "check-sigpipe-hazards\|check-rls-scope" "$candidate" 2>/dev/null; then
+
+        # ⛔ EXECUTION, not mention — and COMMENT-STRIPPED. This was the one
+        # grep in the file that did not strip comments, so a file could keep
+        # its exemption with the gate's name in a comment and no test at all.
+        # That is the "gates read their own prose" defect wearing the costume
+        # of an exemption check.
+        if sed 's/#.*//' "$candidate" 2>/dev/null |
+            grep -qE "(bash|sh|source|\.)[[:space:]]+[^[:space:]]*${required}|${required}\"" ; then
             return 0
         fi
         # ⚠️ The lapse phrase is kept on ONE line, so a grep for it cannot be
         # defeated by the wrap. A test asserting this message straddled two
         # lines and reported the gate as having accepted what it had refused.
         echo "FAIL check-sigpipe-hazards: a fixture exemption has lapsed." >&2
-        echo "  ${candidate} is exempted as a fixture file but no longer references the gate it tests," >&2
+        echo "  ${candidate} is exempted as a fixture file but no longer EXECUTES ${required}," >&2
         echo "  so its exemption is now hiding whatever the file contains." >&2
         echo "  Remove the exemption, or restore the test." >&2
         exit 1

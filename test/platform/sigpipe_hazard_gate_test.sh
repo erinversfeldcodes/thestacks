@@ -114,27 +114,53 @@ run_gate_over_plant() {
         -e "s|^FLOOR=\$(( TOTAL_SH / 2 ))|FLOOR=1|" \
         "$GATE" > "$PLANT_DIR/gate.sh"
 
-    # Anti-vacuity on the substitution itself: if the discovery line is ever
-    # reworded, the sed silently stops matching and every case below runs
-    # against the real corpus — which is green, so the refusal cases would fail
-    # confusingly and the allow cases would pass for no reason.
+    # ⛔ ALL THREE substitutions verified, not just the discovery — and the
+    # missing two were the same defect one level in. There are three: the
+    # corpus, `ABSOLUTE_MIN` and `FLOOR`. Only the first was checked, so
+    # rewording either floor line left the one-file corpus tripping the FLOOR
+    # REFUSAL instead of producing a hazard verdict — `PLANT_RC` non-zero, and
+    # **every "it refuses X" case below passing for the wrong reason**.
     #
-    # ⚠️ COMMENTS STRIPPED. The first version of this check grepped the whole
-    # file, and the gate's own comment explains why `git ls-files` alone is
-    # insufficient — so the check reported a harness failure on every case while
-    # the substitution was working correctly. That is the third time in this
-    # session that an absence check has read prose as code, and the second time
-    # in a check written to prevent exactly that.
-    if sed 's/#.*//' "$PLANT_DIR/gate.sh" | grep -q "git ls-files"; then
-        _record_fail "the harness could not isolate the corpus — a 'git ls-files' call survived the substitution, so these cases are not testing the planted file"
-        PLANT_OUT="harness failure"
-        PLANT_RC=0
+    # The lesson is the one this suite already carries about the gate: a
+    # substitution-based harness needs an assertion per substitution, not one
+    # assertion for the idea of substituting.
+    local stripped
+    stripped="$(sed 's/#.*//' "$PLANT_DIR/gate.sh")"
+
+    if grep -q "git ls-files" <<< "$stripped"; then
+        _harness_failed "a 'git ls-files' call survived, so the corpus is not the planted file"
+        return 0
+    fi
+    if grep -qE "^ABSOLUTE_MIN=30$" <<< "$stripped"; then
+        _harness_failed "ABSOLUTE_MIN was not lowered, so a one-file corpus trips the floor refusal rather than reporting a hazard"
+        return 0
+    fi
+    if grep -qE "^FLOOR=\\\$\\(\\( TOTAL_SH / 2 \\)\\)$" <<< "$stripped"; then
+        _harness_failed "FLOOR was not lowered, so a one-file corpus trips the floor refusal rather than reporting a hazard"
         return 0
     fi
 
     PLANT_OUT="$(bash "$PLANT_DIR/gate.sh" 2>&1)"
     PLANT_RC=$?
+
+    # ⚠️ And a floor refusal is distinguished from a hazard verdict even when
+    # the substitutions DID take — because that is the outcome the refusal
+    # cases must not accept. Without this, any future reason the gate exits
+    # non-zero reads as "it refused the planted form".
+    if grep -q "floor is" <<< "$PLANT_OUT"; then
+        _harness_failed "the gate refused on its anti-vacuity floor, not on the planted hazard"
+        return 0
+    fi
     return 0
+}
+
+# ⚠️ A harness failure must not look like a verdict. `PLANT_RC=0` so a "refuses"
+# case fails rather than passing, and `PLANT_OUT` is a sentinel no assertion
+# matches, so an "allows" case cannot pass on it either.
+_harness_failed() {
+    _record_fail "the harness could not isolate the gate — $1 (these cases are testing nothing)"
+    PLANT_OUT="HARNESS FAILURE"
+    PLANT_RC=0
 }
 
 test_case "it_refuses_the_form_that_shipped_the_fail_open" \
