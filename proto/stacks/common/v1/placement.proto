@@ -147,6 +147,12 @@ message BookPlacement {
   // accepted_values test, parseReadingStatus on the read path, and a column
   // CHECK with NOT NULL DEFAULT 'to_read'. Only the last is unbypassable.
   //
+  // ⛔ But NONE of those four is yours if you are writing a new consumer. Three
+  // are server- or database-side and the fourth is the Elm client specifically,
+  // so "four layers enforce it" does not mean a Python or Rust reader inherits
+  // any of them: validate against this enum yourself rather than assuming
+  // deserialisation rejects an out-of-set value.
+  //
   // ⛔ That column constraint settles what absence MEANS: the column can never
   // hold NULL, so a `Nothing` on the client is only ever "this payload omitted
   // the field" and never "the reader has no status". Treating the two as the
