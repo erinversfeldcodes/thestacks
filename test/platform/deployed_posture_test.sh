@@ -195,7 +195,8 @@ test_case "every_hand_found_breach_is_covered" \
 # being asserted. If either is dropped from the roster, every suite stays green
 # and the assertion simply stops existing.
 for needle in "images_past_expiry" "orphaned_executing_jobs" "warehouse_schemas_missing" \
-    "unmigrated" "app_role_exempt_from_rls" "definer_function_executable_by_public"; do
+    "unmigrated" "app_role_exempt_from_rls" "definer_function_executable_by_public" \
+    "widening_policy_is_not_read_only" "rls_table_without_warehouse_policy"; do
     assert_contains "$GATE_SRC" "$needle" "the roster covers ${needle}"
 done
 

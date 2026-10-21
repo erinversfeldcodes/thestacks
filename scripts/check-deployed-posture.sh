@@ -184,7 +184,47 @@ function wraps — including the runtime role, for functions it was never grante
 A NULL proacl is the Postgres default and counts: it is the absence of a REVOKE,
 not a decision. REVOKE ALL ... FROM PUBLIC and grant by name.")
 
-EXPECTED_ASSERTIONS=6
+# ⛔ The invariant that makes a deliberately-anonymous read WRITE-SAFE, and it
+# is load-bearing without being obvious.
+#
+# An anonymous session resolves `op.current_scope()` to NULL, so every
+# scope-equality policy denies it. What stops it WRITING is a second,
+# independent fact: every policy that widens access without testing the scope
+# is `FOR SELECT`. Measured — anonymous can read 24 `op.bookshelves` rows, and
+# an unqualified `UPDATE` touched 0 of them, because UPDATE and DELETE consult
+# only the `FOR ALL` owner policy's USING and the public arms contribute no
+# write visibility. A row that SATISFIES a widening arm is still refused on
+# insert, because a `FOR SELECT` policy contributes no WITH CHECK.
+#
+# ⚠️ `CREATE POLICY` with no `FOR` clause means `ALL`, which is exactly what
+# somebody adding the next widening arm will reach for — and that would hand
+# every anonymous visitor UPDATE and DELETE on every row the arm admits. The
+# invariant holds today and nothing asserted it.
+ASSERTIONS+=("widening_policy_is_not_read_only
+SELECT count(*) FROM pg_policies WHERE schemaname = 'op' AND coalesce(qual, '') NOT LIKE '%current_scope%' AND 'rls_reader' <> ALL(roles) AND cmd <> 'SELECT'
+0
+A policy that does NOT test op.current_scope() is not restricted to SELECT, so it
+widens WRITE access rather than read access. An anonymous or unscoped session can
+then UPDATE or DELETE every row that policy admits. CREATE POLICY defaults to FOR
+ALL, so this is the shape a new widening arm takes by accident. Add FOR SELECT.")
+
+# ⛔ A row-level-secured table with no warehouse read policy fails SILENTLY:
+# dbt reads zero rows rather than erroring, which is the exact failure shape
+# this whole change set exists to eliminate.
+#
+# ⚠️ It is reachable by omission rather than by mistake. The role migration
+# grants `SELECT ON ALL TABLES IN SCHEMA op` plus `ALTER DEFAULT PRIVILEGES`,
+# so a future table receives the GRANT automatically and the POLICY never —
+# and a grant without a policy reads as access while returning nothing.
+ASSERTIONS+=("rls_table_without_warehouse_policy
+SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'op' AND c.relforcerowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'op' AND p.tablename = c.relname AND 'stacks_dbt' = ANY(p.roles))
+0
+A table in op has FORCE ROW LEVEL SECURITY but no policy naming stacks_dbt, so the
+nightly warehouse refresh reads ZERO rows from it instead of failing. The grant is
+inherited from ALTER DEFAULT PRIVILEGES; the policy is not. Add a role-scoped
+USING (true) policy for stacks_dbt and stacks_readonly.")
+
+EXPECTED_ASSERTIONS=8
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an
