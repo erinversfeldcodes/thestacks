@@ -346,8 +346,20 @@ if added:
         "allowlist does not. So a field added to the proto is emitted by codegen, dropped\n"
         "here, and reaches nothing — with no test failing, because `mix proto.sync --check`\n"
         "only compares generated files against generated files.\n\n"
-        "Either carry the field in the serializer, or add the pair to BASELINE in this script\n"
-        "in the same commit. The diff is the record that somebody decided.",
+        "There are THREE dispositions, and the first is easy to miss:\n\n"
+        "  1. The field MUST NEVER be serialized — a credential, a single-use token.\n"
+        "     Then both options below are wrong, and `skip_fields` in proto/persisted.exs\n"
+        "     is the right place for it. `check-never-serialized.sh` is what enforces that;\n"
+        "     this gate has nothing useful to say about such a field.\n"
+        "  2. A client needs it — carry it in the serializer.\n"
+        "  3. It is deliberately dropped and harmless — add the pair to BASELINE in this\n"
+        "     script in the same commit. The diff is the record that somebody decided.\n\n"
+        "⛔ Option 1 is listed first because this message used to offer only 2 and 3, and\n"
+        "MEASURED: deleting `:password_hash` from the User entry's skip_fields made this gate\n"
+        "print `user drops password_hash` followed by `Either carry the field ... or add the\n"
+        "pair to BASELINE`. Following either instruction would have serialized an Argon2 hash\n"
+        "to clients or pinned it as an accepted omission. A gate whose remediation advice is\n"
+        "wrong on the worst field it can report is worse than one that stays quiet.",
         file=sys.stderr,
     )
 
