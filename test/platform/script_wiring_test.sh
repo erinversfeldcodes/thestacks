@@ -125,4 +125,44 @@ run_gate
 assert_exit_nonzero "$RC" "the orphan is reported again despite the inventory naming it"
 assert_contains "$OUT" "scripts/orphan.sh" "the inventory does not count as a caller"
 
+# --- a gate's own test fixture is a caller ---------------------------------
+
+# `test/**/*.sh` was NOT in the corpus, so a gate exercised only by its own test
+# suite read as an orphan. That had a second-order cost beyond an incomplete
+# inventory: the only way to clear such a script was to name it somewhere the
+# corpus could see, and the cheapest place is a data table inside another
+# script — at which point a bare MENTION is standing in for an invocation,
+# which is the thing the comment-stripping above exists to prevent. On the real
+# repository the widened corpus moved 30-odd scripts from "no test visible" to
+# naming the fixture that runs them.
+mkdir -p "$SANDBOX/test/platform"
+cat > "$SANDBOX/test/platform/orphan_test.sh" <<'EOF'
+#!/usr/bin/env bash
+# orphan_test.sh — exercises the gate
+bash scripts/orphan.sh
+EOF
+
+test_case "a_test_fixture_is_a_caller" "a script exercised only by its own test suite is wired"
+(cd "$SANDBOX" && bash scripts/check-script-wiring.sh --write >/dev/null 2>&1)
+run_gate
+assert_exit_zero "$RC" "the gate passes: the fixture that runs the script counts as its caller"
+assert_contains "$OUT" "all wired" "no script is reported as an orphan"
+
+# --- but a test that only TALKS about a script wires nothing ----------------
+
+# The corpus widened; the mention rule did not. Without this case the widening
+# could silently become the prose-lifting loophole it was meant to remove.
+cat > "$SANDBOX/test/platform/orphan_test.sh" <<'EOF'
+#!/usr/bin/env bash
+# orphan_test.sh — this suite used to run scripts/orphan.sh before it was
+# replaced, and now covers the replacement instead.
+echo covered
+EOF
+
+test_case "comment_mention_in_a_test_is_not_a_caller" "widening the corpus did not widen what counts as a call"
+run_gate
+assert_exit_nonzero "$RC" "the gate fails: prose in a fixture is not an invocation"
+assert_contains "$OUT" "NO caller" "the failure is the orphan check, not a stale inventory"
+assert_contains "$OUT" "scripts/orphan.sh" "the orphan is named"
+
 summarise

@@ -40,7 +40,15 @@ scripts = sorted(
 corpus = {}
 for pat in ["justfile", ".github/workflows/*.yml", ".github/actions/**/*.yml",
             ".claude/settings.json", "scripts/**/*", "e2e/**/*.ts", "e2e/*.json",
-            "mix.exs", "apps/core/mix.exs", ".mcp.json"]:
+            "mix.exs", "apps/core/mix.exs", ".mcp.json",
+            # A gate's test fixture RUNS the gate, so it is a caller in the only
+            # sense this gate measures — and leaving it out had a second-order
+            # cost, not just an incomplete inventory. With fixtures invisible, a
+            # script whose only exerciser is its own test read as an orphan, and
+            # the pressure was then to name it somewhere the corpus can see,
+            # which is how a bare mention in a DATA table starts standing in for
+            # an invocation. Including them removes the incentive.
+            "test/**/*.sh"]:
     for f in glob.glob(pat, recursive=True):
         # The generated inventory names every script — it is the OUTPUT of this
         # gate, never a caller, or the first --write makes everything "wired".
