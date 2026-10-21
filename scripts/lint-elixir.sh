@@ -139,6 +139,13 @@ gate check-unbounded-sweeps.sh
 # a gate that does not exist, which this repo has shipped before. Move it the
 # day a shell lane exists.
 gate check-sigpipe-hazards.sh
+# A sibling of the one above, NOT a widening of it. That gate is about a
+# pipeline whose exit status can be 141 instead of the one you want; this one
+# needs no pipe — a command substitution runs before the command it sits in and
+# overwrites `$?`, so a `$?` later in the SAME command reads the substitution's
+# status. Folding them together would blur a predicate that took five rounds to
+# make precise.
+gate check-status-after-substitution.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

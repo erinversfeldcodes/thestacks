@@ -25,7 +25,7 @@ in code by" and check it before relying on it.
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-css.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
@@ -52,6 +52,7 @@ in code by" and check it before relying on it.
 | `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-sigpipe-hazards.sh` | `scripts/lint-elixir.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Refuse a pipeline whose exit status is read but can be 141 instead of the |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/check_slo_gate_test.sh`, `test/platform/deploy_production_workflow_test.sh` … |  |
+| `scripts/check-status-after-substitution.sh` | `scripts/lint-elixir.sh`, `test/platform/status_after_substitution_test.sh` | Refuse a `$?` read in the same command as a substitution that precedes it. |
 | `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/tracker_refs_gate_test.sh` | Code must not cite tracker artefacts — state the substance instead. |
 | `scripts/check-unbounded-sweeps.sh` | `scripts/lint-elixir.sh`, `test/platform/unbounded_sweeps_test.sh` | A retention sweep whose cost grows with how long it has been failing cannot |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |

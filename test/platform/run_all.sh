@@ -35,6 +35,7 @@ SUITES=(
     "$HERE/campaign_residue_ledger_test.sh"
     "$HERE/rls_scope_gate_test.sh"
     "$HERE/sigpipe_hazard_gate_test.sh"
+    "$HERE/status_after_substitution_test.sh"
     "$HERE/exclusion_tags_have_runners_test.sh"
     "$HERE/async_cache_clearing_test.sh"
     "$HERE/platform_suites_job_test.sh"
