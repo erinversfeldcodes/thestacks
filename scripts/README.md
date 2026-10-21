@@ -36,6 +36,7 @@ in code by" and check it before relying on it.
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml`, `test/platform/idor_gate_test.sh` |  |
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/gate_fail_closed_test.sh` |  |
 | `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | A story that describes the system as it stands must cite things that exist. |
+| `scripts/check-never-serialized.sh` | `scripts/lint-elixir.sh`, `test/platform/never_serialized_test.sh` | A credential must not appear in any JSON serializer, generated or hand-written. |
 | `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented Oban queues must be the queues that exist. |
 | `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |
 | `scripts/check-outbound-test-default.sh` | `scripts/lint-elixir.sh`, `test/platform/platform_suites_job_test.sh` |  |

@@ -132,6 +132,12 @@ gate check-protojson-completeness.sh
 # no column, which emits the raw Ecto association. The seller exposure satisfied
 # the first gate's BASELINE and would have satisfied it again.
 gate check-api-only-is-skipped.sh
+# The third gate on this manifest, and the only one whose expectations are NOT
+# read from the manifest. `skip_fields` is what keeps an Argon2 hash and four
+# auth tokens out of the generated serializer; the other two gates are
+# structurally blind to that entry, and the completeness gate's remediation text
+# used to offer to carry the field. This one states the credential list itself.
+gate check-never-serialized.sh
 gate check-unbounded-sweeps.sh
 # ⚠️ Not an Elixir gate. It lives in this lane because this is where the `gate`
 # helper runs every `scripts/check-*.sh`, and therefore the only lane that

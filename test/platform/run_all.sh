@@ -54,6 +54,7 @@ SUITES=(
     "$HERE/dbt_elixir_reference_test.sh"
     "$HERE/protojson_completeness_test.sh"
     "$HERE/api_only_is_skipped_test.sh"
+    "$HERE/never_serialized_test.sh"
     "$HERE/workflow_health_test.sh"
     "$HERE/deployed_posture_test.sh"
     "$HERE/unbounded_sweeps_test.sh"
