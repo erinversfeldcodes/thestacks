@@ -883,31 +883,52 @@ defmodule Stacks.Social do
 
     # ⛔ A row whose decoration is incomplete is DROPPED, not emitted with nils.
     # The query this replaced INNER JOINed `Book` and `User`, so a placement
-    # whose book or owner was missing never reached the feed — the join carried
-    # that guarantee implicitly, and moving to map lookups moved it out of the
-    # code without stating it anywhere.
+    # whose book or owner was missing never reached the feed. That is the real
+    # argument for the filter: it makes this rewrite BEHAVIOUR-PRESERVING.
+    # Without it, moving a join into Elixir would have silently changed a
+    # reader-facing contract as a side effect of a refactor.
+    #
+    # ⚠️ For the same reason there is deliberately no log line here: logging
+    # would be new behaviour relative to the INNER JOIN, making the rewrite
+    # non-equivalent in a second way. Whether a dropped feed row should be
+    # noisy is a real question about the OLD behaviour too, and this is the
+    # wrong place to decide it. A telemetry count is not behaviour, so that is
+    # what it gets.
     #
     # ⚠️ Unreachable today: `book_id` is FK-constrained, and erasure removes a
-    # user's placements along with the user. Restored anyway because the
-    # alternative emits a feed item with a null title, and this project's
-    # recorded rule is that an absent entry beats a lying one — a sibling
-    # comment in `list_blocked_users/2` says why one undecodable row must not
-    # be allowed to misrepresent the list.
-    rows
-    |> Enum.filter(fn row ->
-      Map.has_key?(titles, row.book_id) and Map.has_key?(names, row.owner_id)
-    end)
-    |> Enum.map(fn row ->
-      %{
-        type: :placement_created,
-        placement_id: row.placement_id,
-        book_id: row.book_id,
-        book_title: Map.fetch!(titles, row.book_id),
-        user_id: row.owner_id,
-        user_display_name: Map.fetch!(names, row.owner_id),
-        occurred_at: row.placed_at
-      }
-    end)
+    # user's placements along with the user. Counted anyway, because
+    # "unreachable" resting on an unmeasured assumption is how this project
+    # accumulated 6,655 expired image rows behind a nightly `:ok`. The counter
+    # turns "cannot happen" from a belief into a measurement.
+    decorated =
+      rows
+      |> Enum.filter(fn row ->
+        Map.has_key?(titles, row.book_id) and Map.has_key?(names, row.owner_id)
+      end)
+      |> Enum.map(fn row ->
+        %{
+          type: :placement_created,
+          placement_id: row.placement_id,
+          book_id: row.book_id,
+          # ⚠️ `fetch!` is a TRIPWIRE for the filter above being edited away —
+          # not, as an earlier version of this comment claimed, what makes a
+          # future gap loud. The filter guarantees both keys are present, so a
+          # genuine gap is dropped before it ever reaches here and this can
+          # never raise while the two sit together.
+          book_title: Map.fetch!(titles, row.book_id),
+          user_id: row.owner_id,
+          user_display_name: Map.fetch!(names, row.owner_id),
+          occurred_at: row.placed_at
+        }
+      end)
+
+    dropped = length(rows) - length(decorated)
+
+    if dropped > 0 do
+      :telemetry.execute([:stacks, :social, :feed_row_undecorated], %{count: dropped}, %{})
+    end
+
+    decorated
   end
 
   defp load_uuid(raw) when is_binary(raw) do

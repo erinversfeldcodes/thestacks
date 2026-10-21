@@ -104,6 +104,11 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_shelf_browse_capped_count_total" => :public,
     "stacks_social_block_count_total" => :public,
     "stacks_social_block_error_count_total" => :public,
+    # An aggregate count of feed rows dropped for incomplete decoration, with no
+    # tags and no per-user dimension — so :public on the same basis as its
+    # siblings. Expected to stay at zero; it exists so that expectation is
+    # measured rather than asserted.
+    "stacks_social_feed_row_undecorated_total" => :public,
     "stacks_social_unblock_count_total" => :public,
     "stacks_upload_terminal_count_total" => :public,
     "stacks_view_as_error_count_total" => :public,

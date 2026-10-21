@@ -568,6 +568,21 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Failed block attempts, by reason (already_blocked vs invalid).",
           tags: [:reason]
         ),
+        # ⚠️ Expected to stay at zero, and that is the point. The feed decorates
+        # placements with map lookups where it once INNER JOINed, and a row
+        # missing its book or owner is dropped to keep that rewrite
+        # behaviour-preserving. The drop is believed unreachable (FK on book_id,
+        # erasure removes a user's placements with the user) — registered so
+        # that belief is measured rather than asserted. An emitted event with no
+        # registered metric is a no-op, which would leave the counter looking
+        # present and reporting nothing.
+        sum(
+          [:stacks, :social, :feed_row_undecorated, :total],
+          event_name: [:stacks, :social, :feed_row_undecorated],
+          measurement: :count,
+          description:
+            "Feed rows dropped for incomplete decoration (missing book title or owner name). Expected zero."
+        ),
         counter(
           [:stacks, :view_as, :usage, :count, :total],
           event_name: [:stacks, :view_as, :usage],
