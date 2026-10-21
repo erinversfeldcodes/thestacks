@@ -226,10 +226,31 @@ updateWithEffect msg model =
                                 )
 
                             Nothing ->
-                                ( { model | cards = updatedCards }, Effect.none, NoOut )
+                                -- ⛔ `clearSaving` is load-bearing. `Card.update
+                                -- SaveClicked` has already set `saving = True`,
+                                -- so returning `updatedCards` untouched leaves
+                                -- the card showing "Saving…" with Save disabled
+                                -- FOREVER: no request was issued, so no response
+                                -- will ever arrive to clear it, and the only way
+                                -- out is a page reload. Refusing to send is
+                                -- correct; refusing to send and then pretending
+                                -- a save is in flight is a worse state than the
+                                -- destructive write this guard replaced.
+                                --
+                                -- BookDetail's equivalent branch calls
+                                -- `Card.stopSaving` for the same reason.
+                                ( { model | cards = clearSaving placementId model.cards }
+                                , Effect.none
+                                , NoOut
+                                )
 
                     _ ->
-                        ( { model | cards = updatedCards }, Effect.none, NoOut )
+                        -- Same reasoning: no token means no request, so the
+                        -- card must not be left mid-save.
+                        ( { model | cards = clearSaving placementId model.cards }
+                        , Effect.none
+                        , NoOut
+                        )
 
             else if List.member Card.EditClosed outMsgs then
                 ( { model | cards = updatedCards }, focusBadge placementId, NoOut )

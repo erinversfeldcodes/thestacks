@@ -160,8 +160,20 @@ saveWithNoChosenStatusIssuesNoRequest =
                 |> ProgramTest.ensureHttpRequests "PUT"
                     progressEndpoint
                     (List.length >> Expect.equal 0)
-                |> ProgramTest.expectViewHas
+                |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ]
+                -- ⛔ Not redundant with the open form, and the sibling host
+                -- proves why: `SaveClicked` sets `saving = True` before the
+                -- guard refuses, so a host that forgets `Card.stopSaving`
+                -- leaves the card on "Saving…" with Save disabled and no
+                -- response ever arriving. That stuck state satisfies every
+                -- form-is-open assertion. ReadingPile had exactly this bug
+                -- while its guard test passed.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                    , Selector.text "Save"
+                    ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "Saving…" ]
 
 
 cardRendersForReadableShelf : Test

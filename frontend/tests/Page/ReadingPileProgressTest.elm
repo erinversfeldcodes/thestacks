@@ -162,7 +162,19 @@ saveWithNoChosenStatusIssuesNoRequest =
                     (List.length >> Expect.equal 0)
                 -- The form stays open, so the reader can still choose a status
                 -- rather than being told the save succeeded.
-                |> ProgramTest.expectViewHas [ Selector.class "placement-card__edit-form" ]
+                |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
+                -- ⛔ The assertion that "the reader can still choose a status"
+                -- actually needs, and which the form-open check does NOT give.
+                -- `SaveClicked` sets `saving = True` before the guard refuses,
+                -- so a host that forgets to clear it leaves the card showing
+                -- "Saving…" with Save disabled and no response ever coming —
+                -- and that stuck state satisfies "the edit form is open"
+                -- perfectly. The open form was the half this test did not prove.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                    , Selector.text "Save"
+                    ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "Saving…" ]
 
 
 progressRendersOnCard : Test

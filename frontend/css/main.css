@@ -4916,7 +4916,12 @@ h4 {
 .placement-card__badge--unrecorded {
     background-color: transparent;
     color: var(--text-muted);
-    border-color: var(--text-muted);
+    /* --border, not --text-muted: --to-read already uses --text-muted for its
+       border, so sharing it left these two differing only by dash pattern —
+       a distinction that disappears at a glance and entirely for anyone who
+       cannot resolve a 1px dash. The lighter border plus the dash makes
+       "nothing recorded" read as absence rather than as a quieter value. */
+    border-color: var(--border);
     border-style: dashed;
     font-weight: 500;
 }
