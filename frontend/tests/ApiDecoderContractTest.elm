@@ -37,6 +37,7 @@ import Expect
 import Http
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
+import Types.Placement exposing (ReadingStatus(..))
 
 
 {-| Feed a decoder a server-shaped payload and fail with the decode error.
@@ -568,14 +569,30 @@ suite =
                             """
                             {"placement": {
                               "id": "66666666-6666-6666-6666-666666666666",
-                              "reading_status": "finished", "current_page": null,
+                              "reading_status": "completed", "current_page": null,
                               "started_at": "2026-10-01T09:00:00.000000Z",
                               "finished_at": "2026-10-09T09:00:00.000000Z"}}
                             """
                     in
+                    -- ⛔ Two corrections, and the fixture was the smaller one.
+                    --
+                    -- It sent `"finished"`, which the server CANNOT emit — the
+                    -- vocabulary is `to_read reading completed abandoned`, and
+                    -- `stacks.common.v1.ReadingStatus` now documents that for
+                    -- every language. So the one test claiming to pin this
+                    -- contract asserted against an invented value, in the file
+                    -- whose stated thesis is that every fixture derives from
+                    -- the server.
+                    --
+                    -- ⛔ And it could not have noticed: `Ok _ -> Expect.pass`
+                    -- discards the decoded value, so it passed identically on
+                    -- `"banana"`. A value-blind assertion over a fixture that
+                    -- contradicts the contract is worse than no test, because
+                    -- the next reader takes the fixture as evidence of what the
+                    -- server sends. Now asserts the resolved status.
                     case Api.progressResponseToResult (goodStatus body) of
-                        Ok _ ->
-                            Expect.pass
+                        Ok progress ->
+                            Expect.equal (Just Completed) progress.readingStatus
 
                         Err _ ->
                             Expect.fail "the server's progress payload did not resolve"
