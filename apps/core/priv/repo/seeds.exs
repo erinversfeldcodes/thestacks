@@ -602,18 +602,27 @@ bookshelf_rows =
 # costs a few extra statements; on a deployed stack, where the application
 # connects as the least-privilege role, it is the difference between a seeded
 # preview and a failed one.
-# ⛔ Returns the ids that were actually INSERTED, which is neither the rows
-# handed in nor everything in the table — and the difference is a defect this
-# seed shipped. Every call passes `on_conflict: :nothing`, so a row colliding
-# with an existing one is silently dropped; emitting a `placement.created` for
-# the intended list therefore wrote creation events for rows that do not exist.
-# Measured: 231 intended, 220 present, and **11 distinct aggregate_ids in
-# op.event_log with no placement row behind them**.
+# ⛔ Returns the ids the statement REPORTED, which is neither the rows handed in
+# nor everything in the table — and the difference is a defect this seed shipped.
+# The three `on_conflict: :nothing` callers drop a colliding row silently, so
+# emitting a `placement.created` for the intended list wrote creation events for
+# rows that do not exist. Measured: 231 intended, 220 present, and **11 distinct
+# aggregate_ids in op.event_log with no placement row behind them**.
 #
-# ⚠️ `returning: [:id]` reports exactly the rows that landed, per owner, inside
-# the scope that was already being opened. The alternative — reading the table
-# back — is what this replaced, and it was wrong in the other direction: it
-# emitted for every placement on every run, including ones seeded previously.
+# ⚠️ "INSERTED" is the wrong word for one of the four callers, and saying so
+# here rather than one layer up: the first `bookshelves` call passes
+# `on_conflict: {:replace, …}`, which is DO UPDATE, and `RETURNING` reports
+# UPDATED rows as well as inserted ones. So that call's result is "rows the
+# statement touched", not "rows that are new". Latent today only because that
+# result is discarded — nothing emits events for bookshelves. A future caller
+# that emits a `*.created` per returned id from a DO UPDATE site would
+# reintroduce exactly this defect with the opposite sign: an event for a row
+# that already existed.
+#
+# ⚠️ `returning: [:id]` reports what the statement actually did, per owner,
+# inside the scope that was already being opened. The alternative — reading the
+# table back — is what this replaced, and it was wrong in the other direction:
+# it emitted for every placement on every run, including ones seeded previously.
 insert_owned = fn table, rows, owner_of, opts ->
   rows
   |> Enum.group_by(owner_of)

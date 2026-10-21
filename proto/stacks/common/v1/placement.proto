@@ -188,9 +188,21 @@ message BookPlacement {
 // against instead of a comment. Declaring nothing is the outlier — two test
 // fixtures carried reading-status and visibility values the server cannot emit,
 // and nothing caught them.
+//
+// ⚠️ It cannot SOURCE a fixture gate, which is worth stating because that was
+// the hope. The wire spellings live only in the per-value prose below, not in
+// any field a generator reads, so a check that validates fixtures against the
+// permitted values has to carry its own copy of them — and a second copy is the
+// thing that drifts. This enum narrows the gap from "a comment somewhere" to
+// "a named set in the contract"; it does not close it.
 enum ReadingStatus {
-  // Not stated. On the wire this is an absent `reading_status` rather than a
-  // value the server sends.
+  // ⛔ Never emitted. The server cannot produce this value — both changesets
+  // `validate_inclusion` against the four real statuses — so the zero value is
+  // reachable only through the ABSENCE path, i.e. a payload with no
+  // `reading_status` key at all. That is exactly why the field is `optional`
+  // rather than relying on this: presence is carried by the field, and this
+  // constant exists because proto3 requires a zero value, not because anything
+  // means it.
   READING_STATUS_UNSPECIFIED = 0;
 
   // Shelved but not started. Wire value "to_read".
