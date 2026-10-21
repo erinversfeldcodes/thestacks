@@ -36,7 +36,30 @@ SWEEP="$REPO_ROOT/scripts/campaign-residue.sh"
 SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
-mkdir -p "$SANDBOX/scripts" "$SANDBOX/plans" "$SANDBOX/issues"
+# ⛔ THE LEDGER'S PATH IS ASKED OF THE SWEEP, NOT SPELLED HERE.
+#
+# Two reasons, and the second is the better one. First, `check-tracker-refs.sh`
+# forbids code from naming a path into the tracker trees, and exempts
+# `campaign-residue.sh` because for that file the path is the thing it operates
+# on rather than a citation. This fixture is neither tooling nor a test OF that
+# gate, so it fits neither exemption list — and both lists carry a warning
+# against growing by analogy, which is exactly what adding it would be.
+#
+# Second, and independent of the gate: the sweep hardcodes where its ledger
+# lives, so a literal here would be a second copy of that decision which could
+# silently stop matching. Deriving it means the sandbox follows the tool. The
+# `|| true` keeps a no-match from tripping `pipefail`; the emptiness check below
+# is what turns a failed derivation into a loud failure rather than a sandbox
+# built in the wrong place.
+LEDGER_REL="$(sed -nE 's#.*[^A-Za-z/]([a-z]+/residue-ledger\.md).*#\1#p' "$SWEEP" | head -1 || true)"
+if [[ -z "${LEDGER_REL}" ]]; then
+    echo "FATAL: could not read the ledger path out of ${SWEEP}." >&2
+    echo "       Every case below would then build its sandbox somewhere the sweep" >&2
+    echo "       does not read, and pass without testing anything." >&2
+    exit 1
+fi
+
+mkdir -p "$SANDBOX/scripts" "$SANDBOX/$(dirname "$LEDGER_REL")" "$SANDBOX/issues"
 cp "$SWEEP" "$SANDBOX/scripts/"
 
 # The sweep resolves its paths from its own location, not the caller's working
@@ -47,7 +70,7 @@ write_ledger() {
         printf '| id | finding | source | status | due_when | disposition |\n'
         printf '|---|---|---|---|---|---|\n'
         cat
-    } > "$SANDBOX/plans/residue-ledger.md"
+    } > "$SANDBOX/$LEDGER_REL"
 }
 
 run_sweep() {
