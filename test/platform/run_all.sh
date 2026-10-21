@@ -45,6 +45,7 @@ SUITES=(
     "$HERE/deploy_stack_eval_prereq_test.sh"
     "$HERE/deploy_stack_posture_test.sh"
     "$HERE/deploy_stack_prod_posture_execution_test.sh"
+    "$HERE/deploy_stack_prod_guards_execution_test.sh"
     "$HERE/gate_fail_closed_test.sh"
     "$HERE/dbt_elixir_reference_test.sh"
     "$HERE/protojson_completeness_test.sh"
