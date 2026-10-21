@@ -126,6 +126,12 @@ gate check-tracker-refs.sh
 gate check-error-token-spelling.sh
 gate check-rls-scope.sh
 gate check-protojson-completeness.sh
+# Beside the completeness gate on purpose: they watch the two halves of the same
+# manifest decision. That one asks whether the hand-written serializer DROPS a
+# field codegen carries; this one asks whether codegen CARRIES a field that has
+# no column, which emits the raw Ecto association. The seller exposure satisfied
+# the first gate's BASELINE and would have satisfied it again.
+gate check-api-only-is-skipped.sh
 gate check-unbounded-sweeps.sh
 # ⚠️ Not an Elixir gate. It lives in this lane because this is where the `gate`
 # helper runs every `scripts/check-*.sh`, and therefore the only lane that
