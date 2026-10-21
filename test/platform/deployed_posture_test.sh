@@ -189,6 +189,43 @@ else
     _record_fail "expires_at is still nullable after this case — the development schema has been left relaxed"
 fi
 
+test_case "a_flipped_definer_is_caught_only_by_the_set_assertion" "four prosecdef assertions are vacuous without it"
+# ⛔ The measurement that justifies the definer-set pair. Four assertions scope
+# on `p.prosecdef`, so each is an inclusion test over the definer set — and a
+# function that LEAVES that set is reported as compliant by every one of them.
+#
+# Planted by flipping a real definer to SECURITY INVOKER, which is the cheap
+# half of the hazard (the other half is deletion, which this suite will not do
+# to a shared development database).
+if psql "$LOCAL_URL" -q -c "ALTER FUNCTION op.blocked_pair(uuid,uuid) SECURITY INVOKER" >/dev/null 2>&1; then
+    _record_pass "a definer was flipped to SECURITY INVOKER, so the hazard is real rather than described"
+    OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1)"
+
+    assert_contains "$OUT" "FAIL definer_set_has_not_regressed" \
+        "the set assertion catches the function leaving the definer set"
+
+    # ⚠️ The other half of the claim, and the reason the pair was added: these
+    # four must still be GREEN, which is precisely what makes them vacuous on
+    # their own. A case asserting only the failure above would not show that.
+    for name in definer_function_executable_by_public \
+                definer_takes_a_user_list_as_its_subject \
+                definer_with_unnamed_parameters \
+                definer_execute_comes_from_the_grant_not_the_role; do
+        assert_contains "$OUT" "ok   ${name}" \
+            "${name} reports compliant for a function that left the set — vacuous without the pair"
+    done
+
+    psql "$LOCAL_URL" -q -c "ALTER FUNCTION op.blocked_pair(uuid,uuid) SECURITY DEFINER" >/dev/null 2>&1 || true
+    RESTORED="$(psql "$LOCAL_URL" -tAc "SELECT prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND proname = 'blocked_pair'" 2>/dev/null | tr -d '[:space:]')"
+    if [[ "$RESTORED" == "t" ]]; then
+        _record_pass "SECURITY DEFINER is restored, so this case left the database as it found it"
+    else
+        _record_fail "op.blocked_pair is still SECURITY INVOKER — the development database has been left altered"
+    fi
+else
+    _record_fail "could not flip the definer, so this case would pass for the wrong reason"
+fi
+
 test_case "the_assertion_count_is_declared" "a dropped assertion shows up in the diff"
 # Retrofitted from a real regression in the sibling posture suite: a roster built
 # by appending to an array is silently shortened by an editing slip, and the loop

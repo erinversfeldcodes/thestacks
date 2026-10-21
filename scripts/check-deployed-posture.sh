@@ -528,7 +528,68 @@ DATA_CONDITION_ASSERTIONS=(
     orphaned_executing_jobs
 )
 
-EXPECTED_ASSERTIONS=15
+# ⛔ THE DEFINER SET ITSELF, both directions — without which the four assertions
+# above are vacuous.
+#
+# Four assertions scope on `p.prosecdef`: the PUBLIC-execute check, the uuid[]
+# subject check, the unnamed-parameter check and the grant-not-role check. Every
+# one of them is an inclusion test over "functions that are SECURITY DEFINER",
+# so every one returns 0 — compliant — for a function that has been DELETED or
+# flipped to SECURITY INVOKER. MEASURED: `prosecdef` appears 4 times in SQL here
+# and not one of the seven function names appears in any query, only in comment
+# prose.
+#
+# That is the same shape the policy coverage pair was already fixed for, applied
+# to functions — and the policy set got an `EXCEPT` arm while the function set
+# did not.
+#
+# MEASURED, with `op.blocked_pair` flipped to SECURITY INVOKER on a real
+# database — all four of the prosecdef-scoped assertions report compliant:
+#
+#   ok   definer_function_executable_by_public              0
+#   ok   definer_takes_a_user_list_as_its_subject           0
+#   ok   definer_with_unnamed_parameters                    0
+#   ok   definer_execute_comes_from_the_grant_not_the_role  0
+#   FAIL definer_set_has_not_regressed                      1   <- only this one
+#
+# ⚠️ Split into two assertions for the reason the coverage pair is split: the two
+# directions need DIFFERENT remediation and one count cannot say which. A missing
+# or invoker-flipped definer means a scoped cross-user read path is gone or has
+# become unscoped. An unexpected new definer means a new cross-user hole that
+# nobody reviewed. Collapsing them would report "the set changed" and leave the
+# reader to work out which disaster it is.
+ASSERTIONS+=("definer_set_has_not_regressed
+WITH expected(proname) AS (VALUES ('blocked_pair'),('group_feed_placements'),('placement_owner'),('placement_owners_for_edition'),('platform_row_counts'),('unmerge_placement_counts'),('wishlist_user_ids')), actual AS (SELECT p.proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef) SELECT count(*) FROM (SELECT proname FROM expected EXCEPT SELECT proname FROM actual) t
+0
+A SECURITY DEFINER function that this suite asserts about is GONE, or has been
+flipped to SECURITY INVOKER.
+
+Either way the four assertions that scope on prosecdef now say nothing about it:
+they are inclusion tests over the definer set, so a function that leaves the set
+is reported as compliant by every one of them. If it was deleted, the scoped
+cross-user read it provided is gone and whatever called it is either broken or
+reading unscoped. If it was flipped to INVOKER, it now runs as the caller and
+the row-level policies apply — which is either a silent behaviour change or a
+deliberate one that this list should have been updated for.
+
+Update the expected list in the same change that removes or converts a definer.")
+
+ASSERTIONS+=("definer_set_has_no_unexpected_function
+WITH expected(proname) AS (VALUES ('blocked_pair'),('group_feed_placements'),('placement_owner'),('placement_owners_for_edition'),('platform_row_counts'),('unmerge_placement_counts'),('wishlist_user_ids')) SELECT count(*) FROM (SELECT p.proname::text AS proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef EXCEPT SELECT proname FROM expected) t
+0
+A new SECURITY DEFINER function exists in op that this suite has never been told
+about.
+
+A definer function runs as its owner and therefore reads every row, so each one
+is a deliberate hole in per-user scoping and its safety argument is that it is
+reachable only by the roles that need it. A new one has had none of that
+argument made: CREATE FUNCTION grants EXECUTE to PUBLIC by default, so unless it
+was explicitly revoked it is callable by every role that can connect.
+
+Add it to the expected list once its grants and its parameters have been
+reviewed — the sibling assertions will then start covering it.")
+
+EXPECTED_ASSERTIONS=17
 EXPECTED_DATA_CONDITIONS=2
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
