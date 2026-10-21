@@ -8,7 +8,10 @@ defmodule Stacks.Scope do
       policies compare each row against `op.current_scope()`, which reads the
       `app.current_user_id` session variable and RAISES when it is unset. So
       every read or write of those tables must happen inside one of the wrappers
-      here, or it fails with `42501` rather than quietly returning nothing.
+      here — `with_user/2`, `set!/1`, `multi_step/2`, or `anonymous/1` for a
+      reader with no account — or it fails with `42501` rather than quietly
+      returning nothing. See "Four states, not two" below: a deliberately
+      anonymous scope is the one case that is neither a user nor a refusal.
 
       Every alternative to the mechanism below was measured and rejected for a
       reason named at its own site: a session-level `SET` leaks across pooled
@@ -37,16 +40,46 @@ defmodule Stacks.Scope do
       connection and an open transaction for the whole duration of every
       progress stream.
 
-      ## Every query is scoped to somebody — there is no system escape
+      ## Four states, not two
+
+      ⚠️ `op.current_scope()` distinguishes four cases, and the fourth was added
+      after the first three shipped:
+
+        * **a user id** — the ordinary scoped read.
+        * **never set** / **`''`** / **`'unset'`** — a forgotten scope. RAISES
+          `42501`, because the overwhelmingly likely cause is a path that did
+          not say which user it acts for. (`''` is what `SET LOCAL` reverts to
+          once a custom parameter has been seen; `'unset'` a role default where
+          a superuser was available to set one.)
+        * **`'anonymous'`** — deliberately no user, set only by `anonymous/1`.
+          Returns NULL, so the owner arm of every policy is unsatisfied and the
+          reader sees exactly the rows whose policies say they are public.
+
+      ⛔ The fourth state is not a relaxation. Allowing an *unset* scope through
+      would have made "forgot to scope" indistinguishable from "no viewer", so a
+      missed scope would quietly serve the public subset instead of refusing —
+      the same bug wearing a success message. "Nobody is here" has to be stated
+      by the caller, and the refusal for the other three is unchanged.
+
+      ⚠️ It exists because without it every anonymous read of these tables was
+      refused — the catalogue, search, the marketplace listing pages, a public
+      profile, the blog archive and the public transparency page. Measured: an
+      unscoped read raises even when the query's own predicate targets only a
+      public policy arm, because Postgres gives no short-circuit guarantee
+      across OR'd permissive policies, so no query shape avoided it.
+
+      ## Every query is scoped to somebody or to nobody — there is no system escape
 
       There is deliberately no `with_system_scope/1` and no sentinel value that
-      means "see everything". Background work that acts for a user scopes to
-      that user; background work that acts across users iterates and scopes to
-      each in turn. The two reasons are recorded in the ADR: a sentinel
-      expressed as an `OR` term in the policy turns every query on these tables
-      into a sequential scan (measured on 50,000 rows, *even when scoped to a
-      real user*), and a role exempt from the policies would be a standing
-      credential that can read every user's rows.
+      means "see everything" — note that `'anonymous'` is the opposite of that:
+      it sees LESS than any user, not more. Background work that acts for a user
+      scopes to that user; background work that acts across users iterates and
+      scopes to each in turn, or asks one of the narrow `op.*` definer functions
+      for the single cross-user fact it needs. The two reasons are recorded in
+      the ADR: a sentinel expressed as an `OR` term in the policy turns every
+      query on these tables into a sequential scan (measured on 50,000 rows,
+      *even when scoped to a real user*), and a role exempt from the policies
+      would be a standing credential that can read every user's rows.
 
       The warehouse is the one exemption, and it is declarative rather than
       coded: `stacks_dbt` and `stacks_readonly` carry their own role-scoped
@@ -107,8 +140,14 @@ defmodule Stacks.Scope do
       nil ->
         Process.put(@nesting_key, user_id)
 
+        # ⚠️ Captured BEFORE opening our own transaction. Asked inside it,
+        # `in_transaction?/0` is true by construction — we just opened one —
+        # so the restore would always run and the per-request cost would come
+        # straight back.
+        restore? = must_restore?()
+
         try do
-          {:ok, result} = Repo.transaction(fn -> set_and_run(user_id, fun) end)
+          {:ok, result} = Repo.transaction(fn -> set_and_run(user_id, fun, restore?) end)
           result
         after
           Process.delete(@nesting_key)
@@ -145,10 +184,18 @@ defmodule Stacks.Scope do
       `'unset'` rather than NULL. Treating one as scoped and the other as not
       is how the policy this replaces became non-deterministic across pooled
       connections.
+
+      ⛔ Returns `:anonymous` — an atom, not a uuid and not `nil` — when the
+      scope is deliberately set to no user. Three outcomes rather than two,
+      because "no user on purpose" and "no scope at all" are different facts
+      and collapsing them is what this state exists to prevent. A caller that
+      only needs to know whether a real user is scoped should match on a binary
+      rather than on `!= nil`, which would read anonymous as a user.
   """
-  @spec current() :: Ecto.UUID.t() | nil
+  @spec current() :: Ecto.UUID.t() | :anonymous | nil
   def current do
     case Repo.query("SELECT current_setting('app.current_user_id', true)", []) do
+      {:ok, %{rows: [[@anonymous]]}} -> :anonymous
       {:ok, %{rows: [[value]]}} when value in [nil, "", "unset"] -> nil
       {:ok, %{rows: [[value]]}} -> value
       _ -> nil
@@ -266,8 +313,10 @@ defmodule Stacks.Scope do
       nil ->
         Process.put(@nesting_key, @anonymous)
 
+        restore? = must_restore?()
+
         try do
-          {:ok, result} = Repo.transaction(fn -> set_and_run(@anonymous, fun) end)
+          {:ok, result} = Repo.transaction(fn -> set_and_run(@anonymous, fun, restore?) end)
           result
         after
           Process.delete(@nesting_key)
@@ -304,7 +353,7 @@ defmodule Stacks.Scope do
   def for_viewer(viewer_id, fun) when is_binary(viewer_id) and is_function(fun, 0),
     do: with_user(viewer_id, fun)
 
-  defp set_and_run(user_id, fun) do
+  defp set_and_run(user_id, fun, restore?) do
     # ⚠️ Parameterised through `$1` rather than interpolated. `SET LOCAL` does
     # not accept a bind parameter, so this uses `set_config/3`, which does —
     # and which is therefore the only form here that cannot be made to carry
@@ -325,19 +374,38 @@ defmodule Stacks.Scope do
     # guard behave differently in the suite than in production. Restoring
     # explicitly makes the two environments agree, and is a no-op in the one
     # where the transaction would have done it anyway.
-    # ⚠️ Conditional, and the condition is the semantic difference itself rather
-    # than "are we testing". Under a real connection the enclosing transaction
-    # reverts the setting on commit and an extra statement would be pure cost —
-    # measured cost: two queries per scope, which pushed two N+1 guards past
-    # their bounds even though the work is per-request and not per-row. Under
-    # the sandbox pool there is no commit to revert anything, so the restore is
-    # the only thing that ends the scope.
+    # ⛔ The condition is "will a COMMIT intervene to revert this", and nothing
+    # else. An earlier version keyed on the connection pool, on the premise that
+    # a real connection always commits — and that premise is FALSE whenever this
+    # function is called inside a transaction it did not open, because then our
+    # `Repo.transaction` is a savepoint and releasing a savepoint does not
+    # revert a `SET LOCAL` made inside it.
     #
-    # `set_and_run/2` is reached only at the OUTERMOST scope — a nested
+    # ⛔ The consequence was the worst available shape: the suite took the
+    # restoring branch and PRODUCTION took the leaking one, so no test could
+    # observe production's behaviour. It is reachable on the deploy path —
+    # `DataCorrection.apply_plan/4` opens a transaction and the unmerge
+    # correction then calls `with_user/2` once per owner inside it, leaving the
+    # outer transaction scoped to whichever owner was iterated last with nothing
+    # in the process state recording it.
+    #
+    # ⚠️ Both terms are load-bearing and the first is NOT redundant. Measured:
+    # `Repo.in_transaction?/0` is **false** at the top of a sandboxed test,
+    # because the sandbox holds its transaction at the connection level, outside
+    # Ecto's per-process tracking — so `in_transaction?/0` alone would skip the
+    # restore in the one environment where nothing else ends the scope. Pinned
+    # by `scope_transaction_probe_test.exs`, which also says what to simplify if
+    # that ever changes.
+    #
+    # ⚠️ At a genuine request boundary both terms are false, so the restore does
+    # not run and costs nothing — which is what keeps the per-request query
+    # bounds where they were.
+    #
+    # `set_and_run/3` is reached only at the OUTERMOST scope — a nested
     # same-user call runs `fun` directly and a different user raises — so
     # restoring to the unset value is right, and needs no read of the previous
     # one.
-    if sandboxed?() do
+    if restore? do
       try do
         Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
         fun.()
@@ -349,6 +417,8 @@ defmodule Stacks.Scope do
       fun.()
     end
   end
+
+  defp must_restore?, do: sandboxed?() or Repo.in_transaction?()
 
   defp sandboxed?, do: Repo.config()[:pool] == Ecto.Adapters.SQL.Sandbox
 end

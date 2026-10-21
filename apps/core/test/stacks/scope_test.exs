@@ -178,6 +178,78 @@ defmodule Stacks.ScopeTest do
     end
   end
 
+  describe "anonymous/1 — a reader with no account" do
+    test "sets the reserved sentinel, which op.current_scope() answers with NULL" do
+      # ⛔ The distinction this whole state exists for: unscoped RAISES, because
+      # the likely cause is a forgotten scope. Anonymous returns NULL, so the
+      # owner arm of every policy is unsatisfied and only the public arms admit
+      # rows. Asserted on the raw setting because `current/0` casts.
+      Scope.anonymous(fn ->
+        %{rows: [[raw]]} = Repo.query!("SELECT current_setting('app.current_user_id', true)", [])
+        assert raw == "anonymous"
+
+        %{rows: [[scope]]} = Repo.query!("SELECT op.current_scope()", [])
+
+        assert is_nil(scope),
+               "op.current_scope() must answer the anonymous sentinel with NULL, not raise and " <>
+                 "not a uuid — NULL is what makes `user_id = op.current_scope()` unsatisfied " <>
+                 "instead of erroring"
+      end)
+    end
+
+    test "⛔ the Elixir sentinel and the SQL function agree about its spelling" do
+      # ⚠️ The literal lives in two languages — `@anonymous` here and a `scope =
+      # 'anonymous'` clause inside op.current_scope() — with nothing but a
+      # comment asking them to match. It fails closed if they diverge (an
+      # unrecognised value falls through to `::uuid` and raises), so this is
+      # cheap insurance rather than a live risk. Asserted by behaviour rather
+      # than by comparing strings, so it cannot pass on a shared typo.
+      Scope.anonymous(fn ->
+        assert %{rows: [[nil]]} = Repo.query!("SELECT op.current_scope()", [])
+      end)
+    end
+
+    test "returns fun's value unwrapped, like with_user/2" do
+      assert Scope.anonymous(fn -> :the_value end) == :the_value
+    end
+
+    test "⛔ refuses to narrow from a user scope to anonymous mid-operation" do
+      user_id = Ecto.UUID.generate()
+
+      # Dropping to anonymous inside a scoped operation would return the PUBLIC
+      # subset of that user's own data — a wrong answer rather than an error,
+      # and one that reads as a page with less on it.
+      assert_raise ArgumentError, ~r/cannot drop from/, fn ->
+        Scope.with_user(user_id, fn -> Scope.anonymous(fn -> :unreachable end) end)
+      end
+    end
+
+    test "nests with itself without raising" do
+      assert Scope.anonymous(fn -> Scope.anonymous(fn -> :ok end) end) == :ok
+    end
+  end
+
+  describe "for_viewer/2 — the optional-auth shape" do
+    test "a nil viewer runs anonymously rather than unscoped" do
+      # ⚠️ The whole reason this function exists: `with_user(nil, …)` runs
+      # UNSCOPED, which the database refuses. A controller serving both a
+      # signed-in and a signed-out reader would otherwise have to remember that
+      # nil means `anonymous/1`, and forgetting it is a 500 on a public page.
+      Scope.for_viewer(nil, fn ->
+        %{rows: [[raw]]} = Repo.query!("SELECT current_setting('app.current_user_id', true)", [])
+        assert raw == "anonymous"
+      end)
+    end
+
+    test "a present viewer scopes to that viewer" do
+      viewer_id = Ecto.UUID.generate()
+
+      Scope.for_viewer(viewer_id, fn ->
+        assert Scope.current() == viewer_id
+      end)
+    end
+  end
+
   describe "what the test environment cannot show" do
     test "⚠️ this suite's role BYPASSES row-level security, and says so" do
       # ⛔ An explicit assertion rather than a comment, because the alternative

@@ -14,7 +14,7 @@ defmodule Stacks.Social do
   alias Stacks.Books.Book
   alias Stacks.Events
   alias Stacks.Scope
-  alias Stacks.Shelving.{Bookshelf, Placement}
+  alias Stacks.Shelving.Bookshelf
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   @group_required_fields [:owner_id, :name, :type]
@@ -803,39 +803,80 @@ defmodule Stacks.Social do
     end
   end
 
+  # ⛔ Two steps, and the split is the point: the secured tables are read through
+  # a definer function, the presentation join through tables that carry no
+  # policy.
+  #
+  # This question is cross-user by intent — it asks what the OTHER members of a
+  # group have shelved — so no per-user scope is correct. Scoping to the viewer
+  # would return only the viewer's own placements and silently empty the feed,
+  # which is a wrong answer rather than an error.
+  #
+  # ⚠️ It was previously one unscoped query, and it was INVISIBLE because
+  # `blocked_user_ids/1` raised first on the same request. Scoping that one
+  # moved the failure here rather than fixing the endpoint — the stacked-defect
+  # pattern this project has on record, so re-drive the surface rather than
+  # trusting a fixed neighbour.
   defp feed_placements(member_ids, before_dt, limit) do
-    base =
-      from(p in Placement,
-        join: bs in Bookshelf,
-        on: p.bookshelf_id == bs.id,
-        join: b in Book,
-        on: p.book_id == b.id,
-        join: u in User,
-        on: bs.user_id == u.id,
-        where: bs.user_id in ^member_ids,
-        where: p.visibility in ["group", "platform"],
-        where: is_nil(p.removed_at),
-        order_by: [desc: p.placed_at],
-        limit: ^limit,
-        select: %{
-          type: :placement_created,
-          placement_id: p.id,
-          book_id: b.id,
-          book_title: b.title,
-          user_id: u.id,
-          user_display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
-          occurred_at: p.placed_at
-        }
+    rows =
+      Repo.query!(
+        "SELECT placement_id, book_id, owner_id, placed_at FROM op.group_feed_placements($1, $2, $3)",
+        [Enum.map(member_ids, &Ecto.UUID.dump!/1), before_dt, limit]
+      ).rows
+
+    rows
+    |> Enum.map(fn [placement_id, book_id, owner_id, placed_at] ->
+      %{
+        placement_id: load_uuid(placement_id),
+        book_id: load_uuid(book_id),
+        owner_id: load_uuid(owner_id),
+        placed_at: placed_at
+      }
+    end)
+    |> decorate_placement_rows()
+  end
+
+  # The book title and the owner's display name, joined in Ecto because
+  # `op.books` and `op.users` carry no row-level policy and so need no
+  # privileged read. Keeping them out of the definer is what holds it to four
+  # values about secured rows.
+  defp decorate_placement_rows([]), do: []
+
+  defp decorate_placement_rows(rows) do
+    book_ids = rows |> Enum.map(& &1.book_id) |> Enum.uniq()
+    owner_ids = rows |> Enum.map(& &1.owner_id) |> Enum.uniq()
+
+    titles =
+      from(b in Book, where: b.id in ^book_ids, select: {b.id, b.title})
+      |> Repo.all()
+      |> Map.new()
+
+    names =
+      from(u in User,
+        where: u.id in ^owner_ids,
+        select: {u.id, fragment("coalesce(?, ?)", u.display_name, u.handle)}
       )
+      |> Repo.all()
+      |> Map.new()
 
-    base =
-      if before_dt do
-        from [p, ...] in base, where: p.placed_at < ^before_dt
-      else
-        base
-      end
+    Enum.map(rows, fn row ->
+      %{
+        type: :placement_created,
+        placement_id: row.placement_id,
+        book_id: row.book_id,
+        book_title: Map.get(titles, row.book_id),
+        user_id: row.owner_id,
+        user_display_name: Map.get(names, row.owner_id),
+        occurred_at: row.placed_at
+      }
+    end)
+  end
 
-    Repo.all(base)
+  defp load_uuid(raw) when is_binary(raw) do
+    case Ecto.UUID.load(raw) do
+      {:ok, uuid} -> uuid
+      :error -> Ecto.UUID.cast!(raw)
+    end
   end
 
   defp feed_posts(member_ids, before_dt, limit) do
