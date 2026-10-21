@@ -9,6 +9,9 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
       Skips API-only fields (api_only: true), security-excluded fields (dbt_exclude: true),
       and belongs_to FK columns (uses the _id directly from proto).
   """
+
+  alias Mix.Tasks.ProtoSync.FieldOverrides
+
   def generate(table, fields) do
     columns = build_column_list(table, fields)
     column_lines = Enum.join(columns, ",\n")
@@ -26,11 +29,12 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
 
   defp build_column_list(table, fields) do
     overrides = Map.get(table, :field_overrides, %{})
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
 
     filtered =
       Enum.reject(fields, fn field ->
-        field.name == "id" or field.name in ts_fields or excluded_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or
+          FieldOverrides.excluded_from_warehouse?(field, overrides)
       end)
 
     proto_columns =
@@ -49,15 +53,4 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
   defp timestamp_cols(%{timestamps: :standard}), do: ["    created_at", "    updated_at"]
   defp timestamp_cols(%{timestamps: {:standard, updated_at: false}}), do: ["    created_at"]
   defp timestamp_cols(_), do: []
-
-  defp excluded_field?(field, overrides) do
-    field_name = String.to_atom(field.name)
-    override = Map.get(overrides, field_name, %{})
-    Map.get(override, :api_only, false) or Map.get(override, :dbt_exclude, false)
-  end
-
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 end

@@ -14,21 +14,19 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
       - `accepted_values` test on enum fields (values from the proto enum definition)
       - `relationships` test on fields with `:binary_id` type override and `_id` suffix
   """
+
+  alias Mix.Tasks.ProtoSync.FieldOverrides
   @spec generate(map(), list(), map()) :: String.t()
   def generate(table, fields, descriptor) do
     overrides = Map.get(table, :field_overrides, %{})
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
     model_name = "stg_#{table.table_name}"
 
     filtered_fields =
       Enum.reject(fields, fn field ->
-        field_atom = String.to_atom(field.name)
-        override = Map.get(overrides, field_atom, %{})
-
         field.name == "id" or
           field.name in ts_fields or
-          Map.get(override, :api_only, false) or
-          Map.get(override, :dbt_exclude, false)
+          FieldOverrides.excluded_from_warehouse?(field, overrides)
       end)
 
     columns =
@@ -178,11 +176,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   end
 
   defp timestamp_columns(_), do: []
-
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
   defp build_tests(_field, override, _ecto_type, _descriptor) do
     tests = []

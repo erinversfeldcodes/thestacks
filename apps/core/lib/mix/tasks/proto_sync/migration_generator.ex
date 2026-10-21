@@ -9,11 +9,14 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       Only called for tables with `migration_exists: false` in the manifest.
       Tables with `migration_exists: true` already have hand-written migrations.
   """
+
+  alias Mix.Tasks.ProtoSync.FieldOverrides
+
   def generate_create_table(table, fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
     module_name = migration_module_name(table.table_name, timestamp)
 
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
 
     column_lines =
       fields
@@ -293,11 +296,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   defp format_migration_type(type) do
     raise "Unsupported migration type: #{inspect(type)}. Add handling in MigrationGenerator.format_migration_type/1."
   end
-
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
   defp timestamps_block(%{timestamps: false}), do: ""
 
