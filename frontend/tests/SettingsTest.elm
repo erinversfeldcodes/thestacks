@@ -95,7 +95,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Consent.update
-                                (Consent.SaveWritingAssistantCompleted (Err (Http.BadStatus 500)))
+                                (Consent.SaveWritingAssistantCompleted True (Err (Http.BadStatus 500)))
                                 (Consent.init { analytics = False, writingAssistant = True })
                                 (Just "tok")
                     in
@@ -121,7 +121,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Consent.update
-                                (Consent.SaveWritingAssistantCompleted (Err (Http.BadStatus 500)))
+                                (Consent.SaveWritingAssistantCompleted True (Err (Http.BadStatus 500)))
                                 (Consent.init { analytics = False, writingAssistant = False }
                                     |> (\m -> { m | writingAssistantConsent = True })
                                 )
@@ -146,6 +146,120 @@ suite =
                                 |> Expect.equal False
                         ]
                         ()
+            , test "⛔ the error is NOT inside .toggle-row, which space-between would wreck" <|
+                -- ⛔ The one fix in this round with no gate behind it. `.toggle-row`
+                -- is `display: flex; justify-content: space-between`, so a third
+                -- child moved the toggle button from the right edge to the CENTRE
+                -- on failure, `.error`'s padding stretched the row, and with no
+                -- `flex-wrap` it compressed to roughly one word per line at 400px.
+                -- CSS has no test that can see that, so the structural fact —
+                -- the error is a SIBLING of the row, not a child — is what gets
+                -- pinned.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveWritingAssistantCompleted True
+                                    (Err (Http.BadStatus 500))
+                                )
+                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Just "tok")
+
+                        rendered =
+                            Consent.viewSection False model |> Query.fromHtml
+                    in
+                    Expect.all
+                        [ -- the error exists at all, so the next assertion is not vacuous
+                          \_ ->
+                            rendered
+                                |> Query.findAll
+                                    [ Selector.attribute
+                                        (Html.Attributes.attribute "data-testid"
+                                            "writing-assistant-consent-error"
+                                        )
+                                    ]
+                                |> Query.count (Expect.equal 1)
+                        , -- and it is not inside the flex row
+                          \_ ->
+                            rendered
+                                |> Query.findAll [ Selector.class "toggle-row" ]
+                                |> Query.keep
+                                    (Selector.attribute
+                                        (Html.Attributes.attribute "data-testid"
+                                            "writing-assistant-consent-error"
+                                        )
+                                    )
+                                |> Query.count (Expect.equal 0)
+                        ]
+                        ()
+            , test "and with no failure, no error element is rendered at all" <|
+                -- The negative half the view test lacked: an assertion that only
+                -- ever looks at the failure state cannot tell a correct render
+                -- from one that always renders.
+                \_ ->
+                    Consent.init { analytics = False, writingAssistant = False }
+                        |> Consent.viewSection False
+                        |> Query.fromHtml
+                        |> Query.findAll
+                            [ Selector.attribute
+                                (Html.Attributes.attribute "data-testid"
+                                    "writing-assistant-consent-error"
+                                )
+                            ]
+                        |> Query.count (Expect.equal 0)
+            , test "⛔ a 401 reverts, reports AND clears Loading — not just a 500" <|
+                -- ⛔ The gap the 500-based cases above could not see, and it was
+                -- on the MOST LIKELY failure for a consent save. `isUnauthorized`
+                -- is 401-only, and that branch used to return the model
+                -- untouched: the optimistic flip was never reverted, no error
+                -- rendered, and `writingAssistantSaving` stayed `Loading`
+                -- forever — a control stuck mid-save, lying about what the server
+                -- holds, on a GDPR consent field.
+                --
+                -- A session-expiry hand-off is not a reason to leave the model in
+                -- that state, so the 401 path now does everything the 500 path
+                -- does and reports `SessionExpired` as well.
+                \_ ->
+                    let
+                        ( model, _, out ) =
+                            Consent.update
+                                (Consent.SaveWritingAssistantCompleted True
+                                    (Err (Http.BadStatus 401))
+                                )
+                                (Consent.init { analytics = False, writingAssistant = False }
+                                    |> (\m -> { m | writingAssistantConsent = True })
+                                )
+                                (Just "tok")
+                    in
+                    Expect.all
+                        [ \_ -> model.writingAssistantConsent |> Expect.equal False
+                        , \_ ->
+                            model.writingAssistantSaving
+                                |> Expect.equal (Failure (Http.BadStatus 401))
+                        , \_ -> out |> Expect.equal Consent.SessionExpired
+                        ]
+                        ()
+            , test "⛔ the restore uses the ATTEMPTED value, not a blind toggle-back" <|
+                -- ⚠️ `not model.writingAssistantConsent` assumes exactly one flip
+                -- is in flight. Carrying the attempted value in the Msg makes the
+                -- restore exact: a failure for an attempted `False` restores
+                -- `True`, whatever the model happens to read at the time.
+                --
+                -- Driven with the model DISAGREEING with the attempt, which is
+                -- the state a blind toggle-back gets wrong and an exact restore
+                -- gets right.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveWritingAssistantCompleted False
+                                    (Err (Http.BadStatus 500))
+                                )
+                                (Consent.init { analytics = False, writingAssistant = True })
+                                (Just "tok")
+                    in
+                    model.writingAssistantConsent
+                        |> Expect.equal True
             , test "and a SaveConsent failure still surfaces under the Save button" <|
                 -- The positive control: splitting the state must not make the
                 -- button stop reporting the save it does govern.

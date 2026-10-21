@@ -47,7 +47,10 @@ type Msg
     | ToggleWritingAssistant
     | SaveConsent
     | SaveCompleted (Result Http.Error ())
-    | SaveWritingAssistantCompleted (Result Http.Error ())
+      -- ⚠️ Carries the value that was ATTEMPTED, so a failure can restore the
+      -- opposite exactly rather than toggling the current value back — which
+      -- assumes exactly one flip is in flight.
+    | SaveWritingAssistantCompleted Bool (Result Http.Error ())
 
 
 type OutMsg
@@ -119,7 +122,9 @@ update msg model maybeToken =
                         | writingAssistantConsent = newValue
                         , writingAssistantSaving = Loading
                       }
-                    , Api.saveWritingAssistantConsent newValue token SaveWritingAssistantCompleted
+                    , Api.saveWritingAssistantConsent newValue
+                        token
+                        (SaveWritingAssistantCompleted newValue)
                     , NoOut
                     )
 
@@ -137,14 +142,37 @@ update msg model maybeToken =
                 Nothing ->
                     ( model, Cmd.none, NoOut )
 
-        SaveWritingAssistantCompleted result ->
+        SaveWritingAssistantCompleted attempted result ->
             case result of
                 Ok _ ->
                     ( { model | writingAssistantSaving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
+                    let
+                        -- ⚠️ Restored from the ATTEMPTED value, not by toggling
+                        -- the current one back. A blind `not model.…Consent`
+                        -- assumes exactly one flip is in flight, so a second
+                        -- click during an in-flight save could make this handler
+                        -- flip away from what the server stored. The view also
+                        -- disables the control while saving, which closes that
+                        -- window — this makes the restore exact rather than
+                        -- merely unlikely to be wrong.
+                        restored =
+                            { model
+                                | writingAssistantConsent = not attempted
+                                , writingAssistantSaving = Failure err
+                            }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        -- ⛔ The 401 path gets the SAME treatment, and its
+                        -- absence was the sharpest gap here: `isUnauthorized` is
+                        -- 401-only and this branch returned the model UNTOUCHED,
+                        -- so on the single most likely failure for a consent save
+                        -- the optimistic flip was never reverted, no error
+                        -- rendered, and `writingAssistantSaving` stayed `Loading`
+                        -- forever. A session-expiry hand-off is not a reason to
+                        -- leave a consent control lying about what is stored.
+                        ( restored, Cmd.none, SessionExpired )
 
                     else
                         -- ⛔ The optimistic flip is REVERTED. The toggle moved
@@ -156,14 +184,8 @@ update msg model maybeToken =
                         -- consent and processing continues.
                         --
                         -- The error beside the toggle says the save failed; the
-                        -- toggle itself must go back to what is actually stored.
-                        ( { model
-                            | writingAssistantConsent = not model.writingAssistantConsent
-                            , writingAssistantSaving = Failure err
-                          }
-                        , Cmd.none
-                        , NoOut
-                        )
+                        -- toggle itself goes back to what is actually stored.
+                        ( restored, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
@@ -256,7 +278,15 @@ viewSection locked model =
                             "toggle toggle--off"
                         )
                     , attribute "data-testid" "writing-assistant-consent-toggle"
-                    , disabled locked
+
+                    -- ⛔ Disabled while SAVING as well as while locked. This
+                    -- control writes on click, so without the second term a
+                    -- second click lands while the first write is in flight —
+                    -- two requests racing, and a failure handler restoring a
+                    -- value that is no longer the one the server is deciding
+                    -- about. `locked` covers the host still learning the stored
+                    -- state; this covers the window the control itself opens.
+                    , disabled (locked || model.writingAssistantSaving == Loading)
                     , onClick ToggleWritingAssistant
                     ]
                     -- ⚠️ Placed in the list below, after the label, so the
