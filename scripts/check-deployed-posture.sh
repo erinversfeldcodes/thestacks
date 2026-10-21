@@ -201,7 +201,7 @@ not a decision. REVOKE ALL ... FROM PUBLIC and grant by name.")
 # every anonymous visitor UPDATE and DELETE on every row the arm admits. The
 # invariant holds today and nothing asserted it.
 ASSERTIONS+=("widening_policy_is_not_read_only
-SELECT count(*) FROM pg_policies WHERE schemaname = 'op' AND coalesce(qual, '') NOT LIKE '%current_scope%' AND 'rls_reader' <> ALL(roles) AND cmd <> 'SELECT'
+SELECT count(*) FROM pg_policies WHERE schemaname = 'op' AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%current_scope%' AND 'rls_reader' <> ALL(roles) AND cmd <> 'SELECT'
 0
 A policy that does NOT test op.current_scope() is not restricted to SELECT, so it
 widens WRITE access rather than read access. An anonymous or unscoped session can
@@ -217,7 +217,7 @@ ALL, so this is the shape a new widening arm takes by accident. Add FOR SELECT."
 # so a future table receives the GRANT automatically and the POLICY never —
 # and a grant without a policy reads as access while returning nothing.
 ASSERTIONS+=("rls_table_without_warehouse_policy
-SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'op' AND c.relforcerowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'op' AND p.tablename = c.relname AND 'stacks_dbt' = ANY(p.roles))
+SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'op' AND c.relrowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'op' AND p.tablename = c.relname AND 'stacks_dbt' = ANY(p.roles))
 0
 A table in op has FORCE ROW LEVEL SECURITY but no policy naming stacks_dbt, so the
 nightly warehouse refresh reads ZERO rows from it instead of failing. The grant is
@@ -275,7 +275,21 @@ chooses the subject moves the whole authorisation decision into the caller — a
 an anonymous session is a caller. Take an identifier of the subject and read the
 asker from op.scope_user() instead.")
 
-EXPECTED_ASSERTIONS=9
+# ⛔ A definer function with UNNAMED parameters, which is a cheaper hole than the
+# name-vs-use gap documented above and runs in the worse direction.
+# `proargnames` is NULL when no parameter is named, so `CREATE FUNCTION
+# op.f(uuid[]) …` with positional parameters contributes zero rows to the
+# assertion above and passes it entirely — a subject selector that is simply
+# never named is invisible to a check keyed on names.
+ASSERTIONS+=("definer_with_unnamed_parameters
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND coalesce(array_length(p.proargtypes, 1), 0) > 0 AND coalesce(array_length(p.proargnames, 1), 0) IS DISTINCT FROM coalesce(array_length(p.proargtypes, 1), 0)
+0
+A SECURITY DEFINER function in op has parameters that are not all named. The
+assertion that a definer may not take a list of users as its subject is keyed on
+parameter NAMES, so an unnamed parameter is invisible to it — the check would
+pass over exactly the function it exists to catch. Name every parameter.")
+
+EXPECTED_ASSERTIONS=10
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an
@@ -302,12 +316,53 @@ fi
 # parameters, stderr is DISCARDED rather than captured, and a failure is
 # CLASSIFIED from the exit code instead of quoted.
 parse_conn() {
-    POSTURE_PGPASSWORD="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
-    POSTURE_PGUSER="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://([^:/@]+).*#\1#p')"
-    POSTURE_PGHOST="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^@]+@([^:/?]+).*#\1#p')"
-    POSTURE_PGPORT="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^@]+@[^:/?]+:([0-9]+).*#\1#p')"
-    POSTURE_PGDATABASE="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^@]+@[^/]+/([^?]+).*#\1#p')"
-    : "${POSTURE_PGPORT:=5432}"
+    # ⛔ Parsed by a URL parser, not by sed, and the reason is percent-encoding.
+    # `deployed-posture.yml` composes this URL with
+    # `urllib.parse.quote(pw, safe='')`, so any `@ / : % +` in the password
+    # arrives percent-ENCODED. The one-argument `psql "$URL"` form this replaced
+    # decoded that for free as part of URI parsing; lifting the raw substring
+    # with a regex and handing it to `PGPASSWORD` does not, and libpq does not
+    # decode either. So the moment the password is rotated to one containing a
+    # reserved character, authentication fails with the wrong string and this
+    # gate goes red nightly for a reason unrelated to what it measures.
+    #
+    # ⚠️ Latent today only because the current password happens to have no
+    # reserved characters. The same applies to user and dbname, also quoted.
+    #
+    # ⚠️ The QUERY STRING is carried through too. Dropping it lost
+    # `sslmode=require` — silently downgrading to `prefer`, which falls back to
+    # PLAINTEXT if the server declines TLS, in the one script whose job is
+    # asserting posture — and also drops `channel_binding` and
+    # `options=endpoint=…`, which some Neon endpoints require.
+    local parsed
+    parsed="$(POSTURE_URL="$POSTURE_DATABASE_URL" python3 - <<'PARSE'
+import os
+import sys
+from urllib.parse import urlsplit, unquote
+
+u = urlsplit(os.environ["POSTURE_URL"])
+if not u.hostname:
+    sys.exit(1)
+# unquote() is the whole point: these arrive percent-encoded.
+print(unquote(u.username or ""))
+print(unquote(u.password or ""))
+print(u.hostname)
+print(u.port or 5432)
+print(unquote((u.path or "").lstrip("/")))
+print(u.query or "")
+PARSE
+)" || {
+        echo "FAIL deployed-posture: POSTURE_DATABASE_URL is not a parseable connection URL." >&2
+        echo "       Nothing was measured. This is a refusal, not a pass." >&2
+        exit 1
+    }
+
+    POSTURE_PGUSER="$(printf '%s' "$parsed" | sed -n '1p')"
+    POSTURE_PGPASSWORD="$(printf '%s' "$parsed" | sed -n '2p')"
+    POSTURE_PGHOST="$(printf '%s' "$parsed" | sed -n '3p')"
+    POSTURE_PGPORT="$(printf '%s' "$parsed" | sed -n '4p')"
+    POSTURE_PGDATABASE="$(printf '%s' "$parsed" | sed -n '5p')"
+    POSTURE_PGQUERY="$(printf '%s' "$parsed" | sed -n '6p')"
 
     # ⚠️ A refusal, not a pass. If the url did not parse, nothing below can be
     # measured and saying so is the only honest outcome. Reports WHICH field is
@@ -321,18 +376,67 @@ parse_conn() {
         echo "       Nothing was measured. This is a refusal, not a pass." >&2
         exit 1
     fi
+
+    # ⛔ `require`, never `prefer`. `prefer` falls back to plaintext when the
+    # server declines TLS, which is a posture downgrade written into the posture
+    # checker. Any sslmode the URL itself carries wins, since it was chosen
+    # deliberately upstream.
+    POSTURE_CONNINFO="host=${POSTURE_PGHOST} port=${POSTURE_PGPORT}"
+    POSTURE_CONNINFO="${POSTURE_CONNINFO} user=${POSTURE_PGUSER} dbname=${POSTURE_PGDATABASE}"
+    if [[ "$POSTURE_PGQUERY" == *sslmode=* ]]; then
+        POSTURE_CONNINFO="${POSTURE_CONNINFO} $(printf '%s' "$POSTURE_PGQUERY" | tr '&' ' ')"
+    else
+        # ⚠️ `require` for anything deployed; `prefer` ONLY under the
+        # self-test escape, which already announces that it measures nothing
+        # deployed. A local Postgres has no TLS, so defaulting to `require`
+        # everywhere made the escape unable to connect — and the suite then
+        # reported "the ceiling comparison is not working" while the gate was
+        # fine, which is the same misattribution this file has on record from
+        # the planted-image fixture.
+        if [[ "${POSTURE_ALLOW_LOCAL:-0}" == "1" ]]; then
+            POSTURE_CONNINFO="${POSTURE_CONNINFO} sslmode=prefer"
+        else
+            POSTURE_CONNINFO="${POSTURE_CONNINFO} sslmode=require"
+        fi
+        [[ -n "$POSTURE_PGQUERY" ]] &&
+            POSTURE_CONNINFO="${POSTURE_CONNINFO} $(printf '%s' "$POSTURE_PGQUERY" | tr '&' ' ')"
+    fi
 }
 parse_conn
 
+# ⛔ TWO shapes, because the credential and the diagnostics live in different
+# places. psql quotes the connection string only in a CONNECTION error — which
+# is exactly the malformed-URL case that leaked. A QUERY error (`relation …
+# does not exist`, `permission denied for table`, a syntax error in a new
+# assertion) is emitted after a successful connection and contains no
+# connection string.
+#
+# ⚠️ Discarding stderr everywhere lost diagnostics that were load-bearing: the
+# `query_to_xml` insight recorded above — that Postgres resolves relation names
+# at parse time — was found by READING one of those query errors. So the
+# connectivity probe discards, and the assertions keep stderr with the password
+# redacted as belt-and-braces.
+probe_scalar() {
+    PGPASSWORD="$POSTURE_PGPASSWORD" psql "$POSTURE_CONNINFO" -tA -c "$1" 2>/dev/null
+}
+
 scalar() {
-    PGPASSWORD="$POSTURE_PGPASSWORD" psql \
-        "host=$POSTURE_PGHOST port=$POSTURE_PGPORT user=$POSTURE_PGUSER dbname=$POSTURE_PGDATABASE sslmode=prefer" \
-        -tA -c "$1" 2>/dev/null
+    local out
+    out="$(PGPASSWORD="$POSTURE_PGPASSWORD" psql "$POSTURE_CONNINFO" -tA -c "$1" 2>&1)"
+
+    # ⚠️ Guarded on the password being non-empty: an empty `sed` pattern
+    # matches everywhere, which would corrupt every message rather than
+    # redacting one.
+    if [[ -n "$POSTURE_PGPASSWORD" ]]; then
+        printf '%s' "$out" | sed "s|${POSTURE_PGPASSWORD}|REDACTED|g"
+    else
+        printf '%s' "$out"
+    fi
 }
 
 # A connectivity probe before the assertions, so "cannot connect" is reported as
 # itself rather than as several mysterious failures.
-if ! probe="$(scalar 'SELECT 1')" || [[ "$probe" != "1" ]]; then
+if ! probe="$(probe_scalar 'SELECT 1')" || [[ "$probe" != "1" ]]; then
     echo "FAIL deployed-posture: cannot query the database as ${POSTURE_PGUSER}@${POSTURE_PGHOST}." >&2
     echo "       psql's own output is deliberately discarded — it quotes the connection" >&2
     echo "       string, password included, and this runs in a CI log." >&2
@@ -357,12 +461,10 @@ for entry in "${ASSERTIONS[@]}"; do
         # echoes the connection string, so there is nothing safe to print here —
         # an empty value means the query errored and the reason is in psql's
         # discarded output by design. Re-run the SQL by hand to see it.
-        if [[ -z "$value" ]]; then
-            echo "     The query returned nothing, which means it errored." >&2
-            echo "     Its text: ${sql}" >&2
-        else
-            echo "     It returned a non-numeric value of ${#value} character(s)." >&2
-        fi
+        # Safe to quote now: `scalar` keeps query stderr and redacts the
+        # password, and a query error cannot carry the connection string.
+        echo "     ${value:-(no output — the query errored silently)}" >&2
+        echo "     Its text: ${sql}" >&2
         echo "     Treated as a failure: an assertion that cannot run has not passed." >&2
         FAILURES=$((FAILURES + 1))
         continue
