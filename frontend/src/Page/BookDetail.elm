@@ -1035,6 +1035,29 @@ updateWithEffect msg model maybeToken =
                         ( Card.EditClosed, _ ) ->
                             ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )
 
+                        ( Card.ProgressUpdateRequested, Nothing ) ->
+                            -- ⛔ An EXPLICIT branch, because the catch-all below
+                            -- matched this and returned `Just newCard` with
+                            -- `saving = True`. `Card.update SaveClicked` has
+                            -- already set that flag, so with no token no request
+                            -- goes out, no response ever arrives to clear it, and
+                            -- the card sits on "Saving…" with Save disabled until
+                            -- the page is reloaded.
+                            --
+                            -- ⚠️ This host had the bug the sibling host had just
+                            -- been fixed for: the fix was applied to ReadingPile's
+                            -- no-token path and not to this one, so a defect was
+                            -- moved rather than removed.
+                            --
+                            -- `SessionExpired` rather than a silent clear, because
+                            -- no token on a save means the session is gone — and
+                            -- clearing the flag without saying so leaves the
+                            -- reader pressing a button that will never work.
+                            ( { model | progressCard = Just (Card.stopSaving newCard) }
+                            , Effect.none
+                            , SessionExpired
+                            )
+
                         _ ->
                             ( { model | progressCard = Just newCard }, Effect.none, NoOut )
 

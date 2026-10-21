@@ -247,9 +247,15 @@ updateWithEffect msg model =
                     _ ->
                         -- Same reasoning: no token means no request, so the
                         -- card must not be left mid-save.
+                        --
+                        -- ⛔ And `SessionExpired`, not `NoOut`. Clearing the flag
+                        -- silently leaves the reader looking at a Save button
+                        -- that will never work, with nothing explaining why —
+                        -- the cause is an expired session, which this page
+                        -- already reports on every other failing path.
                         ( { model | cards = clearSaving placementId model.cards }
                         , Effect.none
-                        , NoOut
+                        , SessionExpired
                         )
 
             else if List.member Card.EditClosed outMsgs then
