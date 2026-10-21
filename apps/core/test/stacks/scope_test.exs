@@ -209,6 +209,14 @@ defmodule Stacks.ScopeTest do
       end)
     end
 
+    test "current/0 reports :anonymous — a third outcome, not nil and not a uuid" do
+      # ⚠️ The spec is `Ecto.UUID.t() | :anonymous | nil` for a reason: a caller
+      # testing `!= nil` to mean "a real user is scoped" would read an
+      # anonymous session as a user. Three outcomes, so the distinction the
+      # fourth scope state exists for survives into Elixir.
+      Scope.anonymous(fn -> assert Scope.current() == :anonymous end)
+    end
+
     test "returns fun's value unwrapped, like with_user/2" do
       assert Scope.anonymous(fn -> :the_value end) == :the_value
     end

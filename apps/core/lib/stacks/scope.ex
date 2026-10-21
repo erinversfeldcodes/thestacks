@@ -220,6 +220,26 @@ defmodule Stacks.Scope do
       transaction is a no-op that reports success, so the scope would appear set
       and the next query on an RLS table would refuse with `42501` somewhere
       that does not name this as the cause.
+
+      ⚠️ **NO CALLERS TODAY.** Nothing outside this module calls it — grep
+      `apps/core/lib` and `apps/core/test`. It is kept rather than deleted
+      because it is the correct primitive for a function that owns its own
+      transaction and does not build a `Multi`, and `multi_step/2` covers only
+      the `Multi` half of that case. Treat the absence of callers as a fact to
+      check before trusting the moduledoc's four-wrapper summary, not as a
+      reason to reach for it.
+
+      ⛔ **Unlike `with_user/2`, this does NOT restore the previous scope, and
+      the asymmetry is deliberate: the caller owns the transaction, so the
+      caller owns the revert.** `with_user/2` opens its own transaction and
+      therefore knows whether a commit will arrive to revert `SET LOCAL`; a
+      function using `set!/1` has already opened one and this has no way to
+      know when it ends. So a scope set here survives until the caller's
+      transaction does — which is correct when that transaction commits, and a
+      leak when it is itself a savepoint inside somebody else's. The same holds
+      for `multi_step/2`. Neither is live today, checked: `set!/1` has no
+      callers, and no `multi_step/2` Multi currently runs inside a transaction
+      it did not open.
   """
   @spec set!(Ecto.UUID.t()) :: :ok
   def set!(user_id) when is_binary(user_id) do
@@ -418,7 +438,26 @@ defmodule Stacks.Scope do
     end
   end
 
-  defp must_restore?, do: sandboxed?() or Repo.in_transaction?()
+  @doc """
+      Whether a scope set now must be restored by hand when the block ends.
+
+      ⛔ Takes its inputs so the DECISION can be tested, which the behaviour
+      cannot be. Under the sandbox `sandboxed?/0` is always true, so
+      `must_restore?/0` short-circuits and an end-to-end assertion passes under
+      the old pool-keyed implementation too — the suite exercises the restoring
+      branch and production exercised the leaking one, which is the very
+      asymmetry this condition was changed to remove. The truth table is
+      therefore the only part of it a test in the suite can pin, and the
+      `{false, true}` row IS the production leak case.
+
+      ⚠️ `false, false` is the ordinary request boundary: the transaction this
+      opens is the outermost one, its commit reverts `SET LOCAL`, and an extra
+      statement would be pure cost on every scoped read.
+  """
+  @spec must_restore?(boolean(), boolean()) :: boolean()
+  def must_restore?(sandboxed?, in_transaction?), do: sandboxed? or in_transaction?
+
+  defp must_restore?, do: must_restore?(sandboxed?(), Repo.in_transaction?())
 
   defp sandboxed?, do: Repo.config()[:pool] == Ecto.Adapters.SQL.Sandbox
 end
