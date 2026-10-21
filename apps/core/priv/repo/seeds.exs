@@ -933,8 +933,22 @@ bookshelf_name_by_id =
 # non-critical emission, but it means **no caller can tell the two apart**. The
 # count below was therefore unmeasurable through it, which is how 81 failed
 # emissions read as a successful seed.
+# ⛔ The E2E fixtures are included, and leaving them out was a regression the
+# read-back had not had. That query selected EVERY placement in the table;
+# `all_placements` is only `user1 ++ user2`, so `e2e_placement_rows` were
+# inserted and then received no `placement.created` event at all. Measured on
+# the deployed run: 81 of 81 emitted against 220 placements in the table.
+#
+# ⚠️ The read-back was less accurate for a re-run AND wider in coverage, and
+# only the first of those was a reason to remove it. Anything that depends on a
+# feed or activity entry for a seeded E2E placement would have found zero rows
+# — which in a spec reads as a pass.
+#
+# `bookshelf_name_by_id` is already built from both row sets, so it covers these.
+emittable_placements = all_placements ++ e2e_placement_rows
+
 emitted =
-  Enum.count(all_placements, fn p ->
+  Enum.count(emittable_placements, fn p ->
     result =
       Stacks.Events.emit(%{
         event_type: "placement.created",
@@ -959,11 +973,22 @@ emitted =
 
 # ⚠️ Counts emissions that SUCCEEDED, not rows attempted. The preview seed is
 # checked against this figure, and a silent zero reads exactly like a success.
-IO.puts("  emitted placement.created for #{emitted} of #{length(all_placements)} placements")
+IO.puts(
+  "  emitted placement.created for #{emitted} of #{length(emittable_placements)} placements"
+)
 
-if emitted == 0 and all_placements != [] do
-  raise "the seed emitted no placement.created events for #{length(all_placements)} placements — " <>
-          "emit_safe/1 logs and continues, so this would otherwise be a silent success"
+# ⛔ Raises on ANY shortfall, not only on zero. The failure that prompted this
+# guard was systematic — a raw-uuid cast error hit every row identically — so a
+# zero-check would have caught it. A DATA-dependent failure would not: 80 of 81
+# leaves `emitted = 1`, no raise, and the per-row WARN scrolls past in a deploy
+# log that exits 0. The per-row `{:error, _}` branch above exists precisely
+# because `emit/1` can fail per row, so the code already anticipates partial
+# failure; the guard has to anticipate it too, or the printed figure and the
+# guard disagree about what counts as success.
+if emitted < length(emittable_placements) do
+  raise "the seed emitted #{emitted} of #{length(emittable_placements)} placement.created " <>
+          "events. Every placement must get one: a shortfall means some rows have no event " <>
+          "and anything reading the feed for them will find zero rows, which reads as a pass."
 end
 
 Repo.insert_all(
