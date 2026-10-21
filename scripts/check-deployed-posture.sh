@@ -219,10 +219,17 @@ ALL, so this is the shape a new widening arm takes by accident. Add FOR SELECT."
 ASSERTIONS+=("rls_table_without_warehouse_policy
 SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'op' AND c.relrowsecurity AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'op' AND p.tablename = c.relname AND 'stacks_dbt' = ANY(p.roles))
 0
-A table in op has FORCE ROW LEVEL SECURITY but no policy naming stacks_dbt, so the
-nightly warehouse refresh reads ZERO rows from it instead of failing. The grant is
-inherited from ALTER DEFAULT PRIVILEGES; the policy is not. Add a role-scoped
-USING (true) policy for stacks_dbt and stacks_readonly.")
+A table in op has ROW LEVEL SECURITY ENABLED but no policy naming stacks_dbt, so
+the nightly warehouse refresh reads ZERO rows from it instead of failing. The grant
+is inherited from ALTER DEFAULT PRIVILEGES; the policy is not. Add a role-scoped
+USING (true) policy for stacks_dbt and stacks_readonly.
+
+⚠️ ENABLED, not FORCED, and the distinction is the whole point of the query. An
+earlier version of this sentence said FORCE, which contradicted the SQL beside it
+and invited a reader to 'fix' the query by narrowing it to relforcerowsecurity.
+FORCE only extends policies to the TABLE OWNER; stacks_dbt is not the owner, so
+plain enablement already subjects it to policies and already blocks the refresh.
+Keying on relrowsecurity is correct and strictly broader.")
 
 # ⛔ A `SECURITY DEFINER` function may take an identifier of the THING BEING
 # ASKED ABOUT — a book, an edition, a placement, a group — but never a list of
