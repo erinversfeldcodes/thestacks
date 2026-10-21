@@ -114,6 +114,41 @@ assert_exit_zero "$RC" "the row is well-formed and parses"
 assert_contains "$OUT" "RL-003" "the row the substring filter dropped is listed"
 assert_contains "$OUT" "1 ledger row(s) parsed, 1 not closed" "it is counted as open"
 
+# ⛔ THE DIFFERENTIAL HALF: the LEGACY implementation is executed, not modelled.
+#
+# A differential case looks identical whether or not it discriminates, so the
+# only way to know is to run the old code against the same input and require
+# the two to DISAGREE. The legacy filter is extracted straight out of history
+# rather than reimplemented here — the first attempt at proving this case was a
+# hand-written stand-in for the substring filter, and it was wrong in the same
+# direction as the case it was checking, so probe and case failed green together
+# and masked each other.
+#
+# ⚠️ It also self-retires. When the legacy path is deleted from history's reach
+# or the extraction stops matching, the harness sentinel fires rather than the
+# case quietly becoming a tautology — which is a differential suite's normal end
+# state and the reason they rot unnoticed.
+LEGACY_SHA="5148e7b2"
+LEGACY_SWEEP="$SANDBOX/legacy-campaign-residue.sh"
+if git -C "$REPO_ROOT" show "${LEGACY_SHA}^:scripts/campaign-residue.sh" > "$LEGACY_SWEEP" 2>/dev/null \
+   && grep -q "grep -Ev" "$LEGACY_SWEEP"; then
+    _record_pass "the legacy implementation was extracted from ${LEGACY_SHA}^, not reimplemented"
+
+    LEGACY_OUT=$(cd "$SANDBOX" && bash "$LEGACY_SWEEP" 2>&1)
+
+    if grep -q "RL-003" <<< "$LEGACY_OUT"; then
+        _record_fail "the two implementations AGREE on this input, so the case proves nothing about why the filter changed"
+    else
+        _record_pass "the legacy substring filter DROPS RL-003 where the positional read keeps it — the case discriminates"
+    fi
+else
+    # ⚠️ Not a pass and not a failure of the gate: the harness could not do its
+    # job, which must satisfy neither direction. Routed here rather than
+    # silently skipped, because a skipped differential case is exactly the
+    # tautology this block exists to prevent.
+    _record_fail "HARNESS: could not extract the legacy sweep from ${LEGACY_SHA}^ — this case cannot show it discriminates"
+fi
+
 # --- an unescaped pipe shifts every cell after it, and is refused -----------
 
 write_ledger <<'EOF'
