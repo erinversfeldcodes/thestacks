@@ -1450,7 +1450,16 @@
       proto_file: "stacks/common/v1/book.proto",
       proto_message: "Edition",
       function_name: :edition,
-      skip_fields: [:book_id],
+      # ⚠️ NOT skipped any more. Skipping removes a field from the GENERATED
+      # shape, which is the left-hand side of the completeness gate's set
+      # difference — so a declared proto field reaching no client became
+      # invisible to the gate built to find exactly that. Same class as
+      # `seller_id`, found by the same query. Nothing consumes `edition.book_id`
+      # (the `book_id` that Api.elm decodes is the upload payload's, not this
+      # one) and an edition is always nested under its book, so the parent id is
+      # already known — but "dropped on purpose" is now recorded in that gate's
+      # BASELINE rather than achieved by making the field unobservable.
+      skip_fields: [],
       field_overrides: %{}
     },
     %{
@@ -1489,7 +1498,20 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BookAssociation",
       function_name: :book_association,
-      skip_fields: [:post_id, :book_title, :status, :created_at],
+      # ⚠️ `post_id` and `created_at` unskipped for the same reason as
+      # `edition.book_id` above: skipping hid them from the completeness gate.
+      # `book_title` and `status` stay skipped because they are NOT in that
+      # class: both are `api_only: true`, so they have no column at all
+      # (`op.post_book_associations` is book_id, confidence, created_at, id,
+      # post_id, reasoning, source, visible) and the hand-written serializer
+      # computes `book_title` itself via `association_book_title/1`.
+      #
+      # Their pairing is ENFORCED rather than conventional —
+      # `check-api-only-is-skipped.sh` requires every api_only field to appear
+      # in its message's skip_fields, so removing either entry is a failing
+      # diff. An earlier version of this comment called them "derived values",
+      # which is true of `book_title` but implied no gate watches them.
+      skip_fields: [:book_title, :status],
       field_overrides: %{}
     },
     %{

@@ -54,6 +54,28 @@ BASELINE = {
     "author:updated_at",
     "blog_association:book_id",
     "blog_association:confidence",
+    # ⚠️ `created_at` and `post_id` joined this baseline rather than staying
+    # hidden. Both sat in the BookAssociation serializer's `skip_fields`, which
+    # removes a field from the GENERATED shape — the left-hand side of this
+    # script's set difference — so a declared proto field reaching no client was
+    # invisible to the gate that exists to find exactly that. Found by the same
+    # query that found `seller_id`, in the same class.
+    #
+    # Both are genuinely dropped: this serializer carries ONE field, the
+    # `post_id` that `Types/FeedItem.elm` decodes comes from the feed-item
+    # payload rather than this one, and `created_at` is server bookkeeping that
+    # nothing reads. Neither is personal data, so a baseline row is the right
+    # disposition — the sorting rule being that an unconsumed NON-personal field
+    # is inventory, while an unconsumed PERSONAL field on a public payload is a
+    # disclosure and a baseline row would pin the exposure as an accepted
+    # omission.
+    #
+    # `book_title` and `status` remain skipped, correctly and for a different
+    # reason: they are derived values the hand-written serializer computes, so
+    # codegen emitting `struct.book_title` would emit a column that does not
+    # exist.
+    "blog_association:created_at",
+    "blog_association:post_id",
     "blog_association:id",
     "blog_association:source",
     "blog_association:visible",
@@ -98,6 +120,12 @@ BASELINE = {
     "catalogue_book:description",
     "catalogue_book:language",
     "catalogue_book:updated_at",
+    # Same class as the two above and as `listing:seller_id`: previously hidden
+    # by `skip_fields` rather than recorded. Nothing consumes `edition.book_id`
+    # — the `book_id` that `Api.elm` decodes belongs to the upload payload — and
+    # an edition is always nested under its book, so the parent id is already in
+    # hand.
+    "edition:book_id",
     "edition:created_at",
     "edition:google_books_id",
     "edition:open_library_id",
