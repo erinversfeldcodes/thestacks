@@ -392,7 +392,21 @@ def touched_stacks(declared_range=None):
         worktree = _git(["diff", "--name-only", "HEAD"]) or []
         untracked = _git(["ls-files", "--others", "--exclude-standard"]) or []
 
-        return _stacks_for(set(committed) | set(worktree) | set(untracked))
+        touched = _stacks_for(set(committed) | set(worktree) | set(untracked))
+
+        # ⛔ An EMPTY computed stack set is UNKNOWN, not satisfied — the third
+        # leg of the same asymmetry the declared-range branch already refuses.
+        # The caller only reaches here when some item is marked done, and "work
+        # is complete but nothing under any stack path was touched" is a
+        # contradiction rather than a pass: either the campaign is being asked
+        # about a merged wave with no `diff_range` declared (which is what that
+        # field exists for) or the checkout is not the one the work landed on.
+        # Reporting full stack-review coverage for either is the failure mode
+        # this whole check was added to end.
+        if not touched:
+            return None
+
+        return touched
 
     return None
 
