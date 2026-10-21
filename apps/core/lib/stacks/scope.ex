@@ -66,6 +66,10 @@ defmodule Stacks.Scope do
   # and so is a worker iterating over them.
   @nesting_key :stacks_rls_scope
 
+  # ⚠️ Must match the reserved value `op.current_scope()` answers with NULL.
+  # Not a uuid, so it can never collide with a real user id.
+  @anonymous "anonymous"
+
   @doc """
       Runs `fun` with the row-level-security scope set to `user_id`.
 
@@ -228,13 +232,123 @@ defmodule Stacks.Scope do
     end
   end
 
+  @doc """
+      Runs `fun` as a reader with **no account**, which is a different thing
+      from running it unscoped.
+
+      ⛔ The distinction is the whole point. An unscoped query is refused,
+      because the overwhelmingly likely cause is that somebody forgot to scope
+      one. A query made on behalf of nobody is legitimate — it is what the
+      catalogue, search, the marketplace listing pages, a public profile, the
+      blog archive and the public transparency page all are — and it has to be
+      expressible without weakening the refusal.
+
+      So this sets the scope to a reserved value that `op.current_scope()`
+      answers with NULL. The owner arm of every policy is then not satisfied
+      (`user_id = NULL` is NULL), and the reader sees exactly the rows whose
+      policies say they are public: platform-visible shelves and placements,
+      and active marketplace listings. Private tables carry no public arm, so
+      an anonymous reader asking about blocks or grants gets no rows rather
+      than an error.
+
+      ⚠️ This widens nothing. Every row reachable here was already reachable by
+      any signed-in reader through the same policy arm.
+
+      ⛔ Use it only where the request genuinely has no viewer. On a path where
+      a viewer *may* be present — the `:optional_auth` pipeline — pass the
+      viewer to `with_user/2` when there is one and come here only when there
+      is not. Calling this with a viewer in hand silently downgrades them to
+      the public subset, which looks like a working page with content missing.
+  """
+  @spec anonymous((-> result)) :: result when result: var
+  def anonymous(fun) when is_function(fun, 0) do
+    case Process.get(@nesting_key) do
+      nil ->
+        Process.put(@nesting_key, @anonymous)
+
+        try do
+          {:ok, result} = Repo.transaction(fn -> set_and_run(@anonymous, fun) end)
+          result
+        after
+          Process.delete(@nesting_key)
+        end
+
+      @anonymous ->
+        fun.()
+
+      other ->
+        # ⛔ Refused for the same reason as a re-scope between two users, and it
+        # is the more dangerous direction: dropping to anonymous inside a
+        # scoped operation returns the PUBLIC subset of someone's own data,
+        # which is a wrong answer rather than an error, and reads as a page
+        # that merely has less on it.
+        raise ArgumentError,
+              "cannot drop from #{inspect(other)} to an anonymous scope inside one operation: " <>
+                "a request either has a viewer or it does not, and narrowing to the public " <>
+                "subset mid-request silently hides rows the viewer is entitled to"
+    end
+  end
+
+  @doc """
+      Runs `fun` scoped to `viewer_id`, or anonymously when it is `nil`.
+
+      The shape the `:optional_auth` pipeline needs: those routes serve both a
+      signed-in reader and one with no account, and the two differ only in
+      which scope is correct. Written once here so no controller has to
+      remember that `nil` means `anonymous/1` and not `with_user/2` — passing a
+      nil viewer to `with_user/2` runs UNSCOPED and is refused by the database.
+  """
+  @spec for_viewer(Ecto.UUID.t() | nil, (-> result)) :: result when result: var
+  def for_viewer(nil, fun) when is_function(fun, 0), do: anonymous(fun)
+
+  def for_viewer(viewer_id, fun) when is_binary(viewer_id) and is_function(fun, 0),
+    do: with_user(viewer_id, fun)
+
   defp set_and_run(user_id, fun) do
     # ⚠️ Parameterised through `$1` rather than interpolated. `SET LOCAL` does
     # not accept a bind parameter, so this uses `set_config/3`, which does —
     # and which is therefore the only form here that cannot be made to carry
     # SQL by a crafted id. The third argument `true` is what makes it LOCAL.
-    Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
-
-    fun.()
+    #
+    # ⛔ The previous value is captured and RESTORED, rather than trusting the
+    # enclosing transaction to revert it. `SET LOCAL` reverts when the
+    # transaction that issued it ends — but under the test sandbox the
+    # connection is held open inside one long transaction, so this block is a
+    # SAVEPOINT, and **releasing a savepoint does not revert a SET LOCAL made
+    # inside it**. Measured: after an inner scope ended, the setting still read
+    # as the user that block had scoped to, while the same sequence against a
+    # real committed transaction read as empty.
+    #
+    # That leak is why a scope could outlive its own block and be seen by an
+    # unrelated later query — which turned a legitimate `op.blocked_pair/2`
+    # call into a refusal in three tests, and would have made any scope-reading
+    # guard behave differently in the suite than in production. Restoring
+    # explicitly makes the two environments agree, and is a no-op in the one
+    # where the transaction would have done it anyway.
+    # ⚠️ Conditional, and the condition is the semantic difference itself rather
+    # than "are we testing". Under a real connection the enclosing transaction
+    # reverts the setting on commit and an extra statement would be pure cost —
+    # measured cost: two queries per scope, which pushed two N+1 guards past
+    # their bounds even though the work is per-request and not per-row. Under
+    # the sandbox pool there is no commit to revert anything, so the restore is
+    # the only thing that ends the scope.
+    #
+    # `set_and_run/2` is reached only at the OUTERMOST scope — a nested
+    # same-user call runs `fun` directly and a different user raises — so
+    # restoring to the unset value is right, and needs no read of the previous
+    # one.
+    if sandboxed?() do
+      try do
+        Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
+        fun.()
+      after
+        Repo.query!("SELECT set_config('app.current_user_id', '', true)")
+      end
+    else
+      Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
+      fun.()
+    end
   end
+
+  defp sandboxed?, do: Repo.config()[:pool] == Ecto.Adapters.SQL.Sandbox
 end
