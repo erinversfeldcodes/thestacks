@@ -183,6 +183,53 @@ assert_contains "$OUT" "apps/core/lib/probe.ex" \
 #
 # The historical-campaign case. The working tree touches elixir; the declared
 # range touches only proto. The guard must answer about the RANGE.
+DIR="$(new_sandbox sha_orphan '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
+# ⚠️ The elixir file is REQUIRED and its absence is what made the first version
+# of this case vacuous. The staleness block only runs for stacks the wave
+# actually touched, so with no `apps/core/lib` change the ancestry check was
+# never reached — and the case still "passed" its exit-code assertion, because
+# the gate was exiting nonzero for an unrelated reason. Measured by running the
+# case against the gate WITHOUT the ancestry check, where it also passed.
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "an elixir commit, so the elixir stack is in scope"
+# ⛔ A SHA that RESOLVES but is not on this branch's history. Built by
+# re-committing HEAD's tree with no parent, so it is a real, readable object
+# reachable by nothing.
+ORPHAN_SHA="$(git -C "$DIR" commit-tree "$(git -C "$DIR" rev-parse 'HEAD^{tree}')" -m "orphan")"
+python3 - "$DIR/plans/probe-campaign-state.json" "$ORPHAN_SHA" <<'PY'
+import sys
+
+path, sha = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    body = f.read()
+with open(path, "w") as f:
+    f.write(body.replace("SHA_PLACEHOLDER", sha))
+PY
+
+test_case "a_sha_that_is_not_an_ancestor_is_refused" \
+    "the check could see files-changed-since but never a WRONG sha"
+# ⛔ MEASURED, and it is why this case exists rather than the obvious one. The
+# orphan's `diff ORPHAN..HEAD` returns **zero files**, because it carries HEAD's
+# own tree — so the staleness check alone reads it as "nothing changed, the
+# review is current" and passes. A wrong SHA is therefore indistinguishable
+# from a perfectly current one by diff, and that failure is UPSTREAM of the one
+# the rest of this block tests: a dispatch computed against the wrong base once
+# told four reviewers their ranges were too narrow and told a fifth it had
+# nothing to review. Ancestry is the signal that does not depend on trusting
+# whoever wrote the SHA down.
+run_gate "$DIR"
+# ⚠️ No bare `assert_exit_nonzero` here, deliberately. Measured: it passes
+# against a gate with NO ancestry check at all, because this sandbox exits
+# nonzero for an unrelated reason — so it would be a third assertion that
+# cannot fail on the thing it names, in a block whose whole subject is checks
+# that pass for the wrong reason. The message assertion is the discriminating
+# one (verified red without the check), and it implies the nonzero exit, since
+# the gate only prints this line as a violation.
+assert_contains "$OUT" "NOT an ancestor of HEAD" "the reason is named, not just the stack"
+assert_not_contains "$OUT" "is STALE" \
+    "and it is NOT reported as merely stale — the diff is meaningless, not current"
+
 DIR="$(new_sandbox declared_range '{}' ',
   "diff_range": "RANGE_PLACEHOLDER"')"
 echo 'syntax = "proto3";' > "$DIR/proto/probe.proto"
@@ -199,6 +246,7 @@ with open(path, "w") as f:
 PY
 # Working-tree change in a DIFFERENT stack, which the declared range excludes.
 echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+
 
 test_case "declared_range_wins" "a campaign that declares its range is measured on that range"
 run_gate "$DIR"

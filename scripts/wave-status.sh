@@ -488,6 +488,30 @@ if not wave_filter and any(
                 )
                 continue
 
+            # ⛔ The SHA is written by hand, so this check could only ever see
+            # "files changed since the recorded SHA" and never "the recorded SHA
+            # is wrong". That second failure is upstream of the first and real:
+            # a dispatch computed against the wrong base once told four
+            # reviewers their ranges were narrower than they were, and told a
+            # fifth it had nothing to review when one file had changed.
+            #
+            # Ancestry is the independent signal available without trusting the
+            # writer. A SHA that is not an ancestor of HEAD cannot be "the
+            # commit this branch's work was reviewed at" — it is from another
+            # branch, a discarded rewrite, or a typo that happens to resolve.
+            # `diff A..HEAD` is silent about that: it compares two trees and
+            # does not care whether A is behind HEAD, so a sibling commit
+            # produces a plausible-looking file list.
+            if _git(["merge-base", "--is-ancestor", seen, "HEAD"]) is None:
+                violations.append(
+                    f"  campaign: the {stack} review names `reviewed_at_sha` {seen[:12]}, which "
+                    f"is NOT an ancestor of HEAD — so it is not a commit this branch's work was "
+                    f"reviewed at, and the file list a diff against it produces is meaningless. "
+                    f"Most likely a SHA from another branch or a rewritten history. Re-record the "
+                    f"verdict with a commit that is actually on this branch."
+                )
+                continue
+
             prefixes = STACK_PATHS[stack]
             stale = [f for f in since if any(f.startswith(p) for p in prefixes)]
             if stale:
