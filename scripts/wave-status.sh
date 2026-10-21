@@ -479,7 +479,25 @@ if not wave_filter and any(
                 )
                 continue
 
-            since = _git(["diff", "--name-only", f"{seen}..HEAD"])
+            # ⛔ COMMITTED work plus the working tree, the same union the
+            # branch-diff path above uses — and its absence here was the same
+            # asymmetry one leg over. `diff SHA..HEAD` sees only commits, so
+            # uncommitted work in a stack's paths read as COVERED by a review
+            # recorded at the current HEAD: exactly the shape this check exists
+            # to refuse, in the check itself.
+            #
+            # Working-tree legs are additive and default to empty, so a failure
+            # to read them narrows the answer rather than discarding the
+            # committed one.
+            committed_since = _git(["diff", "--name-only", f"{seen}..HEAD"])
+            if committed_since is None:
+                since = None
+            else:
+                worktree_since = _git(["diff", "--name-only", "HEAD"]) or []
+                untracked_since = _git(["ls-files", "--others", "--exclude-standard"]) or []
+                since = sorted(
+                    set(committed_since) | set(worktree_since) | set(untracked_since)
+                )
             if since is None:
                 violations.append(
                     f"  campaign: the {stack} review names `reviewed_at_sha` {seen[:12]} and git "

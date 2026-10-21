@@ -183,6 +183,35 @@ assert_contains "$OUT" "apps/core/lib/probe.ex" \
 #
 # The historical-campaign case. The working tree touches elixir; the declared
 # range touches only proto. The guard must answer about the RANGE.
+DIR="$(new_sandbox sha_uncommitted '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
+CURRENT_SHA="$(git -C "$DIR" rev-parse HEAD)"
+python3 - "$DIR/plans/probe-campaign-state.json" "$CURRENT_SHA" <<'PY'
+import sys
+
+path, sha = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    body = f.read()
+with open(path, "w") as f:
+    f.write(body.replace("SHA_PLACEHOLDER", sha))
+PY
+# ⛔ UNCOMMITTED work under the stack's paths, with the review recorded at the
+# CURRENT HEAD — so `diff SHA..HEAD` is empty and the committed-only version of
+# the staleness check read this as covered.
+echo 'defmodule Uncommitted do' > "$DIR/apps/core/lib/uncommitted.ex"
+
+test_case "uncommitted_work_makes_a_current_review_STALE" \
+    "a review recorded at HEAD does not cover work that is not in HEAD yet"
+# ⛔ The same asymmetry the branch-diff path above was already fixed for, one
+# leg over: that path unions committed + worktree + untracked, and this one
+# compared against HEAD alone. So an in-flight wave — which is exactly what
+# uncommitted work means — could have every stack reported as reviewed while
+# the reviewer had seen none of it.
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "uncommitted work in a reviewed stack is unreviewed work"
+assert_contains "$OUT" "elixir review is STALE" "the stack is named"
+assert_contains "$OUT" "apps/core/lib/uncommitted.ex" \
+    "and so is the uncommitted file — a count alone is the thing that gets ignored"
+
 DIR="$(new_sandbox sha_orphan '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
 # ⚠️ The elixir file is REQUIRED and its absence is what made the first version
 # of this case vacuous. The staleness block only runs for stacks the wave
