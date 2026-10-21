@@ -83,7 +83,7 @@ test_case "every_assertion_actually_evaluates" "none of them errors instead of r
 # a `to_regclass` runtime guard did not save it. It ERRORED rather than
 # evaluating, and only the anti-vacuity counter revealed that as "only 3 of 4
 # ran" rather than a pass.
-if printf '%s' "$OUT" | grep -q "did not return a number"; then
+if grep -q "did not return a number" <<< "$OUT"; then
     _record_fail "an assertion errored instead of evaluating: $(printf '%s' "$OUT" | grep -A 2 'did not return a number' | head -3)"
 else
     _record_pass "all assertions returned a number against a real database"
@@ -127,7 +127,7 @@ fi
 
 OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1)"
 
-if printf '%s' "$OUT" | grep -qE "^FAIL images_past_expiry"; then
+if grep -qE "^FAIL images_past_expiry" <<< "$OUT"; then
     _record_pass "a breached ceiling is reported as a failure"
     assert_contains "$OUT" "retention promise is not being kept" \
         "and carries the sentence a reader needs, not just a count"
@@ -171,7 +171,7 @@ for shape in \
     "postgresql://someuser:${THROWAWAY_PW}@db.example.invalid:5432/stacks"; do
     out="$(POSTURE_DATABASE_URL="$shape" bash "$GATE" 2>&1 || true)"
 
-    if printf '%s' "$out" | grep -q "$THROWAWAY_PW"; then
+    if grep -q "$THROWAWAY_PW" <<< "$out"; then
         _record_fail "the password reached the log for a url of this shape: ${shape%%:*}://…"
     else
         _record_pass "no password in the output for a ${shape%%:*}:// url"

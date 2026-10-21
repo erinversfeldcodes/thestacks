@@ -328,8 +328,14 @@ if [[ "$SKIP_DB" == "true" ]]; then
 else
     step "PostgreSQL"
 
+    # Captured once outside the loop: `brew services list | grep -q` would be
+    # four pipelines whose status can come back 141 instead of an answer, and a
+    # false "not started" here silently leaves a competing Postgres running on
+    # 5432 — which presents later as connection failures against the wrong
+    # server, not as a setup error.
+    _brew_services="$(brew services list 2>/dev/null || true)"
     for other in 14 15 17 18; do
-        if brew services list 2>/dev/null | grep -qE "^postgresql@${other}\s+started"; then
+        if grep -qE "^postgresql@${other}[[:space:]]+started" <<< "$_brew_services"; then
             warn "Stopping postgresql@${other} (aligning local on the canonical postgresql@16)..."
             brew services stop "postgresql@${other}" >/dev/null 2>&1 || true
         fi

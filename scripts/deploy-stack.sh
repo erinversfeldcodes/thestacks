@@ -261,7 +261,11 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
 
     if [[ "$neon_branch_name" != "${PREVIEW_NEON_BRANCH}" ]]; then
         echo "FAIL deploy: Neon branch creation failed" >&2
-        echo "$neon_response" | head -5 >&2
+        # `echo … | head -5` under `set -euo pipefail` aborts the script here:
+        # head ALWAYS closes early, so echo takes SIGPIPE and the pipeline
+        # returns 141 — losing the diagnostic this line exists to print, on the
+        # one path that most needs it. Truncate without a pipe.
+        printf '%s\n' "${neon_response:0:2000}" >&2
         exit 1
     fi
     NEON_BRANCH_NAME="${PREVIEW_NEON_BRANCH}"
@@ -421,7 +425,12 @@ print(urls[0] if urls else '')
         # runner (missing generated schemas) was once reported as "model
         # regressed", pointing the investigation at Modal when the defect was
         # the checkout. Claim regression only when the eval itself said so.
-        if printf '%s' "$EVAL_OUT" | grep -q "REGRESSION"; then
+        # ⛔ A here-string, not a pipe: as `printf … | grep -q`, an early
+        # "REGRESSION" in a large eval log returns 141 under `pipefail`, so a
+        # real regression took the else branch and was reported as "the eval
+        # COULD NOT RUN" — exactly the misattribution the comment above exists
+        # to prevent, arriving by a different route.
+        if grep -q "REGRESSION" <<< "$EVAL_OUT"; then
             echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
         else
             echo "FAIL deploy: the vision eval COULD NOT RUN (exit $EVAL_RC) — that is a broken gate, not a scored regression; see the output above. Stopping, because an unscored model must not roll forward under EVAL_VISION_REQUIRED." >&2
@@ -588,7 +597,11 @@ ensure_fly_app "${VM_APP}"
 # Both environments need this.
 fly ips allocate-v6 --private --app "${VM_APP}" 2>&1 | grep -v "^Error" || true
 
-if ! fly volumes list --app "${VM_APP}" --json 2>/dev/null | grep -q '"name"[: ]*"vm_data"'; then
+# Captured first rather than piped: `fly … | grep -q` returns 141 under
+# `pipefail` when grep exits before fly finishes writing, which inverts this
+# test into "the volume does not exist" and re-runs the create on every deploy.
+_fly_volumes="$(fly volumes list --app "${VM_APP}" --json 2>/dev/null || true)"
+if ! grep -q '"name"[: ]*"vm_data"' <<< "${_fly_volumes}"; then
     fly volumes create vm_data --app "${VM_APP}" --region iad --size 1 --yes 2>&1 \
         | grep -v "^Error" || true
 fi

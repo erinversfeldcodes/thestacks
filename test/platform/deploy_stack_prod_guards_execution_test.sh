@@ -110,7 +110,7 @@ else
     _record_fail "a valid url was refused, which would block every production deploy: $OUT_PRESENT"
 fi
 # ⛔ The url must not be echoed. This guard runs in CI logs.
-if printf '%s' "$OUT_PRESENT" | grep -q "postgres://"; then
+if grep -q "postgres://" <<< "$OUT_PRESENT"; then
     _record_fail "the guard echoed the connection string into its output"
 else
     _record_pass "it reports a LENGTH, never the url — a deploy log is not a place for a credential"
@@ -145,7 +145,7 @@ DECIDE
 OUT_NEON_PROD="$(PROD_MODE=1 NEON_STAGING_API_KEY="" bash "$WORK/neon-decide.sh" 2>&1)"
 assert_contains "$OUT_NEON_PROD" "No Neon branch creation in production mode" \
     "production mode takes the no-branch arm"
-if printf '%s' "$OUT_NEON_PROD" | grep -q "WOULD CREATE"; then
+if grep -q "WOULD CREATE" <<< "$OUT_NEON_PROD"; then
     _record_fail "production mode reached branch creation — the live app could be pointed at a preview database"
 else
     _record_pass "and never reaches branch creation"
@@ -174,7 +174,7 @@ SEED
 OUT_SEED_PROD="$(PROD_MODE=1 bash "$WORK/seed-decide.sh" 2>&1)"
 OUT_SEED_PREVIEW="$(PROD_MODE=0 bash "$WORK/seed-decide.sh" 2>&1)"
 assert_contains "$OUT_SEED_PROD" "SEEDING prod owner" "production seeds the owner"
-if printf '%s' "$OUT_SEED_PREVIEW" | grep -q "SEEDING"; then
+if grep -q "SEEDING" <<< "$OUT_SEED_PREVIEW"; then
     _record_fail "a PREVIEW deploy would seed production owner credentials onto a throwaway stack"
 else
     _record_pass "a preview does not — production owner credentials stay out of disposable stacks"
@@ -183,7 +183,8 @@ fi
 # ⛔ The guard in the real script, not a model of it. The two cases above
 # execute a transcription; this asserts the transcription still matches, so a
 # change to the real guard cannot leave this suite passing over a stale copy.
-if grep -A 3 'Seeding \${CORE_APP} (prod owner + prober)' "$DEPLOY" | grep -q "seed_prod"; then
+_seed_block="$(grep -A 3 'Seeding \${CORE_APP} (prod owner + prober)' "$DEPLOY" || true)"
+if grep -q "seed_prod" <<< "$_seed_block"; then
     _record_pass "the real seed block still sits behind the production guard"
 else
     _record_fail "the production seed guard has moved or changed shape — re-read it before trusting the cases above"

@@ -140,7 +140,7 @@ test_case "production_is_never_selected" "the bare name is not a preview"
 # service, and the sweep runs weekly and unattended.
 assert_not_contains "$OUT" "WOULD STOP modal:thestacks-vision " \
     "production is not selected"
-if printf '%s\n' "$OUT" | grep -qE "(WOULD STOP|STOPPED) modal:thestacks-vision$"; then
+if grep -qE "(WOULD STOP|STOPPED) modal:thestacks-vision$" <<< "$OUT"; then
     _record_fail "the sweep selected the PRODUCTION vision app"
 else
     _record_pass "production is untouched"

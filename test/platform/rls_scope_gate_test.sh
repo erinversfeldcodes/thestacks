@@ -40,9 +40,19 @@ else
     _record_fail "it does NOT parse, so nothing below is exercising the real thing"
 fi
 
+# ⚠️ `DRIVES` counts the allowlist entries this suite actually pushed through
+# the verifier, and is asserted against a floor at the end. Without it, deleting
+# two of the `run_gate` calls below leaves the suite reporting N-minus-2 passes
+# and still green — the gate under test has an anti-vacuity floor, and until now
+# the suite testing it did not. A suite that shrinks silently is the same defect
+# class as the gate whose allowlist emptied silently.
+DRIVES=0
+
 run_gate() {
     OUT="$(RLS_SCOPE_TEST_ALLOWLIST="${1:-}" bash "$GATE" 2>&1)"
     RC=$?
+    [[ -n "${1:-}" ]] && DRIVES=$((DRIVES + 1))
+    return 0
 }
 
 test_case "the_clean_tree_passes" "a baseline, so a red below means something"
@@ -130,17 +140,64 @@ test_case "⛔_the_strip_does_not_use_a_pipe_into_grep_q" \
 #
 # ⚠️ A gate that accepts a false claim intermittently is worse than one that
 # fails: the green runs are the dangerous ones.
-PIPE_INTO_GREPQ="$(grep -cE '\| *grep -q' "$GATE" || true)"
-PIPE_IN_PROSE="$(sed 's/#.*//' "$GATE" | grep -cE '\| *grep -q' || true)"
+# ⚠️ The pattern is deliberately wider than the form that caused the flake.
+# `-q` leading was an accident of how that line happened to be written: the
+# hazard is a property of ANY early-exiting consumer, so `grep -Eq`, `grep -iq`
+# and `grep -Fq` are the same defect and all read as equally idiomatic. It also
+# covers the non-grep consumers — `grep -m1`, `head`, `sed …q`, `awk …exit` —
+# because the next instance will not be a grep just because this one was.
+EARLY_EXIT_CONSUMER='\| *(grep [^|]*-[a-zA-Z]*q|grep [^|]*-m *[0-9]|head( |$)|sed -n [^|]*q|awk [^|]*exit)'
+PIPE_INTO_GREPQ="$(grep -cE "$EARLY_EXIT_CONSUMER" "$GATE" || true)"
+PIPE_IN_PROSE="$(sed 's/#.*//' "$GATE" | grep -cE "$EARLY_EXIT_CONSUMER" || true)"
 if [[ "${PIPE_IN_PROSE:-0}" -eq 0 ]]; then
-    _record_pass "no executable pipe into grep -q anywhere in the gate (${PIPE_INTO_GREPQ} mention(s), all in comments)"
+    _record_pass "no executable pipe into an early-exiting consumer anywhere in the gate (${PIPE_INTO_GREPQ} mention(s), all in comments)"
 else
-    _record_fail "${PIPE_IN_PROSE} executable '… | grep -q' remain; under pipefail each returns 141 on an early match, which ACCEPTS a false claim"
+    _record_fail "${PIPE_IN_PROSE} executable pipe(s) into an early-exiting consumer remain; under pipefail each returns 141 on an early match, which ACCEPTS a false claim"
+fi
+
+test_case "the_widened_pattern_still_catches_the_original_form" \
+    "an absence assertion is only as good as its pattern"
+# ⛔ Anti-vacuity for the assertion above. Widening a pattern can silently
+# break it, and an absence check that matches nothing reports clean — so prove
+# the pattern still fires on the exact line that caused the flake, and on the
+# flag-reordered spelling that the previous narrower pattern would have missed.
+_variants_caught=0
+for _variant in \
+    'printf "%s" "$code" | grep -qE "$PAT"' \
+    'printf "%s" "$code" | grep -Eq "$PAT"' \
+    'echo "$out" | grep -iq EXPLOIT' \
+    'cat "$f" | head -5' \
+    'git ls-tree -r main | grep -m1 proto'
+do
+    if grep -qE "$EARLY_EXIT_CONSUMER" <<< "$_variant"; then
+        _variants_caught=$((_variants_caught + 1))
+    else
+        _record_fail "the widened pattern does NOT catch: ${_variant}"
+    fi
+done
+if [[ "${_variants_caught}" -eq 5 ]]; then
+    _record_pass "the pattern catches all 5 spellings, including the flag-reordered 'grep -Eq' the narrow version missed"
 fi
 
 test_case "the_anti_vacuity_floor_on_discovery_is_present" \
     "a discovery pattern that stops matching must not read as clean"
 assert_contains "$(cat "$GATE")" "too few to be this codebase" \
     "the module floor is declared"
+
+test_case "this_suite_drove_every_kind_it_claims_to" \
+    "the suite needs the same anti-vacuity floor as the gate it tests"
+# ⛔ The floor is the count of allowlist entries actually pushed through the
+# verifier: three kinds (no-queries, definer, policy:NAME), plus the unknown
+# kind, plus the second definer module, plus the no-queries contradiction = 6.
+# Raise it when a case is added; a DROP means somebody deleted coverage, and
+# this is the assertion that makes that a failing run rather than a quieter one.
+EXPECTED_DRIVES=6
+if [[ "${DRIVES}" -eq "${EXPECTED_DRIVES}" ]]; then
+    _record_pass "drove ${DRIVES} allowlist entries through the verifier"
+elif [[ "${DRIVES}" -lt "${EXPECTED_DRIVES}" ]]; then
+    _record_fail "only ${DRIVES} of ${EXPECTED_DRIVES} kinds were driven — coverage was deleted, not merely reduced"
+else
+    _record_fail "drove ${DRIVES}, expected ${EXPECTED_DRIVES} — raise EXPECTED_DRIVES deliberately when adding a case"
+fi
 
 summarise

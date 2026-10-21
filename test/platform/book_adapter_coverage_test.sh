@@ -147,7 +147,7 @@ test_case "camel_case_is_matched_to_snake_case" "the two sides spell fields diff
 # multi-word field as dropped — permanently red, which gets a gate deleted.
 assert_contains "$GATE_SRC" 'Elm field names are camelCase' \
     "the normalisation is explained where it is done"
-if printf '%s\n' "$OUT_OK" | grep -q "edition_count"; then
+if grep -q "edition_count" <<< "$OUT_OK"; then
     _record_fail "edition_count was reported dropped even though the adapter reads editionCount"
 else
     _record_pass "editionCount satisfies edition_count"

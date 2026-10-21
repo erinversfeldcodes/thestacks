@@ -251,7 +251,7 @@ sys.exit(0 if (has_run and has_target) else 1)
     else
         _record_fail "tag-main.yml missing workflow_run trigger targeting Deploy production"
     fi
-    if echo "$TAG_CONTENT" | grep -qE "workflow_run\.conclusion\s*==\s*'success'"; then
+    if grep -qE "workflow_run\.conclusion\s*==\s*'success'" <<< "$TAG_CONTENT"; then
         _record_pass "tag-main.yml gates on workflow_run.conclusion == 'success'"
     else
         _record_fail "tag-main.yml does not gate on workflow_run.conclusion == 'success'"
@@ -266,7 +266,7 @@ sys.exit(0 if re.search(r"permissions:\s*\n\s*contents:\s*write", txt) else 1)
         _record_fail "tag-main.yml missing contents: write permission"
     fi
     if [[ "$TAG_CONTENT" =~ main-\$\{short\} ]] \
-        || echo "$TAG_CONTENT" | grep -q 'main-'; then
+        || grep -q 'main-' <<< "$TAG_CONTENT"; then
         _record_pass "tag-main.yml creates main-* tags"
     else
         _record_fail "tag-main.yml does not create main-* tags"
@@ -276,7 +276,7 @@ else
 fi
 
 test_case "record_prev_state_uses_main_tag" "record-prev-state queries git tag --list 'main-*'"
-if echo "$WF_CONTENT" | grep -qE "git tag --list ['\"]main-\\*['\"]"; then
+if grep -qE "git tag --list ['\"]main-\\*['\"]" <<< "$WF_CONTENT"; then
     _record_pass "record-prev-state uses git tag --list 'main-*'"
 else
     _record_fail "record-prev-state does not query git tag --list 'main-*'"
@@ -296,12 +296,12 @@ sys.exit(0 if (has_push and has_dispatch and has_target_app and has_force_rollba
 else
     _record_fail "workflow missing push, workflow_dispatch, target_app, or force_rollback"
 fi
-if echo "$WF_CONTENT" | grep -qE 'inputs\.target_app'; then
+if grep -qE 'inputs\.target_app' <<< "$WF_CONTENT"; then
     _record_pass "job references \${{ inputs.target_app }}"
 else
     _record_fail "job does not reference inputs.target_app"
 fi
-if echo "$WF_CONTENT" | grep -qE 'inputs\.force_rollback'; then
+if grep -qE 'inputs\.force_rollback' <<< "$WF_CONTENT"; then
     _record_pass "job references \${{ inputs.force_rollback }}"
 else
     _record_fail "job does not reference inputs.force_rollback"

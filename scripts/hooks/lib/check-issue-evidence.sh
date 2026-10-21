@@ -45,7 +45,7 @@ while IFS= read -r f; do
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
-    if printf '%s' "$line" | grep -qiE '^[[:space:]]*-[[:space:]]*\[x\]'; then
+    if grep -qiE '^[[:space:]]*-[[:space:]]*\[x\]' <<< "$line"; then
       if ! has_evidence "$line"; then
         add_violation "  [§9 no-evidence] ${f}:"
         add_violation "      ${line}"

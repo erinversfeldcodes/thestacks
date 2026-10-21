@@ -181,8 +181,8 @@ BOTH="$(git -C "$REPO_ROOT" ls-tree -r --name-only origin/main .github/workflows
     while IFS= read -r wf; do
         src="$(git -C "$REPO_ROOT" show "origin/main:$wf" 2>/dev/null)"
         block="$(printf '%s\n' "$src" | awk '/^on:$/{f=1;next} f&&/^[a-z]/{exit} f')"
-        if printf '%s\n' "$block" | grep -qE '^  pull_request:' &&
-            printf '%s\n' "$block" | grep -qE '^  schedule:'; then
+        if grep -qE '^  pull_request:' <<< "$block" &&
+            grep -qE '^  schedule:' <<< "$block"; then
             printf '%s\n' "$wf"
         fi
     done | wc -l | tr -d ' ')"

@@ -284,8 +284,8 @@ if unparsed:
     print(f'UNPARSED\t{unparsed}\t0')
 ")" || { echo "FAIL sweep: could not parse the Modal app listing" >&2; exit 1; }
 
-if printf '%s' "$modal_rows" | grep -q "^UNPARSED"; then
-    count="$(printf '%s' "$modal_rows" | grep "^UNPARSED" | cut -f2)"
+if grep -q "^UNPARSED" <<< "$modal_rows"; then
+    count="$(grep "^UNPARSED" <<< "$modal_rows" | cut -f2)"
     echo "FAIL sweep: ${count} Modal app(s) in the listing have no readable name." >&2
     echo "       The CLI's JSON keys have changed shape. Every decision below would be" >&2
     echo "       made on empty strings — matching no app, sweeping nothing, and reporting" >&2

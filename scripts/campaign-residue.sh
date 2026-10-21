@@ -11,9 +11,14 @@ echo "== 1. Residue ledger: open / deferred / due rows =="
 if [ -f plans/residue-ledger.md ]; then
   grep -E '^\| RL-[0-9]+' plans/residue-ledger.md | grep -Ev '\| *closed *\|' || echo "(none open)"
   echo
-  if grep -E '^\| RL-[0-9]+' plans/residue-ledger.md | grep -q 'SATISFIED'; then
+  # Captured, not piped into `grep -q`: under `pipefail` the producing grep
+  # takes SIGPIPE when the consumer exits on an early match, the pipeline
+  # returns 141, and this test goes FALSE — silently skipping the SATISFIED
+  # rows that are the whole point of the predecessor sweep.
+  _ledger_rows="$(grep -E '^\| RL-[0-9]+' plans/residue-ledger.md || true)"
+  if grep -q 'SATISFIED' <<< "${_ledger_rows}"; then
     echo "!! rows with a SATISFIED due_when (join the next campaign frame):"
-    grep -E '^\| RL-[0-9]+' plans/residue-ledger.md | grep 'SATISFIED'
+    grep 'SATISFIED' <<< "${_ledger_rows}"
   fi
 else
   echo "(no plans/residue-ledger.md)"

@@ -236,7 +236,7 @@ if [[ $HAS_NPM -eq 1 ]]; then
   fi
 fi
 
-if echo "$ALL_CHANGED" | grep -qE '^issues/.*\.md$'; then
+if grep -qE '^issues/.*\.md$' <<< "$ALL_CHANGED"; then
   run_check \
     "issue-evidence (completion-bar §9/§10)" \
     "attach an evidence token to each checked DoD box; point every tracking #NNN at a real issues/NNN-*.md" \

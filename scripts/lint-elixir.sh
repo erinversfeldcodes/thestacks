@@ -127,6 +127,12 @@ gate check-error-token-spelling.sh
 gate check-rls-scope.sh
 gate check-protojson-completeness.sh
 gate check-unbounded-sweeps.sh
+# ⚠️ Not an Elixir gate. It lives in this lane because this is where the `gate`
+# helper runs every `scripts/check-*.sh`, and therefore the only lane that
+# actually executes in `just verify` and `just ci` — a gate nothing invokes is
+# a gate that does not exist, which this repo has shipped before. Move it the
+# day a shell lane exists.
+gate check-sigpipe-hazards.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

@@ -144,7 +144,7 @@ else
         covered=0
         candidate="$root"
         while [[ -n "$candidate" && "$candidate" != "." ]]; do
-            if printf '%s' "$ELM_FILTER_TXT" | grep -qF "'$candidate/**'"; then
+            if grep -qF "'$candidate/**'" <<< "$ELM_FILTER_TXT"; then
                 covered=1
                 break
             fi
@@ -198,7 +198,7 @@ else
         covered=0
         candidate="$root"
         while [[ -n "$candidate" && "$candidate" != "." ]]; do
-            if printf '%s' "$ELIXIR_FILTER_TXT" | grep -qF "'$candidate/**'"; then
+            if grep -qF "'$candidate/**'" <<< "$ELIXIR_FILTER_TXT"; then
                 covered=1
                 break
             fi
@@ -264,7 +264,7 @@ else
                 */node_modules/* | */node_modules) continue ;;
             esac
             GENERATED_READERS=$((GENERATED_READERS + 1))
-            if printf '%s' "$ELIXIR_FILTER_TXT" | grep -qF "'proto/**'"; then
+            if grep -qF "'proto/**'" <<< "$ELIXIR_FILTER_TXT"; then
                 _record_pass "$gate reads the untracked generated $input, and the elixir filter lists proto/** so a contract change triggers the lane"
             else
                 _record_fail "$gate reads $input, which is GENERATED and gitignored, but the elixir filter does not list 'proto/**' — adding a field to a .proto changes this gate's input while changing no tracked file the filter matches, so the lane is skipped on exactly the diff the gate exists to catch"

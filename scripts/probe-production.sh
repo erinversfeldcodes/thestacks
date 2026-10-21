@@ -328,7 +328,7 @@ assert_invite_gate() {
     body="$(cat "$body_file" 2>/dev/null || true)"
     rm -f "$body_file"
 
-    if [[ "$http_code" == "403" ]] && printf '%s' "$body" | grep -q "invite_required"; then
+    if [[ "$http_code" == "403" ]] && grep -q "invite_required" <<< "$body"; then
         echo "PASS assert: invite gate is ON (codeless register -> 403 invite_required)"
         return 0
     fi

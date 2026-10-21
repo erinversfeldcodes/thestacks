@@ -313,7 +313,7 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                 ghcr.io/zaproxy/zaproxy:2.16.1 \
                 zap-baseline.py -t "${_core_url}" 2>&1)" || true
             echo "${zap_out}"
-            if echo "${zap_out}" | grep -q "FAIL-NEW: 0"; then
+            if grep -q "FAIL-NEW: 0" <<< "${zap_out}"; then
                 pass "deploy: ZAP baseline"
             else
                 fail "deploy: ZAP baseline found new failures"
@@ -338,10 +338,20 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             # (ZAP above is the safe polarity — it greps for the SUCCESS marker
             # "FAIL-NEW: 0", so a crash yields no match and fails. Do not
             # "harmonise" these by copying the wrong one.)
+            #
+            # ⛔ The here-string is load-bearing, not a style choice. As
+            # `echo "$out" | grep -q`, this failed OPEN: grep exits on its first
+            # match, echo takes SIGPIPE, and under `pipefail` the pipeline
+            # returns 141, so the `elif` goes FALSE and the lane printed
+            # "Nuclei scan clean" on a critical finding. It needs a payload
+            # larger than the pipe buffer with the match inside it — measured
+            # at 300KB with the match first: rc=141, and with the match last:
+            # rc=0. A scanner's output is routinely that large, and the bigger
+            # the finding list the likelier the miss.
             if [[ ${nuclei_rc} -ne 0 ]]; then
                 fail "deploy: Nuclei did not run (exit ${nuclei_rc}) — this is NOT a clean scan"
                 FAILED+=(deploy-security)
-            elif echo "${nuclei_out}" | grep -qiE "\[critical\]|\[high\]"; then
+            elif grep -qiE "\[critical\]|\[high\]" <<< "${nuclei_out}"; then
                 fail "deploy: Nuclei found high/critical vulnerabilities"
                 FAILED+=(deploy-security)
             else
@@ -371,10 +381,10 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                 # died on `ModuleNotFoundError: No module named 'ratelimit'` the
                 # lane reported "jwt_tool clean" — a green tick for a scan that
                 # never happened. Prove it ran before believing what it found.
-                if [[ ${jwt_rc} -ne 0 ]] || echo "${jwt_out}" | grep -q "Traceback (most recent call last)"; then
+                if [[ ${jwt_rc} -ne 0 ]] || grep -q "Traceback (most recent call last)" <<< "${jwt_out}"; then
                     fail "deploy: jwt_tool did not run (exit ${jwt_rc}) — this is NOT a clean scan"
                     FAILED+=(deploy-security)
-                elif echo "${jwt_out}" | grep -qi "EXPLOIT"; then
+                elif grep -qi "EXPLOIT" <<< "${jwt_out}"; then
                     fail "deploy: jwt_tool found exploitable vulnerability"
                     FAILED+=(deploy-security)
                 else

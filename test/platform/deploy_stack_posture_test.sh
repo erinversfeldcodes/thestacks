@@ -166,7 +166,7 @@ if [[ -z "$DERIVED" ]]; then
 else
     ORPHANED=""
     for flag in "${POSTURE_FLAGS[@]}"; do
-        printf '%s\n' "$DERIVED" | grep -qxF "$flag" || ORPHANED="${ORPHANED}${flag} "
+        grep -qxF "$flag" <<< "$DERIVED" || ORPHANED="${ORPHANED}${flag} "
     done
     if [[ -n "$ORPHANED" ]]; then
         _record_fail "these roster entries name flags deploy-stack.sh no longer assigns a literal on either branch, so the roster claims coverage it does not have: ${ORPHANED}— remove them, or restore the assignment they describe"
@@ -188,7 +188,7 @@ else
     for flag in "${POSTURE_FLAGS[@]}"; do
         for mode in production preview; do
             if [[ "$mode" == production ]]; then TXT="$PROD_TXT"; else TXT="$PREVIEW_TXT"; fi
-            if printf '%s' "$TXT" | grep -qE "^[[:space:]]*${flag}="; then
+            if grep -qE "^[[:space:]]*${flag}=" <<< "$TXT"; then
                 _record_pass "$flag is pinned on the $mode branch"
             else
                 _record_fail "$flag is not pinned on the $mode branch, so its value there is whatever the ambient shell happens to hold. The staging line's \${VAR:+...} expansion omits an unset variable entirely: fly is told nothing and the app keeps whatever was last staged, making the flag a function of deploy history rather than of this script"
