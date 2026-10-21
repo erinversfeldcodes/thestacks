@@ -299,8 +299,27 @@ asker from op.scope_user() instead.")
 # INPUT parameter unnamed? Measured 0 on the real corpus, and 1 against a
 # planted `op.f(uuid)` with a positional parameter while correctly ignoring a
 # planted well-named `RETURNS TABLE` definer.
+#
+# ⛔ SECOND CORRECTION, and the first one still had two holes. Positional
+# slicing (`proargnames[1:pronargs]`) assumes input names come first, and
+# `proargnames` actually follows `proallargtypes` — so an `OUT` or `INOUT`
+# parameter BEFORE an input mis-aligns the slice. Measured against a planted
+# `op.f(a uuid, OUT b integer, uuid)`: `proargnames={a,b,""}`,
+# `proargmodes={i,o,i}`, `pronargs=2`, slice `{a,b}` — both non-empty, so the
+# positional form PASSES while the third (input) argument is unnamed.
+#
+# ⚠️ Also measured: an unnamed slot among named ones is stored as the EMPTY
+# STRING, not NULL — `information_schema._pg_expandarray` has
+# `proargnames={"",x,n}` with `pronargs=1`, a live example of a signature that
+# counts fine and is unnamed where it matters.
+#
+# So inputs are selected BY MODE rather than by position, and tested for
+# emptiness rather than counted. `array_fill` is reached only when
+# `proargmodes IS NULL`, which is exactly the case where names and types have
+# equal length, so the zip is safe. `pronargs > 0` is load-bearing: it keeps
+# `platform_row_counts` (0 inputs, 3 TABLE column names) out.
 ASSERTIONS+=("definer_with_unnamed_parameters
-SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND p.pronargs > 0 AND (p.proargnames IS NULL OR (SELECT count(*) FROM unnest(p.proargnames[1:p.pronargs]) AS nm WHERE nm IS NULL OR nm = '') > 0)
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND p.pronargs > 0 AND (p.proargnames IS NULL OR EXISTS (SELECT 1 FROM unnest(p.proargnames, coalesce(p.proargmodes, array_fill('i'::\"char\", ARRAY[cardinality(p.proargnames)]))) AS a(nm, md) WHERE a.md IN ('i','b','v') AND coalesce(a.nm,'') = ''))
 0
 A SECURITY DEFINER function in op has INPUT parameters that are not all named.
 The assertion that a definer may not take a list of users as its subject is keyed
@@ -327,9 +346,15 @@ The connecting role is NOT an inheriting member of rls_reader. The SECURITY
 DEFINER functions are owned by rls_reader, so on a stack whose owner holds
 BYPASSRLS they would still appear to work — through the exemption rather than
 through the grant. This asserts the grant itself, from pg_auth_members, which
-no role attribute can mask. Expect this to be RED on any local database, where
-the membership has never existed and every definer-related pass is therefore
-uninformative.")
+no role attribute can mask.
+
+The membership is established by the migration that creates the definers
+(20261020160000), which grants rls_reader to the migrating role so it can hand
+ownership over. So this is GREEN wherever that migration has run and red where
+it has not — which makes it a check on the migration having completed, not only
+on the deployed grant. An earlier version of this text claimed it would be red
+on any local database; that was measured before the migration had been applied
+locally and was wrong.")
 
 # EXECUTE is an ACL fact and BYPASSRLS confers no function privileges, so this
 # is an honest test even on the bypassing owner — measured: all seven definers
