@@ -103,8 +103,34 @@ plant() {
 
 # A one-file corpus: swap the discovery for the planted file only.
 run_gate_over_plant() {
-    sed "s|git ls-files '\*\.sh'|printf '%s\\\\n' .sigpipe-probe/planted.sh|; s|^FLOOR=30|FLOOR=1|" \
+    # ⛔ The WHOLE discovery line is replaced, not just the first `git ls-files`.
+    # The gate now reads tracked ∪ untracked, and this copy of it is itself an
+    # untracked `.sh` carrying every banned pattern as data — so a substitution
+    # that neutralised only the first call left the copy discovering ITSELF and
+    # four "does NOT flag" cases failed against a site in the wrong file. The
+    # harness has to isolate the corpus completely or it is testing itself.
+    sed -e "s|^done < <({ git ls-files.*$|done < <(printf '%s\\\\n' .sigpipe-probe/planted.sh)|" \
+        -e "s|^FLOOR=30|FLOOR=1|" \
         "$GATE" > "$PLANT_DIR/gate.sh"
+
+    # Anti-vacuity on the substitution itself: if the discovery line is ever
+    # reworded, the sed silently stops matching and every case below runs
+    # against the real corpus — which is green, so the refusal cases would fail
+    # confusingly and the allow cases would pass for no reason.
+    #
+    # ⚠️ COMMENTS STRIPPED. The first version of this check grepped the whole
+    # file, and the gate's own comment explains why `git ls-files` alone is
+    # insufficient — so the check reported a harness failure on every case while
+    # the substitution was working correctly. That is the third time in this
+    # session that an absence check has read prose as code, and the second time
+    # in a check written to prevent exactly that.
+    if sed 's/#.*//' "$PLANT_DIR/gate.sh" | grep -q "git ls-files"; then
+        _record_fail "the harness could not isolate the corpus — a 'git ls-files' call survived the substitution, so these cases are not testing the planted file"
+        PLANT_OUT="harness failure"
+        PLANT_RC=0
+        return 0
+    fi
+
     PLANT_OUT="$(bash "$PLANT_DIR/gate.sh" 2>&1)"
     PLANT_RC=$?
     return 0
@@ -139,6 +165,89 @@ if [[ $PLANT_RC -ne 0 ]]; then
     _record_pass "refused a pipe into head whose status is read"
 else
     _record_fail "ACCEPTED a pipe into head: ${PLANT_OUT}"
+fi
+
+test_case "it_refuses_a_bare_pipeline_under_set_e" \
+    "the shell consumes a bare pipeline's status with NO syntax at all"
+# ⛔ The P1 the first version of this gate had. It asked "is the status read?"
+# and answered from syntax — `if`/`elif`/`while`/`&&`/`||` — which exempted
+# every bare pipeline in every `set -e` script, roughly 70 files, including the
+# exact shape of a diagnostic this session had just fixed by hand.
+#
+# MEASURED with a producer guaranteed to be killed (`yes | head -1`): a bare
+# pipeline under `set -euo pipefail` returns 141 and the script DIES.
+plant 'cat /etc/hosts | head -1 >/dev/null
+echo after'
+sed -i.bak 's/^set -uo pipefail$/set -euo pipefail/' "$PLANT_DIR/planted.sh"
+rm -f "$PLANT_DIR/planted.sh.bak"
+run_gate_over_plant
+if [[ $PLANT_RC -ne 0 ]] && grep -q "bare pipeline" <<< "$PLANT_OUT"; then
+    _record_pass "refused, and the message names the bare-pipeline reason"
+else
+    _record_fail "a bare pipeline under set -e was ACCEPTED — the predicate is still syntax-only: ${PLANT_OUT}"
+fi
+
+test_case "it_refuses_an_assignment_from_a_piped_substitution_under_set_e" \
+    "under set -e the assignment takes the pipeline's status"
+# MEASURED: `X="$(yes | head -1)"` under `set -euo pipefail` returns 141 and the
+# script dies — unlike the same pipeline in ARGUMENT position, which yields 0.
+plant 'X="$(cat /etc/hosts | head -1)"
+echo "$X"'
+sed -i.bak 's/^set -uo pipefail$/set -euo pipefail/' "$PLANT_DIR/planted.sh"
+rm -f "$PLANT_DIR/planted.sh.bak"
+run_gate_over_plant
+if [[ $PLANT_RC -ne 0 ]] && grep -q "assignment" <<< "$PLANT_OUT"; then
+    _record_pass "refused, and the message distinguishes assignment from argument position"
+else
+    _record_fail "an assignment from a piped \$() under set -e was ACCEPTED: ${PLANT_OUT}"
+fi
+
+test_case "it_does_NOT_flag_argument_position_under_set_e" \
+    "the outer command's status wins there — measured, not assumed"
+# ⚠️ The anti-over-reach half of the same measurement, and the reason four
+# `setup.sh` sites and one `probe-production.sh` site are correctly left alone.
+# `echo "$(yes | head -1)"` under `set -euo pipefail` yields **0**: the
+# substitution's failure does not become the command's. Flagging these would
+# have meant five edits with no defect behind them.
+plant 'echo "version $(cat /etc/hosts | head -1)" >/dev/null
+echo after'
+sed -i.bak 's/^set -uo pipefail$/set -euo pipefail/' "$PLANT_DIR/planted.sh"
+rm -f "$PLANT_DIR/planted.sh.bak"
+run_gate_over_plant
+if [[ $PLANT_RC -eq 0 ]]; then
+    _record_pass "a piped substitution in argument position is correctly allowed"
+else
+    _record_fail "flagged argument position, where the status is provably discarded: ${PLANT_OUT}"
+fi
+
+test_case "it_does_NOT_flag_an_unread_status_without_set_e" \
+    "no -e and no syntactic read means the 141 goes nowhere"
+# ⚠️ The branch whose absence made the first rewrite report 36 sites instead of
+# 4. `BASH_ID="$(bash --version | head -1)"` in a `set -uo pipefail` script
+# takes the stdout it wants and nothing ever looks at the status.
+plant 'X="$(cat /etc/hosts | head -1)"
+echo "$X"'
+run_gate_over_plant
+if [[ $PLANT_RC -eq 0 ]]; then
+    _record_pass "an unread status in a script without set -e is correctly allowed"
+else
+    _record_fail "flagged a discarded status in a non-errexit script: ${PLANT_OUT}"
+fi
+
+test_case "a_pipe_into_grep_q_is_refused_even_when_defused" \
+    "|| true discards the only answer grep -q has"
+# ⛔ The asymmetry that makes the consumer split the right decomposition. For an
+# OUTPUT consumer, `|| true` is a legitimate fix: `head` already printed the
+# right bytes and only the status was poisoned. For `grep -q` there is nothing
+# else — the answer travels in the status and nowhere else, so discarding it
+# does not rescue the site, it destroys the signal.
+plant 'cat /etc/hosts | grep -q localhost || true
+echo after'
+run_gate_over_plant
+if [[ $PLANT_RC -ne 0 ]] && grep -q "only its exit status" <<< "$PLANT_OUT"; then
+    _record_pass "refused despite || true, and the message says why"
+else
+    _record_fail "|| true was accepted as a fix for a status-only consumer: ${PLANT_OUT}"
 fi
 
 test_case "it_does_NOT_flag_a_status_that_is_discarded" \

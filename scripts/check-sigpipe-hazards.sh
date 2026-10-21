@@ -41,15 +41,61 @@ cd "$REPO_ROOT" || exit 1
 # hazards in the first run of this gate, and a gate with false positives gets
 # an exemption list bolted on — which is how the predecessor to this family of
 # checks ended up with eight free-text reasons, seven of them untrue.
-CONSUMER='[^|]\| *(grep [^|]*-[a-zA-Z]*q|grep [^|]*-m *[0-9]|head( |$)|sed -n [^|]*q|awk [^|]*exit)'
+# ⛔ SPLIT BY WHAT THE CONSUMER DOES WITH THE ANSWER, not by surrounding syntax.
+# The first version of this gate asked "is the status read?" and answered it
+# from syntax alone (`if`/`elif`/`while`/`&&`/`||`), which exempted every BARE
+# pipeline — and under `set -e` the shell consumes a bare pipeline's status with
+# no syntax at all. That hid real hazards in ~70 scripts.
+#
+# STATUS-ONLY consumer: the answer travels in the exit status and NOWHERE else.
+# 141 is indistinguishable from "no match", so there is no safe way to pipe into
+# it — not even `|| true`, which discards the only output it has.
+CONSUMER_STATUS_ONLY='[^|]\| *grep [^|]*-[a-zA-Z]*q'
 
-# A site only misbehaves if the pipeline's STATUS is consumed as a decision.
-# `X="$(cmd | head -1)"` uses stdout and discards the status, so it is correct
-# (under `set -e` it aborts loudly, which is a different and visible problem).
-STATUS_IS_READ='^[[:space:]]*(if|elif|while|!)[[:space:]]|^[[:space:]]*(\|\||&&)|(\|\||&&)[[:space:]]*$'
+# OUTPUT consumer: the answer is on stdout and is CORRECT even when the producer
+# is killed — `head -5` still printed its five lines. Only the status is
+# poisoned, so these are hazards exactly when the status is consumed.
+CONSUMER_OUTPUT='[^|]\| *(grep [^|]*-m *[0-9]|head( |$)|sed -n [^|]*q|awk [^|]*exit)'
+
+# ⛔ MEASURED, because the rule is not guessable. Under `set -euo pipefail`, with
+# a producer guaranteed to take SIGPIPE (`yes | head -1`):
+#
+#     bare pipeline            -> rc=141, script DIES
+#     X="$(cmd | head -1)"     -> rc=141, script DIES   (assignment)
+#     echo "$(cmd | head -1)"  -> rc=0,   survives      (argument: outer wins)
+#     if cmd | head -1; then   -> rc=0,   survives, but `if` READS the status
+#     cmd | head -1 || true    -> rc=0,   survives, status discarded
+#
+# So the status is consumed by: a bare pipeline, an assignment from one, or a
+# syntactic read. It is NOT consumed by a pipeline in argument position, which
+# is why `success "$(brew --version | head -1)"` is correctly left alone.
+STATUS_READ_SYNTACTICALLY='^[[:space:]]*(if|elif|while|until|!)[[:space:]]|^[[:space:]]*(\|\||&&)|(\|\||&&)[[:space:]]*$'
+STATUS_DISCARDED='\|\|[[:space:]]*(true|echo|:|\{)'
+# An assignment whose entire right-hand side is the command substitution.
+ASSIGNED_FROM='^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*="?\$\('
+# A pipeline inside $( ) that is embedded in a larger word — argument position.
+IN_ARGUMENT='[^=[:space:]]"?\$\(|"[^"]*\$\('
+
+# ⚠️ Files whose JOB is to contain the banned form as DATA, with the reason
+# stated. This is the exemption list the reviewer asked for, and it is kept to
+# whole files rather than line numbers deliberately: line numbers rot on the
+# next edit, and a rotted exemption silently covers something else. Every entry
+# here is a file that tests this pattern and must therefore spell it.
+is_fixture_file() {
+    case "$1" in
+        # Defines the patterns above; the GUIDE text names the banned form.
+        scripts/check-sigpipe-hazards.sh) return 0 ;;
+        # Plants the banned form to prove this gate refuses it.
+        test/platform/sigpipe_hazard_gate_test.sh) return 0 ;;
+        # Carries five spellings of it as anti-vacuity data for its own pattern.
+        test/platform/rls_scope_gate_test.sh) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 FOUND=0
 SCANNED=0
+EXEMPTED=0
 REPORT=""
 
 while IFS= read -r file; do
@@ -57,18 +103,57 @@ while IFS= read -r file; do
     grep -qE '^[[:space:]]*set .*pipefail' "$file" || continue
     SCANNED=$((SCANNED + 1))
 
+    if is_fixture_file "$file"; then
+        EXEMPTED=$((EXEMPTED + 1))
+        continue
+    fi
+
+    # ⛔ `set -e` is what makes a bare pipeline's status load-bearing, so the
+    # predicate below branches on it. Without `-e` an unread status is genuinely
+    # discarded: `BASH_ID="$(bash --version | head -1)"` in a `set -uo pipefail`
+    # script takes the stdout it wants and nothing ever looks at the 141. Not
+    # branching on this was the first rewrite's error — it reported 36 sites, of
+    # which 20 were that shape.
+    errexit=no
+    grep -qE '^[[:space:]]*set -[a-z]*e' "$file" && errexit=yes
+
     # Strip comments before matching: this gate must not read the prose that
     # explains the banned form as an instance of it. Every fix in the tree
     # carries a comment quoting the bad shape, and an absence check that counts
     # those is the "gates read their own comments as configuration" defect.
     while IFS=: read -r lineno text; do
         [ -n "${lineno:-}" ] || continue
-        grep -qE "$STATUS_IS_READ" <<< "$text" || continue
+
+        why=""
+        if grep -qE "$CONSUMER_STATUS_ONLY" <<< "$text"; then
+            # No escape hatch: the status IS the answer.
+            why="pipes into grep -q, whose answer is only its exit status"
+        elif grep -qE "$CONSUMER_OUTPUT" <<< "$text"; then
+            if grep -qE "$STATUS_DISCARDED" <<< "$text"; then
+                why=""
+            elif grep -qE "$STATUS_READ_SYNTACTICALLY" <<< "$text"; then
+                # A syntactic read is a hazard with or without `set -e`.
+                why="status read by if/while/&&/||"
+            elif [ "$errexit" = no ]; then
+                # No `-e`, and nothing reads it: the 141 goes nowhere and the
+                # stdout this site wanted is correct.
+                why=""
+            elif grep -qE "$ASSIGNED_FROM" <<< "$text"; then
+                why="assignment from \$( ) under set -e — the pipeline's status becomes the script's"
+            elif grep -qE "$IN_ARGUMENT" <<< "$text"; then
+                # Argument position: the outer command's status wins. Measured.
+                why=""
+            else
+                why="bare pipeline under set -e — its status is taken with no syntax at all"
+            fi
+        fi
+
+        [ -n "$why" ] || continue
         FOUND=$((FOUND + 1))
-        REPORT="${REPORT}  ${file}:${lineno}
+        REPORT="${REPORT}  ${file}:${lineno}  (${why})
     ${text}
 "
-    done < <(sed 's/#.*//' "$file" | grep -nE "$CONSUMER" || true)
+    done < <(sed 's/#.*//' "$file" | grep -nE "$CONSUMER_STATUS_ONLY|$CONSUMER_OUTPUT" || true)
     # ⛔ Tracked AND untracked-but-not-ignored, deduplicated. `git ls-files`
     # alone cannot see a new script, which is not hypothetical: this gate was
     # invisible to ITSELF until it was committed, and the run that first
@@ -142,4 +227,4 @@ GUIDE
     exit 1
 fi
 
-echo "OK: ${SCANNED} pipefail-bearing script(s), no pipeline into an early-exiting consumer whose status is read."
+echo "OK: ${SCANNED} pipefail-bearing script(s) (${EXEMPTED} fixture file(s) exempt by name), no pipeline into an early-exiting consumer whose status is consumed."

@@ -25,8 +25,14 @@ added_lines() {
 }
 
 has_evidence() {
+  # ⛔ A here-string, not a pipe. This function's whole answer is `grep -q`'s
+  # exit status, and under `pipefail` a pipe into it can return 141 instead —
+  # grep exits on its first match, printf takes SIGPIPE, and the pipeline's
+  # status becomes the signal. 141 is not 0, so a line that DOES carry evidence
+  # would be reported as carrying none: the hook would reject a correctly
+  # evidenced DoD box. There is no safe pipe into a status-only consumer.
   # shellcheck disable=SC2016  # regex is literal by design — no shell expansion wanted
-  printf '%s' "$1" | grep -qE '`[^`]+`|_test\.(exs|ex)|\.spec\.ts|[0-9]{4}-[0-9]{2}-[0-9]{2}|#[0-9]+|[0-9]+ (tests?|passed|panels?|series|failures?|families|checks?)|evidence:|proven:'
+  grep -qE '`[^`]+`|_test\.(exs|ex)|\.spec\.ts|[0-9]{4}-[0-9]{2}-[0-9]{2}|#[0-9]+|[0-9]+ (tests?|passed|panels?|series|failures?|families|checks?)|evidence:|proven:' <<< "$1"
 }
 
 issue_file_exists() {
