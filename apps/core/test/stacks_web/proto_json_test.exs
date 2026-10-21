@@ -503,8 +503,39 @@ defmodule StacksWeb.ProtoJSONTest do
                personal_rating: 4,
                notes: placement.notes,
                visibility: "owner",
-               bookshelf_visibility: "owner"
+               bookshelf_visibility: "owner",
+               reading_status: placement.reading_status,
+               current_page: placement.current_page
              }
+    end
+
+    test "⛔ carries the reading progress the book-detail card is built from" do
+      # ⛔ Asserted on its own rather than only as part of the shape above,
+      # because the absence of these two keys was not a cosmetic omission: the
+      # progress card is built from this payload, so it rendered "To Read" for a
+      # reader partway through a book, and saving the card wrote `to_read` back
+      # over the real status. The row was loaded and serialised all along — the
+      # response shape dropped it.
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          reading_status: "reading",
+          current_page: 150
+        )
+        |> Core.Repo.preload(:bookshelf)
+
+      result = ProtoJSON.book_placement(placement)
+
+      assert result.reading_status == "reading",
+             "the payload must carry the real reading status, not let the client default it"
+
+      assert result.current_page == 150,
+             "the payload must carry how far through the book the reader is"
     end
 
     test "emits placement visibility and parent bookshelf visibility independently" do

@@ -304,8 +304,15 @@ defmodule StacksWeb.ProtoJSON do
   def book_placement(placement) do
     bookshelf = loaded_bookshelf(placement.bookshelf)
 
+    # ⚠️ `reading_status` and `current_page` are in this list because leaving
+    # them out LOST DATA rather than merely omitting it. `Gen.placement/1`
+    # already emits both — the row is loaded in full — so this `Map.take` was
+    # the only thing dropping them. The book-detail progress card is built from
+    # this payload, so without them it showed "To Read" for a book the reader
+    # was partway through, and saving that card wrote `to_read` back over the
+    # real status.
     Gen.placement(placement)
-    |> Map.take([:id, :book_id, :personal_rating, :notes])
+    |> Map.take([:id, :book_id, :personal_rating, :notes, :reading_status, :current_page])
     |> Map.merge(%{
       bookshelf_name: bookshelf && bookshelf.name,
       formats: placement.formats || [],

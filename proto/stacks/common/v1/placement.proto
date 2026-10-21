@@ -139,6 +139,56 @@ message BookPlacement {
   // greying (mirrors the server validate_visibility_ceiling/3 422). Denormalised
   // onto the placement payload from op.bookshelves.visibility.
   string bookshelf_visibility = 8 [json_name = "bookshelf_visibility"];
+
+  // Where the reader is in this book: "to_read", "reading", "completed" or
+  // "abandoned". See ReadingStatus below for the closed set.
+  //
+  // ⛔ Added because its ABSENCE lost data. The book-detail progress card is
+  // built from this message, so without the field the client could only show
+  // "To Read" for a book the reader was 150 pages into — and saving that card
+  // wrote "to_read" back over the real status. The server was already loading
+  // and serialising the value; this message dropped it, and the client then
+  // defaulted it.
+  optional string reading_status = 9 [json_name = "reading_status"];
+
+  // How far through the book the reader is, in pages.
+  //
+  // ⛔ `optional` is load-bearing here and is not stylistic. A proto3 scalar has
+  // no field presence, so an absent current_page would arrive as 0 — which is
+  // indistinguishable from a reader who really is on page 0, and would show a
+  // confident "page 0 of N" for every book whose progress the server did not
+  // send. Presence makes "the server did not say" expressible, which is the
+  // same correction this contract made for a publication date that could not
+  // distinguish absent from empty.
+  optional int32 current_page = 10 [json_name = "current_page"];
+}
+
+// ReadingStatus documents the closed set `reading_status` carries on the wire.
+//
+// ⚠️ Declared as an enum but NOT used as the field's type, which is the pattern
+// this contract already applies to listing condition, pricing mode and status:
+// the controller serialises Ecto atoms as plain strings, so the field stays a
+// string and the enum exists to give Elm and Python a closed set to validate
+// against instead of a comment. Declaring nothing is the outlier — two test
+// fixtures carried reading-status and visibility values the server cannot emit,
+// and nothing caught them.
+enum ReadingStatus {
+  // Not stated. On the wire this is an absent `reading_status` rather than a
+  // value the server sends.
+  READING_STATUS_UNSPECIFIED = 0;
+
+  // Shelved but not started. Wire value "to_read".
+  READING_STATUS_TO_READ = 1;
+
+  // In progress; `current_page` is meaningful. Wire value "reading".
+  READING_STATUS_READING = 2;
+
+  // Finished. Wire value "completed" — ⚠️ NOT "finished", which is the
+  // spelling two test fixtures invented and which the server cannot emit.
+  READING_STATUS_COMPLETED = 3;
+
+  // Given up on. Wire value "abandoned".
+  READING_STATUS_ABANDONED = 4;
 }
 
 // Shelf represents a physical horizontal shelf within a bookshelf.

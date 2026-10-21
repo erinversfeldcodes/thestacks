@@ -1250,6 +1250,14 @@ responseSuite =
                                 , notes = "Great"
                                 , visibility = "platform"
                                 , bookshelfVisibility = "platform"
+
+                                -- Both absent from the fixture payload below,
+                                -- so both decode to Nothing. That is the
+                                -- distinction the `optional` fields buy: a
+                                -- server that did not send a reading status is
+                                -- not a reader who has not started the book.
+                                , readingStatus = Nothing
+                                , currentPage = Nothing
                                 }
                         , myWriting =
                             [ { id = "w-1"

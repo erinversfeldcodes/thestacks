@@ -328,8 +328,19 @@ fromProtoBookPlacement bp =
     , personalRating = zeroToNothing bp.personalRating
     , notes = emptyToNothing bp.notes
     , bookshelfName = emptyToNothing bp.bookshelfName
-    , readingStatus = Nothing
-    , currentPage = Nothing
+
+    -- ⚠️ Both come straight through as Maybe rather than being defaulted, and
+    -- that is the whole point: the contract declares them `optional`, so
+    -- "the server did not say" is distinguishable from "to_read" and from
+    -- "page 0". Nulling them here is what made the progress card read
+    -- "To Read" for a book the reader was partway through — and Save then
+    -- wrote that back over the real status.
+    --
+    -- `parseReadingStatus` is applied rather than the string being trusted, so
+    -- a value the server cannot emit becomes Nothing instead of a silently
+    -- wrong badge.
+    , readingStatus = Maybe.andThen parseReadingStatus bp.readingStatus
+    , currentPage = bp.currentPage
     , startedAt = Nothing
     , finishedAt = Nothing
     , visibility = Nothing
