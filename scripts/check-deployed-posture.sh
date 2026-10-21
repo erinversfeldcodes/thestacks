@@ -196,16 +196,55 @@ if [[ "${#ASSERTIONS[@]}" -ne "$EXPECTED_ASSERTIONS" ]]; then
     exit 1
 fi
 
+# ⛔ THE CONNECTION STRING NEVER REACHES psql's ARGV, AND psql's STDERR NEVER
+# REACHES THIS LOG.
+#
+# Both halves were wrong here, and together they are this project's one recorded
+# credential-disclosure incident reproduced exactly: `psql "$URL" … 2>&1`
+# captured, and the capture printed on the failure path. psql quotes the whole
+# connection string — password included — into its own error text, so redacting
+# the command you compose does not redact what the tool prints back. The
+# `::add-mask::` in the calling workflow matches exact strings only and would
+# not have covered a reformatted fragment.
+#
+# So: the password is passed through PGPASSWORD, the rest through keyword
+# parameters, stderr is DISCARDED rather than captured, and a failure is
+# CLASSIFIED from the exit code instead of quoted.
+parse_conn() {
+    POSTURE_PGPASSWORD="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
+    POSTURE_PGUSER="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://([^:/@]+).*#\1#p')"
+    POSTURE_PGHOST="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^@]+@([^:/?]+).*#\1#p')"
+    POSTURE_PGPORT="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^@]+@[^:/?]+:([0-9]+).*#\1#p')"
+    POSTURE_PGDATABASE="$(printf '%s' "$POSTURE_DATABASE_URL" | sed -nE 's#^[a-z+]+://[^@]+@[^/]+/([^?]+).*#\1#p')"
+    : "${POSTURE_PGPORT:=5432}"
+
+    # ⚠️ A refusal, not a pass. If the url did not parse, nothing below can be
+    # measured and saying so is the only honest outcome. Reports WHICH field is
+    # missing and never the url.
+    local missing=""
+    [[ -z "$POSTURE_PGUSER" ]] && missing="${missing} user"
+    [[ -z "$POSTURE_PGHOST" ]] && missing="${missing} host"
+    [[ -z "$POSTURE_PGDATABASE" ]] && missing="${missing} database"
+    if [[ -n "$missing" ]]; then
+        echo "FAIL deployed-posture: POSTURE_DATABASE_URL is missing:${missing}." >&2
+        echo "       Nothing was measured. This is a refusal, not a pass." >&2
+        exit 1
+    fi
+}
+parse_conn
+
 scalar() {
-    psql "$POSTURE_DATABASE_URL" -tA -c "$1" 2>&1
+    PGPASSWORD="$POSTURE_PGPASSWORD" psql \
+        "host=$POSTURE_PGHOST port=$POSTURE_PGPORT user=$POSTURE_PGUSER dbname=$POSTURE_PGDATABASE sslmode=prefer" \
+        -tA -c "$1" 2>/dev/null
 }
 
 # A connectivity probe before the assertions, so "cannot connect" is reported as
-# itself rather than as four mysterious failures.
-probe="$(scalar 'SELECT 1')"
-if [[ "$probe" != "1" ]]; then
-    echo "FAIL deployed-posture: cannot query the database." >&2
-    echo "       ${probe}" >&2
+# itself rather than as several mysterious failures.
+if ! probe="$(scalar 'SELECT 1')" || [[ "$probe" != "1" ]]; then
+    echo "FAIL deployed-posture: cannot query the database as ${POSTURE_PGUSER}@${POSTURE_PGHOST}." >&2
+    echo "       psql's own output is deliberately discarded — it quotes the connection" >&2
+    echo "       string, password included, and this runs in a CI log." >&2
     echo "       Nothing was measured. This is a refusal, not a pass." >&2
     exit 1
 fi
@@ -223,7 +262,16 @@ for entry in "${ASSERTIONS[@]}"; do
 
     if ! [[ "$value" =~ ^[0-9]+$ ]]; then
         echo "FAIL ${name}: the assertion did not return a number." >&2
-        echo "     ${value}" >&2
+        # ⚠️ Classified, not quoted. `scalar` discards psql's stderr because it
+        # echoes the connection string, so there is nothing safe to print here —
+        # an empty value means the query errored and the reason is in psql's
+        # discarded output by design. Re-run the SQL by hand to see it.
+        if [[ -z "$value" ]]; then
+            echo "     The query returned nothing, which means it errored." >&2
+            echo "     Its text: ${sql}" >&2
+        else
+            echo "     It returned a non-numeric value of ${#value} character(s)." >&2
+        fi
         echo "     Treated as a failure: an assertion that cannot run has not passed." >&2
         FAILURES=$((FAILURES + 1))
         continue

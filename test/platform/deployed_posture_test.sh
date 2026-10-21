@@ -153,6 +153,38 @@ test_case "a_connection_failure_is_reported_as_itself" \
     "not as four mysterious assertion failures"
 assert_contains "$GATE_SRC" "cannot query the database" "there is a connectivity probe first"
 
+test_case "the_connection_string_never_reaches_the_log" \
+    "psql quotes the url it was given, password included"
+#
+# ⛔ The recorded incident, pinned. When `POSTURE_DATABASE_URL` does not parse
+# as a connection URI, psql treats the ENTIRE STRING as a database name and
+# echoes it back in `database "…" does not exist` — so a gate that captured
+# psql's stderr and printed it published the password. Measured against the
+# previous version of this script: one occurrence in the log. A truncated or
+# mis-set secret is enough to reach it.
+#
+# ⚠️ The throwaway value below is not a credential and never was. Never put a
+# real one in a test.
+THROWAWAY_PW="NOTAREALPASSWORD-platform-test"
+for shape in \
+    "notascheme://someuser:${THROWAWAY_PW}@db.example.invalid/stacks" \
+    "postgresql://someuser:${THROWAWAY_PW}@db.example.invalid:5432/stacks"; do
+    out="$(POSTURE_DATABASE_URL="$shape" bash "$GATE" 2>&1 || true)"
+
+    if printf '%s' "$out" | grep -q "$THROWAWAY_PW"; then
+        _record_fail "the password reached the log for a url of this shape: ${shape%%:*}://…"
+    else
+        _record_pass "no password in the output for a ${shape%%:*}:// url"
+    fi
+done
+assert_contains "$(cat "$GATE")" 'PGPASSWORD=' \
+    "the password is passed out of band, not on psql's argv"
+if grep -qE 'psql "\$POSTURE_DATABASE_URL"' "$GATE"; then
+    _record_fail "the raw url is still being handed to psql as a single argument"
+else
+    _record_pass "the url is decomposed into keyword parameters instead"
+fi
+
 test_case "every_hand_found_breach_is_covered" \
     "the sweeps that found them by hand are now a roster"
 #
