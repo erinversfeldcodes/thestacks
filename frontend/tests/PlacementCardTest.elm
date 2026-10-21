@@ -110,6 +110,35 @@ suite =
                                 (Html.Attributes.attribute "data-testid" "save-progress-btn")
                             ]
                         |> Query.has [ Selector.disabled False ]
+            , test "⛔ a status string this build cannot parse leaves Save DISABLED" <|
+                -- ⛔ The original defect's last door. `StatusChanged` used to go
+                -- through a total `String -> ReadingStatus` ending in
+                -- `_ -> ToRead`, so ANY unrecognised value — the placeholder
+                -- option's empty string, or a fifth status a newer server sends
+                -- during a deploy-skew window — became `Just ToRead`. That
+                -- re-enables Save and writes `to_read` over whatever the server
+                -- held, which is exactly the write this whole change removes.
+                --
+                -- ⚠️ What stood in the way was `disabled` on the placeholder
+                -- `<option>`, i.e. the browser honouring an attribute, which is
+                -- a thin thing to hang a destructive write on. `draftStatus` is
+                -- now `parseReadingStatus s`, so an unrecognised value stays
+                -- `Nothing` and the guard holds on its own.
+                \_ ->
+                    noStatusModel
+                        |> Card.update Card.BadgeClicked
+                        |> Tuple.first
+                        |> Card.update (Card.StatusChanged "")
+                        |> Tuple.first
+                        |> Card.update (Card.StatusChanged "serialised_by_a_newer_server")
+                        |> Tuple.first
+                        |> Card.view
+                        |> Query.fromHtml
+                        |> Query.find
+                            [ Selector.attribute
+                                (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                            ]
+                        |> Query.has [ Selector.disabled True ]
             , test "Reading status badge has class 'placement-card__badge--reading'" <|
                 \_ ->
                     Card.view readingModel

@@ -25,7 +25,7 @@ so the reader can correct the draft, which is preserved.
 import Html exposing (Html, button, div, input, label, option, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
-import Types.Placement exposing (Placement, ReadingStatus(..))
+import Types.Placement exposing (Placement, ReadingStatus(..), parseReadingStatus)
 import Util.TestId exposing (testId)
 
 
@@ -95,7 +95,20 @@ update msg model =
             ( { model | editing = True }, NoOut )
 
         StatusChanged s ->
-            ( { model | draftStatus = Just (readingStatusFromString s) }, NoOut )
+            -- ⛔ `parseReadingStatus` rather than a total String -> ReadingStatus
+            -- function, and the difference is the whole defect once more. The
+            -- previous helper ended in `_ -> ToRead`, so ANY value the select
+            -- could emit that this build does not recognise — the placeholder's
+            -- empty string included — became `Just ToRead`, which re-enables
+            -- Save and writes `to_read` over whatever the server held. That is
+            -- the original defect arriving through a different door.
+            --
+            -- ⚠️ What stood between that and a destructive write was the
+            -- `disabled` attribute on the placeholder `<option>`, which is a
+            -- thin guarantee to hang a write on. Now an unrecognised value
+            -- yields `Nothing`, so `draftStatus` stays empty, Save stays
+            -- disabled, and both host guards still refuse to send.
+            ( { model | draftStatus = parseReadingStatus s }, NoOut )
 
         PageChanged s ->
             ( { model | draftPage = s }, NoOut )
@@ -324,20 +337,13 @@ viewEditForm model =
         ]
 
 
-readingStatusFromString : String -> ReadingStatus
-readingStatusFromString s =
-    case s of
-        "reading" ->
-            Reading
 
-        "completed" ->
-            Completed
-
-        "abandoned" ->
-            Abandoned
-
-        _ ->
-            ToRead
+-- `readingStatusFromString` lived here and is deliberately gone rather than
+-- kept for a future caller: a total `String -> ReadingStatus` cannot represent
+-- "not a status I recognise", so every caller it ever had would have to invent
+-- one. `Types.Placement.parseReadingStatus` returns a `Maybe` and is the single
+-- place this mapping belongs; it also handled "to_read" explicitly, which the
+-- deleted version only got right by falling through to its default.
 
 
 {-| Format an ISO 8601 date string to a human-readable date.
