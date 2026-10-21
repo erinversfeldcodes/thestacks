@@ -141,7 +141,12 @@ BASELINE = {
     "user:age_verification_provider",
     "user:age_verified_at",
     "user:consent_analytics_at",
-    "user:consent_writing_assistant",
+    # `user:consent_writing_assistant` was here and is GONE because the field is
+    # now carried. It was a real data-losing omission, not a deliberate one: the
+    # client already decoded it, and a proto3 bool's implicit presence turned the
+    # absence into a stored `false` — withdrawing a GDPR consent on a save that
+    # raced the settings fetch. The `_at` timestamp below stays omitted, which is
+    # correct: nothing reads it and it is the server's own bookkeeping.
     "user:consent_writing_assistant_at",
     "user:created_at",
     "user:email_confirmed",

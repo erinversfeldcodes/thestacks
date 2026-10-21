@@ -36,7 +36,33 @@ defmodule StacksWeb.ProtoJSON do
                         :website_url,
                         :onboarding_completed,
                         :pending_email,
-                        :pending_email_sent_at
+                        :pending_email_sent_at,
+                        # ⛔ HERE and not in the core list, for exactly the
+                        # reason stated above: `@user_embed_fields` is built
+                        # from the core list, so putting a consent flag there
+                        # would publish it on other people's pages. It is the
+                        # reader's own consent and belongs only in the reader's
+                        # own record. (`consent_analytics` sits in the core list
+                        # and arguably has the same problem — not moved here,
+                        # because changing what an embedded user exposes is a
+                        # separate question from closing this gap.)
+                        #
+                        # ⚠️ Added because its ABSENCE lost data, not for
+                        # completeness. `Api.elm` decodes
+                        # `proto.user.consentWritingAssistant` from this payload
+                        # already, and a proto3 `bool` has IMPLICIT PRESENCE —
+                        # so an omitted field arrived as `false` with nothing to
+                        # distinguish it from a stored `false`. No literal
+                        # default appears in the source, which is why this hid
+                        # where the equivalent reading-status defect did not.
+                        #
+                        # The consequence is a race on a GDPR consent flag:
+                        # `Main.elm` seeds the privacy toggles from this payload
+                        # and the settings fetch (whose decoder REQUIRES the
+                        # field) corrects them only once it resolves, so a save
+                        # inside that window — or after a failed fetch — submits
+                        # `false` and withdraws a consent the reader granted.
+                        :consent_writing_assistant
                       ]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 

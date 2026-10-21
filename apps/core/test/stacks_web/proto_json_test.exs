@@ -628,6 +628,7 @@ defmodule StacksWeb.ProtoJSONTest do
                profile_visibility: "platform",
                age_verified: true,
                consent_analytics: true,
+               consent_writing_assistant: false,
                country_code: "ZA",
                city: "Cape Town",
                website_url: "https://alice.example",
@@ -636,6 +637,56 @@ defmodule StacksWeb.ProtoJSONTest do
                pending_email_sent_at: nil,
                next_onboarding_step: "profile"
              }
+    end
+
+    test "⛔ carries consent_writing_assistant, whose ABSENCE withdrew a consent" do
+      # ⛔ The field was omitted from this payload while the client decoded it
+      # anyway, and a proto3 `bool` has IMPLICIT PRESENCE — so the omission
+      # arrived as `false`, indistinguishable from a stored `false`. There is no
+      # literal default in the source to notice, which is why this hid where the
+      # equivalent reading-status defect did not.
+      #
+      # ⚠️ Not a display bug. `Main.elm` seeds the privacy toggles from THIS
+      # payload and the settings fetch corrects them only once it resolves, so a
+      # save inside that window — or after a failed fetch — submitted `false`
+      # and withdrew a GDPR consent the reader had granted.
+      #
+      # ⛔ Asserted TRUE, not merely present. A presence check passes against the
+      # bug: the key would be there with the wrong value, which is the whole
+      # defect. The granted consent has to survive the round trip.
+      granted = insert(:user, consent_writing_assistant: true)
+
+      assert ProtoJSON.user(granted).consent_writing_assistant == true,
+             "a granted writing-assistant consent did not survive serialisation, so the " <>
+               "privacy toggles will seed from `false` and a save will withdraw it"
+
+      withheld = insert(:user, consent_writing_assistant: false)
+      assert ProtoJSON.user(withheld).consent_writing_assistant == false
+    end
+
+    test "⛔ a user EMBEDDED as a listing's seller does NOT carry the consent flag" do
+      # ⛔ The direction the fix had to avoid, pinned through the only public
+      # path that reaches the embed shape. `@user_embed_fields` is built from
+      # `@user_core_fields`, so adding the consent flag to the core list — the
+      # convenient place, right next to `consent_analytics` — would have
+      # published it on every listing page. It went into `@user_auth_fields`
+      # instead, which is the caller's OWN record.
+      #
+      # ⚠️ This is the assertion that would have caught my first attempt: I did
+      # add it to the core list, and only the comment two lines above it said
+      # why that was wrong. A comment is not a gate.
+      seller = insert(:user, consent_writing_assistant: true)
+      listing = insert(:listing, seller: seller)
+
+      embedded = ProtoJSON.listing(Core.Repo.preload(listing, :seller)).seller
+
+      refute Map.has_key?(embedded, :consent_writing_assistant),
+             "a listing's seller carries their writing-assistant consent, which puts a " <>
+               "consent flag on somebody else's page"
+
+      refute Map.has_key?(embedded, :pending_email),
+             "the embed shape widened — if this fails, something was added to the CORE list " <>
+               "that belongs in the auth list"
     end
 
     test "carries a pending email change but neither of its credentials" do
