@@ -108,6 +108,44 @@ REPO_CALLS='Repo\.(all|one|get|get!|get_by|aggregate|exists\?|insert|insert!|upd
 # modules that used to sit here now scope or call a definer instead; one is
 # unfixed and reports MISSING, which is correct.
 allow_kind() {
+    # ⛔ A TEST SEAM, and it exists because emptying the allowlist left the
+    # verifier below with zero coverage. `verify_kind`, `DIRECT_QUERY_FORMS`
+    # and `DEFINERS` were never executed by any run, and the per-kind
+    # anti-vacuity check compared 0 resolved against 0 declared and passed.
+    #
+    # ⚠️ The guard was written for "the pattern behind a kind stopped
+    # matching". The vacuity arrived instead by **emptying the input**, which
+    # it did not model — so the machinery that will decide the next allowlist
+    # entry, including the three-form query matcher, had no live caller, no
+    # test, and a guard that could not notice.
+    #
+    # ⛔ Re-adding entries to fix that would be wrong: an empty allowlist is
+    # the honest state. The seam lets the suite drive each kind and each query
+    # form against fixtures instead. It is read ONLY from the environment, so
+    # no committed entry can hide in it.
+    # ⚠️ A plain word-split loop, NOT `… | while read`. A while loop at the end
+    # of a pipeline is a subshell in bash 3.2, and this function's output is
+    # consumed by a command substitution — a combination that proved to behave
+    # differently inside a sourced suite than standalone, for reasons not worth
+    # chasing when the pipeline buys nothing.
+    if [[ -n "${RLS_SCOPE_TEST_ALLOWLIST:-}" ]]; then
+        local entry path kind
+        local saved_ifs="$IFS"
+        IFS=','
+        for entry in $RLS_SCOPE_TEST_ALLOWLIST; do
+            path="${entry%%=*}"
+            kind="${entry#*=}"
+            if [[ "$path" == "$1" ]]; then
+                IFS="$saved_ifs"
+                printf '%s' "$kind"
+                return
+            fi
+        done
+        IFS="$saved_ifs"
+        printf '%s' ""
+        return
+    fi
+
     case "$1" in
         *) echo "" ;;
     esac
@@ -133,14 +171,14 @@ verify_kind() {
 
     case "$kind" in
         no-queries)
-            if printf '%s' "$code" | grep -qE "$REPO_CALLS"; then
+            if grep -qE "$REPO_CALLS" <<<"$code"; then
                 echo "claims no-queries but makes a Repo call"
             fi
             ;;
         definer)
-            if ! printf '%s' "$code" | grep -qE "$DEFINERS"; then
+            if ! grep -qE "$DEFINERS" <<<"$code"; then
                 echo "claims definer but calls no op.* definer function"
-            elif printf '%s' "$code" | grep -qE "$DIRECT_QUERY_FORMS"; then
+            elif grep -qE "$DIRECT_QUERY_FORMS" <<<"$code"; then
                 echo "claims definer but also queries a secured schema directly"
             fi
             ;;
@@ -148,7 +186,7 @@ verify_kind() {
             local policy="${kind#policy:}"
             if ! grep -rqE "CREATE POLICY[[:space:]]+${policy}\b" apps/core/priv/repo/migrations; then
                 echo "names policy '${policy}', which no migration creates"
-            elif printf '%s' "$code" | grep -qE 'Repo\.(update|update!|insert|insert!|delete|delete_all|update_all|insert_all)'; then
+            elif grep -qE 'Repo\.(update|update!|insert|insert!|delete|delete_all|update_all|insert_all)' <<<"$code"; then
                 echo "names a read policy but writes to a secured table"
             fi
             ;;
@@ -179,7 +217,24 @@ while IFS= read -r file; do
         continue
     fi
 
-    if grep -qE "$SCOPE_MARKERS" "$file"; then
+    # ⛔ Comments STRIPPED. This is the one grep that decides pass or fail for
+    # every discovered module, and it was the only one in the file that read its
+    # own prose as evidence — `verify_kind`, the `:system` worker check and the
+    # `:user` worker check all strip, three correct instances beside one wrong
+    # one. This repository has five recorded cases of an assertion satisfied by
+    # the comment explaining the pattern it bans, and `SCOPE_MARKERS` has just
+    # grown five more entries, widening exactly that surface.
+    # ⛔ Stripped into a VARIABLE, then matched with a here-string — not
+    # `sed … | grep -q`. Under `pipefail`, `grep -q` exits on its first match
+    # and closes the pipe, `sed` takes SIGPIPE, and the PIPELINE's status
+    # becomes 141 — so a file that genuinely matched took the else branch.
+    # Measured: it bit `shelving.ex` and nothing else, because it is the
+    # largest file here and the match comes early, so grep closed the pipe
+    # while sed still had a thousand lines to write. A smaller file finishes
+    # writing before grep exits and passes. A size-dependent false failure is
+    # worse than a consistent one.
+    code_only="$(sed 's/#.*//' "$file")"
+    if grep -qE "$SCOPE_MARKERS" <<<"$code_only"; then
         echo "    ok      ${rel}"
     else
         echo "    MISSING ${rel} — queries a row-level-secured table and establishes no scope" >&2
@@ -193,6 +248,9 @@ done < <(find "$LIB" -name '*.ex' -type f ! -path '*/gen/*' | sort)
 # reports clean while checking nothing. The gate's own history is the argument:
 # its first version errored on a bash-4 builtin and still exited 0.
 declared_kinds=$(grep -cE '^[[:space:]]+"[^"]+\.ex"\) echo "' "$0" || true)
+if [[ -n "${RLS_SCOPE_TEST_ALLOWLIST:-}" ]]; then
+    declared_kinds=$(printf '%s' "$RLS_SCOPE_TEST_ALLOWLIST" | tr ',' '\n' | grep -c '=' || true)
+fi
 if (( kinds_resolved != declared_kinds )); then
     echo "FAIL: ${declared_kinds} allowlist entr(ies) declared, ${kinds_resolved} resolved." >&2
     echo "      An entry that never matched a discovered module is not being checked at all," >&2
@@ -224,7 +282,8 @@ for file in apps/core/lib/stacks/workers/*.ex; do
         # ⚠️ Comments do not count. A `:system` worker may legitimately MENTION
         # these tables in prose explaining what it does not touch — one of them
         # does — so the claim is tested against code with comments stripped.
-        if sed 's/#.*//' "$file" | grep -qE "$SCHEMAS"; then
+        # Same SIGPIPE hazard as above — see the note in the module loop.
+        if grep -qE "$SCHEMAS" <<<"$(sed 's/#.*//' "$file")"; then
             echo "    FALSE CLAIM ${name} — declares scope: :system but references a secured schema" >&2
             fail=1
         fi
@@ -233,7 +292,7 @@ for file in apps/core/lib/stacks/workers/*.ex; do
         # and it would surface as a 42501 at whatever hour the job runs. Checked
         # here rather than in the macro: a macro sees only the `use` options, not
         # the `perform/1` head, so it cannot tell.
-        if ! sed 's/#.*//' "$file" | grep -qE 'user_id'; then
+        if ! grep -qE 'user_id' <<<"$(sed 's/#.*//' "$file")"; then
             case "$name" in
                 goodreads_import_job.ex)
                     # Derives the user from `import.user_id`; its args carry an
