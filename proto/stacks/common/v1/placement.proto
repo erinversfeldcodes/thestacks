@@ -141,48 +141,30 @@ message BookPlacement {
   string bookshelf_visibility = 8 [json_name = "bookshelf_visibility"];
 
   // Where the reader is in this book: "to_read", "reading", "completed" or
-  // "abandoned". ReadingStatus below DOCUMENTS that closed set; it is not this
-  // field's type and nothing in this schema enforces it. Four layers do, and
-  // the fourth is the only one nothing can bypass:
+  // "abandoned". ReadingStatus below documents that set; it is NOT this field's
+  // type, and protobuf cannot enforce a string's membership either way. Four
+  // layers do enforce it — validate_inclusion on both changesets, a dbt
+  // accepted_values test, parseReadingStatus on the read path, and a column
+  // CHECK with NOT NULL DEFAULT 'to_read'. Only the last is unbypassable.
   //
-  //   1. the write path — validate_inclusion on both changesets in shelving.ex
-  //   2. the warehouse — a dbt accepted_values test on the persisted message
-  //   3. the read path — parseReadingStatus maps a non-member to Nothing
-  //   4. the column itself — CHECK (reading_status IN (…)) with NOT NULL
-  //      DEFAULT 'to_read', which no application path can go around
+  // ⛔ That column constraint settles what absence MEANS: the column can never
+  // hold NULL, so a `Nothing` on the client is only ever "this payload omitted
+  // the field" and never "the reader has no status". Treating the two as the
+  // same reads a serialiser gap as a user state.
   //
-  // ⛔ Layer 4 also settles what absence MEANS here: the column can never hold
-  // NULL, so a `Nothing` on the client is only ever "this payload omitted the
-  // field", never "the reader has no status". A consumer that treats the two as
-  // the same is reading a serialiser gap as a user state.
+  // ⚠️ Stays a string rather than becoming `ReadingStatus reading_status = 9`.
+  // Enum-typing works here, but it moves the wire spellings onto a DERIVATION
+  // (the Elm generator strips the enum-name prefix), so renaming the enum would
+  // silently change every wire value in every language with no `buf breaking`
+  // signal — renaming an enum type is not a field change. For the one field
+  // whose defect was a manufactured value overwriting a reader's real status,
+  // the spellings stay written down. Revisiting it costs a `FIELD_SAME_TYPE`
+  // break once the field is on the default branch; check that rather than
+  // trusting a sentence about when this was written.
   //
-  // A new consumer must therefore validate against the enum itself rather than
-  // assume deserialisation rejects an out-of-set value — protobuf cannot do that
-  // for a string whether the enum is present or absent.
-  //
-  // ⚠️ DELIBERATE: this stays a string rather than becoming
-  // `ReadingStatus reading_status = 9`. Enum-typing would work — the Elm
-  // generator derives the lowercase wire form by stripping the enum-name prefix
-  // — but that moves the wire spellings onto a DERIVATION, so renaming the enum
-  // would silently change every wire value in every language with no
-  // `buf breaking` signal, since renaming an enum type is not a field change.
-  // For the one field whose defect was a manufactured value overwriting a
-  // reader's real status, the spellings stay written down here.
-  //
-  // ⏰ On the cost of revisiting that: changing the type is a `FIELD_SAME_TYPE`
-  // break once this field exists on the default branch, which needs a
-  // file-scoped `buf breaking` suppression — the same instrument this repo is
-  // trying to retire elsewhere. Stated as a standing property rather than as
-  // "free today", because a dated claim in a comment goes false with nothing to
-  // notice: check the field's presence on the default branch rather than
-  // trusting this sentence about when it was written.
-  //
-  // ⛔ Added because its ABSENCE lost data. The book-detail progress card is
-  // built from this message, so without the field the client could only show
-  // "To Read" for a book the reader was 150 pages into — and saving that card
-  // wrote "to_read" back over the real status. The server was already loading
-  // and serialising the value; this message dropped it, and the client then
-  // defaulted it.
+  // ⛔ Added because its ABSENCE lost data: without it the progress card could
+  // only show "To Read" for a book the reader was 150 pages into, and saving
+  // that card wrote "to_read" over the real status.
   optional string reading_status = 9 [json_name = "reading_status"];
 
   // How far through the book the reader is, in pages.
@@ -207,20 +189,15 @@ message BookPlacement {
 // fixtures carried reading-status and visibility values the server cannot emit,
 // and nothing caught them.
 //
-// ⚠️ It cannot SOURCE a fixture gate, which is worth stating because that was
-// the hope. The wire spellings live only in the per-value prose below, not in
-// any field a generator reads, so a check that validates fixtures against the
-// permitted values has to carry its own copy of them — and a second copy is the
-// thing that drifts. This enum narrows the gap from "a comment somewhere" to
-// "a named set in the contract"; it does not close it.
+// ⚠️ It cannot SOURCE a fixture gate — worth stating, because that was the
+// hope. The wire spellings live only in the per-value prose below, so such a
+// check would have to carry its own copy. This narrows the gap from "a comment
+// somewhere" to "a named set in the contract"; it does not close it.
 enum ReadingStatus {
-  // ⛔ Never emitted. The server cannot produce this value — both changesets
-  // `validate_inclusion` against the four real statuses — so the zero value is
-  // reachable only through the ABSENCE path, i.e. a payload with no
-  // `reading_status` key at all. That is exactly why the field is `optional`
-  // rather than relying on this: presence is carried by the field, and this
-  // constant exists because proto3 requires a zero value, not because anything
-  // means it.
+  // ⛔ Never emitted — the server cannot produce it, so this value is reachable
+  // only through the absence path. Presence is carried by the field's
+  // `optional`, not by this; the constant exists because proto3 requires a zero
+  // value, not because anything means it.
   READING_STATUS_UNSPECIFIED = 0;
 
   // Shelved but not started. Wire value "to_read".
