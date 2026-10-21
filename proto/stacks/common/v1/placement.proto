@@ -142,16 +142,22 @@ message BookPlacement {
 
   // Where the reader is in this book: "to_read", "reading", "completed" or
   // "abandoned". ReadingStatus below documents that set; it is NOT this field's
-  // type, and protobuf cannot enforce a string's membership either way. Four
-  // layers do enforce it — validate_inclusion on both changesets, a dbt
-  // accepted_values test, parseReadingStatus on the read path, and a column
-  // CHECK with NOT NULL DEFAULT 'to_read'. Only the last is unbypassable.
+  // type, and protobuf cannot enforce a string's membership either way.
   //
-  // ⛔ But NONE of those four is yours if you are writing a new consumer. Three
-  // are server- or database-side and the fourth is the Elm client specifically,
-  // so "four layers enforce it" does not mean a Python or Rust reader inherits
-  // any of them: validate against this enum yourself rather than assuming
+  // ⛔ ENFORCEMENT DOES NOT CROSS THE WIRE BOUNDARY. The set is enforced where
+  // the value is written and stored — ultimately by a column CHECK, which no
+  // application path can go around — and separately by whichever client wrote
+  // its own parse. None of that travels with the payload. So a new consumer
+  // inherits nothing: validate against this enum yourself rather than assuming
   // deserialisation rejects an out-of-set value.
+  //
+  // ⚠️ Stated as the invariant rather than as a roster of layers, deliberately.
+  // An earlier version counted them ("four layers do enforce it") and named
+  // which side each sat on — and that rots in the DANGEROUS direction: if a
+  // layer is ever removed the sentence still asserts the count, and two of them
+  // are removable without anyone noticing (the dbt test is generated output and
+  // its drift check currently crashes; nothing at all guards the client parse).
+  // The invariant above stays true however many layers there are.
   //
   // ⛔ That column constraint settles what absence MEANS: the column can never
   // hold NULL, so a `Nothing` on the client is only ever "this payload omitted
