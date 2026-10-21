@@ -114,6 +114,18 @@ defmodule StacksWeb.ProtoJSON do
   # `Gen.listing` already carries `contact_info` as the deliberate way to reach
   # a seller, so nothing is lost: no Elm consumer read the embedded email, and
   # none existed anywhere in `frontend/` or `e2e/`.
+  # ⛔ DO NOT COALESCE `display_name` TO `handle` HERE. `display_name` is
+  # nullable (`add :display_name, :text`, no `null: false`), and this repo's
+  # established fix for a null name on the wire is
+  # `coalesce(display_name, handle)` — used in `list_blocked_users/2` and the
+  # group-feed decoration. Applying that idiom to this list would put a
+  # seller's handle on an anonymous payload, and
+  # `e2e/tests/search.spec.ts` drives a test named
+  # "a seller's handle and asking price never reach an anonymous caller".
+  #
+  # So the house pattern is WRONG on this one endpoint, and nothing but this
+  # comment marks it. A null display name on a public listing renders as blank;
+  # that is the correct outcome, not a bug to paper over with the handle.
   @listing_seller_fields [:id, :display_name]
 
   @doc """

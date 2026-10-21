@@ -110,6 +110,32 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     assert is_binary(first["id"]) and first["id"] != ""
   end
 
+  test "⛔ a seller with NO display name does not fall back to their handle" do
+    # ⛔ `display_name` is nullable (`add :display_name, :text`, no
+    # `null: false`), and this repo's established fix for a null name on the
+    # wire is `coalesce(display_name, handle)` — used in `list_blocked_users/2`
+    # and the group-feed decoration. Applying that house idiom to the listing
+    # seller would put a handle on an anonymous payload, and
+    # `e2e/tests/search.spec.ts` drives a test named "a seller's handle and
+    # asking price never reach an anonymous caller".
+    #
+    # ⚠️ The other cases in this file all set `display_name`, so none of them
+    # can see this: the positive control would pass while a coalesce quietly
+    # published the handle. So the house pattern is wrong on exactly this
+    # endpoint, and this is what makes that a failing test rather than a comment.
+    seller = insert(:user, display_name: nil, handle: "private-handle-probe")
+    _listing = insert(:listing, seller: seller, status: "active")
+
+    body =
+      build_conn()
+      |> get("/api/listings")
+      |> response(200)
+
+    refute body =~ "private-handle-probe",
+           "a seller with no display name fell back to their handle, which an anonymous " <>
+             "caller must never receive"
+  end
+
   test "⛔ the real address does not appear ANYWHERE in the response body" do
     # ⚠️ A key-absence check only covers the keys it enumerates. This asserts on
     # the serialised bytes, so the address cannot reach a caller through a field
