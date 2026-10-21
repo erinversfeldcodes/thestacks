@@ -1006,7 +1006,19 @@
         listed_at: %{ecto_type: :utc_datetime_usec},
         expires_at: %{ecto_type: :utc_datetime_usec},
         sold_at: %{ecto_type: :utc_datetime_usec},
-        book: %{api_only: true}
+        book: %{api_only: true},
+        # ⛔ `api_only` for the same reason as `book` above, and it is REQUIRED
+        # rather than tidy: `seller_id`'s `belongs_to` already defines a
+        # `:seller` association on this schema, so generating a `seller` field
+        # too makes Ecto refuse the module — "field/association :seller already
+        # exists" — and the whole app stops compiling.
+        #
+        # ⚠️ Worth knowing because `bash scripts/lint-proto.sh` passes while that
+        # is broken: it checks the five codegen targets agree, and the Ecto
+        # schema comes from `mix proto.sync`, which it does not run. The failure
+        # surfaced in `mix dialyzer` with the test suite producing no output at
+        # all, because compilation never finished.
+        seller: %{api_only: true}
       }
     },
     %{
@@ -1484,7 +1496,20 @@
       proto_file: "stacks/common/v1/listing.proto",
       proto_message: "Listing",
       function_name: :listing,
-      skip_fields: [:book, :seller_id],
+      # `seller` is skipped for the same reason as `book`: the hand-written
+      # serializer replaces both with its own narrow projection, and codegen
+      # cannot know about those. Left unskipped, codegen emitted
+      # `seller: struct.seller` — the RAW `%User{}` association, every column of
+      # it — which is the exact shape whose exposure the projection exists to
+      # end. Nothing calls this function except the hand-written serializer,
+      # which `Map.take`s immediately, so that raw value never reached a client;
+      # it is skipped because the next caller would not be so lucky.
+      #
+      # ⚠️ Skipping also takes `seller` out of the completeness gate's view, so
+      # that gate is NOT what notices if the projection stops being carried.
+      # The anonymous-payload boundary test is — it asserts the seller object's
+      # exact key set over a real HTTP response.
+      skip_fields: [:book, :seller, :seller_id],
       field_overrides: %{}
     },
     %{

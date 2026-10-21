@@ -69,6 +69,38 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     {seller, Enum.map(index["listings"], & &1["seller"]) ++ [show["listing"]["seller"]]}
   end
 
+  test "⛔ the seller payload's key set is EXACTLY what it should be" do
+    # ⛔ The form that subsumes both of the others, and the reason it is here
+    # rather than a longer denylist. The `pending_email` tripwire catches the
+    # MECHANISM — re-inheriting a wider list — but not a hand-added field. The
+    # denylist below catches named fields but can never enumerate a personal
+    # field nobody has invented yet. An exact key set catches inherited,
+    # hand-added and invented additions alike, needs no maintenance, and fails
+    # on a deliberate widening, which is where someone should have to justify
+    # themselves.
+    #
+    # ⚠️ It also has NO ABSENCE FORM, which makes it structurally immune to the
+    # vacuity that has now bitten three times in two rounds: there is no empty
+    # input that satisfies `== ["display_name", "id"]`.
+    #
+    # The line worth keeping: an exact set for a NARROW PROJECTION across a
+    # trust boundary; a denylist for a wide, evolving record on the owner's own
+    # path. This payload is the former.
+    {_seller, sellers} = anonymous_seller_payloads()
+    present = Enum.filter(sellers, &is_map/1)
+
+    assert length(present) == 2,
+           "expected a seller payload from both endpoints, got #{length(present)} — the " <>
+             "assertion below would be comparing against nothing"
+
+    for payload <- present do
+      assert payload |> Map.keys() |> Enum.sort() == ["display_name", "id"],
+             "the anonymous seller payload's shape changed. Every addition here is published " <>
+               "to unauthenticated callers on an enumerable index, so widening this set is a " <>
+               "disclosure decision and not a serialisation detail."
+    end
+  end
+
   test "⛔ no personal field reaches an anonymous caller on either endpoint" do
     {_seller, sellers} = anonymous_seller_payloads()
 
@@ -124,12 +156,25 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     # published the handle. So the house pattern is wrong on exactly this
     # endpoint, and this is what makes that a failing test rather than a comment.
     seller = insert(:user, display_name: nil, handle: "private-handle-probe")
-    _listing = insert(:listing, seller: seller, status: "active")
+    listing = insert(:listing, seller: seller, status: "active")
 
     body =
       build_conn()
       |> get("/api/listings")
       |> response(200)
+
+    # ⛔ ANTI-VACUITY FIRST. The refutation below is absence-only over a response
+    # that can legitimately be EMPTY — an index filter change, a renamed key, a
+    # status the factory stops producing — so without this it passes having
+    # tested nothing. Third instance of this shape in two rounds, in a file whose
+    # comments are about it.
+    #
+    # ⚠️ Keyed on the LISTING's own id rather than the seller's name, because
+    # this fixture deliberately has no display name: asserting on the seller
+    # would be asserting on the thing under test.
+    assert body =~ listing.id,
+           "the anonymous listings response did not contain the planted listing, so the " <>
+             "refutation below is vacuous"
 
     refute body =~ "private-handle-probe",
            "a seller with no display name fell back to their handle, which an anonymous " <>
@@ -142,12 +187,18 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     # nobody thought to name — a nested contact blob, a denormalised copy, an
     # error message.
     seller = insert(:user, email: "unique-probe-addr@example.invalid")
-    _listing = insert(:listing, seller: seller, status: "active")
+    listing = insert(:listing, seller: seller, status: "active")
 
     body =
       build_conn()
       |> get("/api/listings")
       |> response(200)
+
+    # ⛔ ANTI-VACUITY FIRST, for the same reason as above: a refutation over an
+    # empty response is a test that cannot fail.
+    assert body =~ listing.id,
+           "the anonymous listings response did not contain the planted listing, so the " <>
+             "refutation below is vacuous"
 
     refute body =~ "unique-probe-addr@example.invalid",
            "the seller's account address appears somewhere in the anonymous listings response"

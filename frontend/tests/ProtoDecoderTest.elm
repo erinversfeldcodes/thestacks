@@ -131,6 +131,7 @@ import Stacks.Common.V1.Listing
         ( Listing
         , decodeListing
         , defaultListing
+        , defaultListingSeller
         , encodeListing
         )
 import Stacks.Common.V1.Location
@@ -1745,6 +1746,15 @@ listingSuite =
                         , updatedAt = "2026-03-20T00:00:00Z"
                         , bookId = "b-2"
                         , sellerId = "u-2"
+
+                        -- ⛔ The seller embed is now DECLARED in the contract.
+                        -- It was previously emitted by the server and declared
+                        -- nowhere, which is how it came to carry a seller's
+                        -- account email to anonymous callers with no gate
+                        -- looking at it. Declaring it is what makes this
+                        -- fixture need updating — that compile error is the
+                        -- contract doing its job.
+                        , seller = defaultListingSeller
                         }
 
                     result =
