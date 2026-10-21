@@ -237,6 +237,16 @@ USING (true) policy for stacks_dbt and stacks_readonly.")
 # argument, and `group` visibility is admitted by NO policy arm, so it
 # disclosed rows the policy set deliberately withholds.
 #
+# ⚠️ The general form of the rule is MONOTONICITY, and it is worth stating
+# because it decides the next parameter somebody wants to add: a definer
+# parameter is safe iff the returned row set is monotonically NON-INCREASING in
+# it. `member_ids` was increasing — more ids, more rows — which is exactly what
+# made it a subject selector. `exclude_user_ids`, `before_dt` and `lim` are all
+# decreasing, so the maximum disclosure is fixed entirely by the subject
+# identifier plus the viewer check, and the worst a caller achieves by
+# manipulating them is seeing LESS than it is entitled to — a correctness bug at
+# most, never a disclosure.
+#
 # ⛔ The virtue of the rule is that it is checkable from the SIGNATURE, without
 # reading the body or trusting a sentence about callers — which is what the
 # previous moduledoc's claim to be "in the same family as the boolean and the
@@ -244,6 +254,17 @@ USING (true) policy for stacks_dbt and stacks_readonly.")
 # definer function must be called `exclude_…`, because an exclusion list
 # narrows a result while a subject list chooses it. Every other definer here
 # takes a scalar identifier and satisfies the rule trivially.
+#
+# ⚠️ HONEST GAP, recorded rather than papered over: this checks the NAME, not
+# the USE. A function could declare `exclude_user_ids uuid[]` and then write
+# `WHERE user_id = ANY(exclude_user_ids)` — widening while named as narrowing —
+# and this would pass. That is accepted as the right trade: the name is now an
+# explicit claim the author had to make, the population is small enough to
+# enumerate (one `uuid[]` parameter exists on any `op` definer today, and its
+# use is narrowing), and a stronger check would have to assert the parameter
+# appears only under a negated `ANY`/`NOT IN`, which is more SQL parsing than
+# the problem deserves. This converts a judgement into a grep; it does not
+# replace reading the body.
 ASSERTIONS+=("definer_takes_a_user_list_as_its_subject
 SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, unnest(coalesce(p.proargnames, ARRAY[]::text[])) WITH ORDINALITY AS a(argname, ord) WHERE n.nspname = 'op' AND p.prosecdef AND format_type(p.proargtypes[ord - 1], NULL) = 'uuid[]' AND a.argname NOT LIKE 'exclude%'
 0

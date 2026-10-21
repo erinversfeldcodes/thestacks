@@ -107,6 +107,12 @@ defmodule Core.Repo.Migrations.LetTheGroupFeedDecideForItselfWhoIsAsking do
                 HINT = 'wrap the read in Stacks.Scope.with_user/2 with the viewer';
       END IF;
 
+      -- ⛔ `group_feed_placements.group_id` is QUALIFIED, and that is not
+      -- style. Unqualified, `group_id` resolves to the COLUMN, making this
+      -- `gm.group_id = gm.group_id` — an always-true membership check, i.e. a
+      -- guard that passes for everybody. `plpgsql.variable_conflict` defaults
+      -- to `error` so it would raise rather than silently pass, but the
+      -- unqualified form is one session setting away from a vacuous guard.
       IF NOT EXISTS (
         SELECT 1 FROM op.group_members gm
          WHERE gm.group_id = group_feed_placements.group_id
@@ -124,6 +130,12 @@ defmodule Core.Repo.Migrations.LetTheGroupFeedDecideForItselfWhoIsAsking do
          WHERE m.group_id = group_feed_placements.group_id
            AND p.visibility IN ('group', 'platform')
            AND p.removed_at IS NULL
+           -- ⛔ The `coalesce` is load-bearing, not defensive habit. Without it
+           -- a NULL exclude list makes `NOT (x = ANY(NULL))` evaluate to
+           -- `NOT NULL` → NULL, which filters out EVERY row — so the feed would
+           -- come back empty rather than unfiltered. Fails closed, but as a
+           -- silently short page, which is the exact shape this parameter
+           -- exists to prevent.
            AND NOT (bs.user_id = ANY(coalesce(exclude_user_ids, ARRAY[]::uuid[])))
            AND (before_dt IS NULL OR p.placed_at < before_dt)
          ORDER BY p.placed_at DESC
