@@ -602,11 +602,28 @@ bookshelf_rows =
 # costs a few extra statements; on a deployed stack, where the application
 # connects as the least-privilege role, it is the difference between a seeded
 # preview and a failed one.
+# ⛔ Returns the ids that were actually INSERTED, which is neither the rows
+# handed in nor everything in the table — and the difference is a defect this
+# seed shipped. Every call passes `on_conflict: :nothing`, so a row colliding
+# with an existing one is silently dropped; emitting a `placement.created` for
+# the intended list therefore wrote creation events for rows that do not exist.
+# Measured: 231 intended, 220 present, and **11 distinct aggregate_ids in
+# op.event_log with no placement row behind them**.
+#
+# ⚠️ `returning: [:id]` reports exactly the rows that landed, per owner, inside
+# the scope that was already being opened. The alternative — reading the table
+# back — is what this replaced, and it was wrong in the other direction: it
+# emitted for every placement on every run, including ones seeded previously.
 insert_owned = fn table, rows, owner_of, opts ->
   rows
   |> Enum.group_by(owner_of)
-  |> Enum.each(fn {owner_id, group} ->
-    Stacks.Scope.with_user(owner_id, fn -> Repo.insert_all(table, group, opts) end)
+  |> Enum.flat_map(fn {owner_id, group} ->
+    Stacks.Scope.with_user(owner_id, fn ->
+      {_count, returned} =
+        Repo.insert_all(table, group, Keyword.put(opts, :returning, [:id]))
+
+      Enum.map(returned || [], & &1.id)
+    end)
   end)
 end
 
@@ -767,10 +784,11 @@ e2e_placement_rows =
     library_placements ++ antilibrary_placements ++ reading_pile_placements
   end)
 
-insert_owned.("bookshelf_placements", e2e_placement_rows, placement_owner,
-  prefix: "op",
-  on_conflict: :nothing
-)
+inserted_e2e_placement_ids =
+  insert_owned.("bookshelf_placements", e2e_placement_rows, placement_owner,
+    prefix: "op",
+    on_conflict: :nothing
+  )
 
 placement_groups = [
   {302, 0..19, jan_10, "library"},
@@ -897,10 +915,11 @@ user2_placements =
 
 all_placements = user1_placements ++ user2_placements
 
-insert_owned.("bookshelf_placements", all_placements, placement_owner,
-  prefix: "op",
-  on_conflict: :nothing
-)
+inserted_dev_placement_ids =
+  insert_owned.("bookshelf_placements", all_placements, placement_owner,
+    prefix: "op",
+    on_conflict: :nothing
+  )
 
 # ⛔ Emitted from the rows this file just built, with NO read-back. The previous
 # version re-read them with an unscoped `Repo.all` joining both row-level-secured
@@ -945,7 +964,22 @@ bookshelf_name_by_id =
 # — which in a spec reads as a pass.
 #
 # `bookshelf_name_by_id` is already built from both row sets, so it covers these.
-emittable_placements = all_placements ++ e2e_placement_rows
+# ⛔ Only the rows that ACTUALLY LANDED. `on_conflict: :nothing` drops a row
+# that collides, so the intended list over-counts — measured at 231 intended
+# against 220 present, leaving 11 ids with a creation event and no row.
+#
+# ⚠️ An event for a row that does not exist is worse than a missing event, and
+# in an append-only log it cannot be taken back: anything joining event_log to
+# op.bookshelf_placements silently drops those rows, and anything that does not
+# join reports activity for a placement nobody can open.
+inserted_placement_ids =
+  MapSet.new(inserted_dev_placement_ids ++ inserted_e2e_placement_ids)
+
+emittable_placements =
+  Enum.filter(
+    all_placements ++ e2e_placement_rows,
+    &MapSet.member?(inserted_placement_ids, &1.id)
+  )
 
 emitted =
   Enum.count(emittable_placements, fn p ->
