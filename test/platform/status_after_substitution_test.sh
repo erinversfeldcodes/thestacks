@@ -161,10 +161,38 @@ assert_not_contains "$OUT" "zz-status-probe-fixture.sh" "the comment is not repo
 
 # ⛔ The fall-through must default to HAZARD: an empty violation list is what a
 # clean tree produces AND what broken discovery produces.
-test_case "the_floor_is_declared" "a clean verdict over nothing is impossible"
+test_case "the_floor_is_a_fraction_of_an_independent_enumeration" \
+    "a constant floor would sit through a 60% erosion of discovery"
+# ⛔ The floor used to be a flat minimum of 60 against ~154 discovered, which
+# would have passed while discovery eroded by nearly two thirds.
+#
+# ⚠️ The sibling sigpipe gate's fraction does NOT transfer: it floors the
+# pipefail-bearing count against all discovered scripts, two different
+# populations. Here the floored population IS the discovered set, so a fraction
+# of itself is vacuous. The denominator is a second, INDEPENDENT enumeration —
+# the filesystem, which knows nothing about git's index or pathspecs.
 GATE_SRC="$(cat "$GATE")"
-assert_contains "$GATE_SRC" "MIN_SCRIPTS" "the population floor is declared"
-assert_contains "$GATE_SRC" "refusal, not a pass" "and an undersized sweep refuses"
+assert_contains "$GATE_SRC" "pathlib.Path(\".\").rglob" \
+    "a filesystem enumeration provides the denominator"
+assert_contains "$GATE_SRC" "ABSOLUTE_MIN" \
+    "and an absolute minimum still guards against both enumerations failing"
+assert_contains "$GATE_SRC" "refusal, not a pass" "an undersized sweep refuses"
+
+# BEHAVIOURAL: defeat the git discovery and require the floor to catch it. Run
+# against a copy so the real gate is untouched.
+BROKEN_GATE="$(mktemp)"
+sed 's|"git", "ls-files", "\*\.sh"|"git", "ls-files", "scripts/check-css.sh"|' "$GATE" > "$BROKEN_GATE"
+if ! grep -q 'ls-files", "scripts/check-css.sh"' "$BROKEN_GATE"; then
+    _record_fail "could not narrow the discovery in the copy — this case would pass for the wrong reason"
+else
+    _record_pass "the copy's git discovery is narrowed to a single file"
+    BROKEN_OUT=$(cd "$REPO_ROOT" && bash "$BROKEN_GATE" 2>&1)
+    BROKEN_RC=$?
+    assert_exit_nonzero "$BROKEN_RC" "an eroded discovery is refused rather than reported clean"
+    assert_contains "$BROKEN_OUT" "Two independent enumerations disagree" \
+        "and the refusal names the cause, not just a count"
+fi
+rm -f "$BROKEN_GATE"
 
 cleanup
 summarise

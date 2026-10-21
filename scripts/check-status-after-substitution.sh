@@ -41,6 +41,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
 
 python3 - <<'PY'
+import pathlib
 import re
 import subprocess
 import sys
@@ -101,13 +102,50 @@ def strip_comment(line):
 
 scripts = discover_shell_scripts()
 
-# ⚠️ Anti-vacuity. An empty violation list is what a clean tree produces AND
-# what a broken discovery produces. The floor is an absolute minimum rather than
-# a fraction, because a fraction of zero is zero and passes.
-MIN_SCRIPTS = 60
-if len(scripts) < MIN_SCRIPTS:
-    print(f"FAIL: discovered only {len(scripts)} shell script(s), expected at least {MIN_SCRIPTS}.", file=sys.stderr)
-    print("       Nothing was meaningfully swept. This is a refusal, not a pass.", file=sys.stderr)
+# ⛔ A FRACTION OF AN INDEPENDENT ENUMERATION, plus an absolute minimum.
+#
+# An empty violation list is what a clean tree produces AND what a broken
+# discovery produces, so the population has to be floored. A bare constant —
+# this used to be a flat minimum of 60 against ~154 discovered — would sit
+# happily through a 60% erosion of discovery while still reporting clean.
+#
+# ⚠️ The sibling sigpipe gate takes a fraction of a LARGER denominator: it floors
+# the pipefail-bearing count (137) against all discovered scripts (147), two
+# genuinely different populations. That shape does NOT transfer here, because the
+# population this gate floors IS its discovered set, and asking whether it is at
+# least half of itself is vacuous for every value.
+#
+# So the denominator is a SECOND, INDEPENDENT enumeration: the filesystem, which
+# knows nothing about git's index or its pathspecs. If git-based discovery ever
+# returns less than half of what the filesystem can see, the DISCOVERY is broken
+# rather than the repository being small. Measured today: 154 via git, 165 via
+# the filesystem — the gap is vendored and generated output the exclusions below
+# do not catch, which is why this is a fraction rather than an equality.
+FS_EXCLUDE = ("/node_modules/", "/.git/", "/.venv/", "/_build/", "/deps/", "/elm-stuff/")
+fs_scripts = [
+    str(path)
+    for path in pathlib.Path(".").rglob("*.sh")
+    if path.is_file() and not any(frag in f"/{path}/" for frag in FS_EXCLUDE)
+]
+
+# The absolute minimum still matters: a fraction of zero is zero and passes, so
+# a total failure of BOTH enumerations would otherwise read as a clean sweep.
+ABSOLUTE_MIN = 60
+floor = max(len(fs_scripts) // 2, ABSOLUTE_MIN)
+
+if len(scripts) < floor:
+    print(
+        f"FAIL: git discovery found {len(scripts)} shell script(s); the filesystem shows "
+        f"{len(fs_scripts)}, so the floor is {floor}.",
+        file=sys.stderr,
+    )
+    print(
+        "       Two independent enumerations disagree by more than half, which means the\n"
+        "       DISCOVERY is broken rather than the repository being small. An empty\n"
+        "       violation list over an eroded corpus is exactly the result this floor\n"
+        "       exists to refuse. This is a refusal, not a pass.",
+        file=sys.stderr,
+    )
     raise SystemExit(1)
 
 violations = []
