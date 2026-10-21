@@ -147,7 +147,23 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | writingAssistantSaving = Failure err }, Cmd.none, NoOut )
+                        -- ⛔ The optimistic flip is REVERTED. The toggle moved
+                        -- the moment it was clicked, on the assumption the write
+                        -- would succeed; without undoing it a failed save leaves
+                        -- the control reading "Off" while the server still holds
+                        -- "On". For a consent record that is the worst available
+                        -- outcome: the reader believes they have withdrawn
+                        -- consent and processing continues.
+                        --
+                        -- The error beside the toggle says the save failed; the
+                        -- toggle itself must go back to what is actually stored.
+                        ( { model
+                            | writingAssistantConsent = not model.writingAssistantConsent
+                            , writingAssistantSaving = Failure err
+                          }
+                        , Cmd.none
+                        , NoOut
+                        )
 
         SaveCompleted result ->
             case result of
@@ -255,14 +271,31 @@ viewSection locked model =
                             "Off"
                         )
                     ]
-                , case model.writingAssistantSaving of
-                    Failure err ->
-                        p [ class "error", attribute "data-testid" "writing-assistant-consent-error" ]
-                            [ text (FailureCopy.saveFailure "your book-linking preference" err) ]
-
-                    _ ->
-                        text ""
                 ]
+
+            -- ⛔ A SIBLING of `.toggle-row`, not a child of it, and that is a
+            -- measured layout fix rather than tidiness. `.toggle-row` is
+            -- `display: flex; justify-content: space-between`, so a third child
+            -- moved the toggle button from the right edge to the CENTRE on
+            -- failure, `.error`'s padding and border stretched the row, and with
+            -- no `flex-wrap` it compressed to roughly one word per line at
+            -- 400px. This is where the rest of the page already puts a
+            -- control's error.
+            --
+            -- ⚠️ `role="alert"` because a failure here has to be announced, not
+            -- merely rendered — the same treatment this project gives
+            -- `syndication-url-error` and `invite-refusal`.
+            , case model.writingAssistantSaving of
+                Failure err ->
+                    p
+                        [ class "error"
+                        , attribute "role" "alert"
+                        , attribute "data-testid" "writing-assistant-consent-error"
+                        ]
+                        [ text (FailureCopy.saveFailure "your book-linking preference" err) ]
+
+                _ ->
+                    text ""
             ]
         , div [ class "settings-actions" ]
             [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]

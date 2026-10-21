@@ -1,6 +1,7 @@
 module SettingsTest exposing (suite)
 
 import Expect
+import Html.Attributes
 import Http
 import Page.Settings.Consent as Consent
 import Test exposing (Test, describe, test)
@@ -103,6 +104,48 @@ suite =
                         , \m -> m.saving |> Expect.equal NotAsked
                         ]
                         model
+            , test "⛔ a failed book-linking save is RENDERED, announced, and reverts the toggle" <|
+                -- ⛔ Predicted and confirmed: with only the model assertions
+                -- above, deleting the view's `Failure err -> p [...]` branch
+                -- produced ZERO red of 2156 — so a failed consent withdrawal
+                -- would have been silent everywhere, which is strictly worse
+                -- than the wrongly-placed error it replaced, because the Save
+                -- button no longer reports it either.
+                --
+                -- Three things in one assertion because they are one event: the
+                -- message appears, it is announced (`role="alert"`, as this
+                -- project gives its other refusal messages), and the optimistic
+                -- flip is undone so the control stops disagreeing with the
+                -- server about a consent record.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveWritingAssistantCompleted (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = False }
+                                    |> (\m -> { m | writingAssistantConsent = True })
+                                )
+                                (Just "tok")
+
+                        rendered =
+                            Consent.viewSection False model |> Query.fromHtml
+                    in
+                    Expect.all
+                        [ \_ ->
+                            rendered
+                                |> Query.find
+                                    [ Selector.attribute
+                                        (Html.Attributes.attribute "data-testid"
+                                            "writing-assistant-consent-error"
+                                        )
+                                    ]
+                                |> Query.has
+                                    [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
+                        , \_ ->
+                            model.writingAssistantConsent
+                                |> Expect.equal False
+                        ]
+                        ()
             , test "and a SaveConsent failure still surfaces under the Save button" <|
                 -- The positive control: splitting the state must not make the
                 -- button stop reporting the save it does govern.

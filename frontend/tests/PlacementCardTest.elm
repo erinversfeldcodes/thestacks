@@ -124,21 +124,35 @@ suite =
                 -- a thin thing to hang a destructive write on. `draftStatus` is
                 -- now `parseReadingStatus s`, so an unrecognised value stays
                 -- `Nothing` and the guard holds on its own.
+                -- ⚠️ Each spelling asserted SEPARATELY. The first version
+                -- chained both `StatusChanged` calls into one pipeline, so the
+                -- second overwrote the first and only `"serialised_by_a_newer_
+                -- server"` was ever asserted — the empty-string case, which is
+                -- the one the placeholder `<option>` actually emits, was
+                -- shadowed and never tested.
                 \_ ->
-                    noStatusModel
-                        |> Card.update Card.BadgeClicked
-                        |> Tuple.first
-                        |> Card.update (Card.StatusChanged "")
-                        |> Tuple.first
-                        |> Card.update (Card.StatusChanged "serialised_by_a_newer_server")
-                        |> Tuple.first
-                        |> Card.view
-                        |> Query.fromHtml
-                        |> Query.find
-                            [ Selector.attribute
-                                (Html.Attributes.attribute "data-testid" "save-progress-btn")
-                            ]
-                        |> Query.has [ Selector.disabled True ]
+                    let
+                        saveDisabledAfter : String -> Expect.Expectation
+                        saveDisabledAfter spelling =
+                            noStatusModel
+                                |> Card.update Card.BadgeClicked
+                                |> Tuple.first
+                                |> Card.update (Card.StatusChanged spelling)
+                                |> Tuple.first
+                                |> Card.view
+                                |> Query.fromHtml
+                                |> Query.find
+                                    [ Selector.attribute
+                                        (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                                    ]
+                                |> Query.has [ Selector.disabled True ]
+                    in
+                    Expect.all
+                        [ \_ -> saveDisabledAfter ""
+                        , \_ -> saveDisabledAfter "serialised_by_a_newer_server"
+                        , \_ -> saveDisabledAfter "finished"
+                        ]
+                        ()
             , test "Reading status badge has class 'placement-card__badge--reading'" <|
                 \_ ->
                     Card.view readingModel
