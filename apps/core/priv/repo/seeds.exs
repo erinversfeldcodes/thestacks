@@ -902,33 +902,69 @@ insert_owned.("bookshelf_placements", all_placements, placement_owner,
   on_conflict: :nothing
 )
 
-seeded_placements =
-  Repo.all(
-    from p in Stacks.Shelving.Placement,
-      join: b in Stacks.Shelving.Bookshelf,
-      on: b.id == p.bookshelf_id,
-      select: %{
-        id: p.id,
-        book_id: p.book_id,
-        bookshelf: b.name,
-        visibility: p.visibility
-      }
-  )
+# ⛔ Emitted from the rows this file just built, with NO read-back. The previous
+# version re-read them with an unscoped `Repo.all` joining both row-level-secured
+# tables — one line after the scoped inserts that exist because the app role
+# cannot touch those tables unscoped. On a deployed stack `seed_live/0` runs in
+# the live node as the least-privilege role, so that query raises `42501` and
+# the seed dies after inserting placements and before emitting a single event:
+# the file's own comment states the premise and the next statement broke it.
+#
+# ⚠️ Not merely scoped-instead-of-unscoped — removed. The seed already knows
+# every row it inserted, so reading them back was asking the database to confirm
+# what this file had just told it. It was also less accurate: the read returned
+# EVERY placement in the table, so a re-run emitted `placement.created` again for
+# rows seeded by a previous run.
+bookshelf_name_by_id =
+  Map.new(bookshelf_rows ++ e2e_bookshelf_rows, &{&1.id, &1.name})
 
-Enum.each(seeded_placements, fn p ->
-  Stacks.Events.emit_safe(%{
-    event_type: "placement.created",
-    aggregate_type: "placement",
-    aggregate_id: p.id,
-    payload: %{
-      book_id: p.book_id,
-      bookshelf: p.bookshelf,
-      visibility_tier: p.visibility
-    }
-  })
-end)
+# ⛔ `Seeds.uuid/1` returns a RAW 16-byte uuid, not the textual form, so every id
+# built in this file has to be cast before it crosses into a changeset. The
+# read-back this replaced returned already-cast values and hid that.
+#
+# ⚠️ Found by running the seed rather than by reading it, and the failure shape
+# is the reason: `emit_safe/1` logs and continues, so all 24 emissions failed
+# with a `ChangeError`, the seed exited 0, and the count below still printed the
+# number of placements it had INTENDED to emit for. A success-shaped run that
+# emitted nothing — exactly what the count was added to catch, defeated by
+# counting the wrong thing.
+# ⛔ `emit/1`, not `emit_safe/1`. `emit_safe/1` returns `{:ok, _}` on success AND
+# `{:ok, event}` after logging a failure — by design, so a seed does not die on a
+# non-critical emission, but it means **no caller can tell the two apart**. The
+# count below was therefore unmeasurable through it, which is how 81 failed
+# emissions read as a successful seed.
+emitted =
+  Enum.count(all_placements, fn p ->
+    result =
+      Stacks.Events.emit(%{
+        event_type: "placement.created",
+        aggregate_type: "placement",
+        aggregate_id: Ecto.UUID.cast!(p.id),
+        payload: %{
+          book_id: Ecto.UUID.cast!(p.book_id),
+          bookshelf: Map.fetch!(bookshelf_name_by_id, p.bookshelf_id),
+          visibility_tier: p.visibility
+        }
+      })
 
-IO.puts("  emitted placement.created for #{length(seeded_placements)} seeded placements")
+    case result do
+      {:ok, _} ->
+        true
+
+      {:error, reason} ->
+        IO.puts("  WARN placement.created not emitted for #{inspect(p.id)}: #{inspect(reason)}")
+        false
+    end
+  end)
+
+# ⚠️ Counts emissions that SUCCEEDED, not rows attempted. The preview seed is
+# checked against this figure, and a silent zero reads exactly like a success.
+IO.puts("  emitted placement.created for #{emitted} of #{length(all_placements)} placements")
+
+if emitted == 0 and all_placements != [] do
+  raise "the seed emitted no placement.created events for #{length(all_placements)} placements — " <>
+          "emit_safe/1 logs and continues, so this would otherwise be a silent success"
+end
 
 Repo.insert_all(
   "bookshelf_placement_history",
