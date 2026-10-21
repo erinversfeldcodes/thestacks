@@ -153,10 +153,17 @@ test_case "a_connection_failure_is_reported_as_itself" \
     "not as four mysterious assertion failures"
 assert_contains "$GATE_SRC" "cannot query the database" "there is a connectivity probe first"
 
-test_case "the_four_findings_are_each_covered" \
-    "the sweep that found them by hand is now a roster"
+test_case "every_hand_found_breach_is_covered" \
+    "the sweeps that found them by hand are now a roster"
+#
+# ⚠️ The last two are a different kind from the first four, and that is why they
+# are pinned here rather than left to the count. The first four are states a
+# healthy stack drifts into; these two are PRIVILEGE facts that no test can
+# observe, because the test role is a superuser and is exempt from the thing
+# being asserted. If either is dropped from the roster, every suite stays green
+# and the assertion simply stops existing.
 for needle in "images_past_expiry" "orphaned_executing_jobs" "warehouse_schemas_missing" \
-    "unmigrated"; do
+    "unmigrated" "app_role_exempt_from_rls" "definer_function_executable_by_public"; do
     assert_contains "$GATE_SRC" "$needle" "the roster covers ${needle}"
 done
 

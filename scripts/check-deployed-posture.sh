@@ -159,7 +159,32 @@ correct in pg_policies and every test will still pass, because the test role
 bypasses RLS too. Revoke BYPASSRLS from stacks_app, or stop calling this
 enforcement.")
 
-EXPECTED_ASSERTIONS=5
+# ⛔ The cross-user functions are the deliberate holes in per-user scoping, and
+# their whole safety argument is that each is reachable only by the roles that
+# need it. Postgres defeats that by default: `CREATE FUNCTION` grants EXECUTE to
+# PUBLIC, so a function created without an explicit REVOKE is callable by every
+# role that can connect — and a `SECURITY DEFINER` function runs as its owner, so
+# PUBLIC means any connected role performs an unscoped cross-user read.
+#
+# ⚠️ Measured, before this was closed: as the runtime role with no scope set,
+# op.placement_owners_for_edition returned three user ids, while the same
+# question asked directly against the table was refused by the policy these
+# functions exist to work around. The explicit grants to the runtime role looked
+# like an allowlist and were decorative.
+#
+# ⚠️ No test can catch this either, for the same reason as the assertion above:
+# the test role is a superuser, so it can call anything whatever the grants say.
+# The grant list is only a fact about a real database.
+ASSERTIONS+=("definer_function_executable_by_public
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND (p.proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0))
+0
+A SECURITY DEFINER function in schema op is executable by PUBLIC, which means
+every role that can connect can perform the unscoped cross-user read that
+function wraps — including the runtime role, for functions it was never granted.
+A NULL proacl is the Postgres default and counts: it is the absence of a REVOKE,
+not a decision. REVOKE ALL ... FROM PUBLIC and grant by name.")
+
+EXPECTED_ASSERTIONS=6
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
 # suite: a roster built by appending to an array is silently shortened by an
