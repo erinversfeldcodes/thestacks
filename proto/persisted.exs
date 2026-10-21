@@ -1509,7 +1509,16 @@
       # that gate is NOT what notices if the projection stops being carried.
       # The anonymous-payload boundary test is — it asserts the seller object's
       # exact key set over a real HTTP response.
-      skip_fields: [:book, :seller, :seller_id],
+      # ⚠️ `seller_id` is NOT skipped, and the asymmetry with `book_id` was the
+      # finding. Skipping it took it out of the generated shape, which is the
+      # left-hand side of the completeness gate's set difference — so a declared
+      # proto field reaching no client became invisible to the gate built to
+      # find exactly that. `book_id` was never skipped, is therefore compared,
+      # and sits in that gate's BASELINE as a recorded decision. `seller_id` now
+      # does too. Nothing consumes it (no Elm or e2e reference), and it is
+      # redundant with `seller.id` on the projection, but "dropped on purpose"
+      # and "invisible" should not look the same.
+      skip_fields: [:book, :seller],
       field_overrides: %{}
     },
     %{

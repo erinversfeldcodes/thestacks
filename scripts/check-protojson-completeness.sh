@@ -103,6 +103,17 @@ BASELINE = {
     "edition:open_library_id",
     "edition:updated_at",
     "listing:book_id",
+    # `seller_id` joined this baseline rather than being hidden from the gate.
+    # It used to sit in the Listing serializer's `skip_fields`, which removes a
+    # field from the GENERATED shape — the left-hand side of this script's set
+    # difference — so a declared proto field reaching no client was invisible to
+    # the gate that exists to find exactly that. `book_id` beside it was never
+    # skipped and has always been pinned here, and the asymmetry had no reason.
+    # Both are genuinely dropped: nothing in Elm or e2e references either, and
+    # `seller_id` is redundant with `seller.id` on the projection. The point is
+    # that "dropped on purpose" is now recorded where a reader will see it,
+    # instead of being achieved by making the field unobservable.
+    "listing:seller_id",
     "placement_detail:book_edition_id",
     "placement_detail:book_id",
     "placement_detail:bookshelf_id",
