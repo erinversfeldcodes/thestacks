@@ -35,6 +35,32 @@ elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
     else
         echo "No .proto files on origin/main — skipping buf breaking check."
     fi
+
+    # A suppression that suppresses nothing is a standing allowance for its
+    # whole file. Run straight after the check it polices, so the two cannot
+    # drift apart.
+    bash "$REPO_ROOT/scripts/check-breaking-suppressions-are-spent.sh"
+else
+    # ⛔ THIS BRANCH USED NOT TO EXIST, and its absence meant `buf breaking` had
+    # NEVER RUN IN CI.
+    #
+    # The `lint-proto` job checks out with the default `fetch-depth`, so it gets
+    # a shallow clone with no `origin/main` ref. `git rev-parse --verify
+    # origin/main` then fails, the `elif` is false, and with no `else` the whole
+    # construct fell through in silence — no check, no skip notice, lane green.
+    # This repo's own Elixir lane states the rule being broken: "Nothing in here
+    # may print SKIP. A gate that cannot run is a failure."
+    #
+    # Failing loudly rather than skipping, because the alternative is what was
+    # already happening.
+    echo "FAIL lint-proto: origin/main is not available, so buf breaking cannot run." >&2
+    echo "       The contract gate compares against the default branch; without that ref" >&2
+    echo "       there is nothing to compare and NOTHING WAS CHECKED." >&2
+    echo "" >&2
+    echo "       In CI: give the job 'fetch-depth: 0', or fetch the branch explicitly." >&2
+    echo "       Locally: git fetch origin main" >&2
+    echo "       Deliberately migrating the contract? BUF_BREAKING_SKIP=1 says so out loud." >&2
+    exit 1
 fi
 
 python3 "$REPO_ROOT/scripts/check-enum-coverage.py"

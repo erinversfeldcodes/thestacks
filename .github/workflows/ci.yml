@@ -461,7 +461,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # fetch-depth: 0 is REQUIRED, not tidy. `buf breaking` compares against
+      # origin/main, and the default shallow checkout creates no such ref — so
+      # the breaking-change gate silently did not run here at all. The script
+      # now fails loudly in that state rather than falling through, which is
+      # what surfaced it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}

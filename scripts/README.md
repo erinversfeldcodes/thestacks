@@ -23,6 +23,7 @@ in code by" and check it before relying on it.
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-api-only-is-skipped.sh` | `scripts/lint-elixir.sh`, `test/platform/api_only_is_skipped_test.sh` | An api_only field must also be skipped by its message's JSON serializer. |
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
+| `scripts/check-breaking-suppressions-are-spent.sh` | `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
@@ -95,7 +96,7 @@ in code by" and check it before relying on it.
 | `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/platform_suites_job_test.sh` … |  |
 | `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/lint_migrations_test.sh`, `test/platform/migration_gate_syntax_test.sh` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
-| `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` |  |
+| `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` … |  |
 | `scripts/lint-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-sql.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
