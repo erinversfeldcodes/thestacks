@@ -23,7 +23,7 @@ in code by" and check it before relying on it.
 | `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-api-only-is-skipped.sh` | `scripts/lint-elixir.sh`, `test/platform/api_only_is_skipped_test.sh` | An api_only field must also be skipped by its message's JSON serializer. |
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
-| `scripts/check-breaking-suppressions-are-spent.sh` | `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
+| `scripts/check-breaking-suppressions-are-spent.sh` | `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh`, `test/platform/guard_unbypassable_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
 | `scripts/check-cli-stub-provenance.sh` | `scripts/lint-elixir.sh`, `test/platform/cli_stub_provenance_test.sh` | A stubbed CLI must say which real tool output it was copied from, and when. |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
@@ -34,6 +34,7 @@ in code by" and check it before relying on it.
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh`, `test/platform/error_token_spelling_test.sh` | Two spellings of one error token is a client that matches on one of them. |
+| `scripts/check-guard-is-unbypassable.sh` | `scripts/lint-elixir.sh`, `test/platform/guard_unbypassable_test.sh` | A declared-count guard must not sit below a path that exits successfully. |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml`, `test/platform/idor_gate_test.sh` |  |
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/gate_fail_closed_test.sh` |  |

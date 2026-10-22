@@ -157,6 +157,11 @@ gate check-status-after-substitution.sh
 # says what real tool output it encodes — a stub written from its author's
 # memory of an API hid three faults in one script behind a fully green suite.
 gate check-cli-stub-provenance.sh
+# The third of the not-really-Elixir gates, here because this lane is the
+# only one that executes. It asks whether any declared-count guard sits
+# below a path that exits 0 — the shape that let a sibling gate report
+# "nothing to police" with nine live suppressions in the file.
+gate check-guard-is-unbypassable.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

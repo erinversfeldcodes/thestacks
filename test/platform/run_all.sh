@@ -37,6 +37,7 @@ SUITES=(
     "$HERE/sigpipe_hazard_gate_test.sh"
     "$HERE/cli_stub_provenance_test.sh"
     "$HERE/ci_gate_reachability_test.sh"
+    "$HERE/guard_unbypassable_test.sh"
     "$HERE/status_after_substitution_test.sh"
     "$HERE/exclusion_tags_have_runners_test.sh"
     "$HERE/async_cache_clearing_test.sh"
