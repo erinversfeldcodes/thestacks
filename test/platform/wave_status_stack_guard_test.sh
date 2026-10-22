@@ -613,4 +613,101 @@ run_gate "$DIR"
 assert_exit_nonzero "$RC" "a kind outside the enum is a violation"
 assert_contains "$OUT" "recognised kind" "so the enum is closed rather than advisory"
 
+# ── 9. the review record is an append-only LOG, not one field ───────────────
+#
+# ⛔ A single `reviewed_at_sha` cannot distinguish "the newest review" from "a
+# review". MEASURED on the real campaign: one axis sat recorded at an earlier
+# commit while THREE later reviews existed and were never written down, so the
+# staleness check reported reviewed work as unreviewed and the next dispatch
+# handed the reviewer work they had already approved.
+#
+# ⚠️ An empty-per-axis-range check cannot reach this. That catches
+# OVER-recording (a sha newer than any real review); under-recording leaves a
+# non-empty, plausible range and is blind by construction. The rule that does
+# catch it is arithmetic over the log: the entry treated as current must be the
+# maximum by ancestry.
+
+log_sandbox() {
+    local name="$1" reviews_json="$2" dir base head
+    dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM"}}')"
+    base="$(git -C "$dir" rev-parse HEAD)"
+    echo 'defmodule Probe do' > "$dir/apps/core/lib/probe.ex"
+    git -C "$dir" add -A
+    git -C "$dir" commit -qm "elixir work the newest review covers"
+    head="$(git -C "$dir" rev-parse HEAD)"
+    python3 - "$dir/plans/probe-campaign-state.json" "$base" "$head" "$reviews_json" <<'LOGFIX'
+import json, sys
+
+path, base, head, reviews = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+state = json.load(open(path))
+state["domain_reviews"]["elixir"]["reviews"] = json.loads(
+    reviews.replace("BASE_SHA", base).replace("HEAD_SHA", head)
+)
+json.dump(state, open(path, "w"), indent=2)
+LOGFIX
+    printf '%s' "$dir"
+}
+
+PROV='{"kind": "quoted_from_reply", "detail": "the reply said so"}'
+
+test_case "the_newest_log_entry_is_the_one_measured" \
+    "the green half — a log in reply order must not fire"
+DIR="$(log_sandbox log_ordered "[{\"sha\": \"BASE_SHA\", \"provenance\": $PROV}, {\"sha\": \"HEAD_SHA\", \"provenance\": $PROV}]")"
+run_gate "$DIR"
+assert_not_contains "$OUT" "sit LATER on this branch" \
+    "the last entry is the newest, so nothing is out of order"
+assert_not_contains "$OUT" "review is STALE" \
+    "and staleness is measured from the NEWEST entry, so this review is current"
+
+# ⛔ The planted red, and it is the real failure: the older entry is last, so an
+# earlier commit is treated as current while a later review is on record.
+test_case "an_older_entry_treated_as_current_is_refused" \
+    "under-recording measures staleness from too far back and re-sends reviewed work"
+DIR="$(log_sandbox log_out_of_order "[{\"sha\": \"HEAD_SHA\", \"provenance\": $PROV}, {\"sha\": \"BASE_SHA\", \"provenance\": $PROV}]")"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a stale current entry is a violation"
+assert_contains "$OUT" "sit LATER on this branch" "the refusal names the condition"
+assert_contains "$OUT" "re-sends work that was already reviewed" \
+    "and states the cost, which is a reviewer's time rather than a false green"
+
+# ── every entry must RESOLVE, or one bogus entry defeats the rule ──────────
+#
+# ⛔ MEASURED on my own record. I wrote a 40-char sha for this log having been
+# given only the short form, inventing 32 hex characters — and the check I used
+# to verify it was `git rev-parse --verify <40-hex>`, which ECHOES BACK any
+# well-formed hex string rather than resolving it. So the verification passed
+# for the wrong reason, on a fabricated value, inside the mechanism built to
+# stop fabricated values.
+#
+# ⚠️ The ancestry rule above asks `merge-base --is-ancestor` of each older
+# entry, and that command FAILS for a sha that does not exist — which reads as
+# "not a descendant" and is skipped in silence. One bogus entry would therefore
+# hide an out-of-order log.
+test_case "an_unresolvable_log_entry_is_refused" \
+    "a sha that resolves to nothing is skipped by the ancestry rule, so it must refuse first"
+BOGUS="81fc33c05e7d1e1e4b3f5d9e8c1a6f2b4d7e0a94"
+DIR="$(log_sandbox log_bogus "[{\"sha\": \"$BOGUS\", \"provenance\": $PROV}, {\"sha\": \"HEAD_SHA\", \"provenance\": $PROV}]")"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "an unresolvable entry is a violation"
+assert_contains "$OUT" "cannot resolve" "the refusal names the condition"
+assert_contains "$OUT" "echoes back any well-formed hex string" \
+    "and names the check that must NOT be used to verify one"
+
+# ⚠️ The discriminating half: the bogus sha used above must be well-formed, or
+# this case would pass against a gate that merely checked the LENGTH.
+test_case "the_bogus_sha_is_well_formed" "a length check must not be able to pass this case"
+if [[ "${#BOGUS}" -eq 40 ]] && [[ "$BOGUS" =~ ^[0-9a-f]+$ ]]; then
+    _record_pass "the planted sha is 40 lowercase hex characters, so only resolution can refuse it"
+else
+    _record_fail "the planted sha is malformed, so the case above proves nothing about resolution"
+fi
+
+test_case "the_legacy_single_field_still_works" \
+    "a migration that turns every existing row red is a migration nobody runs"
+DIR="$(drive_sandbox log_legacy NONE)"
+run_gate "$DIR"
+assert_not_contains "$OUT" "cannot resolve" "the single-field form normalises into a one-entry log"
+assert_not_contains "$OUT" "sit LATER on this branch" "and a one-entry log has nothing out of order"
+assert_not_contains "$OUT" "recognised kind" "with its provenance carried across"
+
 summarise

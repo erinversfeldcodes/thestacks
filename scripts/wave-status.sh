@@ -199,6 +199,53 @@ def _provenance_kind(value):
     return kind if kind in PROVENANCE_KINDS else None
 
 
+# ⛔ A REVIEW LOG, NOT A SINGLE FIELD, and the reason is a measured failure of my
+# own bookkeeping. `reviewed_at_sha` as one value cannot distinguish "the newest
+# review" from "a review" — so an axis that had been reviewed at three later
+# commits sat recorded at an earlier one, and the staleness check dutifully
+# reported REVIEWED work as unreviewed. Reviewers then received ranges inflated
+# with work they had already approved.
+#
+# ⚠️ That failure is INVISIBLE to the obvious check. An empty per-axis range
+# catches OVER-recording (a sha newer than any real review); under-recording
+# leaves a non-empty, healthy-looking range, so it is blind by construction.
+#
+# ⚖️ What makes it computable is arithmetic over the log rather than knowledge of
+# any reply: **the entry treated as current must be the maximum by ancestry** —
+# no other recorded entry may be a DESCENDANT of it. No new trust root, nothing
+# about what arrived in a message, and it catches exactly the case above: with
+# three entries at later commits, treating the earliest as current is refused.
+#
+# ⚠️ Per-entry provenance falls out of the same change, which matters on its own:
+# with a single field a `reconstructed` value can silently overwrite a
+# `quoted_from_reply` one, and the stronger claim is the one you lose.
+def _review_log(entry):
+    """Normalise an axis's record into a list of {sha, provenance, replied_at}.
+
+    Accepts the append-only `reviews` list and the older single-field form, so
+    rows already on disk keep working — a migration that turns every existing
+    row red is a migration nobody runs.
+    """
+    log = entry.get("reviews")
+    if isinstance(log, list) and log:
+        out = []
+        for item in log:
+            if isinstance(item, dict) and item.get("sha"):
+                out.append(item)
+        return out
+    sha = entry.get("reviewed_at_sha")
+    if not sha:
+        return []
+    return [
+        {
+            "sha": sha,
+            "provenance": entry.get("reviewed_at_sha_provenance")
+            or entry.get("sha_provenance"),
+            "replied_at": entry.get("reviewed_on"),
+        }
+    ]
+
+
 def _git(args, timeout=30):
     """Run a git command, returning its stdout lines, or None on any failure."""
     import subprocess
@@ -600,7 +647,10 @@ if not wave_filter and any(
             entry = (state.get("domain_reviews") or {}).get(stack) or {}
             if not isinstance(entry, dict):
                 entry = {}
-            seen = entry.get("reviewed_at_sha")
+
+            log = _review_log(entry)
+            current = log[-1] if log else {}
+            seen = current.get("sha")
 
             if not seen:
                 violations.append(
@@ -663,6 +713,68 @@ if not wave_filter and any(
                 )
                 continue
 
+            # ⛔ THE CURRENT ENTRY MUST BE THE MAXIMUM BY ANCESTRY. Any other
+            # recorded review that is a DESCENDANT of it means this axis has
+            # been reviewed at a later commit than the one being treated as
+            # current — so staleness is being measured from too far back, and
+            # the next dispatch will hand the reviewer work they have already
+            # approved.
+            #
+            # ⚠️ This is the half an empty-range check cannot reach. Over-
+            # recording produces an empty range and is caught; under-recording
+            # produces a non-empty, plausible range and is invisible without
+            # comparing the log against itself.
+            # ⛔ EVERY ENTRY MUST RESOLVE, not just the current one. The
+            # ancestry comparison below asks `merge-base --is-ancestor` of each
+            # older entry, and that command fails for a sha that does not
+            # exist — which this code would read as "not a descendant" and skip
+            # in silence. So a single bogus entry defeats the whole rule.
+            #
+            # ⛔ MEASURED, on my own record. I wrote a 40-char sha for this very
+            # log having only been given the short form, inventing 32 hex
+            # characters. The check I used to verify it was
+            # `git rev-parse --verify <40-hex>`, which ECHOES BACK any
+            # well-formed hex string instead of resolving it — so the
+            # verification passed for the wrong reason, on a fabricated value,
+            # inside the mechanism built to stop fabricated values.
+            #
+            # `cat-file -e <sha>^{commit}` is the form that actually resolves:
+            # the `^{commit}` peel forces object lookup and fails when there is
+            # nothing to peel.
+            unresolvable = [
+                item["sha"]
+                for item in log
+                if _git(["cat-file", "-e", f"{item['sha']}^{{commit}}"]) is None
+            ]
+            if unresolvable:
+                violations.append(
+                    f"  campaign: the {stack} review log names "
+                    f"{len(unresolvable)} commit(s) git cannot resolve: "
+                    f"{', '.join(sha[:12] for sha in unresolvable)}. "
+                    f"A recorded sha that resolves to nothing is either a fetch away or "
+                    f"invented — and an unresolvable entry is SKIPPED by the ancestry rule "
+                    f"below, so one of them defeats it. ⚠️ Verify with "
+                    f"`git cat-file -e <sha>^{{commit}}`, not `git rev-parse --verify <sha>`: "
+                    f"the latter echoes back any well-formed hex string."
+                )
+
+            later = [
+                item
+                for item in log[:-1]
+                if item.get("sha")
+                and item["sha"] != seen
+                and _git(["merge-base", "--is-ancestor", seen, item["sha"]]) is not None
+            ]
+            if later:
+                shown = ", ".join(sorted({item["sha"][:12] for item in later}))
+                violations.append(
+                    f"  campaign: the {stack} review is recorded at {seen[:12]}, but "
+                    f"{len(later)} recorded review(s) sit LATER on this branch: {shown}. "
+                    f"The current entry must be the newest by ancestry, or staleness is "
+                    f"measured from too far back and the next dispatch re-sends work that was "
+                    f"already reviewed. Append in reply order, and make the newest entry last."
+                )
+
             # ⛔ THE SECOND HALF: the SHA must say where it came from.
             #
             # Ancestry proves the commit is on this branch. It cannot prove the
@@ -688,7 +800,7 @@ if not wave_filter and any(
             # both unprovenanced AND stale. Short-circuiting here reported the
             # weaker finding and hid the stronger one — MEASURED, by breaking two
             # existing staleness cases that had been passing.
-            provenance = entry.get("reviewed_at_sha_provenance") or entry.get("sha_provenance")
+            provenance = current.get("provenance")
             if _provenance_kind(provenance) is None:
                 violations.append(
                     f"  campaign: the {stack} review names `reviewed_at_sha` {seen[:12]} "
