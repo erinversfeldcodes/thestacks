@@ -829,9 +829,44 @@ if not wave_filter and any(
             # instead of passing as measurement. And a hand-edited state file can
             # always be made consistent; the defect this refuses is the accidental
             # one, which is the one that actually happened, twice.
+            # ⚠️ A DECLINE IS THE THIRD OUTCOME OF A DISPATCH, and leaving it
+            # out made every decline read as a lost reply. Found by a reviewer
+            # DECLINING a round the same hour this check shipped: the dispatch
+            # was answered, correctly, and produced no review entry — so
+            # `dispatches` stayed one above the log with nothing in flight,
+            # which is precisely the signature of the defect. A model that
+            # cannot represent a legitimate outcome reports it as the failure it
+            # most resembles.
+            #
+            # Declines are counted rather than logged because the log's entries
+            # answer "what sha has been reviewed", and a decline reviews
+            # nothing. Putting it in the log would make the newest entry's sha
+            # mean two different things depending on a field.
+            declines = entry.get("declines", 0)
+            if not isinstance(declines, int) or isinstance(declines, bool) or declines < 0:
+                declines = 0
+
             dispatches = entry.get("dispatches")
             baseline = entry.get("dispatches_baseline")
-            if not isinstance(dispatches, int) or isinstance(dispatches, bool):
+
+            # ⚠️ The counter is demanded only of an axis that HAS something to
+            # reconcile — a log entry or a round in flight. MEASURED: as a
+            # blanket requirement it put twelve violations onto two FINISHED
+            # campaigns whose axes predate the field, which is this repo's own
+            # rule ("a migration that reds every existing row is one nobody
+            # runs") broken two days after writing it.
+            #
+            # ⛔ And this is a narrowing, not a tolerated absence, only because
+            # another check closes the escape: an axis with no log and no
+            # dispatch is already refused below for recording no
+            # `reviewed_at_sha`, so deleting the log to escape the counter
+            # trades one refusal for another rather than reaching green. Stated
+            # explicitly because "absent is fine" is otherwise the exact shape
+            # this block refuses one paragraph up.
+            has_history = bool(log) or bool(dispatch)
+            if not has_history:
+                pass
+            elif not isinstance(dispatches, int) or isinstance(dispatches, bool):
                 violations.append(
                     f"  campaign: the {stack} axis declares no `dispatches` count, so a reply "
                     f"that arrived and was never logged is UNDETECTABLE here — the log stays "
@@ -839,7 +874,21 @@ if not wave_filter and any(
                     f"produced twice. Declare the count at dispatch, alongside "
                     f"`dispatch_in_flight`."
                 )
-            elif isinstance(baseline, int) and dispatches < baseline:
+            # ⛔ The baseline is MANDATORY, not optional. It was `elif
+            # isinstance(baseline, int) and …`, so deleting the field silently
+            # removed the only guard against a counter reset to match a short
+            # log — the same shape as a declared count sitting below an early
+            # success exit, and the same shape as `EXPECTED_ENTRIES` before it
+            # was moved above the parse. Every live axis carries one, so
+            # requiring it costs nothing and closes the downgrade.
+            elif not isinstance(baseline, int) or isinstance(baseline, bool):
+                violations.append(
+                    f"  campaign: the {stack} axis declares {dispatches} dispatches with no "
+                    f"`dispatches_baseline`. The baseline is what makes the count monotonic; "
+                    f"without it a counter reset to agree with a short log passes unnoticed, so "
+                    f"an absent baseline is a silent downgrade rather than a smaller claim."
+                )
+            elif dispatches < baseline:
                 violations.append(
                     f"  campaign: the {stack} axis declares {dispatches} dispatches against a "
                     f"recorded baseline of {baseline}. A dispatch count only ever goes up; a "
@@ -847,23 +896,26 @@ if not wave_filter and any(
                     f"removes the check instead of satisfying it."
                 )
             else:
-                expected = len(log) + (1 if dispatch else 0)
+                expected = len(log) + declines + (1 if dispatch else 0)
                 if dispatches != expected:
+                    outcomes = f"{len(log)} logged replies"
+                    if declines:
+                        outcomes += f" and {declines} declined round(s)"
                     if dispatch:
                         detail = (
                             f"one dispatch is in flight, so the count should be one more than "
-                            f"the {len(log)} logged replies"
+                            f"its {expected - 1} settled outcome(s)"
                         )
                     else:
                         detail = (
                             f"nothing is in flight, so every one of the {dispatches} dispatches "
-                            f"should have a logged reply and only {len(log)} do — a reply that "
-                            f"was read and acted on but never appended is the shape that "
-                            f"produces this"
+                            f"should have settled as a logged reply or a recorded decline, and "
+                            f"only {expected} have — a reply that was read and acted on but "
+                            f"never appended is the shape that produces this"
                         )
                     violations.append(
-                        f"  campaign: the {stack} axis declares {dispatches} dispatches and "
-                        f"{len(log)} logged replies: {detail}."
+                        f"  campaign: the {stack} axis declares {dispatches} dispatches against "
+                        f"{outcomes}: {detail}."
                     )
 
             if not seen:

@@ -45,6 +45,21 @@ assert_path_exists "$GATE" "scripts/wave-status.sh exists"
 SANDBOX_ROOT="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX_ROOT"' EXIT
 
+# ⚠️ DECLARED HERE, far from the case that reads it, on the guard-bypassability
+# gate's instruction. Strictly its finding was a false positive — the
+# `SystemExit(0)` it flagged is inside an embedded python heredoc and exits that
+# interpreter, not this script — but the fix it asks for costs nothing, and
+# arguing with a gate to avoid moving a constant is the wrong trade when the
+# gate's own header records that narrowing it previously produced zero true
+# positives. It also matches the rule this suite enforces on `wave-status.sh`
+# one file over: declarations above the flow that uses them.
+#
+# What it counts: fixtures that set `declares_dispatches`, turning off the
+# harness default that keeps other cases from testing the dispatch count by
+# accident. See the case at the end of this file for why an undeclared opt-out
+# is an allowlist with unstated reasons.
+EXPECTED_DISPATCH_OPT_OUTS=2
+
 # A sandbox repo with one commit on `main`, a feature branch at the same commit,
 # and a campaign state whose single item is COMPLETE — which is what switches
 # the campaign-level stack guard on. `informal` keeps the item from needing a
@@ -134,7 +149,14 @@ for entry in (state.get("domain_reviews") or {}).values():
     log = [e for e in (entry.get("reviews") or []) if isinstance(e, dict) and e.get("sha")]
     if not log and entry.get("reviewed_at_sha"):
         log = [{"sha": entry["reviewed_at_sha"]}]
-    entry["dispatches"] = len(log) + (1 if entry.get("dispatch_in_flight") else 0)
+    count = len(log) + entry.get("declines", 0) + (1 if entry.get("dispatch_in_flight") else 0)
+    entry["dispatches"] = count
+    # ⛔ EVERY mandatory field of this check must be filled here, not just the
+    # first one. MEASURED: making `dispatches_baseline` mandatory re-dirtied
+    # all sixteen fixtures a THIRD time — the normaliser supplied `dispatches`
+    # and not the baseline, so the exit assertions silently went back to being
+    # satisfied by the fixture. The canary case below is what caught it.
+    entry["dispatches_baseline"] = count
 json.dump(state, open(path, "w"), indent=2)
 NORMALISE
 }
@@ -808,6 +830,26 @@ DISPATCHFIX
     printf '%s' "$dir"
 }
 
+# ⛔ THE CANARY, AND IT IS A STANDING INSTRUMENT RATHER THAN A CASE ABOUT
+# DISPATCHES. Every `assert_exit_nonzero` in this file is evidence only while a
+# correct fixture exits ZERO, and that property has now been revoked THREE
+# TIMES by three different causes: the wave status, then `dispatches`, then
+# `dispatches_baseline` — each one a new mandatory requirement that every
+# pre-existing fixture silently failed.
+#
+# ⚠️ It was caught all three times by probing an UNRELATED check and noticing
+# its exit assertion had stopped reddening, which is a thing I had to remember
+# to do. Asserting it directly is what makes the next mandatory field announce
+# itself: this case reds the moment a correct fixture stops being clean, and it
+# names the cause rather than leaving sixteen assertions quietly decorative.
+test_case "a_correct_fixture_exits_ZERO_so_the_exit_assertions_mean_something" \
+    "three mandatory fields have each silently revoked this property"
+DIR="$(dispatch_sandbox disp_clean '{"base_sha": "HEAD_SHA", "round": 2}')"
+run_gate "$DIR"
+assert_exit_zero "$RC" \
+    "a fixture with nothing wrong must be GREEN, or every assert_exit_nonzero below is satisfied by the fixture"
+assert_contains "$OUT" "Wave probe" "and the gate actually ran, rather than producing nothing"
+
 test_case "a_base_equal_to_the_newest_review_satisfies" "the green half — this must not fire on a correct dispatch"
 DIR="$(dispatch_sandbox disp_equal '{"base_sha": "HEAD_SHA", "round": 2}')"
 run_gate "$DIR"
@@ -880,8 +922,11 @@ assert_not_contains "$OUT" "no recorded review to match it against" "and not als
 # green/red pair below is followed by a case asserting that the count is the
 # ONLY instrument that reports the defect.
 
+# `baseline`: "" takes the reconciling default, "none" omits the field entirely
+# (the mandatory-baseline case), anything else is used verbatim.
+# `declines`: "" omits the field, a number records that many declined rounds.
 completion_sandbox() {
-    local name="$1" dispatches="$2" dispatch_json="$3" baseline="${4:-}" dir base head
+    local name="$1" dispatches="$2" dispatch_json="$3" baseline="${4:-}" declines="${5:-}" dir base head
     dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM"}}')"
     base="$(git -C "$dir" rev-parse HEAD)"
     echo 'defmodule Probe do' > "$dir/apps/core/lib/probe.ex"
@@ -889,10 +934,10 @@ completion_sandbox() {
     git -C "$dir" commit -qm "elixir work the review covers"
     head="$(git -C "$dir" rev-parse HEAD)"
     python3 - "$dir/plans/probe-campaign-state.json" "$base" "$head" \
-        "$dispatches" "$dispatch_json" "$baseline" <<'COMPLETIONFIX'
+        "$dispatches" "$dispatch_json" "$baseline" "$declines" <<'COMPLETIONFIX'
 import json, sys
 
-path, base, head, dispatches, dispatch, baseline = sys.argv[1:7]
+path, base, head, dispatches, dispatch, baseline, declines = sys.argv[1:8]
 state = json.load(open(path))
 # This case is ABOUT the dispatch count, so the harness default must not touch
 # it — including the case that tests an absent count, which the default would
@@ -904,8 +949,17 @@ e["reviews"] = [
 ]
 if dispatches != "":
     e["dispatches"] = json.loads(dispatches)
-if baseline != "":
+# ⚠️ The baseline defaults to a RECONCILING value rather than being omitted:
+# it is mandatory, so leaving it out of every fixture would make each case test
+# the missing-baseline refusal instead of what it names. "none" is the explicit
+# opt-out for the one case that IS about its absence.
+if baseline == "":
+    if dispatches != "":
+        e["dispatches_baseline"] = json.loads(dispatches)
+elif baseline != "none":
     e["dispatches_baseline"] = json.loads(baseline)
+if declines != "":
+    e["declines"] = json.loads(declines)
 parsed = json.loads(dispatch.replace("BASE_SHA", base).replace("HEAD_SHA", head))
 if parsed is not None:
     e["dispatch_in_flight"] = parsed
@@ -940,7 +994,7 @@ test_case "a_dispatch_with_no_logged_reply_is_refused" \
 DIR="$(completion_sandbox comp_unlogged 2 'null')"
 run_gate "$DIR"
 assert_exit_nonzero "$RC" "an unlogged reply is a violation"
-assert_contains "$OUT" "declares 2 dispatches and 1 logged replies" \
+assert_contains "$OUT" "declares 2 dispatches against 1 logged replies" \
     "the refusal states both numbers rather than only that they disagree"
 assert_contains "$OUT" "never appended" "and names the act that produces it"
 
@@ -966,6 +1020,68 @@ run_gate "$DIR"
 assert_exit_nonzero "$RC" "an axis with no declared count is a violation"
 assert_contains "$OUT" "declares no \`dispatches\` count" "the refusal names the condition"
 assert_contains "$OUT" "UNDETECTABLE" "and says what the absence costs"
+
+# ⚠️ A DECLINE IS THE THIRD OUTCOME, and omitting it made every decline read as
+# the defect. Found by a reviewer declining a round the same hour this check
+# shipped: the dispatch was answered, correctly, and produced no review entry —
+# so the count sat one above the log with nothing in flight, which is exactly
+# the signature of a lost reply. A model that cannot represent a legitimate
+# outcome reports it as the failure it most resembles.
+test_case "a_recorded_decline_settles_a_dispatch" \
+    "a declined round is answered, not lost"
+DIR="$(completion_sandbox comp_declined 2 'null' '' 1)"
+run_gate "$DIR"
+assert_exit_zero "$RC" "a dispatch settled by a decline reconciles"
+assert_not_contains "$OUT" "never appended" \
+    "a decline must not be reported as the reply that was never written down"
+
+# ⛔ And the red half, which is what keeps `declines` from being an escape
+# hatch: a decline COUNT does not excuse a missing one. Two dispatches, one
+# logged reply, no declines recorded — still the defect.
+test_case "a_decline_count_does_not_excuse_an_unlogged_reply" \
+    "the third outcome must be recorded to settle a round, not merely available"
+DIR="$(completion_sandbox comp_declined_zero 2 'null' '' 0)"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "an unrecorded outcome is still a violation"
+assert_contains "$OUT" "a logged reply or a recorded decline" \
+    "and the refusal names both settling outcomes, so the fix is discoverable"
+
+# ⛔ The baseline is MANDATORY. It was optional, so deleting the field silently
+# removed the only guard against a counter reset to match a short log — the
+# same shape as a declared count below an early success exit.
+test_case "a_dispatch_count_with_no_baseline_is_refused" \
+    "an optional guard is one a future edit removes without noticing"
+DIR="$(completion_sandbox comp_nobaseline 1 'null' none)"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a count with no baseline is a violation"
+assert_contains "$OUT" "no \`dispatches_baseline\`" "the refusal names the missing field"
+assert_contains "$OUT" "silent downgrade" "and says why absence is not a smaller claim"
+
+# ⚠️ An axis with NO log and NO dispatch has nothing to reconcile, and
+# demanding the counter of it put twelve violations onto two FINISHED campaigns
+# whose axes predate the field — this repo's own rule about migrations that red
+# every existing row, broken two days after writing it.
+#
+# ⛔ The narrowing is safe only because another check closes the escape: such an
+# axis is already refused for recording no `reviewed_at_sha`, so deleting the
+# log to dodge the counter trades one refusal for another. Both halves are
+# asserted here, because "absent is fine" is otherwise the exact shape this
+# section refuses.
+test_case "an_axis_with_no_history_is_not_asked_for_a_count" \
+    "a field cannot be demanded of records that predate it"
+DIR="$(new_sandbox comp_nohistory '{"elixir": {"verdict": "LGTM"}}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+python3 - "$DIR/plans/probe-campaign-state.json" <<'NOHIST'
+import json, sys
+state = json.load(open(sys.argv[1]))
+state["declares_dispatches"] = True
+json.dump(state, open(sys.argv[1], "w"), indent=2)
+NOHIST
+run_gate "$DIR"
+assert_not_contains "$OUT" "declares no \`dispatches\` count" \
+    "an axis with no log and no dispatch has nothing to reconcile"
+assert_contains "$OUT" "records no \`reviewed_at_sha\`" \
+    "and is still refused by the check that closes the escape — the narrowing adds no green path"
 
 # ⚠️ A counter that can be reset is a counter that can be made to agree with a
 # short log, which would turn the check above into a formality. Monotonicity is
@@ -1119,5 +1235,45 @@ if [[ $? -eq 0 ]]; then
 else
     _record_fail "a definition drifted below the main flow — see the FAIL lines above"
 fi
+
+# ── the dispatch-count opt-out is a CLAIM, not a convenience ───────────────
+#
+# ⛔ `declares_dispatches` turns off the harness default that keeps every other
+# case from testing the dispatch count by accident. Today two fixtures set it
+# and both are genuinely about the count — **correct and unchecked**, which is
+# the state an allowlist in this repo was in before seven of its eight stated
+# reasons turned out to be false.
+#
+# ⚠️ The failure it permits lands on the discriminating case directly: a future
+# fixture that opts out for convenience silently stops exercising the count
+# while reading as a case about it, and every absence assertion still passes
+# because nothing fires. Absence assertions cannot notice a check that went
+# quiet — that is the whole reason they are paired with a planted red.
+#
+# Two things are therefore pinned. The number of opt-out sites, so a new one
+# must be declared deliberately; and the fact that each of the three count
+# refusals is actually ASSERTED somewhere, so the opt-out family cannot drift
+# into being all-green. The second is the one that makes the first mean
+# something: a declared count of sites that test nothing is just a number.
+test_case "the_dispatch_count_opt_out_is_declared_and_exercised" \
+    "an opt-out nothing checks is an allowlist with unstated reasons"
+SUITE_SRC="$(cat "$0")"
+_opt_outs="$(grep -c 'state\["declares_dispatches"\] = True' "$0" || true)"
+if [[ "$_opt_outs" -eq "$EXPECTED_DISPATCH_OPT_OUTS" ]]; then
+    _record_pass "exactly $EXPECTED_DISPATCH_OPT_OUTS fixture(s) opt out of the dispatch-count default, as declared"
+else
+    _record_fail "$_opt_outs fixture(s) opt out of the dispatch-count default, expected $EXPECTED_DISPATCH_OPT_OUTS — a new opt-out silently stops testing the count while reading as a case about it; add the case that exercises what it turned off, then update the constant"
+fi
+
+# ⚠️ Asserted over this file's own source rather than a run, because each
+# refusal is produced by a different fixture and no single run holds all three.
+# The claim is "every branch of the count check has a case", which is a
+# property of the suite, not of one invocation.
+assert_contains "$SUITE_SRC" 'declares no `dispatches` count' \
+    "the undeclared-count refusal is asserted by some case"
+assert_contains "$SUITE_SRC" 'no `dispatches_baseline`' \
+    "the missing-baseline refusal is asserted by some case"
+assert_contains "$SUITE_SRC" "a logged reply or a recorded decline" \
+    "and the reconciliation refusal, naming both settling outcomes"
 
 summarise
