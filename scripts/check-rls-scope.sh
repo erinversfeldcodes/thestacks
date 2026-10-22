@@ -439,12 +439,33 @@ def strip_elixir(src):
     repo's most-recorded gate failure — a gate reading its own subject matter as
     configuration — in its sharpest form yet.
 
-    ⚠️ KNOWN LIMIT, stated rather than discovered: a string literal is blanked
-    whole, including `#{…}` interpolation, so a function that establishes a
-    scope only inside an interpolated expression would go undetected. That is a
-    false negative, which the floor below cannot see — but it is the safe
-    direction for this gate, whose false positives are expensive because there
-    is no prose exemption path.
+    ⚠️ A CHARACTER SCANNER RATHER THAN A REGEX, and that choice is LOAD-BEARING
+    rather than stylistic. MEASURED: `apps/core/lib` contains 20 `?"` character
+    literals, and the obvious `re.sub(r'"[^"]*"', …)` version would have read
+    each one's quote as a string opener and blanked real code forward to the
+    next quote — wrong twenty times, silently, in the direction that blinds the
+    gate. The `?` branch consumes the two-character literal before the `"`
+    branch can see it. (`?\\"` would desync it the other way; measured 0, and
+    nobody writes it.)
+
+    ⚠️ TWO KNOWN LIMITS, with their measured base rates, because "a limit
+    exists" and "a limit is reachable at 0 of 52" are different claims and the
+    second is what a future reader needs:
+
+      * `#{…}` interpolation inside a string is blanked with the string, so a
+        function establishing a scope ONLY inside an interpolated expression
+        goes undetected. A false NEGATIVE the floor cannot see.
+        **Measured 0** — no `#{… Scope. …}` anywhere in `apps/core/lib`.
+
+      * `~s`/`~S` sigil contents are NOT blanked, so `Scope.with_user` written
+        inside one would survive the strip and be read as a call — the same
+        shape as the `blocked?` comment above. A false POSITIVE, which is the
+        EXPENSIVE direction here because there is no prose exemption path.
+        **Measured 11 sigils in lib, 0 containing `Scope.`**
+
+    So the gate is sound today on both, and the cheap direction is the one left
+    open. 1842 `\"\"\"` heredoc delimiters are handled explicitly by the branch
+    above rather than by luck.
     """
     out, i, n = [], 0, len(src)
     while i < n:
@@ -534,6 +555,21 @@ if len(establishers) < floor:
 # directory — which would report "no test wraps a scope-establishing call" over
 # a corpus of nothing, the precise vacuity the floor above exists to refuse. An
 # extra directory can only ever add offenders, never hide one.
+#
+# ⚖️ AND THE SOUNDER REASON, which the sentence above does not name: the floor
+# and the override act on DISJOINT POPULATIONS. The reviewer attacked this
+# expecting the floor to be defeatable — an additive override inflates the
+# scanned corpus, so if `MIN_SCOPE_ESTABLISHERS` counted THAT, pointing the
+# override at a fixture directory with twenty synthetic sites would satisfy the
+# floor while the real corpus eroded. It does not, because the floor counts
+# scope-establishing functions in PRODUCTION code while the override extends the
+# TEST corpus. Nothing the override can add is in the dimension the floor
+# measures.
+#
+# ⚠️ Recorded because "can only add offenders" is an argument about OFFENDERS
+# and the floor is a separate axis — the same shape as the narrowing argument
+# one file over, where the claim was sound and its soundness lived somewhere the
+# claim did not name.
 roots = [pathlib.Path("apps/core/test")]
 extra = os.environ.get("RLS_SCOPE_EXTRA_TEST_DIR", "").strip()
 if extra:

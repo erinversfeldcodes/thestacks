@@ -967,15 +967,29 @@ if not wave_filter and any(
                 # outcome.** Stated as a floor rather than a match, because the
                 # process bounds replies from below and not from above.
                 #
-                # ⚠️ WHAT THIS GIVES UP, said plainly because the weaker form is
-                # easy to read as equivalent: it no longer catches
-                # OVER-recording — a log entry for a dispatch never sent. That
-                # is a different defect (a fabricated review) and it is covered
-                # by the provenance kinds and the sha resolution above, both of
-                # which a fabricated entry has to get past. What it still
-                # catches is the defect that actually happened twice: a reply
-                # read, acted on, and never written down, which drives `settled`
-                # below `dispatches`.
+                # ⚠️ WHAT THIS GIVES UP IS A DELIBERATE ASYMMETRY, not a
+                # weakening to apologise for — stated this way because the
+                # floor form otherwise reads as a regression to the next reader.
+                #
+                # The two directions have different consequences and different
+                # remediation. UNDER-recording means unreviewed work shipped,
+                # which only arithmetic over the log can see — so the floor
+                # keeps it. OVER-recording means a review was CLAIMED that did
+                # not happen, which is a claim the provenance enum and the sha
+                # resolution already have to defend against, and neither of
+                # those is arithmetic. Spending the equality to catch the second
+                # at the cost of refusing the first's legitimate shape was the
+                # wrong trade.
+                #
+                # ⛔ And the rule the equality broke, worth more than this fix:
+                # **an equality between two counts encodes an arity claim
+                # SILENTLY.** `dispatches == settled` asserted
+                # one-reply-per-dispatch without anyone having written that
+                # anywhere, so the assumption could not be reviewed, only
+                # tripped over. A missing `else` in a different costume — a
+                # claim on a path nobody can read. Either write the cardinality
+                # down beside the equality, or use the inequality that does not
+                # assume it.
                 settled = len(log) + declines
                 allowance = 1 if dispatch else 0
                 if settled < dispatches - allowance:
