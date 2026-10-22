@@ -15,6 +15,11 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_ai_together_completion_count_total" => :public,
     "stacks_discovery_brave_search_count_total" => :public,
     "stacks_auth_jwt_issued_count_total" => :public,
+    # Session transport during the cookie rollout. `:public` like its auth
+    # siblings: the series is an aggregate keyed only by `cookie`/`bearer` and
+    # names no reader, session or token. It is the reading the bearer-path
+    # deletion is decided on, so it needs to be visible rather than break-glass.
+    "stacks_auth_session_transport_count_total" => :public,
     "stacks_auth_login_failure_count_total" => :public,
     "stacks_auth_mfa_verify_count_total" => :public,
     # Invite-gate outcomes. `:public` like its registration sibling: the counter is an

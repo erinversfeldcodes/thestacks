@@ -671,6 +671,63 @@
           "legendFormat": "degraded"
         }
       ]
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Session transport rollout",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Session transport (cookie vs bearer) \u2014 the bearer deletion gate",
+      "description": "WHAT: rate of AUTHENTICATED requests by the transport that carried the session. HOW: rate over stacks_auth_session_transport_count_total by transport, emitted from StacksWeb.Plugs.SessionCookie in register_before_send, and only when the request actually authenticated \u2014 an unauthenticated request offers a transport too, and counting those would let the bearer series read zero on a stream of failures. MEANS: during the rollout both series are live; `cookie` should climb as clients update and `bearer` should fall toward zero. WATCH: this panel is the DECIDING instrument for deleting the bearer path \u2014 delete it when `bearer` holds at zero for a full release, and not before. A `bearer` series that stops falling means a client is still on the old transport; find it before removing the path it depends on.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_auth_session_transport_count_total{app=\"$app\"}[$__rate_interval])) by (transport)",
+          "legendFormat": "{{transport}}/s"
+        }
+      ]
     }
   ]
 }

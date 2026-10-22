@@ -57,6 +57,23 @@ defmodule Core.PromEx.Plugins.Stacks do
         # them was emitted, counted by nothing, and on no dashboard: the prose
         # written for them described series that did not exist. The plugin is
         # where a metric becomes observable, so they are declared here too.
+        # ⛔ THE ROLLOUT'S DECIDING INSTRUMENT, not an observability nicety. The
+        # bearer transport is deleted when this counter's `bearer` series reads
+        # zero for a release — so without the series the deletion is a guess,
+        # and this repository has a recorded dual path that became permanent
+        # because nothing measured which half was live.
+        #
+        # ⚠️ Declared HERE as well as emitted, which is the lesson the comment
+        # above this group records: five metrics were emitted, counted by
+        # nothing, and on no dashboard. The plugin is where a metric becomes
+        # observable.
+        counter(
+          [:stacks, :auth, :session_transport, :count, :total],
+          event_name: [:stacks, :auth, :session_transport],
+          description:
+            "Authenticated requests by the transport that carried the session (cookie/bearer). Counts only requests that authenticated: an unauthenticated request offers a transport too, and counting those would let the bearer series read zero on a stream of failures. The bearer path is deleted when its series holds at zero for a release.",
+          tags: [:transport]
+        ),
         counter(
           [:stacks, :auth, :password_reset, :count, :total],
           event_name: [:stacks, :auth, :password_reset],
