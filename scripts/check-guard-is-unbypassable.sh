@@ -67,6 +67,14 @@ SUCCESS_EXIT = re.compile(
 # policing bypassable guards whose own guard were bypassable would be the exact
 # defect it exists to catch. The first run reported 12 against a hand-counted 11
 # for precisely this reason.
+#
+# ⚠️ THIS COUNT SITS OVER A GROWING POPULATION, so every new gate that declares a
+# floor touches this line. That is CORRECT FRICTION by the same reasoning that
+# makes it a declared count rather than a floor: adding a guarded script is a
+# decision, and it should appear in the diff rather than inside slack. Do not
+# "fix" the friction by converting this to `>=` — a floor here would let a gate
+# join the population without anyone noticing it had, which is the whole thing
+# this file exists to prevent one level down.
 EXPECTED_GUARDED_SCRIPTS = 12
 
 guarded = {}
