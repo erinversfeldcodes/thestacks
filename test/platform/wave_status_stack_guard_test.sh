@@ -331,4 +331,115 @@ assert_contains "$OUT" "Wave probe" "the gate ran and rendered the wave"
 assert_not_contains "$OUT" "of its items are done" \
     "one item is not_started, so this wave is legitimately in_progress"
 
+# ── 6. a recorded SHA must say where it came from ───────────────────────────
+#
+# ⛔ The failure this closes actually happened, and every existing check passed
+# through it. A recording script set `reviewed_at_sha` from the DISPATCH's
+# head_sha for three axes — which assumes the reviewer reviewed the tip it was
+# handed. Two had replied at an earlier commit and one at a different one, so
+# all three read as having reviewed work they never saw, and the campaign
+# UNDERSTATED its own staleness.
+#
+# ⚠️ Ancestry could not catch it: a dispatch head is a real ancestor of HEAD. A
+# claim about what arrived in a message cannot be verified from inside a state
+# file, so the requirement is that the claim be STATED — which turns a silent
+# assumption into a sentence someone has to write.
+#
+# ⚠️ Driven, not grepped. This case was first written as four
+# `assert_contains` over the gate's own SOURCE, which asserts the sentences
+# exist and says nothing about whether the check runs — the precise instrument
+# defect this suite keeps catching elsewhere. The red/green pair below differs
+# only in the presence of the provenance field.
+DIR="$(new_sandbox sha_unprovenanced '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
+# ⚠️ The elixir file is what puts `elixir` in the changed-stack set, and without
+# it the per-stack loop never runs for elixir at all — so the gate still exited
+# nonzero (other violations exist in this sandbox) while the provenance check
+# had not executed. The exit status was satisfied for the wrong reason, and the
+# green half below was then passing vacuously against a needle absent from both.
+# Committed, so the review SHA can be HEAD and the review is current, not stale.
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "an elixir commit the review is current for"
+UNPROV_SHA="$(git -C "$DIR" rev-parse HEAD)"
+python3 - "$DIR/plans/probe-campaign-state.json" "$UNPROV_SHA" <<'PY'
+import sys
+
+path, sha = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    body = f.read()
+with open(path, "w") as f:
+    f.write(body.replace("SHA_PLACEHOLDER", sha))
+PY
+
+test_case "an_unprovenanced_sha_is_refused" "ancestry cannot see a SHA the reviewer never reported"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a SHA with no provenance is a violation"
+assert_contains "$OUT" "with no provenance" "the refusal names the condition"
+assert_contains "$OUT" "elixir review names" "and the stack it applies to"
+assert_contains "$OUT" "ancestry cannot see it" \
+    "and says why the ancestry check above it is not sufficient"
+
+# ⚠️ THE ANTI-VACUITY HALF. Without it this case passes against a check that
+# refuses every review, provenanced or not — and that is not a hypothetical: the
+# sandbox above is at the current SHA with nothing changed under apps/core, so
+# the ONLY thing standing between it and a clean report is the provenance field.
+python3 - "$DIR/plans/probe-campaign-state.json" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+state = json.load(open(path))
+entry = state["domain_reviews"]["elixir"]
+entry["reviewed_at_sha_provenance"] = "quoted from the reviewer's reply"
+json.dump(state, open(path, "w"), indent=2)
+PY
+
+test_case "a_provenanced_sha_satisfies" "the green half — this must not fire on everything"
+run_gate "$DIR"
+assert_contains "$OUT" "Wave probe" "the gate ran and rendered the wave"
+assert_not_contains "$OUT" "with no provenance" \
+    "the same sandbox passes once the field is present — so the refusal is about provenance and nothing else"
+
+# ⛔ And the check must not SHORT-CIRCUIT the staleness check below it. It was
+# first written ending in `continue`, by symmetry with every refusal above it —
+# but those end the stack's checks because staleness is genuinely uncomputable
+# past them, and this one is not. MEASURED: the `continue` broke two existing
+# staleness cases, reporting the weaker finding and hiding the stronger one.
+DIR="$(new_sandbox sha_unprovenanced_and_stale '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "SHA_PLACEHOLDER"}}')"
+BOTH_SHA="$(git -C "$DIR" rev-parse main)"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "an elixir commit the reviewer never saw"
+python3 - "$DIR/plans/probe-campaign-state.json" "$BOTH_SHA" <<'PY'
+import sys
+
+path, sha = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    body = f.read()
+with open(path, "w") as f:
+    f.write(body.replace("SHA_PLACEHOLDER", sha))
+PY
+
+test_case "both_defects_are_reported_together" "a missing provenance note must not hide staleness"
+run_gate "$DIR"
+assert_contains "$OUT" "with no provenance" "the provenance violation is reported"
+assert_contains "$OUT" "elixir review is STALE" "and the staleness violation is reported too"
+assert_contains "$OUT" "apps/core/lib/probe.ex" \
+    "naming the file — the finding a short-circuit here would have swallowed"
+
+# ⚠️ The older key name stays accepted, because rows already on disk use it.
+python3 - "$DIR/plans/probe-campaign-state.json" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+state = json.load(open(path))
+state["domain_reviews"]["elixir"]["sha_provenance"] = "reconstructed from the dispatch log"
+json.dump(state, open(path, "w"), indent=2)
+PY
+
+test_case "the_older_key_name_is_accepted" "rows already on disk use the shorter spelling"
+run_gate "$DIR"
+assert_contains "$OUT" "elixir review is STALE" "the gate still ran and still reports staleness"
+assert_not_contains "$OUT" "with no provenance" \
+    "the shorter key name satisfies the requirement, so existing rows do not all turn red at once"
+
 summarise

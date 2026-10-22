@@ -530,6 +530,42 @@ if not wave_filter and any(
                 )
                 continue
 
+            # ⛔ THE SECOND HALF: the SHA must say where it came from.
+            #
+            # Ancestry proves the commit is on this branch. It cannot prove the
+            # reviewer ever saw it — and that is the failure that actually
+            # happened. A recording script set this field from the DISPATCH's
+            # head_sha for three axes, which assumes the reviewer reviewed the
+            # tip it was handed; two of them had replied at an earlier commit
+            # and one at a different one entirely, so all three read as having
+            # reviewed work they never saw. Every check here passed, because
+            # each SHA was a real ancestor.
+            #
+            # There is no way to verify a claim about a message from inside this
+            # file, so the requirement is that the claim be STATED: a recorded
+            # SHA carries a provenance note saying it was quoted from the reply
+            # rather than inferred. That converts a silent assumption into a
+            # sentence someone has to write and can be wrong in public.
+            #
+            # ⚠️ NO `continue`. Every refusal above it ends the stack's checks
+            # because staleness is genuinely UNCOMPUTABLE past them — an
+            # unreadable diff yields no file list, and a non-ancestor SHA yields
+            # a meaningless one. A missing provenance note is a different kind of
+            # defect: the file list is perfectly computable, and the review can be
+            # both unprovenanced AND stale. Short-circuiting here reported the
+            # weaker finding and hid the stronger one — MEASURED, by breaking two
+            # existing staleness cases that had been passing.
+            provenance = entry.get("reviewed_at_sha_provenance") or entry.get("sha_provenance")
+            if not provenance:
+                violations.append(
+                    f"  campaign: the {stack} review names `reviewed_at_sha` {seen[:12]} "
+                    f"with no provenance. "
+                    f"Add `reviewed_at_sha_provenance` saying where it came from — "
+                    f"quoted from the reviewer's reply, or reconstructed and how. A SHA set from "
+                    f"the dispatch head instead of the reply is the recorded failure here, and "
+                    f"ancestry cannot see it because such a SHA is a real ancestor."
+                )
+
             prefixes = STACK_PATHS[stack]
             stale = [f for f in since if any(f.startswith(p) for p in prefixes)]
             if stale:
