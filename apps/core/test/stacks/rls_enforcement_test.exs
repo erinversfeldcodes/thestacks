@@ -25,6 +25,7 @@ defmodule Stacks.RlsEnforcementTest do
   alias Core.Repo
   alias Ecto.Adapters.SQL
   alias Stacks.Scope
+  alias Stacks.Shelving.Bookshelf
 
   @unscoped_refusal "no request scope set"
 
@@ -175,6 +176,139 @@ defmodule Stacks.RlsEnforcementTest do
              the scope — the deployed-500 defect, now visible offline. The fix belongs at the
              shared helper the query goes through, not at the call site.
              """
+    end
+  end
+
+  describe "writes are refused too, not only reads" do
+    # ⛔ I had recorded the write path as UNTESTABLE — the `Ecto.Multi`'s abort
+    # poisoning the enclosing transaction. A reviewer thought the blocker was
+    # imaginary and the Multi incidental, and was right on both counts.
+    #
+    # MEASURED: a single `Repo.insert!` exercises the policy's `WITH CHECK`
+    # identically, needs no Multi, and the connection is still usable after each
+    # refusal — so the constraint is "assert nothing after the raise", not
+    # "untestable". The Multi brought savepoint complexity unrelated to the
+    # thing under test.
+    test "a scoped write of the scoped user's own row is allowed" do
+      owner = insert(:user)
+
+      # The positive control. Without it the two refusals below pass against a
+      # policy that refuses everything, which would be no guarantee at all.
+      assert %Bookshelf{} =
+               Scope.with_user(owner.id, fn ->
+                 AppRole.as_app_role(fn ->
+                   Repo.insert!(%Bookshelf{
+                     id: Ecto.UUID.generate(),
+                     user_id: owner.id,
+                     name: "library",
+                     visibility: "owner"
+                   })
+                 end)
+               end)
+    end
+
+    test "an UNSCOPED write is refused" do
+      owner = insert(:user)
+
+      # ⚠️ `assert_raise` is the LAST statement, asserting nothing after it: the
+      # refusal aborts the statement, and while the connection survives here,
+      # depending on that would be depending on an implementation detail.
+      assert_raise Postgrex.Error, fn ->
+        AppRole.as_app_role(fn ->
+          Repo.insert!(%Bookshelf{
+            id: Ecto.UUID.generate(),
+            user_id: owner.id,
+            name: "wishlist",
+            visibility: "owner"
+          })
+        end)
+      end
+    end
+
+    # ⛔ THE WRITE-SIDE ISOLATION GUARANTEE, and it exercises a different clause
+    # from everything above. The reads are refused by `USING`; this is refused
+    # by `WITH CHECK` — "new row violates row-level security policy" rather than
+    # "no request scope set". A policy with `USING` and no `WITH CHECK` would
+    # pass every other case in this file and let one user write rows owned by
+    # another.
+    test "a scoped write of ANOTHER user's row is refused by WITH CHECK" do
+      owner = insert(:user)
+      other = insert(:user)
+
+      assert_raise Postgrex.Error, fn ->
+        Scope.with_user(owner.id, fn ->
+          AppRole.as_app_role(fn ->
+            Repo.insert!(%Bookshelf{
+              id: Ecto.UUID.generate(),
+              user_id: other.id,
+              name: "antilibrary",
+              visibility: "owner"
+            })
+          end)
+        end)
+      end
+    end
+  end
+
+  describe "the policies exist and are FORCED on every secured table" do
+    # ⛔ THE COMPLEMENT TO THE BEHAVIOURAL TESTS, and it is query-independent.
+    # The cases above prove the policies WORK on `op.bookshelves`, where the
+    # owner-sees-own / other-sees-none pair cannot both hold on a policy-free
+    # table. They say nothing about the other three secured tables.
+    #
+    # ⚠️ `relforcerowsecurity` is the one most worth asserting, and the reason is
+    # not obvious: **the table OWNER bypasses row-level security unless FORCE is
+    # set.** This project does set it, but a future migration that recreated a
+    # table without it would be invisible to every behavioural test that happens
+    # to run as a non-owner — which is all of them here.
+    @secured_tables ~w(bookshelves bookshelf_placements user_blocks visibility_grants)
+
+    test "all four carry row-level security, and it is forced" do
+      %{rows: rows} =
+        SQL.query!(
+          Repo,
+          """
+          SELECT c.relname::text, c.relrowsecurity, c.relforcerowsecurity
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'op' AND c.relname = ANY($1)
+          ORDER BY c.relname
+          """,
+          [@secured_tables]
+        )
+
+      # ⚠️ A floor on the population, or a renamed table silently empties the
+      # set and this passes over nothing.
+      assert length(rows) == length(@secured_tables),
+             "expected #{length(@secured_tables)} secured tables, found #{length(rows)}: #{inspect(rows)}"
+
+      for [name, enabled, forced] <- rows do
+        assert enabled, "op.#{name} does not have row-level security ENABLED"
+
+        assert forced,
+               "op.#{name} has RLS enabled but NOT FORCED — its owner bypasses every policy, " <>
+                 "and no behavioural test here would notice because none runs as the owner"
+      end
+    end
+
+    test "each secured table has at least one policy" do
+      %{rows: rows} =
+        SQL.query!(
+          Repo,
+          """
+          SELECT tablename::text, count(*) FROM pg_policies
+          WHERE schemaname = 'op' AND tablename = ANY($1)
+          GROUP BY tablename ORDER BY tablename
+          """,
+          [@secured_tables]
+        )
+
+      assert length(rows) == length(@secured_tables),
+             "a secured table has NO policy at all: #{inspect(rows)}"
+
+      for [name, count] <- rows do
+        assert count >= 1, "op.#{name} has #{count} policies"
+      end
     end
   end
 end
