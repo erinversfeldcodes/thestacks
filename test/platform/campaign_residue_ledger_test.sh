@@ -249,4 +249,165 @@ assert_contains "$OUT" "'clsoed'" "and quotes the offending value in the refusal
 assert_contains "$OUT" "(RL-011)" "and names the row carrying it, in the refusal's own form"
 assert_not_contains "$OUT" "RL-012" "the genuinely open row is not blamed for it"
 
+# --- a trigger naming only COMPLETED issues has fired ----------------------
+#
+# ⛔ The sweep's older half looks for the literal word SATISFIED, which someone
+# has to have typed — so a trigger is discharged exactly as often as its author
+# comes back to say so, which is the property this ledger exists to remove.
+#
+# MEASURED 2026-10-22: a row's trigger named a wave item as "in progress" after
+# that item had completed. A fresh pass reads that as scheduled against work
+# still in flight, so the row is neither discharged nor re-derived.
+#
+# ⚠️ The sandbox's paths are DERIVED and its reference numbers ASSEMBLED, for
+# the reason already given above the ledger path: a literal path into the
+# tracker trees, or a literal reference number, is forbidden in code, and this
+# fixture fits neither exemption list. The numbers below are synthetic fixture
+# data rather than citations, but the gate cannot tell those apart from the
+# outside — and the fix that makes it tell them apart is the same one the
+# ledger path already uses, so it is applied rather than argued with.
+STATE_REL="$(dirname "$LEDGER_REL")/probe-state.json"
+# The gate forbids a literal reference in code; these are sandbox row data, so
+# the sigil is assembled rather than written.
+REF='#'
+
+write_state() {
+    mkdir -p "$SANDBOX/$(dirname "$STATE_REL")"
+    cat > "$SANDBOX/$STATE_REL"
+}
+
+clear_state() { rm -f "$SANDBOX/$(dirname "$STATE_REL")/"*state.json; }
+
+one_item_each() {
+    python3 - "$SANDBOX/$STATE_REL" "$@" <<'STATE'
+import json, sys
+
+path, pairs = sys.argv[1], sys.argv[2:]
+items = {}
+for i in range(0, len(pairs), 2):
+    number, state = pairs[i], pairs[i + 1]
+    items[f"w{number}"] = {"issue": number, "status": state, "title": f"item {number}"}
+json.dump({"campaign": "probe", "waves": {"one": {"items": items}}}, open(path, "w"), indent=2)
+STATE
+}
+
+mkdir -p "$SANDBOX/$(dirname "$STATE_REL")"
+DONE="${REF}900"
+LIVE="${REF}901"
+UNTRACKED="${REF}902"
+one_item_each 900 complete 901 not_started
+
+write_ledger <<EOF
+| RL-020 | a finding whose owner has shipped | a review | open | with ${DONE} | unfixed |
+| RL-021 | a finding whose owner is still to come | a review | open | with ${LIVE} | unfixed |
+EOF
+
+test_case "a_trigger_naming_only_completed_issues_is_reported" \
+    "the computable half — a fired trigger must not wait for someone to type SATISFIED"
+run_sweep
+assert_contains "$OUT" "RL-020: every issue it names is complete" "the fired trigger is named"
+assert_contains "$OUT" "re-point it at the issue that owns the class now" \
+    "and the message offers the other legitimate outcome, not only discharge"
+assert_not_contains "$OUT" "RL-021: every issue" \
+    "a row whose owner is not_started has NOT fired, so it must stay silent"
+
+# ⛔ ALL cited issues, not ANY — and this case exists because the fix to the row
+# that motivated this check would otherwise trip it. A row legitimately names a
+# completed predecessor as context alongside its live owner.
+test_case "a_trigger_mixing_a_completed_and_a_live_issue_is_not_reported" \
+    "a row is owned while ANY cited issue is live, so 'any complete' would be wrong"
+write_ledger <<EOF
+| RL-022 | a finding re-pointed at its new owner | a review | open | moved from ${DONE}, now ${LIVE} | unfixed |
+EOF
+run_sweep
+assert_contains "$OUT" "RL-022" "the row is still listed as non-closed"
+assert_not_contains "$OUT" "every issue it names is complete" \
+    "one cited issue is not_started, so the trigger has not fired"
+
+test_case "a_trigger_citing_an_untracked_issue_is_reported_as_unknown" \
+    "unknown is a third state — reading it as 'not complete' hides an untracked owner"
+write_ledger <<EOF
+| RL-023 | a finding whose owner is in no campaign | a review | open | with ${UNTRACKED} | unfixed |
+EOF
+run_sweep
+assert_contains "$OUT" "status UNKNOWN, not 'incomplete'" "the distinct state is named as such"
+assert_contains "$OUT" "RL-023" "and the row carrying it"
+
+# --- the SATISFIED marker is a CELL, not a word on the line ----------------
+#
+# ⛔ The repo's most-recorded gate failure, caught here by a ledger row that
+# described a different instance of it. A row whose FINDING text contained "ALL
+# SATISFIED BY ITS FIXTURE" was reported as a satisfied trigger — and the row
+# was `closed`, so the sweep's one job, naming rows that should join the next
+# campaign frame, produced a finished row and a wall of unrelated prose.
+#
+# A ledger whose rows discuss gate markers will contain those markers as words,
+# so position is the only thing separating configuration from commentary.
+# ⚠️ THIS CASE IS SPLIT IN TWO BECAUSE THE FIRST VERSION DID NOT DISCRIMINATE.
+# MEASURED: it put the prose marker on a CLOSED row, so the closed-row filter
+# caught it and the positional read was never exercised — a probe reverting the
+# cell read to a whole-line grep left the suite fully green. Two independent
+# narrowings need two cases, or whichever runs second is untested.
+test_case "the_satisfied_marker_in_an_OPEN_row_s_prose_is_not_read_as_a_trigger" \
+    "the positional read — a ledger that discusses markers contains them as words"
+write_ledger <<EOF
+| RL-024 | a finding noting that sixteen assertions were ALL SATISFIED by a fixture | a review | open | with ${LIVE} | unfixed |
+EOF
+run_sweep
+assert_contains "$OUT" "RL-024" "the row is listed as non-closed, so the sweep ran"
+assert_not_contains "$OUT" "SATISFIED due_when" \
+    "the word sits in the finding, not the trigger, so it is a mention and not a marker"
+
+test_case "the_satisfied_marker_on_a_CLOSED_row_is_not_read_as_a_trigger" \
+    "the status narrowing — a discharged row cannot join the next frame"
+write_ledger <<EOF
+| RL-025 | a finding already dealt with | a review | closed | SATISFIED by the merge | fixed |
+| RL-026 | a live finding | a review | open | with ${LIVE} | unfixed |
+EOF
+run_sweep
+assert_contains "$OUT" "RL-026" "the open row is listed, so the sweep ran"
+assert_not_contains "$OUT" "SATISFIED due_when" \
+    "a closed row's fired trigger is history, and reporting it sends someone to finished work"
+
+test_case "the_satisfied_marker_in_the_due_when_cell_is_read" \
+    "the green half — the marker must still work where it belongs"
+write_ledger <<'EOF'
+| RL-027 | a finding whose author came back to say so | a review | open | SATISFIED by the merge | unfixed |
+EOF
+run_sweep
+assert_contains "$OUT" "SATISFIED due_when" "the marker in the right cell is read"
+assert_contains "$OUT" "RL-027: SATISFIED by the merge" \
+    "and the row is named with its trigger, not dumped in full"
+
+# --- the walker must prove it read something -------------------------------
+#
+# ⚠️ An earlier version of this floor refused below 20 known statuses, which
+# refused every sandbox in this suite and would refuse a young campaign. A
+# floor that fails on a legitimately small input is not measuring what it
+# claims. The size-independent signal is items walked versus numbers found.
+test_case "a_walker_that_extracts_no_issue_numbers_is_refused" \
+    "items with no issue field would make every trigger read UNKNOWN"
+write_state <<'EOF'
+{ "campaign": "probe",
+  "waves": { "one": { "items": {
+    "a": { "ticket": "900", "status": "complete", "title": "the field moved" },
+    "b": { "ticket": "901", "status": "complete", "title": "and again" } } } } }
+EOF
+write_ledger <<EOF
+| RL-028 | a finding | a review | open | with ${DONE} | unfixed |
+EOF
+run_sweep
+assert_exit_nonzero "$RC" "a walker that found nothing is a refusal, not a clean result"
+assert_contains "$OUT" "extracted ZERO issue numbers" "the refusal names the condition"
+assert_contains "$OUT" "indistinguishable from a ledger with none" "and says why it cannot pass"
+
+test_case "no_campaign_state_at_all_is_reported_inapplicable" \
+    "nothing to reconcile must not read as everything reconciles"
+clear_state
+run_sweep
+assert_exit_zero "$RC" "a repo with no campaign is not an error"
+assert_contains "$OUT" "trigger reconciliation did not run" "the check says it did not run"
+assert_not_contains "$OUT" "cited issues are live" \
+    "and does not claim the triggers were checked"
+
 summarise

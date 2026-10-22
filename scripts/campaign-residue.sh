@@ -143,10 +143,160 @@ LEDGER
   # returns 141, and this test goes FALSE — silently skipping the SATISFIED
   # rows that are the whole point of the predecessor sweep.
   _ledger_rows="$(grep -E '^\| RL-[0-9]+' plans/residue-ledger.md || true)"
-  if grep -q 'SATISFIED' <<< "${_ledger_rows}"; then
-    echo "!! rows with a SATISFIED due_when (join the next campaign frame):"
-    grep 'SATISFIED' <<< "${_ledger_rows}"
-  fi
+  # ⛔ The SATISFIED marker is read from the `due_when` CELL of a NON-CLOSED
+  # row, not grepped across the whole line — and this is the repo's
+  # most-recorded gate failure, caught here by a row describing a different
+  # instance of it.
+  #
+  # MEASURED 2026-10-22: a new row whose finding text contains the words "ALL
+  # SATISFIED BY ITS FIXTURE" was reported as a satisfied trigger. It is
+  # `closed`, and the word was in its prose rather than its trigger — so the
+  # sweep's one job, naming rows that should join the next campaign frame,
+  # produced a row that is finished and a wall of unrelated text.
+  #
+  # The whole-line grep could not distinguish a marker from a mention. A ledger
+  # whose rows discuss gate markers will contain those markers as words, so
+  # position is the only thing that separates configuration from commentary.
+  python3 - <<'MARKER'
+import re
+
+SPLIT = re.compile(r"(?<!\\)\|")
+STATUS, DUE = 3, 4
+
+hits = []
+for line in open("plans/residue-ledger.md"):
+    if not line.startswith("| RL-"):
+        continue
+    cells = [c.strip() for c in SPLIT.split(line.rstrip("\n"))[1:-1]]
+    if len(cells) != 6 or cells[STATUS].lower() == "closed":
+        continue
+    if "SATISFIED" in cells[DUE]:
+        hits.append((cells[0], cells[DUE]))
+
+if hits:
+    print("!! rows with a SATISFIED due_when (join the next campaign frame):")
+    for rid, due in hits:
+        print(f"   {rid}: {due}")
+MARKER
+
+  # ⛔ AND THE COMPUTABLE HALF, because the check above only finds the word
+  # SATISFIED — which someone has to have typed. A trigger is discharged
+  # exactly as often as the person who wrote it comes back to say so, which is
+  # the property the ledger exists to remove, not to reproduce.
+  #
+  # MEASURED 2026-10-22: RL-076's trigger read "W3d / #485, in progress" after
+  # #485 had completed. A fresh pass reads that as scheduled against work still
+  # in flight, so the row is neither discharged nor re-derived — and the row's
+  # own finding is that scheduled work reported as unscheduled makes every
+  # count of unowned residue wrong. A stale owner is the same error with the
+  # blame misfiled.
+  #
+  # ⚠️ ALL cited issues must be complete before a row is reported, not any. A
+  # row legitimately names a completed predecessor as context alongside its live
+  # owner — RL-076 now cites #485 that way, and reporting on "any" would make
+  # the fix to that row trip this check.
+  #
+  # ⚠️ And three states, not two: an issue appearing in no campaign state file
+  # is UNKNOWN, reported separately, because silently reading unknown as
+  # "not complete" is how a trigger whose owner was never tracked stays
+  # invisible.
+  python3 - <<'TRIGGERS'
+import glob, json, re, sys
+
+SPLIT = re.compile(r"(?<!\\)\|")
+STATUS, DUE = 3, 4
+
+status = {}
+items_seen = 0
+
+
+def walk(items):
+    global items_seen
+    values = items.values() if isinstance(items, dict) else items
+    if not isinstance(values, (list, type({}.values()))):
+        return
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        items_seen += 1
+        number = str(item.get("issue") or "").lstrip("#")
+        if number.isdigit():
+            status.setdefault(number, set()).add(item.get("status"))
+
+
+state_files = glob.glob("plans/*state.json")
+for path in state_files:
+    try:
+        doc = json.load(open(path))
+    except Exception:
+        continue
+    waves = doc.get("waves") or {}
+    for wave in (waves.values() if isinstance(waves, dict) else waves):
+        if isinstance(wave, dict):
+            walk(wave.get("items") or {})
+    walk(doc.get("items") or {})
+
+# ⚠️ Anti-vacuity, and the floor is on THE WALKER WORKING rather than on the
+# campaign being big. MEASURED: the first version refused below 20 known
+# statuses, which refused every sandbox in this gate's own suite and would
+# refuse a young campaign — a floor that fails on a legitimately small input is
+# not measuring what it claims to.
+#
+# The size-independent signal is items walked versus numbers extracted. If
+# items exist and NONE yielded an issue number, the field this reads has moved
+# and every trigger below would report UNKNOWN — which is indistinguishable
+# from a ledger whose triggers are all live.
+if items_seen and not status:
+    print(
+        f"!! REFUSING: walked {items_seen} campaign item(s) and extracted ZERO issue numbers.",
+        file=sys.stderr,
+    )
+    print(
+        "   Every trigger would then read as UNKNOWN and a satisfied one would be",
+        file=sys.stderr,
+    )
+    print(
+        "   invisible, which is indistinguishable from a ledger with none. The `issue`",
+        file=sys.stderr,
+    )
+    print("   field this walks has probably moved.", file=sys.stderr)
+    raise SystemExit(1)
+
+# ⚠️ And no campaign at all is INAPPLICABLE, not clean. Saying so is what keeps
+# "nothing to reconcile" from reading as "everything reconciles".
+if not state_files:
+    print("(no campaign state files — trigger reconciliation did not run)")
+    raise SystemExit(0)
+
+satisfied, unknown = [], []
+for line in open("plans/residue-ledger.md"):
+    if not line.startswith("| RL-"):
+        continue
+    cells = [c.strip() for c in SPLIT.split(line.rstrip("\n"))[1:-1]]
+    if len(cells) != 6 or cells[STATUS].lower() == "closed":
+        continue
+    cited = re.findall(r"#(\d+)", cells[DUE])
+    if not cited:
+        continue
+    seen = {n: status.get(n) for n in cited}
+    if all(s == {"complete"} for s in seen.values()):
+        satisfied.append((cells[0], cells[DUE][:90], cited))
+    elif any(s is None for s in seen.values()):
+        unknown.append((cells[0], [n for n, s in seen.items() if s is None]))
+
+if satisfied:
+    print("!! rows whose due_when names ONLY completed issues — the trigger has fired:")
+    for rid, due, cited in satisfied:
+        print(f"   {rid}: every issue it names is complete ({', '.join('#' + n for n in cited)})")
+        print(f"      due_when: {due}")
+    print("   Discharge the row, or re-point it at the issue that owns the class now.")
+if unknown:
+    print("?? rows citing an issue tracked in no campaign state file:")
+    for rid, missing in unknown:
+        print(f"   {rid}: {', '.join('#' + n for n in missing)} — status UNKNOWN, not 'incomplete'")
+if not satisfied and not unknown:
+    print(f"(every non-closed row's cited issues are live; {len(status)} issue statuses read)")
+TRIGGERS
 else
   echo "(no plans/residue-ledger.md)"
 fi
