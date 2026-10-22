@@ -854,4 +854,74 @@ else
     _record_fail "the peel accepted a tree object, so it is only checking existence"
 fi
 
+# ── 12. definitions live above the main flow, positionally ──────────────────
+#
+# ⛔ FOUR ORDERING SLIPS IN THIS ONE FILE IN A SINGLE DAY, every one the same
+# shape: the script runs top to bottom, its definitions used to be interleaved
+# with the flow that uses them, and adding a check meant guessing whether its
+# helpers existed yet.
+#
+# ⚠️ The failure mode is what makes it worth a gate rather than care. The new
+# code raises `NameError`, the gate exits NON-ZERO, and a case asserting
+# `assert_exit_nonzero` therefore PASSES — so the suite went green on a check
+# that had never executed, twice, and the message assertions were the only
+# thing that caught it.
+#
+# So the rule is positional and checkable: nothing below the MAIN FLOW banner
+# may define anything.
+test_case "no_definition_sits_below_the_main_flow_banner" \
+    "a positional rule nothing enforces is a convention, and this one failed four times"
+python3 - "$GATE" <<'ORDERING'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+
+# The embedded python block only; the bash wrapper around it is not in scope.
+start = src.index("python3 - ")
+start = src.index("\n", start) + 1
+end = src.rindex("\nPY\n")
+body = src[start:end].split("\n")
+
+BANNER = "# MAIN FLOW — executing code only. No definitions past this line."
+try:
+    banner_at = next(i for i, l in enumerate(body) if BANNER in l)
+except StopIteration:
+    print("FAIL: the MAIN FLOW banner is gone, so this check has nothing to measure.")
+    print("      Without it a definition can drift below the flow again, which is how a")
+    print("      NameError came to pass an exit-code assertion twice.")
+    raise SystemExit(1)
+
+# A top-level definition: a `def` or an UPPER_SNAKE constant at column zero.
+DEFN = re.compile(r"^(def\s+\w+|[A-Z][A-Z0-9_]*\s*=)")
+offenders = [
+    (i + 1, l[:70]) for i, l in enumerate(body[banner_at:], start=banner_at) if DEFN.match(l)
+]
+if offenders:
+    print(f"FAIL: {len(offenders)} definition(s) sit below the MAIN FLOW banner:")
+    for n, text in offenders:
+        print(f"  python block line {n}: {text}")
+    print("\nMove them into the definitions block above the banner. A definition that works")
+    print("today because nothing above it needs one will break the next insertion that does,")
+    print("and that break passes an exit-code assertion.")
+    raise SystemExit(1)
+
+# ⚠️ Anti-vacuity: if the pattern stopped matching, "no offenders" would be
+# indistinguishable from "nothing was read". There must be definitions ABOVE
+# the banner for this to have measured anything.
+above = [l for l in body[:banner_at] if DEFN.match(l)]
+if len(above) < 8:
+    print(f"FAIL: only {len(above)} definition(s) found above the banner; expected many.")
+    print("      The pattern has probably stopped matching, so a clean result here would")
+    print("      mean nothing was read rather than nothing is misplaced.")
+    raise SystemExit(1)
+
+print(f"OK: {len(above)} definitions above the banner, 0 below.")
+ORDERING
+if [[ $? -eq 0 ]]; then
+    _record_pass "every constant and helper sits above the banner, and the pattern still matches"
+else
+    _record_fail "a definition drifted below the main flow — see the FAIL lines above"
+fi
+
 summarise

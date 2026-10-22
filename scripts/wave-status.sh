@@ -148,11 +148,176 @@ def staff_reviewed(path):
     return bool(STAFF_REVIEW.search(open(path, encoding="utf-8").read()))
 
 violations, actionable, informal = [], [], []
-# ⚠️ Defined HERE rather than beside the other path tables because the wave
-# roll-up below is their FIRST use, and this file executes top to bottom. The
-# drive check read as working when it was only reaching its no-record branch;
-# the branches that call git died on a NameError the moment a wave actually
-# had a drive to check.
+# ══════════════════════════════════════════════════════════════════════════════
+# EVERY CONSTANT AND HELPER LIVES HERE, ABOVE ALL EXECUTING CODE.
+#
+# ⛔ THIS BLOCK IS A STRUCTURAL FIX FOR A MISTAKE MADE FOUR TIMES IN ONE DAY.
+# This file is a single top-to-bottom script, and its definitions used to be
+# interleaved with the flow that uses them — so adding a check meant guessing
+# whether its helpers existed yet. Four times the guess was wrong, and the
+# failure mode is nasty: the new code raises `NameError`, the gate exits
+# non-zero, and a test asserting `assert_exit_nonzero` PASSES. The suite went
+# green on a check that had never run.
+#
+# ⚠️ So the rule is positional rather than a matter of care: nothing below the
+# "MAIN FLOW" banner may define anything, and nothing here may execute. A
+# definition added below that banner is a bug even if it happens to work today,
+# because the next insertion above it will not.
+# ══════════════════════════════════════════════════════════════════════════════
+
+STACK_PATHS = {
+    "elixir": ("apps/core/lib", "apps/core/test"),
+    "elm": ("frontend/src", "frontend/tests"),
+    "database": ("apps/core/priv/repo", "dbt/"),
+    "contract": ("proto/",),
+    "platform": ("scripts/", ".github/", "justfile", "test/platform"),
+    "python": ("apps/vision",),
+    "rust": ("apps/scraper",),
+}
+
+# ⛔ SHA RESOLUTION IS SELF-CHECKED, because the verifier I used before this had
+# a blind spot EXACTLY the width of the input I gave it.
+#
+# MEASURED, and the coupling is the lesson rather than the fix:
+#
+#     git rev-parse --verify 0123456789abcdef0123456789abcdef01234567  -> rc=0, echoes it
+#     git rev-parse --verify 0123456789abcdef0123456789abcdef0123456   -> rc=128
+#     git rev-parse --verify 012345678901                              -> rc=128
+#
+# A SHORT sha is ambiguous, so git must resolve it and fails when it cannot. A
+# FULL-LENGTH one is syntactically unambiguous, so git accepts it without a
+# lookup — and echoes it back. The pass-through is exactly 40 characters wide.
+#
+# ⚠️ So **padding a sha removes the check**. I was given a short sha, expanding
+# it to 40 characters was the reasonable thing to do, and expanding it is what
+# turned a checked input into an unchecked one. At 39 characters my fabricated
+# value would have been caught. The mistake and the blind spot were the same act.
+#
+# ⚠️ And the instrument was easy to trust because **its success output is its
+# input**: `rev-parse --verify` echoing the string makes "it resolved" and "it
+# passed through" byte-identical, so no amount of reading the output
+# distinguishes them. The same family as 141 meaning both "no match" and "dead
+# producer". Fifteen OKs was not weak evidence, it was ZERO evidence — a
+# deliberately bad input was the only thing that could ever have produced any.
+#
+# `^{commit}` is the one-token fix, and the peel is load-bearing beyond
+# existence: a TREE object passes bare `cat-file -e` and fails with the peel,
+# and what a review ledger needs is "something I can diff from", not "these
+# bytes are in the object store".
+BOGUS_SHA_PROBE = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _resolves(sha):
+    """True when `sha` names a commit this repository actually has."""
+    return _git(["cat-file", "-e", f"{sha}^{{commit}}"]) is not None
+
+
+def _check_sha_verifier():
+    """Refuse if the resolver cannot tell a real commit from a fabricated one.
+
+    ⛔ Run on EVERY invocation rather than only in the suite, for the reason
+    `check-sigpipe-hazards.sh` carries its planted violation inline: a
+    verification step is an instrument and needs the same red-run discipline as
+    a gate. Fifteen consecutive OKs with no known-bad input is the same shape as
+    a green absence assertion with no anti-vacuity probe.
+    """
+    head = _git(["rev-parse", "HEAD"])
+    if not head:
+        return "git cannot resolve HEAD, so no sha below could be checked"
+    if not _resolves(head[0]):
+        return "the resolver rejects HEAD, so it would reject every real sha"
+    if _resolves(BOGUS_SHA_PROBE):
+        return (
+            f"the resolver ACCEPTS the fabricated sha {BOGUS_SHA_PROBE[:12]}…, so every "
+            f"recorded sha below would pass without being looked up"
+        )
+    return None
+
+
+def _stacks_for(changed):
+    return {
+        stack
+        for stack, prefixes in STACK_PATHS.items()
+        if any(f.startswith(pre) for f in changed for pre in prefixes)
+    }
+
+
+def touched_stacks(declared_range=None):
+    """Stacks the CAMPAIGN's diff touches, or None if git cannot say.
+
+    ⚠️ Two things this got wrong, both found while closing a missing wave-11
+    review axis, and both of which made the guard report "nothing to review".
+
+    (a) IT MEASURED THE WRONG RANGE FOR A HISTORICAL CAMPAIGN. Asked about a
+        campaign whose wave merged two months ago, it diffed whatever branch is
+        checked out today — so the wave whose missing review axis prompted all
+        this was never going to be caught by the instrument that exists to catch
+        it. A campaign state may now declare its own `diff_range`
+        ("<base>..<head>"), which is the only correct instrument for work that
+        has already merged.
+
+        A declared range that git cannot read returns None (UNKNOWN) rather than
+        falling back to the branch diff. Falling back is precisely how the wrong
+        range came to be measured, and a quiet fallback to a wrong answer is
+        worse than refusing to answer.
+
+    (b) IT WAS BLIND TO UNCOMMITTED WORK, which is what an in-flight wave looks
+        like. With ten files modified and zero commits beyond main it reported
+        "0 actionable" and demanded no review at all. The in-flight path now
+        unions the committed diff with the working tree — the same three legs
+        the migration-safety gate uses (committed, staged+unstaged, untracked),
+        for the same reason: it has to be useful in the order people actually
+        work, not only after a commit.
+    """
+    if declared_range:
+        files = _git(["diff", "--name-only", declared_range])
+        if files is None:
+            return None
+        # ⛔ An EMPTY-but-readable range is UNKNOWN, not "nothing to review".
+        # The `None` path above was given a refusal and this one was not, which
+        # is the same asymmetry the sweep's legs had: the case somebody thought
+        # about got a guard, the neighbouring case did not. `HEAD..HEAD` — a
+        # typo resolving to one commit twice — exits 0 with no output, which
+        # produced an empty stack set, which satisfied every stack-review check
+        # vacuously and printed full coverage.
+        if not files:
+            return None
+        return _stacks_for(files)
+
+    for base_ref in ("origin/main", "main"):
+        base = _git(["merge-base", "HEAD", base_ref], timeout=20)
+        if not base:
+            continue
+
+        committed = _git(["diff", "--name-only", f"{base[0]}..HEAD"])
+        if committed is None:
+            continue
+
+        # Working-tree legs are additive: a failure to read them must not
+        # discard the committed answer, so they default to empty rather than
+        # aborting the whole lookup.
+        worktree = _git(["diff", "--name-only", "HEAD"]) or []
+        untracked = _git(["ls-files", "--others", "--exclude-standard"]) or []
+
+        touched = _stacks_for(set(committed) | set(worktree) | set(untracked))
+
+        # ⛔ An EMPTY computed stack set is UNKNOWN, not satisfied — the third
+        # leg of the same asymmetry the declared-range branch already refuses.
+        # The caller only reaches here when some item is marked done, and "work
+        # is complete but nothing under any stack path was touched" is a
+        # contradiction rather than a pass: either the campaign is being asked
+        # about a merged wave with no `diff_range` declared (which is what that
+        # field exists for) or the checkout is not the one the work landed on.
+        # Reporting full stack-review coverage for either is the failure mode
+        # this whole check was added to end.
+        if not touched:
+            return None
+
+        return touched
+
+    return None
+
+
 # ⛔ What invalidates a PREVIEW DRIVE, which is a different population from what
 # invalidates a review. A drive is evidence about running behaviour, so it is
 # spent by a change to code that runs — not by a change to a gate, a test or a
@@ -261,6 +426,10 @@ def _git(args, timeout=30):
     return [line for line in done.stdout.splitlines() if line.strip()]
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN FLOW — executing code only. No definitions past this line.
+# ══════════════════════════════════════════════════════════════════════════════
 
 waves = state.get("waves") or {}
 
@@ -497,159 +666,6 @@ if next_only:
 #
 # So: once anything in the campaign is complete, every stack the branch actually
 # TOUCHES must carry a recorded verdict under state["domain_reviews"].
-STACK_PATHS = {
-    "elixir": ("apps/core/lib", "apps/core/test"),
-    "elm": ("frontend/src", "frontend/tests"),
-    "database": ("apps/core/priv/repo", "dbt/"),
-    "contract": ("proto/",),
-    "platform": ("scripts/", ".github/", "justfile", "test/platform"),
-    "python": ("apps/vision",),
-    "rust": ("apps/scraper",),
-}
-
-# ⛔ SHA RESOLUTION IS SELF-CHECKED, because the verifier I used before this had
-# a blind spot EXACTLY the width of the input I gave it.
-#
-# MEASURED, and the coupling is the lesson rather than the fix:
-#
-#     git rev-parse --verify 0123456789abcdef0123456789abcdef01234567  -> rc=0, echoes it
-#     git rev-parse --verify 0123456789abcdef0123456789abcdef0123456   -> rc=128
-#     git rev-parse --verify 012345678901                              -> rc=128
-#
-# A SHORT sha is ambiguous, so git must resolve it and fails when it cannot. A
-# FULL-LENGTH one is syntactically unambiguous, so git accepts it without a
-# lookup — and echoes it back. The pass-through is exactly 40 characters wide.
-#
-# ⚠️ So **padding a sha removes the check**. I was given a short sha, expanding
-# it to 40 characters was the reasonable thing to do, and expanding it is what
-# turned a checked input into an unchecked one. At 39 characters my fabricated
-# value would have been caught. The mistake and the blind spot were the same act.
-#
-# ⚠️ And the instrument was easy to trust because **its success output is its
-# input**: `rev-parse --verify` echoing the string makes "it resolved" and "it
-# passed through" byte-identical, so no amount of reading the output
-# distinguishes them. The same family as 141 meaning both "no match" and "dead
-# producer". Fifteen OKs was not weak evidence, it was ZERO evidence — a
-# deliberately bad input was the only thing that could ever have produced any.
-#
-# `^{commit}` is the one-token fix, and the peel is load-bearing beyond
-# existence: a TREE object passes bare `cat-file -e` and fails with the peel,
-# and what a review ledger needs is "something I can diff from", not "these
-# bytes are in the object store".
-BOGUS_SHA_PROBE = "0123456789abcdef0123456789abcdef01234567"
-
-
-def _resolves(sha):
-    """True when `sha` names a commit this repository actually has."""
-    return _git(["cat-file", "-e", f"{sha}^{{commit}}"]) is not None
-
-
-def _check_sha_verifier():
-    """Refuse if the resolver cannot tell a real commit from a fabricated one.
-
-    ⛔ Run on EVERY invocation rather than only in the suite, for the reason
-    `check-sigpipe-hazards.sh` carries its planted violation inline: a
-    verification step is an instrument and needs the same red-run discipline as
-    a gate. Fifteen consecutive OKs with no known-bad input is the same shape as
-    a green absence assertion with no anti-vacuity probe.
-    """
-    head = _git(["rev-parse", "HEAD"])
-    if not head:
-        return "git cannot resolve HEAD, so no sha below could be checked"
-    if not _resolves(head[0]):
-        return "the resolver rejects HEAD, so it would reject every real sha"
-    if _resolves(BOGUS_SHA_PROBE):
-        return (
-            f"the resolver ACCEPTS the fabricated sha {BOGUS_SHA_PROBE[:12]}…, so every "
-            f"recorded sha below would pass without being looked up"
-        )
-    return None
-
-
-def _stacks_for(changed):
-    return {
-        stack
-        for stack, prefixes in STACK_PATHS.items()
-        if any(f.startswith(pre) for f in changed for pre in prefixes)
-    }
-
-
-def touched_stacks(declared_range=None):
-    """Stacks the CAMPAIGN's diff touches, or None if git cannot say.
-
-    ⚠️ Two things this got wrong, both found while closing a missing wave-11
-    review axis, and both of which made the guard report "nothing to review".
-
-    (a) IT MEASURED THE WRONG RANGE FOR A HISTORICAL CAMPAIGN. Asked about a
-        campaign whose wave merged two months ago, it diffed whatever branch is
-        checked out today — so the wave whose missing review axis prompted all
-        this was never going to be caught by the instrument that exists to catch
-        it. A campaign state may now declare its own `diff_range`
-        ("<base>..<head>"), which is the only correct instrument for work that
-        has already merged.
-
-        A declared range that git cannot read returns None (UNKNOWN) rather than
-        falling back to the branch diff. Falling back is precisely how the wrong
-        range came to be measured, and a quiet fallback to a wrong answer is
-        worse than refusing to answer.
-
-    (b) IT WAS BLIND TO UNCOMMITTED WORK, which is what an in-flight wave looks
-        like. With ten files modified and zero commits beyond main it reported
-        "0 actionable" and demanded no review at all. The in-flight path now
-        unions the committed diff with the working tree — the same three legs
-        the migration-safety gate uses (committed, staged+unstaged, untracked),
-        for the same reason: it has to be useful in the order people actually
-        work, not only after a commit.
-    """
-    if declared_range:
-        files = _git(["diff", "--name-only", declared_range])
-        if files is None:
-            return None
-        # ⛔ An EMPTY-but-readable range is UNKNOWN, not "nothing to review".
-        # The `None` path above was given a refusal and this one was not, which
-        # is the same asymmetry the sweep's legs had: the case somebody thought
-        # about got a guard, the neighbouring case did not. `HEAD..HEAD` — a
-        # typo resolving to one commit twice — exits 0 with no output, which
-        # produced an empty stack set, which satisfied every stack-review check
-        # vacuously and printed full coverage.
-        if not files:
-            return None
-        return _stacks_for(files)
-
-    for base_ref in ("origin/main", "main"):
-        base = _git(["merge-base", "HEAD", base_ref], timeout=20)
-        if not base:
-            continue
-
-        committed = _git(["diff", "--name-only", f"{base[0]}..HEAD"])
-        if committed is None:
-            continue
-
-        # Working-tree legs are additive: a failure to read them must not
-        # discard the committed answer, so they default to empty rather than
-        # aborting the whole lookup.
-        worktree = _git(["diff", "--name-only", "HEAD"]) or []
-        untracked = _git(["ls-files", "--others", "--exclude-standard"]) or []
-
-        touched = _stacks_for(set(committed) | set(worktree) | set(untracked))
-
-        # ⛔ An EMPTY computed stack set is UNKNOWN, not satisfied — the third
-        # leg of the same asymmetry the declared-range branch already refuses.
-        # The caller only reaches here when some item is marked done, and "work
-        # is complete but nothing under any stack path was touched" is a
-        # contradiction rather than a pass: either the campaign is being asked
-        # about a merged wave with no `diff_range` declared (which is what that
-        # field exists for) or the checkout is not the one the work landed on.
-        # Reporting full stack-review coverage for either is the failure mode
-        # this whole check was added to end.
-        if not touched:
-            return None
-
-        return touched
-
-    return None
-
-
 # Campaign-level, so it is not reported when the caller has filtered to one wave —
 # a single-wave view answering a campaign-wide question reads as a defect in that
 # wave, which it is not.
