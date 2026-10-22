@@ -796,6 +796,76 @@ if not wave_filter and any(
                         f"ancestry not."
                     )
 
+            # ⛔ A DISPATCH MUST RECONCILE WITH A LOGGED REPLY, and the
+            # byte-equality rule above CANNOT catch the case where it doesn't.
+            #
+            # Measured twice in one day: a reply arrived, was acted on, and was
+            # never appended to the log — four times in the first instance, then
+            # once more after the mechanism above was built FOR that instance.
+            # The reviewer's diagnosis is why it slipped through: base-equality
+            # compares a dispatch against the newest log entry, so when the
+            # dispatch is simply dropped the log stays perfectly
+            # self-consistent. There is nothing left behind to be unequal to.
+            # Every check above reads green on a log that is missing an entry.
+            #
+            # What is absent is a record of the dispatch having COMPLETED.
+            # So count the rounds SENT and reconcile:
+            #
+            #   dispatches == len(log)      and nothing in flight  → settled
+            #   dispatches == len(log) + 1  and one in flight      → awaiting
+            #
+            # An unlogged reply is the first form with the count one too high,
+            # which is the only state that distinguishes it from a round that
+            # was never sent. The counter must be DECLARED at dispatch, in the
+            # same step that writes `dispatch_in_flight`: inferring it from the
+            # log would make it agree with the log by construction, which is the
+            # vacuity this whole block exists to escape.
+            #
+            # ⚠️ What this does NOT establish, stated because the baseline below
+            # is easy to read as more than it is: the counts were baselined to
+            # the log lengths observed when this check was written, so they
+            # prove nothing about rounds before that point — `dispatches_baseline`
+            # records the inferred value so the one-time inference stays visible
+            # instead of passing as measurement. And a hand-edited state file can
+            # always be made consistent; the defect this refuses is the accidental
+            # one, which is the one that actually happened, twice.
+            dispatches = entry.get("dispatches")
+            baseline = entry.get("dispatches_baseline")
+            if not isinstance(dispatches, int) or isinstance(dispatches, bool):
+                violations.append(
+                    f"  campaign: the {stack} axis declares no `dispatches` count, so a reply "
+                    f"that arrived and was never logged is UNDETECTABLE here — the log stays "
+                    f"self-consistent with the entry missing, which is exactly how this was "
+                    f"produced twice. Declare the count at dispatch, alongside "
+                    f"`dispatch_in_flight`."
+                )
+            elif isinstance(baseline, int) and dispatches < baseline:
+                violations.append(
+                    f"  campaign: the {stack} axis declares {dispatches} dispatches against a "
+                    f"recorded baseline of {baseline}. A dispatch count only ever goes up; a "
+                    f"lower one means the counter was reset rather than incremented, which "
+                    f"removes the check instead of satisfying it."
+                )
+            else:
+                expected = len(log) + (1 if dispatch else 0)
+                if dispatches != expected:
+                    if dispatch:
+                        detail = (
+                            f"one dispatch is in flight, so the count should be one more than "
+                            f"the {len(log)} logged replies"
+                        )
+                    else:
+                        detail = (
+                            f"nothing is in flight, so every one of the {dispatches} dispatches "
+                            f"should have a logged reply and only {len(log)} do — a reply that "
+                            f"was read and acted on but never appended is the shape that "
+                            f"produces this"
+                        )
+                    violations.append(
+                        f"  campaign: the {stack} axis declares {dispatches} dispatches and "
+                        f"{len(log)} logged replies: {detail}."
+                    )
+
             if not seen:
                 violations.append(
                     f"  campaign: the {stack} review records no `reviewed_at_sha`, so whether it "

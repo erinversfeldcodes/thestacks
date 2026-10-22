@@ -49,6 +49,21 @@ trap 'rm -rf "$SANDBOX_ROOT"' EXIT
 # and a campaign state whose single item is COMPLETE — which is what switches
 # the campaign-level stack guard on. `informal` keeps the item from needing a
 # backing issue file, so the only thing under test is the stack guard.
+#
+# ⛔ THE WAVE IS MARKED COMPLETE, AND THAT IS LOAD-BEARING FOR EVERY EXIT-CODE
+# ASSERTION IN THIS FILE. It used to say `in_progress` while its only item was
+# done, which is itself a violation — so the gate exited NON-ZERO on every run
+# of this sandbox, and all sixteen `assert_exit_nonzero` cases below were
+# satisfied by the FIXTURE rather than by the check under test. MEASURED: under
+# a probe that neutered the dispatch reconciliation entirely, its exit
+# assertion still passed; only the message assertions caught it.
+#
+# ⚠️ The comment at the ancestry case already recorded "a bare
+# assert_exit_nonzero passes here" for one case — noticing the symptom without
+# fixing the cause, which left the other fifteen reading as evidence. A clean
+# baseline is what makes a non-zero exit mean anything, so the one case that
+# genuinely tests the understated-wave roll-up sets `in_progress` back
+# explicitly rather than relying on this default.
 new_sandbox() {
     local name="$1" reviews="$2" extra="${3:-}"
     local dir="$SANDBOX_ROOT/$name"
@@ -74,7 +89,7 @@ new_sandbox() {
   "waves": {
     "probe": {
       "title": "Probe",
-      "status": "in_progress",
+      "status": "complete",
       "items": {
         "alpha": {
           "status": "complete",
@@ -91,7 +106,41 @@ EOF
     printf '%s' "$dir"
 }
 
+# ⛔ A MANDATORY FIELD DIRTIES EVERY FIXTURE THAT PREDATES IT, and that is how
+# a clean baseline silently stops being one. MEASURED: adding the `dispatches`
+# reconciliation put a standing violation into all sixteen sandboxes that do
+# not declare it, so their exit codes went back to being satisfied by the
+# fixture — the exact vacuity the wave status above was just fixed to remove,
+# reintroduced one commit later by a different field.
+#
+# So the harness reconciles the field for any case that does not speak about
+# it, leaving each case testing the one thing it means to. A case that IS about
+# the dispatch count sets `declares_dispatches` and is left alone — opting out
+# by declaration rather than by the absence the default would paper over.
+normalise_dispatches() {
+    python3 - "$1/plans/probe-campaign-state.json" <<'NORMALISE'
+import json, sys
+
+path = sys.argv[1]
+state = json.load(open(path))
+# ⚠️ Read, never consumed. Several cases call run_gate TWICE against the same
+# fixture — popping the flag would make the second call take the default path
+# and quietly test something the first did not.
+if state.get("declares_dispatches"):
+    raise SystemExit(0)
+for entry in (state.get("domain_reviews") or {}).values():
+    if not isinstance(entry, dict) or "dispatches" in entry:
+        continue
+    log = [e for e in (entry.get("reviews") or []) if isinstance(e, dict) and e.get("sha")]
+    if not log and entry.get("reviewed_at_sha"):
+        log = [{"sha": entry["reviewed_at_sha"]}]
+    entry["dispatches"] = len(log) + (1 if entry.get("dispatch_in_flight") else 0)
+json.dump(state, open(path, "w"), indent=2)
+NORMALISE
+}
+
 run_gate() {
+    normalise_dispatches "$1"
     OUT="$(cd "$1" && bash wave-status.sh probe-campaign 2>&1)"
     RC=$?
 }
@@ -305,6 +354,15 @@ assert_not_contains "$OUT" "touches elixir" \
 # is what a fresh pass reads and believes.
 DIR="$(new_sandbox stale_wave '{"elixir": "LGTM"}')"
 echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+# The one case that wants the understated state, set explicitly — the shared
+# sandbox is clean so that the exit codes elsewhere carry information.
+python3 - "$DIR/plans/probe-campaign-state.json" <<'UNDERSTATE'
+import json, sys
+path = sys.argv[1]
+state = json.load(open(path))
+state["waves"]["probe"]["status"] = "in_progress"
+json.dump(state, open(path, "w"), indent=2)
+UNDERSTATE
 
 test_case "a_wave_with_all_items_done_is_not_left_in_progress" "an understated wave is reported"
 run_gate "$DIR"
@@ -801,6 +859,124 @@ echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
 run_gate "$DIR"
 assert_contains "$OUT" "first dispatch, no prior review" "the declared state is surfaced"
 assert_not_contains "$OUT" "no recorded review to match it against" "and not also reported as a gap"
+
+# ── 10b. a dispatch must reconcile with a logged reply ─────────────────────
+#
+# ⛔ THE DEFECT THAT PRODUCED THIS SECTION HAPPENED TWICE, the second time
+# AFTER the byte-equality rule above was built for the first. Four reviewer
+# replies arrived, were acted on, and were never appended to the log; then one
+# more did.
+#
+# ⚠️ Every check above is blind to it BY CONSTRUCTION, and that is the point
+# worth a case rather than a comment. Base-equality compares a dispatch against
+# the newest log entry — so when the dispatch is dropped along with the reply,
+# there is nothing left to be unequal to, and the log that remains is perfectly
+# self-consistent. Ancestry is satisfied, resolution is satisfied, provenance is
+# satisfied, staleness is satisfied. The missing entry leaves no trace in any of
+# them.
+#
+# What is absent is a record that the dispatch COMPLETED. So the count of rounds
+# sent is declared at dispatch and reconciled against the log length, and the
+# green/red pair below is followed by a case asserting that the count is the
+# ONLY instrument that reports the defect.
+
+completion_sandbox() {
+    local name="$1" dispatches="$2" dispatch_json="$3" baseline="${4:-}" dir base head
+    dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM"}}')"
+    base="$(git -C "$dir" rev-parse HEAD)"
+    echo 'defmodule Probe do' > "$dir/apps/core/lib/probe.ex"
+    git -C "$dir" add -A
+    git -C "$dir" commit -qm "elixir work the review covers"
+    head="$(git -C "$dir" rev-parse HEAD)"
+    python3 - "$dir/plans/probe-campaign-state.json" "$base" "$head" \
+        "$dispatches" "$dispatch_json" "$baseline" <<'COMPLETIONFIX'
+import json, sys
+
+path, base, head, dispatches, dispatch, baseline = sys.argv[1:7]
+state = json.load(open(path))
+# This case is ABOUT the dispatch count, so the harness default must not touch
+# it — including the case that tests an absent count, which the default would
+# otherwise fill in and hide.
+state["declares_dispatches"] = True
+e = state["domain_reviews"]["elixir"]
+e["reviews"] = [
+    {"sha": head, "provenance": {"kind": "quoted_from_reply", "detail": "the reply"}}
+]
+if dispatches != "":
+    e["dispatches"] = json.loads(dispatches)
+if baseline != "":
+    e["dispatches_baseline"] = json.loads(baseline)
+parsed = json.loads(dispatch.replace("BASE_SHA", base).replace("HEAD_SHA", head))
+if parsed is not None:
+    e["dispatch_in_flight"] = parsed
+json.dump(state, open(path, "w"), indent=2)
+COMPLETIONFIX
+    printf '%s' "$dir"
+}
+
+test_case "a_settled_axis_reconciles" \
+    "the green half — one dispatch, one logged reply, nothing in flight"
+DIR="$(completion_sandbox comp_settled 1 'null')"
+run_gate "$DIR"
+assert_not_contains "$OUT" "logged replies" "a settled axis is silent"
+assert_not_contains "$OUT" "declares no \`dispatches\` count" "and is not reported as undeclared"
+# ⚠️ Asserted here so the `assert_exit_nonzero` in the red cases below means
+# something. MEASURED: under a probe that neutered the reconciliation, those
+# cases' exit assertions still PASSED while only their message assertions
+# caught it — the same shape as the four ordering slips this file gates. A
+# non-zero exit is only evidence if the green fixture exits ZERO.
+assert_exit_zero "$RC" "a reconciled axis leaves the gate green, so a non-zero exit below is evidence"
+
+test_case "an_axis_awaiting_a_reply_reconciles" \
+    "the other green half — a round in flight is legitimately one ahead of the log"
+DIR="$(completion_sandbox comp_awaiting 2 '{"base_sha": "HEAD_SHA", "round": 2}')"
+run_gate "$DIR"
+assert_not_contains "$OUT" "logged replies" "an in-flight round is not a gap"
+
+# ⛔ The planted red, and it is the exact shape that happened: the count says a
+# round was sent, the log has no reply for it, and nothing is in flight.
+test_case "a_dispatch_with_no_logged_reply_is_refused" \
+    "a reply read and acted on but never written down is what this exists to catch"
+DIR="$(completion_sandbox comp_unlogged 2 'null')"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "an unlogged reply is a violation"
+assert_contains "$OUT" "declares 2 dispatches and 1 logged replies" \
+    "the refusal states both numbers rather than only that they disagree"
+assert_contains "$OUT" "never appended" "and names the act that produces it"
+
+# ⛔ THE DISCRIMINATING CASE, and the reason the count had to exist at all. On
+# the SAME fixture, every other rule in this guard reads green — so if this
+# assertion ever fails because another check started firing, the count has
+# stopped being the thing that catches this and the next reader should know.
+test_case "the_count_is_the_only_instrument_that_sees_an_unlogged_reply" \
+    "every other rule is satisfied by a log that is merely missing an entry"
+assert_not_contains "$OUT" "must be BYTE-EQUAL" \
+    "base-equality has nothing to compare — the dispatch went with the reply"
+assert_not_contains "$OUT" "sit LATER on this branch" \
+    "ancestry is satisfied: the remaining entries are in order"
+assert_not_contains "$OUT" "cannot resolve" "every remaining entry resolves"
+assert_not_contains "$OUT" "no provenance" "every remaining entry is provenanced"
+assert_not_contains "$OUT" "review is STALE" \
+    "and staleness is satisfied, because the entry that IS there covers HEAD"
+
+test_case "an_undeclared_dispatch_count_is_refused" \
+    "an absent counter is this rule skipped rather than satisfied"
+DIR="$(completion_sandbox comp_undeclared '' 'null')"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "an axis with no declared count is a violation"
+assert_contains "$OUT" "declares no \`dispatches\` count" "the refusal names the condition"
+assert_contains "$OUT" "UNDETECTABLE" "and says what the absence costs"
+
+# ⚠️ A counter that can be reset is a counter that can be made to agree with a
+# short log, which would turn the check above into a formality. Monotonicity is
+# what makes the baseline mean anything.
+test_case "a_dispatch_count_below_its_baseline_is_refused" \
+    "a reset counter removes the check instead of satisfying it"
+DIR="$(completion_sandbox comp_reset 1 'null' 3)"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a count below its recorded baseline is a violation"
+assert_contains "$OUT" "recorded baseline of 3" "the refusal quotes the baseline"
+assert_contains "$OUT" "only ever goes up" "and states the invariant"
 
 # ── 11. the sha verifier is self-checked on every run ──────────────────────
 #
