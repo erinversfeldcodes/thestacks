@@ -288,10 +288,23 @@ suite =
               -- returning `[]` unless `Failure`. This file had eight rounds of
               -- edits in between without anyone noticing the sibling.
               --
-              -- ⚖️ Asserting the attribute ALONE cannot catch it: a dangling
-              -- reference and a live one are the same attribute. What makes it
-              -- detectable is asserting the attribute and the TARGET together,
-              -- which is the shape `Page/InviteGateTest` already uses.
+              -- ⚠️ WHAT THESE TWO CASES DO NOT ASSERT, corrected after a
+              -- reviewer caught the comment claiming it. Both arms assert the
+              -- ATTRIBUTE only. They cannot assert the attribute together with
+              -- its TARGET, because the element carrying `progressErrorId` is
+              -- rendered by whichever HOST embeds this card — so a card-level
+              -- test structurally cannot see both halves. `Page/InviteGateTest`
+              -- genuinely does pair them, in one `Expect.all`, because
+              -- `Login.view` renders both.
+              --
+              -- ⛔ The earlier version of this comment claimed the pairing. That
+              -- is the documented-but-unasserted shape, and the comment is the
+              -- only evidence a future reader would have looked for.
+              --
+              -- ⚖️ These cases remain valuable for the defect that was LIVE —
+              -- the unconditional attribute — which the mirror catches. The
+              -- pairing is asserted where both halves render, in each host's
+              -- `progress_save_contract` block.
               test "with the error showing, the input describes it" <|
                 \_ ->
                     editingReadingCard

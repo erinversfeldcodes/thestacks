@@ -1,4 +1,4 @@
-module ProgressSaveContract exposing (Classification, ExpectedOut(..), classifications, errorSelector, expectedOut, fixtureDecodes, label, reportsAnError, response)
+module ProgressSaveContract exposing (Classification, ExpectedOut(..), classifications, errorSelector, expectedOut, fixtureDecodes, label, refusedResponse, reportsAnError, response)
 
 {-| How a reading-progress save is CLASSIFIED, written once and driven against
 every host that owns a progress card.
@@ -143,6 +143,22 @@ response endpoint savedBody classification =
                 , headers = Dict.empty
                 }
                 "{\"error\":\"unauthorized\"}"
+
+
+{-| The server-refused response, without exposing which constructor it is.
+
+⛔ `Classification` is OPAQUE, so a host cannot name `Refused` — which is the
+constraint that keeps a host from re-acquiring a per-page judgement about which
+classification means what. A host that needs a specific response therefore asks
+for it by name here rather than constructing it.
+
+⚠️ Same principle as `fixtureDecodes`: move the thing that needs the type to
+where the type is visible, rather than widening the type.
+
+-}
+refusedResponse : String -> String -> Http.Response String
+refusedResponse endpoint savedBody =
+    response endpoint savedBody Refused
 
 
 {-| Whether the host must have an error on screen after this classification.

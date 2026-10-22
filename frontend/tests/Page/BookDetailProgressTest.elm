@@ -139,8 +139,43 @@ progressSaveContract : Test
 progressSaveContract =
     describe "progress_save_contract: every classification clears the in-flight flag"
         (ProgressSaveContract.fixtureDecodes progressEndpoint completedBody
+            :: describesItsTarget
             :: List.map contractCase ProgressSaveContract.classifications
         )
+
+
+{-| The card's `aria-describedby` and the element it names, asserted TOGETHER.
+
+⛔ THIS IS THE ASSERTION A CARD-LEVEL TEST STRUCTURALLY CANNOT MAKE. The card
+renders the reference; this host renders the target. Only here do both halves
+exist, so only here can a dangling reference be distinguished from a live one —
+and `PlacementCardTest`'s comment used to claim this pairing while asserting
+only the attribute.
+
+⚠️ What is reachable now is PREDICATE drift rather than spelling drift: the
+single authority closed the spelling half. The attribute is gated on this host's
+failure predicate and the element on its own `case state of Failure`, two
+expressions over one state. They agree by construction today and nothing would
+fail if someone widened either — which is what this case is for.
+
+-}
+describesItsTarget : Test
+describesItsTarget =
+    test "a failed save renders the error AND the input that references it" <|
+        \() ->
+            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook libraryPlacement)
+                |> openAndSaveWithOut
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    progressEndpoint
+                    (ProgressSaveContract.refusedResponse progressEndpoint completedBody)
+                |> ProgramTest.expectViewHas
+                    [ Selector.id Card.progressErrorId
+                    , Selector.attribute
+                        (Html.Attributes.attribute "aria-describedby" Card.progressErrorId)
+                    ]
 
 
 {-| This host's spelling of the shared out-message decision.
