@@ -146,4 +146,102 @@ assert_contains "$GATE_SRC" "parsed only" "an undersized parse refuses"
 assert_contains "$GATE_SRC" "passes trivially" "and says why that is not a pass"
 assert_contains "$GATE_SRC" "NEVER_SERIALIZE list is empty" "an empty expectation list also refuses"
 
+# --- ROUTE THREE: the Jason.Encoder derive list -----------------------------
+
+# ⛔ The route that actually leaked, and the one the first version of this gate
+# did not read. `derive_jason` in the manifest writes
+# `@derive {Jason.Encoder, only: [...]}` onto the generated Ecto schema, and any
+# `json(conn, record)` publishes that list with no serializer involved.
+# `listing.proto:132` names it in the contract: "The seller (embedded User
+# struct VIA JASON.ENCODER if preloaded)".
+#
+# MEASURED, adding `:password_hash` to the User entry's `derive_jason` in the
+# MANIFEST and regenerating — the faithful reproduction, not a hand-edit:
+#
+#   check-never-serialized.sh         rc=1   <- only this one
+#   check-api-only-is-skipped.sh      rc=0
+#   check-protojson-completeness.sh   rc=0
+#   mix proto.sync --check            rc=0
+#
+# So before this route was read, a one-line manifest edit published an Argon2
+# hash with every gate green.
+test_case "the_derive_route_is_read" "a credential in a Jason.Encoder derive list is refused"
+assert_contains "$GATE_SRC" "@derive \\{Jason\\.Encoder" "the gate parses the derive attribute"
+assert_contains "$GATE_SRC" "derive_schemas" "and keeps that population separately"
+assert_contains "$GATE_SRC" "MIN_DERIVE_SCHEMAS" "with its own floor, since this check is also an absence"
+
+GEN_SCHEMA="$REPO_ROOT/apps/core/lib/stacks/gen/accounts/user.ex"
+SCHEMA_BACKUP="$(mktemp)"
+cp "$GEN_SCHEMA" "$SCHEMA_BACKUP"
+restore_schema() { cp "$SCHEMA_BACKUP" "$GEN_SCHEMA"; rm -f "$SCHEMA_BACKUP"; }
+trap 'restore_both 2>/dev/null; restore_schema 2>/dev/null' EXIT
+
+# ⚠️ The plant's own exit status is checked. An earlier version of this block
+# carried a literal newline inside a Python string, so the plant was a syntax
+# error, never ran, and the gate correctly reported clean — the case failed for
+# the right verdict and the wrong reason. A probe that silently does not apply
+# has now cost three separate detours in this campaign.
+if python3 - "$GEN_SCHEMA" <<'PLANT'
+import sys
+
+path = sys.argv[1]
+lines = open(path, encoding="utf-8").read().split("\n")
+idx = next((i for i, line in enumerate(lines) if line.strip() == ":id,"), None)
+assert idx is not None, "anchor moved — this case would pass for the wrong reason"
+lines.insert(idx + 1, "             :password_hash,")
+open(path, "w", encoding="utf-8").write("\n".join(lines))
+PLANT
+then
+    _record_pass "the credential was planted into the derive list"
+else
+    _record_fail "the plant did not apply, so this case cannot show the gate works"
+fi
+
+run_gate
+assert_exit_nonzero "$RC" "the gate refuses a credential on the derive route"
+assert_contains "$OUT" "Jason.Encoder derive list" "the refusal names the route"
+assert_contains "$OUT" "no serializer involved" "and says why no serializer check would catch it"
+assert_contains "$OUT" "Stacks.Accounts.User" "and names the schema"
+
+restore_schema
+SCHEMA_BACKUP="$(mktemp)"
+cp "$GEN_SCHEMA" "$SCHEMA_BACKUP"
+
+test_case "the_derive_restore_is_clean" "the planted derive entry is gone again"
+run_gate
+assert_exit_zero "$RC" "the gate passes once the plant is removed"
+assert_contains "$OUT" "all THREE routes to JSON" "and the summary names every route it checked"
+
+# --- a MODULE-QUALIFIED entry applies only to its own schema ----------------
+
+# ⛔ `metadata` is Cloak ciphertext on `audit.audit_log` and an ordinary `:map`
+# on three other messages, so the bare name cannot be banned. The qualified
+# form must fire on its own module and stay silent on the others — a
+# qualification that matched everything would be a bare name with extra steps.
+test_case "a_qualified_entry_is_scoped_to_its_module" "the same name can be a credential on one message and benign on another"
+assert_contains "$GATE_SRC" "Stacks.Audit.Entry.metadata" "the qualified entry is declared"
+assert_contains "$GATE_SRC" "def split_entry" "and the gate splits module from field"
+
+if python3 - "$GEN_SCHEMA" <<'PLANT'
+import sys
+
+path = sys.argv[1]
+lines = open(path, encoding="utf-8").read().split("\n")
+idx = next((i for i, line in enumerate(lines) if line.strip() == ":id,"), None)
+assert idx is not None, "anchor moved — this case would pass for the wrong reason"
+# `metadata` on the USER schema — a DIFFERENT module from the qualified entry.
+lines.insert(idx + 1, "             :metadata,")
+open(path, "w", encoding="utf-8").write("\n".join(lines))
+PLANT
+then
+    _record_pass "a benign `metadata` was planted on a module the qualified entry does not name"
+else
+    _record_fail "the plant did not apply, so this case cannot show the qualification is scoped"
+fi
+
+run_gate
+assert_exit_zero "$RC" \
+    "a qualified entry does NOT fire on a different module, so it is not a bare name in disguise"
+restore_schema
+
 summarise

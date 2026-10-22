@@ -18,6 +18,23 @@
 #     decision, because deleting a `skip_fields` entry and regenerating is a
 #     perfectly consistent pair of changes.
 #
+# ⛔ AND THERE ARE THREE ROUTES TO JSON, NOT TWO. The first version of this gate
+# read the two serializer files and stopped — which left it protecting the two
+# routes that had never leaked anything.
+#
+# The manifest drives three: `api_only` (no column at all), `skip_fields` (the
+# generated serializer must not emit it), and `derive_jason`, which writes
+# `@derive {Jason.Encoder, only: [...]}` onto the generated Ecto SCHEMA. Fifteen
+# schemas carry that attribute, and it means any `json(conn, record)` publishes
+# the listed fields with no serializer involved at all. Adding `:password_hash`
+# to the `User` entry's `derive_jason` would have been published by that route
+# with this gate green.
+#
+# ⚠️ That is not the hypothetical route — it is the one that actually leaked.
+# `listing.proto:132` still says so in the contract: "The seller (embedded User
+# struct VIA JASON.ENCODER if preloaded)", which is how a seller's account email
+# reached unauthenticated callers on an enumerable public index.
+#
 # So deleting one line from a manifest would have put a password hash into a
 # serializer with three gates green. Nothing was exposed — `Gen.user/1` emits
 # none of them today and both of its callers `Map.take` — but that is the same
@@ -38,6 +55,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
 
 python3 - <<'PY'
+import pathlib
 import re
 import sys
 
@@ -46,12 +64,38 @@ HAND = "apps/core/lib/stacks_web/proto_json.ex"
 
 # ⛔ Credentials and single-use tokens. There is no payload on which any of
 # these is the right answer, so no override, no baseline, no exemption.
+# An entry is either a BARE name — forbidden on every route, in every message —
+# or `Full.Module.Path.field`, forbidden only on the schema whose module matches.
+#
+# ⚠️ Qualification exists because a name can be a credential on one message and
+# benign on another: `metadata` is Cloak ciphertext on `audit.audit_log` and an
+# ordinary `:map` on three other messages, so it cannot be banned unqualified.
 NEVER_SERIALIZE = [
     "password_hash",
     "email_confirmation_token",
     "pending_email_token",
     "pending_email_revert_token",
     "password_reset_token",
+    # Added after two reviewers independently swept for credential-shaped names
+    # and resolved each to its owning message. Both state the policy in the
+    # CONTRACT and neither was enforced anywhere:
+    #
+    #   partner.proto:46   hmac_secret  "Argon2 hash of the API key. DB-only —
+    #                                    never serialized over the wire"
+    #   user.proto:201     code_hash    "DB-only; never on the wire"
+    #
+    # `hmac_secret` is the partner shared secret behind `X-Internal-Token`.
+    # Neither is reachable today — neither message has a generated-serializer
+    # entry, so there is nothing for codegen to emit them into — but that is
+    # accident rather than design, and `ProtoJSON.partner/1` is the last
+    # hand-written serializer with no `Gen` base among its nine siblings, so
+    # bringing it into line is the natural next tidy. Adding them now is free.
+    "hmac_secret",
+    "code_hash",
+    # Cloak ciphertext on the audit log, qualified because the bare name is
+    # benign elsewhere. `Stacks.Audit` encrypts on write and decrypts on read;
+    # nothing should ever publish the stored bytes.
+    "Stacks.Audit.Entry.metadata",
 ]
 
 # ⚠️ DELIBERATELY NOT IN THE LIST ABOVE, and the distinction is the reason this
@@ -86,6 +130,28 @@ def read(path):
 gen_src = read(GEN)
 hand_src = read(HAND)
 
+# ⛔ ROUTE THREE: `@derive {Jason.Encoder, only: [...]}` on the generated Ecto
+# schemas. No serializer is involved — `json(conn, record)` publishes whatever
+# is in that list.
+DERIVE_RE = re.compile(r"@derive \{Jason\.Encoder,\s*only: \[(.*?)\]\}", re.S)
+
+derive_schemas = []
+for schema_path in sorted(pathlib.Path("apps/core/lib/stacks/gen").rglob("*.ex")):
+    text = schema_path.read_text(encoding="utf-8", errors="ignore")
+    match = DERIVE_RE.search(text)
+    if not match:
+        continue
+    module = re.search(r"defmodule ([\w.]+)", text)
+    line_no = text[: match.start()].count("\n") + 1
+    derive_schemas.append(
+        {
+            "path": str(schema_path),
+            "module": module.group(1) if module else "?",
+            "fields": set(re.findall(r":([a-z_0-9]+)", match.group(1))),
+            "line": line_no,
+        }
+    )
+
 # ⚠️ Anti-vacuity on BOTH inputs, because every check below is an absence and an
 # absence is what an unparsed file also produces. The generated file defines one
 # serializer per persisted message; a number this low means the parse stopped
@@ -101,6 +167,19 @@ if len(gen_funs) < 5:
 if len(hand_funs) < 10:
     print(f"FAIL: parsed only {len(hand_funs)} function(s) from {HAND}.", file=sys.stderr)
     print("       An absence check over an unparsed file passes trivially.", file=sys.stderr)
+    raise SystemExit(1)
+
+# ⚠️ The derive route gets its own floor for the same reason as the other two:
+# "no credential in any @derive list" is an absence, and an absence is what a
+# failed discovery also produces. Fifteen schemas carry the attribute today.
+MIN_DERIVE_SCHEMAS = 10
+if len(derive_schemas) < MIN_DERIVE_SCHEMAS:
+    print(
+        f"FAIL: found only {len(derive_schemas)} generated schema(s) with a Jason.Encoder "
+        f"derive list, expected at least {MIN_DERIVE_SCHEMAS}.",
+        file=sys.stderr,
+    )
+    print("       An absence check over an unparsed population passes trivially.", file=sys.stderr)
     raise SystemExit(1)
 
 if not NEVER_SERIALIZE:
@@ -139,8 +218,39 @@ def strip_comments(src):
 gen_code = strip_comments(gen_src)
 hand_code = strip_comments(hand_src)
 
+def split_entry(entry):
+    """`field` -> (None, field); `A.B.C.field` -> ("A.B.C", field)."""
+    if "." in entry:
+        module, _, field = entry.rpartition(".")
+        return module, field
+    return None, entry
+
+
 findings = []
-for name in NEVER_SERIALIZE:
+
+# ⛔ Route three first, because it is the one that actually leaked.
+for entry in NEVER_SERIALIZE:
+    qualifier, name = split_entry(entry)
+    for schema in derive_schemas:
+        if qualifier is not None and schema["module"] != qualifier:
+            continue
+        if name in schema["fields"]:
+            findings.append(
+                (
+                    schema["path"],
+                    schema["line"],
+                    f"only: [… :{name} …]",
+                    f"`{name}` is in {schema['module']}'s Jason.Encoder derive list — "
+                    "any `json(conn, record)` publishes it, with no serializer involved",
+                )
+            )
+
+for entry in NEVER_SERIALIZE:
+    qualifier, name = split_entry(entry)
+    # A module-qualified entry says nothing about the shared serializer files,
+    # which are not per-message — so it is checked on the derive route only.
+    if qualifier is not None:
+        continue
     # In the generated file a field is emitted as `name: struct.name`.
     for n, line in enumerate(gen_code.split("\n"), 1):
         if re.match(rf"^\s+{re.escape(name)}:\s", line):
@@ -167,8 +277,9 @@ if findings:
     raise SystemExit(1)
 
 print(
-    f"OK: {len(NEVER_SERIALIZE)} credential field(s) absent from "
-    f"{len(gen_funs)} generated and {len(hand_funs)} hand-written serializer function(s); "
+    f"OK: {len(NEVER_SERIALIZE)} credential field(s) absent from all THREE routes to JSON — "
+    f"{len(gen_funs)} generated serializer(s), {len(hand_funs)} hand-written function(s), "
+    f"and {len(derive_schemas)} Jason.Encoder derive list(s); "
     f"{len(POLICY_NOT_SECRET)} lockout field(s) deliberately out of scope."
 )
 PY
