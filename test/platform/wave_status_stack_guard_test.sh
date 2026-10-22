@@ -905,13 +905,12 @@ if len(banner_lines) != 1:
     print("      banner is gone and there is nothing to measure.")
     raise SystemExit(1)
 
-try:
-    banner_at = next(i for i, l in enumerate(body) if BANNER in l)
-except StopIteration:
-    print("FAIL: the MAIN FLOW banner is gone, so this check has nothing to measure.")
-    print("      Without it a definition can drift below the flow again, which is how a")
-    print("      NameError came to pass an exit-code assertion twice.")
-    raise SystemExit(1)
+# ⚠️ No `try` — `next()` cannot raise now that the count above is pinned to
+# exactly 1. The guard it used to need is the `!= 1` check, which covers the
+# banner being GONE (0 matches) as well as ambiguous (>1). Keeping the handler
+# would imply a reachable path that is not, and the next reader would preserve
+# it as load-bearing.
+banner_at = banner_lines[0]
 
 # A top-level definition: a `def` or an UPPER_SNAKE constant at column zero.
 DEFN = re.compile(r"^(def\s+\w+|[A-Z][A-Z0-9_]*\s*=)")
