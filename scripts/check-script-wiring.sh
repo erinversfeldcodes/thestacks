@@ -105,6 +105,12 @@ def _code_lines(txt, path=""):
         #
         # None of those files invokes the script it was recorded as calling.
         #
+        # ⚠️ The first example is kept as the MEASUREMENT it was, but the
+        # construct is gone: `check-sigpipe-hazards.sh` no longer has a
+        # `FIXTURE_FILES` list, having replaced its whole-file exemptions with a
+        # data/code classifier. Don't go looking for it. The shape it
+        # illustrates is still live, which is why the rule stays.
+        #
         # ⚠️ This is NOT the stricter fix the comment above refutes. That one
         # asked what an invocation looks like and reported 11 live scripts as
         # orphans, because this repo dispatches through its own shell functions.

@@ -420,27 +420,101 @@ else
     _record_fail "a zsh shell was accepted, leaving every word-splitting loop silently broken"
 fi
 
-test_case "a_fixture_exemption_is_a_CHECKED_claim" \
-    "an exemption whose reason has lapsed is worse than no reason at all"
-# ⛔ Each exempted file is exempt because its job is to spell the banned form as
-# test data — so the exemption is valid only while that remains true. A file
-# that stops testing this gate and keeps its exemption becomes a blind spot
-# WITH A REASON ATTACHED, which the next reader trusts.
+# ── the data/code classifier replaced the exemption list ────────────────────
 #
-# The cheapest proof is that the file still references the gate it tests. This
-# case breaks that reference and asserts the gate refuses rather than quietly
-# carrying the exemption.
-EXEMPT_VICTIM="$REPO_ROOT/test/platform/rls_scope_gate_test.sh"
-cp "$EXEMPT_VICTIM" "$PLANT_DIR/exempt.orig"
-sed 's|check-rls-scope|check-SOMETHING-ELSE|g' "$PLANT_DIR/exempt.orig" > "$EXEMPT_VICTIM"
-LAPSED_OUT="$(bash "$GATE" 2>&1)"
-LAPSED_RC=$?
-cp "$PLANT_DIR/exempt.orig" "$EXEMPT_VICTIM"
-rm -f "$PLANT_DIR/exempt.orig"
-if [[ $LAPSED_RC -ne 0 ]] && grep -q "a fixture exemption has lapsed" <<< "$LAPSED_OUT"; then
-    _record_pass "an exempted file that stopped testing this gate is refused, not silently trusted"
+# ⛔ There USED to be a whole-file exemption list here, and a case asserting its
+# entries had not gone stale. Both are gone. Two test suites whose job is to
+# SPELL the banned form were exempted file-wide, which the gate's own error
+# message admitted — "its exemption is now hiding whatever the file contains" —
+# so the executable code of the two suites that test this gate was the one code
+# in the repository it could not see.
+#
+# The classifier makes the distinction directly: a pipeline in a single-quoted
+# string or a heredoc body is data; one outside is code. The three cases below
+# replace the exemption machinery, and the first is the one that matters —
+# without it, a classifier that blanked EVERYTHING would also report clean.
+
+test_case "the_classifier_discriminates_data_from_code" \
+    "a classifier that blanks everything reports clean over a corpus full of hazards"
+# ⛔ This is the vacuity the file-count floor cannot see. The floor proves
+# scripts were DISCOVERED; it says nothing about whether anything survived
+# classification. So the gate carries its own five-line probe — one pipeline as
+# code, four as data — and refuses unless it finds exactly the code one.
+#
+# ⚠️ Driven against BROKEN classifiers, not just asserted present. A probe that
+# only ran against the real one would pass whatever the real one does.
+BLANKER="$REPO_ROOT/scripts/lib/blank-shell-data.py"
+assert_path_exists "$BLANKER" "the classifier the gate depends on exists"
+
+_probe_corpus() {
+    printf '%s\n' \
+        'live_code | grep -q findme' \
+        "assert_contains \"\$SRC\" 'inert_data | grep -q findme'" \
+        'echo x <<< "inert_string | grep -q findme"' \
+        "cat <<'INERT'" \
+        'inert_heredoc | grep -q findme' \
+        'INERT'
+}
+_consumer_re='[^|]\| *grep [^|]*-[a-zA-Z]*q'
+
+_real_hits="$(_probe_corpus | python3 "$BLANKER" | grep -cE "$_consumer_re" || true)"
+if [[ "$_real_hits" == "1" ]]; then
+    _record_pass "the real classifier finds the one code hazard and none of the four data ones"
 else
-    _record_fail "a lapsed fixture exemption was honoured, so the file is now a blind spot: ${LAPSED_OUT}"
+    _record_fail "the classifier is not discriminating — expected 1 hit, got ${_real_hits}"
+fi
+
+# A classifier that blanks everything: the dangerous direction, because it makes
+# the gate green over anything.
+printf 'import sys\nfor _ in sys.stdin.read().split("\\n"): print("")\n' > "$PLANT_DIR/blank_all.py"
+_all_hits="$(_probe_corpus | python3 "$PLANT_DIR/blank_all.py" | grep -cE "$_consumer_re" || true)"
+if [[ "$_all_hits" == "0" ]]; then
+    _record_pass "a blank-everything classifier yields 0 hits, which is what the gate's probe refuses on"
+else
+    _record_fail "the probe cannot detect a blank-everything classifier (got ${_all_hits})"
+fi
+
+# A classifier that blanks nothing: the noisy direction — the fixture suites
+# that spell this pattern deliberately would all be reported as hazards.
+printf 'import sys\nsys.stdout.write(sys.stdin.read())\n' > "$PLANT_DIR/blank_none.py"
+_none_hits="$(_probe_corpus | python3 "$PLANT_DIR/blank_none.py" | grep -cE "$_consumer_re" || true)"
+if [[ "$_none_hits" -gt 1 ]]; then
+    _record_pass "a blank-nothing classifier reports the data lines too, which the probe also refuses"
+else
+    _record_fail "the probe cannot detect a blank-nothing classifier (got ${_none_hits})"
+fi
+
+test_case "the_gate_refuses_when_the_classifier_is_missing" \
+    "without it every line reads as code, so the gate must not run at all"
+CLASSIFIER_HIDDEN="$PLANT_DIR/blanker.hidden"
+cp "$BLANKER" "$CLASSIFIER_HIDDEN"
+rm -f "$BLANKER"
+MISSING_OUT="$(bash "$GATE" 2>&1)"
+MISSING_RC=$?
+cp "$CLASSIFIER_HIDDEN" "$BLANKER"
+rm -f "$CLASSIFIER_HIDDEN"
+if [[ $MISSING_RC -ne 0 ]] && grep -q "is missing" <<< "$MISSING_OUT"; then
+    _record_pass "a missing classifier is a refusal, not a pass over unclassified lines"
+else
+    _record_fail "the gate ran without its classifier: ${MISSING_OUT}"
+fi
+
+test_case "a_substitution_inside_double_quotes_is_CODE" \
+    "double quotes expand, so a pipeline inside them is a real hazard"
+# ⛔ MEASURED, and it is the bug the first classifier shipped with. `"..."`
+# undergoes expansion, so `X="prefix$(cat f | head -1)"` is executable — under
+# `set -e` that pipeline's 141 becomes the script's status. Blanking the whole
+# double-quoted run hid it, and this suite caught SIX assignment shapes being
+# accepted that it had previously refused. Only single quotes are literal.
+_dq_hits="$(printf '%s\n' \
+    'X="prefix$(cat /etc/hosts | head -1)"' \
+    'X="${V:-$(cat /etc/hosts | head -1)}"' \
+    'V="`cat f | head -1`"' |
+    python3 "$BLANKER" | grep -cE '\| *head' || true)"
+if [[ "$_dq_hits" == "3" ]]; then
+    _record_pass "all three substitution spellings inside double quotes survive as code"
+else
+    _record_fail "a substitution inside double quotes was blanked as data (${_dq_hits} of 3 survived)"
 fi
 
 test_case "the_gate_itself_is_not_wholesale_exempt" \

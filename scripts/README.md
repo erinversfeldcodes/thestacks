@@ -87,6 +87,7 @@ in code by" and check it before relying on it.
 | `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
 | `scripts/install-flyctl.sh` | `justfile` |  |
 | `scripts/install-hooks.sh` | `justfile` |  |
+| `scripts/lib/blank-shell-data.py` | `scripts/check-sigpipe-hazards.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Blank out the parts of a shell script that are DATA, keeping line numbers. |
 | `scripts/lib/derive-app-database-url.py` | `scripts/deploy-stack.sh`, `test/platform/app_database_url_derivation_test.sh` | Derive the least-privilege runtime connection URL from the owner's. |
 | `scripts/lib/postgres.sh` | `scripts/test-dbt.sh`, `scripts/test-e2e.sh`, `scripts/test-elixir.sh` |  |
 | `scripts/lib/preview-names.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `scripts/cleanup-preview.sh`, `scripts/deploy-preview.sh` … |  |

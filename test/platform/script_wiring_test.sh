@@ -174,7 +174,10 @@ assert_contains "$OUT" "scripts/orphan.sh" "the orphan is named"
 #
 # MEASURED on the real repository: the discriminator removed ELEVEN false
 # callers, including this gate recording `check-sigpipe-hazards.sh` as a caller
-# of `check-rls-scope.sh` (a fixture pairing), `gen_python_proto.py` as a caller
+# of `check-rls-scope.sh` (a fixture pairing — ⚠️ that pairing no longer exists,
+# the exemption list having been replaced by a data/code classifier, so the
+# example records a past measurement rather than something to go and find),
+# `gen_python_proto.py` as a caller
 # of three `gen-*-proto.sh` scripts (a "Regenerate: …" banner it writes into
 # generated files), and `install-hooks.sh` as a caller of `pre-stop-lint.sh` (a
 # path in a `chmod +x` array — it makes the hook executable and never runs it).

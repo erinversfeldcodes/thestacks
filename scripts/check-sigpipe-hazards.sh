@@ -50,6 +50,21 @@ cd "$REPO_ROOT" || exit 1
 # STATUS-ONLY consumer: the answer travels in the exit status and NOWHERE else.
 # 141 is indistinguishable from "no match", so there is no safe way to pipe into
 # it — not even `|| true`, which discards the only output it has.
+# ⛔ THE DATA/CODE CLASSIFIER, and it is what lets this gate have no exemption
+# list at all. It blanks comments, heredoc bodies and the CONTENTS of quoted
+# strings while keeping everything outside them — so a pipeline written as code
+# still matches and the same pipeline written as a test fixture does not. See
+# the file for the two measured traps in it (`<<<` is not a heredoc, and the
+# delimiter of `<<'X'` must be consumed before quotes are blanked).
+BLANK_DATA="$REPO_ROOT/scripts/lib/blank-shell-data.py"
+
+if [[ ! -f "$BLANK_DATA" ]]; then
+    echo "FAIL check-sigpipe-hazards: $BLANK_DATA is missing, so every line would be" >&2
+    echo "  read as code and this gate would report hazards it cannot classify." >&2
+    echo "  Nothing was checked. This is a refusal, not a pass." >&2
+    exit 1
+fi
+
 CONSUMER_STATUS_ONLY='[^|]\| *grep [^|]*-[a-zA-Z]*q'
 
 # OUTPUT consumer: the answer is on stdout and is CORRECT even when the producer
@@ -120,6 +135,47 @@ IS_ASSIGNMENT='(^|;|&&|\|\||\bthen|\belse|\bdo|\{|\(|\))[[:space:]]*[A-Za-z_][A-
 # on them explicitly keeps the right outcome once the fall-through is inverted.
 IS_BUILTIN_DECL='^[[:space:]]*(local|export|declare|readonly|typeset)[[:space:]]'
 
+# ⛔ THE CLASSIFIER IS SELF-CHECKED ON EVERY RUN, because it opened a vacuity
+# path that the file-count floor below cannot see. The floor proves scripts were
+# DISCOVERED; it says nothing about whether anything survived classification. A
+# blanker that emitted empty lines for everything — a bad regex, a heredoc
+# delimiter that never matches its terminator, a python that dies on the first
+# file — produces zero hazards from a corpus full of them, and "0 hazards" then
+# means "nothing was read".
+#
+# So the discrimination itself is asserted against a fixture carrying one of
+# each: the same pipeline as CODE and as DATA. It must find exactly the code
+# one. This is a planted red that runs in production rather than only in the
+# suite, which is the only version that cannot drift away from the gate.
+_probe="$(printf '%s\n' \
+    'live_code | grep -q findme' \
+    "assert_contains \"\$SRC\" 'inert_data | grep -q findme'" \
+    'echo x <<< "inert_string | grep -q findme"' \
+    "cat <<'INERT'" \
+    'inert_heredoc | grep -q findme' \
+    'INERT' |
+    python3 "$BLANK_DATA" | grep -cE "$CONSUMER_STATUS_ONLY" || true)"
+
+if [[ "$_probe" != "1" ]]; then
+    echo "FAIL check-sigpipe-hazards: the data/code classifier is not discriminating." >&2
+    echo "  Its five-line self-check holds ONE pipeline as executable code and four as data" >&2
+    echo "  (a single-quoted argument, a here-string, and a heredoc body). It should report" >&2
+    echo "  exactly 1 hazard; it reported ${_probe}." >&2
+    if [[ -z "$_probe" ]]; then
+        echo "  An EMPTY count means the probe itself did not run — a pattern that is not yet" >&2
+        echo "  defined at this point in the file, or a classifier that died before writing." >&2
+    elif [[ "$_probe" == "0" ]]; then
+        echo "  0 means it is blanking CODE as well as data — so a clean result from this gate" >&2
+        echo "  would mean nothing was read, which the file-count floor cannot detect." >&2
+    else
+        echo "  More than 1 means it is reading DATA as code, so the test suites that spell" >&2
+        echo "  this pattern deliberately will be reported as hazards." >&2
+    fi
+    echo "  Nothing was checked. This is a refusal, not a pass." >&2
+    exit 1
+fi
+
+
 # ⚠️ Files whose JOB is to contain the banned form as DATA, with the reason
 # stated. This is the exemption list the reviewer asked for, and it is kept to
 # whole files rather than line numbers deliberately: line numbers rot on the
@@ -138,57 +194,24 @@ discover_shell_scripts() {
     { git ls-files '*.sh'; git ls-files --others --exclude-standard '*.sh'; } | sort -u
 }
 
-# ⚠️ A CHECKED claim, not a bare list. Each exempted file is exempt because its
-# job is to spell the banned form as test data — so the exemption is only valid
-# while that is still true, and the cheapest proof of it is that the file still
-# references this gate. A test file that stops testing this gate and keeps its
-# exemption is a blind spot with a reason attached, which is worse than no
-# reason at all: the next reader trusts it.
+# ⛔ THERE IS NO FIXTURE-FILE EXEMPTION LIST, and deleting it is the point of
+# the classifier above. There used to be one: two test suites whose job is to
+# SPELL the banned form as test data were exempted WHOLE-FILE, which its own
+# error message admitted — "its exemption is now hiding whatever the file
+# contains". So the executable code of the two suites that test this gate was
+# the one code in the repository this gate could not see.
 #
-# ⛔ `scripts/check-sigpipe-hazards.sh` is NOT in this list. Exempting the gate
-# wholesale would hide a real hazard in its own executable code, and it does not
-# need the exemption: every pipeline in it is already a here-string, so the only
-# matches are the pattern DEFINITIONS and the GUIDE heredoc. Those are handled
-# by the narrower rule below rather than by a file-wide pass.
-# Each entry pairs the exempted file with the gate it must EXECUTE. Paired
-# rather than a shared disjunction, because a disjunction let either file
-# justify its exemption with a reference to the OTHER gate — so a suite that
-# stopped testing this pattern entirely kept its exemption by mentioning its
-# neighbour.
-FIXTURE_FILES=(
-    # Plants the banned form to prove this gate refuses it.
-    "test/platform/sigpipe_hazard_gate_test.sh:check-sigpipe-hazards.sh"
-    # Carries several spellings of it as anti-vacuity data for its own pattern.
-    "test/platform/rls_scope_gate_test.sh:check-rls-scope.sh"
-)
-
-is_fixture_file() {
-    local candidate="$1" entry fixture required
-    for entry in "${FIXTURE_FILES[@]}"; do
-        fixture="${entry%%:*}"
-        required="${entry#*:}"
-        [[ "$candidate" == "$fixture" ]] || continue
-
-        # ⛔ EXECUTION, not mention — and COMMENT-STRIPPED. This was the one
-        # grep in the file that did not strip comments, so a file could keep
-        # its exemption with the gate's name in a comment and no test at all.
-        # That is the "gates read their own prose" defect wearing the costume
-        # of an exemption check.
-        if sed 's/#.*//' "$candidate" 2>/dev/null |
-            grep -qE "(bash|sh|source|\.)[[:space:]]+[^[:space:]]*${required}|${required}\"" ; then
-            return 0
-        fi
-        # ⚠️ The lapse phrase is kept on ONE line, so a grep for it cannot be
-        # defeated by the wrap. A test asserting this message straddled two
-        # lines and reported the gate as having accepted what it had refused.
-        echo "FAIL check-sigpipe-hazards: a fixture exemption has lapsed." >&2
-        echo "  ${candidate} is exempted as a fixture file but no longer EXECUTES ${required}," >&2
-        echo "  so its exemption is now hiding whatever the file contains." >&2
-        echo "  Remove the exemption, or restore the test." >&2
-        exit 1
-    done
-    return 1
-}
+# The exemption also needed its own guard against rotting (a file that stopped
+# testing the gate but kept its exemption), and that guard needed its own test,
+# and the pairing of file-to-gate existed because a shared disjunction let
+# either file justify itself by naming the other. All of that machinery was in
+# service of a distinction the classifier makes directly: a pipeline inside a
+# quoted string or a heredoc is data, and one outside is code.
+#
+# ⚠️ What this costs, stated rather than discovered later: a heredoc that writes
+# a REAL script is now read as data, so a hazard inside such a heredoc is not
+# scanned. That is a narrower blind spot than the whole files it replaces, and
+# it is bounded by the fact that generated scripts are not scanned today either.
 
 # The gate's own file: only the pattern definitions and the printed guidance may
 # contain the banned form, because those are data. Anything else in it is code.
@@ -199,18 +222,12 @@ is_own_pattern_definition() {
 
 FOUND=0
 SCANNED=0
-EXEMPTED=0
 REPORT=""
 
 while IFS= read -r file; do
     # Only scripts where pipefail is actually in effect.
     grep -qE '^[[:space:]]*set .*pipefail' "$file" || continue
     SCANNED=$((SCANNED + 1))
-
-    if is_fixture_file "$file"; then
-        EXEMPTED=$((EXEMPTED + 1))
-        continue
-    fi
 
     # ⛔ `set -e` is what makes a bare pipeline's status load-bearing, so the
     # predicate below branches on it. Without `-e` an unread status is genuinely
@@ -266,7 +283,8 @@ while IFS= read -r file; do
         REPORT="${REPORT}  ${file}:${lineno}  (${why})
     ${text}
 "
-    done < <(sed 's/#.*//' "$file" | grep -nE "$CONSUMER_STATUS_ONLY|$CONSUMER_OUTPUT" || true)
+    done < <(python3 "$BLANK_DATA" < "$file" |
+        grep -nE "$CONSUMER_STATUS_ONLY|$CONSUMER_OUTPUT" || true)
 done < <(discover_shell_scripts)
 
 # ⚠️ Anti-vacuity. If the discovery stops finding scripts — a renamed
@@ -352,4 +370,7 @@ GUIDE
     exit 1
 fi
 
-echo "OK: ${SCANNED} pipefail-bearing script(s) (${EXEMPTED} fixture file(s) exempt by name), no pipeline into an early-exiting consumer whose status is consumed."
+echo "OK: ${SCANNED} of ${TOTAL_SH} pipefail-bearing script(s) read in full, with NO file-wide
+  exemptions — comments, heredoc bodies and literal string text classified as data, while
+  command substitutions inside double quotes are read as the code they are; no pipeline
+  into an early-exiting consumer whose status is consumed."
