@@ -1091,12 +1091,40 @@ test_case "a_decline_count_does_not_excuse_an_unlogged_reply" \
 DIR="$(completion_sandbox comp_declined_zero 2 'null' '' 0)"
 run_gate "$DIR"
 assert_exit_nonzero "$RC" "an unrecorded outcome is still a violation"
-assert_contains "$OUT" "a logged reply or a recorded decline" \
+assert_contains "$OUT" "neither a logged reply nor a recorded decline" \
     "and the refusal names both settling outcomes, so the fix is discoverable"
 
 # ⛔ The baseline is MANDATORY. It was optional, so deleting the field silently
 # removed the only guard against a counter reset to match a short log — the
 # same shape as a declared count below an early success exit.
+# ⛔ SEVERAL REPLIES TO ONE DISPATCH IS NORMAL, and the first version of this
+# reconciliation refused it. MEASURED the day the check shipped: one dispatch to
+# the elixir axis produced THREE replies at two distinct shas, as the reviewer
+# worked through the range and came back with more. `dispatches == settled`
+# assumed one reply per dispatch and would have reported a generous review as a
+# bookkeeping defect — the same error as reporting a decline as a lost reply,
+# one shape over, and found the same way.
+#
+# ⚠️ So the claim is a FLOOR, not a match: every dispatch must have produced at
+# least one settled outcome. This case is the half that the equality failed.
+test_case "several_replies_to_one_dispatch_reconcile" \
+    "the process bounds replies from below, not from above"
+DIR="$(completion_sandbox comp_many 1 'null')"
+python3 - "$DIR/plans/probe-campaign-state.json" <<'MANYREPLIES'
+import json, sys
+state = json.load(open(sys.argv[1]))
+e = state["domain_reviews"]["elixir"]
+base = e["reviews"][0]
+# Two further replies to the SAME single dispatch, as a reviewer coming back.
+e["reviews"] = [base, dict(base), dict(base)]
+json.dump(state, open(sys.argv[1], "w"), indent=2)
+MANYREPLIES
+run_gate "$DIR"
+assert_exit_zero "$RC" \
+    "three logged replies against one dispatch is a thorough review, not a miscount"
+assert_not_contains "$OUT" "settled as neither" \
+    "and it must not be reported as a dispatch that produced no outcome"
+
 test_case "a_dispatch_count_with_no_baseline_is_refused" \
     "an optional guard is one a future edit removes without noticing"
 DIR="$(completion_sandbox comp_nobaseline 1 'null' none)"
@@ -1356,7 +1384,7 @@ assert_contains "$SUITE_SRC" 'declares no `dispatches` count' \
     "the undeclared-count refusal is asserted by some case"
 assert_contains "$SUITE_SRC" 'no `dispatches_baseline`' \
     "the missing-baseline refusal is asserted by some case"
-assert_contains "$SUITE_SRC" "a logged reply or a recorded decline" \
+assert_contains "$SUITE_SRC" "neither a logged reply nor a recorded decline" \
     "and the reconciliation refusal, naming both settling outcomes"
 
 summarise

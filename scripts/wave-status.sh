@@ -951,23 +951,49 @@ if not wave_filter and any(
                 # Adding a term here is therefore a decision about the PROCESS,
                 # not a bug fix, and it belongs in this comment before it
                 # belongs in the arithmetic.
-                expected = len(log) + declines + (1 if dispatch else 0)
-                if dispatches != expected:
+                # ⛔ AN INEQUALITY, AND IT USED TO BE AN EQUALITY THAT WAS
+                # SIMPLY WRONG ABOUT THE PROCESS.
+                #
+                # `dispatches == settled (+1 in flight)` assumes ONE REPLY PER
+                # DISPATCH. MEASURED the day it shipped: one dispatch to the
+                # elixir axis produced THREE replies at two distinct shas, as
+                # the reviewer worked through the range and came back with more.
+                # The equality would have refused that — a correct and generous
+                # review reported as a bookkeeping defect, which is the same
+                # error as reporting a decline as a lost reply, one shape over.
+                #
+                # ⚖️ So the claim is narrowed to the one that is actually true:
+                # **every dispatch must have produced AT LEAST ONE settled
+                # outcome.** Stated as a floor rather than a match, because the
+                # process bounds replies from below and not from above.
+                #
+                # ⚠️ WHAT THIS GIVES UP, said plainly because the weaker form is
+                # easy to read as equivalent: it no longer catches
+                # OVER-recording — a log entry for a dispatch never sent. That
+                # is a different defect (a fabricated review) and it is covered
+                # by the provenance kinds and the sha resolution above, both of
+                # which a fabricated entry has to get past. What it still
+                # catches is the defect that actually happened twice: a reply
+                # read, acted on, and never written down, which drives `settled`
+                # below `dispatches`.
+                settled = len(log) + declines
+                allowance = 1 if dispatch else 0
+                if settled < dispatches - allowance:
                     outcomes = f"{len(log)} logged replies"
                     if declines:
                         outcomes += f" and {declines} declined round(s)"
-                    if dispatch:
-                        detail = (
-                            f"one dispatch is in flight, so the count should be one more than "
-                            f"its {expected - 1} settled outcome(s)"
+                    missing = dispatches - allowance - settled
+                    detail = (
+                        f"{missing} dispatch(es) settled as neither a logged reply nor a "
+                        "recorded decline"
+                        + (
+                            " beyond the one in flight"
+                            if dispatch
+                            else ", and nothing is in flight"
                         )
-                    else:
-                        detail = (
-                            f"nothing is in flight, so every one of the {dispatches} dispatches "
-                            f"should have settled as a logged reply or a recorded decline, and "
-                            f"only {expected} have — a reply that was read and acted on but "
-                            f"never appended is the shape that produces this"
-                        )
+                        + " — a reply that was read and acted on but never appended is the "
+                        "shape that produces this"
+                    )
                     violations.append(
                         f"  campaign: the {stack} axis declares {dispatches} dispatches against "
                         f"{outcomes}: {detail}."
