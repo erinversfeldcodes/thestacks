@@ -693,6 +693,9 @@ if not wave_filter and any(
                 "UNKNOWN — not satisfied. Run from a git checkout with main reachable."
             )
     else:
+        # Collected rather than appended per axis, so a campaign that predates
+        # the field reports once. See the disposition after the loop.
+        unrecorded_sha = []
         for stack in sorted(stacks - reviews):
             violations.append(
                 f"  campaign: the branch touches {stack} and no {stack} review is recorded. "
@@ -856,13 +859,25 @@ if not wave_filter and any(
             # rule ("a migration that reds every existing row is one nobody
             # runs") broken two days after writing it.
             #
-            # ⛔ And this is a narrowing, not a tolerated absence, only because
-            # another check closes the escape: an axis with no log and no
-            # dispatch is already refused below for recording no
-            # `reviewed_at_sha`, so deleting the log to escape the counter
-            # trades one refusal for another rather than reaching green. Stated
-            # explicitly because "absent is fine" is otherwise the exact shape
-            # this block refuses one paragraph up.
+            # ⛔ And this is a narrowing, not a tolerated absence — but the
+            # reason is a specific LINE, not "another check", and naming the
+            # check was the defect in this comment.
+            #
+            # `seen` below is read from `current`, which is the last element of
+            # THIS SAME normalised `log`. So `has_history` false implies `seen`
+            # falsy implies the `reviewed_at_sha` refusal fires: deleting the
+            # log to dodge the counter trades one refusal for another rather
+            # than reaching green. The guarantee is that both predicates read
+            # one derivation, and it holds only while they do.
+            #
+            # ⚠️ THE EDIT THAT WOULD OPEN IT, named because it reads as a bug
+            # fix. `_review_log` returns `[]` for a `reviews` list that is
+            # non-empty but whose entries all lack a `sha` — it never reaches
+            # the `reviewed_at_sha` fallback, because the fallback is in the
+            # else-branch of `if … and log`. A future reader may well "repair"
+            # that as `seen = current.get("sha") or entry.get("reviewed_at_sha")`.
+            # That makes `seen` truthy while `has_history` stays false, and the
+            # axis then passes with NO counter at all. A case pins that state.
             has_history = bool(log) or bool(dispatch)
             if not has_history:
                 pass
@@ -896,6 +911,46 @@ if not wave_filter and any(
                     f"removes the check instead of satisfying it."
                 )
             else:
+                # ⛔ THE OUTCOME SET IS ENUMERATED DELIBERATELY AND CLOSED HERE,
+                # on a reviewer's argument that is worth more than the list: a
+                # decline was the SECOND outcome discovered after the fact, and
+                # the second discovery is the signal to enumerate rather than
+                # wait for the third.
+                #
+                # ⚖️ The portable statement of why the first version was wrong:
+                # **when you reconcile a count against a log, the count must
+                # enumerate OUTCOMES, not EVENTS.** `dispatches` counted rounds
+                # SENT while the log recorded reviews RECEIVED — two different
+                # domains — so every outcome that is not a review looked like
+                # loss, confidently, because the signature genuinely matches.
+                #
+                # A dispatch settles in exactly one of three ways, and each has
+                # a term in this sum:
+                #
+                #   reviewed  an entry in `reviews` carrying the sha seen
+                #   declined  counted in `declines`; reviews nothing, so it has
+                #             no sha to log and must not borrow one
+                #   in flight the single `dispatch_in_flight` slot
+                #
+                # ⚠️ TWO CANDIDATE FOURTH OUTCOMES, considered and deliberately
+                # NOT added, so that the next person finds a ruling rather than
+                # an oversight:
+                #
+                #   superseded — a dispatch replaced before any reply. It is
+                #     not a fourth state: the round was never answered, so it
+                #     either still occupies the slot or was withdrawn, and a
+                #     withdrawal that reduced the count would be the reset the
+                #     baseline exists to refuse. Supersede by letting the round
+                #     settle (a decline costs one line) rather than by editing
+                #     history.
+                #
+                #   axis removed mid-wave — removes the whole entry, so there is
+                #     nothing left to reconcile. It is a change to `stacks`, not
+                #     to an axis's outcomes.
+                #
+                # Adding a term here is therefore a decision about the PROCESS,
+                # not a bug fix, and it belongs in this comment before it
+                # belongs in the arithmetic.
                 expected = len(log) + declines + (1 if dispatch else 0)
                 if dispatches != expected:
                     outcomes = f"{len(log)} logged replies"
@@ -919,13 +974,7 @@ if not wave_filter and any(
                     )
 
             if not seen:
-                violations.append(
-                    f"  campaign: the {stack} review records no `reviewed_at_sha`, so whether it "
-                    f"covers the current diff is UNKNOWN — not satisfied. A `range` ending in "
-                    f"\"HEAD\" is not evidence: HEAD moves and the text does not, which is how "
-                    f"this axis went unreported while 178 files changed behind it. Re-record the "
-                    f"verdict with the resolved commit the reviewer actually saw."
-                )
+                unrecorded_sha.append(stack)
                 continue
 
             # ⛔ COMMITTED work plus the working tree, the same union the
@@ -1088,6 +1137,55 @@ if not wave_filter and any(
                     f"Re-run docs/agents/reviewers/{stack}-reviewer.md over the new work and "
                     f"re-record the verdict with the SHA it saw."
                 )
+
+        # ⛔ A CAMPAIGN THAT PREDATES THE FIELD REPORTS ONCE, NOT PER AXIS — and
+        # the finding underneath this was neither reviewer's first guess.
+        #
+        # MEASURED: `wave-status` has never been usable on a finished campaign
+        # since `reviewed_at_sha` became mandatory. Two closed campaigns emit 5
+        # and 7 campaign-level violations each, every one of them the same fact
+        # — their axes were recorded before the field existed. The retrospective
+        # case that `diff_range` exists to serve is blocked by a field that
+        # postdates the campaigns it would be used on.
+        #
+        # ⚠️ WHAT THIS DELIBERATELY DOES NOT DO: silence it. A finished campaign
+        # whose axes were never recorded really did ship unreviewed work, and
+        # converting that into a pass would be this guard's own failure mode —
+        # an axis disappearing because nothing demanded it. So the exit stays
+        # non-zero and the message says UNVERIFIABLE rather than absent.
+        #
+        # ⚖️ What changes is legibility, which was the actual complaint: twelve
+        # near-identical messages read as twelve problems. One message naming N
+        # axes reads as one fact about the record, which is what it is.
+        #
+        # ⛔ A CLOSED-CAMPAIGN STATE IS NOT BUILT, and that is a ruling rather
+        # than an omission. The obvious design — let a campaign declare itself
+        # closed and exempt its axes — puts a self-asserted escape hatch on the
+        # one guard that exists to stop a review axis disappearing, and every
+        # status field here is self-asserted. Whether retrospective campaigns
+        # are in scope at all is a process decision, so it belongs to whoever
+        # owns the process and not to this file.
+        if unrecorded_sha:
+            if len(unrecorded_sha) > 1 and not actionable:
+                violations.append(
+                    f"  campaign: {len(unrecorded_sha)} axes record a verdict with no "
+                    f"`reviewed_at_sha` ({', '.join(unrecorded_sha)}), and this campaign has "
+                    f"nothing actionable left — so these are almost certainly verdicts recorded "
+                    f"BEFORE the field existed. Coverage for them is UNVERIFIABLE from this "
+                    f"record, which is not the same as absent and is not a pass: work shipped "
+                    f"under a review nobody can now place against a commit. Reported once rather "
+                    f"than per axis because it is one fact about the record, not N problems."
+                )
+            else:
+                for stack in unrecorded_sha:
+                    violations.append(
+                        f"  campaign: the {stack} review records no `reviewed_at_sha`, so whether "
+                        f"it covers the current diff is UNKNOWN — not satisfied. A `range` ending "
+                        f"in \"HEAD\" is not evidence: HEAD moves and the text does not, which is "
+                        f"how this axis went unreported while 178 files changed behind it. "
+                        f"Re-record the verdict with the resolved commit the reviewer actually "
+                        f"saw."
+                    )
 
 if violations:
     print("=" * 78)

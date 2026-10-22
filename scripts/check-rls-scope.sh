@@ -402,6 +402,27 @@ DEF = re.compile(r"^\s*(?:defp?)\s+([a-z_][a-zA-Z0-9_!?]*)", re.M)
 # that mistake here would flag every call into a scoping context.
 establishers = {}
 for path in pathlib.Path("apps/core/lib").rglob("*.ex"):
+    # ⛔ THE SCOPE PRIMITIVES THEMSELVES ARE NOT SUBJECTS OF THIS RULE, and this
+    # exemption is DELIBERATE where it used to be accidental.
+    #
+    # A test whose subject is `Stacks.Scope` must nest a scope inside a scope —
+    # `scope_test.exs` has four such cases ("the same user nested is a
+    # pass-through", "a DIFFERENT user nested is refused", "refuses to narrow
+    # from a user scope to anonymous mid-operation", "nests with itself without
+    # raising") — and forbidding that would forbid testing the thing.
+    #
+    # ⚠️ MEASURED: those four already escaped, but only because `with_user`'s
+    # own body calls internal helpers rather than `Scope.with_user`, so the
+    # prefix pattern never matched it. `Scope.set!` DOES match and is defined
+    # here, so the exemption rested on which primitive each test happened to
+    # call — one refactor of `with_user` to route through `set_and_run` would
+    # have turned all four red. An accidental exemption is a false positive
+    # waiting for an unrelated change.
+    #
+    # Derivable rather than a convention: "the subject is Scope itself" is a
+    # fact about where the function is DEFINED, not about how a test is named.
+    if path.name == "scope.ex":
+        continue
     src = path.read_text(encoding="utf-8")
     defs = [(m.start(), m.group(1)) for m in DEF.finditer(src)]
     for i, (pos, name) in enumerate(defs):

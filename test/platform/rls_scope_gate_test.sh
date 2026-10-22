@@ -260,6 +260,36 @@ assert_contains "$OUT" "wraps get_bookshelf_shelves" \
     "and names the enclosed function, so the fix is at a line rather than in a file"
 assert_contains "$OUT" "Drop the wrapper" "and says what to do"
 
+# ⛔ AND THE SCOPE PRIMITIVES ARE EXEMPT BY DESIGN, not by accident. A test
+# whose subject is `Stacks.Scope` must nest a scope inside a scope, and
+# `scope_test.exs` has four such cases. MEASURED: they already escaped, but only
+# because `with_user`'s body calls internal helpers rather than
+# `Scope.with_user`, so the pattern never matched it — while `Scope.set!` DOES
+# match and is defined in the same file. The exemption therefore rested on which
+# primitive each test happened to call, and one refactor of `with_user` would
+# have redded all four. This fixture is that refactor's shape, today.
+mkdir -p "$NEST_FIXTURES/primitive"
+cat > "$NEST_FIXTURES/primitive/nesting_semantics_test.exs" <<'PRIMITIVEFIXTURE'
+defmodule Probe do
+  test "the same user nested is a pass-through, not a second transaction" do
+    owner = insert(:user)
+
+    Scope.with_user(owner.id, fn ->
+      Scope.set!(owner.id)
+      assert Scope.current() == owner.id
+    end)
+  end
+end
+PRIMITIVEFIXTURE
+
+test_case "a_test_whose_subject_is_Scope_itself_may_nest" \
+    "forbidding this would forbid testing the thing — and the exemption was accidental until now"
+OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/primitive" bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_zero "$RC" \
+    "nesting a scope primitive inside a scope is how Scope's own nesting semantics are tested"
+assert_contains "$OUT" "no test wraps a scope-establishing call" "and it reports clean rather than silently"
+
 test_case "a_test_that_wraps_a_raw_query_is_permitted" \
     "the discriminator — is the scope the thing under test, or the precondition for it?"
 OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/good" bash "$GATE" 2>&1)"

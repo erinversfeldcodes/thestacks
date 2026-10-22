@@ -58,7 +58,7 @@ trap 'rm -rf "$SANDBOX_ROOT"' EXIT
 # harness default that keeps other cases from testing the dispatch count by
 # accident. See the case at the end of this file for why an undeclared opt-out
 # is an allowlist with unstated reasons.
-EXPECTED_DISPATCH_OPT_OUTS=2
+EXPECTED_DISPATCH_OPT_OUTS=3
 
 # A sandbox repo with one commit on `main`, a feature branch at the same commit,
 # and a campaign state whose single item is COMPLETE — which is what switches
@@ -902,6 +902,54 @@ run_gate "$DIR"
 assert_contains "$OUT" "first dispatch, no prior review" "the declared state is surfaced"
 assert_not_contains "$OUT" "no recorded review to match it against" "and not also reported as a gap"
 
+# ── a campaign that predates the field reports once, and still refuses ─────
+#
+# ⛔ MEASURED: `wave-status` has never been usable on a finished campaign since
+# `reviewed_at_sha` became mandatory — two closed campaigns emitted 5 and 7
+# campaign-level violations, every one the same fact. The retrospective case
+# `diff_range` exists to serve was blocked by a field postdating the campaigns
+# it would be used on.
+#
+# ⚠️ BOTH HALVES ARE ASSERTED, because collapsing the message is only correct
+# while the refusal survives. A finished campaign whose axes were never recorded
+# really did ship unreviewed work, and turning that into a pass would be this
+# guard's own failure mode — an axis disappearing because nothing demanded it.
+test_case "many_axes_with_no_recorded_sha_report_once_and_still_refuse" \
+    "one fact about the record, not N problems — and still not a pass"
+DIR="$(new_sandbox predates '{"elixir": {"verdict": "LGTM"}, "elm": {"verdict": "LGTM"}, "platform": {"verdict": "LGTM"}}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+echo 'module Probe exposing (x)' > "$DIR/frontend/src/Probe.elm" 2>/dev/null \
+    || { mkdir -p "$DIR/frontend/src"; echo 'module Probe exposing (x)' > "$DIR/frontend/src/Probe.elm"; }
+mkdir -p "$DIR/scripts"; echo '#!/usr/bin/env bash' > "$DIR/scripts/probe.sh"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" \
+    "UNVERIFIABLE is not a pass — work shipped under a review nobody can place against a commit"
+assert_contains "$OUT" "axes record a verdict with no \`reviewed_at_sha\`" "the collapsed message is used"
+assert_contains "$OUT" "UNVERIFIABLE from this record" "and says what the state actually is"
+assert_contains "$OUT" "not the same as absent and is not a pass" \
+    "and refuses the reading that would make this silence a gap"
+
+# ⚠️ The discriminating half: with work still ACTIONABLE, the per-axis messages
+# must come back. A live campaign missing a sha is a thing to fix now, named per
+# axis; a finished one is a fact about history. Collapsing both would hide the
+# live case inside a sentence about the past.
+test_case "a_live_campaign_still_reports_each_missing_sha_separately" \
+    "the collapse is about finished campaigns, not about tidiness"
+python3 - "$DIR/plans/probe-campaign-state.json" <<'STILLGOING'
+import json, sys
+state = json.load(open(sys.argv[1]))
+wave = state["waves"]["probe"]
+wave["status"] = "in_progress"
+wave["items"]["beta"] = {"status": "not_started", "informal": True, "note": "live work", "title": "second"}
+json.dump(state, open(sys.argv[1], "w"), indent=2)
+STILLGOING
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "still a violation"
+assert_contains "$OUT" "the elixir review records no \`reviewed_at_sha\`" "elixir is named on its own"
+assert_contains "$OUT" "the elm review records no \`reviewed_at_sha\`" "and so is elm"
+assert_not_contains "$OUT" "axes record a verdict with no" \
+    "the collapsed form must NOT be used while there is work left to do"
+
 # ── 10b. a dispatch must reconcile with a logged reply ─────────────────────
 #
 # ⛔ THE DEFECT THAT PRODUCED THIS SECTION HAPPENED TWICE, the second time
@@ -1067,6 +1115,41 @@ assert_contains "$OUT" "silent downgrade" "and says why absence is not a smaller
 # log to dodge the counter trades one refusal for another. Both halves are
 # asserted here, because "absent is fine" is otherwise the exact shape this
 # section refuses.
+# ⛔ THE ONE STATE WHERE THE TWO PREDICATES CAN DISAGREE, pinned because the
+# edit that opens it reads as a bug fix.
+#
+# `_review_log` returns `[]` for a `reviews` list that is non-empty but whose
+# entries all lack a `sha` — the `reviewed_at_sha` fallback sits in the
+# else-branch of `if … and log`, so a non-empty malformed list never reaches it.
+# Today that axis is refused for recording no `reviewed_at_sha`, which is what
+# makes the counter's narrowing safe.
+#
+# ⚠️ Now consider `seen = current.get("sha") or entry.get("reviewed_at_sha")`,
+# which a future reader may well write as a repair for a malformed legacy log.
+# `seen` becomes truthy while `has_history` stays false, and the axis passes
+# with NO counter at all — the narrowing turned into the escape it was argued
+# not to be. The reviewer found this by tracing the line rather than reading the
+# comment, which had named the wrong guarantee.
+test_case "a_malformed_log_with_a_legacy_sha_is_still_refused" \
+    "the narrowing is safe only while has_history and seen read ONE derivation"
+DIR="$(new_sandbox comp_malformed '{"elixir": {"verdict": "LGTM"}}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+python3 - "$DIR/plans/probe-campaign-state.json" <<'MALFORMED'
+import json, sys
+state = json.load(open(sys.argv[1]))
+state["declares_dispatches"] = True
+e = state["domain_reviews"]["elixir"]
+# Non-empty `reviews` whose entries carry NO sha, plus a legacy single field.
+e["reviews"] = [{"provenance": {"kind": "quoted_from_reply", "detail": "no sha recorded"}}]
+e["reviewed_at_sha"] = "0123456789abcdef0123456789abcdef01234567"
+json.dump(state, open(sys.argv[1], "w"), indent=2)
+MALFORMED
+run_gate "$DIR"
+assert_exit_nonzero "$RC" \
+    "an axis whose log normalises to empty must still be refused, or the counter's narrowing becomes a green path"
+assert_contains "$OUT" "records no \`reviewed_at_sha\`" \
+    "and the refusal is the one the narrowing relies on — if this stops firing, the counter stops being demanded too"
+
 test_case "an_axis_with_no_history_is_not_asked_for_a_count" \
     "a field cannot be demanded of records that predate it"
 DIR="$(new_sandbox comp_nohistory '{"elixir": {"verdict": "LGTM"}}')"
