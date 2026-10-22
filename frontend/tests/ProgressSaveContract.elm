@@ -1,4 +1,4 @@
-module ProgressSaveContract exposing (Classification, ExpectedOut(..), classifications, expectedOut, label, reportsAnError, response)
+module ProgressSaveContract exposing (Classification, ExpectedOut(..), classifications, errorSelector, expectedOut, fixtureDecodes, label, reportsAnError, response)
 
 {-| How a reading-progress save is CLASSIFIED, written once and driven against
 every host that owns a progress card.
@@ -50,7 +50,11 @@ name: this says which branches exist, not which outcomes do.
 
 import Api
 import Dict
+import Expect
+import Html.Attributes
 import Http
+import Test exposing (Test, test)
+import Test.Html.Selector as Selector
 
 
 {-| The branches a progress-save handler discriminates.
@@ -216,3 +220,61 @@ expectedOut classification =
 
         SessionRejected ->
             SessionExpiryOut
+
+
+{-| The selector every host renders its save failure through.
+
+⛔ THE LAST HAND-MAINTAINED SHARED CONSTANT, and it was duplicated four times
+across the two hosts — a pair that has diverged four times in four review
+rounds. A shared claim spelled separately in each host is a claim each host can
+drift out of silently, which is the whole reason this module exists.
+
+`ReadingPile` renders it via `viewSaveState`, `BookDetail` via
+`viewProgressSaveState`, both as `data-testid="progress-error"`.
+
+-}
+errorSelector : Selector.Selector
+errorSelector =
+    Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error")
+
+
+{-| `Succeeded` must be the error-free classification, for THIS host's fixture.
+
+⛔ AN IDENTITY CLAIM, WHERE THE HOSTS COULD ONLY MAKE A CARDINALITY ONE. Each
+host used to assert "exactly one classification is error-free", which is
+equivalent to what it is named for only because of a property of the OTHER two
+fixtures — `Refused` (500) and `SessionRejected` (401) are `Err` under any body.
+A host cannot do better, because `Classification`'s constructors are opaque so
+it cannot name `Succeeded`. This module can, so the claim belongs here and is
+exact rather than a proxy.
+
+⚠️ That is the second instance of the abstraction we chose constraining the
+assertion we could write; the first was `expectedOut`, where `OutMsg` not being
+derivable set the floor on how far that hole could close. Worth noticing as a
+pattern rather than twice as a surprise: opacity buys a guarantee and spends
+some expressiveness, and the right response is to move the assertion to where
+the type is visible — not to widen the type.
+
+⛔ WHAT IT CATCHES, measured. Rename one key in a host's success body so it stops
+decoding and every other case in that host still passes — the whole suite green
+at 2180/0 — because `reportsAnError Succeeded` flips to `True`, the host
+genuinely renders its error so the presence check passes, `expectedOut Succeeded`
+is `NoOutMsg` and a non-401 failure emits no out-message, and the in-flight flag
+settles either way. That host's `Succeeded` case silently becomes a second copy
+of its `Refused` case, still named "a save the server accepted".
+
+⚠️ Reachable BECAUSE `progressDecoder` is deliberately fail-loud: a server field
+rename stops both hosts' bodies decoding at once, so both success cases become
+refusal cases together and nothing else in either host notices.
+
+⚖️ The general form: **deriving an expectation moves the trust to the
+derivation's inputs, so every input needs its own assertion.** `savedBody` is
+supplied by each host — the least-examined party — and had none.
+
+-}
+fixtureDecodes : String -> String -> Test
+fixtureDecodes endpoint savedBody =
+    test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
+        \() ->
+            reportsAnError endpoint savedBody Succeeded
+                |> Expect.equal False

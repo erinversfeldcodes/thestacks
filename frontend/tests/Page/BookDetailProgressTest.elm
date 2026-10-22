@@ -138,80 +138,27 @@ the new classification should produce.
 progressSaveContract : Test
 progressSaveContract =
     describe "progress_save_contract: every classification clears the in-flight flag"
-        (fixtureDecodes :: List.map contractCase ProgressSaveContract.classifications)
-
-
-{-| ⛔ EXACTLY ONE CLASSIFICATION IS ERROR-FREE, ASSERTED WITH **THIS HOST'S OWN
-FIXTURE** — which is the parameter the other cases actually pass.
-
-The shared `reportsAnError` is derived from `Api.progressResponseToResult` and is
-parameterised on `savedBody`, which each host supplies. A sibling copy of this
-guard lives in `ApiDecoderContractTest` and checks the mapping's shape through a
-fixture of its own, so it cannot speak for this one: the parameter it checks is
-not the parameter this host passes.
-
-⛔ MEASURED, and the failure is silent and total. Rename one key in
-`completedBody` so it stops decoding and EVERY case in this block still
-passes — 2180/0 green:
-
-  - `reportsAnError … Succeeded` flips to `True`, because a 200 that does not
-    decode is `BadBody`;
-  - the host genuinely renders an error, so `ensureViewHas progress-error`
-    passes;
-  - `expectedOut Succeeded` is `NoOutMsg`, and a non-401 failure emits `NoOut`,
-    so `lastOut` matches;
-  - the in-flight flag settles either way, so the "Saving…" check passes.
-
-So this host's `Succeeded` case quietly becomes a second copy of its `Refused`
-case, still named "a save the server accepted".
-
-⚠️ It is reachable BECAUSE `progressDecoder` is deliberately fail-loud: a server
-field rename stops both hosts' bodies decoding at once, and both success cases
-become refusal cases together. Nothing else in either host would notice.
-
-⚖️ The general form, which is worth more than the fix: **deriving an expectation
-moves the trust to the derivation's INPUTS, so every input needs its own
-assertion.** `savedBody` is supplied by the least-examined party and had none.
-
--}
-fixtureDecodes : Test
-fixtureDecodes =
-    test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
-        \() ->
-            ProgressSaveContract.classifications
-                |> List.filter
-                    (\c ->
-                        not
-                            (ProgressSaveContract.reportsAnError
-                                progressEndpoint
-                                completedBody
-                                c
-                            )
-                    )
-                |> List.length
-                |> Expect.equal 1
+        (ProgressSaveContract.fixtureDecodes progressEndpoint completedBody
+            :: List.map contractCase ProgressSaveContract.classifications
+        )
 
 
 {-| This host's spelling of the shared out-message decision.
 
-⛔ WHAT CHANGED, AND WHY IT MATTERS. This used to be
-`expectedOut : Classification -> BookDetail.OutMsg`, a three-case fixture owned by this
-host — so the shared table fixed which CASES exist while each host decided what
-it owed in them. A host that stopped emitting its session-expiry message could
-therefore be made green by editing this function, with the compiler's blessing.
-`SessionRejected` producing a session expiry is not a per-page judgement.
+⛔ The DECISION lives in `ProgressSaveContract.expectedOut`; what remains here is
+only the translation into this host's own `OutMsg` type, which is genuinely
+per-host. This used to be a three-case fixture owned by the host, so the shared
+table fixed which CASES exist while each host decided what it owed in them — and
+a host that stopped emitting its session-expiry message could be made green by
+editing its own fixture, with the compiler's blessing.
 
-The DECISION now lives in `ProgressSaveContract.expectedOut`; what remains here
-is only the translation into this host's own `OutMsg` type, which is genuinely
-per-host. The compiler still checks it exhaustively.
-
-⚠️ NARROWED, NOT CLOSED — stated so nobody believes it is airtight. A host
-can still map BOTH constructors to `BookDetail.NoOut` and the compiler will
-accept it. What changed is the shape of the lie: it used to be a plausible
-per-page decision spread over three cases, and is now one visibly nonsensical
-line saying the session-expiry out-message is no out-message. That is the
-minimum achievable, because `BookDetail.OutMsg`'s constructors are not derivable
-from anything the shared table knows.
+⚠️ NARROWED, NOT CLOSED — stated so nobody believes it is airtight. A host can
+still map BOTH constructors to `BookDetail.NoOut` and the compiler will accept
+it. What changed is the shape of the lie: it used to be a plausible per-page
+decision spread over three cases, and is now one visibly nonsensical line saying
+the session-expiry out-message is no out-message. That is the minimum
+achievable, because `BookDetail.OutMsg`'s constructors are not derivable from
+anything the shared table knows.
 
 -}
 toOutMsg : ProgressSaveContract.ExpectedOut -> BookDetail.OutMsg
@@ -250,10 +197,10 @@ contractCase classification =
                 -- ABSENCE — a host that rendered `progress-error` on success
                 -- would have passed.
                 |> (if ProgressSaveContract.reportsAnError progressEndpoint completedBody classification then
-                        ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
+                        ProgramTest.ensureViewHas [ ProgressSaveContract.errorSelector ]
 
                     else
-                        ProgramTest.ensureViewHasNot [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
+                        ProgramTest.ensureViewHasNot [ ProgressSaveContract.errorSelector ]
                    )
                 |> ProgramTest.expectModel
                     (\model ->
