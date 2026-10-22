@@ -293,30 +293,33 @@ supplied by each host — the least-examined party — and had none.
 -}
 fixtureDecodes : String -> String -> Test
 fixtureDecodes endpoint savedBody =
-    test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
-        \() ->
-            -- ⚖️ BOTH CLAIMS, because they catch different things and only this
-            -- module can make the first one.
-            --
-            -- IDENTITY — `Succeeded` specifically must be error-free. A host
-            -- cannot assert this: `Classification`'s constructors are opaque,
-            -- so it could only ever assert the cardinality below and rely on a
-            -- property of the OTHER two fixtures to make them equivalent.
-            --
-            -- CARDINALITY — exactly one classification is error-free. Identity
-            -- alone loses collapse detection: a mapping that returned `Ok` for
-            -- everything would satisfy the identity claim while measuring
-            -- nothing, and collapse is fixture-INDEPENDENT so it belongs here
-            -- rather than only in the `Api` branch table.
-            Expect.all
-                [ \_ ->
-                    reportsAnError endpoint savedBody Succeeded
-                        |> Expect.equal False
-                , \_ ->
-                    classifications
-                        |> List.filter
-                            (\c -> not (reportsAnError endpoint savedBody c))
-                        |> List.length
-                        |> Expect.equal 1
-                ]
-                ()
+    -- ⚖️ TWO NAMED TESTS, NOT ONE WITH TWO CLAIMS. They were a single
+    -- `Expect.all`, and a reviewer pointed out the cost: the test was named for
+    -- the identity half, so a COLLAPSE one layer down would red a test saying
+    -- "this host's success fixture decodes" — pointing at the wrong cause.
+    -- "Reds by name" has been this campaign's evidence standard in every probe,
+    -- so a name pointing at the wrong cause is a real cost, and the lambdas were
+    -- already independent claims over `()`.
+    --
+    -- IDENTITY — `Succeeded` specifically must be error-free. A host cannot
+    -- assert this: `Classification`'s constructors are opaque, so it could only
+    -- ever assert the cardinality and rely on a property of the OTHER two
+    -- fixtures to make them equivalent.
+    --
+    -- CARDINALITY — exactly one classification is error-free. Identity alone
+    -- loses collapse detection: a mapping returning `Ok` for everything would
+    -- satisfy the identity claim while measuring nothing, and collapse is
+    -- fixture-INDEPENDENT.
+    Test.describe "the derivation holds for this host"
+        [ test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
+            \() ->
+                reportsAnError endpoint savedBody Succeeded
+                    |> Expect.equal False
+        , test "exactly one classification is error-free, so the derivation cannot collapse" <|
+            \() ->
+                classifications
+                    |> List.filter
+                        (\c -> not (reportsAnError endpoint savedBody c))
+                    |> List.length
+                    |> Expect.equal 1
+        ]
