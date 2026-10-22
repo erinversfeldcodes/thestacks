@@ -12,7 +12,27 @@ permissions:
 
 jobs:
   gate-pre-push-report:
-    if: github.event_name == 'pull_request'
+    # ⛔ BOT ACTORS ARE ADMITTED, because they cannot satisfy this gate and the
+    # result was that an entire PR category received ZERO CI jobs and reported
+    # GREEN. Measured on run 39308930602 (a dependabot action-SHA bump): this
+    # gate ran and SUCCEEDED, `proceed` was false, `changes` skipped, all 22
+    # dependent jobs skipped, and the run's own conclusion was "success".
+    #
+    # The gate reads a `ci-summary` sentinel out of the PR description, which the
+    # local pre-push hook writes. Dependabot authors its own body and has no such
+    # block, so `block_is_green` could never pass for it — a standing condition
+    # rather than an occasional slip.
+    #
+    # ⚠️ Why this is the dangerous category to lose rather than a generic gap:
+    # dependabot's job HERE is bumping pinned action SHAs, which is precisely the
+    # change class that silently breaks a workflow — and the lane that would
+    # notice was the skipped one. First execution was therefore post-merge, with
+    # the breakage already on the default branch.
+    #
+    # Skipping this gate hands those PRs the full suite, because `changes` admits
+    # `result == 'skipped'` on its first arm. The precedent for naming the actor
+    # is already in this file on the vision-lock-drift job.
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
@@ -60,14 +80,30 @@ jobs:
           proceed=true
           block_is_green "ci-summary" "$ci_block" || proceed=false
 
+          echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
+
           if [[ "$proceed" == "true" ]]; then
               echo "Gate: pre-push report is fully green; CI will proceed."
-          else
-              echo "Gate: pre-push report not all green; CI will skip remaining jobs."
-              echo "Push without skipping the local hook (don't pass --no-verify) and"
-              echo "ensure ci-summary lands green to trigger a CI run."
+              exit 0
           fi
-          echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
+
+          # ⛔ FAIL, rather than succeeding with a false output. This job used to
+          # exit 0 either way and let 22 downstream jobs resolve to `skipped`,
+          # which is how a whole PR category went un-tested while its run
+          # reported "success" — twenty grey skips say nothing on a PR page.
+          #
+          # ⚠️ The behaviour that matters has NOT changed: CI still does not run
+          # when the pre-push report is not green, which is the point of the
+          # sentinel. What changes is that the PR now says so in red instead of
+          # looking passed. "CI did not run" and "CI ran and was fine" must not
+          # render identically.
+          echo "::error title=CI did not run::The ci-summary block in this PR's" \
+               "description is missing, empty, or not green, so every dependent job" \
+               "was skipped. This is NOT a passing CI run."
+          echo "Gate: pre-push report not all green; CI skipped remaining jobs."
+          echo "Push without skipping the local hook (don't pass --no-verify) and"
+          echo "ensure ci-summary lands green to trigger a CI run."
+          exit 1
 
   versions:
     needs: gate-pre-push-report

@@ -85,7 +85,7 @@ in code by" and check it before relying on it.
 | `scripts/hooks/lib/pre-stop-lint.sh` | `.claude/settings.json` |  |
 | `scripts/hooks/lib/update-pr-ci.sh` | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` |  |
 | `scripts/hooks/pre-commit` | `scripts/install-hooks.sh` | pre-commit — Git pre-commit hook: lint gate on staged files. |
-| `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
+| `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh`, `test/platform/ci_gate_reachability_test.sh` | pre-push hook — runs before every `git push`. |
 | `scripts/install-flyctl.sh` | `justfile` |  |
 | `scripts/install-hooks.sh` | `justfile` |  |
 | `scripts/lib/blank-shell-data.py` | `scripts/check-cli-stub-provenance.sh`, `scripts/check-sigpipe-hazards.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Blank out the parts of a shell script that are DATA, keeping line numbers. |
