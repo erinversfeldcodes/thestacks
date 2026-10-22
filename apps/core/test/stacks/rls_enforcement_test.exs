@@ -28,6 +28,7 @@ defmodule Stacks.RlsEnforcementTest do
   alias Stacks.Shelving.Bookshelf
 
   @unscoped_refusal "no request scope set"
+  @secured_tables ~w(bookshelves bookshelf_placements user_blocks visibility_grants)
 
   describe "the policies actually enforce" do
     test "an unscoped read of a secured table is REFUSED, not silently empty" do
@@ -250,6 +251,137 @@ defmodule Stacks.RlsEnforcementTest do
     end
   end
 
+  describe "the write primitive production actually uses" do
+    # ⛔ THE HIGHEST-VALUE SINGLE TEST AVAILABLE HERE, and it closes the gap I had
+    # recorded as needing a mechanism. I had written off the write path because an
+    # `Ecto.Multi`'s abort poisons the enclosing transaction; a reviewer pointed
+    # out that a single statement covers the POLICY, and what a Multi covers that
+    # a statement cannot is `Scope.multi_step/2` — the primitive every production
+    # write uses, and until now unverified under enforcement.
+    #
+    # ⚖️ And `place_book/5` is the historical defect's exact shape:
+    # `get_or_create_bookshelf/2` (`shelving.ex:374`) and
+    # `get_or_create_default_shelf/1` (`:376`) run BEFORE the Multi, scoped by
+    # `with_user`, and `Scope.multi_step(user_id)` is the Multi's first step
+    # (`:380`). So one test exercises the pre-Multi scoped lookups AND
+    # `multi_step`, under the least-privilege role, on the function that returned
+    # the deployed 500.
+    #
+    # ⚠️ It needs no abort: this is the SUCCESS case. The "connection survives a
+    # refusal" measurement is not load-bearing for the valuable half.
+    test "place_book succeeds as the least-privilege role, scoped" do
+      owner = insert(:user)
+      book = insert(:book)
+      edition = insert(:book_edition, book: book)
+
+      # ⛔ NO OUTER `Scope.with_user`, and this is what makes the case
+      # discriminate. `place_book/5` is SELF-SCOPING: `get_or_create_bookshelf/2`
+      # wraps itself (`shelving.ex:1354`) and `Scope.multi_step/2` scopes the
+      # Multi. An outer wrapper supplies the scope the function is supposed to
+      # supply, and `SET LOCAL` applies to the outermost transaction — so the
+      # Multi inherits it and `multi_step` becomes redundant.
+      #
+      # MEASURED: with the outer wrapper in place, removing `Scope.multi_step`
+      # from that Multi left this test GREEN. Same vacuity as the read case
+      # before it — the test providing the precondition it is meant to check.
+      result =
+        AppRole.as_app_role(fn ->
+          Stacks.Shelving.place_book(owner.id, book.id, "library", edition.id)
+        end)
+
+      case result do
+        {:ok, _} ->
+          :ok
+
+        other ->
+          flunk("""
+          place_book was refused as the least-privilege role: #{inspect(other)}
+
+          ⛔ A 42501 here means some query on this path runs OUTSIDE the scope — either one of the
+          two pre-Multi lookups, or the Multi itself if `Scope.multi_step/2` is missing from it.
+          That is the deployed-500 defect, now visible offline. The fix belongs at the shared
+          helper the query goes through, not at the call site.
+          """)
+      end
+    end
+  end
+
+  describe "every secured table isolates, not just the one the other cases touch" do
+    # ⛔ CONSULTATION PROVEN BEHAVIOURALLY ON ALL FOUR, which the catalogue tests
+    # below cannot do. Those prove the policies EXIST and are FORCED; they say
+    # nothing about what the policies say. The owner-sees-own / other-sees-none
+    # pair is what proves a policy is consulted, because it cannot both hold on
+    # a policy-free table — and until now it existed for `bookshelves` only.
+    #
+    # ⚖️ Anchored to @secured_tables (the same list the catalogue tests use), so
+    # adding a fifth secured table fails here until a pair exists for it.
+    # Derived rather than maintained.
+    #
+    # ⚠️ It is NOT four copies, and the reviewer said so before I found out:
+    # `user_blocks` and `visibility_grants` each need a second user plus a
+    # block/grant row, and `bookshelf_placements` nests under a bookshelf. The
+    # setup is per-table; only the assertion is shared.
+    #
+    # ⚠️ And the route NOT taken, recorded so nobody re-proposes it: inspecting
+    # `EXPLAIN` output for policy quals asserts the PLAN rather than the outcome
+    # and breaks on planner changes.
+    defp seed_for("bookshelves", owner, other) do
+      insert(:bookshelf, user: owner, name: "library")
+      insert(:bookshelf, user: other, name: "library")
+      {"SELECT count(*) FROM op.bookshelves WHERE user_id = $1", []}
+    end
+
+    defp seed_for("bookshelf_placements", owner, other) do
+      for u <- [owner, other] do
+        shelf = insert(:bookshelf, user: u, name: "library")
+        insert(:placement, bookshelf: shelf, book: insert(:book))
+      end
+
+      {"""
+       SELECT count(*) FROM op.bookshelf_placements p
+       JOIN op.bookshelves b ON b.id = p.bookshelf_id
+       WHERE b.user_id = $1
+       """, []}
+    end
+
+    defp seed_for("user_blocks", owner, other) do
+      insert(:user_block, blocker: owner, blocked: insert(:user))
+      insert(:user_block, blocker: other, blocked: insert(:user))
+      {"SELECT count(*) FROM op.user_blocks WHERE blocker_id = $1", []}
+    end
+
+    defp seed_for("visibility_grants", owner, other) do
+      insert(:visibility_grant, granted_by: owner, granted_to: insert(:user))
+      insert(:visibility_grant, granted_by: other, granted_to: insert(:user))
+      {"SELECT count(*) FROM op.visibility_grants WHERE granted_by_id = $1", []}
+    end
+
+    for table <- @secured_tables do
+      @table table
+
+      test "op.#{table}: the owner sees their own row and NOT another user's" do
+        owner = insert(:user)
+        other = insert(:user)
+        {sql, _} = seed_for(@table, owner, other)
+
+        count_as = fn scoped_user, subject ->
+          Scope.with_user(scoped_user.id, fn ->
+            AppRole.as_app_role(fn ->
+              %{rows: [[n]]} = SQL.query!(Repo, sql, [Ecto.UUID.dump!(subject.id)])
+              n
+            end)
+          end)
+        end
+
+        assert count_as.(owner, owner) >= 1,
+               "op.#{@table}: the owner cannot see their own row under their own scope"
+
+        assert count_as.(owner, other) == 0,
+               "op.#{@table}: the owner can see ANOTHER user's row — the policy is not isolating"
+      end
+    end
+  end
+
   describe "the policies exist and are FORCED on every secured table" do
     # ⛔ THE COMPLEMENT TO THE BEHAVIOURAL TESTS, and it is query-independent.
     # The cases above prove the policies WORK on `op.bookshelves`, where the
@@ -261,8 +393,6 @@ defmodule Stacks.RlsEnforcementTest do
     # set.** This project does set it, but a future migration that recreated a
     # table without it would be invisible to every behavioural test that happens
     # to run as a non-owner — which is all of them here.
-    @secured_tables ~w(bookshelves bookshelf_placements user_blocks visibility_grants)
-
     test "all four carry row-level security, and it is forced" do
       %{rows: rows} =
         SQL.query!(
@@ -303,12 +433,13 @@ defmodule Stacks.RlsEnforcementTest do
           [@secured_tables]
         )
 
+      # ⚠️ The population floor is the whole assertion. A per-row `count >= 1`
+      # would be unreachable: a `GROUP BY` row exists only when the count is at
+      # least 1, so the only way a secured table fails here is by being ABSENT
+      # from the result — which is what the length check catches.
       assert length(rows) == length(@secured_tables),
-             "a secured table has NO policy at all: #{inspect(rows)}"
-
-      for [name, count] <- rows do
-        assert count >= 1, "op.#{name} has #{count} policies"
-      end
+             "a secured table has NO policy at all — present: #{inspect(rows)}, " <>
+               "expected all of #{inspect(@secured_tables)}"
     end
   end
 end
