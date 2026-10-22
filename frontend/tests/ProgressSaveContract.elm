@@ -279,5 +279,28 @@ fixtureDecodes : String -> String -> Test
 fixtureDecodes endpoint savedBody =
     test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
         \() ->
-            reportsAnError endpoint savedBody Succeeded
-                |> Expect.equal False
+            -- ⚖️ BOTH CLAIMS, because they catch different things and only this
+            -- module can make the first one.
+            --
+            -- IDENTITY — `Succeeded` specifically must be error-free. A host
+            -- cannot assert this: `Classification`'s constructors are opaque,
+            -- so it could only ever assert the cardinality below and rely on a
+            -- property of the OTHER two fixtures to make them equivalent.
+            --
+            -- CARDINALITY — exactly one classification is error-free. Identity
+            -- alone loses collapse detection: a mapping that returned `Ok` for
+            -- everything would satisfy the identity claim while measuring
+            -- nothing, and collapse is fixture-INDEPENDENT so it belongs here
+            -- rather than only in the `Api` branch table.
+            Expect.all
+                [ \_ ->
+                    reportsAnError endpoint savedBody Succeeded
+                        |> Expect.equal False
+                , \_ ->
+                    classifications
+                        |> List.filter
+                            (\c -> not (reportsAnError endpoint savedBody c))
+                        |> List.length
+                        |> Expect.equal 1
+                ]
+                ()
