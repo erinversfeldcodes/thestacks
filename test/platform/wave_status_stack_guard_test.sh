@@ -710,4 +710,148 @@ assert_not_contains "$OUT" "cannot resolve" "the single-field form normalises in
 assert_not_contains "$OUT" "sit LATER on this branch" "and a one-entry log has nothing out of order"
 assert_not_contains "$OUT" "recognised kind" "with its provenance carried across"
 
+# ── 10. a dispatch base must be BYTE-EQUAL to the newest recorded review ────
+#
+# ⛔ The reviewer corrected their own framing, and the correction is the point.
+# Stating the rule as a property of the LOG ("no entry may be a descendant of
+# the current one") checks internal consistency and ties nothing to the base
+# actually dispatched from. Non-emptiness of a range is a weak signal because
+# many WRONG bases are non-empty — but an inferred base essentially cannot
+# ACCIDENTALLY be byte-equal to a recorded 40-character sha.
+#
+# ⚠️ Both failures this exists for would have been caught by equality and
+# neither was caught by ancestry: a sha fabricated by padding a short one, and a
+# base silently substituted from the dispatch head.
+
+dispatch_sandbox() {
+    local name="$1" dispatch_json="$2" dir base head
+    dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM"}}')"
+    base="$(git -C "$dir" rev-parse HEAD)"
+    echo 'defmodule Probe do' > "$dir/apps/core/lib/probe.ex"
+    git -C "$dir" add -A
+    git -C "$dir" commit -qm "elixir work"
+    head="$(git -C "$dir" rev-parse HEAD)"
+    python3 - "$dir/plans/probe-campaign-state.json" "$base" "$head" "$dispatch_json" <<'DISPATCHFIX'
+import json, sys
+
+path, base, head, dispatch = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+state = json.load(open(path))
+e = state["domain_reviews"]["elixir"]
+e["reviews"] = [
+    {"sha": head, "provenance": {"kind": "quoted_from_reply", "detail": "the reply"}}
+]
+parsed = json.loads(dispatch.replace("BASE_SHA", base).replace("HEAD_SHA", head))
+if parsed is None:
+    e.pop("dispatch_in_flight", None)
+else:
+    e["dispatch_in_flight"] = parsed
+json.dump(state, open(path, "w"), indent=2)
+DISPATCHFIX
+    printf '%s' "$dir"
+}
+
+test_case "a_base_equal_to_the_newest_review_satisfies" "the green half — this must not fire on a correct dispatch"
+DIR="$(dispatch_sandbox disp_equal '{"base_sha": "HEAD_SHA", "round": 2}')"
+run_gate "$DIR"
+assert_not_contains "$OUT" "must be BYTE-EQUAL" "a base matching the newest review passes"
+assert_not_contains "$OUT" "records no \`base_sha\`" "and is not reported as missing"
+
+# ⛔ The planted red, and it is the dispatch-head substitution: the base is an
+# ANCESTOR of the newest review, so ancestry would accept it and equality does
+# not. This is the failure that actually happened.
+test_case "a_base_that_is_merely_an_ancestor_is_refused" \
+    "ancestry accepts the exact mistake this rule exists to catch"
+DIR="$(dispatch_sandbox disp_ancestor '{"base_sha": "BASE_SHA", "round": 2}')"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a base that is not byte-equal is a violation"
+assert_contains "$OUT" "must be BYTE-EQUAL" "the refusal names the condition"
+assert_contains "$OUT" "re-sends work already approved" "and states what an ancestor base costs"
+assert_contains "$OUT" "cannot accidentally match" \
+    "and says why equality is the check where ancestry is not"
+
+test_case "a_dispatch_with_no_base_is_refused" "what the reviewer was asked to look at must be recorded"
+DIR="$(dispatch_sandbox disp_nobase '{"round": 2}')"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a dispatch with no base is a violation"
+assert_contains "$OUT" "records no \`base_sha\`" "the refusal names the condition"
+
+# ⚠️ And no dispatch at all must not fire — most axes have none in flight.
+test_case "no_dispatch_in_flight_is_not_a_violation" "an axis between rounds has nothing to check"
+DIR="$(dispatch_sandbox disp_none 'null')"
+run_gate "$DIR"
+assert_not_contains "$OUT" "base_sha" "an absent dispatch is silent, not refused"
+
+# ── the first dispatch is a DECLARED state, not a bypass ───────────────────
+#
+# ⛔ "Empty log means anything goes" would be this rule skipped by a path rather
+# than satisfied — the same shape as a declared count below an early success
+# exit, which is the defect its sibling gate was built for.
+test_case "an_undeclared_first_dispatch_is_refused" \
+    "an empty log must not be a path around the rule"
+DIR="$(new_sandbox disp_firstundeclared '{"elixir": {"verdict": "LGTM", "dispatch_in_flight": {"base_sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "round": 1}}}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a dispatch with no recorded review is a violation"
+assert_contains "$OUT" "no recorded review to match it against" "the refusal names the condition"
+assert_contains "$OUT" "first_dispatch: true" "and names the declaration that would make it legitimate"
+
+test_case "a_declared_first_dispatch_is_accepted" "a genuine first round is a legitimate state"
+DIR="$(new_sandbox disp_firstdeclared '{"elixir": {"verdict": "LGTM", "dispatch_in_flight": {"base_sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "round": 1, "first_dispatch": true}}}')"
+echo 'defmodule Probe do' > "$DIR/apps/core/lib/probe.ex"
+run_gate "$DIR"
+assert_contains "$OUT" "first dispatch, no prior review" "the declared state is surfaced"
+assert_not_contains "$OUT" "no recorded review to match it against" "and not also reported as a gap"
+
+# ── 11. the sha verifier is self-checked on every run ──────────────────────
+#
+# ⛔ MEASURED, and the coupling is the lesson. `git rev-parse --verify` RESOLVES
+# a short sha and merely ECHOES a full-length one, because 40 hex characters are
+# syntactically unambiguous and need no lookup:
+#
+#     len 12 -> rc=128      len 39 -> rc=128      len 40 -> rc=0, echoed
+#
+# So **padding a sha removes the check**. I was given a short sha, expanding it
+# to 40 characters was the reasonable thing to do, and expanding it is what
+# turned a checked input into an unchecked one — at 39 characters the fabricated
+# value would have been caught.
+#
+# ⚠️ And the instrument was easy to trust because its success output IS its
+# input: "it resolved" and "it passed through" are byte-identical, so reading
+# the output can never distinguish them. Fifteen consecutive OKs was not weak
+# evidence, it was zero evidence.
+test_case "the_sha_verifier_is_probed_on_every_run" \
+    "a verification step is an instrument and needs the same red-run discipline as a gate"
+GATE_SRC="$(cat "$GATE")"
+assert_contains "$GATE_SRC" "cat-file" "resolution goes through an object lookup"
+assert_contains "$GATE_SRC" "^{commit}" \
+    "with the peel, which also rejects a sha that exists but is not a commit"
+assert_contains "$GATE_SRC" "BOGUS_SHA_PROBE" "and a known-bad input is checked on every run"
+assert_contains "$GATE_SRC" "padding a short sha to full length removes" \
+    "with the coupling recorded, because that is what stops it recurring"
+
+# ⚠️ Driven, not grepped: the probe must actually discriminate. These are the
+# measurements, re-run here so a git upgrade that changed the behaviour would
+# red this case rather than silently invalidate the gate's reasoning.
+test_case "the_verifier_measurements_still_hold" "a gate's reasoning about a tool must be re-measured, not remembered"
+BOGUS="0123456789abcdef0123456789abcdef01234567"
+_out=$(git -C "$REPO_ROOT" cat-file -e "${BOGUS}^{commit}" 2>&1); _rc=$?
+if [[ $_rc -ne 0 ]]; then
+    _record_pass "cat-file -e with the peel REJECTS a fabricated 40-hex sha (rc=$_rc)"
+else
+    _record_fail "cat-file -e accepted a fabricated sha — the gate's resolver is now vacuous"
+fi
+_out=$(git -C "$REPO_ROOT" rev-parse --verify "$BOGUS" 2>&1); _rc=$?
+if [[ $_rc -eq 0 ]]; then
+    _record_pass "and rev-parse --verify still ACCEPTS it, which is why the gate must not use it"
+else
+    _record_fail "rev-parse --verify now rejects a fabricated sha; the gate's warning is stale and should be re-measured"
+fi
+_tree=$(git -C "$REPO_ROOT" rev-parse "HEAD^{tree}")
+_out=$(git -C "$REPO_ROOT" cat-file -e "${_tree}^{commit}" 2>&1); _rc=$?
+if [[ $_rc -ne 0 ]]; then
+    _record_pass "and the peel rejects a real TREE object, so the check means 'diffable from'"
+else
+    _record_fail "the peel accepted a tree object, so it is only checking existence"
+fi
+
 summarise

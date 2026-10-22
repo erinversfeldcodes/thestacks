@@ -507,6 +507,65 @@ STACK_PATHS = {
     "rust": ("apps/scraper",),
 }
 
+# ⛔ SHA RESOLUTION IS SELF-CHECKED, because the verifier I used before this had
+# a blind spot EXACTLY the width of the input I gave it.
+#
+# MEASURED, and the coupling is the lesson rather than the fix:
+#
+#     git rev-parse --verify 0123456789abcdef0123456789abcdef01234567  -> rc=0, echoes it
+#     git rev-parse --verify 0123456789abcdef0123456789abcdef0123456   -> rc=128
+#     git rev-parse --verify 012345678901                              -> rc=128
+#
+# A SHORT sha is ambiguous, so git must resolve it and fails when it cannot. A
+# FULL-LENGTH one is syntactically unambiguous, so git accepts it without a
+# lookup — and echoes it back. The pass-through is exactly 40 characters wide.
+#
+# ⚠️ So **padding a sha removes the check**. I was given a short sha, expanding
+# it to 40 characters was the reasonable thing to do, and expanding it is what
+# turned a checked input into an unchecked one. At 39 characters my fabricated
+# value would have been caught. The mistake and the blind spot were the same act.
+#
+# ⚠️ And the instrument was easy to trust because **its success output is its
+# input**: `rev-parse --verify` echoing the string makes "it resolved" and "it
+# passed through" byte-identical, so no amount of reading the output
+# distinguishes them. The same family as 141 meaning both "no match" and "dead
+# producer". Fifteen OKs was not weak evidence, it was ZERO evidence — a
+# deliberately bad input was the only thing that could ever have produced any.
+#
+# `^{commit}` is the one-token fix, and the peel is load-bearing beyond
+# existence: a TREE object passes bare `cat-file -e` and fails with the peel,
+# and what a review ledger needs is "something I can diff from", not "these
+# bytes are in the object store".
+BOGUS_SHA_PROBE = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _resolves(sha):
+    """True when `sha` names a commit this repository actually has."""
+    return _git(["cat-file", "-e", f"{sha}^{{commit}}"]) is not None
+
+
+def _check_sha_verifier():
+    """Refuse if the resolver cannot tell a real commit from a fabricated one.
+
+    ⛔ Run on EVERY invocation rather than only in the suite, for the reason
+    `check-sigpipe-hazards.sh` carries its planted violation inline: a
+    verification step is an instrument and needs the same red-run discipline as
+    a gate. Fifteen consecutive OKs with no known-bad input is the same shape as
+    a green absence assertion with no anti-vacuity probe.
+    """
+    head = _git(["rev-parse", "HEAD"])
+    if not head:
+        return "git cannot resolve HEAD, so no sha below could be checked"
+    if not _resolves(head[0]):
+        return "the resolver rejects HEAD, so it would reject every real sha"
+    if _resolves(BOGUS_SHA_PROBE):
+        return (
+            f"the resolver ACCEPTS the fabricated sha {BOGUS_SHA_PROBE[:12]}…, so every "
+            f"recorded sha below would pass without being looked up"
+        )
+    return None
+
+
 def _stacks_for(changed):
     return {
         stack
@@ -643,6 +702,21 @@ if not wave_filter and any(
         # under that stack's paths makes it stale. Staleness is a violation and
         # not a warning: the whole point of this guard is that an unreviewed axis
         # must not be reportable as a reviewed one.
+        # ⛔ Before any recorded sha is believed, prove the thing that believes
+        # it can disbelieve. This refuses rather than warning: a resolver that
+        # cannot reject a fabricated sha makes every check below vacuous, and
+        # "the shas all resolved" would then be a sentence with no content.
+        verifier_fault = _check_sha_verifier()
+        if verifier_fault:
+            violations.append(
+                f"  campaign: the sha verifier is not discriminating — {verifier_fault}. "
+                f"Every recorded sha below would pass unchecked, so this is a refusal rather "
+                f"than a warning. ⚠️ Use `git cat-file -e <sha>^{{commit}}`, never "
+                f"`git rev-parse --verify <sha>`: the latter echoes back any 40-character hex "
+                f"string without looking it up, so padding a short sha to full length removes "
+                f"the check."
+            )
+
         for stack in sorted(stacks & reviews):
             entry = (state.get("domain_reviews") or {}).get(stack) or {}
             if not isinstance(entry, dict):
@@ -651,6 +725,60 @@ if not wave_filter and any(
             log = _review_log(entry)
             current = log[-1] if log else {}
             seen = current.get("sha")
+
+            # ⛔ A DISPATCH BASE MUST BE BYTE-EQUAL TO THE CURRENT ENTRY'S SHA.
+            # Not an ancestor of it, not consistent with it — string-equal.
+            #
+            # ⚠️ The reviewer corrected their own framing here, and the
+            # correction is the whole point. Stating the rule as a property of
+            # the LOG ("no entry may be a descendant of the current one") checks
+            # the log's internal consistency and ties nothing to the base
+            # actually dispatched from. Non-emptiness of a range is a weak
+            # signal because many WRONG bases are non-empty — but an inferred
+            # base essentially cannot ACCIDENTALLY be byte-equal to a recorded
+            # 40-character sha.
+            #
+            # Both failures this mechanism exists for would have been caught by
+            # it and neither was caught by ancestry: a sha fabricated by padding
+            # a short one, and a base silently substituted from the dispatch
+            # head when the reply had not been read.
+            dispatch = entry.get("dispatch_in_flight") or {}
+            if not isinstance(dispatch, dict):
+                dispatch = {}
+            if dispatch and not log:
+                # ⛔ THE FIRST DISPATCH HAS NO ENTRY TO MATCH, and "empty log
+                # means anything goes" would be this very rule bypassed by a
+                # path — the same shape as a declared count sitting below an
+                # early success exit. So it is a DECLARED state, not a gap: say
+                # `first_dispatch: true` and it is accepted and printed.
+                if dispatch.get("first_dispatch") is True:
+                    print(
+                        f"    {stack}: first dispatch, no prior review to match a base against"
+                    )
+                else:
+                    violations.append(
+                        f"  campaign: the {stack} dispatch names a base with no recorded review "
+                        f"to match it against. If this is genuinely the first round for this "
+                        f"axis, say so with `first_dispatch: true` — an undeclared empty log is "
+                        f"this rule being skipped rather than satisfied."
+                    )
+            elif dispatch:
+                base = dispatch.get("base_sha")
+                if not base:
+                    violations.append(
+                        f"  campaign: the {stack} dispatch records no `base_sha`, so what the "
+                        f"reviewer was asked to look at is UNKNOWN — not satisfied."
+                    )
+                elif base != seen:
+                    violations.append(
+                        f"  campaign: the {stack} dispatch names base_sha {base[:12]} while the "
+                        f"newest recorded review is {seen[:12]}. These must be BYTE-EQUAL, not "
+                        f"merely consistent: a base that is an ancestor of the newest review "
+                        f"re-sends work already approved, and one that is a descendant asks about "
+                        f"work nobody has reviewed. An inferred base cannot accidentally match a "
+                        f"recorded 40-character sha, which is what makes equality the check and "
+                        f"ancestry not."
+                    )
 
             if not seen:
                 violations.append(
@@ -741,11 +869,7 @@ if not wave_filter and any(
             # `cat-file -e <sha>^{commit}` is the form that actually resolves:
             # the `^{commit}` peel forces object lookup and fails when there is
             # nothing to peel.
-            unresolvable = [
-                item["sha"]
-                for item in log
-                if _git(["cat-file", "-e", f"{item['sha']}^{{commit}}"]) is None
-            ]
+            unresolvable = [item["sha"] for item in log if not _resolves(item["sha"])]
             if unresolvable:
                 violations.append(
                     f"  campaign: the {stack} review log names "
