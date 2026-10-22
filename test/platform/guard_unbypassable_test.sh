@@ -53,8 +53,24 @@ assert_contains "$OUT" "check-guard-is-unbypassable.sh" \
 # --- the planted red, against the real script -----------------------------
 test_case "a_guard_below_a_success_exit_is_refused" \
     "a partial failure is caught and a total one is not, which is the case that matters"
+# ⚠️ TRAPPED, not only restored inline — and this suite had the gap. It plants
+# into `scripts/check-breaking-suppressions-are-spent.sh`, which is TRACKED, and
+# an early exit between the plant and the inline restore would have left a
+# modified gate in the tree for every suite that runs after it in `run_all.sh`.
+#
+# The `-s` guard is the same one its sibling needed: an empty backup is
+# indistinguishable from a good one at `cp` time, so restoring from one silently
+# truncates the thing it was meant to protect.
 BACKUP="$(mktemp)"
 cp "$VICTIM" "$BACKUP"
+restore_victim() {
+    if [[ -s "$BACKUP" ]]; then
+        cp "$BACKUP" "$VICTIM"
+    else
+        echo "REFUSING to restore $VICTIM from an EMPTY backup." >&2
+    fi
+}
+trap 'restore_victim; rm -f "$BACKUP"' EXIT
 
 python3 - "$VICTIM" <<'PLANT'
 import sys
@@ -71,8 +87,7 @@ open(path, "w", encoding="utf-8").write(src)
 PLANT
 
 run_gate
-cp "$BACKUP" "$VICTIM"
-rm -f "$BACKUP"
+restore_victim
 assert_exit_nonzero "$RC" "the gate refuses"
 assert_contains "$OUT" "sit below a path that exits 0" "the refusal names the condition"
 assert_contains "$OUT" "check-breaking-suppressions-are-spent.sh" "and the offending file"

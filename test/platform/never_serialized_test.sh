@@ -65,8 +65,20 @@ assert_not_contains "$GATE_SRC" "persisted.exs\", encoding" "the gate does not r
 GEN="$REPO_ROOT/apps/core/lib/stacks/gen/proto_json.ex"
 GEN_BACKUP="$(mktemp)"
 cp "$GEN" "$GEN_BACKUP"
-restore_gen() { cp "$GEN_BACKUP" "$GEN"; rm -f "$GEN_BACKUP"; }
-trap restore_gen EXIT
+# ⚠️ The `-s` guard and a restore that does NOT delete its own backup, so there
+# is no window in which the trap is armed over an empty file. The sibling
+# suppressions suite had the same shape over a TRACKED file and could truncate
+# it; here `GEN` is gitignored and regenerable, so the consequence was recovery
+# work rather than data loss — but the shape is identical and the guard is two
+# lines.
+restore_gen() {
+    if [[ -s "$GEN_BACKUP" ]]; then
+        cp "$GEN_BACKUP" "$GEN"
+    else
+        echo "REFUSING to restore $GEN from an EMPTY backup — regenerate it instead." >&2
+    fi
+}
+trap 'restore_gen; rm -f "$GEN_BACKUP"' EXIT
 
 python3 - "$GEN" <<'PLANT'
 import re
@@ -87,7 +99,6 @@ assert_contains "$OUT" "password_hash\` is EMITTED" "it says the generated side 
 assert_contains "$OUT" "no baseline to add the pair to" "and offers no escape, unlike the completeness gate"
 
 restore_gen
-cp "$GEN" "$GEN_BACKUP" 2>/dev/null || GEN_BACKUP="$(mktemp)" && cp "$GEN" "$GEN_BACKUP"
 
 test_case "the_restore_is_clean" "the planted emission is gone again"
 run_gate

@@ -36,10 +36,51 @@ BUF_YAML="$REPO_ROOT/proto/buf.yaml"
 GATE_SRC="$(cat "$GATE" 2>/dev/null)"
 LINT_SRC="$(cat "$LINT" 2>/dev/null)"
 
+# ⛔ THIS RESTORE COULD TRUNCATE A TRACKED FILE, and the fix removes the window
+# rather than narrowing it.
+#
+# `restore_buf` used to delete the backup it restored from, so every case that
+# re-armed had to `mktemp` a fresh one and re-fill it — and between those two
+# statements `BUF_BACKUP` pointed at an EMPTY file while the EXIT trap was
+# armed. Worse than a two-statement window: this suite runs `set -uo pipefail`
+# WITHOUT `-e`, so a failed re-fill `cp` leaves the empty backup in place for
+# the REST of the run, and the trap then copies zero bytes over the real file.
+#
+# MEASURED on a standalone reproduction of the exact shape: a tracked file went
+# from 25 bytes to 0.
+#
+# ⚖️ TWO CHANGES, and the first is the generalisable one:
+#
+#   1. NEVER RESTORE FROM A BACKUP WITHOUT CHECKING IT IS NON-EMPTY. An empty
+#      backup is indistinguishable from a good one at `cp` time — the same
+#      "signal that means two things, one of which is I DID NOTHING" shape as a
+#      verifier that echoes its own input.
+#   2. The restore no longer deletes the backup, so nothing needs to re-arm and
+#      the window does not exist. Deletion moves to the trap, once.
 BUF_BACKUP="$(mktemp)"
 cp "$BUF_YAML" "$BUF_BACKUP"
-restore_buf() { cp "$BUF_BACKUP" "$BUF_YAML"; rm -f "$BUF_BACKUP"; }
-trap restore_buf EXIT
+
+WA_PROTO="$REPO_ROOT/proto/stacks/common/v1/writing_assistant.proto"
+WA_BACKUP="$(mktemp)"
+cp "$WA_PROTO" "$WA_BACKUP"
+
+restore_one() {
+    local backup="$1" target="$2"
+    if [[ -s "$backup" ]]; then
+        cp "$backup" "$target"
+    else
+        echo "REFUSING to restore $target from an EMPTY backup — leaving the file as it is." >&2
+    fi
+}
+
+restore_buf() { restore_one "$BUF_BACKUP" "$BUF_YAML"; }
+restore_wa() { restore_one "$WA_BACKUP" "$WA_PROTO"; }
+
+# ⚠️ BOTH planted files are in the trap, not just the one that had it. The proto
+# plant was restored inline only, so an early exit left a tracked proto file
+# modified — residue rather than truncation, but residue the next suite in
+# `run_all.sh` would then measure as its own finding.
+trap 'restore_buf; restore_wa; rm -f "$BUF_BACKUP" "$WA_BACKUP"' EXIT
 
 run_gate() {
     OUT=$(cd "$REPO_ROOT" && bash "$GATE" 2>&1)
@@ -92,8 +133,6 @@ assert_contains "$OUT" "social.proto" "and names the offending entry"
 assert_contains "$OUT" "standing allowance" "and says what a spent entry costs while it stands"
 
 restore_buf
-BUF_BACKUP="$(mktemp)"
-cp "$BUF_YAML" "$BUF_BACKUP"
 
 test_case "the_restore_is_clean" "the planted entry is gone again"
 run_gate
@@ -188,8 +227,6 @@ assert_not_contains "$OUT" "OK: no breaking" \
     "and it must NOT print the OK line it used to exit 0 with"
 
 restore_buf
-BUF_BACKUP="$(mktemp)"
-cp "$BUF_YAML" "$BUF_BACKUP"
 
 test_case "the_reindent_restore_is_clean" "the gate passes again once the indentation is back"
 run_gate
@@ -207,10 +244,6 @@ assert_exit_zero "$RC" "the gate passes over the restored file"
 # read as a far smaller blast radius than the suppressions actually have.
 test_case "an_entry_covering_MORE_than_declared_is_refused" \
     "covering something is not the same as covering only what it was created for"
-WA_PROTO="$REPO_ROOT/proto/stacks/common/v1/writing_assistant.proto"
-WA_BACKUP="$(mktemp)"
-cp "$WA_PROTO" "$WA_BACKUP"
-
 python3 - "$WA_PROTO" <<'EXTRA'
 import sys
 
@@ -224,8 +257,7 @@ open(path, "w", encoding="utf-8").write(
 EXTRA
 
 run_gate
-cp "$WA_BACKUP" "$WA_PROTO"
-rm -f "$WA_BACKUP"
+restore_wa
 assert_exit_nonzero "$RC" "a thirteenth field-type change on a file declared to have twelve is refused"
 assert_contains "$OUT" "declared 12, found 13" "the refusal gives both numbers"
 assert_contains "$OUT" "covering a change nobody recorded" \
@@ -240,5 +272,42 @@ test_case "the_report_states_violations_not_pairs" \
     "a count labelled wrongly understates the blast radius"
 assert_contains "$OUT" "34 violation(s)" "the raw violation total is reported"
 assert_contains "$OUT" "(rule, file) pair(s)" "distinguished from the pair count it used to print"
+
+# --- no residue: both planted files are back as git has them ---------------
+#
+# ⛔ Every case above plants into a REAL tracked file — `proto/buf.yaml` and
+# `writing_assistant.proto` — so the hygiene of these restores is load-bearing
+# for every suite that runs after this one in `run_all.sh`. A restore that
+# half-worked would show up as a finding somewhere else entirely.
+#
+# ⚠️ This was being checked by hand, once, by me. A manual check is not a
+# check: it does not run in CI, it does not run for the next person, and it is
+# exactly the kind of step that gets skipped on the run where it matters.
+test_case "no_residue" "the suite must leave both planted files as it found them"
+RESIDUE_OUT="$(cd "$REPO_ROOT" && git diff --name-only -- \
+    proto/buf.yaml proto/stacks/common/v1/writing_assistant.proto 2>&1)"
+if [[ -z "$RESIDUE_OUT" ]]; then
+    _record_pass "both planted files match the index — every restore completed"
+else
+    _record_fail "PLANT RESIDUE left behind in: ${RESIDUE_OUT//$'\n'/, }"
+fi
+
+# ⚠️ And the restore must REFUSE an empty backup rather than copying zero bytes
+# over a tracked file. Asserted on the helper's own behaviour, because the
+# consequence is destructive and "it has not happened yet" is not evidence.
+test_case "an_empty_backup_is_refused_not_restored" \
+    "an empty backup is indistinguishable from a good one at cp time"
+EMPTY_BACKUP="$(mktemp)"
+VICTIM_FILE="$(mktemp)"
+printf 'content that must survive\n' > "$VICTIM_FILE"
+REFUSAL="$(restore_one "$EMPTY_BACKUP" "$VICTIM_FILE" 2>&1)"
+SURVIVED="$(cat "$VICTIM_FILE")"
+rm -f "$EMPTY_BACKUP" "$VICTIM_FILE"
+if [[ "$SURVIVED" == "content that must survive" ]]; then
+    _record_pass "the target was left intact rather than truncated to zero bytes"
+else
+    _record_fail "the target was CLOBBERED by an empty backup: '${SURVIVED}'"
+fi
+assert_contains "$REFUSAL" "REFUSING to restore" "and the refusal is reported rather than silent"
 
 summarise
