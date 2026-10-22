@@ -86,12 +86,21 @@ configures a cookie session store (key `_core_key`, `same_site: "Lax"`), wired a
 options either, though `docs/technical-architecture.md` claimed it was; that row
 has been corrected.
 
-⚠️ So the document describing this system has been asserting cookie sessions,
-with the same `SameSite=Lax` value argued for above, for however long. The
-agreement is a coincidence rather than a prior decision — nothing read the
-cookie. W4b (#506) chooses explicitly whether to use that plumbing, leave it
-inert with a reason, or delete it; a wired plug carrying nothing is the mirror of
-this repository's commonest defect.
+⚖️ **RULED (contract review, W4a): remove it.** Verified safe — zero
+`put_flash`/`get_flash`, zero CSRF, zero LiveView, and no socket declaration
+anywhere in the web layer, so nothing depends on a session store.
+
+⛔ And the deciding argument is not tidiness, it is what W4b would otherwise
+inherit. That block carries `signing_salt: "stacks_signing"` — **a committed
+literal in a tracked file**, which becomes a real finding the moment the cookie
+carries a session — and no `secure: true`. Then the part that makes it hazardous
+rather than merely untidy: its `same_site: "Lax"` coincidentally matches what
+this ADR argues for independently, and **an unreviewed config that agrees with a
+reviewed decision on one line reads as vetted.** The next reader infers the other
+two options were considered. They were not.
+
+An empty file forces three decisions — salt, `secure`, `same_site`. This block
+forecloses two of them silently while appearing to have decided all three.
 
 ### 2. `SameSite=Lax`, and the argument is the confirmation link
 
@@ -208,13 +217,29 @@ change what makes one invalid.
 
 Unchanged and load-bearing after this ADR:
 
-- `guardian_tokens` families and the `family_id` revocation check
-  (`guardian.ex:56-59`) — the mechanism for **user** sessions.
-- The boot-scoped rejection of **admin** tokens: `typ: "admin_session"` carries a
-  `bid` claim compared against `Core.Application.boot_id()` (`guardian.ex:49`),
-  so every admin session dies on deploy. ⚠️ Note the precision — `boot_id`
-  invalidation is admin-only; user sessions are revoked by family, not by boot.
-  A change that applied one mechanism's reasoning to the other would be wrong.
+⚖️ **Two claim-level mechanisms plus the `Guardian.DB` baseline** — three
+things, and `verify_claims/2` is a `cond`, so the two claim-level ones are
+**mutually exclusive by control flow** rather than by convention about
+populations:
+
+- Branch 1 — the boot-scoped rejection of **admin** tokens: `typ:
+  "admin_session"` carries a `bid` claim compared against
+  `Core.Application.boot_id()` (`guardian.ex:48-53`), so every admin session dies
+  on deploy. ⚠️ An admin session takes this branch and **never reaches the family
+  check, even if it carried a `family_id`**.
+- Branch 2 — `guardian_tokens` families and the `family_id` revocation check
+  (`guardian.ex:55-59`), for **user** sessions. A family-bearing token never gets
+  a boot check.
+- Branch 3 — `true -> {:ok, claims}` (`guardian.ex:61-62`) is **reachable**: a
+  token that is neither admin nor family-bearing passes with no claim-level
+  revocation check at all. ⚠️ It is not unrevocable — `Guardian.DB.on_verify`
+  (`guardian.ex:75`) still applies to every token — but a reader of branches 1
+  and 2 alone could conclude such a session has *no* revocation path, which is
+  why the third is named here.
+
+⛔ The precision matters: `boot_id` invalidation is admin-only, and a change that
+applied one branch's reasoning to another would be wrong in a way the `cond`
+makes silent — the wrong branch simply never runs.
 - Partner API keys: server-to-server, Argon2-hashed, no cookie, untouched.
 - The `/api/test/*` helper gate.
 
