@@ -48,12 +48,31 @@ import sys
 HEREDOC_AT = re.compile(r"<<-?[ \t]*(?!<)(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
 
-def blank_line(line):
+def blank_line(line, keep_comments=False, keep_strings=False):
     """Return (blanked_text, heredoc_delimiters_opened_by_this_line).
 
     Walks the line with an explicit mode stack. "code" is the default; "subst"
     is code inside `$(…)` or backticks and differs only in what ends it; "dq"
     and "sq" are the two string literals, and only "sq" is blanked wholesale.
+
+    ⚖️ `keep_comments` exists for callers whose pattern IS a comment. The
+    stub-provenance gate is one: its markers are comment lines, so stripping
+    comments would blank the very thing it looks for — while it still needs
+    heredoc bodies gone, because a test suite that PLANTS a marker inside a
+    heredoc would otherwise be counted as carrying one. Default stays off, so
+    absence checks keep their comment-stripping and do not start reading the
+    prose that explains the pattern they ban.
+
+    ⚖️ `keep_strings` is the second independent knob, for callers whose pattern
+    lives INSIDE a quoted string. The stub-provenance gate again: a stub is
+    defined as `cat > "$STUBS/fly"`, so the path it needs is double-quoted, and
+    blanking string literals made that gate find zero stubs in a tree with
+    seven. Both flags default off, so the hazard scanner this file was written
+    for is unaffected — it needs exactly the opposite of both.
+
+    ⚠️ With both flags on, the only thing still blanked is heredoc BODIES, which
+    is the irreducible part: a heredoc body is data for every caller, because it
+    is content being written somewhere else rather than code being run here.
     """
     out = []
     openers = []
@@ -105,6 +124,8 @@ def blank_line(line):
             # `$( … )` a `#` is still a comment, so treat it the same way and
             # stop — the rest of the line cannot be code either way.
             if ch == "#":
+                if keep_comments:
+                    out.append(line[i:])
                 break
             if ch == "'":
                 out.append(ch)
@@ -136,13 +157,13 @@ def blank_line(line):
                 stack.pop()
                 out.append(ch)
             else:
-                out.append(" ")
+                out.append(ch if keep_strings else " ")
             i += 1
             continue
 
         # mode == "dq": literal runs are data, but substitutions are code.
         if ch == "\\" and i + 1 < n:
-            out.append("  ")
+            out.append(line[i : i + 2] if keep_strings else "  ")
             i += 2
             continue
         if line.startswith("$(", i):
@@ -160,13 +181,15 @@ def blank_line(line):
             out.append(ch)
             i += 1
             continue
-        out.append(" ")
+        out.append(ch if keep_strings else " ")
         i += 1
 
     return "".join(out), openers
 
 
 def main():
+    keep_comments = "--keep-comments" in sys.argv[1:]
+    keep_strings = "--keep-strings" in sys.argv[1:]
     pending = []
     for raw in sys.stdin.read().split("\n"):
         line = raw.rstrip("\n")
@@ -178,7 +201,7 @@ def main():
                 pending.pop(0)
             print("")
             continue
-        text, openers = blank_line(line)
+        text, openers = blank_line(line, keep_comments=keep_comments, keep_strings=keep_strings)
         pending.extend(openers)
         print(text)
 

@@ -152,6 +152,11 @@ gate check-sigpipe-hazards.sh
 # status. Folding them together would blur a predicate that took five rounds to
 # make precise.
 gate check-status-after-substitution.sh
+# Also not an Elixir gate, and here for the same reason as its two neighbours:
+# this is the only lane that actually executes. It asks whether each stubbed CLI
+# says what real tool output it encodes — a stub written from its author's
+# memory of an API hid three faults in one script behind a fully green suite.
+gate check-cli-stub-provenance.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

@@ -32,6 +32,12 @@ trap 'rm -rf "$WORK"' EXIT
 # test needs and exiting with whatever code it needs.
 write_flyctl_stub() {
     local output="$1" exit_code="$2"
+    # ⚠️ stub-provenance says `unknown` because that is the honest answer: this stub
+    # was written from its author's memory of the CLI and has never been compared to
+    # the real tool. Reading `--version` locally would not change that — it says what
+    # is installed, not that this response SHAPE was re-recorded against it. Replace
+    # `unknown` with the version and today's date when you drive the real CLI.
+    # stub-provenance: flyctl unknown captured unknown
     cat > "$WORK/flyctl" <<STUB
 #!/usr/bin/env bash
 cat <<'OUTPUT'

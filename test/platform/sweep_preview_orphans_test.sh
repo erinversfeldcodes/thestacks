@@ -50,12 +50,24 @@ print(datetime.datetime.fromtimestamp(${NOW} - 600, datetime.timezone.utc).isofo
 # `gh` returns no open PRs, so nothing is in the allowlist and every decision
 # below is made by the age and stack rules alone. That is the harder case: an
 # allowlist hit would mask them.
+# ⚠️ stub-provenance says `unknown` because that is the honest answer: this stub
+# was written from its author's memory of the CLI and has never been compared to
+# the real tool. Reading `--version` locally would not change that — it says what
+# is installed, not that this response SHAPE was re-recorded against it. Replace
+# `unknown` with the version and today's date when you drive the real CLI.
+# stub-provenance: gh unknown captured unknown
 cat > "$STUBS/gh" <<'STUB'
 #!/usr/bin/env bash
 echo ""
 STUB
 
 # No Fly preview apps, so the Modal leg has an empty live-stack set.
+# ⚠️ stub-provenance says `unknown` because that is the honest answer: this stub
+# was written from its author's memory of the CLI and has never been compared to
+# the real tool. Reading `--version` locally would not change that — it says what
+# is installed, not that this response SHAPE was re-recorded against it. Replace
+# `unknown` with the version and today's date when you drive the real CLI.
+# stub-provenance: fly unknown captured unknown
 cat > "$STUBS/fly" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
@@ -65,6 +77,12 @@ case "$*" in
 esac
 STUB
 
+# ✅ stub-provenance VERIFIED, and it is the only one in this repository that is.
+# Both JSON key spellings this suite drives were read off the real CLI: 1.2.6
+# emitted `Description`/`State`/`Created at` and 1.6.2 emits `description`/
+# `state`/`created_at`; and `app stop` was driven on the real account and found
+# to PROMPT. That drive is what turned three green-but-false assertions red.
+# stub-provenance: modal 1.6.2 captured 2026-10-21
 write_modal_stub() {
     local listing="$1"
     cat > "$STUBS/modal" <<STUB

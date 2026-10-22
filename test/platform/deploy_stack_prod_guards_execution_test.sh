@@ -128,6 +128,12 @@ assert_contains "$(cat "$GUARD2")" "No Neon branch creation in production mode" 
     "and it says so out loud rather than silently skipping"
 
 # The decision itself, executed both ways against a stubbed Neon API.
+# ⚠️ stub-provenance says `unknown` because that is the honest answer: this stub
+# was written from its author's memory of the CLI and has never been compared to
+# the real tool. Reading `--version` locally would not change that — it says what
+# is installed, not that this response SHAPE was re-recorded against it. Replace
+# `unknown` with the version and today's date when you drive the real CLI.
+# stub-provenance: neon unknown captured unknown
 cat > "$WORK/neon-decide.sh" <<'DECIDE'
 # The real script's shape: branch creation happens only when a staging API key
 # is present, and production forces that key empty in its posture block.
