@@ -52,3 +52,47 @@ breaking:
       - stacks/internal/v1/vision.proto
     ENUM_NO_DELETE:
       - stacks/internal/v1/vision.proto
+    # ⚠️ TIME-BOXED, same trigger as the two above: remove once this branch has
+    # landed on the default branch. `buf breaking` compares against that branch,
+    # so after the merge there is nothing left to flag and the entries only
+    # weaken the gate. All four entries in this block go together.
+    #
+    # They cover a deliberate pre-wire settlement of writing_assistant.proto:
+    #
+    #   FIELD_SAME_TYPE (12)        every datetime moved from plain `string` to
+    #                               google.protobuf.Timestamp. The codegen
+    #                               already mapped Timestamp -> :utc_datetime_usec
+    #                               in both mappers, so the Ecto types are
+    #                               UNCHANGED and no migration is generated —
+    #                               verified. Three hand-written `ecto_type:`
+    #                               overrides were buying the same effect.
+    #   FIELD_SAME_CARDINALITY (14) 12 of them follow from that change (a message
+    #                               field has explicit presence where a proto3
+    #                               scalar has none). The other 2 are `shelf` and
+    #                               `comment` gaining `optional`, so "not given"
+    #                               stops being indistinguishable from "".
+    #
+    # ⛔ WHY THIS IS NOT FREE, CORRECTING THE RECORD. The filed work describing
+    # this change says it "costs a regen". That was true only while the file was
+    # unmerged; `2a355ed2` put it on the default branch with the `string` types,
+    # so the change has required a suppression ever since. The cost is now FLAT
+    # rather than rising — which removes the urgency that was the argument for
+    # doing it ahead of other work, and is recorded here because the next person
+    # reading that issue will otherwise inherit the wrong premise.
+    #
+    # ⛔ WHAT IT BLINDS, which is the real price. `ignore_only` maps a rule to
+    # FILES, not fields — buf v2 cannot express "only these twelve". So while
+    # these stand, ANY field type or cardinality change in this six-message file
+    # goes unflagged. That matters more than usual here because the same filed
+    # work still carries F8 for this file — collapsing two parallel arrays into
+    # `repeated RetrievalHit` — which is deliberately NOT in this batch: it would
+    # convert two real array columns on op.retrieval_log and needs a migration
+    # and a jsonb-versus-child-table decision, not a regen.
+    #
+    # Nothing consumes these messages on the wire: none of the six has a
+    # json_serializers entry, so no client can break. The suppression is about
+    # the structural gate, not about a live contract.
+    FIELD_SAME_TYPE:
+      - stacks/common/v1/writing_assistant.proto
+    FIELD_SAME_CARDINALITY:
+      - stacks/common/v1/writing_assistant.proto

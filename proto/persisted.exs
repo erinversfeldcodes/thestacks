@@ -1300,7 +1300,6 @@
           null: false
         },
         status: %{default: "active", null: false},
-        started_at: %{ecto_type: :utc_datetime_usec},
         topic: %{dbt_exclude: true}
       }
     },
@@ -1377,8 +1376,7 @@
           on_delete: :delete_all,
           null: false
         },
-        access_type: %{default: "granted", null: false},
-        granted_at: %{ecto_type: :utc_datetime_usec}
+        access_type: %{default: "granted", null: false}
       }
     },
     %{
@@ -1402,8 +1400,7 @@
           null: false
         },
         source_type: %{null: false},
-        source_id: %{ecto_type: :binary_id},
-        content_date: %{ecto_type: :utc_datetime_usec}
+        source_id: %{ecto_type: :binary_id}
       }
     },
     %{

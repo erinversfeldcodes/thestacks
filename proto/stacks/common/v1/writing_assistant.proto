@@ -30,9 +30,37 @@ syntax = "proto3";
 
 package stacks.common.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option java_package = "com.thestacks.common.v1";
 option java_outer_classname = "WritingAssistantProto";
 option java_multiple_files = true;
+
+// EmbeddingSourceType enumerates what an embedding was derived from.
+// Wire values (strings): "shelf", "blog_post", "book", "placement".
+//
+// ⚠️ Declared as documentation and for client-side validation, NOT as the
+// field's type — `Embedding.source_type` stays `string`, following the pattern
+// `listing.proto` sets for the same reason: the controller serialises atoms as
+// plain strings, so a typed enum field would describe a wire shape the server
+// does not produce. Protobuf cannot enforce a string's membership either way;
+// what this buys is that the valid set stops living only in a comment.
+enum EmbeddingSourceType {
+  // Default unspecified value; should not be used in practice.
+  EMBEDDING_SOURCE_TYPE_UNSPECIFIED = 0;
+
+  // Derived from a bookshelf's name or category.
+  EMBEDDING_SOURCE_TYPE_SHELF = 1;
+
+  // Derived from the text of a blog post.
+  EMBEDDING_SOURCE_TYPE_BLOG_POST = 2;
+
+  // Derived from a book's own metadata or content.
+  EMBEDDING_SOURCE_TYPE_BOOK = 3;
+
+  // Derived from a placement — a book on a particular shelf.
+  EMBEDDING_SOURCE_TYPE_PLACEMENT = 4;
+}
 
 // Embedding is a user-scoped vector record over the user's own content
 // (shelves, blog posts, books, placements). The vector itself lives in a
@@ -58,16 +86,39 @@ message Embedding {
   string title = 5 [json_name = "title"];
 
   // Bookshelf name/category the source item sits on, when applicable.
-  string shelf = 6 [json_name = "shelf"];
+  //
+  // ⚠️ `optional` so "no shelf" is distinguishable from "". A proto3 scalar has
+  // no presence, so without it the two are the same value and a consumer cannot
+  // tell an item that sits on no shelf from one whose shelf name is blank.
+  optional string shelf = 6 [json_name = "shelf"];
 
   // Timestamp of the source content (the "date" retrieval dimension).
-  string content_date = 7 [json_name = "content_date"];
+  google.protobuf.Timestamp content_date = 7 [json_name = "content_date"];
 
   // When this embedding record was created.
-  string created_at = 8 [json_name = "created_at"];
+  google.protobuf.Timestamp created_at = 8 [json_name = "created_at"];
 
   // When this embedding record was last updated.
-  string updated_at = 9 [json_name = "updated_at"];
+  google.protobuf.Timestamp updated_at = 9 [json_name = "updated_at"];
+}
+
+// SessionStatus tracks the lifecycle of a writing-assistant session.
+// Wire values (strings): "active", "completed", "abandoned".
+//
+// ⚠️ Documentation and client-side validation only; the field stays `string`.
+// See the note on EmbeddingSourceType above.
+enum SessionStatus {
+  // Default unspecified value; should not be used in practice.
+  SESSION_STATUS_UNSPECIFIED = 0;
+
+  // The session is open and accepting turns.
+  SESSION_STATUS_ACTIVE = 1;
+
+  // The writer finished the session deliberately.
+  SESSION_STATUS_COMPLETED = 2;
+
+  // The session was left without being completed.
+  SESSION_STATUS_ABANDONED = 3;
 }
 
 // BlogAssistantSession records a writing-assistant session. User-scoped.
@@ -90,13 +141,29 @@ message BlogAssistantSession {
   string model = 5 [json_name = "model"];
 
   // When the session was started.
-  string started_at = 6 [json_name = "started_at"];
+  google.protobuf.Timestamp started_at = 6 [json_name = "started_at"];
 
   // When the session record was created.
-  string created_at = 7 [json_name = "created_at"];
+  google.protobuf.Timestamp created_at = 7 [json_name = "created_at"];
 
   // When the session record was last updated.
-  string updated_at = 8 [json_name = "updated_at"];
+  google.protobuf.Timestamp updated_at = 8 [json_name = "updated_at"];
+}
+
+// FeedbackRating is the writer's verdict on one assistant turn.
+// Wire values (strings): "up", "down".
+//
+// ⚠️ Documentation and client-side validation only; the field stays `string`.
+// See the note on EmbeddingSourceType above.
+enum FeedbackRating {
+  // Default unspecified value; should not be used in practice.
+  FEEDBACK_RATING_UNSPECIFIED = 0;
+
+  // The turn was useful.
+  FEEDBACK_RATING_UP = 1;
+
+  // The turn was not useful.
+  FEEDBACK_RATING_DOWN = 2;
 }
 
 // TurnFeedback captures per-turn feedback within a session. Session-child;
@@ -117,10 +184,15 @@ message TurnFeedback {
   string rating = 4 [json_name = "rating"];
 
   // Optional free-text comment.
-  string comment = 5 [json_name = "comment"];
+  //
+  // ⛔ `optional` is load-bearing here rather than tidy. "No comment given" and
+  // "an empty comment" are different facts about a feedback submission, and
+  // without explicit presence they arrive identical — a distinction that cannot
+  // be recovered later without adding a second field.
+  optional string comment = 5 [json_name = "comment"];
 
   // When the feedback was recorded.
-  string created_at = 6 [json_name = "created_at"];
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
 }
 
 // RetrievalLog audits a RAG retrieval performed for a session turn.
@@ -147,7 +219,26 @@ message RetrievalLog {
   int32 turn_index = 6 [json_name = "turn_index"];
 
   // When the retrieval was performed.
-  string created_at = 7 [json_name = "created_at"];
+  google.protobuf.Timestamp created_at = 7 [json_name = "created_at"];
+}
+
+// ContentAccessType records how a reader came to be allowed a book's content.
+// Wire values (strings): "granted", "purchased", "sample".
+//
+// ⚠️ Documentation and client-side validation only; the field stays `string`.
+// See the note on EmbeddingSourceType above.
+enum ContentAccessType {
+  // Default unspecified value; should not be used in practice.
+  CONTENT_ACCESS_TYPE_UNSPECIFIED = 0;
+
+  // Access granted by the platform, e.g. for a review copy.
+  CONTENT_ACCESS_TYPE_GRANTED = 1;
+
+  // Access follows from a purchase.
+  CONTENT_ACCESS_TYPE_PURCHASED = 2;
+
+  // A limited sample rather than the whole work.
+  CONTENT_ACCESS_TYPE_SAMPLE = 3;
 }
 
 // UserBookContentAccess records that a user has access to a book's content
@@ -166,10 +257,10 @@ message UserBookContentAccess {
   string access_type = 4 [json_name = "access_type"];
 
   // When access was granted.
-  string granted_at = 5 [json_name = "granted_at"];
+  google.protobuf.Timestamp granted_at = 5 [json_name = "granted_at"];
 
   // When the access record was created.
-  string created_at = 6 [json_name = "created_at"];
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
 }
 
 // BookContentChunk is a chunk of a book's shared text corpus, used as retrieval
@@ -194,8 +285,8 @@ message BookContentChunk {
   int32 token_count = 5 [json_name = "token_count"];
 
   // When the chunk was created.
-  string created_at = 6 [json_name = "created_at"];
+  google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
 
   // When the chunk was last updated.
-  string updated_at = 7 [json_name = "updated_at"];
+  google.protobuf.Timestamp updated_at = 7 [json_name = "updated_at"];
 }
