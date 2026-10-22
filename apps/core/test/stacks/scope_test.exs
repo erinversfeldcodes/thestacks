@@ -7,11 +7,16 @@ defmodule Stacks.ScopeTest do
       connects as `postgres`, which is `rolsuper = true`, and **superusers
       bypass row-level security entirely** — so nothing here can show that a
       policy refuses anything. A green run of this file says the scope is set
-      and unset correctly; it says nothing about enforcement. Enforcement is
-      proven against `stacks_app`, a non-superuser role, and that evidence lives
-      in the issue's notes and the `:deployed_only` suite. A test that implied
+      and unset correctly; it says nothing about enforcement. A test that implied
       otherwise would be the exact instrument-that-cannot-go-red this whole
       change exists to remove.
+
+      ✅ Enforcement IS now proven offline, in `rls_enforcement_test.exs`, which
+      drops the connection's role to `stacks_app` with `SET LOCAL ROLE` inside
+      the sandbox transaction — so policies apply while the fixtures stay
+      visible. That suite catches the deployed-500 defect (a query on a secured
+      table running outside any scope) with the real `42501`. This file keeps
+      its narrower job: that the scope is set and reverted correctly.
 
       ⚠️ **A second thing the sandbox hides, found while writing this file.**
       ExUnit's sandbox wraps each test in a transaction, and `SET LOCAL` binds
@@ -274,8 +279,8 @@ defmodule Stacks.ScopeTest do
 
       assert super?,
              "the test role is no longer a superuser, so row-level security now applies in " <>
-               "`MIX_ENV=test`. The enforcement assertions currently proven only against " <>
-               "stacks_app can and should move into this suite."
+               "`MIX_ENV=test`. If that is deliberate, `Core.AppRole.as_app_role/2` becomes " <>
+               "unnecessary and the cases in `rls_enforcement_test.exs` can drop it."
     end
   end
 end

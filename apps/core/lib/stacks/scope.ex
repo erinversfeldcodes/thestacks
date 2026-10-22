@@ -425,12 +425,32 @@ defmodule Stacks.Scope do
     # same-user call runs `fun` directly and a different user raises — so
     # restoring to the unset value is right, and needs no read of the previous
     # one.
+    # ⛔ THE RESTORE MUST NOT RAISE, or it replaces the error that actually
+    # failed with its own. Once any statement aborts a Postgres transaction
+    # every later statement fails with "current transaction is aborted" —
+    # including this `set_config` — so a genuine failure inside `fun` surfaced
+    # as `DBConnection.ConnectionError: transaction rolling back` attributed to
+    # THIS line, with the real cause gone.
+    #
+    # ⚠️ MEASURED while building the least-privilege test harness: a policy
+    # refusal inside `fun` was undiagnosable through two orderings, and the
+    # stack frame blamed the scope helper rather than the query. Every scoped
+    # failure in the suite had this shape.
+    #
+    # ⚖️ Swallowing it is safe and does not weaken the restore's purpose. The
+    # restore exists because a `SET LOCAL` made inside a savepoint does not
+    # revert when that savepoint releases; if the transaction is already
+    # aborting there is nothing left to leak into, because the abort reverts it.
     if restore? do
       try do
         Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
         fun.()
       after
-        Repo.query!("SELECT set_config('app.current_user_id', '', true)")
+        try do
+          Repo.query!("SELECT set_config('app.current_user_id', '', true)")
+        rescue
+          _ -> :ok
+        end
       end
     else
       Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
