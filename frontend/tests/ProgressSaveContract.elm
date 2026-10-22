@@ -293,33 +293,27 @@ supplied by each host — the least-examined party — and had none.
 -}
 fixtureDecodes : String -> String -> Test
 fixtureDecodes endpoint savedBody =
-    -- ⚖️ TWO NAMED TESTS, NOT ONE WITH TWO CLAIMS. They were a single
-    -- `Expect.all`, and a reviewer pointed out the cost: the test was named for
-    -- the identity half, so a COLLAPSE one layer down would red a test saying
-    -- "this host's success fixture decodes" — pointing at the wrong cause.
-    -- "Reds by name" has been this campaign's evidence standard in every probe,
-    -- so a name pointing at the wrong cause is a real cost, and the lambdas were
-    -- already independent claims over `()`.
+    -- ONE CLAIM, PER HOST — identity: `Succeeded` specifically must be
+    -- error-free for THIS host's fixture. A host cannot assert this itself,
+    -- because `Classification`'s constructors are opaque, so it could only
+    -- assert a cardinality and lean on a property of the other two fixtures to
+    -- make them equivalent.
     --
-    -- IDENTITY — `Succeeded` specifically must be error-free. A host cannot
-    -- assert this: `Classification`'s constructors are opaque, so it could only
-    -- ever assert the cardinality and rely on a property of the OTHER two
-    -- fixtures to make them equivalent.
+    -- ⛔ COLLAPSE DETECTION DELIBERATELY LIVES ONE LAYER DOWN, and it was
+    -- briefly duplicated here. The question that settles it: *what mutation,
+    -- at THIS layer, would fail this test and nothing else?* For a cardinality
+    -- copy here, nothing — a broken `savedBody` fails identity as well, and a
+    -- collapse is a change to `Api.progressResponseToResult`, already held at
+    -- `ApiDecoderContractTest` under this exact name. MEASURED: with the copy
+    -- present, collapsing the mapping redded THREE tests for ONE cause.
     --
-    -- CARDINALITY — exactly one classification is error-free. Identity alone
-    -- loses collapse detection: a mapping returning `Ok` for everything would
-    -- satisfy the identity claim while measuring nothing, and collapse is
-    -- fixture-INDEPENDENT.
-    Test.describe "the derivation holds for this host"
-        [ test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
-            \() ->
-                reportsAnError endpoint savedBody Succeeded
-                    |> Expect.equal False
-        , test "exactly one classification is error-free, so the derivation cannot collapse" <|
-            \() ->
-                classifications
-                    |> List.filter
-                        (\c -> not (reportsAnError endpoint savedBody c))
-                    |> List.length
-                    |> Expect.equal 1
-        ]
+    -- ⚠️ The copy was added on the reasoning that a per-host version uses the
+    -- host's own fixture, which sounds free. It is not: the only term the body
+    -- affects is `Succeeded`, which identity already covers exactly, so the
+    -- extra red points at a layer that did not change. Defence in depth costs
+    -- a misdirected failure, which is the same cost the name split one level up
+    -- was made to remove.
+    test "this host's success fixture decodes, so Succeeded is not a second Refused" <|
+        \() ->
+            reportsAnError endpoint savedBody Succeeded
+                |> Expect.equal False
