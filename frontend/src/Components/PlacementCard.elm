@@ -5,6 +5,7 @@ module Components.PlacementCard exposing
     , badgeDomId
     , hideTitle
     , init
+    , progressErrorId
     , stopSaving
     , update
     , view
@@ -51,6 +52,50 @@ type Msg
     | PageChanged String
     | SaveClicked
     | CancelClicked
+
+
+{-| The DOM id of the progress-save error, rendered by whichever HOST embeds
+this card.
+
+⛔ ONE AUTHORITY FOR A CROSS-MODULE STRING CONTRACT. This id was spelled five
+times in source across three modules — `id` and `testId` in each of the two
+hosts, and the `aria-describedby` here that points at them. Nothing asserted the
+pairing, so the reference and its target could drift apart silently.
+
+⚠️ It lives in SOURCE rather than in the test contract on purpose: the
+duplication is a source duplication, and a DOM id has exactly one correct
+answer, so sharing it removes an existing problem rather than leaking a test
+concern into production code. (`OutMsg`'s constructors are the opposite case —
+there is no single authority they could be derived from, which is why that hole
+is narrowed rather than closed.)
+
+-}
+progressErrorId : String
+progressErrorId =
+    "progress-error"
+
+
+{-| `aria-describedby` only when the host is actually rendering the error.
+
+⛔ THIS WAS UNCONDITIONAL, and that is a defect every reader met in the NORMAL
+case. The error element is rendered by the host and only on `Failure`, so a card
+showing the current-page input pointed `aria-describedby` at an id that was not
+in the document — a dangling reference announced to assistive technology on
+every successful edit.
+
+⚠️ Second instance of this exact class in one campaign. The first was the invite
+field, fixed with `inviteRefusalAttrs` returning `[]` unless `Failure` — same
+shape, same reasoning, and this file had eight rounds of edits without anyone
+noticing the sibling.
+
+-}
+describedByAttrs : { errorShowing : Bool } -> List (Html.Attribute Msg)
+describedByAttrs { errorShowing } =
+    if errorShowing then
+        [ attribute "aria-describedby" progressErrorId ]
+
+    else
+        []
 
 
 init : Placement -> Model
@@ -129,14 +174,14 @@ update msg model =
             )
 
 
-view : Model -> Html Msg
-view model =
+view : { errorShowing : Bool } -> Model -> Html Msg
+view opts model =
     div [ class "placement-card", testId "placement-card" ]
         [ viewHeader model
         , viewStatusBadge model
         , viewProgress model.placement
         , if model.editing then
-            viewEditForm model
+            viewEditForm opts model
 
           else
             text ""
@@ -254,8 +299,8 @@ viewProgress placement =
             text ""
 
 
-viewEditForm : Model -> Html Msg
-viewEditForm model =
+viewEditForm : { errorShowing : Bool } -> Model -> Html Msg
+viewEditForm opts model =
     div [ class "placement-card__edit-form", testId "reading-status-form" ]
         [ label [ class "placement-card__field" ]
             [ span [ class "placement-card__label" ] [ text "Status" ]
@@ -289,14 +334,15 @@ viewEditForm model =
             label [ class "placement-card__field" ]
                 [ span [ class "placement-card__label" ] [ text "Current page" ]
                 , input
-                    [ class "placement-card__input"
-                    , type_ "number"
-                    , value model.draftPage
-                    , placeholder "0"
-                    , onInput PageChanged
-                    , testId "current-page-input"
-                    , attribute "aria-describedby" "progress-error"
-                    ]
+                    ([ class "placement-card__input"
+                     , type_ "number"
+                     , value model.draftPage
+                     , placeholder "0"
+                     , onInput PageChanged
+                     , testId "current-page-input"
+                     ]
+                        ++ describedByAttrs opts
+                    )
                     []
                 ]
 

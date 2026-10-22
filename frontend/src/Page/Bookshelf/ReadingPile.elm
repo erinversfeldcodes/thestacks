@@ -480,16 +480,29 @@ viewProgressPanel model =
 
     else
         div [ class "reading-pile__progress", testId "reading-progress-panel" ]
-            (List.map viewCard model.cards
+            -- ⚠️ The flag must agree with whether `viewSaveState` below actually
+            -- renders the error element, since the card's `aria-describedby`
+            -- points at an id only that call creates.
+            (List.map (viewCard (isSaveFailure model.saveState)) model.cards
                 ++ [ viewSaveState model.saveState
                    , viewFinishedPrompt model.finishedPrompt
                    ]
             )
 
 
-viewCard : Card.Model -> Html Msg
-viewCard card =
-    Html.map (CardMsg card.placement.id) (Card.view card)
+viewCard : Bool -> Card.Model -> Html Msg
+viewCard errorShowing card =
+    Html.map (CardMsg card.placement.id) (Card.view { errorShowing = errorShowing } card)
+
+
+isSaveFailure : RemoteData Api.ProgressError () -> Bool
+isSaveFailure state =
+    case state of
+        Failure _ ->
+            True
+
+        _ ->
+            False
 
 
 viewSaveState : RemoteData Api.ProgressError () -> Html Msg
@@ -499,8 +512,8 @@ viewSaveState state =
             p
                 [ class "error"
                 , attribute "role" "alert"
-                , id "progress-error"
-                , testId "progress-error"
+                , id Card.progressErrorId
+                , testId Card.progressErrorId
                 ]
                 [ text (Api.progressErrorMessage err) ]
 

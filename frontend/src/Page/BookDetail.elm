@@ -1561,7 +1561,13 @@ viewProgressSection model =
                 , attribute "aria-labelledby" "section-progress"
                 ]
                 [ h3 [ class "book-detail__section-title", id "section-progress" ] [ text "Reading Progress" ]
-                , Html.map ProgressCardMsg (Card.view card)
+
+                -- ⚠️ `errorShowing` must agree with whether the next line
+                -- actually renders the error element: the card's
+                -- `aria-describedby` points at an id only that line creates.
+                -- Asked here, beside it, rather than tracked as card state.
+                , Html.map ProgressCardMsg
+                    (Card.view { errorShowing = isProgressFailure model.progressSaveState } card)
                 , viewProgressSaveState model.progressSaveState
                 , if model.finishedReadPrompt then
                     viewFinishedReadPrompt
@@ -1574,6 +1580,16 @@ viewProgressSection model =
             text ""
 
 
+isProgressFailure : RemoteData Api.ProgressError () -> Bool
+isProgressFailure state =
+    case state of
+        Failure _ ->
+            True
+
+        _ ->
+            False
+
+
 viewProgressSaveState : RemoteData Api.ProgressError () -> Html Msg
 viewProgressSaveState state =
     case state of
@@ -1581,8 +1597,8 @@ viewProgressSaveState state =
             p
                 [ class "book-detail__status book-detail__status--error"
                 , attribute "role" "alert"
-                , id "progress-error"
-                , testId "progress-error"
+                , id Card.progressErrorId
+                , testId Card.progressErrorId
                 ]
                 [ text (Api.progressErrorMessage err) ]
 

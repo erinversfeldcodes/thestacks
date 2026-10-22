@@ -49,6 +49,7 @@ name: this says which branches exist, not which outcomes do.
 -}
 
 import Api
+import Components.PlacementCard as PlacementCard
 import Dict
 import Expect
 import Html.Attributes
@@ -230,12 +231,14 @@ rounds. A shared claim spelled separately in each host is a claim each host can
 drift out of silently, which is the whole reason this module exists.
 
 `ReadingPile` renders it via `viewSaveState`, `BookDetail` via
-`viewProgressSaveState`, both as `data-testid="progress-error"`.
+`viewProgressSaveState`, both as `data-testid` carrying
+`PlacementCard.progressErrorId` — the one authority for that string.
 
 -}
 errorSelector : Selector.Selector
 errorSelector =
-    Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error")
+    Selector.attribute
+        (Html.Attributes.attribute "data-testid" PlacementCard.progressErrorId)
 
 
 {-| `Succeeded` must be the error-free classification, for THIS host's fixture.
