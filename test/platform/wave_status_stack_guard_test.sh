@@ -884,6 +884,27 @@ end = src.rindex("\nPY\n")
 body = src[start:end].split("\n")
 
 BANNER = "# MAIN FLOW — executing code only. No definitions past this line."
+
+# ⛔ EXACTLY ONE MATCH, asserted rather than assumed. The reviewer asked whether
+# this check's floor could be satisfied by the wrong REGION, because "MAIN FLOW"
+# appears twice in the file — once as the banner and once in the prose above it
+# that explains the rule.
+#
+# MEASURED: the full banner sentence matches once, so the search is right. But
+# had it matched the prose mention instead, 7 definitions sit above that point
+# against a floor of 8 — so the protection held by a margin of ONE DEFINITION,
+# and two more definitions near the top would have silently removed it.
+#
+# ⚠️ A guard that is correct by margin is a guard that stops being correct
+# without anyone touching it. Pinning the match count removes the dependence.
+banner_lines = [i for i, l in enumerate(body) if BANNER in l]
+if len(banner_lines) != 1:
+    print(f"FAIL: the MAIN FLOW banner matches {len(banner_lines)} line(s); expected exactly 1.")
+    print("      More than one means the region this check measures is ambiguous, and its")
+    print("      floor could be satisfied by the wrong half of the file. Fewer means the")
+    print("      banner is gone and there is nothing to measure.")
+    raise SystemExit(1)
+
 try:
     banner_at = next(i for i, l in enumerate(body) if BANNER in l)
 except StopIteration:
