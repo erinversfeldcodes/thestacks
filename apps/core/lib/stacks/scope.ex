@@ -425,33 +425,33 @@ defmodule Stacks.Scope do
     # same-user call runs `fun` directly and a different user raises — so
     # restoring to the unset value is right, and needs no read of the previous
     # one.
-    # ⛔ THE RESTORE MUST NOT RAISE, or it replaces the error that actually
-    # failed with its own. Once any statement aborts a Postgres transaction
-    # every later statement fails with "current transaction is aborted" —
-    # including this `set_config` — so a genuine failure inside `fun` surfaced
-    # as `DBConnection.ConnectionError: transaction rolling back` attributed to
-    # THIS line, with the real cause gone.
+    # ⛔ THE RESTORE RUNS ON THE SUCCESS PATH ONLY, and there is deliberately no
+    # `try`/`after` around it.
     #
-    # ⚠️ MEASURED while building the least-privilege test harness: a policy
-    # refusal inside `fun` was undiagnosable through two orderings, and the
-    # stack frame blamed the scope helper rather than the query. Every scoped
-    # failure in the suite had this shape.
+    # It was an `after` clause, which made it run on the failure path too — and
+    # on that path it CANNOT succeed: once a statement aborts a Postgres
+    # transaction, every later statement fails with "current transaction is
+    # aborted", so the restore raised and its exception REPLACED the one that
+    # actually failed. MEASURED while building the least-privilege test harness:
+    # a policy refusal inside `fun` was undiagnosable through two different
+    # nestings, with the stack frame blaming this helper rather than the query.
     #
-    # ⚖️ Swallowing it is safe and does not weaken the restore's purpose. The
-    # restore exists because a `SET LOCAL` made inside a savepoint does not
-    # revert when that savepoint releases; if the transaction is already
-    # aborting there is nothing left to leak into, because the abort reverts it.
+    # ⚖️ The first fix was a `rescue` inside the `after`, and a reviewer was
+    # right that it treated the symptom. The asymmetry recorded above is the
+    # whole argument: `RELEASE SAVEPOINT` KEEPS a `SET LOCAL` while
+    # `ROLLBACK TO SAVEPOINT` reverts it — so the failure path never needed a
+    # restore at all, and the `after` was covering a case that needs no cover.
+    # Removing it means the real error from `fun` propagates untouched.
+    #
+    # ⚠️ And the restore is now allowed to raise, which is what you want: on the
+    # success path the realistic failure is `fun` having returned normally after
+    # swallowing a Postgrex error, and that is precisely the case worth hearing
+    # about. It was silent before.
     if restore? do
-      try do
-        Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
-        fun.()
-      after
-        try do
-          Repo.query!("SELECT set_config('app.current_user_id', '', true)")
-        rescue
-          _ -> :ok
-        end
-      end
+      Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
+      result = fun.()
+      Repo.query!("SELECT set_config('app.current_user_id', '', true)")
+      result
     else
       Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [user_id])
       fun.()
