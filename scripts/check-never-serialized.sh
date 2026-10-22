@@ -50,6 +50,19 @@
 # form was `skipped ⟹ api_only`, which is false by design for `seller_id`,
 # `book_id`, `post_id` and `created_at`. This is `must-not-be-serialized ⟹
 # absent from every serializer`, which says nothing about those fields at all.
+#
+# ⛔ THE HAND-WRITTEN HALF IS THE ANSWER, NOT A SECOND OPINION. It is tempting to
+# read the atom-mention check below as belt-and-braces over the generated one, and
+# that undersells it: it is the only thing asserting that a hand-maintained
+# take-list — `@user_auth_fields`, `@listing_seller_fields` — cannot NAME a
+# credential. That is the caller-side property worth having.
+#
+# ⚠️ And it is the right property because the obvious alternative is wrong.
+# "Every caller of a generated serializer narrows it" would be the natural thing
+# to assert, and asserting it teaches `narrowing ⟹ safe` — which is exactly what
+# was false for `seller`, where the hand-written serializer DID narrow and the
+# defect was on the generated side. Making the caller count irrelevant is the
+# point; `skip_fields` plus this gate is how.
 set -uo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
@@ -99,10 +112,8 @@ NEVER_SERIALIZE = [
 ]
 
 # ⚠️ DELIBERATELY NOT IN THE LIST ABOVE, and the distinction is the reason this
-# gate stays usable. The lockout bookkeeping — `failed_login_count`,
-# `failed_login_first_at`, `locked_until`, `lockout_duration_seconds`,
-# `password_reset_sent_at` — is also kept out of the serializer by
-# `skip_fields`, and should be. But "your account is locked until 14:05" is a
+# gate stays usable. The lockout bookkeeping is also kept out of the serializer
+# by `skip_fields`, and should be. But "your account is locked until 14:05" is a
 # message a product could legitimately decide to show, so a hard refusal here
 # would block a reasonable feature and the gate would be edited to allow it —
 # at which point the credential entries lose their protection too.
@@ -114,6 +125,20 @@ POLICY_NOT_SECRET = [
     "failed_login_first_at",
     "locked_until",
     "lockout_duration_seconds",
+]
+
+# ⚠️ SEPARATE, because it is not lockout bookkeeping and the rationale above does
+# not fit it. `password_reset_sent_at` is a reset-flow timestamp: it says when a
+# reset mail was last sent, which is throttling state rather than something a
+# product would ever surface as "your account is locked until…". It was grouped
+# with the lockout fields on first writing and inherited a displayability
+# argument that was never made about it.
+#
+# It stays unenforced rather than being promoted, on the narrower ground that a
+# timestamp is not a credential — knowing WHEN a reset was requested does not
+# help anyone use the token, which is enforced above. Recorded apart so the next
+# reader does not inherit the wrong reason for it too.
+RESET_FLOW_TIMESTAMP = [
     "password_reset_sent_at",
 ]
 
@@ -280,6 +305,7 @@ print(
     f"OK: {len(NEVER_SERIALIZE)} credential field(s) absent from all THREE routes to JSON — "
     f"{len(gen_funs)} generated serializer(s), {len(hand_funs)} hand-written function(s), "
     f"and {len(derive_schemas)} Jason.Encoder derive list(s); "
-    f"{len(POLICY_NOT_SECRET)} lockout field(s) deliberately out of scope."
+    f"{len(POLICY_NOT_SECRET)} lockout field(s) and "
+    f"{len(RESET_FLOW_TIMESTAMP)} reset-flow timestamp deliberately out of scope."
 )
 PY
