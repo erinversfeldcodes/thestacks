@@ -13,7 +13,8 @@
 #
 # ⚠️ The cases below run the gate against SANDBOX manifests, not the real one,
 # so they keep asserting as fields come and go. The one case that uses the real
-# manifest is the last, and it asserts the gate's floor rather than its verdict.
+# manifest is the last, and it asserts the gate's declared count rather than its
+# verdict.
 
 set -uo pipefail
 
@@ -41,12 +42,15 @@ run_gate() {
     RC=$?
 }
 
-# A manifest with enough api_only fields to clear the gate's floor, so a case
-# below fails on the VERDICT rather than on the population check.
+# A manifest matching the gate's DECLARED COUNT exactly, so a case below fails
+# on the VERDICT rather than on the population check.
 #
-# ⚠️ Four messages and nine api_only fields is not decoration — the floor is 8
-# across 3, and a smaller fixture would make every "allows" case pass for the
-# wrong reason and every "refuses" case fail for it.
+# ⚠️ Twelve api_only fields across four messages is not decoration — the gate
+# declares exactly that, in both directions, so a sandbox of any other size
+# makes every "allows" case fail for the wrong reason and every "refuses" case
+# pass for one. These manifests were 9 across 3 while the gate carried a FLOOR
+# of 8 across 3; replacing the floor with a declared count meant resizing every
+# one of them, which is the cost of the stricter instrument and worth naming.
 compliant_manifest() {
     write_manifest <<'EOF'
 %{
@@ -74,6 +78,14 @@ compliant_manifest() {
         eight: %{api_only: true},
         nine: %{api_only: true}
       }
+    },
+    %{
+      proto_message: "Delta",
+      field_overrides: %{
+        ten: %{api_only: true},
+        eleven: %{api_only: true},
+        twelve: %{api_only: true}
+      }
     }
   ],
   json_serializers: [
@@ -88,6 +100,10 @@ compliant_manifest() {
     %{
       proto_message: "Gamma",
       skip_fields: [:seven, :eight, :nine]
+    },
+    %{
+      proto_message: "Delta",
+      skip_fields: [:ten, :eleven, :twelve]
     }
   ]
 }
@@ -101,7 +117,7 @@ compliant_manifest
 test_case "every_api_only_field_skipped_passes" "the gate allows a manifest that skips them all"
 run_gate
 assert_exit_zero "$RC" "the gate passes"
-assert_contains "$OUT" "9 api_only field(s) across 3 message(s)" "it reports what it actually read"
+assert_contains "$OUT" "12 api_only field(s) across 4 message(s)" "it reports what it actually read"
 
 # --- one unskipped api_only field fails -------------------------------------
 
@@ -134,6 +150,14 @@ write_manifest <<'EOF'
         eight: %{api_only: true},
         nine: %{api_only: true}
       }
+    },
+    %{
+      proto_message: "Delta",
+      field_overrides: %{
+        ten: %{api_only: true},
+        eleven: %{api_only: true},
+        twelve: %{api_only: true}
+      }
     }
   ],
   json_serializers: [
@@ -148,6 +172,10 @@ write_manifest <<'EOF'
     %{
       proto_message: "Gamma",
       skip_fields: [:seven, :eight, :nine]
+    },
+    %{
+      proto_message: "Delta",
+      skip_fields: [:ten, :eleven, :twelve]
     }
   ]
 }
@@ -196,11 +224,19 @@ write_manifest <<'EOF'
       }
     },
     %{
-      proto_message: "Delta",
+      proto_message: "Gamma",
       field_overrides: %{
         seven: %{api_only: true},
         eight: %{api_only: true},
         nine: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Delta",
+      field_overrides: %{
+        ten: %{api_only: true},
+        eleven: %{api_only: true},
+        twelve: %{api_only: true}
       }
     }
   ],
@@ -212,6 +248,10 @@ write_manifest <<'EOF'
     %{
       proto_message: "Beta",
       skip_fields: [:four, :five, :six]
+    },
+    %{
+      proto_message: "Gamma",
+      skip_fields: [:seven, :eight, :nine]
     }
   ]
 }
@@ -238,19 +278,160 @@ EOF
 test_case "an_empty_manifest_is_refused" "a clean verdict over nothing is refused"
 run_gate
 assert_exit_nonzero "$RC" "the gate refuses rather than reporting a clean manifest"
-assert_contains "$OUT" "parsed only 0 api_only field(s)" "the refusal says what it read"
+assert_contains "$OUT" "parsed 0 api_only field(s)" "the refusal says what it read"
+assert_contains "$OUT" "expected exactly 12 across 4" "and what it expected"
 assert_contains "$OUT" "stopped matching" "and names the likely cause"
 
 # --- the floor is below the real manifest, and the real manifest passes -----
 
-# ⚠️ Asserted against the REAL manifest, because a floor is only meaningful
-# relative to the population it guards. If the repository's own count ever drops
-# below the floor the gate starts refusing a correct tree, and that is a failure
-# worth catching here rather than in someone's lint run.
-test_case "the_real_manifest_clears_the_floor" "the gate's floor is calibrated to the tree it guards"
+# ⚠️ Asserted against the REAL manifest, because a declared count is a claim
+# about this repository and nothing else. If the manifest and the two constants
+# ever disagree the gate refuses a correct tree, and that is a failure worth
+# catching here rather than in someone's lint run.
+test_case "the_real_manifest_matches_the_declared_count" "the gate's floor is calibrated to the tree it guards"
 OUT=$(cd "$REPO_ROOT" && bash scripts/check-api-only-is-skipped.sh 2>&1)
 RC=$?
 assert_exit_zero "$RC" "the real manifest passes"
 assert_contains "$OUT" "all skipped by their serializer" "every api_only field is skipped today"
+
+# --- the declared count fails in BOTH directions ---------------------------
+
+# ⛔ This is what a floor could not do. The gate carried `MIN_API_ONLY = 8`
+# against an actual 12, so up to four fields could drop out of the parse
+# without tripping it — observable in the printed count, never enforced.
+#
+# ⚠️ A floor is the right instrument when a population grows for reasons nobody
+# decides. `api_only` fields are added one at a time by a person editing a
+# manifest, so an exact count makes that edit a recorded decision visible in a
+# diff — the same argument as `EXPECTED_ASSERTIONS` in the posture gate.
+
+# FEWER than declared: eleven fields across four messages.
+write_manifest <<'EOF'
+%{
+  tables: [
+    %{
+      proto_message: "Alpha",
+      field_overrides: %{
+        one: %{api_only: true},
+        two: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Beta",
+      field_overrides: %{
+        four: %{api_only: true},
+        five: %{api_only: true},
+        six: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Gamma",
+      field_overrides: %{
+        seven: %{api_only: true},
+        eight: %{api_only: true},
+        nine: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Delta",
+      field_overrides: %{
+        ten: %{api_only: true},
+        eleven: %{api_only: true},
+        twelve: %{api_only: true}
+      }
+    }
+  ],
+  json_serializers: [
+    %{
+      proto_message: "Alpha",
+      skip_fields: [:one, :two]
+    },
+    %{
+      proto_message: "Beta",
+      skip_fields: [:four, :five, :six]
+    },
+    %{
+      proto_message: "Gamma",
+      skip_fields: [:seven, :eight, :nine]
+    },
+    %{
+      proto_message: "Delta",
+      skip_fields: [:ten, :eleven, :twelve]
+    }
+  ]
+}
+EOF
+
+test_case "fewer_fields_than_declared_is_refused" "a floor would have passed this"
+run_gate
+assert_exit_nonzero "$RC" "eleven fields against a declared twelve is refused"
+assert_contains "$OUT" "expected exactly 12 across 4" "the refusal states the declared count"
+assert_contains "$OUT" "FEWER means" "and distinguishes a drifted parse from a removed flag"
+
+# MORE than declared: thirteen fields across four messages, all correctly skipped,
+# so the only thing wrong is that nobody recorded the addition.
+write_manifest <<'EOF'
+%{
+  tables: [
+    %{
+      proto_message: "Alpha",
+      field_overrides: %{
+        one: %{api_only: true},
+        two: %{api_only: true},
+        three: %{api_only: true},
+        extra: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Beta",
+      field_overrides: %{
+        four: %{api_only: true},
+        five: %{api_only: true},
+        six: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Gamma",
+      field_overrides: %{
+        seven: %{api_only: true},
+        eight: %{api_only: true},
+        nine: %{api_only: true}
+      }
+    },
+    %{
+      proto_message: "Delta",
+      field_overrides: %{
+        ten: %{api_only: true},
+        eleven: %{api_only: true},
+        twelve: %{api_only: true}
+      }
+    }
+  ],
+  json_serializers: [
+    %{
+      proto_message: "Alpha",
+      skip_fields: [:one, :two, :three, :extra]
+    },
+    %{
+      proto_message: "Beta",
+      skip_fields: [:four, :five, :six]
+    },
+    %{
+      proto_message: "Gamma",
+      skip_fields: [:seven, :eight, :nine]
+    },
+    %{
+      proto_message: "Delta",
+      skip_fields: [:ten, :eleven, :twelve]
+    }
+  ]
+}
+EOF
+
+test_case "more_fields_than_declared_is_refused" "an unrecorded addition is refused even when correctly skipped"
+run_gate
+assert_exit_nonzero "$RC" "thirteen fields against a declared twelve is refused"
+assert_contains "$OUT" "MORE means" "and says why an addition needs recording"
+assert_contains "$OUT" "Alpha: extra" "and lists what it found, so the diff is readable"
 
 summarise

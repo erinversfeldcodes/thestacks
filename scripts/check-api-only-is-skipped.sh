@@ -84,24 +84,47 @@ for m in re.finditer(r'proto_message:\s*"([A-Za-z0-9_]+)"(.*?)(?=proto_message:\
 # ⛔ Anti-vacuity, and it is the whole difference between this gate working and
 # this gate reporting a clean tree it never read. An empty set difference is
 # what a correct manifest produces AND what a drifted regex produces, so the
-# population has to be asserted. The floor is a real count rather than `> 0`
-# because one surviving match would otherwise satisfy it.
-MIN_API_ONLY = 8
-MIN_MESSAGES = 3
+# population has to be asserted.
+# ⛔ A DECLARED COUNT, not a floor with slack.
+#
+# This was a floor of 8 fields across 3 messages against an actual 12 across 4 —
+# so up to four `api_only` fields could have dropped out of the parse without
+# tripping it. The printed count made that observable; nothing made it
+# ENFORCED, and "observable" is what a reader has to go looking for.
+#
+# ⚠️ A floor was the wrong instrument here, and the reason generalises. A floor
+# is right when the population grows for reasons nobody decides — shell scripts,
+# say. `api_only` fields are added one at a time by a person editing a manifest,
+# so an exact count makes that edit a RECORDED DECISION visible in a diff, which
+# is the same argument as pinning `EXPECTED_ASSERTIONS` in the posture gate and
+# the same argument that put `seller_id` in a baseline instead of hiding it.
+#
+# It fails in both directions on purpose: fewer than expected means the parse
+# drifted or a flag was removed, more means one was added without the review
+# that should accompany publishing a field with no column.
+EXPECTED_API_ONLY_FIELDS = 12
+EXPECTED_API_ONLY_MESSAGES = 4
 
 found_fields = sum(len(v) for v in api_only.values())
-if found_fields < MIN_API_ONLY or len(api_only) < MIN_MESSAGES:
+if found_fields != EXPECTED_API_ONLY_FIELDS or len(api_only) != EXPECTED_API_ONLY_MESSAGES:
     print(
-        f"FAIL: parsed only {found_fields} api_only field(s) across {len(api_only)} "
-        f"message(s) from {MANIFEST}.",
+        f"FAIL: parsed {found_fields} api_only field(s) across {len(api_only)} message(s) "
+        f"from {MANIFEST}; expected exactly {EXPECTED_API_ONLY_FIELDS} across "
+        f"{EXPECTED_API_ONLY_MESSAGES}.",
         file=sys.stderr,
     )
     print(
-        f"       Expected at least {MIN_API_ONLY} across {MIN_MESSAGES}. A number this low\n"
-        "       means the entry shape stopped matching, not that the flags were removed —\n"
-        "       and an unread manifest produces the same empty result as a correct one.",
+        "       FEWER means either the entry shape stopped matching — an unread manifest\n"
+        "       produces the same empty result as a correct one — or a flag was removed.\n"
+        "       MORE means a field was marked api_only without the review that should\n"
+        "       accompany publishing a field that has no column.\n"
+        "\n"
+        "       Update the two expected counts in the same change, so the population is a\n"
+        "       recorded decision rather than slack nobody has to justify.",
         file=sys.stderr,
     )
+    for message in sorted(api_only):
+        print(f"         {message}: {', '.join(sorted(api_only[message]))}", file=sys.stderr)
     raise SystemExit(1)
 
 violations = []
