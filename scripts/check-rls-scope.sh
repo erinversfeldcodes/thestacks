@@ -441,7 +441,10 @@ def strip_elixir(src):
 
     ⚠️ A CHARACTER SCANNER RATHER THAN A REGEX, and that choice is LOAD-BEARING
     rather than stylistic. MEASURED: `apps/core/lib` contains 20 `?"` character
-    literals, and the obvious `re.sub(r'"[^"]*"', …)` version would have read
+    literals — OCCURRENCES, not lines; one line carries two, which is why a
+    `grep -rn | wc -l` of the same thing reports 19 and the figure that matters
+    here is the occurrence count, since each occurrence is one place a regex
+    strip would have blanked real code — and the obvious `re.sub(r'"[^"]*"', …)` version would have read
     each one's quote as a string opener and blanked real code forward to the
     next quote — wrong twenty times, silently, in the direction that blinds the
     gate. The `?` branch consumes the two-character literal before the `"`
