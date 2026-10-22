@@ -70,6 +70,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 buf_yaml = Path(sys.argv[1])
@@ -86,10 +87,48 @@ src = buf_yaml.read_text(encoding="utf-8")
 # run with nothing installed beyond python3 and buf — the same constraint the
 # sibling proto gates work under. The shape is fixed and small: under
 # `ignore_only:`, a rule name at one indent and `- path` entries beneath it.
+# ⛔ THIS GATE NEEDS ITS OWN FLOOR, or it becomes the thing it was built to
+# catch: a parse that silently stops matching reports "no spent suppressions"
+# over an unread file, which is indistinguishable from a clean result.
+#
+# The count is DECLARED rather than floored, for the reason a declared count
+# beats a floor whenever the population changes only by someone deciding:
+# adding or removing a suppression is exactly such a decision, and it should
+# show up in this diff rather than inside slack.
+#
+# ⛔ DECLARED HERE, ABOVE THE PARSE, AND NOT BELOW IT. It used to sit after the
+# block search, so the declared count caught a PARTIAL parse and was bypassed
+# entirely by a TOTAL one: no match meant an early `SystemExit(0)` printing
+# "nothing to police" while every suppression stood. MEASURED — re-indenting
+# `ignore_only` by one space (still valid YAML, invisible to this regex) made
+# this gate exit 0 with nine suppression lines live in the file.
+#
+# ⚠️ The general shape, and it is the second instance in one diff: an audit for
+# fail-open enumerates what each BRANCH does, and both defects lived on a PATH
+# rather than in a branch — there a missing `else`, here an early exit above
+# the guard. There is nothing to read in either case.
+EXPECTED_ENTRIES = 4
+
 ignore_block = re.search(r"^  ignore_only:\n((?:.*\n)*?)(?=^\S|\Z)", src, re.M)
 if not ignore_block:
-    print("OK: no breaking.ignore_only block — nothing to police.")
-    raise SystemExit(0)
+    if EXPECTED_ENTRIES == 0:
+        print("OK: no breaking.ignore_only block, and none is expected — nothing to police.")
+        raise SystemExit(0)
+    print(
+        f"FAIL: no `breaking.ignore_only` block parsed out of {buf_yaml}, but "
+        f"{EXPECTED_ENTRIES} entr(y/ies) are expected.",
+        file=sys.stderr,
+    )
+    print(
+        "       Either every suppression was deleted — good, set EXPECTED_ENTRIES to 0 in the\n"
+        "       same change — or this gate's parse no longer matches the file, in which case it\n"
+        "       was about to report 'nothing to police' over suppressions that are still live.\n"
+        "       Re-indenting the block by one space is enough to cause this, and the file stays\n"
+        "       valid YAML, so the second case is the likely one.\n"
+        "       Nothing was checked. This is a refusal, not a pass.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 entries = []
 current_rule = None
@@ -104,16 +143,6 @@ for raw in ignore_block.group(1).split("\n"):
     path = re.match(r"^      - (\S+)$", line)
     if path and current_rule:
         entries.append((current_rule, path.group(1)))
-
-# ⛔ THIS GATE NEEDS ITS OWN FLOOR, or it becomes the thing it was built to
-# catch: a parse that silently stops matching reports "no spent suppressions"
-# over an unread file, which is indistinguishable from a clean result.
-#
-# The count is DECLARED rather than floored, for the reason a declared count
-# beats a floor whenever the population changes only by someone deciding:
-# adding or removing a suppression is exactly such a decision, and it should
-# show up in this diff rather than inside slack.
-EXPECTED_ENTRIES = 4
 
 if len(entries) != EXPECTED_ENTRIES:
     print(
@@ -158,7 +187,7 @@ def breaking_violations_without_suppressions():
             text=True,
         )
 
-    found = set()
+    found = Counter()
     for line in (proc.stdout + "\n" + proc.stderr).split("\n"):
         line = line.strip()
         if not line.startswith("{"):
@@ -169,7 +198,7 @@ def breaking_violations_without_suppressions():
             continue
         rule, path = payload.get("type"), payload.get("path")
         if rule and path:
-            found.add((rule, path))
+            found[(rule, path)] += 1
     return found, proc.returncode
 
 
@@ -195,13 +224,14 @@ if not violations:
     raise SystemExit(1)
 
 declared = set(entries)
-spent = sorted(declared - violations)
-load_bearing = sorted(declared & violations)
+violation_pairs = set(violations)
+spent = sorted(declared - violation_pairs)
+load_bearing = sorted(declared & violation_pairs)
 
 # ⚠️ The other direction: a violation no entry covers. The baseline must be
 # green, so every violation should map to a declared entry. One that does not
 # means `buf breaking` is failing for a reason nobody recorded.
-uncovered = sorted(violations - declared)
+uncovered = sorted(violation_pairs - declared)
 if uncovered:
     print(
         f"FAIL: {len(uncovered)} breaking violation(s) are covered by no ignore_only entry:",
@@ -235,10 +265,74 @@ if spent:
     )
     raise SystemExit(1)
 
+# ⛔ "DOES THIS ENTRY COVER SOMETHING" IS THE WRONG QUESTION — it must cover
+# ONLY what it was created for. Every check above is satisfied by an entry
+# matching SOME violation, so a second, unrelated field change on the same file
+# during the suppression window is silently covered with this gate green. That
+# is the real price of `ignore_only` being file-scoped, and until now this gate
+# measured the window's existence rather than its contents.
+#
+# ⚠️ The multiplicity was being collected and THROWN AWAY: violations went into
+# a set, so "4 pairs" was reported where there are 34 violations — and the
+# message called them "violation(s)", which read as a far smaller blast radius
+# than the suppressions actually have.
+#
+# Counts are DECLARED per entry, for the same reason the entry count is: each
+# number changes only when someone decides to change the proto, so it belongs
+# in the diff rather than inside slack.
+EXPECTED_PER_ENTRY = {
+    # Four Classify/Extract/Associate message deletions plus three more in the
+    # same deletion event.
+    ("MESSAGE_NO_DELETE", "stacks/internal/v1/vision.proto"): 7,
+    # `AssociationStatus`.
+    ("ENUM_NO_DELETE", "stacks/internal/v1/vision.proto"): 1,
+    # Twelve datetimes moved from `string` to google.protobuf.Timestamp.
+    ("FIELD_SAME_TYPE", "stacks/common/v1/writing_assistant.proto"): 12,
+    # Those same twelve gaining explicit presence, plus `shelf` and `comment`
+    # gaining `optional`.
+    ("FIELD_SAME_CARDINALITY", "stacks/common/v1/writing_assistant.proto"): 14,
+}
+
+miscounted = []
+for entry in sorted(declared):
+    expected = EXPECTED_PER_ENTRY.get(entry)
+    actual = violations.get(entry, 0)
+    if expected is None:
+        miscounted.append((entry, None, actual))
+    elif expected != actual:
+        miscounted.append((entry, expected, actual))
+
+if miscounted:
+    print(
+        f"FAIL: {len(miscounted)} suppression(s) cover a different number of violations than "
+        f"declared:",
+        file=sys.stderr,
+    )
+    for (rule, path), expected, actual in miscounted:
+        if expected is None:
+            print(f"  {rule}: {path} — {actual} violation(s), none declared", file=sys.stderr)
+        else:
+            print(
+                f"  {rule}: {path} — declared {expected}, found {actual}",
+                file=sys.stderr,
+            )
+    print(
+        "\nMORE than declared means the suppression is now covering a change nobody recorded —\n"
+        "the file-scoped allowance doing exactly what makes it dangerous. FEWER means part of\n"
+        "what it covered has landed or been reverted, so the entry is partly spent.\n"
+        "\nEither way, decide deliberately and update EXPECTED_PER_ENTRY in the same change. A\n"
+        "suppression that merely covers SOMETHING is not the same as one that covers only what\n"
+        "it was created for, and every other check in this gate is satisfied by the former.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 print(
     f"OK: {len(load_bearing)} of {len(entries)} breaking suppression(s) are load-bearing, "
-    f"matched against {len(violations)} violation(s); none is spent."
+    f"matched against {sum(violations.values())} violation(s) across "
+    f"{len(violation_pairs)} (rule, file) pair(s); none is spent, and each covers exactly the "
+    f"number of violations declared for it."
 )
 for rule, path in load_bearing:
-    print(f"    {rule}: {path}")
+    print(f"    {rule}: {path}  ({violations[(rule, path)]} violation(s), as declared)")
 PY

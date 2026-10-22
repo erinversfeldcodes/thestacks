@@ -731,7 +731,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # fetch-depth: 0 is REQUIRED, not tidy, and this is the SECOND instance of
+      # the same defect in this file. `test/platform/workflow_health_test.sh`
+      # builds its population from `git ls-tree -r origin/main .github/workflows`
+      # — at the default shallow depth that ref does not exist, the listing is
+      # empty, and the suite's own floor refuses rather than asserting over
+      # nothing. Measured locally: 13 workflows with the ref, 0 without, against
+      # a floor of 5.
+      #
+      # ⚠️ Note the asymmetry that made this easy to miss: the GATE
+      # (`check-workflow-health.sh`) tolerates a missing default-branch ref via
+      # WORKFLOW_HEALTH_DEFAULT_BRANCH and falls back, while its FIXTURE has no
+      # override and refuses. Reading the gate suggests the job is fine.
+      #
+      # ⛔ And CI history could not settle whether this was already red: every
+      # recent run SKIPPED this job (`needs.changes.outputs.platform`), so it has
+      # not executed since that suite joined run_all.sh. "No red run on record"
+      # meant "never ran", not "passed".
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install suite dependencies
         run: |
           pip3 install --quiet pyyaml

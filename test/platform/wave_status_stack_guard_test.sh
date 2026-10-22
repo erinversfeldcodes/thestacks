@@ -389,7 +389,7 @@ import json, sys
 path = sys.argv[1]
 state = json.load(open(path))
 entry = state["domain_reviews"]["elixir"]
-entry["reviewed_at_sha_provenance"] = "quoted from the reviewer's reply"
+entry["reviewed_at_sha_provenance"] = {"kind": "quoted_from_reply", "detail": "the reply said so"}
 json.dump(state, open(path, "w"), indent=2)
 PY
 
@@ -432,7 +432,7 @@ import json, sys
 
 path = sys.argv[1]
 state = json.load(open(path))
-state["domain_reviews"]["elixir"]["sha_provenance"] = "reconstructed from the dispatch log"
+state["domain_reviews"]["elixir"]["sha_provenance"] = "reconstructed: from the dispatch log"
 json.dump(state, open(path, "w"), indent=2)
 PY
 
@@ -460,7 +460,7 @@ assert_not_contains "$OUT" "with no provenance" \
 # satisfied elixir review (so the drive finding is the only one in play).
 drive_sandbox() {
     local name="$1" drive_json="$2" dir sha
-    dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "REVIEW_SHA", "reviewed_at_sha_provenance": "quoted from the reply"}}')"
+    dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "REVIEW_SHA", "reviewed_at_sha_provenance": "quoted_from_reply: the reply said so"}}')"
     echo 'defmodule Probe do' > "$dir/apps/core/lib/probe.ex"
     git -C "$dir" add -A
     git -C "$dir" commit -qm "running code the drive and review both cover"
@@ -490,7 +490,7 @@ assert_not_contains "$OUT" "preview drive is STALE" \
 
 test_case "a_current_drive_with_provenance_satisfies" \
     "the green half — this must not fire on everything"
-DIR="$(drive_sandbox drive_current '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "read off the deployed stack"}')"
+DIR="$(drive_sandbox drive_current '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "reconstructed: read off the deployed stack"}')"
 run_gate "$DIR"
 assert_contains "$OUT" "drive current as of" "a drive covering the current tree is reported as current"
 assert_not_contains "$OUT" "preview drive is STALE" "and not as stale"
@@ -498,7 +498,7 @@ assert_not_contains "$OUT" "with no provenance" "and not as unprovenanced"
 
 test_case "a_drive_predating_running_code_is_STALE" \
     "a drive that never saw this code cannot be its verification"
-DIR="$(drive_sandbox drive_stale '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "read off the deployed stack"}')"
+DIR="$(drive_sandbox drive_stale '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "reconstructed: read off the deployed stack"}')"
 echo 'defmodule Later do' > "$DIR/apps/core/lib/later.ex"
 git -C "$DIR" add -A
 git -C "$DIR" commit -qm "running code that landed after the drive"
@@ -514,7 +514,7 @@ assert_contains "$OUT" "apps/core/lib/later.ex" \
 # useless and then removed.
 test_case "a_test_only_change_does_not_spend_a_drive" \
     "a drive is evidence about running behaviour, so only running code spends it"
-DIR="$(drive_sandbox drive_tests_only '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "read off the deployed stack"}')"
+DIR="$(drive_sandbox drive_tests_only '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "reconstructed: read off the deployed stack"}')"
 mkdir -p "$DIR/test/platform" "$DIR/scripts"
 echo 'echo hi' > "$DIR/test/platform/some_suite.sh"
 echo 'echo hi' > "$DIR/scripts/some-gate.sh"
@@ -541,5 +541,76 @@ assert_contains "$OUT" "not driven, by record" "the recorded decision is surface
 assert_contains "$OUT" "no user-facing surface" "together with the reason given"
 assert_not_contains "$OUT" "no preview drive recorded" \
     "and it is not also reported as an unexplained gap"
+
+# ── 8. provenance is a KIND plus detail, not free text ──────────────────────
+#
+# ⛔ A predecessor guard in this repository carried eight free-text allowlist
+# reasons and SEVEN of them were untrue. Presence-only prose cannot be checked
+# and cannot be falsified later, so it decays into a field people fill in to get
+# past the gate.
+#
+# ⚠️ The enum does NOT buy verification — nothing here can confirm what arrived
+# in a message. It buys SPECIFICITY: "quoted_from_reply" is a definite claim
+# someone can be shown wrong about, where "I got this from the reviewer somehow"
+# is not, and being able to be wrong in public is the property this field is for.
+
+test_case "free_text_provenance_is_refused" "prose that cannot be falsified is not provenance"
+DIR="$(drive_sandbox prov_free_text NONE)"
+python3 - "$DIR/plans/probe-campaign-state.json" <<'FREETEXT'
+import json, sys
+
+path = sys.argv[1]
+state = json.load(open(path))
+state["domain_reviews"]["elixir"]["reviewed_at_sha_provenance"] = (
+    "I am fairly sure the reviewer mentioned this commit at some point"
+)
+json.dump(state, open(path, "w"), indent=2)
+FREETEXT
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "provenance with no recognised kind is a violation"
+assert_contains "$OUT" "no provenance of a recognised kind" "the refusal names the condition"
+assert_contains "$OUT" "quoted_from_reply" "and lists the kinds that satisfy it"
+assert_contains "$OUT" "cannot be falsified" "and says why prose is not enough"
+
+test_case "both_provenance_spellings_are_accepted" \
+    "rows already on disk use the string form, so it must keep working"
+for SPELLING in dict string; do
+    DIR="$(drive_sandbox "prov_$SPELLING" NONE)"
+    python3 - "$DIR/plans/probe-campaign-state.json" "$SPELLING" <<'SPELL'
+import json, sys
+
+path, spelling = sys.argv[1], sys.argv[2]
+state = json.load(open(path))
+entry = state["domain_reviews"]["elixir"]
+if spelling == "dict":
+    entry["reviewed_at_sha_provenance"] = {"kind": "reconstructed", "detail": "from the log"}
+else:
+    entry["reviewed_at_sha_provenance"] = "reconstructed: from the log"
+json.dump(state, open(path, "w"), indent=2)
+SPELL
+    run_gate "$DIR"
+    if ! grep -q "recognised kind" <<< "$OUT"; then
+        _record_pass "the $SPELLING spelling satisfies the requirement"
+    else
+        _record_fail "the $SPELLING spelling was refused: $OUT"
+    fi
+done
+
+test_case "an_unrecognised_kind_is_refused" "the enum is closed, or it is just prose with a colon"
+DIR="$(drive_sandbox prov_bad_kind NONE)"
+python3 - "$DIR/plans/probe-campaign-state.json" <<'BADKIND'
+import json, sys
+
+path = sys.argv[1]
+state = json.load(open(path))
+state["domain_reviews"]["elixir"]["reviewed_at_sha_provenance"] = {
+    "kind": "probably_fine",
+    "detail": "a kind nobody declared",
+}
+json.dump(state, open(path, "w"), indent=2)
+BADKIND
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a kind outside the enum is a violation"
+assert_contains "$OUT" "recognised kind" "so the enum is closed rather than advisory"
 
 summarise

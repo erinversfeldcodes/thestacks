@@ -113,7 +113,7 @@ assert_contains "$GATE_SRC" "MORE means" "and more is distinguished from a legit
 # whenever any other entry is doing work.
 test_case "the_verdict_comes_from_the_violation_list" "an exit status cannot answer a per-entry question"
 assert_contains "$GATE_SRC" "error-format=json" "violations are read structurally"
-assert_contains "$GATE_SRC" "declared & violations" "and matched against the declared entries"
+assert_contains "$GATE_SRC" "declared & violation_pairs" "and matched against the declared entries"
 assert_contains "$GATE_SRC" "property of the whole run" "with the reason recorded"
 
 # --- an uncovered violation is also refused --------------------------------
@@ -146,5 +146,99 @@ CI_YML="$(cat "$REPO_ROOT/.github/workflows/ci.yml" 2>/dev/null)"
 LINT_JOB="$(printf '%s' "$CI_YML" | awk '/^  lint-proto:/{f=1} f{print} /^  lint-actions:/{f=0}')"
 assert_contains "$LINT_JOB" "fetch-depth: 0" "the lint-proto job checks out full history"
 assert_contains "$LINT_JOB" "buf-setup-action" "and still installs buf"
+
+# --- the declared count must be reachable on EVERY path ---------------------
+#
+# ⛔ R13-1, and it was a live fail-open. `EXPECTED_ENTRIES` sat BELOW the block
+# search, so the declared count caught a PARTIAL parse and was bypassed
+# entirely by a TOTAL one: no regex match meant an early `SystemExit(0)`
+# printing "nothing to police" while every suppression stood.
+#
+# MEASURED — re-indenting `ignore_only` by ONE SPACE, which leaves the file
+# valid YAML and changes nothing about what buf does, made this gate exit 0
+# with nine suppression lines live in the file.
+#
+# ⚠️ The generalisable shape, and the second instance of it in one change: an
+# audit for fail-open enumerates what each BRANCH does, and both defects lived
+# on a PATH — there a missing `else`, here an early exit above the guard. There
+# is nothing to read in either case.
+test_case "a_total_parse_failure_cannot_bypass_the_count" \
+    "an early exit above the guard is a path, not a branch — an audit of branches cannot see it"
+python3 - "$BUF_YAML" <<'REINDENT'
+import sys
+
+path = sys.argv[1]
+src = open(path, encoding="utf-8").read()
+needle = "\n  ignore_only:\n"
+assert src.count(needle) == 1, "anchor moved — this case would pass for the wrong reason"
+open(path, "w", encoding="utf-8").write(src.replace(needle, "\n   ignore_only:\n", 1))
+REINDENT
+
+run_gate
+assert_exit_nonzero "$RC" "a block the parse cannot see is a refusal, not 'nothing to police'"
+assert_contains "$OUT" "no \`breaking.ignore_only\` block parsed" "the refusal names what happened"
+assert_contains "$OUT" "still live" "and says the suppressions are still in force"
+assert_contains "$OUT" "Re-indenting the block by one space" \
+    "naming the cheapest way to cause it, because the file stays valid YAML"
+# ⚠️ The needle is the old OK LINE, not the phrase "nothing to police" — the new
+# refusal quotes that phrase when explaining what it was about to do, so an
+# absence check on it fails against the fixed gate. Same shape as this repo's
+# recorded "gates read their own prose" defect, one level up in a test.
+assert_not_contains "$OUT" "OK: no breaking" \
+    "and it must NOT print the OK line it used to exit 0 with"
+
+restore_buf
+BUF_BACKUP="$(mktemp)"
+cp "$BUF_YAML" "$BUF_BACKUP"
+
+test_case "the_reindent_restore_is_clean" "the gate passes again once the indentation is back"
+run_gate
+assert_exit_zero "$RC" "the gate passes over the restored file"
+
+# --- a suppression must cover ONLY what it was created for ------------------
+#
+# ⛔ Every other check in this gate is satisfied by an entry matching SOME
+# violation, so a second unrelated change to the same file during the
+# suppression window was silently covered with the gate green. That is the real
+# price of `ignore_only` being file-scoped.
+#
+# ⚠️ The multiplicity was being collected and thrown away — violations went
+# into a set, so the gate reported "4 violation(s)" where there are 34, which
+# read as a far smaller blast radius than the suppressions actually have.
+test_case "an_entry_covering_MORE_than_declared_is_refused" \
+    "covering something is not the same as covering only what it was created for"
+WA_PROTO="$REPO_ROOT/proto/stacks/common/v1/writing_assistant.proto"
+WA_BACKUP="$(mktemp)"
+cp "$WA_PROTO" "$WA_BACKUP"
+
+python3 - "$WA_PROTO" <<'EXTRA'
+import sys
+
+path = sys.argv[1]
+src = open(path, encoding="utf-8").read()
+needle = '  string title = 5 [json_name = "title"];'
+assert src.count(needle) == 1, "anchor moved — this case would pass for the wrong reason"
+open(path, "w", encoding="utf-8").write(
+    src.replace(needle, '  int64 title = 5 [json_name = "title"];', 1)
+)
+EXTRA
+
+run_gate
+cp "$WA_BACKUP" "$WA_PROTO"
+rm -f "$WA_BACKUP"
+assert_exit_nonzero "$RC" "a thirteenth field-type change on a file declared to have twelve is refused"
+assert_contains "$OUT" "declared 12, found 13" "the refusal gives both numbers"
+assert_contains "$OUT" "covering a change nobody recorded" \
+    "and says what MORE than declared means"
+
+test_case "the_extra_violation_restore_is_clean" "the planted field type is back to string"
+run_gate
+assert_exit_zero "$RC" "the gate passes once the extra violation is gone"
+assert_contains "$OUT" "as declared" "and each entry reports its own count"
+
+test_case "the_report_states_violations_not_pairs" \
+    "a count labelled wrongly understates the blast radius"
+assert_contains "$OUT" "34 violation(s)" "the raw violation total is reported"
+assert_contains "$OUT" "(rule, file) pair(s)" "distinguished from the pair count it used to print"
 
 summarise

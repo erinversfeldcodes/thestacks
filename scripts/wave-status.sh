@@ -170,6 +170,35 @@ DRIVE_PATHS = (
 )
 
 
+# ⛔ PROVENANCE IS A KIND PLUS DETAIL, NOT FREE TEXT, and the reason is a
+# measured one from this repository: a predecessor guard carried eight free-text
+# allowlist reasons and SEVEN of them were untrue. Presence-only prose cannot be
+# checked and cannot be falsified later, so it decays into a field people fill
+# in to get past the gate.
+#
+# An enum buys SPECIFICITY rather than verification — nothing here can confirm
+# what arrived in a message. But "quoted_from_reply" is a definite claim someone
+# can be shown wrong about, where "I got this from the reviewer somehow" is not,
+# and being able to be wrong in public is the whole property this field exists
+# for.
+#
+# ⚖️ Two shapes accepted, because rows already on disk use the string form:
+# either {"kind": "...", "detail": "..."} or a string whose first token before a
+# colon is the kind. Anything else is refused with both spellings shown.
+PROVENANCE_KINDS = ("quoted_from_reply", "reconstructed")
+
+
+def _provenance_kind(value):
+    """The declared kind, or None when it is absent or unrecognised."""
+    if isinstance(value, dict):
+        kind = value.get("kind")
+    elif isinstance(value, str):
+        kind = value.split(":", 1)[0].strip()
+    else:
+        return None
+    return kind if kind in PROVENANCE_KINDS else None
+
+
 def _git(args, timeout=30):
     """Run a git command, returning its stdout lines, or None on any failure."""
     import subprocess
@@ -304,12 +333,19 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
                     f"and the file list a diff against it produces is meaningless."
                 )
             else:
-                if not (drive.get("at_sha_provenance") or drive.get("sha_provenance")):
+                raw_prov = drive.get("at_sha_provenance") or drive.get("sha_provenance")
+                if _provenance_kind(raw_prov) is None:
+                    said = "with no provenance" if not raw_prov else (
+                        "with provenance that does not declare a recognised kind"
+                    )
                     violations.append(
-                        f"  WAVE {wname}: the preview drive names {driven_at[:12]} with no "
-                        f"provenance. Add `at_sha_provenance` saying where it came from — read "
-                        f"off the deployed stack, or reconstructed and how. Ancestry cannot see "
-                        f"a sha nobody drove, because such a sha is a real ancestor."
+                        f"  WAVE {wname}: the preview drive names {driven_at[:12]} {said}. "
+                        f"Set `at_sha_provenance` to one of {', '.join(PROVENANCE_KINDS)} — as "
+                        f"{{\"kind\": \"quoted_from_reply\", \"detail\": \"…\"}} or the string "
+                        f"\"reconstructed: …\". Ancestry cannot see a sha nobody drove, because "
+                        f"such a sha is a real ancestor; and free-text prose here cannot be "
+                        f"falsified later, which is how seven of eight such reasons came to be "
+                        f"untrue in a predecessor guard."
                     )
                 stale = [f for f in since if any(f.startswith(p) for p in DRIVE_PATHS)]
                 if stale:
@@ -653,14 +689,17 @@ if not wave_filter and any(
             # weaker finding and hid the stronger one — MEASURED, by breaking two
             # existing staleness cases that had been passing.
             provenance = entry.get("reviewed_at_sha_provenance") or entry.get("sha_provenance")
-            if not provenance:
+            if _provenance_kind(provenance) is None:
                 violations.append(
                     f"  campaign: the {stack} review names `reviewed_at_sha` {seen[:12]} "
-                    f"with no provenance. "
-                    f"Add `reviewed_at_sha_provenance` saying where it came from — "
-                    f"quoted from the reviewer's reply, or reconstructed and how. A SHA set from "
+                    f"with no provenance of a recognised kind. "
+                    f"Set `reviewed_at_sha_provenance` to one of "
+                    f"{', '.join(PROVENANCE_KINDS)} — as "
+                    f"{{\"kind\": \"quoted_from_reply\", \"detail\": \"…\"}} or the string "
+                    f"\"reconstructed: …\". A SHA set from "
                     f"the dispatch head instead of the reply is the recorded failure here, and "
-                    f"ancestry cannot see it because such a SHA is a real ancestor."
+                    f"ancestry cannot see it because such a SHA is a real ancestor. The kind is "
+                    f"an enum rather than prose because prose cannot be falsified later."
                 )
 
             prefixes = STACK_PATHS[stack]
