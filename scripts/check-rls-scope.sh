@@ -376,6 +376,23 @@ echo "==> Checking no test supplies the scope its subject is responsible for"
 # makes this a gate rather than a nuisance — had it been non-zero it would have
 # needed reasons per exemption, and this repo has eight entries' worth of
 # evidence that reasons beside a verdict rot unread.
+#
+# ⛔ HOW TO ADMIT A LEGITIMATE CASE: ADD A PERMITTED-SHAPE FIXTURE TO
+# `test/platform/rls_scope_gate_test.sh`. Never by editing the predicate, and
+# never by adding a reason.
+#
+# ⚖️ That path already existed before anyone named it — the `SQL.query!` case
+# and the scope-primitive case are both exemptions in exactly this form — and
+# the reviewer's argument for why it is the right one is worth keeping: a
+# fixture is SELF-VERIFYING (it proves the gate permits the shape), it cannot
+# rot into unread prose (tighten the predicate and it reddens), and it forces
+# whoever wants an exemption to state the shape precisely enough to test. That
+# is the whole distinction between this and the allowlist deleted above, where a
+# REASON stood in for verification.
+#
+# So "no prose exemptions" keeps its teeth without the brittleness of having no
+# exemption path at all. If you are reading this because the gate flagged
+# something you believe is correct, write the fixture.
 MIN_SCOPE_ESTABLISHERS=20
 # ⚠️ RAISE-ONLY SEAM, so the suite can drive the floor's refusal rather than
 # assert that its message exists in the source. A floor can only be moved UP by
@@ -396,6 +413,66 @@ import sys
 floor = int(sys.argv[1])
 ESTABLISH = re.compile(r"Scope\.(with_user|set_and_run|multi_step)\b")
 DEF = re.compile(r"^\s*(?:defp?)\s+([a-z_][a-zA-Z0-9_!?]*)", re.M)
+
+
+def _blank(text):
+    """Spaces for everything but newlines, so line numbers survive."""
+    return "".join("\n" if c == "\n" else " " for c in text)
+
+
+def strip_elixir(src):
+    """Blank comment text and string literals, keeping line structure intact.
+
+    ⛔ BOTH TEXT-MATCHING HALVES OF THIS CHECK NEED THIS, and applying it to
+    only the half somebody noticed is now a THREE-INSTANCE pattern in this
+    repository. The reviewer's rule, derived from those three rather than from
+    principle: **when you strip comments in one text-matching half of a gate,
+    audit every other text-matching half of the same gate in the same commit.**
+
+    ⚠️ MEASURED, and it was LIVE. `Social.blocked?/2` deliberately does NOT
+    establish a scope — that was a reviewed decision, because wrapping it took
+    the public blog listing from a bounded 13 queries to 43. The comment
+    recording that decision names `Stacks.Scope.with_user/2`. So this gate
+    classified `blocked?` as a scope-establisher **because of the comment
+    documenting that it deliberately is not one**, and any test calling
+    `blocked?` inside a scope would have been a false positive. That is this
+    repo's most-recorded gate failure — a gate reading its own subject matter as
+    configuration — in its sharpest form yet.
+
+    ⚠️ KNOWN LIMIT, stated rather than discovered: a string literal is blanked
+    whole, including `#{…}` interpolation, so a function that establishes a
+    scope only inside an interpolated expression would go undetected. That is a
+    false negative, which the floor below cannot see — but it is the safe
+    direction for this gate, whose false positives are expensive because there
+    is no prose exemption path.
+    """
+    out, i, n = [], 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            if src.startswith('"""', i):
+                end = src.find('"""', i + 3)
+                j = n if end < 0 else end + 3
+            else:
+                j = i + 1
+                while j < n and src[j] != '"':
+                    j += 2 if src[j] == "\\" else 1
+                j = min(j + 1, n)
+            out.append(_blank(src[i:j]))
+            i = j
+        elif ch == "?" and i + 1 < n:
+            # A character literal — `?#` must not open a comment.
+            out.append(src[i : i + 2])
+            i += 2
+        elif ch == "#":
+            end = src.find("\n", i)
+            j = n if end < 0 else end
+            out.append(_blank(src[i:j]))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 # A function establishes a scope only if its OWN BODY does. Module-level
 # matching is what makes the rest of this gate module-granular, and repeating
@@ -423,7 +500,7 @@ for path in pathlib.Path("apps/core/lib").rglob("*.ex"):
     # fact about where the function is DEFINED, not about how a test is named.
     if path.name == "scope.ex":
         continue
-    src = path.read_text(encoding="utf-8")
+    src = strip_elixir(path.read_text(encoding="utf-8"))
     defs = [(m.start(), m.group(1)) for m in DEF.finditer(src)]
     for i, (pos, name) in enumerate(defs):
         end = defs[i + 1][0] if i + 1 < len(defs) else len(src)
@@ -463,18 +540,42 @@ if extra:
     roots.append(pathlib.Path(extra))
 
 offenders = []
+sites = 0
 for path in sorted(p for root in roots for p in root.rglob("*.exs")):
-    src = path.read_text(encoding="utf-8")
+    # ⛔ STRIPPED HERE TOO — the second text-matching half, fixed in the same
+    # change as the first rather than when somebody next notices it.
+    # `rls_enforcement_test.exs` carries comments naming establishers,
+    # including a "NO OUTER `Scope.with_user`" note, and they dodged the
+    # call-token regex only because they happen to be written in arity notation
+    # (`get_or_create_bookshelf/2`) rather than call syntax. A comment written
+    # as `get_bookshelf_shelves(user, "library")` would have flagged.
+    src = strip_elixir(path.read_text(encoding="utf-8"))
+    lines = src.split("\n")
     for m in re.finditer(r"Scope\.with_user\(", src):
-        line = src[: m.start()].count("\n") + 1
-        # A window rather than a parse: the enclosed call sits within a few
-        # lines of the wrapper in every real instance, and a brace-matching
-        # parse of Elixir here would be more machinery than the claim needs.
-        window = "\n".join(src[m.start():].split("\n")[:14])
+        sites += 1
+        idx = src[: m.start()].count("\n")
+        line = idx + 1
+        # ⛔ BOUNDED AT THE ENCLOSING BLOCK, not a flat 14 lines. A fixed window
+        # reads past the closing `end` into the NEXT test — and `scope_test.exs`
+        # has three-line tests, so 14 lines reaches well into the following one.
+        # That cross-block bleed was invisible only because the one function it
+        # could have picked up was not yet in the establisher set, which is the
+        # same accident that was suppressing the other half of this check.
+        #
+        # ⚠️ A window rather than a parse is still the right size for the claim:
+        # the enclosed call sits within a few lines in every real instance. What
+        # the bound removes is the reach into code the wrapper does not enclose.
+        indent = len(lines[idx]) - len(lines[idx].lstrip())
+        window = [lines[idx]]
+        for nxt in lines[idx + 1 : idx + 14]:
+            body = nxt.strip()
+            if body.startswith("end") and (len(nxt) - len(nxt.lstrip())) <= indent:
+                break
+            window.append(nxt)
         called = sorted(
             {
                 name
-                for name in re.findall(r"\b([a-z_][a-zA-Z0-9_!?]*)\(", window)
+                for name in re.findall(r"\b([a-z_][a-zA-Z0-9_!?]*)\(", "\n".join(window))
                 if name in establishers
             }
         )
@@ -502,7 +603,7 @@ if offenders:
 # the value in use is what turns a structural claim into a checkable one.
 print(
     f"    ok      no test wraps a scope-establishing call "
-    f"({len(establishers)} such functions known, floor {floor})"
+    f"({sites} wrapper site(s) scanned, {len(establishers)} such functions known, floor {floor})"
 )
 NESTED
 then

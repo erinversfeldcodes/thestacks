@@ -290,6 +290,76 @@ assert_exit_zero "$RC" \
     "nesting a scope primitive inside a scope is how Scope's own nesting semantics are tested"
 assert_contains "$OUT" "no test wraps a scope-establishing call" "and it reports clean rather than silently"
 
+# ⛔ A COMMENT NAMING AN ESTABLISHER IS NOT A CALL TO ONE — in EITHER half of
+# this check, and the live instance was in the half nobody was looking at.
+#
+# MEASURED: `Social.blocked?/2` deliberately does NOT establish a scope (a
+# reviewed decision — wrapping it took the public blog listing from a bounded 13
+# queries to 43), and the comment recording that decision names
+# `Stacks.Scope.with_user/2`. So the gate classified `blocked?` as an
+# establisher **because of the comment saying it deliberately is not one**, and
+# any test calling it inside a scope was a false positive. Stripping drops the
+# establisher set from 52 to 50.
+mkdir -p "$NEST_FIXTURES/prose"
+cat > "$NEST_FIXTURES/prose/prose_only_test.exs" <<'PROSEFIXTURE'
+defmodule Probe do
+  test "a blocked viewer sees nothing" do
+    viewer = insert(:user)
+
+    visible =
+      Scope.with_user(viewer.id, fn ->
+        # Deliberately unscoped itself — see Stacks.Scope.with_user/2 for why,
+        # and note that get_bookshelf_shelves(owner, "library") is NOT called
+        # here; this line exists to be read, not run.
+        Social.blocked?(viewer.id, other_id)
+      end)
+
+    assert visible == false
+  end
+end
+PROSEFIXTURE
+
+test_case "an_establisher_named_only_in_a_comment_does_not_flag" \
+    "a gate reading its own subject matter as configuration — this repo's most-recorded failure"
+OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/prose" bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_zero "$RC" \
+    "neither the commented call syntax nor blocked? (an establisher only by its own comment) may flag"
+assert_contains "$OUT" "50 such functions known" \
+    "and the establisher set is the STRIPPED one — 52 included two functions matched only in prose"
+
+# ⛔ THE WINDOW IS BOUNDED AT THE ENCLOSING BLOCK, not a flat 14 lines. A fixed
+# window reads past the closing `end` into the NEXT test, and `scope_test.exs`
+# has three-line tests — so 14 lines reaches well into the following one. The
+# bleed was invisible only because the one function it could have picked up was
+# not yet in the establisher set: one accident suppressing two defects.
+mkdir -p "$NEST_FIXTURES/bleed"
+cat > "$NEST_FIXTURES/bleed/cross_block_test.exs" <<'BLEEDFIXTURE'
+defmodule Probe do
+  test "a scope wrapper with nothing of interest inside it" do
+    owner = insert(:user)
+
+    Scope.with_user(owner.id, fn ->
+      assert Scope.current() == owner.id
+    end)
+  end
+
+  test "a separate test that legitimately calls a self-scoping context" do
+    owner = insert(:user)
+    assert {:ok, _} = Stacks.Shelving.get_bookshelf_shelves(owner.id, "library")
+  end
+end
+BLEEDFIXTURE
+
+test_case "a_call_in_the_NEXT_test_is_not_read_as_enclosed" \
+    "a window with no block bound reaches into code the wrapper does not enclose"
+OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/bleed" bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_zero "$RC" \
+    "the self-scoping call sits in a sibling test, outside the wrapper — it must not be attributed to it"
+assert_contains "$OUT" "wrapper site(s) scanned" \
+    "and the site count proves the wrapper WAS seen, so this is a bound rather than a miss"
+
 test_case "a_test_that_wraps_a_raw_query_is_permitted" \
     "the discriminator — is the scope the thing under test, or the precondition for it?"
 OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/good" bash "$GATE" 2>&1)"
