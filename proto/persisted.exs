@@ -1392,6 +1392,17 @@
       skip_ecto: true,
       skip_dbt: true,
       indexes: [],
+      # ⚠️ EVERY OVERRIDE BELOW IS INERT, and that is not obvious from reading it.
+      # This entry carries `skip_ecto: true` AND `skip_dbt: true`, its
+      # `ecto_path` is a hand-written module outside `gen/`, and it has no
+      # `json_serializers` entry — so none of the four routes that consume
+      # `field_overrides` reaches this map. It is a record of INTENT for the
+      # hand-maintained schema, not a thing the codegen applies.
+      #
+      # ⛔ The hazard is the flip, not the present state: setting `skip_ecto:
+      # false` would make all of these live AT ONCE, none of them ever having
+      # been validated against a generated schema. Check them individually
+      # before flipping, rather than trusting that they have been working.
       field_overrides: %{
         user_id: %{
           belongs_to: Stacks.Accounts.User,
@@ -1416,6 +1427,17 @@
       skip_ecto: true,
       skip_dbt: true,
       indexes: [],
+      # ⚠️ EVERY OVERRIDE BELOW IS INERT, and that is not obvious from reading it.
+      # This entry carries `skip_ecto: true` AND `skip_dbt: true`, its
+      # `ecto_path` is a hand-written module outside `gen/`, and it has no
+      # `json_serializers` entry — so none of the four routes that consume
+      # `field_overrides` reaches this map. It is a record of INTENT for the
+      # hand-maintained schema, not a thing the codegen applies.
+      #
+      # ⛔ The hazard is the flip, not the present state: setting `skip_ecto:
+      # false` would make all of these live AT ONCE, none of them ever having
+      # been validated against a generated schema. Check them individually
+      # before flipping, rather than trusting that they have been working.
       field_overrides: %{
         book_id: %{
           belongs_to: Stacks.Books.Book,
