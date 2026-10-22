@@ -23,8 +23,13 @@ line_of() {
 
 GEN_LINE="$(line_of 'Generating Ecto schemas from proto')"
 EVAL_LINE="$(line_of 'Scoring the deployed vision model')"
-# shellcheck disable=SC2016  # a literal grep pattern, not an expansion
-MODAL_IF_LINE="$(line_of 'if \[\[ -z "\${SKIP_VISION:-}" \]\]')"
+# ⚠️ The landmark is the Modal section's CONDITION, not a particular spelling of
+# it. This grepped for `if [[ -z "${SKIP_VISION:-}" ]]` until that presence test
+# was replaced: `SKIP_VISION=0` is non-empty, so the obvious way to write "do not
+# skip" turned the skip ON and dropped the vision deploy. The condition now reads
+# the VALUE via `vision_skipped`, and this landmark follows it rather than
+# pinning the defect's spelling.
+MODAL_IF_LINE="$(line_of 'if ! vision_skipped && ')"
 
 test_case "eval_prereq_present" "the script still generates the Ecto schemas and still scores the model"
 RC=0; [[ -n "$GEN_LINE" && -n "$EVAL_LINE" && -n "$MODAL_IF_LINE" ]] || RC=1
@@ -63,5 +68,47 @@ assert_exit_zero "$RC" "generator call present between checkout and deploy (chec
 test_case "rollback_protos_after_checkout_before_deploy" "…and in that order"
 RC=0; [[ -n "$RB_GEN_LINE" && "$RB_CHECKOUT_LINE" -lt "$RB_GEN_LINE" && "$RB_GEN_LINE" -lt "$RB_DEPLOY_LINE" ]] || RC=1
 assert_exit_zero "$RC" "checkout (${RB_CHECKOUT_LINE:-?}) < codegen (${RB_GEN_LINE:-?}) < modal deploy (${RB_DEPLOY_LINE:-?})"
+
+test_case "skip_vision_reads_its_value_not_its_presence" "the flag's off-switch must not be its on-switch"
+# ⛔ `SKIP_VISION` was tested with `-n`/`-z` at FOUR sites, so any non-empty value
+# meant skip — and `SKIP_VISION=0`, the obvious way to say "do not skip", turned
+# the skip on and silently dropped the vision deploy from the stack.
+#
+# ⚠️ Driven by extracting the real helper and calling it DIRECTLY. An earlier
+# version of this probe called it inside `$(...)`, where the helper's `exit 1`
+# refusal kills the subshell with status 1 — indistinguishable from `return 1`,
+# so a refusal read as "deploy". The command substitution has to go.
+VS_PROBE="$(mktemp)"
+cat > "$VS_PROBE" <<'PROBE'
+#!/usr/bin/env bash
+set -uo pipefail
+eval "$(awk '/^vision_skipped\(\) \{/,/^\}/' "$2")"
+export SKIP_VISION="$1"
+if vision_skipped; then echo "skip"; else echo "deploy"; fi
+PROBE
+
+for case_pair in "1:skip" "true:skip" "YES:skip" "0:deploy" "false:deploy" "no:deploy"; do
+    value="${case_pair%%:*}"
+    want="${case_pair##*:}"
+    got="$(bash "$VS_PROBE" "$value" "$SCRIPT" 2>&1)"
+    if [[ "$got" == "$want" ]]; then
+        _record_pass "SKIP_VISION=${value} -> ${want}"
+    else
+        _record_fail "SKIP_VISION=${value} -> ${got}, expected ${want}"
+    fi
+done
+
+# An unrecognised value must REFUSE rather than pick a side, because the wrong
+# guess either spends on Modal unexpectedly or ships a stack with no vision.
+for bad in off banana; do
+    out="$(bash "$VS_PROBE" "$bad" "$SCRIPT" 2>&1)"
+    rc=$?
+    if [[ "$rc" -ne 0 ]] && grep -q 'neither true nor false' <<< "$out"; then
+        _record_pass "SKIP_VISION=${bad} is refused, not guessed"
+    else
+        _record_fail "SKIP_VISION=${bad} gave exit ${rc} and output: ${out}"
+    fi
+done
+rm -f "$VS_PROBE"
 
 summarise

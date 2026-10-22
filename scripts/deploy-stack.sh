@@ -10,6 +10,29 @@ fi
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
+# ⛔ READS THE VALUE, NOT THE PRESENCE — and the bug this replaces inverted a
+# deploy. Four sites tested `SKIP_VISION` with `-n`/`-z`, so ANY non-empty value
+# meant "skip": `SKIP_VISION=0`, the obvious way to write "do not skip", turned
+# the skip ON and silently dropped the vision deploy. A flag whose natural
+# off-switch is its on-switch is worse than no flag.
+#
+# ⚠️ An unrecognised value REFUSES rather than guessing. Defaulting it either way
+# is how the original defect reads to whoever writes `SKIP_VISION=off`, and this
+# runs during a deploy where the wrong guess is a missing service.
+vision_skipped() {
+    case "$(printf '%s' "${SKIP_VISION:-}" | tr '[:upper:]' '[:lower:]')" in
+        1 | true | yes) return 0 ;;
+        "" | 0 | false | no) return 1 ;;
+        *)
+            echo "FAIL deploy: SKIP_VISION is set to '${SKIP_VISION}', which is neither true nor false." >&2
+            echo "       Use 1/true/yes to skip the vision deploy, or 0/false/no (or unset) to run it." >&2
+            echo "       Refusing rather than guessing: the wrong guess here either spends on Modal" >&2
+            echo "       unexpectedly or ships a stack with no vision service." >&2
+            exit 1
+            ;;
+    esac
+}
+
 deploy_with_retry() {
     local name="$1"; shift
     if "$@"; then return 0; fi
@@ -324,7 +347,7 @@ if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROO
 fi
 echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 
-if [[ -z "${SKIP_VISION:-}" ]] && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
+if ! vision_skipped && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     MODAL_PYTHON=""
     if [[ -x "${REPO_ROOT}/apps/vision/.venv/bin/python3" ]] \
         && "${REPO_ROOT}/apps/vision/.venv/bin/python3" -c "import modal" 2>/dev/null; then
@@ -438,7 +461,7 @@ print(urls[0] if urls else '')
         exit 1
     fi
     echo "PASS deploy: vision model scored, no regression"
-elif [[ -n "${SKIP_VISION:-}" ]]; then
+elif vision_skipped; then
     echo "SKIP: SKIP_VISION set — skipping Modal vision deploy (no Modal spend). VISION_SERVICE_URL left empty."
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
@@ -1121,7 +1144,7 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     fi
 fi
 
-if [[ -n "${SKIP_VISION:-}" ]]; then
+if vision_skipped; then
     echo "SKIP warmup: SKIP_VISION set — vision not deployed, skipping warmup"
 else
 
@@ -1270,7 +1293,7 @@ else
 fi
 fi
 
-if [[ -n "${SKIP_VISION:-}" ]]; then
+if vision_skipped; then
     echo "SKIP probe: SKIP_VISION set — skipping vision completion probe"
 elif [[ ${#warmup_ids[@]} -gt 0 ]]; then
     probe_id="${warmup_ids[0]}"
