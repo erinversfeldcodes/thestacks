@@ -147,7 +147,9 @@ count against the router's own route list.
 
 ### 4. Identity becomes a server answer
 
-`GET /api/me` at boot, replacing the parsed storage blob.
+`GET /api/auth/me` at boot, replacing the parsed storage blob. ⚠️ The route
+already exists and is already consumed; what moves is WHEN the SPA asks.
+(Corrected 2026-10-22 — this document previously implied the endpoint was new.)
 `encodeAuth`/`decodeAuth`/`saveAuth` and the stored token are deleted, and the
 `Decode.succeed "user"` fallback goes with them: with role arriving from the
 server the field is always present, so a decoder that cannot produce a role
@@ -162,7 +164,9 @@ rendering signed-in chrome shows it to anonymous readers. This is a new window
 that the old model did not have, and it is the most likely silent regression of
 the change.
 
-⚠️ `GET /api/me` must not have a "not signed in" success shape. An
+⚠️ `GET /api/auth/me` must not have a "not signed in" success shape — and
+measured 2026-10-22, it does not: the `:authenticated` pipeline refuses first.
+So this is a property to PRESERVE, not one to add. An
 unauthenticated request gets **401**, not 200 with a null user — otherwise "am I
 signed in?" is a guess again, one layer further out.
 
@@ -278,7 +282,8 @@ net loss.
 
 ## References
 
-- Issue #505 (this ADR), #506 (transport + `/api/me` + counter), #507 (CSRF),
+- Issue #505 (this ADR), #506 (transport + counter; `/api/me` struck — the
+  route exists as `/api/auth/me`), #507 (CSRF),
   #508 (SPA auth model), #509 (SSE + admin elevation), #510 (E2E harness +
   rollout), #511 (review currency).
 - `docs/technical-architecture.md` — session transport description, updated with
