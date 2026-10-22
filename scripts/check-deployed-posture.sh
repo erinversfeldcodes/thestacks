@@ -558,11 +558,59 @@ DATA_CONDITION_ASSERTIONS=(
 # become unscoped. An unexpected new definer means a new cross-user hole that
 # nobody reviewed. Collapsing them would report "the set changed" and leave the
 # reader to work out which disaster it is.
+
+# ⛔ ONE ROSTER, AND KEYED ON THE FULL SIGNATURE RATHER THAN THE NAME.
+#
+# Two corrections to the first version of this pair, both from review.
+#
+# (1) The roster was written out TWICE, once per assertion, with no pinned size.
+# That duplication was accidentally load-bearing — editing one copy is caught by
+# the sibling — so the obvious tidy-up of defining it once would have REMOVED
+# protection without adding any. One list PLUS a pinned count dominates both:
+# a single edit now changes both directions, and the count catches an add or a
+# removal. The live silent case the pair otherwise re-admits: add a name to the
+# unexpected-direction list only, and the function is accepted as expected AND
+# never covered by the regression direction — the exact hole this pair closes,
+# re-entering through its own roster.
+#
+# (2) Keying on `p.proname` ignores argument signatures, so a new OVERLOAD is
+# invisible: its name is already expected. MEASURED on a real database — adding
+# `op.placement_owner(uuid, uuid)`, a brand-new SECURITY DEFINER function doing
+# unscoped cross-user reads, leaves BOTH assertions reporting 0. That is how a
+# cross-user hole gets added without "adding a function" in the reviewable
+# sense, and it is the same name-versus-thing shape as the uuid[] rule above.
+# `p.oid::regprocedure::text` carries the arguments.
+DEFINER_SIGNATURES=(
+    'blocked_pair(uuid,uuid)'
+    'group_feed_placements(uuid,uuid[],timestamp with time zone,integer)'
+    'placement_owner(uuid)'
+    'placement_owners_for_edition(uuid)'
+    'platform_row_counts()'
+    'unmerge_placement_counts(uuid,uuid)'
+    'wishlist_user_ids(uuid)'
+)
+EXPECTED_DEFINERS=7
+
+if [[ "${#DEFINER_SIGNATURES[@]}" -ne "$EXPECTED_DEFINERS" ]]; then
+    echo "FAIL deployed-posture: declared $EXPECTED_DEFINERS definer signature(s), listed ${#DEFINER_SIGNATURES[@]}." >&2
+    echo "       Update EXPECTED_DEFINERS in the same change that adds or removes one, so a" >&2
+    echo "       roster edit is a recorded decision rather than a silent widening." >&2
+    exit 1
+fi
+
+# Built once and interpolated into both arms, so the two directions cannot
+# disagree about what is expected.
+DEFINER_VALUES=""
+for sig in "${DEFINER_SIGNATURES[@]}"; do
+    [[ -n "$DEFINER_VALUES" ]] && DEFINER_VALUES="${DEFINER_VALUES},"
+    DEFINER_VALUES="${DEFINER_VALUES}('${sig}')"
+done
+
 ASSERTIONS+=("definer_set_has_not_regressed
-WITH expected(proname) AS (VALUES ('blocked_pair'),('group_feed_placements'),('placement_owner'),('placement_owners_for_edition'),('platform_row_counts'),('unmerge_placement_counts'),('wishlist_user_ids')), actual AS (SELECT p.proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef) SELECT count(*) FROM (SELECT proname FROM expected EXCEPT SELECT proname FROM actual) t
+WITH expected(sig) AS (VALUES ${DEFINER_VALUES}), actual AS (SELECT p.oid::regprocedure::text AS sig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef) SELECT count(*) FROM (SELECT sig FROM expected EXCEPT SELECT sig FROM actual) t
 0
-A SECURITY DEFINER function that this suite asserts about is GONE, or has been
-flipped to SECURITY INVOKER.
+A SECURITY DEFINER function that this suite asserts about is GONE, has been
+flipped to SECURITY INVOKER, or has had its ARGUMENTS changed.
 
 Either way the four assertions that scope on prosecdef now say nothing about it:
 they are inclusion tests over the definer set, so a function that leaves the set
@@ -570,15 +618,16 @@ is reported as compliant by every one of them. If it was deleted, the scoped
 cross-user read it provided is gone and whatever called it is either broken or
 reading unscoped. If it was flipped to INVOKER, it now runs as the caller and
 the row-level policies apply — which is either a silent behaviour change or a
-deliberate one that this list should have been updated for.
+deliberate one that this roster should have been updated for. If its signature
+changed, the old entry no longer matches anything.
 
-Update the expected list in the same change that removes or converts a definer.")
+Update DEFINER_SIGNATURES and EXPECTED_DEFINERS in the same change.")
 
 ASSERTIONS+=("definer_set_has_no_unexpected_function
-WITH expected(proname) AS (VALUES ('blocked_pair'),('group_feed_placements'),('placement_owner'),('placement_owners_for_edition'),('platform_row_counts'),('unmerge_placement_counts'),('wishlist_user_ids')) SELECT count(*) FROM (SELECT p.proname::text AS proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef EXCEPT SELECT proname FROM expected) t
+WITH expected(sig) AS (VALUES ${DEFINER_VALUES}) SELECT count(*) FROM (SELECT p.oid::regprocedure::text AS sig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef EXCEPT SELECT sig FROM expected) t
 0
 A new SECURITY DEFINER function exists in op that this suite has never been told
-about.
+about — possibly an OVERLOAD of a name that is already expected.
 
 A definer function runs as its owner and therefore reads every row, so each one
 is a deliberate hole in per-user scoping and its safety argument is that it is
@@ -586,7 +635,11 @@ reachable only by the roles that need it. A new one has had none of that
 argument made: CREATE FUNCTION grants EXECUTE to PUBLIC by default, so unless it
 was explicitly revoked it is callable by every role that can connect.
 
-Add it to the expected list once its grants and its parameters have been
+⚠️ This keys on the full signature, not the name, because an overload is a new
+function with none of the review and would otherwise be invisible behind an
+expected name.
+
+Add it to DEFINER_SIGNATURES once its grants and its parameters have been
 reviewed — the sibling assertions will then start covering it.")
 
 EXPECTED_ASSERTIONS=17
@@ -863,6 +916,18 @@ for entry in "${ASSERTIONS[@]}"; do
         fi
         echo "" >&2
         FAILURES=$((FAILURES + 1))
+    elif [[ "$kind" == "data condition" ]]; then
+        # ⛔ NOT "ok". A data condition counts rows a backlog produces, and this
+        # gate cannot interpret the number — "0 stuck jobs" is consistent with a
+        # healthy queue AND with an Oban that is not running at all. Printing
+        # `ok` claims VERIFIED HEALTHY for a measurement the gate cannot make
+        # that claim about, and the `[data condition]` label made a green
+        # reading more comfortable rather than more informative.
+        #
+        # So it reports the number and stops. A gate that returns a verdict on a
+        # measurement it cannot interpret is worse than one that returns the
+        # measurement.
+        echo "--   ${name} [${kind}]: ${value} found (ceiling ${ceiling}) — a count, not a verdict"
     else
         echo "ok   ${name} [${kind}]: ${value} (ceiling ${ceiling})"
     fi

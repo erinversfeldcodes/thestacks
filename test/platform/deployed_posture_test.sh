@@ -226,6 +226,58 @@ else
     _record_fail "could not flip the definer, so this case would pass for the wrong reason"
 fi
 
+test_case "an_overload_of_an_expected_name_is_caught" "the roster keys on the signature, not the name"
+# ⛔ MEASURED as invisible before this: both definer-set assertions keyed on
+# `p.proname`, so `op.placement_owner(uuid, uuid)` — a brand-new SECURITY
+# DEFINER function doing unscoped cross-user reads — left BOTH reporting 0,
+# because its NAME was already expected. That is how a cross-user hole gets
+# added without "adding a function" in the reviewable sense, and it is the same
+# name-versus-thing shape as the uuid[] subject rule.
+#
+# ⚠️ This plants a NEW function and drops it. The sibling hazard — changing an
+# existing function's signature — is deliberately NOT planted here: it requires
+# dropping and recreating a real definer along with its owner and its narrowed
+# grant, and a fixture that gets the restore slightly wrong leaves a
+# cross-user read owned by the wrong role on a shared database.
+if psql "$LOCAL_URL" -q -c "CREATE FUNCTION op.posture_probe_overload(a uuid, b uuid) RETURNS int LANGUAGE sql SECURITY DEFINER AS \$\$ SELECT 1 \$\$" >/dev/null 2>&1; then
+    _record_pass "a new definer overload was planted"
+    OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1)"
+    assert_contains "$OUT" "FAIL definer_set_has_no_unexpected_function" \
+        "an unexpected definer signature is caught"
+    assert_contains "$OUT" "possibly an OVERLOAD" \
+        "and the message names the case a name-keyed check would have missed"
+    psql "$LOCAL_URL" -q -c "DROP FUNCTION op.posture_probe_overload(uuid, uuid)" >/dev/null 2>&1 || true
+    GONE="$(psql "$LOCAL_URL" -tAc "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.proname = 'posture_probe_overload'" 2>/dev/null | tr -d '[:space:]')"
+    if [[ "$GONE" == "0" ]]; then
+        _record_pass "the planted definer is dropped, so this case left the database as it found it"
+    else
+        _record_fail "op.posture_probe_overload still exists — a planted SECURITY DEFINER was left behind"
+    fi
+else
+    _record_fail "could not plant the overload, so this case would pass for the wrong reason"
+fi
+
+test_case "the_definer_roster_is_one_list_with_a_pinned_size" "a roster edit must be a recorded decision"
+# ⛔ The roster was written out TWICE, once per assertion, with no pinned count.
+# That duplication was accidentally load-bearing — editing one copy is caught by
+# the sibling — so defining it once would have REMOVED protection. One list plus
+# a pinned size dominates both: a single edit changes both directions, and the
+# count catches an add or a removal. Without the count, adding a name to only
+# the unexpected-direction list would accept the function as expected AND leave
+# it uncovered by the regression direction.
+assert_contains "$GATE_SRC" "DEFINER_SIGNATURES=(" "there is one roster"
+assert_contains "$GATE_SRC" "EXPECTED_DEFINERS=7" "and its size is pinned"
+assert_contains "$GATE_SRC" "DEFINER_VALUES" "built once and interpolated into both arms"
+assert_contains "$GATE_SRC" "regprocedure" "keyed on the full signature rather than the name"
+
+test_case "a_data_condition_reports_a_count_not_a_verdict" "the gate does not claim health it cannot establish"
+# ⛔ `ok … 0` claimed VERIFIED HEALTHY for a number this gate cannot interpret:
+# "0 stuck jobs" is consistent with a healthy queue AND with an Oban that is not
+# running at all. The `[data condition]` label alone made a green reading more
+# comfortable rather than more informative.
+assert_contains "$GATE_SRC" "a count, not a verdict" "a passing data condition says so"
+assert_contains "$GATE_SRC" "cannot interpret" "and the reason is stated where it is printed"
+
 test_case "the_assertion_count_is_declared" "a dropped assertion shows up in the diff"
 # Retrofitted from a real regression in the sibling posture suite: a roster built
 # by appending to an array is silently shortened by an editing slip, and the loop
