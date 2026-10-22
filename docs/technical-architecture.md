@@ -244,7 +244,7 @@ thestacks/
 | Component | Technology | Notes |
 |-----------|-----------|-------|
 | JWT signing | Guardian (HS256) | 64-char `GUARDIAN_SECRET_KEY`, generated with `mix guardian.gen.secret` |
-| Session storage | Signed/encrypted cookies | `same_site: "Lax"`, `secure: true` in production |
+| Session storage | ⚠️ **Bearer token in `localStorage`** — migrating to `HttpOnly` cookies per [ADR 024](decisions/024-httponly-cookie-sessions.md) | This row previously read "signed/encrypted cookies, `same_site: Lax`, `secure: true` in production", which described a system that did not exist. A `Plug.Session` cookie IS configured (`core_web/endpoint.ex:4-9`, key `_core_key`, `same_site: "Lax"`) but **nothing reads or writes it** — zero `get_session`/`put_session`/`fetch_session` call sites in the web layer — and `secure: true` is not among its options. The real transport is a Guardian JWT returned in a JSON body and stored by the SPA. ADR 024 decides the migration; until it lands this row describes the bearer token. |
 | Token lifetime | 8h access, no refresh token | Refresh flow deferred to #173. Access token is stored in `op.guardian_tokens` and revocable server-side via `guardian_db` (Issue #124). |
 | Password hashing | Argon2 (`argon2_elixir`) | Memory-hard, resistant to GPU attacks |
 
