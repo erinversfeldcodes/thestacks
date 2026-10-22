@@ -55,3 +55,31 @@ pick_python() {
     echo "$fallback_venv/bin/python3"
     return 0
 }
+
+# ⚠️ PyYAML resolves the bare key `on` to BOOLEAN TRUE, because YAML 1.1 treats
+# `on`/`off`/`yes`/`no` as booleans. So `doc["on"]` raises `KeyError` on every
+# GitHub workflow file, and `doc.get("on", {})` silently returns the default —
+# which is the dangerous one, because a sweep for triggers would then report
+# every workflow as having none.
+#
+# ⛔ SWEPT BEFORE ADDING THIS: zero live instances. Five files parse YAML here,
+# four of them workflow files, and none reads the `on` key today — so the
+# reviewer's recommendation was a HELPER rather than a gate, applying their own
+# base-rate rule to itself: a gate over zero instances is unfalsifiable from
+# birth, while a helper placed before it is needed costs nothing.
+#
+# ⚠️ It is one line from mattering: `deploy_production_workflow_test.sh:327`
+# already `safe_load`s a workflow and would hit this the first time it asks what
+# triggers it.
+#
+# Emit this into an embedded python block that needs workflow triggers:
+#
+#     eval "$(workflow_triggers_py)"
+#     trig = workflow_triggers(yaml.safe_load(open(path)))
+workflow_triggers_py() {
+    cat <<'PYHELPER'
+def workflow_triggers(doc):
+    """A workflow's `on:` mapping, surviving YAML 1.1's boolean coercion."""
+    return doc.get("on", doc.get(True, {})) or {}
+PYHELPER
+}
