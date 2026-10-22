@@ -1,0 +1,73 @@
+name: Suppression expiry
+
+# Asks daily whether any `buf breaking` suppression has outlived its reason.
+#
+# ⛔ WHY A SCHEDULE AND NOT A PR CHECK. The four `breaking.ignore_only` entries
+# in `proto/buf.yaml` are time-boxed on a trigger no pull request can observe:
+# they cover changes that are breaking only while unmerged, so the moment the
+# branch lands on the default branch `buf breaking` finds nothing for them and
+# every one becomes SPENT. The gate already refuses a spent entry — what was
+# missing was anything that asks after the merge.
+#
+# ⚠️ A MISSED FIRING IS PERMANENT WITH A ONE-SHOT TRIGGER, which is why this is
+# a cron rather than a `workflow_run` hook on the deploy. A merge-time trigger
+# that does not fire — a skipped job, a cancelled run, a path filter — is never
+# retried, and the suppressions then stand indefinitely with nothing asking. A
+# daily schedule self-heals: it subsumes the merge case within a day and keeps
+# asking afterwards.
+#
+# ⚠️ And it needs no second source of truth. There is no date field here and no
+# "remove by" note to keep in sync: the mechanism is already correct, because
+# once the change is in the default branch the gate's own measurement says the
+# entries cover nothing. The only thing being added is a clock.
+#
+# ⛔ IT IS IN `check-workflow-health.sh`'s POPULATION, which matters because
+# this is a workflow no pull request depends on — the class that let the staging
+# reseed fail deterministically for two months before a human looked. A red here
+# is a failed scheduled run on the default branch, which GitHub notifies on, and
+# the health check reports it alongside the rest.
+
+on:
+  schedule:
+    # Daily. The window between a merge and this firing is the only period in
+    # which a spent suppression stands unreported, and a day is short enough
+    # that nobody plans around it.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: suppression-expiry
+  cancel-in-progress: false
+
+jobs:
+  expiry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # fetch-depth: 0 is REQUIRED, not tidy. The gate runs `buf breaking`
+      # against `origin/main`, and at the default shallow depth that ref does
+      # not exist — which is exactly how `buf breaking` came to have never run
+      # in CI at all. The gate refuses rather than skipping when the ref is
+      # missing, so a shallow checkout here fails loudly instead of reporting a
+      # clean result over nothing.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Are any breaking suppressions spent?
+        run: bash scripts/check-breaking-suppressions-are-spent.sh
+
+      - name: Are any declared-count guards bypassable?
+        # Cheap, offline, and the sibling defect: the gate above declared its
+        # expected entry count BELOW an early success exit, so a total parse
+        # failure reported "nothing to police" with every suppression standing.
+        # Running it here means the two are checked together on the branch where
+        # the suppressions actually expire.
+        run: bash scripts/check-guard-is-unbypassable.sh
