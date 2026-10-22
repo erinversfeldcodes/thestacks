@@ -36,6 +36,7 @@ import Dict
 import Expect
 import Http
 import Json.Decode as Decode
+import ProgressSaveContract
 import Test exposing (Test, describe, test)
 import Types.Placement exposing (ReadingStatus(..))
 
@@ -612,7 +613,134 @@ suite =
                     Api.shelfMoveResponseToResult (goodStatus body)
                         |> Expect.equal (Ok "88888888-8888-8888-8888-888888888888")
             ]
+        , describe "progressResponseToResult maps every branch it has"
+            [ -- ⛔ THIS IS THE ORACLE A DERIVED TEST ASSUMES, and it did not
+              -- exist. `tests/ProgressSaveContract.elm` now derives its
+              -- "must an error be on screen?" claim from this function, which
+              -- turned an ABSOLUTE claim that could be silently wrong into a
+              -- RELATIVE one that cannot — the right allocation, but only while
+              -- the absolute claim lives somewhere. It did not: this function
+              -- has eight branches and exactly ONE had a direct test, the
+              -- 200-decodable case above.
+              --
+              -- ⚠️ And the derivation SPENT the indirect coverage that used to
+              -- exist. A hand-written bool disagreeing with this function would
+              -- have gone red; a test deriving its expectation from `f` can
+              -- never be `f`'s oracle. So the independence budget genuinely
+              -- decreased, and this table is what restores it.
+              --
+              -- ⚠️ Two of these shapes were driven by NOTHING anywhere before:
+              -- a 200 whose body does not decode, and a 422 whose body does not
+              -- carry `{errors:…}`. The first is the interesting one — it is a
+              -- 200 for which an error must be shown, which is why an
+              -- "outcome space" reading of the contract table was wrong.
+              test "a 200 whose body does not decode is a BadBody error, not a success" <|
+                \_ ->
+                    case Api.progressResponseToResult (goodStatus "{\"placement\": {\"id\": 7}}") of
+                        Err (Api.ProgressRequestFailed (Http.BadBody _)) ->
+                            Expect.pass
+
+                        other ->
+                            Expect.fail
+                                ("a malformed 200 must not resolve; got "
+                                    ++ Debug.toString other
+                                )
+            , test "a 422 carrying errors resolves to ProgressValidationFailed" <|
+                \_ ->
+                    Api.progressResponseToResult
+                        (badProgressStatus 422 "{\"errors\": {\"current_page\": [\"is invalid\"]}}")
+                        |> Expect.equal
+                            (Err (Api.ProgressValidationFailed [ ( "current_page", [ "is invalid" ] ) ]))
+            , test "a 422 whose body carries no errors key falls back to the status" <|
+                \_ ->
+                    Api.progressResponseToResult (badProgressStatus 422 "not json at all")
+                        |> Expect.equal
+                            (Err (Api.ProgressRequestFailed (Http.BadStatus 422)))
+            , test "a 500 resolves to its status and not to a validation failure" <|
+                \_ ->
+                    Api.progressResponseToResult (badProgressStatus 500 "{\"error\": \"boom\"}")
+                        |> Expect.equal
+                            (Err (Api.ProgressRequestFailed (Http.BadStatus 500)))
+            , test "a 401 resolves to its status, which is what the session net keys on" <|
+                \_ ->
+                    Api.progressResponseToResult (badProgressStatus 401 "{\"error\": \"unauthorized\"}")
+                        |> Expect.equal
+                            (Err (Api.ProgressRequestFailed (Http.BadStatus 401)))
+            , test "a timeout resolves to Timeout" <|
+                \_ ->
+                    Api.progressResponseToResult Http.Timeout_
+                        |> Expect.equal (Err (Api.ProgressRequestFailed Http.Timeout))
+            , test "a network error resolves to NetworkError" <|
+                \_ ->
+                    Api.progressResponseToResult Http.NetworkError_
+                        |> Expect.equal (Err (Api.ProgressRequestFailed Http.NetworkError))
+            , test "a bad url resolves to BadUrl carrying the url" <|
+                \_ ->
+                    Api.progressResponseToResult (Http.BadUrl_ "::nonsense::")
+                        |> Expect.equal
+                            (Err (Api.ProgressRequestFailed (Http.BadUrl "::nonsense::")))
+
+            -- ⛔ ANTI-VACUITY ON THE DERIVATION ITSELF, which the branch table
+            -- above cannot provide. `ProgressSaveContract.reportsAnError` is
+            -- derived from `progressResponseToResult`, so it FOLLOWS that
+            -- function wherever it goes — including somewhere useless. If a
+            -- change collapsed the mapping so every response resolved to `Ok`,
+            -- or every response to `Err`, the derived claim would move with it
+            -- and both hosts' error assertions would keep passing while
+            -- asserting nothing.
+            --
+            -- ⚖️ This is the one claim about the mapping that is ABSOLUTE and
+            -- carries no judgement: of the three classifications the hosts
+            -- drive, exactly one must be an error-free outcome. No row to keep
+            -- in sync, and it is exactly the shape a collapse destroys.
+            , test "exactly one classification is error-free, so the derivation cannot collapse" <|
+                \_ ->
+                    ProgressSaveContract.classifications
+                        |> List.filter
+                            (\c ->
+                                not
+                                    (ProgressSaveContract.reportsAnError
+                                        "https://stacks.test/api"
+                                        savedProgressFixture
+                                        c
+                                    )
+                            )
+                        |> List.length
+                        |> Expect.equal 1
+            ]
         ]
+
+
+{-| A progress payload that DOES decode, for the collapse guard.
+
+⚠️ It has to decode, or the `Succeeded` classification would resolve to
+`BadBody`, every classification would report an error, and the guard would fail
+for a reason that has nothing to do with a collapse.
+
+-}
+savedProgressFixture : String
+savedProgressFixture =
+    """
+    {"placement": {
+      "id": "55555555-5555-5555-5555-555555555555",
+      "reading_status": "completed",
+      "current_page": null,
+      "started_at": null,
+      "finished_at": null}}
+    """
+
+
+{-| A non-2xx response carrying `body`, for the progress branch table.
+-}
+badProgressStatus : Int -> String -> Http.Response String
+badProgressStatus code body =
+    Http.BadStatus_
+        { url = "https://stacks.test/api"
+        , statusCode = code
+        , statusText = "Error"
+        , headers = Dict.empty
+        }
+        body
 
 
 {-| A 200 response carrying `body`, for the resolvers above.

@@ -1,4 +1,4 @@
-module ProgressSaveContract exposing (Classification(..), ExpectedOut(..), classifications, expectedOut, label, reportsAnError, response)
+module ProgressSaveContract exposing (Classification, ExpectedOut(..), classifications, expectedOut, label, reportsAnError, response)
 
 {-| How a reading-progress save is CLASSIFIED, written once and driven against
 every host that owns a progress card.
@@ -60,6 +60,19 @@ import Http
 session-expiry net, which may ADOPT a token another tab refreshed and cancel the
 logout — so the page is still on screen afterwards, which is precisely when a
 stuck in-flight flag becomes permanent rather than invisible behind a redirect.
+
+⛔ OPAQUE ON PURPOSE, and `elm-review` is what noticed it had become possible.
+The constructors used to be exposed because each host pattern-matched on them to
+decide its own `expectedOut`. Now that the decision lives here, nothing outside
+needs them — and keeping them hidden is what stops a host re-acquiring a
+per-page judgement about which classification means what. A host can enumerate
+`classifications` and ask this module questions; it cannot branch on them.
+
+⚠️ This repository's standing rule is to distrust `elm-review --fix` narrowing
+an export, because it will narrow `Msg(..)` back to `Msg` whenever no test
+consumes it and that silently undoes a deliberate widening. This narrowing is
+the opposite case: the consumer was deliberately REMOVED, so the narrowing
+records the improvement rather than erasing one.
 
 -}
 type Classification
