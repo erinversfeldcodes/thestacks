@@ -191,6 +191,133 @@ test_case "this_suite_drove_every_kind_it_claims_to" \
 # kind, plus the second definer module, plus the no-queries contradiction = 6.
 # Raise it when a case is added; a DROP means somebody deleted coverage, and
 # this is the assertion that makes that a failing run rather than a quieter one.
+# ── check 3: a test must not supply the scope its subject establishes ───────
+#
+# ⛔ The defect class this closes reads as correct at every line, which is why
+# it needed a gate rather than review. MEASURED three times in one session: a
+# case named for a production function establishing its own scope wrapped that
+# function in an outer `Scope.with_user`, so the TEST supplied the precondition
+# and the case stayed green with the subject's scoping removed entirely — 7 of 7
+# against the planted historical defect.
+#
+# ⚠️ BUILT ON A MEASURED BASE RATE, because three narrower proposals in this
+# area were refuted by measurement first: 22 `Scope.with_user` sites across
+# `apps/core/test`, of which ZERO enclose a call whose own body establishes a
+# scope. Zero legitimate instances is what makes a gate the right shape here.
+NEST_FIXTURES="$(mktemp -d)"
+trap 'rm -rf "$NEST_FIXTURES"' EXIT
+
+# The forbidden shape, which is the historical defect reduced.
+mkdir -p "$NEST_FIXTURES/bad"
+cat > "$NEST_FIXTURES/bad/nested_scope_test.exs" <<'BADFIXTURE'
+defmodule Probe do
+  test "a scoped Shelving READ runs entirely within the scope" do
+    owner = insert(:user)
+
+    result =
+      Scope.with_user(owner.id, fn ->
+        AppRole.as_app_role(fn ->
+          Stacks.Shelving.get_bookshelf_shelves(owner.id, "library")
+        end)
+      end)
+
+    refute match?({:error, _}, result)
+  end
+end
+BADFIXTURE
+
+# ⛔ AND THE PERMITTED SHAPE, which is the half that decides whether this gate
+# is usable. A test that wraps a RAW QUERY in a scope is correct — the four RLS
+# isolation pairs do exactly that, because there the scope is the precondition
+# and the POLICY is the subject. A gate that flagged both would have to be
+# turned off.
+mkdir -p "$NEST_FIXTURES/good"
+cat > "$NEST_FIXTURES/good/scoped_query_test.exs" <<'GOODFIXTURE'
+defmodule Probe do
+  test "op.bookshelves: the owner sees their own row and NOT another user's" do
+    owner = insert(:user)
+
+    count =
+      Scope.with_user(owner.id, fn ->
+        AppRole.as_app_role(fn ->
+          %{rows: [[n]]} = SQL.query!(Repo, "SELECT count(*) FROM op.bookshelves", [])
+          n
+        end)
+      end)
+
+    assert count >= 1
+  end
+end
+GOODFIXTURE
+
+test_case "a_test_that_supplies_its_subject_s_scope_is_refused" \
+    "the planted red — the historical defect reduced to its shape"
+OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/bad" bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_nonzero "$RC" "the forbidden shape is refused"
+assert_contains "$OUT" "supply a scope their subject must establish" "the refusal names the condition"
+assert_contains "$OUT" "wraps get_bookshelf_shelves" \
+    "and names the enclosed function, so the fix is at a line rather than in a file"
+assert_contains "$OUT" "Drop the wrapper" "and says what to do"
+
+test_case "a_test_that_wraps_a_raw_query_is_permitted" \
+    "the discriminator — is the scope the thing under test, or the precondition for it?"
+OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/good" bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_zero "$RC" \
+    "wrapping SQL.query! in a scope is CORRECT — the isolation pairs do it, and flagging it would retire this gate"
+assert_contains "$OUT" "no test wraps a scope-establishing call" "and it is reported as clean rather than silently"
+
+# ⚠️ The override is ADDITIVE, asserted rather than assumed. If it replaced the
+# scan root it could be pointed at an empty directory and report a clean corpus
+# of nothing — the vacuity the gate's own floor exists to refuse, reachable
+# through the seam added to test it.
+test_case "the_test_seam_cannot_narrow_the_corpus" \
+    "a seam that can empty the population is a bypass, not a fixture"
+EMPTY_DIR="$(mktemp -d)"
+OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$EMPTY_DIR" bash "$GATE" 2>&1)"
+RC=$?
+rmdir "$EMPTY_DIR"
+assert_exit_zero "$RC" "an empty extra directory adds nothing and the real corpus is still scanned"
+assert_contains "$OUT" "such functions known" \
+    "the establisher count is still reported, so the real corpus was read rather than replaced"
+
+# ⚠️ And the gate's own anti-vacuity floor, driven. A clean result is only
+# meaningful while the establisher set is populated; an empty one would make
+# every test read as innocent.
+test_case "the_gate_refuses_a_thin_establisher_set" \
+    "no establishers means every test looks innocent, which is not the same as clean"
+OUT="$(RLS_SCOPE_MIN_ESTABLISHERS=100000 bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_nonzero "$RC" "a floor the corpus cannot meet is a refusal"
+assert_contains "$OUT" "scope-establishing function(s); expected at least" \
+    "the refusal quotes both the found count and the floor"
+assert_contains "$OUT" "nothing was read rather than nothing is wrong" \
+    "and says why a clean result under an empty set would be empty of content"
+
+# ⚠️ The seam is RAISE-ONLY, driven rather than trusted. If it could lower the
+# floor it would be a way to make the gate's own anti-vacuity check pass over a
+# corpus it never read — a bypass wearing a fixture's clothes.
+# ⛔ AND THE SEAM MUST NOT BE ABLE TO LOWER THE FLOOR, which needed the gate to
+# PRINT the floor it used before it could be asserted at all.
+#
+# ⚠️ MEASURED: the first version of this case asserted only that a zero
+# override still exited 0, and it was VACUOUS — removing the raise-only guard
+# entirely left it green, because a corpus that clears both the declared floor
+# and the lowered one behaves identically either way. No run could tell the two
+# implementations apart while the only observable was the exit code.
+#
+# So the gate now reports the floor in use on success, and this asserts the
+# VALUE rather than the outcome. Same shape as the dispatch count one file over:
+# a property is only checkable once something outside the check reports it.
+test_case "the_floor_seam_cannot_lower_the_floor" \
+    "a seam that can weaken a guard is not a test seam"
+OUT="$(RLS_SCOPE_MIN_ESTABLISHERS=0 bash "$GATE" 2>&1)"
+RC=$?
+assert_exit_zero "$RC" "a zero override leaves the declared floor in place and the tree still passes"
+assert_contains "$OUT" "floor 20" \
+    "and the floor REPORTED is the declared one, not the override — asserting the exit code alone cannot tell these apart"
+
 EXPECTED_DRIVES=6
 if [[ "${DRIVES}" -eq "${EXPECTED_DRIVES}" ]]; then
     _record_pass "drove ${DRIVES} allowlist entries through the verifier"

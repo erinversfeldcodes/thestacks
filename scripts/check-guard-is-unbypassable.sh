@@ -62,11 +62,16 @@ SUCCESS_EXIT = re.compile(
 # A parse that stopped matching would report "no bypassable guards" over a
 # corpus it never read, which is indistinguishable from a clean result.
 #
-# ⚠️ 12 INCLUDES THIS GATE, which carries the constant below and is therefore in
-# its own corpus. That is deliberate rather than an accident of the glob: a gate
-# policing bypassable guards whose own guard were bypassable would be the exact
-# defect it exists to catch. The first run reported 12 against a hand-counted 11
-# for precisely this reason.
+# ⚠️ THE COUNT INCLUDES THIS GATE, which carries the constant below and is
+# therefore in its own corpus. That is deliberate rather than an accident of the
+# glob: a gate policing bypassable guards whose own guard were bypassable would
+# be the exact defect it exists to catch. The first run reported one more than
+# the hand count for precisely this reason.
+#
+# ⚠️ Written without the number, deliberately. It said "12 INCLUDES THIS GATE"
+# and went stale the first time the population grew — a figure in prose beside a
+# constant that changes is the rot this repository keeps recording, and here it
+# would have sat two lines above the value that contradicted it.
 #
 # ⚠️ THIS COUNT SITS OVER A GROWING POPULATION, so every new gate that declares a
 # floor touches this line. That is CORRECT FRICTION by the same reasoning that
@@ -75,7 +80,7 @@ SUCCESS_EXIT = re.compile(
 # "fix" the friction by converting this to `>=` — a floor here would let a gate
 # join the population without anyone noticing it had, which is the whole thing
 # this file exists to prevent one level down.
-EXPECTED_GUARDED_SCRIPTS = 13
+EXPECTED_GUARDED_SCRIPTS = 14
 
 guarded = {}
 violations = []

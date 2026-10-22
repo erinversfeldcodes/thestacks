@@ -337,6 +337,157 @@ if (( setters == 0 )); then
     echo "    ok      only Stacks.Scope sets app.current_user_id"
 fi
 
+echo "==> Checking no test supplies the scope its subject is responsible for"
+# ⛔ A TEST THAT WRAPS A SCOPE-ESTABLISHING CALL IN `Scope.with_user` CANNOT
+# FAIL THE WAY IT CLAIMS TO, and this is the one defect class in this area that
+# reads as correct at every line.
+#
+# MEASURED, three times in one session. A case named "a scoped Shelving READ
+# runs entirely within the scope" wrapped `get_bookshelf_shelves/2` in an outer
+# `Scope.with_user` — so the TEST supplied the scope the production function is
+# responsible for supplying, and the case stayed green with the scoping stripped
+# out of that function entirely: 7 of 7 against the planted historical defect.
+# It was proving "RLS enforces when something sets a scope", which other cases
+# already prove, rather than "this path sets its own".
+#
+# ⚠️ WHY NEITHER REVIEW NOR MUTATION PROBING FINDS IT. Everything in the test is
+# correct in isolation: the population is non-empty, the exit code is right, the
+# assertion's subject is genuinely present. It fails SEMANTICALLY — the setup
+# establishes the precondition the subject is responsible for establishing — so
+# reading the test shows nothing wrong. And nineteen rounds of mutation probing
+# all mutated the thing under TEST, while all three of these defects lived in
+# the fixture's ARRANGEMENT, which subject-mutation cannot reach. The reviewer's
+# formulation: probe the setup, not just the subject — remove each piece and
+# classify. Reds for the right reason = scaffolding. Reds because the subject
+# cannot run = load-bearing. **Still passes = the setup was supplying the
+# answer.**
+#
+# ⛔ THE PREDICATE IS THE REVIEWER'S DISCRIMINATOR, NOT A BAN ON NESTING: *is
+# the scope the thing under test, or the precondition for it?* So this flags an
+# outer scope only when the ENCLOSED CALL establishes a scope in its own body.
+# A test that wraps `SQL.query!` in a scope is CORRECT and is not flagged — the
+# four RLS isolation pairs do exactly that, because there the scope is the
+# precondition and the policy is the subject.
+#
+# ⚠️ BUILT ON A MEASURED BASE RATE, because three narrower proposals in this
+# area were refuted by measurement first. Measured 2026-10-22 across
+# apps/core/test: 22 `Scope.with_user` sites in tests, of which **0** enclose a
+# call whose own body establishes a scope. Zero legitimate instances is what
+# makes this a gate rather than a nuisance — had it been non-zero it would have
+# needed reasons per exemption, and this repo has eight entries' worth of
+# evidence that reasons beside a verdict rot unread.
+MIN_SCOPE_ESTABLISHERS=20
+# ⚠️ RAISE-ONLY SEAM, so the suite can drive the floor's refusal rather than
+# assert that its message exists in the source. A floor can only be moved UP by
+# this, which makes the gate stricter — the one direction that cannot be a
+# bypass. `$(( ))` on a non-numeric value yields 0, and `-gt` then keeps the
+# declared value, so a malformed override cannot lower it either.
+if [[ -n "${RLS_SCOPE_MIN_ESTABLISHERS:-}" ]] \
+   && (( $(( RLS_SCOPE_MIN_ESTABLISHERS + 0 )) > MIN_SCOPE_ESTABLISHERS )); then
+    MIN_SCOPE_ESTABLISHERS="$(( RLS_SCOPE_MIN_ESTABLISHERS + 0 ))"
+fi
+
+if ! python3 - "$MIN_SCOPE_ESTABLISHERS" <<'NESTED'
+import os
+import re
+import pathlib
+import sys
+
+floor = int(sys.argv[1])
+ESTABLISH = re.compile(r"Scope\.(with_user|set_and_run|multi_step)\b")
+DEF = re.compile(r"^\s*(?:defp?)\s+([a-z_][a-zA-Z0-9_!?]*)", re.M)
+
+# A function establishes a scope only if its OWN BODY does. Module-level
+# matching is what makes the rest of this gate module-granular, and repeating
+# that mistake here would flag every call into a scoping context.
+establishers = {}
+for path in pathlib.Path("apps/core/lib").rglob("*.ex"):
+    src = path.read_text(encoding="utf-8")
+    defs = [(m.start(), m.group(1)) for m in DEF.finditer(src)]
+    for i, (pos, name) in enumerate(defs):
+        end = defs[i + 1][0] if i + 1 < len(defs) else len(src)
+        if ESTABLISH.search(src[pos:end]):
+            establishers.setdefault(name, set()).add(path.name)
+
+# ⚠️ Anti-vacuity, and it is the whole basis of trusting a clean result. If the
+# `def` or `Scope.` patterns stopped matching, this set would be empty, every
+# test would look innocent, and "no test supplies its subject's scope" would be
+# a sentence with no content — the exact shape of a gate attesting a corpus it
+# never read.
+if len(establishers) < floor:
+    print(
+        f"    REFUSING: found only {len(establishers)} scope-establishing function(s); "
+        f"expected at least {floor}.",
+        file=sys.stderr,
+    )
+    print(
+        "    With an empty set every test reads as innocent, so a clean result here would",
+        file=sys.stderr,
+    )
+    print(
+        "    mean nothing was read rather than nothing is wrong. Check the def/Scope patterns.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+# ⚠️ ADDITIVE ONLY, and that is the point of the design rather than a detail.
+# The suite driving this gate needs to plant the forbidden shape somewhere, and
+# an override that REPLACED the scan root could be pointed at an empty
+# directory — which would report "no test wraps a scope-establishing call" over
+# a corpus of nothing, the precise vacuity the floor above exists to refuse. An
+# extra directory can only ever add offenders, never hide one.
+roots = [pathlib.Path("apps/core/test")]
+extra = os.environ.get("RLS_SCOPE_EXTRA_TEST_DIR", "").strip()
+if extra:
+    roots.append(pathlib.Path(extra))
+
+offenders = []
+for path in sorted(p for root in roots for p in root.rglob("*.exs")):
+    src = path.read_text(encoding="utf-8")
+    for m in re.finditer(r"Scope\.with_user\(", src):
+        line = src[: m.start()].count("\n") + 1
+        # A window rather than a parse: the enclosed call sits within a few
+        # lines of the wrapper in every real instance, and a brace-matching
+        # parse of Elixir here would be more machinery than the claim needs.
+        window = "\n".join(src[m.start():].split("\n")[:14])
+        called = sorted(
+            {
+                name
+                for name in re.findall(r"\b([a-z_][a-zA-Z0-9_!?]*)\(", window)
+                if name in establishers
+            }
+        )
+        if called:
+            offenders.append((path, line, called))
+
+if offenders:
+    print(f"    FORBIDDEN {len(offenders)} test(s) supply a scope their subject must establish:", file=sys.stderr)
+    for path, line, called in offenders:
+        where = ", ".join(sorted(set().union(*(establishers[c] for c in called))))
+        print(f"      {path}:{line} wraps {', '.join(called)} ({where})", file=sys.stderr)
+    print("    Each of those functions establishes a scope in its OWN body, so an outer", file=sys.stderr)
+    print("    Scope.with_user makes the test supply the precondition the subject is", file=sys.stderr)
+    print("    responsible for supplying — and the case stays green with the subject's", file=sys.stderr)
+    print("    scoping removed entirely. Drop the wrapper and let the subject do its job.", file=sys.stderr)
+    print("    Wrapping a raw query (SQL.query!) is different and is not flagged: there the", file=sys.stderr)
+    print("    scope is the precondition and the policy is the subject.", file=sys.stderr)
+    raise SystemExit(1)
+
+# ⚠️ THE FLOOR IS PRINTED ON SUCCESS, not only in the refusal. Without it the
+# raise-only property of the override above is UNOBSERVABLE: a version that
+# allowed the floor to be lowered behaves identically on a corpus that clears
+# both values, so no run could tell the two apart. MEASURED — removing the
+# raise-only guard entirely left the suite driving it fully green. Reporting
+# the value in use is what turns a structural claim into a checkable one.
+print(
+    f"    ok      no test wraps a scope-establishing call "
+    f"({len(establishers)} such functions known, floor {floor})"
+)
+NESTED
+then
+    fail=1
+fi
+
 if (( fail )); then
     echo "FAIL: a query against a row-level-secured table has no scope." >&2
     echo "      Establish one with Stacks.Scope.with_user/2 (or set!/1 inside a transaction" >&2
