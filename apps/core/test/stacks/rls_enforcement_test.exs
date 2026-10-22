@@ -325,35 +325,56 @@ defmodule Stacks.RlsEnforcementTest do
     # ⚠️ And the route NOT taken, recorded so nobody re-proposes it: inspecting
     # `EXPLAIN` output for policy quals asserts the PLAN rather than the outcome
     # and breaks on planner changes.
+    # Each clause returns the query plus how to name its subject, because the
+    # subject is not always a user — see the placements clause for why that
+    # distinction is load-bearing rather than tidiness.
+    defp by_user_id(user), do: user.id
+
     defp seed_for("bookshelves", owner, other) do
       insert(:bookshelf, user: owner, name: "library")
       insert(:bookshelf, user: other, name: "library")
-      {"SELECT count(*) FROM op.bookshelves WHERE user_id = $1", []}
+      {"SELECT count(*) FROM op.bookshelves WHERE user_id = $1", &by_user_id/1}
     end
 
+    # ⛔ NO JOIN, AND THE SUBJECT IS A BOOKSHELF RATHER THAN A USER. The first
+    # version of this pair joined `op.bookshelves` and filtered on
+    # `b.user_id`, which made it UNABLE TO DISCRIMINATE THE POLICY IT NAMES:
+    # the joined row is itself subject to `bookshelves_owner`, so the
+    # other-sees-none half returned 0 because the other user's BOOKSHELF was
+    # hidden — whatever `bookshelf_placements_owner` happened to say. Widening
+    # the placements policy to `USING (true)` left the pair green.
+    #
+    # ⚠️ The per-table red drive did not catch it, and that is the instructive
+    # part: it was run on `user_blocks`, which has no join, so the one table
+    # whose query reached through a second secured table was the one table the
+    # probe could not speak to. A probe on a shared assertion proves the
+    # assertion, not every arrangement feeding it.
+    #
+    # Placements carry no `user_id`, so `bookshelf_id` is the column the policy
+    # itself discriminates on — which is why naming the subject that way makes
+    # the query depend on the placements policy and nothing else.
     defp seed_for("bookshelf_placements", owner, other) do
-      for u <- [owner, other] do
-        shelf = insert(:bookshelf, user: u, name: "library")
-        insert(:placement, bookshelf: shelf, book: insert(:book))
-      end
+      shelves =
+        for u <- [owner, other], into: %{} do
+          shelf = insert(:bookshelf, user: u, name: "library")
+          insert(:placement, bookshelf: shelf, book: insert(:book))
+          {u.id, shelf.id}
+        end
 
-      {"""
-       SELECT count(*) FROM op.bookshelf_placements p
-       JOIN op.bookshelves b ON b.id = p.bookshelf_id
-       WHERE b.user_id = $1
-       """, []}
+      {"SELECT count(*) FROM op.bookshelf_placements WHERE bookshelf_id = $1",
+       fn user -> Map.fetch!(shelves, user.id) end}
     end
 
     defp seed_for("user_blocks", owner, other) do
       insert(:user_block, blocker: owner, blocked: insert(:user))
       insert(:user_block, blocker: other, blocked: insert(:user))
-      {"SELECT count(*) FROM op.user_blocks WHERE blocker_id = $1", []}
+      {"SELECT count(*) FROM op.user_blocks WHERE blocker_id = $1", &by_user_id/1}
     end
 
     defp seed_for("visibility_grants", owner, other) do
       insert(:visibility_grant, granted_by: owner, granted_to: insert(:user))
       insert(:visibility_grant, granted_by: other, granted_to: insert(:user))
-      {"SELECT count(*) FROM op.visibility_grants WHERE granted_by_id = $1", []}
+      {"SELECT count(*) FROM op.visibility_grants WHERE granted_by_id = $1", &by_user_id/1}
     end
 
     for table <- @secured_tables do
@@ -362,12 +383,12 @@ defmodule Stacks.RlsEnforcementTest do
       test "op.#{table}: the owner sees their own row and NOT another user's" do
         owner = insert(:user)
         other = insert(:user)
-        {sql, _} = seed_for(@table, owner, other)
+        {sql, subject_id} = seed_for(@table, owner, other)
 
         count_as = fn scoped_user, subject ->
           Scope.with_user(scoped_user.id, fn ->
             AppRole.as_app_role(fn ->
-              %{rows: [[n]]} = SQL.query!(Repo, sql, [Ecto.UUID.dump!(subject.id)])
+              %{rows: [[n]]} = SQL.query!(Repo, sql, [Ecto.UUID.dump!(subject_id.(subject))])
               n
             end)
           end)
