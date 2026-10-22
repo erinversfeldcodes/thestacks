@@ -442,4 +442,104 @@ assert_contains "$OUT" "elixir review is STALE" "the gate still ran and still re
 assert_not_contains "$OUT" "with no provenance" \
     "the shorter key name satisfies the requirement, so existing rows do not all turn red at once"
 
+# ── 7. a preview DRIVE goes stale the same way a review does ────────────────
+#
+# ⛔ A wave whose verification predates its own changes is not verified. One
+# wave was marked complete on a preview deploy that predated every row-level-
+# security fix in it, plus 4122 passing tests run as a superuser that bypasses
+# the policies entirely; five stack reviews then found 6 P0 and 20 P1 in that
+# wave's own work, none of which any local instrument could see.
+#
+# ⚠️ THREE STATES, and only a FALSE claim fails. A stale drive record claims
+# something checkable and wrong, so it is a violation. NO record is not a claim
+# at all — it is reported on every run but does not fail, because making absence
+# fatal would turn every wave closed before this mechanism existed permanently
+# red, which is how a useful check gets deleted.
+
+# A sandbox whose wave is COMPLETE (so the drive check runs at all) with a
+# satisfied elixir review (so the drive finding is the only one in play).
+drive_sandbox() {
+    local name="$1" drive_json="$2" dir sha
+    dir="$(new_sandbox "$name" '{"elixir": {"verdict": "LGTM", "reviewed_at_sha": "REVIEW_SHA", "reviewed_at_sha_provenance": "quoted from the reply"}}')"
+    echo 'defmodule Probe do' > "$dir/apps/core/lib/probe.ex"
+    git -C "$dir" add -A
+    git -C "$dir" commit -qm "running code the drive and review both cover"
+    sha="$(git -C "$dir" rev-parse HEAD)"
+    python3 - "$dir/plans/probe-campaign-state.json" "$sha" "$drive_json" <<'DRIVEFIX'
+import json, sys
+
+path, sha, drive = sys.argv[1], sys.argv[2], sys.argv[3]
+state = json.loads(open(path).read().replace("REVIEW_SHA", sha))
+state["waves"]["probe"]["status"] = "complete"
+if drive != "NONE":
+    state["waves"]["probe"]["preview_drive"] = json.loads(drive.replace("DRIVE_SHA", sha))
+json.dump(state, open(path, "w"), indent=2)
+DRIVEFIX
+    printf '%s' "$dir"
+}
+
+test_case "a_complete_wave_with_no_drive_is_REPORTED_not_failed" \
+    "absence is a gap, not a false claim — and making it fatal is how a check gets deleted"
+DIR="$(drive_sandbox drive_absent NONE)"
+run_gate "$DIR"
+assert_contains "$OUT" "no preview drive recorded" "the gap is stated on every run"
+assert_contains "$OUT" "superuser test role bypasses" \
+    "and says why local green is not sufficient evidence"
+assert_not_contains "$OUT" "preview drive is STALE" \
+    "but an absent record is not reported as a stale one"
+
+test_case "a_current_drive_with_provenance_satisfies" \
+    "the green half — this must not fire on everything"
+DIR="$(drive_sandbox drive_current '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "read off the deployed stack"}')"
+run_gate "$DIR"
+assert_contains "$OUT" "drive current as of" "a drive covering the current tree is reported as current"
+assert_not_contains "$OUT" "preview drive is STALE" "and not as stale"
+assert_not_contains "$OUT" "with no provenance" "and not as unprovenanced"
+
+test_case "a_drive_predating_running_code_is_STALE" \
+    "a drive that never saw this code cannot be its verification"
+DIR="$(drive_sandbox drive_stale '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "read off the deployed stack"}')"
+echo 'defmodule Later do' > "$DIR/apps/core/lib/later.ex"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "running code that landed after the drive"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a stale drive is a violation, not a warning"
+assert_contains "$OUT" "preview drive is STALE" "the condition is named"
+assert_contains "$OUT" "apps/core/lib/later.ex" \
+    "and so is the file the drive never saw — a count alone is the thing that gets ignored"
+
+# ⚠️ THE DISCRIMINATING HALF. A drive must be spent by a change to code that
+# RUNS, not by a change to a gate or a test. Without this case the check passes
+# while firing on every wave that touched `test/platform`, which would make it
+# useless and then removed.
+test_case "a_test_only_change_does_not_spend_a_drive" \
+    "a drive is evidence about running behaviour, so only running code spends it"
+DIR="$(drive_sandbox drive_tests_only '{"at_sha": "DRIVE_SHA", "at_sha_provenance": "read off the deployed stack"}')"
+mkdir -p "$DIR/test/platform" "$DIR/scripts"
+echo 'echo hi' > "$DIR/test/platform/some_suite.sh"
+echo 'echo hi' > "$DIR/scripts/some-gate.sh"
+git -C "$DIR" add -A
+git -C "$DIR" commit -qm "a gate and a suite, no running code"
+run_gate "$DIR"
+assert_contains "$OUT" "drive current as of" \
+    "a scripts/test-only change leaves the drive current — it changed nothing a browser saw"
+assert_not_contains "$OUT" "preview drive is STALE" "so it must not be reported stale"
+
+test_case "a_drive_sha_must_say_where_it_came_from" \
+    "ancestry cannot prove anyone actually drove it"
+DIR="$(drive_sandbox drive_unprovenanced '{"at_sha": "DRIVE_SHA"}')"
+run_gate "$DIR"
+assert_exit_nonzero "$RC" "a drive sha with no provenance is a violation"
+assert_contains "$OUT" "with no provenance" "the refusal names the condition"
+assert_contains "$OUT" "at_sha_provenance" "and the field that satisfies it"
+
+test_case "a_recorded_non_drive_is_accepted_with_its_reason" \
+    "a wave with no user-facing surface is a legitimate row, not a hole"
+DIR="$(drive_sandbox drive_declined '{"not_driven": "no user-facing surface - gates and tracking only"}')"
+run_gate "$DIR"
+assert_contains "$OUT" "not driven, by record" "the recorded decision is surfaced"
+assert_contains "$OUT" "no user-facing surface" "together with the reason given"
+assert_not_contains "$OUT" "no preview drive recorded" \
+    "and it is not also reported as an unexplained gap"
+
 summarise

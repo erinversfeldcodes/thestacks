@@ -148,6 +148,44 @@ def staff_reviewed(path):
     return bool(STAFF_REVIEW.search(open(path, encoding="utf-8").read()))
 
 violations, actionable, informal = [], [], []
+# ⚠️ Defined HERE rather than beside the other path tables because the wave
+# roll-up below is their FIRST use, and this file executes top to bottom. The
+# drive check read as working when it was only reaching its no-record branch;
+# the branches that call git died on a NameError the moment a wave actually
+# had a drive to check.
+# ⛔ What invalidates a PREVIEW DRIVE, which is a different population from what
+# invalidates a review. A drive is evidence about running behaviour, so it is
+# spent by a change to code that runs — not by a change to a gate, a test or a
+# workflow. Scripts and tests are deliberately absent: a wave that only touched
+# `test/platform` has not invalidated anything a browser saw.
+DRIVE_PATHS = (
+    "apps/core/lib",
+    "apps/core/priv/repo",
+    "frontend/src",
+    "frontend/css",
+    "proto/",
+    "apps/vision/app",
+    "apps/scraper/src",
+    "dbt/models",
+)
+
+
+def _git(args, timeout=30):
+    """Run a git command, returning its stdout lines, or None on any failure."""
+    import subprocess
+
+    try:
+        done = subprocess.run(
+            ["git"] + args, capture_output=True, text=True, timeout=timeout
+        )
+    except Exception:
+        return None
+    if done.returncode != 0:
+        return None
+    return [line for line in done.stdout.splitlines() if line.strip()]
+
+
+
 waves = state.get("waves") or {}
 
 # ⛔ ANTI-VACUITY. A missing key, a renamed key and an explicitly empty `{}` all
@@ -210,6 +248,81 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
 
     mark = "OK " if wstatus in DONE and not not_done else "-- "
     print(f"{mark}Wave {wname}: {wave.get('title','')}  [{wave.get('status','unknown')}]")
+
+    # ⛔ A WAVE WHOSE VERIFICATION PREDATES ITS OWN CHANGES IS NOT VERIFIED, and
+    # that is not hypothetical. One wave was marked complete on the strength of a
+    # preview deploy that predated every row-level-security fix in it, plus 4122
+    # passing tests run as a superuser that bypasses the policies entirely. Five
+    # stack reviews then found 6 P0 and 20 P1 in that wave's own work, none of
+    # which any local instrument could see. "The preview was green" decays the
+    # moment anything lands after it.
+    #
+    # This is the review-staleness mechanism one artifact over, and it reuses
+    # the same three signals for the same reasons: git must be able to READ the
+    # sha, the sha must be an ANCESTOR (or the file list a diff produces is
+    # meaningless), and it must carry PROVENANCE (because neither of the first
+    # two can prove anyone actually drove it).
+    #
+    # ⚠️ THREE STATES, and only a FALSE claim is a violation. A wave with a
+    # drive record that is stale is claiming something checkable and wrong, so
+    # it fails. A wave with NO record is not making a claim at all — it is a
+    # gap, and it is reported on every run rather than either hidden or made
+    # fatal. Making absence fatal would turn every wave closed before this
+    # mechanism existed permanently red, which is how a useful check gets
+    # deleted; hiding it is the presence-only blindness this guard already has
+    # a scar from.
+    if wstatus in DONE:
+        drive = wave.get("preview_drive") or {}
+        if not isinstance(drive, dict):
+            drive = {}
+        driven_at = drive.get("at_sha") or drive.get("driven_at_sha")
+
+        if not drive:
+            print(
+                f"    ⚠️ no preview drive recorded — this wave's completion rests on local "
+                f"instruments only, and a superuser test role bypasses row-level security"
+            )
+        elif drive.get("not_driven"):
+            print(f"    ⚠️ not driven, by record: {drive['not_driven']}")
+        elif not driven_at:
+            violations.append(
+                f"  WAVE {wname}: a preview drive is recorded with no sha, so whether it covers "
+                f"this wave's own changes is UNKNOWN — not satisfied. Record the commit the "
+                f"drive actually ran against."
+            )
+        else:
+            since = _git(["diff", "--name-only", f"{driven_at}..HEAD"])
+            if since is None:
+                violations.append(
+                    f"  WAVE {wname}: the preview drive names {driven_at[:12]} and git cannot "
+                    f"read it, so its currency is UNKNOWN — not satisfied."
+                )
+            elif _git(["merge-base", "--is-ancestor", driven_at, "HEAD"]) is None:
+                violations.append(
+                    f"  WAVE {wname}: the preview drive names {driven_at[:12]}, which is NOT an "
+                    f"ancestor of HEAD — so it is not a commit this branch's work was driven at, "
+                    f"and the file list a diff against it produces is meaningless."
+                )
+            else:
+                if not (drive.get("at_sha_provenance") or drive.get("sha_provenance")):
+                    violations.append(
+                        f"  WAVE {wname}: the preview drive names {driven_at[:12]} with no "
+                        f"provenance. Add `at_sha_provenance` saying where it came from — read "
+                        f"off the deployed stack, or reconstructed and how. Ancestry cannot see "
+                        f"a sha nobody drove, because such a sha is a real ancestor."
+                    )
+                stale = [f for f in since if any(f.startswith(p) for p in DRIVE_PATHS)]
+                if stale:
+                    shown = ", ".join(sorted(stale)[:3])
+                    more = f" (+{len(stale) - 3} more)" if len(stale) > 3 else ""
+                    violations.append(
+                        f"  WAVE {wname}: the preview drive is STALE — {len(stale)} file(s) of "
+                        f"RUNNING code changed since it drove {driven_at[:12]}: {shown}{more}. "
+                        f"Re-drive on a preview and re-record the sha, or the wave's completion "
+                        f"rests on a drive that never saw this code."
+                    )
+                else:
+                    print(f"    drive current as of {driven_at[:12]}")
 
     for iname in sorted(witems):
         item = witems[iname]
@@ -310,22 +423,6 @@ STACK_PATHS = {
     "python": ("apps/vision",),
     "rust": ("apps/scraper",),
 }
-
-
-def _git(args, timeout=30):
-    """Run a git command, returning its stdout lines, or None on any failure."""
-    import subprocess
-
-    try:
-        done = subprocess.run(
-            ["git"] + args, capture_output=True, text=True, timeout=timeout
-        )
-    except Exception:
-        return None
-    if done.returncode != 0:
-        return None
-    return [line for line in done.stdout.splitlines() if line.strip()]
-
 
 def _stacks_for(changed):
     return {
