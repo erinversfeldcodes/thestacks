@@ -180,13 +180,17 @@ contractCase outcome =
                 -- "Saving…" let the minimal wrong fix through — settle the flag,
                 -- surface nothing — which leaves a re-enabled button and a save
                 -- that silently vanished.
-                |> ProgramTest.ensureViewHas
-                    (if ProgressSaveContract.reportsAnError outcome then
-                        [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
+                -- ⛔ The branch is on the ASSERTION, not on the selector list.
+                -- `ensureViewHas []` is a no-op, so putting the branch on the
+                -- list made the `Saved` case claim nothing about the error's
+                -- ABSENCE — a host that rendered `progress-error` on success
+                -- would have passed.
+                |> (if ProgressSaveContract.reportsAnError outcome then
+                        ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
 
-                     else
-                        []
-                    )
+                    else
+                        ProgramTest.ensureViewHasNot [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
+                   )
                 |> ProgramTest.expectModel
                     (\model -> Expect.equal (expectedOut outcome) model.lastOut)
 
