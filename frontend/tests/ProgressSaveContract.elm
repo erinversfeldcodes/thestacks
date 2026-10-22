@@ -1,7 +1,7 @@
-module ProgressSaveContract exposing (Outcome(..), label, outcomes, reportsAnError, response)
+module ProgressSaveContract exposing (Classification(..), ExpectedOut(..), classifications, expectedOut, label, reportsAnError, response)
 
-{-| The outcomes a reading-progress save can end in, written once and driven
-against every host that owns a progress card.
+{-| How a reading-progress save is CLASSIFIED, written once and driven against
+every host that owns a progress card.
 
 ⛔ THIS EXISTS BECAUSE THE TWO HOSTS WERE WRONG IDENTICALLY, NOT DIFFERENTLY.
 
@@ -22,63 +22,84 @@ list of CASES, written against intended behaviour rather than against either
 host's current code, with each host driving the list through its own UI.
 
 ⚠️ Adding a variant here adds a case to every host automatically, because each
-host maps over `outcomes` rather than listing them. That is deliberate: a
+host maps over `classifications` rather than listing them. That is deliberate: a
 behaviour cannot be added to one host and forgotten in the other, and `label`
 and `response` below stop compiling until the new variant is described.
 
+
+## This is a CLASSIFICATION, not the outcome space
+
+⛔ The three constructors below are the branches a host's save handler
+DISCRIMINATES, and they were previously named and documented as the outcomes a
+save can end in. That was wrong, and the real outcome space is FIVE shapes:
+`Api.progressResponseToResult` also produces `ProgressValidationFailed` for a
+422 carrying `{errors:…}`, and `BadBody` for a **200 whose body does not
+decode**.
+
+⚠️ That last one is the shape that breaks an outcome-space reading: it is a 200
+for which an error must appear on screen, so `Succeeded`/`Refused` has nowhere
+to put it. And it is driven by no test anywhere — every success path in both
+hosts passes a well-formed body.
+
+⚖️ Deliberately NOT expanded to five. Partitioning by classification branch is
+what made this table discriminate so cleanly on the real defect, and adding two
+rarely-hit shapes would dilute the cases that caught it. The honest fix is the
+name: this says which branches exist, not which outcomes do.
+
 -}
 
+import Api
 import Dict
 import Http
 
 
-{-| What came back from `PUT /api/placements/:id/progress`.
+{-| The branches a progress-save handler discriminates.
 
 `SessionRejected` is the case that was missing. It is not a variant of
-`ServerRefused`: `Api.isUnauthorized` is 401-only and routes to the deferred
+`Refused`: `Api.isUnauthorized` is 401-only and routes to the deferred
 session-expiry net, which may ADOPT a token another tab refreshed and cancel the
 logout — so the page is still on screen afterwards, which is precisely when a
 stuck in-flight flag becomes permanent rather than invisible behind a redirect.
 
 -}
-type Outcome
-    = Saved
-    | ServerRefused
+type Classification
+    = Succeeded
+    | Refused
     | SessionRejected
 
 
-{-| Every outcome, in the order a host should report them.
+{-| Every classification, in the order a host should report them.
 -}
-outcomes : List Outcome
-outcomes =
-    [ Saved, ServerRefused, SessionRejected ]
+classifications : List Classification
+classifications =
+    [ Succeeded, Refused, SessionRejected ]
 
 
-{-| The test name fragment for an outcome.
+{-| The test name fragment for a classification.
 -}
-label : Outcome -> String
-label outcome =
-    case outcome of
-        Saved ->
+label : Classification -> String
+label classification =
+    case classification of
+        Succeeded ->
             "a save the server accepted"
 
-        ServerRefused ->
+        Refused ->
             "a save the server refused with a 500"
 
         SessionRejected ->
             "a save refused with a 401 because the session expired"
 
 
-{-| The HTTP response for an outcome.
+{-| The HTTP response for a classification.
 
 `savedBody` is the host's own success payload, because each host's placement has
 a different id and the response has to decode against it.
 
 -}
-response : String -> String -> Outcome -> Http.Response String
-response endpoint savedBody outcome =
-    case outcome of
-        Saved ->
+response : String -> String -> Classification -> Http.Response String
+response endpoint savedBody classification =
+    case classification of
+        Succeeded ->
             Http.GoodStatus_
                 { url = endpoint
                 , statusCode = 200
@@ -87,7 +108,7 @@ response endpoint savedBody outcome =
                 }
                 savedBody
 
-        ServerRefused ->
+        Refused ->
             Http.BadStatus_
                 { url = endpoint
                 , statusCode = 500
@@ -106,7 +127,7 @@ response endpoint savedBody outcome =
                 "{\"error\":\"unauthorized\"}"
 
 
-{-| Whether the host must have an error on screen after this outcome.
+{-| Whether the host must have an error on screen after this classification.
 
 ⛔ "Not stuck" and "says why" are different claims, and asserting only the first
 let the minimal wrong fix through: settle the in-flight flag, surface nothing,
@@ -117,20 +138,68 @@ Both hosts render their failure through a `progress-error` test id — `ReadingP
 via `viewSaveState`, `BookDetail` via `viewProgressSaveState` — so this is a
 claim a shared table can make about either of them.
 
-⚠️ `SessionRejected` reports an error like any other failure, deliberately. The
-save did not happen, and the session hand-off may be CANCELLED a tick later when
-another tab's token is adopted — so a reader who stays on the page must be told,
-not left to infer it from a button that went quiet.
+⛔ DERIVED FROM `Api`, NOT WRITTEN DOWN. This used to be a hand-maintained
+`Classification -> Bool` table, and it was the one field here encoding a
+JUDGEMENT rather than data. The failure mode is specific: when such a judgement
+is wrong for ONE host the assertion fails loudly for whichever host is right,
+but when it is wrong and ALL hosts agree with it, nothing fails — and
+convergence across hosts is the exact class this table exists to catch. So the
+table could catch hosts disagreeing with each other and could never catch
+itself.
+
+⚖️ Deriving it makes the claim behavioural: _the host surfaces an error exactly
+when `Api` says the response is an error_. There is nothing to keep in sync, and
+a classification added later gets the right answer without anyone deciding —
+including the undecodable 200 described above, which a hand-written table would
+have got wrong, because it is a 200 that must report an error.
+
+⚠️ `SessionRejected` reports an error like any other failure, and that now falls
+out of the derivation rather than being asserted: the save did not happen, and
+the session hand-off may be CANCELLED a tick later when another tab's token is
+adopted — so a reader who stays on the page must be told, not left to infer it
+from a button that went quiet.
 
 -}
-reportsAnError : Outcome -> Bool
-reportsAnError outcome =
-    case outcome of
-        Saved ->
+reportsAnError : String -> String -> Classification -> Bool
+reportsAnError endpoint savedBody classification =
+    case Api.progressResponseToResult (response endpoint savedBody classification) of
+        Err _ ->
+            True
+
+        Ok _ ->
             False
 
-        ServerRefused ->
-            True
+
+{-| The out-message a host must emit, named independently of any host's type.
+
+⛔ THE HOST-INDEPENDENT EXPECTATION BELONGS HERE, and leaving it per-host was a
+real hole rather than a tidiness point. Each host used to carry its own
+`expectedOut : Classification -> OutMsg`, so the table fixed which CASES exist
+while each host decided what it owed in them — and a host that stopped emitting
+its session-expiry message could be made green by editing its own fixture, with
+the compiler's blessing. `SessionRejected` producing a session expiry is not a
+per-page judgement.
+
+⚠️ `OutMsg` is genuinely per-host (`BookDetail.OutMsg` and
+`ReadingPile.OutMsg` are different types), so what is shared is the DECISION and
+what stays local is only the spelling: each host maps these two constructors to
+its own. That is a one-line translation the compiler checks exhaustively, rather
+than a three-case fixture it can quietly disagree with.
+
+-}
+type ExpectedOut
+    = NoOutMsg
+    | SessionExpiryOut
+
+
+expectedOut : Classification -> ExpectedOut
+expectedOut classification =
+    case classification of
+        Succeeded ->
+            NoOutMsg
+
+        Refused ->
+            NoOutMsg
 
         SessionRejected ->
-            True
+            SessionExpiryOut

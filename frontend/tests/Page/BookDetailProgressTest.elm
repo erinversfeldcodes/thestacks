@@ -126,43 +126,48 @@ suite =
         ]
 
 
-{-| The shared outcome table from `ProgressSaveContract`, driven through this
+{-| The shared CLASSIFICATION table from `ProgressSaveContract`, driven through this
 host's own UI. The Reading Pile runs the same list.
 
-⛔ Written as a `List.map` over `ProgressSaveContract.outcomes` rather than as
-hand-listed cases, so a new outcome cannot be added to one host and forgotten in
+⛔ Written as a `List.map` over `ProgressSaveContract.classifications` rather than as
+hand-listed cases, so a new classification cannot be added to one host and forgotten in
 the other — and `expectedOut` below stops compiling until this host says what
-the new outcome should produce.
+the new classification should produce.
 
 -}
 progressSaveContract : Test
 progressSaveContract =
-    describe "progress_save_contract: every terminal outcome clears the in-flight flag"
-        (List.map contractCase ProgressSaveContract.outcomes)
+    describe "progress_save_contract: every classification clears the in-flight flag"
+        (List.map contractCase ProgressSaveContract.classifications)
 
 
-{-| What this host must emit for each outcome.
+{-| This host's spelling of the shared out-message decision.
 
-Exhaustive on purpose: this is the per-host half of the contract, and the
-compiler is what keeps it complete.
+⛔ WHAT CHANGED, AND WHY IT MATTERS. This used to be
+`expectedOut : Classification -> BookDetail.OutMsg`, a three-case fixture owned by this
+host — so the shared table fixed which CASES exist while each host decided what
+it owed in them. A host that stopped emitting its session-expiry message could
+therefore be made green by editing this function, with the compiler's blessing.
+`SessionRejected` producing a session expiry is not a per-page judgement.
+
+The DECISION now lives in `ProgressSaveContract.expectedOut`; what remains here
+is only the translation into this host's own `OutMsg` type, which is genuinely
+per-host. The compiler still checks it exhaustively.
 
 -}
-expectedOut : ProgressSaveContract.Outcome -> BookDetail.OutMsg
-expectedOut outcome =
-    case outcome of
-        ProgressSaveContract.Saved ->
+toOutMsg : ProgressSaveContract.ExpectedOut -> BookDetail.OutMsg
+toOutMsg expected =
+    case expected of
+        ProgressSaveContract.NoOutMsg ->
             BookDetail.NoOut
 
-        ProgressSaveContract.ServerRefused ->
-            BookDetail.NoOut
-
-        ProgressSaveContract.SessionRejected ->
+        ProgressSaveContract.SessionExpiryOut ->
             BookDetail.SessionExpired
 
 
-contractCase : ProgressSaveContract.Outcome -> Test
-contractCase outcome =
-    test (ProgressSaveContract.label outcome) <|
+contractCase : ProgressSaveContract.Classification -> Test
+contractCase classification =
+    test (ProgressSaveContract.label classification) <|
         \() ->
             ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
                 |> ProgramTest.simulateHttpResponse "GET"
@@ -171,7 +176,7 @@ contractCase outcome =
                 |> openAndSaveWithOut
                 |> ProgramTest.simulateHttpResponse "PUT"
                     progressEndpoint
-                    (ProgressSaveContract.response progressEndpoint completedBody outcome)
+                    (ProgressSaveContract.response progressEndpoint completedBody classification)
                 -- The in-flight flag, asserted through the button a reader sees.
                 -- A host that leaves it set shows "Saving…" with Save disabled
                 -- and no response ever coming.
@@ -185,14 +190,18 @@ contractCase outcome =
                 -- list made the `Saved` case claim nothing about the error's
                 -- ABSENCE — a host that rendered `progress-error` on success
                 -- would have passed.
-                |> (if ProgressSaveContract.reportsAnError outcome then
+                |> (if ProgressSaveContract.reportsAnError progressEndpoint completedBody classification then
                         ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
 
                     else
                         ProgramTest.ensureViewHasNot [ Selector.attribute (Html.Attributes.attribute "data-testid" "progress-error") ]
                    )
                 |> ProgramTest.expectModel
-                    (\model -> Expect.equal (expectedOut outcome) model.lastOut)
+                    (\model ->
+                        Expect.equal
+                            (toOutMsg (ProgressSaveContract.expectedOut classification))
+                            model.lastOut
+                    )
 
 
 {-| `openAndSave`, against the out-recording harness.
