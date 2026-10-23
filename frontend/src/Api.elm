@@ -27,7 +27,9 @@ module Api exposing
     , ConfirmError(..)
     , ConfirmOutcome(..)
     , ConfirmResponse
+    , Credential(..)
     , Deanonymisation
+    , Destination(..)
     , GroupMember
     , ImportError(..)
     , ImportRow
@@ -229,6 +231,7 @@ module Api exposing
     , reorderShelvesRequest
     , requestExport
     , requestExportRequest
+    , requestHeaders
     , requestListingRemoval
     , resendConfirmationRequest
     , resetPassword
@@ -309,6 +312,86 @@ import Url.Builder
 baseUrl : String
 baseUrl =
     ""
+
+
+{-| WHICH credential a request carries, named rather than implied.
+
+⛔ A NAMED CONSTRUCTOR AND NOT A `Bool`, AND THE REASON IS A GATE. Read the chain
+before simplifying this:
+
+1.  `scripts/check-session-expiry-coverage.sh` decides which endpoints are
+    mandatorily authenticated by **matching a name** in each definition's body.
+2.  A name is only matchable if it **appears at the call site** — the gate reads
+    this file as text, so whatever carries the distinction has to be written out
+    where the request is built.
+3.  `True` and `False` have **no name to match**, and a call site passing a
+    variable or a record field has no literal at all. So the first such site
+    drops out of the gate's classification with nothing reporting the drop.
+
+⚠️ The failure is silent and partial: the gate does not error, it classifies
+fewer endpoints and keeps passing — and its own floor is an emptiness check, so
+it stays green down to one remaining endpoint.
+
+⚖️ `Session` is therefore the mandatory marker the gate greps for, `Optional`
+the maybe-authenticated one, and `NoCredential` the deliberate none.
+
+-}
+type Credential
+    = Session String
+    | Optional (Maybe String)
+    | NoCredential
+
+
+{-| WHERE a request is going, as a decision rather than a default.
+
+⛔ REQUIRED AT EVERY CALL SITE, so a new request cannot inherit "attach the
+credential" by saying nothing. Measured: exactly one site in this file is
+genuinely cross-origin — `putFileToR2`, a `PUT` to a presigned object-storage
+URL — and it must carry no credential.
+
+⚠️ A header-carried token has no `SameSite` equivalent: nothing in the browser
+stops a shared derivation attaching `Authorization: Bearer …` to a request at
+any origin. The cookie transport is NOT implicated — `SameSite=Lax` already
+blocks it cross-site — so this guards the token specifically.
+
+-}
+type Destination
+    = SameOrigin
+    | CrossOrigin
+
+
+{-| The one derivation of a request's headers, as DATA rather than as
+`Http.Header`.
+
+⛔ DATA, because `Http.Header` and `SimulatedEffect.Http.Header` are different
+opaque types — the same constraint `Effect.elm` records about `Http.Expect`. So
+production and the program-test harness each convert this list with a one-line
+`List.map`, and there is **one** derivation rather than two that can disagree.
+
+⚠️ A `CrossOrigin` destination yields NO credential header regardless of the
+credential, and that precedence is deliberate: the origin decision wins, so a
+caller cannot leak a token by passing `Session` to an external URL.
+
+-}
+requestHeaders : Destination -> Credential -> List ( String, String )
+requestHeaders destination credential =
+    case destination of
+        CrossOrigin ->
+            []
+
+        SameOrigin ->
+            case credential of
+                Session token ->
+                    [ ( "Authorization", "Bearer " ++ token ) ]
+
+                Optional (Just token) ->
+                    [ ( "Authorization", "Bearer " ++ token ) ]
+
+                Optional Nothing ->
+                    []
+
+                NoCredential ->
+                    []
 
 
 {-| A request's data — method, url, JSON body — apart from the
