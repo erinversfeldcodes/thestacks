@@ -11,6 +11,7 @@ defmodule StacksWeb.AuthControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Workers.EmailDeliveryJob
   alias StacksWeb.AuthController
+  alias StacksWeb.Plugs.SessionCookie
 
   defp latest_audit_row(action) do
     {:ok, %{rows: [row], columns: cols}} =
@@ -1448,6 +1449,112 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert_receive {:telemetry_event, [:stacks, :auth, :login_failure], %{count: 1},
                       %{type: :missing_params}}
+    end
+  end
+
+  # ⛔ THE COOKIE'S ISSUANCE, which was unobserved until these cases: the plug
+  # suite proves a cookie is ACCEPTED, and nothing proved one was ever SENT.
+  # Those are different claims and only the second is this controller's.
+  describe "the session cookie is issued where a session is issued" do
+    setup do
+      # The factory hashes "password123"; `password:` is not a settable field.
+      user = insert(:user)
+      %{user: user}
+    end
+
+    defp session_cookie(conn) do
+      Map.get(conn.resp_cookies, SessionCookie.cookie_name())
+    end
+
+    test "login sets it, with the session's own token as the value", %{conn: conn, user: user} do
+      conn = post(conn, "/api/auth/login", %{email: user.email, password: "password123"})
+
+      assert %{"token" => body_token} = json_response(conn, 200)
+      cookie = session_cookie(conn)
+
+      # ⚠️ The cookie must carry the SAME token the body does, not merely some
+      # token. A cookie holding a different (or stale) credential would
+      # authenticate a different session than the client believes it has.
+      assert cookie.value == body_token
+      assert cookie.http_only
+      assert cookie.secure
+      assert cookie.same_site == "Lax"
+    end
+
+    # ⛔ PHASE ONE KEEPS THE BODY TOKEN, and this asserts it rather than leaving
+    # it to be noticed when it disappears. With no operator recovery path in
+    # existence, the both-transports phase IS the recovery path, so removing the
+    # body token here would break the deploy that is meant to be the fallback.
+    test "login still returns the token in the body during phase one", %{conn: conn, user: user} do
+      conn = post(conn, "/api/auth/login", %{email: user.email, password: "password123"})
+
+      assert %{"token" => token} = json_response(conn, 200)
+      assert is_binary(token)
+    end
+
+    test "refresh re-sets it, which is what makes renewal server-side", %{conn: conn} do
+      user = insert(:user, email: "refresh-cookie@example.com", email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> post("/api/auth/refresh")
+
+      assert %{"token" => new_token} = json_response(conn, 200)
+      cookie = session_cookie(conn)
+
+      assert cookie.value == new_token
+
+      # ⚠️ The rotation half: refresh issues a NEW token, so a cookie still
+      # holding the old one would pin the browser to a credential the server has
+      # just revoked — a session that dies at the next request for no visible
+      # reason.
+      refute cookie.value == token
+    end
+
+    test "logout clears it", %{conn: conn, user: user} do
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> delete("/api/auth/logout")
+
+      assert conn.status == 204
+      cookie = session_cookie(conn)
+
+      # ⚠️ A deletion carries NO `:value` — it is `max_age: 0` plus a 1970
+      # expiry, which is stronger evidence than an empty string would be: it
+      # proves the cookie is being EXPIRED rather than merely overwritten with
+      # something falsy.
+      assert cookie.max_age == 0
+      assert cookie.universal_time == {{1970, 1, 1}, {0, 0, 0}}
+
+      # ⛔ And the attributes are repeated on the clear. A cookie is identified
+      # by name plus path plus domain, so a mismatched deletion leaves the
+      # original in place — a logout that reports 204 while the session keeps
+      # being replayed.
+      assert cookie.http_only
+      assert cookie.secure
+      assert cookie.same_site == "Lax"
+    end
+
+    # ⛔ The paths that issue NO session must set NO cookie, and this is the half
+    # the issue got wrong: it specified "set on login, register and email
+    # confirmation", but registration returns `confirmation_email_sent` and
+    # confirmation REDIRECTS. A cookie set on either would be a credential
+    # issued to someone who has not authenticated.
+    test "register sets no cookie, because it issues no session", %{conn: conn} do
+      conn =
+        post(conn, "/api/auth/register", %{
+          email: "fresh@example.com",
+          password: "password123!",
+          display_name: "Fresh Reader"
+        })
+
+      assert conn.status in [201, 422]
+      refute session_cookie(conn)
     end
   end
 end

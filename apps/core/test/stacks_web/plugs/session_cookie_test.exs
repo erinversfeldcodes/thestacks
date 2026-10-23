@@ -2,9 +2,9 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
   @moduledoc """
       The cookie transport, and the counter the bearer deletion is decided on.
 
-      ⛔ THE COUNTER IS WHAT THESE CASES EXIST FOR. #506 records that it is "the
-      load-bearing part of the rollout and the thing most likely to be dropped
-      as incidental", because without it "delete the bearer path" is a guess —
+      ⛔ THE COUNTER IS WHAT THESE CASES EXIST FOR. It is the load-bearing part
+      of the rollout and the thing most likely to be dropped as incidental,
+      because without it "delete the bearer path" is a guess —
       and this repository has a dual path that became permanent because nothing
       measured which half was live. A counter that reports the WRONG transport
       is worse than none: it would license the deletion on false evidence.

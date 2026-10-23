@@ -15,6 +15,7 @@ defmodule StacksWeb.AuthController do
   alias Stacks.Audit
   alias Stacks.Duration
   alias Stacks.Email
+  alias StacksWeb.Plugs.SessionCookie
   alias StacksWeb.ProtoJSON
 
   @doc "POST /api/auth/register — create a new user account and send confirmation email."
@@ -79,7 +80,9 @@ defmodule StacksWeb.AuthController do
           {:ok, _family} ->
             :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :login})
 
-            json(conn, %{token: token, user: ProtoJSON.user(user)})
+            conn
+            |> put_session_cookie(token)
+            |> json(%{token: token, user: ProtoJSON.user(user)})
 
           {:error, reason} ->
             Logger.error("rotate_token_family failed on login: #{inspect(reason)}")
@@ -171,7 +174,9 @@ defmodule StacksWeb.AuthController do
         :ok
     end
 
-    send_resp(conn, 204, "")
+    conn
+    |> SessionCookie.delete_session_cookie()
+    |> send_resp(204, "")
   end
 
   @doc """
@@ -334,7 +339,9 @@ defmodule StacksWeb.AuthController do
 
       :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :refresh})
 
-      json(conn, %{token: token, user: ProtoJSON.user(user)})
+      conn
+      |> put_session_cookie(token)
+      |> json(%{token: token, user: ProtoJSON.user(user)})
     end
   end
 
@@ -362,6 +369,38 @@ defmodule StacksWeb.AuthController do
   def me(conn, _params) do
     user = Guardian.Plug.current_resource(conn)
     json(conn, %{user: ProtoJSON.user(user)})
+  end
+
+  # ⛔ THE COOKIE IS SET BESIDE THE BODY TOKEN, NOT INSTEAD OF IT, for phase one.
+  #
+  # The decision record is explicit that with NO operator recovery path in
+  # existence, the rollout's first phase accepting both transports IS the
+  # recovery path. Dropping the body token here would break every client on the
+  # very deploy that is supposed to be the fallback.
+  #
+  # ⚠️ So the XSS exposure the ADR exists to close is STILL OPEN after this
+  # change. It closes when the SPA stops storing the token and the bearer path
+  # is deleted. What this buys is reload-survival and the measurement that makes
+  # that deletion decidable — both real, neither the security win.
+  #
+  # ⚠️ The cookie's lifetime is READ FROM Guardian's own `ttl` rather than
+  # restated, because a cookie that outlives the token it carries presents a
+  # credential the server will refuse — a session that looks live to the browser
+  # and is dead on arrival, which is indistinguishable from a server fault.
+  defp put_session_cookie(conn, token) do
+    SessionCookie.put_session_cookie(conn, token, session_max_age())
+  end
+
+  defp session_max_age do
+    {amount, unit} = Application.fetch_env!(:core, Stacks.Accounts.Guardian)[:ttl]
+
+    case unit do
+      :seconds -> amount
+      :minutes -> amount * 60
+      :hours -> amount * 60 * 60
+      :days -> amount * 24 * 60 * 60
+      :weeks -> amount * 7 * 24 * 60 * 60
+    end
   end
 
   defp get_ip(conn), do: StacksWeb.ClientIP.get(conn)
