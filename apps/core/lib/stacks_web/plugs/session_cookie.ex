@@ -112,9 +112,31 @@ defmodule StacksWeb.Plugs.SessionCookie do
   #   2. Adding a WebKit or Firefox E2E project re-opens the question: the
   #      localhost exemption is implemented across browsers but not
   #      identically, and every Playwright project here is Desktop Chrome.
+  # ⛔ `SameSite=Lax` IS THE CSRF MITIGATION UNTIL THE DOUBLE-SUBMIT TOKEN LANDS,
+  # so the standard question when cookie auth arrives has to be answered rather
+  # than inferred: **Lax still sends the cookie on top-level GET navigation, so
+  # is any state-changing route a GET?**
+  #
+  # MEASURED 2026-10-23 across the whole router — 69 GET routes, of which THREE
+  # reach a state-changing action:
+  #
+  #   GET /auth/confirm/:token              EmailVerification.confirm
+  #   GET /auth/confirm-email-change/:token EmailVerification.confirm_change
+  #   GET /confirmation-token               TestHelper.confirmation_token
+  #
+  # ⚖️ All three are authorised by a CAPABILITY TOKEN IN THE PATH rather than by
+  # the session, so a Lax-sent session cookie confers no authority on them — a
+  # cross-site GET to a confirmation URL succeeds or fails on whether the
+  # attacker holds the token, exactly as it did before cookies existed. The
+  # third is additionally behind the E2E-helper env gate.
+  #
+  # ⚠️ So the answer is "no state-changing route depends on the session via a
+  # GET", and it is written down because the next person to add a GET that acts
+  # on `current_resource` re-opens it — and nothing here would notice.
   @cookie_opts [http_only: true, secure: true, same_site: "Lax"]
 
   @transport_event [:stacks, :auth, :session_transport]
+  @cookie_rejected_event [:stacks, :auth, :session_cookie_rejected]
 
   @doc "The cookie's name, for the controllers that set and clear it."
   @spec cookie_name() :: String.t()
@@ -182,19 +204,77 @@ defmodule StacksWeb.Plugs.SessionCookie do
   # fatal and break the migration for every client that holds one.
   defp adopt_cookie_token(conn, opts) do
     with nil <- Guardian.Plug.current_token(conn, opts),
-         %{@cookie => token} when is_binary(token) and token != "" <- conn.cookies,
-         module <- Pipeline.fetch_module!(conn, opts),
-         key <- Pipeline.fetch_key(conn, opts),
-         verify_opts <- Guardian.Plug.resolve_secret(conn, opts),
-         {:ok, claims} <- Guardian.decode_and_verify(module, token, %{}, verify_opts) do
-      conn
-      |> Guardian.Plug.put_current_token(token, key: key)
-      |> Guardian.Plug.put_current_claims(claims, key: key)
-      |> put_private(:stacks_session_transport, :cookie)
+         %{@cookie => token} when is_binary(token) and token != "" <- conn.cookies do
+      verify_cookie(conn, opts, token)
     else
       _ -> conn
     end
   end
+
+  # ⛔ A PRESENT-BUT-UNUSABLE COOKIE IS COUNTED SEPARATELY, because the transport
+  # counter cannot distinguish it from no cookie at all.
+  #
+  # Both states fall through to the bearer path and both are therefore counted
+  # `:bearer`. During a migration that is the EXPECTED initial reading — so a
+  # systemic cookie failure (a key rotation, or the documented case where
+  # binding dev beyond loopback stops `Secure` cookies being sent at all)
+  # presents as "the rollout has not started yet" and nothing says otherwise.
+  #
+  # ⚖️ A separate counter rather than a transport tag, deliberately. The
+  # transport series answers "which transport is carrying sessions", which is
+  # the bearer-DELETION question, and adding failures to it would corrupt that
+  # reading. "Is the cookie transport working" is a different question and needs
+  # the failures the other counter correctly excludes. Observability only — no
+  # semantics change, and the fall-through below is byte-identical to before.
+  defp verify_cookie(conn, opts, token) do
+    module = Pipeline.fetch_module!(conn, opts)
+    key = Pipeline.fetch_key(conn, opts)
+    verify_opts = Guardian.Plug.resolve_secret(conn, opts)
+
+    case Guardian.decode_and_verify(module, token, %{}, verify_opts) do
+      {:ok, claims} ->
+        conn
+        |> Guardian.Plug.put_current_token(token, key: key)
+        |> Guardian.Plug.put_current_claims(claims, key: key)
+        |> put_private(:stacks_session_transport, :cookie)
+
+      {:error, reason} ->
+        # ⚠️ The reason is bounded to the atom Guardian returns, and anything
+        # else is collapsed to `:other`. An unbounded label on a counter is a
+        # cardinality leak, and this one is fed by a value a client controls.
+        :telemetry.execute(@cookie_rejected_event, %{count: 1}, %{reason: reject_label(reason)})
+        conn
+    end
+  end
+
+  @known_rejections [
+    :invalid_token,
+    :token_expired,
+    :invalid_issuer,
+    :invalid_audience,
+    :not_found
+  ]
+
+  @doc """
+      Collapses a Guardian rejection to a bounded counter label.
+
+      ⛔ PUBLIC FOR ONE REASON: the `:other` fallback is otherwise UNTESTABLE,
+      and it is the clause that matters.
+
+      MEASURED — a probe making the mapping unbounded left the suite fully
+      green, because every reason reachable through an HTTP request lands in
+      the known list, so no request-driven test can tell a bounded mapping from
+      an unbounded one. The fallback exists for a reason Guardian has not
+      returned yet, which is precisely the input no request can produce.
+
+      ⚠️ And the bound is not tidiness: this label is fed by a value a client
+      controls, so unbounded means a metric-cardinality leak. A guard whose only
+      untested clause is the security-relevant one is the wrong way round.
+  """
+  @spec reject_label(term()) :: atom()
+  def reject_label(reason) when reason in @known_rejections, do: reason
+  def reject_label({reason, _detail}) when reason in @known_rejections, do: reason
+  def reject_label(_), do: :other
 
   # ⛔ The transport is read from `conn.private`, not re-derived from the request
   # here. Re-deriving would ask "is a cookie present?" at response time, which

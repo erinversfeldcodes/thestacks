@@ -728,6 +728,50 @@
           "legendFormat": "{{transport}}/s"
         }
       ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Session cookie rejections (is the cookie transport working?)",
+      "description": "WHAT: rate of requests that presented a session cookie which FAILED to verify, by bounded reason. HOW: rate over stacks_auth_session_cookie_rejected_count_total by reason, emitted from StacksWeb.Plugs.SessionCookie when decode_and_verify refuses a cookie that was present. MEANS: a present-but-unusable cookie falls through to the bearer path and is counted as BEARER by the transport panel beside this one \u2014 so without this series a systemic cookie failure is indistinguishable from 'the rollout has not started yet'. WATCH: this is the companion instrument to the transport panel. Non-zero and rising means cookies are being issued and then refused \u2014 check key rotation, and check whether Secure cookies are reaching the server at all. Reading the transport panel's bearer series WITHOUT this one is how a broken cookie transport gets mistaken for an un-started migration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_auth_session_cookie_rejected_count_total{app=\"$app\"}[$__rate_interval])) by (reason)",
+          "legendFormat": "{{reason}}/s"
+        }
+      ]
     }
   ]
 }

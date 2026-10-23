@@ -67,6 +67,21 @@ defmodule Core.PromEx.Plugins.Stacks do
         # above this group records: five metrics were emitted, counted by
         # nothing, and on no dashboard. The plugin is where a metric becomes
         # observable.
+        # ⛔ THE COMPANION TO THE TRANSPORT SERIES, and a separate series rather
+        # than a tag on it. The transport counter answers "which transport is
+        # carrying sessions" — the bearer-DELETION question — and a present but
+        # undecodable cookie falls through to bearer, so it is counted `:bearer`
+        # exactly like no cookie at all. During a migration that is the expected
+        # initial reading, which means a SYSTEMIC cookie failure (key rotation,
+        # or cookies silently not being sent) looks like "the rollout has not
+        # started". This series is what says otherwise.
+        counter(
+          [:stacks, :auth, :session_cookie_rejected, :count, :total],
+          event_name: [:stacks, :auth, :session_cookie_rejected],
+          description:
+            "Requests that presented a session cookie which failed to verify, by bounded reason. A present-but-unusable cookie falls through to the bearer path and is counted as bearer by the transport series, so without this a systemic cookie failure is indistinguishable from the rollout not having started. Non-zero and rising means cookies are being issued and refused — check key rotation and whether Secure cookies are reaching the server at all.",
+          tags: [:reason]
+        ),
         counter(
           [:stacks, :auth, :session_transport, :count, :total],
           event_name: [:stacks, :auth, :session_transport],

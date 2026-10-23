@@ -20,6 +20,11 @@ defmodule Core.PromEx.MetricAudience do
     # names no reader, session or token. It is the reading the bearer-path
     # deletion is decided on, so it needs to be visible rather than break-glass.
     "stacks_auth_session_transport_count_total" => :public,
+    # Cookie rejections during the rollout. `:public` like its sibling: the
+    # series is keyed only by a bounded rejection atom and names no reader,
+    # token or session. It is the only thing that distinguishes a systemic
+    # cookie failure from the rollout not having begun.
+    "stacks_auth_session_cookie_rejected_count_total" => :public,
     "stacks_auth_login_failure_count_total" => :public,
     "stacks_auth_mfa_verify_count_total" => :public,
     # Invite-gate outcomes. `:public` like its registration sibling: the counter is an
