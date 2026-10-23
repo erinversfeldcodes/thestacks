@@ -85,6 +85,25 @@ run_on_untracked() {
     GATE_RC=$?
 }
 
+# Same, but the untracked file is also GITIGNORED — the state
+# `--exclude-standard` exists to keep out of the union.
+run_on_untracked_ignored() {
+    local rel_path="$1"
+    local contents="$2"
+
+    cleanup
+    SANDBOX="$(mktemp -d)"
+    mkdir -p "$SANDBOX/$(dirname "$rel_path")"
+    git -C "$SANDBOX" init --quiet
+    printf '%s\n' "$rel_path" > "$SANDBOX/.gitignore"
+    git -C "$SANDBOX" add .gitignore
+    git -C "$SANDBOX" -c user.email=t@t -c user.name=t commit --quiet -m t
+    printf '%s\n' "$contents" > "$SANDBOX/$rel_path"
+
+    GATE_OUT="$(cd "$SANDBOX" && bash "$GATE" 2>&1)"
+    GATE_RC=$?
+}
+
 test_case "gate_exists" "the script both callers invoke is present"
 assert_path_exists "$GATE" "scripts/check-tracker-refs.sh exists"
 
@@ -287,11 +306,36 @@ test_case "docs_dir_excluded" "a citation anywhere under docs/ passes"
 run_on "docs/thing.txt" 'Superseded by ADR-015.'
 assert_exit_zero "$GATE_RC" "docs/ is out of scope by design, whatever the extension"
 
-test_case "untracked_not_scanned" "an untracked file is not scanned"
-# Not a nicety: it is why the gate ran clean on itself until it was committed.
-# A clean first run of any new file-scanning gate proves less than it looks.
+# ⛔ INVERTED 2026-10-23. This case used to assert the OPPOSITE — that an
+# untracked file is NOT scanned — and that is the most instructive thing about
+# it: **the gate's blind spot had a passing test asserting it as intended
+# behaviour.** Its own comment even explained the cost ("it is why the gate ran
+# clean on itself until it was committed"), so the defect was documented,
+# encoded as an assertion, and therefore indistinguishable from a decision. That
+# is why it survived while two sibling gates were fixed.
+#
+# ⚠️ The blind spot coincided with the gate's HIGHEST-YIELD case: a brand-new
+# module header is exactly where a `# see <issue>` lands, and exactly what a
+# pre-commit run could not see. Four citations reached a commit here that way.
+#
+# Measured across the repository: two gates already unioned untracked files,
+# thirteen use `glob.glob` and see them inherently, and this was the only
+# tracked-only corpus — the last unpropagated instance of a fix proven twice.
+test_case "untracked_IS_scanned" "a new file is where a citation most often lands"
 run_on_untracked "apps/core/lib/thing.ex" '# See #412.'
-assert_exit_zero "$GATE_RC" "the gate reads tracked files only"
+assert_exit_nonzero "$GATE_RC" \
+    "an untracked file must be scanned — a clean run before \`git add\` otherwise proves nothing"
+assert_contains "$GATE_OUT" "#412" "and the citation is named"
+
+# ⚠️ The flag that makes the fix safe, asserted rather than trusted. Without
+# `--exclude-standard` the union pulls in every gitignored file — measured: local
+# editor and tool state whose contents legitimately mention issue numbers — and
+# the gate becomes a wall of findings in files nobody edits by hand.
+test_case "gitignored_files_stay_out_of_the_union" \
+    "the untracked fix is safe BECAUSE of a flag, so the flag is the assertion"
+run_on_untracked_ignored "apps/core/lib/generated.ex" '# See #412.'
+assert_exit_zero "$GATE_RC" \
+    "a gitignored file is untracked too, and must NOT be scanned"
 
 test_case "tooling_path_exempt" "issue-management tooling may name the trees it manages"
 run_on "scripts/wave-status.sh" 'LEDGER="plans/residue-ledger.md"'

@@ -34,10 +34,46 @@ import re
 import subprocess
 import sys
 
-# Tracked files only, so generated and ignored artefacts never reach the check.
-tracked = subprocess.run(
-    ["git", "ls-files", "-z"], capture_output=True, text=True, check=True
-).stdout.split("\0")
+# ⛔ TRACKED **AND** UNTRACKED-BUT-NOT-IGNORED, and the second half closes this
+# gate's own documented blind spot rather than adding reach for its own sake.
+#
+# `git ls-files` alone cannot see a NEW file, and the comment further down
+# records that this gate was invisible to itself until it was committed. What
+# that comment treats as an observation is a defect: **the blind spot coincides
+# with the highest-yield case.** A brand-new module header is exactly where
+# `# see <issue>` lands, and it is exactly what a pre-commit run cannot see — so
+# a clean run before `git add` proves almost nothing, which is how four
+# citations reached a commit here on 2026-10-23.
+#
+# Measured across every gate in this repository: two already union untracked
+# files, thirteen use `glob.glob` and see them inherently, and this was the ONLY
+# tracked-only corpus. So this is the last unpropagated instance of a fix proven
+# twice in-repo, not a new design.
+#
+# ⚠️ `--exclude-standard` IS LOAD-BEARING, not idiomatic — PROBED, and the probe
+# corrected the reason. Dropping the flag turns this gate red, so the claim
+# holds; but the first version of this comment said it would start scanning
+# gitignored `issues/` and `plans/`, and that is wrong — `EXCLUDED_DIRS` below
+# already keeps those out whether they are tracked or not. What the flag
+# actually keeps out is every OTHER gitignored file, and measured it is local
+# editor and tool state (`.claude/settings.local.json` and its kin) whose
+# contents legitimately mention issue numbers.
+#
+# ⚖️ Recorded as a correction rather than quietly fixed, because the two reasons
+# fail differently: an `EXCLUDED_DIRS` overlap would mean the flag is redundant,
+# where the real reason means it is the only thing standing between this gate
+# and a wall of findings in files nobody edits by hand.
+tracked = (
+    subprocess.run(
+        ["git", "ls-files", "-z"], capture_output=True, text=True, check=True
+    ).stdout.split("\0")
+    + subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split("\0")
+)
 
 EXCLUDED_DIRS = ("docs/", "issues/", "plans/", "notes/", "e2e/node_modules/")
 # ⚠️ No EXCLUDED_NAMES list. There was one — CLAUDE.md, AGENTS.md, README.md —
