@@ -50,6 +50,31 @@ defmodule StacksWeb.Plugs.SessionCookie do
       plug found is VALID is decided later by `EnsureAuthenticated` and
       `LoadResource`. Emitting inline would count an expired cookie as a live
       cookie session.
+
+      ## ⛔ WHAT THE COUNTER DOES NOT COVER — read this before deleting anything
+
+      This plug sits in `AuthPipeline` only, and the counter is registered
+      inside it, so **a pipeline that does not include this plug emits
+      nothing at all.** Measured 2026-10-23, four pipelines authenticate:
+
+        * `AuthPipeline` — cookie or Bearer header. **Counted.**
+        * `AdminAuthPipeline` — Bearer header, `admin_session` type. NOT counted.
+        * `OptionalAuthPipeline` — Bearer header, `allow_blank: true`. NOT counted.
+        * `SseAuthPipeline` — JWT in the `?token=` QUERY PARAMETER. NOT counted.
+
+      ⛔ So "the bearer series reads zero" means *zero bearer-authenticated
+      requests through the user-session pipeline* — and three other pipelines
+      read bearer tokens whose use is invisible here. Deleting bearer support
+      repository-wide on this reading would break the admin console, every
+      optional-auth page and the SSE stream. The admin and SSE transports move
+      with their own pipelines, each of which must bring its own measurement.
+
+      ⚠️ And a narrower exclusion inside the counted pipeline: only requests
+      that AUTHENTICATE are counted, so **zero authenticated bearer requests is
+      not zero bearer attempts.** A client whose tokens all fail is invisible
+      here, which means the zero can coexist with something still trying to use
+      bearer — a token-rotation window, say. Deleting the path then breaks a
+      client that was reaching for it.
   """
 
   @behaviour Plug
