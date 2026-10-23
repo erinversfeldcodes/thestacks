@@ -130,9 +130,34 @@ defmodule StacksWeb.Plugs.SessionCookie do
   # attacker holds the token, exactly as it did before cookies existed. The
   # third is additionally behind the E2E-helper env gate.
   #
-  # ⚠️ So the answer is "no state-changing route depends on the session via a
-  # GET", and it is written down because the next person to add a GET that acts
-  # on `current_resource` re-opens it — and nothing here would notice.
+  # ⛔ AND THE OTHER HALF, which is the one the cookie actually turns on. The
+  # three routes above are authorised by a PATH token, which is the safe case;
+  # the dangerous case is a GET authorised BY THE SESSION that mutates. Measured
+  # 23 session-authorised GETs behind the `:authenticated` pipeline, and all 23
+  # are reads:
+  #
+  #   /listings/mine · /uploads/inbox · /auth/me · /books/isbn/:isbn
+  #   /imports · /imports/:id · /imports/:id/rows · /placements/mine
+  #   /bookshelves/:bookshelf_name · /bookshelves/:bookshelf_name/shelves
+  #   /bookshelves/:bookshelf_id/grants · /onboarding/status · /me/inferences
+  #   /settings/privacy · /settings/notifications · /settings/blocked-users
+  #   /settings/audit-log · /posts/:post_id/comments · /groups/:id
+  #   /groups/:id/feed · /groups/:group_id/members
+  #   /blog/posts/:id/syndication · /blog/posts/:id/syndications
+  #
+  # ⚠️ `/books/isbn/:isbn` is the one that looks like it might write — an ISBN
+  # lookup that resolves and inserts would be a state-changing GET. Checked: it
+  # is `Books.find_existing/1` plus a 404, with no resolver call and no insert,
+  # so an unknown ISBN creates nothing.
+  #
+  # ⚖️ **THE SET IS NAMED ON PURPOSE.** "No state-changing GET" is a claim over a
+  # POPULATION, and listing the population is what makes it re-CHECKABLE rather
+  # than re-DERIVABLE — the next reader can diff this list against the router
+  # instead of repeating the analysis and hoping they used the same predicate.
+  #
+  # ⚠️ The next person to add a GET that acts on `current_resource` re-opens
+  # this, and nothing here would notice. That is the standing hazard; the list
+  # above is what makes noticing cheap.
   @cookie_opts [http_only: true, secure: true, same_site: "Lax"]
 
   @transport_event [:stacks, :auth, :session_transport]
