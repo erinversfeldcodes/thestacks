@@ -428,6 +428,20 @@ requestHeaders destination credential =
                     []
 
 
+{-| `requestHeaders` converted to `elm/http`'s own header type.
+
+⚠️ The conversion is one line and lives here so each call site is a declaration
+rather than a declaration plus plumbing. The DATA form stays the shared thing —
+`Http.Header` and `SimulatedEffect.Http.Header` are different opaque types, so
+the program-test harness converts the same list into its own.
+
+-}
+httpHeaders : Destination -> Credential -> List Http.Header
+httpHeaders destination credential =
+    requestHeaders destination credential
+        |> List.map (\( name, value ) -> Http.header name value)
+
+
 {-| A request's data — method, url, JSON body — apart from the
 `Http.request` that sends it. `elm-program-test` cannot run real
 requests, so test translators build `SimulatedEffect`s; before this seam
@@ -704,7 +718,7 @@ getUploadInbox : String -> (Result Http.Error (List InboxItem) -> msg) -> Cmd ms
 getUploadInbox token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/uploads/inbox"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg uploadInboxDecoder
@@ -873,7 +887,7 @@ createGoodreadsImport : String -> File -> (Result ImportError LibraryImport -> m
 createGoodreadsImport token file toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/imports/goodreads"
         , body = Http.multipartBody [ Http.filePart "file" file ]
         , expect = expectImport toMsg
@@ -954,7 +968,7 @@ getImport : String -> String -> (Result Http.Error LibraryImport -> msg) -> Cmd 
 getImport token importId toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/imports/" ++ importId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "import" libraryImportDecoder)
@@ -969,7 +983,7 @@ getImportRows : String -> String -> (Result Http.Error (List ImportRow) -> msg) 
 getImportRows token importId toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/imports/" ++ importId ++ "/rows"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "rows" (Decode.list importRowDecoder))
@@ -1431,7 +1445,7 @@ construction here rather than inlining it at a call site.
 -}
 authedHeaders : Authed err ok msg -> List Http.Header
 authedHeaders (Authed request) =
-    [ Http.header "Authorization" ("Bearer " ++ request.token) ]
+    httpHeaders SameOrigin (Session request.token)
 
 
 {-| The `Http.Expect` for an authenticated request: a 401 is diverted to
@@ -1543,7 +1557,7 @@ refresh token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg authResponseDecoder
@@ -1577,7 +1591,7 @@ logout :
 logout token toMsg =
     Http.request
         { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -1724,7 +1738,18 @@ putFileToR2 :
 putFileToR2 url file toMsg =
     Http.request
         { method = "PUT"
-        , headers = []
+
+        -- ⛔ THE ONE CROSS-ORIGIN REQUEST IN THIS MODULE, declared rather than
+        -- left as an empty list. `httpHeaders CrossOrigin NoCredential` yields
+        -- `[]`, so the behaviour is identical — what changes is that the absence
+        -- is now a STATEMENT a reader and a gate can both check, instead of an
+        -- absence indistinguishable from an oversight.
+        --
+        -- ⚠️ The url is a presigned object-storage URL passed in by the caller,
+        -- so it cannot be proven same-origin from this file and must not be: a
+        -- `SameOrigin` claim here would attach a bearer token to a third-party
+        -- host. `check-credential-origin.sh` refuses that combination.
+        , headers = httpHeaders CrossOrigin NoCredential
         , url = url
         , body = Http.fileBody file
         , expect = Http.expectWhatever toMsg
@@ -2025,7 +2050,7 @@ getBookshelf shelfName token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg bookshelfResponseDecoder
@@ -2295,7 +2320,7 @@ requestExport token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectWhatever toMsg
@@ -2333,7 +2358,7 @@ deleteAccount token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectWhatever toMsg
@@ -2362,7 +2387,7 @@ saveConsent :
 saveConsent consent token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/gdpr/consent"
         , body = Http.jsonBody (Requests.encodeConsentRequest { consent = consent })
         , expect = Http.expectWhatever toMsg
@@ -2384,7 +2409,7 @@ saveWritingAssistantConsent :
 saveWritingAssistantConsent consent token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/gdpr/consent"
         , body =
             Http.jsonBody
@@ -2569,7 +2594,7 @@ getAuditLog token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg auditLogResponseDecoder
@@ -2743,7 +2768,7 @@ getInferences revealRisk token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg personalInferencesDecoder
@@ -2841,7 +2866,7 @@ placeBook bookshelfName bookId token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = expectPlace toMsg
@@ -2889,7 +2914,7 @@ getUserPlacements token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg placementsMineDecoder
@@ -3527,13 +3552,7 @@ getListings :
 getListings maybeToken toMsg =
     Http.request
         { method = "GET"
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
+        , headers = httpHeaders SameOrigin (Optional maybeToken)
         , url = baseUrl ++ "/api/listings"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg listingsResponseDecoder
@@ -3551,7 +3570,7 @@ getMyListings :
 getMyListings token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/listings/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg listingsResponseDecoder
@@ -3570,7 +3589,7 @@ createListing :
 createListing params token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/listings"
         , body =
             Http.jsonBody
@@ -3601,7 +3620,7 @@ activateListing :
 activateListing listingId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/activate"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
@@ -3620,7 +3639,7 @@ deactivateListing :
 deactivateListing listingId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/deactivate"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
@@ -3639,7 +3658,7 @@ soldListing :
 soldListing listingId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/sold"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
@@ -3658,7 +3677,7 @@ getMyPlacements :
 getMyPlacements token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
@@ -3704,13 +3723,7 @@ getBlogPosts :
 getBlogPosts maybeToken maybeCursor toMsg =
     Http.request
         { method = "GET"
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
+        , headers = httpHeaders SameOrigin (Optional maybeToken)
         , url =
             Url.Builder.crossOrigin baseUrl
                 [ "api", "blog", "posts" ]
@@ -3736,13 +3749,7 @@ getBlogPost :
 getBlogPost postId maybeToken toMsg =
     Http.request
         { method = "GET"
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
+        , headers = httpHeaders SameOrigin (Optional maybeToken)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "post" blogPostDecoder)
@@ -3761,7 +3768,7 @@ createBlogPost :
 createBlogPost postData token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts"
         , body =
             Http.jsonBody
@@ -3788,7 +3795,7 @@ updateBlogPost :
 updateBlogPost postId postData token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId
         , body =
             Http.jsonBody
@@ -3848,7 +3855,7 @@ fetchSyndicationExport :
 fetchSyndicationExport token postId format toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndication?format=" ++ format
         , body = Http.emptyBody
         , expect =
@@ -3878,7 +3885,7 @@ listSyndications :
 listSyndications token postId toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
         , body = Http.emptyBody
         , expect =
@@ -3899,7 +3906,7 @@ recordSyndication :
 recordSyndication token postId method toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
         , body = Http.jsonBody (Encode.object [ ( "method", Encode.string method ) ])
         , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
@@ -3921,7 +3928,7 @@ updateSyndicationUrl :
 updateSyndicationUrl token postId sid url toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications/" ++ sid
         , body = Http.jsonBody (Encode.object [ ( "syndicated_url", Encode.string url ) ])
         , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
@@ -3942,7 +3949,7 @@ setPostSyndicated :
 setPostSyndicated token postId syndicated toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId
         , body = Http.jsonBody (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
         , expect = Http.expectJson toMsg (Decode.at [ "post", "syndicated" ] Decode.bool)
@@ -3961,7 +3968,7 @@ publishBlogPost :
 publishBlogPost postId token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/publish"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -3981,7 +3988,7 @@ confirmAssociation :
 confirmAssociation postId associationId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/confirm"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -4001,7 +4008,7 @@ dismissAssociation :
 dismissAssociation postId associationId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/dismiss"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -4020,13 +4027,7 @@ getPostComments :
 getPostComments postId maybeToken toMsg =
     Http.request
         { method = "GET"
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-                Nothing ->
-                    []
+        , headers = httpHeaders SameOrigin (Optional maybeToken)
         , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "comments" (Decode.list commentDecoder))
@@ -4056,7 +4057,7 @@ createComment postId body maybeParentId token toMsg =
     in
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
         , body =
             Http.jsonBody
@@ -4079,7 +4080,7 @@ deleteComment :
 deleteComment commentId token toMsg =
     Http.request
         { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/comments/" ++ commentId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -4098,7 +4099,7 @@ updateProfileVisibility :
 updateProfileVisibility visibility token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/settings/profile_visibility"
         , body =
             Http.jsonBody
@@ -4122,7 +4123,7 @@ updateShelfVisibility :
 updateShelfVisibility shelfName visibility token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName ++ "/visibility"
         , body =
             Http.jsonBody
@@ -4395,7 +4396,7 @@ blockUser :
 blockUser targetUserId token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
         , body = Http.emptyBody
         , expect = expectBlock toMsg
@@ -4415,7 +4416,7 @@ unblockUser :
 unblockUser targetUserId token toMsg =
     Http.request
         { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -4436,7 +4437,7 @@ listBlockedUsers :
 listBlockedUsers token page toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg blockedUsersResponseDecoder
@@ -4491,7 +4492,7 @@ getPrivacySettings :
 getPrivacySettings token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/settings/privacy"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg privacySettingsDecoder
@@ -4684,12 +4685,7 @@ peopleSearchDecoder =
 
 authHeaders : Maybe String -> List Http.Header
 authHeaders maybeToken =
-    case maybeToken of
-        Just token ->
-            [ Http.header "Authorization" ("Bearer " ++ token) ]
-
-        Nothing ->
-            []
+    httpHeaders SameOrigin (Optional maybeToken)
 
 
 {-| A source as returned by the admin sources API.
@@ -4861,7 +4857,7 @@ adminMfaSetup : String -> (Result Http.Error AdminMfaEnrolment -> msg) -> Cmd ms
 adminMfaSetup ownerToken toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ ownerToken) ]
+        , headers = httpHeaders SameOrigin (Session ownerToken)
         , url = baseUrl ++ "/api/admin/auth/mfa/setup"
         , body = Http.jsonBody (Encode.object [])
         , expect =
@@ -4895,7 +4891,7 @@ adminMfaConfirm :
 adminMfaConfirm ownerToken body toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ ownerToken) ]
+        , headers = httpHeaders SameOrigin (Session ownerToken)
         , url = baseUrl ++ "/api/admin/auth/mfa/confirm"
         , body =
             Http.jsonBody
@@ -5008,7 +5004,7 @@ getRemovalRequests : String -> (Result Http.Error (List RemovalRequest) -> msg) 
 getRemovalRequests token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/removal-requests"
         , body = Http.emptyBody
         , expect =
@@ -5141,7 +5137,7 @@ getAdminFeedback token window toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminFeedbackPageDecoder
@@ -5196,7 +5192,7 @@ getAdminInvites : String -> (Result Http.Error (List AdminInvite) -> msg) -> Cmd
 getAdminInvites token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/invites"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "invites" (Decode.list adminInviteDecoder))
@@ -5216,7 +5212,7 @@ createAdminInvite :
 createAdminInvite token body toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/invites"
         , body =
             Http.jsonBody
@@ -5254,7 +5250,7 @@ revokeAdminInvite : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
 revokeAdminInvite token id toMsg =
     Http.request
         { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/invites/" ++ id
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -5287,7 +5283,7 @@ removalDecision : String -> String -> String -> (Result Http.Error () -> msg) ->
 removalDecision requestId action token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/removal-requests/" ++ requestId ++ "/" ++ action
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -5313,7 +5309,7 @@ getAdminSources params token toMsg =
     in
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = Url.Builder.absolute [ "api", "admin", "sources" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminSourcesResponseDecoder
@@ -5332,7 +5328,7 @@ approveSource :
 approveSource sourceId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/approve"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
@@ -5351,7 +5347,7 @@ rejectSource :
 rejectSource sourceId token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
@@ -5417,7 +5413,7 @@ adminListBooks params token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg adminBooksResponseDecoder
@@ -5461,7 +5457,7 @@ adminSetBookAgeGate bookId ageGated token toMsg =
     in
     Http.request
         { method = spec.method
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg adminBookEnvelopeDecoder
@@ -5531,7 +5527,7 @@ getSourceHealth :
 getSourceHealth token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/admin/source-health"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg sourceHealthListDecoder
@@ -5574,7 +5570,7 @@ getOnboardingStatus :
 getOnboardingStatus token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/onboarding/status"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
@@ -5593,7 +5589,7 @@ completeOnboardingStep :
 completeOnboardingStep step token toMsg =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/onboarding/step/" ++ step
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
@@ -5610,7 +5606,7 @@ createGroup :
 createGroup name token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups"
         , body =
             Http.jsonBody
@@ -5633,7 +5629,7 @@ getGroup :
 getGroup groupId token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
@@ -5650,18 +5646,23 @@ getGroupFeed :
     -> Cmd msg
 getGroupFeed groupId token maybeCursor toMsg =
     let
-        url =
+        -- ⚠️ The PATH is let-bound and `baseUrl` is applied at the request, so
+        -- the url expression stays textually recognisable as same-origin.
+        -- `check-credential-origin.sh` relates a declared `SameOrigin` to the
+        -- URL beside it and reads text — it cannot follow a let-binding, so a
+        -- `url = url` form would be an unprovable claim rather than a wrong one.
+        path =
             case maybeCursor of
                 Nothing ->
-                    baseUrl ++ "/api/groups/" ++ groupId ++ "/feed"
+                    "/api/groups/" ++ groupId ++ "/feed"
 
                 Just cursor ->
-                    baseUrl ++ "/api/groups/" ++ groupId ++ "/feed?before=" ++ cursor
+                    "/api/groups/" ++ groupId ++ "/feed?before=" ++ cursor
     in
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = url
+        , headers = httpHeaders SameOrigin (Session token)
+        , url = baseUrl ++ path
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg feedResponseDecoder
         , timeout = standardTimeout
@@ -5678,7 +5679,7 @@ inviteToGroup :
 inviteToGroup groupId identifier token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations"
         , body =
             Http.jsonBody
@@ -5701,7 +5702,7 @@ acceptInvitation :
 acceptInvitation groupId invitationId token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/accept"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -5719,7 +5720,7 @@ declineInvitation :
 declineInvitation groupId invitationId token toMsg =
     Http.request
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -5755,7 +5756,7 @@ getGroupMembers :
 getGroupMembers groupId token toMsg =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "members" (Decode.list groupMemberDecoder))
@@ -5779,7 +5780,7 @@ removeGroupMember :
 removeGroupMember groupId memberUserId token toMsg =
     Http.request
         { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members/" ++ memberUserId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
@@ -5796,7 +5797,7 @@ leaveGroup :
 leaveGroup groupId token toMsg =
     Http.request
         { method = "DELETE"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = httpHeaders SameOrigin (Session token)
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/leave"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg

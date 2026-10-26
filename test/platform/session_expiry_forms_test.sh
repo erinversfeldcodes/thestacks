@@ -96,18 +96,18 @@ CASES = [
     ),
     ("authedHeaders authed", True, "the legacy shared derivation, 8 callers"),
     (
-        "requestHeaders SameOrigin (Session token) |> List.map toHeader",
+        "httpHeaders SameOrigin (Session token)",
         True,
         "THE NEW FORM — unrecognised means the population falls silently as sites migrate",
     ),
     ("authHeaders maybeToken", False, "the legacy optional form takes a Maybe"),
     (
-        "requestHeaders SameOrigin (Optional maybeToken) |> List.map toHeader",
+        "httpHeaders SameOrigin (Optional maybeToken)",
         False,
         "the new optional form — why Optional must stay separately nameable",
     ),
     (
-        "requestHeaders CrossOrigin NoCredential |> List.map toHeader",
+        "httpHeaders CrossOrigin NoCredential",
         False,
         "an endpoint that never takes a credential cannot be mandatorily authenticated",
     ),

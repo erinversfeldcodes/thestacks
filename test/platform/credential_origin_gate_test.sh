@@ -196,4 +196,57 @@ else
     _record_fail "ci.yml not found at $CI_YML"
 fi
 
+# ⛔ A COMMENT MENTIONING THE KEYWORD IS NOT A DECLARATION — this repository's
+# most-recorded gate failure, caught the first time this gate met real code.
+#
+# MEASURED: `putFileToR2` declares `CrossOrigin NoCredential` and carries a
+# comment explaining that a `SameOrigin` claim there would attach a bearer token
+# to a third-party host. The gate matched `SameOrigin` IN THAT COMMENT and
+# reported the one correctly-declared cross-origin request as the violation —
+# while the comment said exactly why it was not one.
+#
+# ⚠️ The text explaining the rule was the text that broke it. Any file
+# discussing this gate contains its keywords as prose, so stripping is a
+# precondition rather than a refinement.
+test_case "the_keyword_in_a_comment_is_not_a_declaration" \
+    "the text explaining the rule must not trip it"
+run_on "$(filler 75)
+putFileToStorage : String -> Cmd msg
+putFileToStorage presignedUrl =
+    Http.request
+        { method = \"PUT\"
+
+        -- A SameOrigin claim here would attach a bearer token to a third-party
+        -- host, which is why this declares CrossOrigin instead.
+        , headers = httpHeaders CrossOrigin NoCredential
+        , url = presignedUrl
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever Done
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+"
+assert_exit_zero "$RC" \
+    "a correctly-declared cross-origin request must not be flagged by its own explanation"
+
+# ⚠️ And a block comment too, since Elm has both forms and a line-comment-only
+# strip would leave the other half open.
+test_case "a_block_comment_mentioning_the_keyword_is_also_stripped" \
+    "Elm has two comment forms and stripping one leaves the other"
+run_on "$(filler 75)
+putFileToStorage : String -> Cmd msg
+putFileToStorage presignedUrl =
+    Http.request
+        { method = \"PUT\"
+        {- SameOrigin would be wrong here -}
+        , headers = httpHeaders CrossOrigin NoCredential
+        , url = presignedUrl
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever Done
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+"
+assert_exit_zero "$RC" "a block comment is stripped too"
+
 summarise

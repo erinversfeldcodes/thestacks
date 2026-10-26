@@ -53,6 +53,12 @@ def top_level_definitions(text):
 # population would fall silently as the refactor proceeded, and its floor is an
 # EMPTINESS check, so it would stay green all the way down to one endpoint.
 #
+# ⚠️ Matched on the CREDENTIAL CONSTRUCTOR rather than on the wrapper
+# function's name, because there are two wrappers — `requestHeaders` returning
+# data and `httpHeaders` returning `Http.Header` — and a third would otherwise
+# silently fall out of the population. The constructor IS the declaration;
+# the function around it is plumbing.
+#
 # ⚠️ `Session` is the mandatory marker and `Optional` the maybe-authenticated
 # one, which is why those constructors must stay separately nameable at the call
 # site. They are the only thing distinguishing an endpoint that always needs a
@@ -62,14 +68,14 @@ MANDATORY = re.compile(
     r"headers\s*=\s*("
     r"authedHeaders\b"
     r"|\[\s*Http\.header\s+\"Authorization\""
-    r"|requestHeaders\s+\w+\s+\(\s*Session\b"
+    r"|\w*[Hh]eaders\s+\w+\s+\(\s*Session\b"
     r")"
 )
 OPTIONAL = re.compile(
     r"headers\s*=\s*("
     r"authHeaders\b"
-    r"|requestHeaders\s+\w+\s+\(\s*Optional\b"
-    r"|requestHeaders\s+\w+\s+NoCredential\b"
+    r"|\w*[Hh]eaders\s+\w+\s+\(\s*Optional\b"
+    r"|\w*[Hh]eaders\s+\w+\s+NoCredential\b"
     r"|$)",
     re.M,
 )

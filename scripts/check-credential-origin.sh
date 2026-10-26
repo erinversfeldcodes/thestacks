@@ -85,12 +85,55 @@ SAME_ORIGIN = [
     re.compile(r'^\s*"/'),
 ]
 
+def strip_elm_comments(text):
+    """Blank Elm comments, keeping line structure so line numbers stay true.
+
+    ⛔ MEASURED THE FIRST TIME THIS GATE MET REAL CODE, and it is this
+    repository's most-recorded gate failure: **a gate reading its own subject
+    matter as configuration.**
+
+    `putFileToR2` declares `CrossOrigin NoCredential` and carries a comment
+    explaining that a `SameOrigin` claim there would attach a bearer token to a
+    third-party host. The gate matched the word `SameOrigin` IN THAT COMMENT and
+    reported the one correctly-declared cross-origin request in the file as the
+    violation — while the comment said exactly why it was not.
+
+    ⚠️ So the text explaining the rule was the text that broke it. Any file
+    discussing this gate will contain its keywords as prose, which makes
+    stripping a precondition rather than a refinement.
+    """
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text.startswith("{-", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("{-", j):
+                    depth += 1
+                    j += 2
+                elif text.startswith("-}", j):
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            out.append("".join("\n" if c == "\n" else " " for c in text[i:j]))
+            i = j
+        elif text.startswith("--", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 records = 0
 violations = []
 unprovable = []
 
 for match in RECORD.finditer(src):
-    body = match.group(0)
+    body = strip_elm_comments(match.group(0))
     if "method =" not in body or "headers =" not in body:
         continue
 
