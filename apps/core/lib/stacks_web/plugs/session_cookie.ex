@@ -162,6 +162,7 @@ defmodule StacksWeb.Plugs.SessionCookie do
 
   @transport_event [:stacks, :auth, :session_transport]
   @cookie_rejected_event [:stacks, :auth, :session_cookie_rejected]
+  @samesite_event [:stacks, :auth, :samesite_support]
 
   @doc "The cookie's name, for the controllers that set and clear it."
   @spec cookie_name() :: String.t()
@@ -311,8 +312,43 @@ defmodule StacksWeb.Plugs.SessionCookie do
     if Guardian.Plug.current_resource(conn) do
       transport = Map.get(conn.private, :stacks_session_transport, :bearer)
       :telemetry.execute(@transport_event, %{count: 1}, %{transport: transport})
+      count_samesite_support(conn)
     end
 
     conn
+  end
+
+  # ⛔ WHETHER THIS CLIENT ENFORCES `SameSite`, counted on the same population as
+  # the transport above and for a different decision.
+  #
+  # `SameSite=Lax` is the CSRF defence until a double-submit token exists, and it
+  # blocks the cookie on every cross-site state-changing method. Its one hole —
+  # top-level GET navigation — has no state-changing target here. So the residual
+  # threat a token would close is principally **clients that ignore SameSite**,
+  # and whether that is worth a 77-call-site refactor plus an enforcement step
+  # that can reject writes is a MEASUREMENT rather than a judgement.
+  #
+  # ⚠️ Nothing in this application recorded an inbound `User-Agent` before this —
+  # not the request log, not `audit.audit_log`, and the metrics plugin
+  # deliberately declines to tag by it. So the question was unanswerable from
+  # existing data, which is why this counter exists rather than a log query.
+  #
+  # ⛔ THE STRING IS NEVER RETAINED. It is read, classified into one of three
+  # atoms by `Stacks.UserAgent`, and discarded — the same bound-at-the-emit-site
+  # move `Stacks.Audit` makes for its metric labels. A three-valued counter is
+  # not personal data where a stored user agent arguably is.
+  #
+  # ⚠️ AUTHENTICATED REQUESTS ONLY, and the scoping is load-bearing rather than
+  # tidy: anonymous traffic has no session to forge, so including it would dilute
+  # the figure **in the direction of looking riskier than it is** — pushing the
+  # decision toward the expensive option on a number that overstates the threat.
+  defp count_samesite_support(conn) do
+    support =
+      conn
+      |> get_req_header("user-agent")
+      |> List.first()
+      |> Stacks.UserAgent.samesite_support()
+
+    :telemetry.execute(@samesite_event, %{count: 1}, %{enforces: support})
   end
 end

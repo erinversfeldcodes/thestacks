@@ -772,6 +772,50 @@
           "legendFormat": "{{reason}}/s"
         }
       ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "SameSite enforcement of authenticated clients (the CSRF sizing question)",
+      "description": "WHAT: authenticated requests by whether the client enforces the SameSite cookie attribute. HOW: rate over stacks_auth_samesite_support_count_total by `enforces` (enforces / does_not_enforce / unknown), classified from the User-Agent in Stacks.UserAgent and the string then DISCARDED \u2014 nothing retains a user agent. MEANS: SameSite=Lax is the CSRF defence until a double-submit token exists, and it blocks the cookie on every cross-site state-changing method; its only hole, top-level GET navigation, has no state-changing target here. So `does_not_enforce` IS the residual population a CSRF token would protect. WATCH: this panel is the evidence for whether a 77-call-site refactor plus an enforcement step that can reject writes is warranted. Read `does_not_enforce` as the threat population and `unknown` as the classifier's own limit \u2014 a large unknown bucket is a finding about the classifier, NOT a safe default, because it never guesses `enforces`. Counted on authenticated requests only: anonymous traffic has no session to forge and would dilute the figure toward looking riskier than it is.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_auth_samesite_support_count_total{app=\"$app\"}[$__rate_interval])) by (enforces)",
+          "legendFormat": "{{enforces}}/s"
+        }
+      ]
     }
   ]
 }

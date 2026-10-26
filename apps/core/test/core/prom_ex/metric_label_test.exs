@@ -97,6 +97,16 @@ defmodule Core.PromEx.MetricLabelTest do
     failed_step: "the name of the erasure step that failed — a Multi step key",
     feature: "consent feature key, whitelisted before it reaches consent",
     fuse_name: "circuit-breaker name, one per declared breaker",
+    enforces:
+      "SameSite enforcement of the requesting client: exactly three atoms " <>
+        "(:enforces / :does_not_enforce / :unknown) returned by " <>
+        "Stacks.UserAgent.samesite_support/1. ⛔ The bound is the POINT of that " <>
+        "function, not a property of its input: it is fed a raw User-Agent — an " <>
+        "unbounded, client-controlled string — and every unrecognised value, " <>
+        "including a missing header and a family whose version will not parse, " <>
+        "collapses to :unknown. The string is classified in memory and DISCARDED; " <>
+        "nothing retains a user agent. Its three-valued type is asserted directly " <>
+        "in stacks/user_agent_test.exs, including the inputs no request can produce",
     handler: "event-handler module name — bounded by the handler registry",
     outcome: "bounded outcome atom, per emit site",
     perspective: "view-as perspective, validated by the plug before use",

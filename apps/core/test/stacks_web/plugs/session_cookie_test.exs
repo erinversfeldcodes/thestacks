@@ -23,6 +23,7 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
 
   @event [:stacks, :auth, :session_transport]
   @rejected_event [:stacks, :auth, :session_cookie_rejected]
+  @samesite_event [:stacks, :auth, :samesite_support]
 
   setup do
     handler = "session-transport-#{System.unique_integer([:positive])}"
@@ -48,9 +49,21 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
       nil
     )
 
+    samesite_handler = "samesite-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      samesite_handler,
+      @samesite_event,
+      fn _event, measurements, metadata, _ ->
+        send(test_pid, {:samesite, measurements, metadata})
+      end,
+      nil
+    )
+
     on_exit(fn ->
       :telemetry.detach(handler)
       :telemetry.detach(rejected_handler)
+      :telemetry.detach(samesite_handler)
     end)
 
     # The factory confirms by default; `RequireConfirmedEmail` is in the pipeline.
@@ -342,6 +355,79 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
 
       assert_receive {:transport, %{count: 1}, %{transport: :bearer}}
       assert_receive {:rejected, %{count: 1}, _}
+    end
+  end
+
+  # ⛔ THE SIZING COUNTER, and the cases are about what could corrupt the number
+  # rather than about whether it fires.
+  #
+  # It exists because a pending decision — whether a double-submit CSRF token is
+  # worth a 77-call-site refactor plus an enforcement step that can reject
+  # writes — turns on how much authenticated traffic comes from clients that
+  # ignore SameSite. ⚠️ Nothing in this application recorded an inbound user
+  # agent before, so the question was unanswerable from existing data.
+  describe "the SameSite sizing counter" do
+    @modern_chrome "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " <>
+                     "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+
+    test "classifies an authenticated request's client", %{conn: conn, token: token} do
+      conn
+      |> put_req_cookie(SessionCookie.cookie_name(), token)
+      |> put_req_header("user-agent", @modern_chrome)
+      |> authenticated_get()
+
+      assert_receive {:samesite, %{count: 1}, %{enforces: :enforces}}
+    end
+
+    # ⛔ The population the decision is actually about.
+    test "counts a client that ignores SameSite as does_not_enforce",
+         %{conn: conn, token: token} do
+      conn
+      |> put_req_cookie(SessionCookie.cookie_name(), token)
+      |> put_req_header(
+        "user-agent",
+        "Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko"
+      )
+      |> authenticated_get()
+
+      assert_receive {:samesite, %{count: 1}, %{enforces: :does_not_enforce}}
+    end
+
+    # ⚠️ A missing header must be :unknown and never :enforces. Defaulting to
+    # enforcement would make the residual population look smaller than it is —
+    # the direction that argues for skipping the refactor.
+    test "a request with no user-agent header is unknown, not assumed safe",
+         %{conn: conn, token: token} do
+      conn
+      |> put_req_cookie(SessionCookie.cookie_name(), token)
+      |> authenticated_get()
+
+      assert_receive {:samesite, %{count: 1}, %{enforces: :unknown}}
+    end
+
+    # ⛔ AUTHENTICATED ONLY, and the scoping is load-bearing: anonymous traffic
+    # has no session to forge, so including it would dilute the figure IN THE
+    # DIRECTION OF LOOKING RISKIER than it is — pushing the decision toward the
+    # expensive option on a number that overstates the threat.
+    test "an unauthenticated request is not counted at all", %{conn: conn} do
+      conn
+      |> put_req_header("user-agent", @modern_chrome)
+      |> authenticated_get()
+
+      refute_receive {:samesite, _, _}
+    end
+
+    # ⚠️ It must fire on the bearer path too, or the figure is scoped to cookie
+    # sessions and silently answers a narrower question than the one asked.
+    test "fires regardless of which transport carried the session",
+         %{conn: conn, token: token} do
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> put_req_header("user-agent", @modern_chrome)
+      |> authenticated_get()
+
+      assert_receive {:transport, %{count: 1}, %{transport: :bearer}}
+      assert_receive {:samesite, %{count: 1}, %{enforces: :enforces}}
     end
   end
 end

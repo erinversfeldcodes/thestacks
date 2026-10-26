@@ -75,6 +75,25 @@ defmodule Core.PromEx.Plugins.Stacks do
         # initial reading, which means a SYSTEMIC cookie failure (key rotation,
         # or cookies silently not being sent) looks like "the rollout has not
         # started". This series is what says otherwise.
+        # ⛔ THE MEASUREMENT A PENDING DECISION TURNS ON, not observability for
+        # its own sake. `SameSite=Lax` is the CSRF defence until a double-submit
+        # token exists, and it blocks the cookie on every cross-site
+        # state-changing method; its one hole (top-level GET navigation) has no
+        # state-changing target here. So the residual threat a token would close
+        # is principally clients that IGNORE SameSite — and whether that is
+        # worth a 77-call-site refactor plus an enforcement step that can reject
+        # writes is a measurement rather than a judgement.
+        #
+        # ⚠️ Nothing recorded an inbound user agent before this, so the question
+        # was unanswerable from existing data. The string is classified into
+        # three atoms and discarded — never stored.
+        counter(
+          [:stacks, :auth, :samesite_support, :count, :total],
+          event_name: [:stacks, :auth, :samesite_support],
+          description:
+            "Authenticated requests by whether the client enforces the SameSite cookie attribute (enforces/does_not_enforce/unknown). Counted on AUTHENTICATED requests only: anonymous traffic has no session to forge, and including it dilutes the figure in the direction of looking riskier than it is. A large unknown bucket is a finding about the classifier rather than an answer about the traffic — it never defaults to enforces.",
+          tags: [:enforces]
+        ),
         counter(
           [:stacks, :auth, :session_cookie_rejected, :count, :total],
           event_name: [:stacks, :auth, :session_cookie_rejected],

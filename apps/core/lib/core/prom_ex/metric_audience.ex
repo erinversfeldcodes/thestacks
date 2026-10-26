@@ -20,6 +20,11 @@ defmodule Core.PromEx.MetricAudience do
     # names no reader, session or token. It is the reading the bearer-path
     # deletion is decided on, so it needs to be visible rather than break-glass.
     "stacks_auth_session_transport_count_total" => :public,
+    # SameSite enforcement of authenticated clients. `:public` like its auth
+    # siblings: the series is keyed only by a three-valued atom and names no
+    # reader, session or user agent. It is the evidence a pending CSRF decision
+    # rests on, so it needs to be visible rather than break-glass.
+    "stacks_auth_samesite_support_count_total" => :public,
     # Cookie rejections during the rollout. `:public` like its sibling: the
     # series is keyed only by a bounded rejection atom and names no reader,
     # token or session. It is the only thing that distinguishes a systemic
