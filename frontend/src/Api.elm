@@ -332,8 +332,29 @@ before simplifying this:
 fewer endpoints and keeps passing — and its own floor is an emptiness check, so
 it stays green down to one remaining endpoint.
 
-⚖️ `Session` is therefore the mandatory marker the gate greps for, `Optional`
-the maybe-authenticated one, and `NoCredential` the deliberate none.
+⚖️ `Session` is the mandatory marker the gate greps for and `Optional` the
+maybe-authenticated one, which is the distinction the gate's two classes need.
+
+⛔ **THREE CONSTRUCTORS, AND THE REASON IS NOT THE GATE — corrected 2026-10-26.**
+An earlier version of this comment said `Optional Nothing` and `NoCredential`
+must stay separate so the gate can tell them apart. **That is disprovable and
+was disproved:** the gate computes `MANDATORY and not OPTIONAL`, a two-class
+decision, so both are simply non-mandatory and it never needs to distinguish
+them.
+
+⚠️ Why a wrong reason here is worse than no reason: collapsing the two is
+**behaviourally invisible**, so no test catches it — which makes this comment the
+only guard. A guard carrying a disprovable reason invites the next reader to
+check it, find it false, and collapse the constructors **with this comment as
+licence.**
+
+⚖️ **The reason that survives checking is a domain one.** `Optional` means _this
+endpoint accepts a credential when the reader holds one_ — the 15
+optionally-authenticated routes. `NoCredential` means _this endpoint never takes
+one_ — `putFileToR2`, a `PUT` at third-party object storage. Collapsing them
+makes an endpoint that **refuses** credentials indistinguishable from one that
+merely **lacks** one, which is this project's absent-versus-declared-none
+distinction: a declared "none" can be checked against intent, an absence cannot.
 
 -}
 type Credential
@@ -369,8 +390,21 @@ production and the program-test harness each convert this list with a one-line
 `List.map`, and there is **one** derivation rather than two that can disagree.
 
 ⚠️ A `CrossOrigin` destination yields NO credential header regardless of the
-credential, and that precedence is deliberate: the origin decision wins, so a
-caller cannot leak a token by passing `Session` to an external URL.
+credential. The origin decision wins over the credential.
+
+⛔ **WHAT THAT DOES NOT PROTECT, corrected 2026-10-26 because the earlier
+wording overclaimed it.** `Destination` is **declared by the caller, not derived
+from the URL** — so `requestHeaders SameOrigin (Session token)` against an
+external URL still attaches the token. The precedence above defends
+`CrossOrigin` + `Session`, which is the _unlikely_ mistake; it does nothing
+against the likelier one, because `SameOrigin` is the ordinary-looking value a
+hurried caller reaches for.
+
+⚖️ So the real guard is not in this module: it is the assertion that **no request
+whose URL is not `baseUrl`-derived carries an `Authorization` header** — URL
+against destination, not destination alone. ⚠️ An assertion that only checks
+`CrossOrigin ⇒ []` is this blind spot restated as coverage, and would pass while
+the gap stands.
 
 -}
 requestHeaders : Destination -> Credential -> List ( String, String )
