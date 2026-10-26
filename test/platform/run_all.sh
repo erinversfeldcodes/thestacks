@@ -34,6 +34,7 @@ SUITES=(
     "$HERE/wave_status_stack_guard_test.sh"
     "$HERE/campaign_residue_ledger_test.sh"
     "$HERE/rls_scope_gate_test.sh"
+    "$HERE/credential_origin_gate_test.sh"
     "$HERE/sigpipe_hazard_gate_test.sh"
     "$HERE/cli_stub_provenance_test.sh"
     "$HERE/ci_gate_reachability_test.sh"
