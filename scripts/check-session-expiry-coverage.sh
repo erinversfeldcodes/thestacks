@@ -44,18 +44,70 @@ def top_level_definitions(text):
         definitions.setdefault(name, []).extend(buffer)
     return {key: "\n".join(value) for key, value in definitions.items()}
 
+# ⛔ THREE FORMS, BECAUSE A MIGRATION IS IN FLIGHT AND THE OLD TWO MUST KEEP
+# WORKING UNTIL IT FINISHES.
+#
+# `Api.elm`'s 70 inline `Http.header "Authorization"` derivations are being
+# consolidated onto `Api.requestHeaders`. The moment a site migrates, the old
+# patterns stop matching it — so without the new form below this gate's
+# population would fall silently as the refactor proceeded, and its floor is an
+# EMPTINESS check, so it would stay green all the way down to one endpoint.
+#
+# ⚠️ `Session` is the mandatory marker and `Optional` the maybe-authenticated
+# one, which is why those constructors must stay separately nameable at the call
+# site. They are the only thing distinguishing an endpoint that always needs a
+# credential from one that merely accepts it — and that distinction is what
+# decides whether a page must route a 401 to the session-expiry interceptor.
 MANDATORY = re.compile(
-    r"headers\s*=\s*(authedHeaders\b|\[\s*Http\.header\s+\"Authorization\")"
+    r"headers\s*=\s*("
+    r"authedHeaders\b"
+    r"|\[\s*Http\.header\s+\"Authorization\""
+    r"|requestHeaders\s+\w+\s+\(\s*Session\b"
+    r")"
 )
-OPTIONAL = re.compile(r"headers\s*=\s*(authHeaders\b|$)", re.M)
+OPTIONAL = re.compile(
+    r"headers\s*=\s*("
+    r"authHeaders\b"
+    r"|requestHeaders\s+\w+\s+\(\s*Optional\b"
+    r"|requestHeaders\s+\w+\s+NoCredential\b"
+    r"|$)",
+    re.M,
+)
 
 api_text = read(API)
+definitions = top_level_definitions(api_text)
 authed_endpoints = set()
-for name, body in top_level_definitions(api_text).items():
-    if name in ("authedHeaders", "authHeaders"):
+for name, body in definitions.items():
+    if name in ("authedHeaders", "authHeaders", "requestHeaders"):
         continue
     if MANDATORY.search(body) and not OPTIONAL.search(body):
         authed_endpoints.add(name)
+
+# ⛔ A FLOOR ON WHAT WAS PARSED, not only on what was found — added 2026-10-26
+# because the emptiness check below cannot tell a cleared file from a broken
+# parser, and a 70-site migration is about to walk this population down.
+#
+# MEASURED: `if not authed_endpoints` refuses only at ZERO, so a change taking
+# this from 70 matching sites to ONE passes green, classifies one endpoint and
+# prints "1" as though that were the population. "I found nothing" and "I could
+# not look" are the same output unless the floor is on the reading.
+MIN_PARSED_DEFINITIONS = 200
+
+if len(definitions) < MIN_PARSED_DEFINITIONS:
+    print(
+        f"FAIL: parsed only {len(definitions)} top-level definition(s) in " + API + ";",
+        file=sys.stderr,
+    )
+    print(
+        f"      expected at least {MIN_PARSED_DEFINITIONS}. A verdict over a corpus this",
+        file=sys.stderr,
+    )
+    print(
+        "      small is the parser having drifted from the source, not the source having",
+        file=sys.stderr,
+    )
+    print("      become safe — and the findings-based floor below cannot tell them apart.", file=sys.stderr)
+    sys.exit(1)
 
 if not authed_endpoints:
     print("FAIL: found no mandatorily-authenticated endpoints in " + API + ".")

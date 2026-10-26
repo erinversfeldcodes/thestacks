@@ -54,7 +54,7 @@ in code by" and check it before relying on it.
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
 | `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml`, `test/platform/schema_diff_test.sh` |  |
 | `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/script_wiring_test.sh` | Every script has a caller, and the inventory that says so is generated. |
-| `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/session_expiry_forms_test.sh` |  |
 | `scripts/check-sigpipe-hazards.sh` | `scripts/lint-elixir.sh`, `scripts/wave-status.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Refuse a pipeline whose exit status is read but can be 141 instead of the |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/check_slo_gate_test.sh`, `test/platform/deploy_production_workflow_test.sh` … |  |
 | `scripts/check-status-after-substitution.sh` | `scripts/lint-elixir.sh`, `test/platform/status_after_substitution_test.sh` | Refuse a `$?` read in the same command as a substitution that precedes it. |
