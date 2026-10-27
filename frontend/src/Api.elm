@@ -282,6 +282,7 @@ module Api exposing
     , updateSyndicationUrl
     , uploadInboxDecoder
     , uploadTimeout
+    , withBearer
     )
 
 {-| Every HTTP call the SPA makes, and every decoder that reads a server
@@ -420,6 +421,20 @@ cannot be bypassed.
 credentials : String -> Maybe String -> Credentials
 credentials bearer csrf =
     Credentials { bearer = bearer, csrf = csrf }
+
+
+{-| Replace the bearer token, keeping the same-origin proof.
+
+⚖️ This is what a token REFRESH is: the credential that proves who you are gets
+a new value, and the proof that the request came from a document on our origin
+is unchanged — it is a property of the browsing context, not of the session.
+Rebuilding the whole value from the refresh response would drop the CSRF token
+and silently stop every subsequent write from proving itself.
+
+-}
+withBearer : String -> Credentials -> Credentials
+withBearer bearer (Credentials creds) =
+    Credentials { creds | bearer = bearer }
 
 
 {-| The bearer token as a bare string.

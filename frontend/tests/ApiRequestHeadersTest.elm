@@ -173,6 +173,46 @@ suite =
                         |> List.member ( "X-CSRF-Token", "c" )
                         |> Expect.equal True
             ]
+        , describe "a refresh replaces the bearer and keeps the proof"
+            -- ⛔ THE SILENT-LOSS CASE. A token refresh that rebuilt the whole
+            -- credential from the refresh response would drop the CSRF token,
+            -- and every subsequent write would stop proving itself — with
+            -- nothing failing until enforcement lands, and then everything
+            -- failing at once.
+            --
+            -- ⚖️ The proof is a property of the BROWSING CONTEXT, not of the
+            -- session: it comes from a cookie the document can read, and a new
+            -- access token does not change which document is asking.
+            [ test "the bearer changes" <|
+                \() ->
+                    Api.credentials "old-bearer" (Just "proof")
+                        |> Api.withBearer "new-bearer"
+                        |> Api.bearerOf
+                        |> Expect.equal "new-bearer"
+            , test "and the proof is still sent on a write" <|
+                \() ->
+                    Api.credentials "old-bearer" (Just "proof")
+                        |> Api.withBearer "new-bearer"
+                        |> (\creds ->
+                                Api.requestHeaders "POST" Api.SameOrigin (Api.Session creds)
+                           )
+                        |> Expect.equal
+                            [ ( "Authorization", "Bearer new-bearer" )
+                            , ( "X-CSRF-Token", "proof" )
+                            ]
+
+            -- ⚠️ And an absent proof stays absent: `withBearer` must not invent
+            -- one, or a page that never received a cookie would start claiming
+            -- to prove something.
+            , test "an absent proof is not conjured" <|
+                \() ->
+                    Api.credentials "old" Nothing
+                        |> Api.withBearer "new"
+                        |> (\creds ->
+                                Api.requestHeaders "POST" Api.SameOrigin (Api.Session creds)
+                           )
+                        |> Expect.equal [ ( "Authorization", "Bearer new" ) ]
+            ]
         , describe "the derivation is data, so both runtimes convert one value"
             -- ⛔ The headers are returned as `( String, String )` pairs rather
             -- than as `Http.Header`, because `Http.Header` and

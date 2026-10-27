@@ -62,7 +62,7 @@ type Msg
 
 type OutMsg
     = NoOut
-    | Authenticated Api.Credentials
+    | Authenticated String
 
 
 init : Model
@@ -167,11 +167,13 @@ update msg model ownerToken =
                 _ ->
                     ( model, Cmd.none, NoOut )
 
+        -- ⚠️ The BEARER only. This page has no business knowing about the
+        -- same-origin proof — that is a property of the document, held by
+        -- `Main`, which pairs the two when it stores the admin session. A page
+        -- that built the whole credential would need the proof threaded into
+        -- it for no reason other than to hand it straight back.
         Verified (Ok token) ->
-            ( { model | busy = False, code = "" }
-            , Cmd.none
-            , Authenticated (Api.credentials token Nothing)
-            )
+            ( { model | busy = False, code = "" }, Cmd.none, Authenticated token )
 
         Verified (Err err) ->
             ( { model | busy = False, code = "", error = Just (authErrorMessage err) }

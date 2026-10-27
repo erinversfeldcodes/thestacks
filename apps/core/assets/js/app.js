@@ -124,6 +124,22 @@ import "../css/main.css";
   };
 })();
 
+// One cookie's value, or null. Split on "; " rather than ";" alone would miss
+// the first pair; `indexOf` rather than a regex because a cookie value can
+// contain characters a loose pattern would treat as delimiters.
+function readCookie(name) {
+  var prefix = name + "=";
+  var parts = (document.cookie || "").split(";");
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (part.indexOf(prefix) === 0) {
+      var value = part.substring(prefix.length);
+      return value.length > 0 ? value : null;
+    }
+  }
+  return null;
+}
+
 var storedAuth = null;
 var storedAuthUnreadable = null;
 try {
@@ -145,6 +161,21 @@ function boot() {
   if (storedAuthUnreadable !== null) {
     flags.storedAuthUnreadable = storedAuthUnreadable;
   }
+  // The same-origin proof the SPA echoes in `X-CSRF-Token` on every write.
+  //
+  // Read from the cookie the server set on THIS page's response. A browser
+  // cannot have run this script without having loaded that response, so the
+  // cookie is present by the time we look — which is why the cookie is issued
+  // on the SPA page rather than at login, where the login POST itself would
+  // have had nothing to echo.
+  //
+  // Deliberately NOT HttpOnly server-side: a token the page cannot read cannot
+  // be double-submitted. It is not a secret — it proves the request came from a
+  // document on our origin, which is exactly what a cross-site attacker cannot
+  // arrange, since they can send a request with our cookies but cannot read
+  // them.
+  flags.csrfToken = readCookie("stacks_csrf");
+
   flags.ageGatingEnabled = false;
   // Fail CLOSED: registration stays invite-gated until the real
   // config arrives; a fetch failure must not reopen public sign-ups.

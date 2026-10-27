@@ -454,6 +454,12 @@ type alias Model =
     , route : Route
     , auth : AuthState
     , adminAuth : Maybe Api.Credentials
+
+    -- ⚠️ The same-origin proof, held independently of any session. A visitor
+    -- who is signed OUT still needs it: the login POST is itself a
+    -- state-changing request, and the token has to be available before there is
+    -- an `Auth` to carry it.
+    , csrf : Maybe String
     , adminChrome : AdminChrome.Model
     , page : Page
     , previousRoute : Maybe Route
@@ -546,6 +552,10 @@ init flags url key =
         config =
             decodeConfig flags
 
+        csrf =
+            Decode.decodeValue (Decode.field "csrfToken" Decode.string) flags
+                |> Result.toMaybe
+
         route =
             Route.fromUrl url
 
@@ -558,6 +568,7 @@ init flags url key =
       , auth =
             maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
       , adminAuth = Nothing
+      , csrf = csrf
       , adminChrome = AdminChrome.init
       , page = page
       , previousRoute = Nothing
@@ -615,8 +626,8 @@ and `adoptExternalAuth` (cross-tab propagation,) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
-    Decode.map6
-        (\token userId email displayName handle role ->
+    Decode.map7
+        (\token userId email displayName handle role csrf ->
             { user =
                 { id = userId
                 , email = email
@@ -628,7 +639,7 @@ authDecoder =
                 , consentAnalytics = False
                 , consentWritingAssistant = False
                 }
-            , token = Api.credentials token Nothing
+            , token = Api.credentials token csrf
             }
         )
         (Decode.field "token" Decode.string)
@@ -645,6 +656,13 @@ authDecoder =
             , Decode.succeed "user"
             ]
         )
+        -- ⚠️ The same-origin proof, read from the boot flags rather than from
+        -- the stored auth blob: it is a property of the BROWSING CONTEXT, not
+        -- of the session, and it comes from a cookie the page can read. An
+        -- absent one decodes to `Nothing`, which sends no header and will be
+        -- refused once enforcement lands — the correct outcome, and the reason
+        -- it is not defaulted to `""`.
+        (Decode.maybe (Decode.field "csrfToken" Decode.string))
 
 
 {-| What boot found in localStorage. Three outcomes, three
@@ -1605,7 +1623,7 @@ current ones. Pure and key-free, so the renewal-success path is unit-testable.
 -}
 renewAuthToken : Api.AuthResponse -> Auth -> Auth
 renewAuthToken authResponse auth =
-    { auth | token = Api.credentials authResponse.token Nothing }
+    { auth | token = Api.withBearer authResponse.token auth.token }
 
 
 {-| How long to wait after receiving an access token before silently renewing it.
@@ -1696,8 +1714,8 @@ type alias CompletedLogin =
 key-free, so the persist-first guarantee is unit-testable rather than only
 observable in a browser.
 -}
-completeLogin : Api.AuthResponse -> CompletedLogin
-completeLogin authResponse =
+completeLogin : Maybe String -> Api.AuthResponse -> CompletedLogin
+completeLogin csrf authResponse =
     let
         session =
             { user =
@@ -1711,7 +1729,7 @@ completeLogin authResponse =
                 , consentAnalytics = authResponse.consentAnalytics
                 , consentWritingAssistant = authResponse.consentWritingAssistant
                 }
-            , token = Api.credentials authResponse.token Nothing
+            , token = Api.credentials authResponse.token csrf
             }
     in
     { session = session
@@ -1944,7 +1962,7 @@ update msg model =
                         Login.LoggedIn authResponse ->
                             let
                                 arrival =
-                                    completeLogin authResponse
+                                    completeLogin model.csrf authResponse
                             in
                             ( { baseModel | auth = arrival.authState }
                             , loginCompletionCmd model.key model.redirectAfterLogin arrival baseCmd
@@ -2816,7 +2834,7 @@ update msg model =
                         AdminSession.Authenticated adminToken ->
                             let
                                 withToken =
-                                    { model | adminAuth = Just adminToken }
+                                    { model | adminAuth = Just (Api.credentials adminToken model.csrf) }
 
                                 ( page, pageCmd ) =
                                     initPage model.config

@@ -122,7 +122,7 @@ shellUpdate msg model =
                 Login.LoggedIn authResponse ->
                     let
                         arrival =
-                            Main.completeLogin authResponse
+                            Main.completeLogin Nothing authResponse
                     in
                     List.foldl (applyEffect arrival)
                         { withPage | authState = arrival.authState }
@@ -258,7 +258,7 @@ completeLoginAlwaysPersists : Test
 completeLoginAlwaysPersists =
     test "completeLogin cannot produce an authenticated state without the effect that saves it" <|
         \() ->
-            Main.completeLogin (fakeResponse readerAuth)
+            Main.completeLogin Nothing (fakeResponse readerAuth)
                 |> (\arrival ->
                         Expect.all
                             [ \a -> Expect.equal True (List.member Main.PersistAuth a.effects)
@@ -272,7 +272,7 @@ completeLoginCarriesTheResponsesToken : Test
 completeLoginCarriesTheResponsesToken =
     test "completeLogin's session is the token the server issued" <|
         \() ->
-            (Main.completeLogin (fakeResponse readerAuth)).session.token
+            (Main.completeLogin Nothing (fakeResponse readerAuth)).session.token
                 |> Expect.equal (TestHelpers.creds "jwt-token")
 
 
@@ -280,7 +280,7 @@ completeLoginStartsArriving : Test
 completeLoginStartsArriving =
     test "completeLogin starts in Arriving — the door ornament is still owed a signal" <|
         \() ->
-            (Main.completeLogin (fakeResponse readerAuth)).authState
+            (Main.completeLogin Nothing (fakeResponse readerAuth)).authState
                 |> Expect.equal (Main.Arriving readerAuth)
 
 

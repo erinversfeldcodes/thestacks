@@ -73,7 +73,7 @@ suite =
             [ test "a verified code emits the admin token" <|
                 \_ ->
                     out (Session.Verified (Ok "admin-token-abc")) awaitingCode
-                        |> Expect.equal (Session.Authenticated (TestHelpers.creds "admin-token-abc"))
+                        |> Expect.equal (Session.Authenticated "admin-token-abc")
             , test "nothing else emits a token" <|
                 \_ ->
                     [ out (Session.SetEmail "x") Session.init
