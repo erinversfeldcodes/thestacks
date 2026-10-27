@@ -27,6 +27,7 @@ in code by" and check it before relying on it.
 | `scripts/check-cli-stub-provenance.sh` | `scripts/lint-elixir.sh`, `test/platform/cli_stub_provenance_test.sh` | A stubbed CLI must say which real tool output it was copied from, and when. |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-credential-origin.sh` | `scripts/lint-elm.sh`, `test/platform/credential_origin_gate_test.sh` | A request that attaches a credential must have a PROVABLY same-origin URL. |
+| `scripts/check-csrf-scope.sh` | `scripts/lint-elixir.sh` | The CSRF counter's declared scope must match the router's actual population. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |

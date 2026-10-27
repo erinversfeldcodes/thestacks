@@ -125,6 +125,7 @@ gate check-phase-scheme.sh
 gate check-tracker-refs.sh
 gate check-error-token-spelling.sh
 gate check-rls-scope.sh
+gate check-csrf-scope.sh
 gate check-protojson-completeness.sh
 # Beside the completeness gate on purpose: they watch the two halves of the same
 # manifest decision. That one asks whether the hand-written serializer DROPS a
