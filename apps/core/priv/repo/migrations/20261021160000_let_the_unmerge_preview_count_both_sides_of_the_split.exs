@@ -30,6 +30,9 @@ defmodule Core.Repo.Migrations.LetTheUnmergePreviewCountBothSidesOfTheSplit do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("""
     CREATE OR REPLACE FUNCTION op.unmerge_placement_counts(edition_id uuid, work_id uuid)
       RETURNS TABLE (movers bigint, retained bigint)
@@ -53,6 +56,9 @@ defmodule Core.Repo.Migrations.LetTheUnmergePreviewCountBothSidesOfTheSplit do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("DROP FUNCTION IF EXISTS op.unmerge_placement_counts(uuid, uuid)")
   end
 end

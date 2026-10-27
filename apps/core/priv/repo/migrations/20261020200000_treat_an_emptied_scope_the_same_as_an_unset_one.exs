@@ -42,6 +42,9 @@ defmodule Core.Repo.Migrations.TreatAnEmptiedScopeTheSameAsAnUnsetOne do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("""
     CREATE OR REPLACE FUNCTION op.current_scope() RETURNS uuid
       LANGUAGE plpgsql
@@ -73,6 +76,9 @@ defmodule Core.Repo.Migrations.TreatAnEmptiedScopeTheSameAsAnUnsetOne do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     # Back to the definition that required the role default to give a named
     # error on a reused connection.
     execute("""

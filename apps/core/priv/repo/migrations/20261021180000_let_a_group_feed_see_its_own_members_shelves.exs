@@ -44,6 +44,9 @@ defmodule Core.Repo.Migrations.LetAGroupFeedSeeItsOwnMembersShelves do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("""
     CREATE OR REPLACE FUNCTION op.group_feed_placements(
       member_ids uuid[],
@@ -82,6 +85,9 @@ defmodule Core.Repo.Migrations.LetAGroupFeedSeeItsOwnMembersShelves do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("DROP FUNCTION IF EXISTS op.group_feed_placements(uuid[], timestamptz, integer)")
   end
 end

@@ -52,6 +52,9 @@ defmodule Core.Repo.Migrations.AnswerTheThreeCrossUserQuestionsWithoutABroadExem
   @cross_user_tables ~w(user_blocks bookshelves bookshelf_placements)
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     # ── The function owner: a role nobody can connect as ────────────────────
     execute("""
     DO $$
@@ -182,30 +185,30 @@ defmodule Core.Repo.Migrations.AnswerTheThreeCrossUserQuestionsWithoutABroadExem
     # ⚠️ Both arms of the new placement policy need an index or the OR they add
     # turns the read into a sequential scan — the same effect measured for the
     # platform-visibility arm.
-    create_if_not_exists index(:bookshelf_placements, [:listing_status],
-                           prefix: "op",
-                           name: :bookshelf_placements_active_listing_idx,
-                           where: "listing_status = 'active' AND removed_at IS NULL"
-                         )
-
-    create_if_not_exists index(:bookshelves, [:name],
-                           prefix: "op",
-                           name: :bookshelves_looking_for_home_idx,
-                           where: "name = 'looking_for_home'"
-                         )
+    #
+    # ⛔ THE TWO INDEXES ARE BUILT BY THE SUCCESSOR MIGRATION, CONCURRENTLY.
+    # They were created here, in this transaction, which takes a lock against
+    # WRITES on `op.bookshelf_placements` and `op.bookshelves` for the whole
+    # build — both tables on the request path, and `bookshelf_placements` is
+    # written by every shelving action. A concurrent build needs its own
+    # transaction (`@disable_ddl_transaction`), which the policies and functions
+    # above cannot share, so the index work moved out rather than the policy
+    # work.
+    #
+    # ⚖️ Ordering is safe because the dependency is PERFORMANCE, not
+    # correctness: the policies above are enforced with or without the indexes,
+    # and until the successor runs the reads they govern are merely slow.
   end
 
   def down do
-    drop_if_exists index(:bookshelves, [:name],
-                     prefix: "op",
-                     name: :bookshelves_looking_for_home_idx
-                   )
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
 
-    drop_if_exists index(:bookshelf_placements, [:listing_status],
-                     prefix: "op",
-                     name: :bookshelf_placements_active_listing_idx
-                   )
-
+    # ⚠️ The two policy-supporting indexes are dropped by the successor
+    # migration's `down`, since that is where they are created. Dropping them
+    # here as well would be harmless on a full rollback and wrong on a partial
+    # one: rolling back only this migration would remove indexes the successor
+    # still believes it owns.
     execute("DROP POLICY IF EXISTS bookshelves_looking_for_home ON op.bookshelves")
 
     execute(
@@ -222,12 +225,46 @@ defmodule Core.Repo.Migrations.AnswerTheThreeCrossUserQuestionsWithoutABroadExem
 
     execute("REVOKE USAGE, CREATE ON SCHEMA op FROM rls_reader")
 
+    # ⛔ A ROLE IS CLUSTER-WIDE, SO THIS DROP CANNOT BE A PER-DATABASE DECISION.
+    #
+    # MEASURED, and it is why `mix ecto.rollback --all` — the reversibility
+    # check at the end of scripts/test-elixir.sh — failed on this migration:
+    #
+    #     ERROR 2BP01 (dependent_objects_still_exist)
+    #     role "rls_reader" cannot be dropped because some objects depend on it
+    #     16 objects in database stacks_dev
+    #
+    # The rollback was running against `stacks_test`. Every statement above
+    # released everything this migration tied to the role IN THIS DATABASE —
+    # verified, zero rows left in `pg_shdepend` at this point — and the DROP
+    # still failed, because `pg_shdepend` is a SHARED catalogue and `stacks_dev`
+    # had the same functions and grants from its own copy of this migration.
+    #
+    # ⚠️ So the failure had nothing to do with this migration's own
+    # completeness, and no amount of extra REVOKEs here could have fixed it. Any
+    # cluster holding two Stacks databases reproduces it: a developer's dev plus
+    # test, a CI machine with both, a staging cluster beside a preview branch.
+    #
+    # ⚖️ Swallowing `dependent_objects_still_exist` is the same answer
+    # `20260305000020` reached for `stacks_app`, `stacks_dbt` and
+    # `stacks_readonly`, and it is right for the same reason: the role is
+    # NOLOGIN and holds no privilege once the revokes above have run, so leaving
+    # it behind grants nobody anything. A rollback that cannot complete is a
+    # worse outcome than a tidy-up that cannot finish.
+    #
+    # ⚠️ What is NOT swallowed is anything else. A permissions error, a missing
+    # schema, a syntax error still aborts — only the one condition that is
+    # provably not this database's business is caught.
     execute("""
     DO $$
     BEGIN
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rls_reader') THEN
-        DROP ROLE rls_reader;
-      END IF;
+      BEGIN
+        DROP ROLE IF EXISTS rls_reader;
+      EXCEPTION WHEN dependent_objects_still_exist THEN
+        RAISE NOTICE
+          'rls_reader kept: another database in this cluster still owns objects as it. '
+          'It is NOLOGIN and every grant made here has been revoked.';
+      END;
     END $$
     """)
   end

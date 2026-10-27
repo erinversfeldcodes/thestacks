@@ -40,6 +40,9 @@ defmodule Core.Repo.Migrations.LetACorrectionFindWhoseRowsItMustScopeTo do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("""
     CREATE OR REPLACE FUNCTION op.placement_owners_for_edition(edition_id uuid)
       RETURNS TABLE (user_id uuid)
@@ -60,6 +63,9 @@ defmodule Core.Repo.Migrations.LetACorrectionFindWhoseRowsItMustScopeTo do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("DROP FUNCTION IF EXISTS op.placement_owners_for_edition(uuid)")
   end
 end

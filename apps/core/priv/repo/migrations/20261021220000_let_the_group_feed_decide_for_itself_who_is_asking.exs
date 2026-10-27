@@ -74,6 +74,9 @@ defmodule Core.Repo.Migrations.LetTheGroupFeedDecideForItselfWhoIsAsking do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     # The owner role could always have read these — neither carries row-level
     # security — it was only ever missing the grant.
     execute("GRANT SELECT ON op.group_members TO rls_reader")
@@ -154,6 +157,9 @@ defmodule Core.Repo.Migrations.LetTheGroupFeedDecideForItselfWhoIsAsking do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute(
       "DROP FUNCTION IF EXISTS op.group_feed_placements(uuid, uuid[], timestamptz, integer)"
     )

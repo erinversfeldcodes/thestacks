@@ -88,6 +88,9 @@ defmodule Core.Repo.Migrations.OneDefinitionOfWhoIsAsking do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     # ── 1. the grant the admin API actually needs ───────────────────────────
     execute("GRANT EXECUTE ON FUNCTION op.placement_owners_for_edition(uuid) TO stacks_app")
 
@@ -181,6 +184,9 @@ defmodule Core.Repo.Migrations.OneDefinitionOfWhoIsAsking do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("REVOKE EXECUTE ON FUNCTION op.placement_owners_for_edition(uuid) FROM stacks_app")
 
     # Back to each function deciding for itself, which is the duplication this

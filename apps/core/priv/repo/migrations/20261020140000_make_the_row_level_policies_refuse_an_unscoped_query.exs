@@ -62,6 +62,9 @@ defmodule Core.Repo.Migrations.MakeTheRowLevelPoliciesRefuseAnUnscopedQuery do
   @disable_migration_lock true
 
   def up do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     # ── The one place the rule lives ────────────────────────────────────────
     #
     # ⚠️ Raises rather than returning NULL. Returning NULL would make every
@@ -250,6 +253,9 @@ defmodule Core.Repo.Migrations.MakeTheRowLevelPoliciesRefuseAnUnscopedQuery do
   end
 
   def down do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     # ⚠️ Restores the short-circuit, which means restoring the defect: the
     # policies permit every row again. That is the correct `down` — a rollback
     # must return the database to the state the previous release expects, and

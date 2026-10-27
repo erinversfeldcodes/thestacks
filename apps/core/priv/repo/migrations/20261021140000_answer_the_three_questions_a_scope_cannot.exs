@@ -61,6 +61,9 @@ defmodule Core.Repo.Migrations.AnswerTheThreeQuestionsAScopeCannot do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     # ── 1. platform-wide totals ─────────────────────────────────────────────
     execute("""
     CREATE OR REPLACE FUNCTION op.platform_row_counts()
@@ -140,6 +143,9 @@ defmodule Core.Repo.Migrations.AnswerTheThreeQuestionsAScopeCannot do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("DROP FUNCTION IF EXISTS op.placement_owner(uuid)")
     execute("DROP FUNCTION IF EXISTS op.platform_row_counts()")
 
