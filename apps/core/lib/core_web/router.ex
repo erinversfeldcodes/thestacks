@@ -4,6 +4,17 @@ defmodule CoreWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug StacksWeb.Plugs.SecurityHeaders
+
+    # ⚠️ COUNTS, and cannot reject. Shipped before any enforcement so the
+    # decision to enforce is a reading of present/absent/mismatched over real
+    # traffic rather than a judgement — the recorded failure behind this work is
+    # an enforcement switched on before the client side was converted.
+    #
+    # On `:api` rather than on each authenticated pipeline, so the pre-auth
+    # writes (login, password reset, registration) are counted too: they are
+    # state-changing and they are exactly the routes a token issued at login
+    # would have missed.
+    plug StacksWeb.Plugs.CsrfCounter
   end
 
   pipeline :spa do
