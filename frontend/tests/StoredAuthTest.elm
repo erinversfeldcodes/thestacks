@@ -175,7 +175,7 @@ cardForFlags : Encode.Value -> Query.Single Login.Msg
 cardForFlags flags =
     Main.decodeFlags flags
         |> Main.arrivalForBoot
-        |> Login.init
+        |> Login.init Nothing
         |> Login.view
         |> Query.fromHtml
 

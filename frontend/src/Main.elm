@@ -491,6 +491,13 @@ extend this record as new server-driven flags land.
 type alias AppConfig =
     { ageGatingEnabled : Bool
     , inviteOnly : Bool
+
+    -- ⚠️ The same-origin proof rides with the boot config because it is the
+    -- same KIND of value: read once from the document the SPA was served in,
+    -- before any session exists. It is not a feature flag, and it is here
+    -- rather than as an eighth `initPage` parameter because every page that
+    -- needs it needs it for the same reason the config is passed at all.
+    , proof : Maybe String
     }
 
 
@@ -500,6 +507,7 @@ type alias AppConfig =
 defaultConfig : AppConfig
 defaultConfig =
     { ageGatingEnabled = False
+    , proof = Nothing
 
     -- Fail CLOSED (): a gate on account creation must not reopen
     -- because a config fetch blipped. The server's real value arrives over
@@ -515,7 +523,7 @@ defaultConfig =
 -}
 configDecoder : Decode.Decoder AppConfig
 configDecoder =
-    Decode.map2 AppConfig
+    Decode.map3 AppConfig
         (Decode.oneOf
             [ Decode.field "ageGatingEnabled" Decode.bool
             , Decode.succeed False
@@ -526,6 +534,7 @@ configDecoder =
             , Decode.succeed True
             ]
         )
+        (Decode.maybe (Decode.field "csrfToken" Decode.string))
 
 
 {-| Read the runtime config from the boot flags, falling back to
@@ -972,7 +981,7 @@ one of them.
 initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe Api.Credentials -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
 initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
     if loginRedirectFor route maybeAuth /= Nothing then
-        ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
+        ( PageLogin (Login.init config.proof arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
     else if isAdminRoute route && adminToken == Nothing then
         -- ⛔ The gate that makes four surfaces reachable. `/api/admin/*` needs an
@@ -1080,7 +1089,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageHome subModel, Cmd.map HomeMsg subCmd )
 
         Login ->
-            ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
+            ( PageLogin (Login.init config.proof arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         Library ->
             initBookshelf Bookshelf.libraryConfig maybeAuth
@@ -1386,10 +1395,10 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageConfirmEmail status, Cmd.none )
 
         ForgotPassword ->
-            ( PageLogin (Login.init Login.ForgotPassword |> Login.withInviteOnly config.inviteOnly), Cmd.none )
+            ( PageLogin (Login.init config.proof Login.ForgotPassword |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResendConfirmation ->
-            ( PageLogin (Login.init Login.ConfirmationExpired |> Login.withInviteOnly config.inviteOnly), Cmd.none )
+            ( PageLogin (Login.init config.proof Login.ConfirmationExpired |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResetPassword token ->
             ( PageResetPassword (ResetPassword.init token), Cmd.none )
@@ -3057,7 +3066,7 @@ update msg model =
                         | userMenu = newUserMenu
                         , auth = Anonymous
                         , adminAuth = Nothing
-                        , page = PageLogin (Login.init Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
+                        , page = PageLogin (Login.init model.config.proof Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
                         , arrival = Login.Fresh
                       }
                     , Cmd.batch

@@ -338,7 +338,7 @@ expiredInitRendersDistinctNotice : Test
 expiredInitRendersDistinctNotice =
     test "expired_init_renders_distinct_notice: the expired-notice login state shows the session-expired message" <|
         \() ->
-            ProgramTest.start () (loginModelProgram (Login.init (Login.SessionExpired { draftSaved = False })))
+            ProgramTest.start () (loginModelProgram (Login.init Nothing (Login.SessionExpired { draftSaved = False })))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 
@@ -349,7 +349,7 @@ freshInitHasNoNotice : Test
 freshInitHasNoNotice =
     test "fresh_init_has_no_notice: an ordinary login has no session-expired notice" <|
         \() ->
-            ProgramTest.start () (loginModelProgram (Login.init Login.Fresh))
+            ProgramTest.start () (loginModelProgram (Login.init Nothing Login.Fresh))
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 

@@ -173,6 +173,41 @@ suite =
                         |> List.member ( "X-CSRF-Token", "c" )
                         |> Expect.equal True
             ]
+        , describe "a write with NO session still proves itself"
+            -- ⛔ THE DEFECT THIS WAS WRITTEN FOR, and it shipped through 2208
+            -- passing tests. The proof began as a field of `Credentials`, which
+            -- exists only when there is a bearer — so a signed-OUT visitor had
+            -- no way to reach one, and `POST /api/auth/login` is a write
+            -- performed by definition without a session.
+            --
+            -- ⚖️ Found by DRIVING the deployed client, not by reading code: the
+            -- real login POST sent `content-type` and nothing else. Every unit
+            -- test passed because each one builds a `Credentials` in order to
+            -- ask its question — the case with no credential at all is the one
+            -- no test thought to build. That is what this describe block is.
+            [ test "a sessionless write carries the proof" <|
+                \() ->
+                    Api.planHeaders "POST" Nothing (Just "proof-abc")
+                        |> List.length
+                        |> Expect.equal 1
+            , test "a sessionless READ carries nothing" <|
+                \() ->
+                    Api.planHeaders "GET" Nothing (Just "proof-abc")
+                        |> Expect.equal []
+            , test "a sessionless write with no proof available carries nothing" <|
+                \() ->
+                    Api.planHeaders "POST" Nothing Nothing
+                        |> Expect.equal []
+
+            -- ⚠️ And the resolver's precedence: a reader WITH a session uses
+            -- the proof inside their credentials, so a cookie that rotated
+            -- since boot does not make consecutive requests disagree.
+            , test "a session's own proof wins over the plan's" <|
+                \() ->
+                    Api.planHeaders "POST" (Just (Api.credentials "tok" (Just "from-session"))) (Just "from-plan")
+                        |> List.length
+                        |> Expect.equal 2
+            ]
         , describe "a refresh replaces the bearer and keeps the proof"
             -- ⛔ THE SILENT-LOSS CASE. A token refresh that rebuilt the whole
             -- credential from the refresh response would drop the CSRF token,

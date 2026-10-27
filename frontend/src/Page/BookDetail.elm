@@ -214,12 +214,15 @@ initWithEffect bookId maybeToken maybePreviousRoute =
     , Effect.batch
         [ Effect.public (Api.getBookRequest bookId)
             maybeToken
+            Nothing
             (Api.resolveJson Api.bookDetailResponseDecoder >> BookLoaded)
         , Effect.public (availabilityRequest bookId)
             maybeToken
+            Nothing
             (Api.resolveJson availabilityDecoder >> AvailabilityLoaded)
         , Effect.public (pricesRequest bookId)
             maybeToken
+            Nothing
             (Api.resolveJson pricesDecoder >> PricesLoaded)
         ]
     )
@@ -533,6 +536,7 @@ updateWithEffect msg model maybeToken =
                         [ case response.book.author of
                             Just author ->
                                 Effect.public (Api.getAuthorEventsRequest author.id)
+                                    Nothing
                                     Nothing
                                     (Api.resolveJson Api.authorEventsDecoder >> GotAuthorEvents)
 

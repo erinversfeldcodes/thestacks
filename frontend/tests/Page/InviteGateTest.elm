@@ -26,7 +26,7 @@ import Types.RemoteData exposing (RemoteData(..))
 -}
 registerCard : Bool -> Login.Model
 registerCard inviteOnly =
-    Login.init Login.Fresh
+    Login.init Nothing Login.Fresh
         |> Login.withInviteOnly inviteOnly
         |> (\model -> { model | mode = Login.RegisterMode })
 

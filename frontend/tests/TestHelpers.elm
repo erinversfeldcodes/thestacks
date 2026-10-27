@@ -1413,7 +1413,7 @@ starts it, from the arrival.
 loginProgramFrom : Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgramFrom arrival =
     ProgramTest.createElement
-        { init = \() -> ( Login.init arrival, SimulatedEffect.Cmd.none )
+        { init = \() -> ( Login.init Nothing arrival, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let

@@ -42,7 +42,12 @@ type FieldValidation
 
 
 type alias Model =
-    { email : String
+    { -- ⚠️ The same-origin proof, held by a page that by definition has NO
+      -- session. This is where the original design broke: the proof was a field
+      -- of the session credential, so the login POST — a write performed
+      -- without a session — could not reach one and sent none.
+      proof : Maybe String
+    , email : String
     , password : String
     , passwordConfirm : String
     , displayName : String
@@ -177,9 +182,10 @@ The card's initial `mode` is derived here rather than passed separately, so
 `/forgot-password` cannot open a card in login mode while claiming to be a reset.
 
 -}
-init : Arrival -> Model
-init arrival =
-    { email = ""
+init : Maybe String -> Arrival -> Model
+init proof arrival =
+    { proof = proof
+    , email = ""
     , password = ""
     , passwordConfirm = ""
     , displayName = ""
@@ -379,6 +385,7 @@ updateWithEffect msg model =
                 ( { model | forgotState = Loading }
                 , Effect.public (Api.forgotPasswordRequest model.email)
                     Nothing
+                    model.proof
                     (Api.resolveNoContent >> GotForgotResponse)
                 , NoOut
                 )
@@ -399,6 +406,7 @@ updateWithEffect msg model =
                 ( { model | resendState = Loading }
                 , Effect.public (Api.resendConfirmationRequest (resendTarget model))
                     Nothing
+                    model.proof
                     (Api.resolveNoContent >> GotResendResponse)
                 , NoOut
                 )
@@ -446,6 +454,7 @@ updateWithEffect msg model =
                 ( { model | inviteCheck = Loading }
                 , Effect.public (Api.checkInviteRequest (String.trim model.inviteCode))
                     Nothing
+                    model.proof
                     (Api.resolveJson Api.inviteStatusDecoder >> GotInviteCheck)
                 , NoOut
                 )
@@ -469,6 +478,7 @@ submitEffect model =
             Effect.public
                 (Api.loginRequest { email = model.email, password = model.password })
                 Nothing
+                model.proof
                 (Api.resolveAuthResponse >> GotAuthResponse)
 
         RegisterMode ->
@@ -481,6 +491,7 @@ submitEffect model =
                     }
                 )
                 Nothing
+                model.proof
                 (Api.resolveRegister >> GotRegisterResponse)
 
         RegistrationPending _ ->

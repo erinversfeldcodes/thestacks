@@ -210,6 +210,7 @@ module Api exposing
     , placementFormatsDecoder
     , placementShelfDecoder
     , placementsMineDecoder
+    , planHeaders
     , privacySettingsDecoder
     , profileSavedDecoder
     , progressDecoder
@@ -567,6 +568,35 @@ first time someone added one of the others.
 safeMethod : String -> Bool
 safeMethod method =
     List.member (String.toUpper method) [ "GET", "HEAD", "OPTIONS" ]
+
+
+{-| Headers for a request whose proof does NOT come from a session credential.
+
+⛔ **WHY THIS EXISTS, and it is a design error of mine that only a drive found.**
+The proof began life as a field of `Credentials`, which exists only when there is
+a bearer token. A logged-OUT visitor therefore had no proof — and
+`POST /api/auth/login` is a state-changing request. Driven against the deployed
+preview, the SPA's real login POST sent `content-type` and nothing else.
+
+⚖️ The type error underneath: a credential is a property of the **session**, a
+double-submit proof is a property of the **document**. Nesting the second inside
+the first makes it unreachable exactly when there is no session, which is the
+one case that matters for login fixation.
+
+⚠️ 2208 unit tests passed throughout, because every one of them constructs a
+`Credentials` in order to ask its question. The case with no credential at all is
+the case no test thought to build.
+
+-}
+proofHeaders : String -> Destination -> Maybe String -> List Http.Header
+proofHeaders method destination maybeProof =
+    case destination of
+        CrossOrigin ->
+            []
+
+        SameOrigin ->
+            csrfHeader method maybeProof
+                |> List.map (\( name, value ) -> Http.header name value)
 
 
 {-| The token a credential carries, if any.
@@ -4871,6 +4901,35 @@ peopleSearchDecoder =
 authHeaders : String -> Maybe Credentials -> List Http.Header
 authHeaders method maybeToken =
     httpHeaders method SameOrigin (Optional maybeToken)
+
+
+{-| Headers for a plan: the credential if there is one, and the proof from
+whichever source holds it.
+
+⛔ **ONE resolver, not two sources.** A signed-in reader's proof arrives inside
+their `Credentials`; a signed-OUT visitor has no `Credentials` and their proof
+arrives on the plan. Both are real and the request needs whichever exists — but
+the CHOICE between them is made here, once, rather than at each call site.
+
+⚠️ This exists because the proof was originally reachable only through a
+credential, which made `POST /api/auth/login` — a write performed by definition
+without a session — send no proof at all. Driven on a deployed preview; invisible
+to 2208 unit tests, each of which built a credential in order to ask its
+question.
+
+⚖️ The credential's own proof wins when present, so a reader whose cookie has
+rotated since boot still sends the value their session was established with
+rather than two different ones on consecutive requests.
+
+-}
+planHeaders : String -> Maybe Credentials -> Maybe String -> List Http.Header
+planHeaders method maybeToken planProof =
+    case maybeToken of
+        Just creds ->
+            httpHeaders method SameOrigin (Optional (Just creds))
+
+        Nothing ->
+            proofHeaders method SameOrigin planProof
 
 
 {-| A source as returned by the admin sources API.

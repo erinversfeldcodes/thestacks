@@ -249,7 +249,7 @@ theRouteIsWiredToTheArrival : Test
 theRouteIsWiredToTheArrival =
     test "route_is_wired: /resend-confirmation builds the card on the confirmation-expired arrival" <|
         \() ->
-            Main.initPage { ageGatingEnabled = False, inviteOnly = False }
+            Main.initPage { ageGatingEnabled = False, inviteOnly = False, proof = Nothing }
                 Navigation.Route.ResendConfirmation
                 "https://thestacks.test"
                 Nothing
@@ -257,7 +257,7 @@ theRouteIsWiredToTheArrival =
                 Nothing
                 Login.Fresh
                 |> Tuple.first
-                |> Expect.equal (Main.PageLogin (Login.init Login.ConfirmationExpired))
+                |> Expect.equal (Main.PageLogin (Login.init Nothing Login.ConfirmationExpired))
 
 
 deadLinkArrivalOpensTheResendForm : Test

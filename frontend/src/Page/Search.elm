@@ -129,6 +129,7 @@ updateWithEffect msg model maybeToken =
                     [ booksSearch model.query model.deepSearch maybeToken
                     , Effect.public (Api.searchUsersRequest model.query)
                         maybeToken
+                        Nothing
                         (Api.resolveJson Api.peopleSearchDecoder >> ReadersCompleted)
                     ]
                 , NoOut
@@ -237,6 +238,7 @@ booksSearch : String -> Bool -> Maybe Api.Credentials -> Effect Msg
 booksSearch query deep maybeToken =
     Effect.public (Api.searchBooksRequest query deep)
         maybeToken
+        Nothing
         (Api.resolveJson Api.searchResponseDecoder >> SearchCompleted)
 
 

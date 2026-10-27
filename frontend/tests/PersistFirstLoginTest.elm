@@ -62,7 +62,7 @@ type alias ShellModel =
 
 shellInit : ShellModel
 shellInit =
-    { page = Login.init Login.Fresh
+    { page = Login.init Nothing Login.Fresh
     , authState = Main.Anonymous
     , storedToken = Nothing
     , effectLog = []

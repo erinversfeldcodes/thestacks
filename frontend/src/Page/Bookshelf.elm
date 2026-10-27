@@ -272,6 +272,7 @@ fetchShelves config maybeToken =
         ProfileShelf token handle bookshelfName ->
             Effect.public (Api.getProfileShelfRequest handle bookshelfName)
                 token
+                Nothing
                 (Api.resolveJson shelvesResponseDecoder
                     >> Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
                     >> ShelvesLoaded (requestKey config)

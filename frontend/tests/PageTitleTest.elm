@@ -83,12 +83,12 @@ readerAuth =
 
 ageGatingOff : Main.AppConfig
 ageGatingOff =
-    { ageGatingEnabled = False, inviteOnly = False }
+    { ageGatingEnabled = False, inviteOnly = False, proof = Nothing }
 
 
 ageGatingOn : Main.AppConfig
 ageGatingOn =
-    { ageGatingEnabled = True, inviteOnly = False }
+    { ageGatingEnabled = True, inviteOnly = False, proof = Nothing }
 
 
 {-| Build a page exactly the way the shell does, so a test cannot assert about a
@@ -176,7 +176,7 @@ driftSignOut =
         \() ->
             let
                 signedOutCard =
-                    Login.init Login.Fresh
+                    Login.init Nothing Login.Fresh
 
                 ( registering, _, _ ) =
                     Login.update (Login.ModeSwitched Login.RegisterMode) signedOutCard
@@ -343,7 +343,7 @@ publicProfileNamesTheReader =
 -}
 representativePages : List Page
 representativePages =
-    [ PageLogin (Login.init Login.Fresh)
+    [ PageLogin (Login.init Nothing Login.Fresh)
     , bookshelfPage Bookshelf.libraryConfig
     , PageBookDetail (bookDetailModel Types.RemoteData.Loading)
     , PageAbout

@@ -75,7 +75,7 @@ unreadableCopy =
 
 cardFor : Login.Arrival -> Query.Single Login.Msg
 cardFor arrival =
-    Login.init arrival
+    Login.init Nothing arrival
         |> Login.view
         |> Query.fromHtml
 
@@ -191,7 +191,7 @@ modeSwitchSpendsTheArrival =
             let
                 ( switched, _, _ ) =
                     Login.update (Login.ModeSwitched Login.RegisterMode)
-                        (Login.init (Login.SessionExpired { draftSaved = True }))
+                        (Login.init Nothing (Login.SessionExpired { draftSaved = True }))
             in
             Expect.all
                 [ \model -> Expect.equal Login.Fresh model.arrival
@@ -210,7 +210,7 @@ submittingSpendsTheArrival =
             let
                 ( submitted, _, _ ) =
                     Login.update Login.FormSubmitted
-                        (Login.init Login.AccountDeleted)
+                        (Login.init Nothing Login.AccountDeleted)
             in
             Expect.equal Login.Fresh submitted.arrival
 
@@ -224,7 +224,7 @@ aSubmitFailureOutranksTheNotice =
         \() ->
             let
                 expired =
-                    Login.init (Login.SessionExpired { draftSaved = False })
+                    Login.init Nothing (Login.SessionExpired { draftSaved = False })
 
                 failed =
                     { expired
@@ -250,7 +250,7 @@ consumedByALoginCard : Test
 consumedByALoginCard =
     test "consumed_by_login_card: an arrival delivered to a card is spent" <|
         \() ->
-            Main.consumeArrival (Main.PageLogin (Login.init Login.AccountDeleted)) Login.AccountDeleted
+            Main.consumeArrival (Main.PageLogin (Login.init Nothing Login.AccountDeleted)) Login.AccountDeleted
                 |> Expect.equal Login.Fresh
 
 
@@ -266,7 +266,7 @@ consumedByABounce =
         \() ->
             let
                 bouncedPage =
-                    Main.initPage { ageGatingEnabled = False, inviteOnly = False }
+                    Main.initPage { ageGatingEnabled = False, inviteOnly = False, proof = Nothing }
                         Navigation.Route.Library
                         "https://thestacks.test"
                         Nothing

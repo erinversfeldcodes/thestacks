@@ -49,6 +49,7 @@ both can wrap.
 type alias RequestPlan msg =
     { spec : Api.RequestSpec
     , token : Maybe Api.Credentials
+    , proof : Maybe String
     , onResponse : Http.Response String -> msg
     }
 
@@ -71,16 +72,23 @@ batch =
 -}
 authed : Api.RequestSpec -> Api.Credentials -> (Http.Response String -> msg) -> Effect msg
 authed spec token onResponse =
-    Request { spec = spec, token = Just token, onResponse = onResponse }
+    -- ⚠️ No plan-level proof needed: a signed-in reader's proof travels inside
+    -- their credentials. `Api.planHeaders` resolves which source to use.
+    Request { spec = spec, token = Just token, proof = Nothing, onResponse = onResponse }
 
 
 {-| A request sent without credentials, or with them only if the viewer happens
 to have them — the optional-auth endpoints, where the server answers an
 anonymous reader too.
 -}
-public : Api.RequestSpec -> Maybe Api.Credentials -> (Http.Response String -> msg) -> Effect msg
-public spec maybeToken onResponse =
-    Request { spec = spec, token = maybeToken, onResponse = onResponse }
+public : Api.RequestSpec -> Maybe Api.Credentials -> Maybe String -> (Http.Response String -> msg) -> Effect msg
+public spec maybeToken proof onResponse =
+    -- ⛔ The proof is a SEPARATE argument here, and that is the fix for a real
+    -- defect: a signed-out visitor has no credentials, so a plan that could
+    -- only find a proof inside one sent none — and `POST /api/auth/login` is
+    -- performed by definition without a session. Found by driving the deployed
+    -- preview; 2208 unit tests passed throughout.
+    Request { spec = spec, token = maybeToken, proof = proof, onResponse = onResponse }
 
 
 {-| Wait, then send a Msg — a debounce, a toast that stops being offered.
@@ -111,7 +119,7 @@ perform effect =
         Request plan ->
             Http.request
                 { method = plan.spec.method
-                , headers = Api.authHeaders plan.spec.method plan.token
+                , headers = Api.planHeaders plan.spec.method plan.token plan.proof
                 , url = plan.spec.url
                 , body = Api.specHttpBody plan.spec
                 , expect = expectResponse plan.onResponse
