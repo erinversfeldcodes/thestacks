@@ -36,6 +36,7 @@ SUITES=(
     "$HERE/rls_scope_gate_test.sh"
     "$HERE/credential_origin_gate_test.sh"
     "$HERE/session_expiry_forms_test.sh"
+    "$HERE/one_credential_derivation_test.sh"
     "$HERE/sigpipe_hazard_gate_test.sh"
     "$HERE/cli_stub_provenance_test.sh"
     "$HERE/ci_gate_reachability_test.sh"
