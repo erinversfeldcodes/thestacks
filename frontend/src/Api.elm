@@ -1293,7 +1293,14 @@ resetPassword :
 resetPassword body toMsg =
     Http.request
         { method = "POST"
-        , headers = []
+
+        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
+        -- it carries a password-reset
+        -- capability token in the BODY —
+        -- so it carries no session and is not a CSRF target: there is no ambient
+        -- authority for a cross-site request to borrow. Stated rather than left as
+        -- an empty list, so the absence is checkable instead of ambiguous.
+        , headers = httpHeaders SameOrigin NoCredential
         , url = baseUrl ++ "/api/auth/reset-password"
         , body =
             Http.jsonBody
@@ -1337,7 +1344,14 @@ requestListingRemoval :
 requestListingRemoval body toMsg =
     Http.request
         { method = "POST"
-        , headers = []
+
+        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
+        -- it is an opt-out request from someone
+        -- who is not a reader —
+        -- so it carries no session and is not a CSRF target: there is no ambient
+        -- authority for a cross-site request to borrow. Stated rather than left as
+        -- an empty list, so the absence is checkable instead of ambiguous.
+        , headers = httpHeaders SameOrigin NoCredential
         , url = baseUrl ++ "/api/opt-out"
         , body =
             Http.jsonBody
@@ -4782,7 +4796,13 @@ adminLogin :
 adminLogin body toMsg =
     Http.request
         { method = "POST"
-        , headers = []
+
+        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
+        -- it IS the pre-authentication step —
+        -- so it carries no session and is not a CSRF target: there is no ambient
+        -- authority for a cross-site request to borrow. Stated rather than left as
+        -- an empty list, so the absence is checkable instead of ambiguous.
+        , headers = httpHeaders SameOrigin NoCredential
         , url = baseUrl ++ "/api/admin/auth/login"
         , body =
             Http.jsonBody
@@ -4808,7 +4828,13 @@ adminVerifyMfa :
 adminVerifyMfa body toMsg =
     Http.request
         { method = "POST"
-        , headers = []
+
+        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
+        -- it is the pre-authentication MFA step —
+        -- so it carries no session and is not a CSRF target: there is no ambient
+        -- authority for a cross-site request to borrow. Stated rather than left as
+        -- an empty list, so the absence is checkable instead of ambiguous.
+        , headers = httpHeaders SameOrigin NoCredential
         , url = baseUrl ++ "/api/admin/auth/verify_mfa"
         , body =
             Http.jsonBody
