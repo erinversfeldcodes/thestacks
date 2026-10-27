@@ -1106,14 +1106,30 @@ requestFromSpec spec maybeToken expect =
         }
 
 
+{-| The harness's header list, derived from `Api.requestHeaders` rather than
+decided again here.
+
+⛔ This used to be its own `case maybeToken of` — a second, independent decision
+about what an authenticated request carries. That is the exact shape this
+module's own `Effect` docs describe: two decisions that each pass their own
+tests while disagreeing with each other. Nothing compared them, so the two
+could drift and the whole suite would stay green while every program test
+asserted against a request production does not send.
+
+⚖️ `SimulatedEffect.Http.Header` and `Http.Header` are different opaque types,
+which is why the shared thing is header **data**: `Api.requestHeaders` returns
+`List ( String, String )` and each runtime wraps it in its own type. That is the
+whole reason the builder returns pairs instead of `Http.Header`.
+
+⚠️ `Optional`, not `Session`, because a plan's token is a `Maybe` — the
+optional-auth endpoints send the header only when the viewer has one, and so
+does `Effect.perform` on the production side.
+
+-}
 authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
 authHeaderList maybeToken =
-    case maybeToken of
-        Just token ->
-            [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-
-        Nothing ->
-            []
+    Api.requestHeaders Api.SameOrigin (Api.Optional maybeToken)
+        |> List.map (\( name, value ) -> SimulatedEffect.Http.header name value)
 
 
 {-| Harness model for the admin chrome: the chrome's own model plus the most
