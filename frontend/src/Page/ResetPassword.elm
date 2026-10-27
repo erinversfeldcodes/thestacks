@@ -22,7 +22,11 @@ import Util.TestId exposing (testId)
 
 
 type alias Model =
-    { token : String
+    { -- ⚠️ The same-origin proof. This page performs a state-changing request
+      -- with NO session behind it, so the proof cannot come from a credential —
+      -- it comes from the document, via the boot config.
+      proof : Maybe String
+    , token : String
     , password : String
     , confirmPassword : String
     , submitting : RemoteData Http.Error ()
@@ -64,9 +68,10 @@ advanceDelayMs =
     2000
 
 
-init : String -> Model
-init token =
-    { token = token
+init : Maybe String -> String -> Model
+init proof token =
+    { proof = proof
+    , token = token
     , password = ""
     , confirmPassword = ""
     , submitting = NotAsked
@@ -115,7 +120,7 @@ update msg model =
 
                 ( _, Nothing ) ->
                     ( { model | submitting = Loading }
-                    , Api.resetPassword
+                    , Api.resetPassword model.proof
                         { token = model.token, password = model.password }
                         Completed
                     , NoOut

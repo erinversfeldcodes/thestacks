@@ -37,7 +37,7 @@ resetWithShortPassword =
             in
             newModel
     in
-    ResetPassword.init "tok-123"
+    ResetPassword.init Nothing "tok-123"
         |> step (ResetPassword.SetPassword "short")
         |> step (ResetPassword.SetConfirmPassword "short")
 
@@ -54,7 +54,7 @@ resetRejected =
             in
             newModel
     in
-    ResetPassword.init "tok-123"
+    ResetPassword.init Nothing "tok-123"
         |> step (ResetPassword.SetPassword "long-enough-password")
         |> step (ResetPassword.SetConfirmPassword "long-enough-password")
         |> step ResetPassword.Submit

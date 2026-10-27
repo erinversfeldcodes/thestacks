@@ -23,7 +23,8 @@ import Types.RemoteData exposing (RemoteData(..))
 
 filled : ListingRemoval.Model
 filled =
-    { url = "https://yourshop.example"
+    { proof = Nothing
+    , url = "https://yourshop.example"
     , email = "owner@yourshop.example"
     , reason = ""
     , submitting = NotAsked

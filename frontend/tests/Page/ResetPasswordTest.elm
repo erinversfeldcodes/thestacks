@@ -34,7 +34,7 @@ outMsgOf msg model =
 -}
 validModel : ResetPassword.Model
 validModel =
-    ResetPassword.init "tok-123"
+    ResetPassword.init Nothing "tok-123"
         |> update (SetPassword "new-password")
         |> update (SetConfirmPassword "new-password")
 
@@ -54,7 +54,7 @@ suite =
         [ describe "submitting"
             [ test "init carries the token from the URL" <|
                 \_ ->
-                    (ResetPassword.init "tok-123").token |> Expect.equal "tok-123"
+                    (ResetPassword.init Nothing "tok-123").token |> Expect.equal "tok-123"
             , test "submitting a valid, matching password moves to Loading" <|
                 \_ ->
                     validModel
@@ -63,7 +63,7 @@ suite =
                         |> Expect.equal Loading
             , test "a too-short password blocks submit (stays NotAsked)" <|
                 \_ ->
-                    ResetPassword.init "tok-123"
+                    ResetPassword.init Nothing "tok-123"
                         |> update (SetPassword "short")
                         |> update (SetConfirmPassword "short")
                         |> update Submit
@@ -71,7 +71,7 @@ suite =
                         |> Expect.equal NotAsked
             , test "a mismatched confirmation blocks submit (stays NotAsked)" <|
                 \_ ->
-                    ResetPassword.init "tok-123"
+                    ResetPassword.init Nothing "tok-123"
                         |> update (SetPassword "new-password")
                         |> update (SetConfirmPassword "different-one")
                         |> update Submit

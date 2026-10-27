@@ -42,7 +42,7 @@ suite =
                     Api.requestHeaders "GET" Api.SameOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
                         |> Expect.equal [ ( "Authorization", "Bearer tok-abc" ) ]
 
-            -- ⚠️ `Optional Nothing` and `NoCredential` both yield no header, and
+            -- ⚠️ `Optional Nothing` and `NoCredential Nothing` both yield no header, and
             -- they are kept as DISTINCT constructors rather than collapsed.
             --
             -- ⛔ NOT for the reason this comment used to give. It said the two
@@ -50,12 +50,12 @@ suite =
             -- to tell a mandatorily-authenticated endpoint from an
             -- optionally-authenticated one. That is true of `Session` versus
             -- `Optional`, and FALSE of this pair: the gate puts `Optional` and
-            -- `NoCredential` in the same class and cannot distinguish them —
+            -- `NoCredential Nothing` in the same class and cannot distinguish them —
             -- its own suite asserts both classify as not-mandatory.
             --
             -- ⚖️ The reason that survives checking is a DOMAIN one, stated where
             -- the type is declared. `Optional` means the endpoint accepts a
-            -- credential when the reader holds one; `NoCredential` means it
+            -- credential when the reader holds one; `NoCredential Nothing` means it
             -- never takes one. Collapsing them makes an endpoint that REFUSES
             -- credentials indistinguishable from one that merely LACKS them —
             -- and `Optional Nothing` cannot even be written at a call site with
@@ -69,9 +69,9 @@ suite =
                 \() ->
                     Api.requestHeaders "GET" Api.SameOrigin (Api.Optional Nothing)
                         |> Expect.equal []
-            , test "NoCredential carries nothing" <|
+            , test "NoCredential Nothing carries nothing" <|
                 \() ->
-                    Api.requestHeaders "GET" Api.SameOrigin Api.NoCredential
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.NoCredential Nothing)
                         |> Expect.equal []
             ]
         , describe "a cross-origin request never carries a credential"
@@ -89,7 +89,7 @@ suite =
                         |> Expect.equal []
             , test "and trivially when handed none" <|
                 \() ->
-                    Api.requestHeaders "GET" Api.CrossOrigin Api.NoCredential
+                    Api.requestHeaders "GET" Api.CrossOrigin (Api.NoCredential Nothing)
                         |> Expect.equal []
 
             -- ⚠️ Stated as its own case because it is the property, not an
@@ -101,7 +101,7 @@ suite =
                     [ Api.Session (TestHelpers.creds "tok-abc")
                     , Api.Optional (Just (TestHelpers.creds "tok-abc"))
                     , Api.Optional Nothing
-                    , Api.NoCredential
+                    , Api.NoCredential Nothing
                     ]
                         |> List.map (Api.requestHeaders "GET" Api.CrossOrigin)
                         |> Expect.equal [ [], [], [], [] ]
@@ -172,6 +172,46 @@ suite =
                     Api.requestHeaders "post" Api.SameOrigin (Api.Session (Api.credentials "tok" (Just "c")))
                         |> List.member ( "X-CSRF-Token", "c" )
                         |> Expect.equal True
+            ]
+        , describe "NoCredential carries a proof too, which is what broke the admin gate"
+            -- ⛔ THE SECOND HALF OF A DEFECT I FIXED ONCE AND LEFT HALF-DONE.
+            -- The proof was reachable only through `Credentials`, so an endpoint
+            -- declaring `NoCredential` had none. Fixed for the PLAN path first
+            -- (`Effect.public` → `planHeaders`) and NOT for the direct
+            -- `Http.request` sites — and `adminLogin`, `adminVerifyMfa`,
+            -- `resetPassword` and `requestListingRemoval` are exactly those.
+            --
+            -- ⚠️ Found by the E2E suite against an enforcing stack: the admin
+            -- gate answered "Could not reach the server", which is how the SPA
+            -- renders a 403. Driven directly, the server said
+            -- `absent_header`. ⚖️ The reason it was missed twice is the same
+            -- both times — I measured which `Effect.public` sites were writes
+            -- and never asked the same question of the direct ones.
+            [ test "a sessionless write declaring NoCredential sends the proof" <|
+                \() ->
+                    Api.requestHeaders "POST" Api.SameOrigin (Api.NoCredential (Just "proof-abc"))
+                        |> Expect.equal [ ( "X-CSRF-Token", "proof-abc" ) ]
+            , test "and carries no credential, which is the point of the constructor" <|
+                \() ->
+                    Api.requestHeaders "POST" Api.SameOrigin (Api.NoCredential (Just "p"))
+                        |> List.map Tuple.first
+                        |> Expect.equal [ "X-CSRF-Token" ]
+
+            -- ⚠️ A READ declaring NoCredential still sends nothing: the public
+            -- catalogue and the transparency metrics pass `Nothing` by design,
+            -- and a safe method carries no proof regardless.
+            , test "a sessionless READ sends nothing" <|
+                \() ->
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.NoCredential (Just "p"))
+                        |> Expect.equal []
+
+            -- ⛔ And the origin decision still wins: the proof must never leave
+            -- our origin, or a third party is handed the value the whole scheme
+            -- rests on.
+            , test "a cross-origin write sends nothing, proof or not" <|
+                \() ->
+                    Api.requestHeaders "POST" Api.CrossOrigin (Api.NoCredential (Just "p"))
+                        |> Expect.equal []
             ]
         , describe "a write with NO session still proves itself"
             -- ⛔ THE DEFECT THIS WAS WRITTEN FOR, and it shipped through 2208

@@ -51,7 +51,17 @@ src_root, floor = sys.argv[1], int(sys.argv[2])
 
 # The one function allowed to spell the scheme, and the file it lives in.
 HOME_FILE = os.path.join(src_root, "Api.elm")
-HOME_FUNCTION = "requestHeaders"
+
+# ⛔ `bearerHeader`, not `requestHeaders`, and the move is why this gate has an
+# anti-vacuity half. The scheme literal used to live in `requestHeaders`; adding
+# the CSRF proof meant the bearer and the proof needed separate arms, and Elm has
+# no or-patterns — so keeping the literal in ONE place required extracting it.
+#
+# ⚠️ This gate REFUSED when that happened, saying "`requestHeaders` does not
+# spell the credential at all" rather than passing over a file it could no longer
+# find the derivation in. That is the guard working: a findings-based gate would
+# have reported zero violations and been right about nothing.
+HOME_FUNCTION = "bearerHeader"
 
 # What counts as spelling the credential. Both forms, because collapsing them
 # would let the other one through:

@@ -384,7 +384,7 @@ and the cross-origin case is the one that generalises worst.
 type Credential
     = Session Credentials
     | Optional (Maybe Credentials)
-    | NoCredential
+    | NoCredential (Maybe String)
 
 
 {-| What a signed-in reader carries: the bearer token, and the CSRF token the
@@ -514,16 +514,63 @@ requestHeaders method destination credential =
     -- credential to its token first. `scripts/check-one-credential-derivation.sh`
     -- counts the spellings, and two identical ones make its "there is one
     -- place" report read as a number to be interpreted rather than a fact.
-    case ( destination, tokenFor credential ) of
-        ( CrossOrigin, _ ) ->
+    case destination of
+        CrossOrigin ->
             []
 
-        ( SameOrigin, Nothing ) ->
+        SameOrigin ->
+            bearerHeader (tokenFor credential) ++ csrfHeader method (proofFor credential)
+
+
+{-| The credential header, if there is a credential.
+
+⚠️ Separated from the proof so the scheme literal stays in ONE place. Elm has no
+or-patterns, so a `case` that handled bearer and proof together would spell
+`"Bearer "` once per arm — and `scripts/check-one-credential-derivation.sh`
+counts those spellings precisely so "there is one place" stays a fact.
+
+-}
+bearerHeader : Maybe Credentials -> List ( String, String )
+bearerHeader maybeCreds =
+    case maybeCreds of
+        Nothing ->
             []
 
-        ( SameOrigin, Just (Credentials creds) ) ->
-            ( "Authorization", "Bearer " ++ creds.bearer )
-                :: csrfHeader method creds.csrf
+        Just (Credentials creds) ->
+            [ ( "Authorization", "Bearer " ++ creds.bearer ) ]
+
+
+{-| The same-origin proof a credential carries, from whichever constructor holds
+it.
+
+⛔ **THIS IS THE FUNCTION WHOSE ABSENCE BROKE THE ADMIN GATE.** The proof used
+to be reachable only through `Credentials`, so `NoCredential` — an endpoint that
+takes no session — had none. That is right for a READ and wrong for a WRITE:
+`adminLogin`, `adminVerifyMfa`, `resetPassword` and `requestListingRemoval` are
+state-changing requests performed without a session, and enforcement refused
+every one of them with `absent_header`.
+
+⚖️ Found by the E2E suite against an enforcing stack, having already been found
+once in the PLAN path and fixed only there. ⚠️ The reason it was missed twice is
+the same both times: I measured which `Effect.public` sites were writes and
+never asked the same question of the direct `Http.request` sites. A proof is a
+property of the DOCUMENT, so every constructor has to be able to carry one.
+
+-}
+proofFor : Credential -> Maybe String
+proofFor credential =
+    case credential of
+        Session (Credentials creds) ->
+            creds.csrf
+
+        Optional (Just (Credentials creds)) ->
+            creds.csrf
+
+        Optional Nothing ->
+            Nothing
+
+        NoCredential proof ->
+            proof
 
 
 {-| The double-submit proof, on state-changing requests only.
@@ -617,7 +664,7 @@ tokenFor credential =
         Optional maybeCreds ->
             maybeCreds
 
-        NoCredential ->
+        NoCredential _ ->
             Nothing
 
 
@@ -1480,10 +1527,11 @@ resendConfirmationRequest email =
 invalid/expired token, 422 = password validation failed.
 -}
 resetPassword :
-    { token : String, password : String }
+    Maybe String
+    -> { token : String, password : String }
     -> (Result Http.Error () -> msg)
     -> Cmd msg
-resetPassword body toMsg =
+resetPassword proof body toMsg =
     Http.request
         { method = "POST"
 
@@ -1493,7 +1541,7 @@ resetPassword body toMsg =
         -- so it carries no session and is not a CSRF target: there is no ambient
         -- authority for a cross-site request to borrow. Stated rather than left as
         -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" SameOrigin NoCredential
+        , headers = httpHeaders "POST" SameOrigin (NoCredential proof)
         , url = baseUrl ++ "/api/auth/reset-password"
         , body =
             Http.jsonBody
@@ -1531,10 +1579,11 @@ else is queued for review.
 
 -}
 requestListingRemoval :
-    { url : String, email : String, reason : String }
+    Maybe String
+    -> { url : String, email : String, reason : String }
     -> (Result Http.Error RemovalOutcome -> msg)
     -> Cmd msg
-requestListingRemoval body toMsg =
+requestListingRemoval proof body toMsg =
     Http.request
         { method = "POST"
 
@@ -1544,7 +1593,7 @@ requestListingRemoval body toMsg =
         -- so it carries no session and is not a CSRF target: there is no ambient
         -- authority for a cross-site request to borrow. Stated rather than left as
         -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" SameOrigin NoCredential
+        , headers = httpHeaders "POST" SameOrigin (NoCredential proof)
         , url = baseUrl ++ "/api/opt-out"
         , body =
             Http.jsonBody
@@ -1890,7 +1939,7 @@ getTransparencyMetrics toMsg =
         -- ⚠️ NO CREDENTIAL, DECLARED. Public transparency metrics: no session
         -- is read and none is required. Stated rather than left as an empty
         -- list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "GET" SameOrigin NoCredential
+        , headers = httpHeaders "GET" SameOrigin (NoCredential Nothing)
         , url = baseUrl ++ "/api/transparency/metrics"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg transparencyMetricsDecoder
@@ -1951,7 +2000,7 @@ putFileToR2 url file toMsg =
         { method = "PUT"
 
         -- ⛔ THE ONE CROSS-ORIGIN REQUEST IN THIS MODULE, declared rather than
-        -- left as an empty list. `httpHeaders CrossOrigin NoCredential` yields
+        -- left as an empty list. `httpHeaders CrossOrigin (NoCredential Nothing)` yields
         -- `[]`, so the behaviour is identical — what changes is that the absence
         -- is now a STATEMENT a reader and a gate can both check, instead of an
         -- absence indistinguishable from an oversight.
@@ -1960,7 +2009,7 @@ putFileToR2 url file toMsg =
         -- so it cannot be proven same-origin from this file and must not be: a
         -- `SameOrigin` claim here would attach a bearer token to a third-party
         -- host. `check-credential-origin.sh` refuses that combination.
-        , headers = httpHeaders "PUT" CrossOrigin NoCredential
+        , headers = httpHeaders "PUT" CrossOrigin (NoCredential Nothing)
         , url = url
         , body = Http.fileBody file
         , expect = Http.expectWhatever toMsg
@@ -3344,7 +3393,7 @@ getCatalogue params toMsg =
         -- ⚠️ NO CREDENTIAL, DECLARED. The public catalogue answers everyone the
         -- same way, so no session is read. Stated rather than left as an empty
         -- list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders spec.method SameOrigin NoCredential
+        , headers = httpHeaders spec.method SameOrigin (NoCredential Nothing)
         , url = spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg catalogueResponseDecoder
@@ -5020,10 +5069,11 @@ type AdminAuthError
 {-| POST /api/admin/auth/login — step 1. Returns an UNVERIFIED session id, not a usable token.
 -}
 adminLogin :
-    { email : String, password : String }
+    Maybe String
+    -> { email : String, password : String }
     -> (Result AdminAuthError AdminSession -> msg)
     -> Cmd msg
-adminLogin body toMsg =
+adminLogin proof body toMsg =
     Http.request
         { method = "POST"
 
@@ -5032,7 +5082,7 @@ adminLogin body toMsg =
         -- so it carries no session and is not a CSRF target: there is no ambient
         -- authority for a cross-site request to borrow. Stated rather than left as
         -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" SameOrigin NoCredential
+        , headers = httpHeaders "POST" SameOrigin (NoCredential proof)
         , url = baseUrl ++ "/api/admin/auth/login"
         , body =
             Http.jsonBody
@@ -5052,10 +5102,11 @@ adminLogin body toMsg =
 {-| POST /api/admin/auth/verify\_mfa — step 2. Returns the admin token.
 -}
 adminVerifyMfa :
-    { sessionId : String, code : String }
+    Maybe String
+    -> { sessionId : String, code : String }
     -> (Result AdminAuthError String -> msg)
     -> Cmd msg
-adminVerifyMfa body toMsg =
+adminVerifyMfa proof body toMsg =
     Http.request
         { method = "POST"
 
@@ -5064,7 +5115,7 @@ adminVerifyMfa body toMsg =
         -- so it carries no session and is not a CSRF target: there is no ambient
         -- authority for a cross-site request to borrow. Stated rather than left as
         -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" SameOrigin NoCredential
+        , headers = httpHeaders "POST" SameOrigin (NoCredential proof)
         , url = baseUrl ++ "/api/admin/auth/verify_mfa"
         , body =
             Http.jsonBody

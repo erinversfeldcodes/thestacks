@@ -56,12 +56,17 @@ requestHeaders destination credential =
             []
 
         SameOrigin ->
-            case credential of
-                Session token ->
-                    [ ( "Authorization", "Bearer " ++ token ) ]
+            bearerHeader (tokenFor credential)
 
-                NoCredential ->
-                    []
+
+bearerHeader : Maybe Credentials -> List ( String, String )
+bearerHeader maybeCreds =
+    case maybeCreds of
+        Nothing ->
+            []
+
+        Just (Credentials creds) ->
+            [ ( "Authorization", "Bearer " ++ creds.bearer ) ]
 
 
 somethingElse : String
@@ -223,7 +228,7 @@ import pathlib
 import sys
 
 p = pathlib.Path(sys.argv[1])
-p.write_text(p.read_text(encoding="utf-8").replace("requestHeaders", "buildHeaders"), "utf-8")
+p.write_text(p.read_text(encoding="utf-8").replace("bearerHeader", "buildHeaders"), "utf-8")
 RENAME
 run_gate
 assert_exit_nonzero "$RC" "a renamed builder refuses rather than flagging itself"
@@ -239,7 +244,7 @@ import sys
 
 p = pathlib.Path(sys.argv[1])
 text = p.read_text(encoding="utf-8")
-p.write_text(text.replace('[ ( "Authorization", "Bearer " ++ token ) ]', "[]"), encoding="utf-8")
+p.write_text(text.replace('[ ( "Authorization", "Bearer " ++ creds.bearer ) ]', "[]"), encoding="utf-8")
 BLANK
 run_gate
 assert_exit_nonzero "$RC" "a builder that attaches no credential is not a pass"

@@ -203,10 +203,10 @@ driftAdminReauth =
         \() ->
             let
                 onSources =
-                    pageTitleOf (PageAdminGate Route.AdminSourceApproval AdminSession.init)
+                    pageTitleOf (PageAdminGate Route.AdminSourceApproval (AdminSession.init Nothing))
 
                 onScrapers =
-                    pageTitleOf (PageAdminGate Route.AdminScraperConfig AdminSession.init)
+                    pageTitleOf (PageAdminGate Route.AdminScraperConfig (AdminSession.init Nothing))
             in
             Expect.all
                 [ \() -> Expect.equal onSources onScrapers
@@ -347,7 +347,7 @@ representativePages =
     , bookshelfPage Bookshelf.libraryConfig
     , PageBookDetail (bookDetailModel Types.RemoteData.Loading)
     , PageAbout
-    , PageAdminGate Route.AdminSourceApproval AdminSession.init
+    , PageAdminGate Route.AdminSourceApproval (AdminSession.init Nothing)
     , PageConfirmEmail EmailConfirmed
     , PageConfirmEmail EmailConfirmFailed
     , PageNotFound

@@ -49,7 +49,7 @@ out msg model =
 
 filled : Session.Model
 filled =
-    Session.init
+    Session.init Nothing
         |> run (Session.SetEmail "owner@thestacks.app")
         |> run (Session.SetPassword "hunter2")
 
@@ -76,7 +76,7 @@ suite =
                         |> Expect.equal (Session.Authenticated "admin-token-abc")
             , test "nothing else emits a token" <|
                 \_ ->
-                    [ out (Session.SetEmail "x") Session.init
+                    [ out (Session.SetEmail "x") (Session.init Nothing)
                     , out (Session.SetCode "123456") awaitingCode
                     , out (Session.LoggedIn (Ok { sessionId = "s" })) filled
                     , out (Session.Verified (Err InvalidCode)) awaitingCode
@@ -108,7 +108,7 @@ suite =
                         |> Expect.equal Cmd.none
             , test "incomplete credentials fire no request" <|
                 \_ ->
-                    Session.update Session.SubmitCredentials Session.init ownerToken
+                    Session.update Session.SubmitCredentials (Session.init Nothing) ownerToken
                         |> (\( _, cmd, _ ) -> cmd)
                         |> Expect.equal Cmd.none
             , test "a rejected code clears the code but keeps the session" <|
@@ -164,13 +164,13 @@ suite =
                         |> Expect.equal Nothing
             , test "enrolment is reachable without failing a sign-in first" <|
                 \_ ->
-                    render Session.init
+                    render (Session.init Nothing)
                         |> Query.has [ testId "admin-enrol-start" ]
             , test "confirming enrolment returns to the sign-in form, not a dead end" <|
                 \_ ->
                     let
                         after =
-                            run (Session.EnrolmentConfirmed (Ok ())) Session.init
+                            run (Session.EnrolmentConfirmed (Ok ())) (Session.init Nothing)
                     in
                     Expect.all
                         [ \m -> Expect.notEqual Nothing m.notice
@@ -179,11 +179,11 @@ suite =
                         after
             , test "and the sign-in form is actually rendered there" <|
                 \_ ->
-                    render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
+                    render (run (Session.EnrolmentConfirmed (Ok ())) (Session.init Nothing))
                         |> Query.has [ testId "admin-email" ]
             , test "the success notice is not rendered as an error" <|
                 \_ ->
-                    render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
+                    render (run (Session.EnrolmentConfirmed (Ok ())) (Session.init Nothing))
                         |> Query.has [ testId "admin-gate-notice" ]
             , test "the recovery codes are shown with the warning that they are shown once" <|
                 \_ ->
@@ -196,7 +196,7 @@ suite =
                                     }
                                 )
                             )
-                            Session.init
+                            (Session.init Nothing)
                         )
                         |> Expect.all
                             [ Query.has [ Selector.text "not shown again" ]

@@ -32,7 +32,11 @@ import Util.TestId exposing (testId)
 
 
 type alias Model =
-    { url : String
+    { -- ⚠️ The same-origin proof. This page performs a state-changing request
+      -- with NO session behind it, so the proof cannot come from a credential —
+      -- it comes from the document, via the boot config.
+      proof : Maybe String
+    , url : String
     , email : String
     , reason : String
     , submitting : RemoteData Http.Error RemovalOutcome
@@ -47,9 +51,10 @@ type Msg
     | Completed (Result Http.Error RemovalOutcome)
 
 
-init : Model
-init =
-    { url = ""
+init : Maybe String -> Model
+init proof =
+    { proof = proof
+    , url = ""
     , email = ""
     , reason = ""
     , submitting = NotAsked
@@ -94,7 +99,7 @@ update msg model =
 
                 Nothing ->
                     ( { model | submitting = Loading }
-                    , Api.requestListingRemoval
+                    , Api.requestListingRemoval model.proof
                         { url = String.trim model.url
                         , email = String.trim model.email
                         , reason = String.trim model.reason

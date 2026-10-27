@@ -989,7 +989,7 @@ initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
         -- the latter and every request 401'd, so all four had never loaded for anyone. Rather than
         -- let a page render and fail, the route resolves to the sign-in gate until a real admin
         -- token exists — so a page never holds a token it cannot use.
-        ( PageAdminGate route AdminSession.init, Cmd.none )
+        ( PageAdminGate route (AdminSession.init config.proof), Cmd.none )
 
     else
         initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival
@@ -1177,7 +1177,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageArchitecture, Cmd.none )
 
         ListingRemoval ->
-            ( PageListingRemoval ListingRemoval.init, Cmd.none )
+            ( PageListingRemoval (ListingRemoval.init config.proof), Cmd.none )
 
         Catalogue ->
             let
@@ -1401,7 +1401,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageLogin (Login.init config.proof Login.ConfirmationExpired |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResetPassword token ->
-            ( PageResetPassword (ResetPassword.init token), Cmd.none )
+            ( PageResetPassword (ResetPassword.init config.proof token), Cmd.none )
 
         NotFound ->
             ( PageNotFound, Cmd.none )
@@ -4513,7 +4513,7 @@ endAdminSession : Model -> Model
 endAdminSession model =
     { model
         | adminAuth = Nothing
-        , page = adminGateAfterEnding model.route
+        , page = adminGateAfterEnding model.config.proof model.route
     }
 
 
@@ -4526,6 +4526,6 @@ half — _which page, with what on it_ — is the half that was wrong, and it is
 testable.
 
 -}
-adminGateAfterEnding : Route -> Page
-adminGateAfterEnding route =
-    PageAdminGate route (AdminSession.initWithNotice adminSessionEndedNotice)
+adminGateAfterEnding : Maybe String -> Route -> Page
+adminGateAfterEnding proof route =
+    PageAdminGate route (AdminSession.initWithNotice proof adminSessionEndedNotice)

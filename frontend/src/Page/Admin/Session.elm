@@ -36,7 +36,11 @@ type Step
 
 
 type alias Model =
-    { step : Step
+    { -- ⚠️ The same-origin proof. This page performs a state-changing request
+      -- with NO session behind it, so the proof cannot come from a credential —
+      -- it comes from the document, via the boot config.
+      proof : Maybe String
+    , step : Step
     , email : String
     , password : String
     , code : String
@@ -65,9 +69,10 @@ type OutMsg
     | Authenticated String
 
 
-init : Model
-init =
-    { step = Credentials
+init : Maybe String -> Model
+init proof =
+    { proof = proof
+    , step = Credentials
     , email = ""
     , password = ""
     , code = ""
@@ -81,9 +86,13 @@ init =
 purpose (they ended their session) rather than by being turned away, and a form
 with no explanation would read as the sign-in having failed.
 -}
-initWithNotice : String -> Model
-initWithNotice notice =
-    { init | notice = Just notice }
+initWithNotice : Maybe String -> String -> Model
+initWithNotice proof notice =
+    let
+        base =
+            init proof
+    in
+    { base | notice = Just notice }
 
 
 {-| The `secret=` parameter from an `otpauth://` provisioning URI, **base32, unmodified**.
@@ -130,7 +139,7 @@ update msg model ownerToken =
 
             else
                 ( { model | busy = True, error = Nothing }
-                , Api.adminLogin { email = model.email, password = model.password } LoggedIn
+                , Api.adminLogin model.proof { email = model.email, password = model.password } LoggedIn
                 , NoOut
                 )
 
@@ -158,7 +167,7 @@ update msg model ownerToken =
 
                     else
                         ( { model | busy = True, error = Nothing }
-                        , Api.adminVerifyMfa
+                        , Api.adminVerifyMfa model.proof
                             { sessionId = sessionId, code = String.trim model.code }
                             Verified
                         , NoOut
