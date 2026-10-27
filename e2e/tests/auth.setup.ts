@@ -1,4 +1,4 @@
-import { test as setup } from "@playwright/test";
+import { test as setup } from "./fixtures";
 import path from "path";
 import {
   DEV_EMAIL,

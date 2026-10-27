@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { createHmac } from "node:crypto";
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
 
 export const OWNER_AUTH_FILE = path.join(__dirname, "../.auth/owner.json");
