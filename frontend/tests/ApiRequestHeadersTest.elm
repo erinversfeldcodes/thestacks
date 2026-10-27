@@ -42,11 +42,28 @@ suite =
                         |> Expect.equal [ ( "Authorization", "Bearer tok-abc" ) ]
 
             -- ⚠️ `Optional Nothing` and `NoCredential` both yield no header, and
-            -- they are kept as DISTINCT constructors rather than collapsed. The
-            -- difference is not in the output — it is that a gate reads the
-            -- call site to tell a mandatorily-authenticated endpoint from an
-            -- optionally-authenticated one, so the two must stay separately
-            -- nameable even where they behave alike.
+            -- they are kept as DISTINCT constructors rather than collapsed.
+            --
+            -- ⛔ NOT for the reason this comment used to give. It said the two
+            -- must stay separately nameable because a gate reads the call site
+            -- to tell a mandatorily-authenticated endpoint from an
+            -- optionally-authenticated one. That is true of `Session` versus
+            -- `Optional`, and FALSE of this pair: the gate puts `Optional` and
+            -- `NoCredential` in the same class and cannot distinguish them —
+            -- its own suite asserts both classify as not-mandatory.
+            --
+            -- ⚖️ The reason that survives checking is a DOMAIN one, stated where
+            -- the type is declared. `Optional` means the endpoint accepts a
+            -- credential when the reader holds one; `NoCredential` means it
+            -- never takes one. Collapsing them makes an endpoint that REFUSES
+            -- credentials indistinguishable from one that merely LACKS them —
+            -- and `Optional Nothing` cannot even be written at a call site with
+            -- no `Maybe` in scope, which is every unauthenticated endpoint.
+            --
+            -- ⚠️ Recorded at this length because the false version was replaced
+            -- in `Api.elm` and left standing here, which is the stale-sibling
+            -- shape this project keeps paying for: one justification, three
+            -- homes, corrected in one of them.
             , test "an Optional credential that is absent carries nothing" <|
                 \() ->
                     Api.requestHeaders Api.SameOrigin (Api.Optional Nothing)
