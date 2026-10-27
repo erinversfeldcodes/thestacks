@@ -8,6 +8,12 @@ defmodule CoreWeb.Router do
 
   pipeline :spa do
     plug StacksWeb.Plugs.SecurityHeaders
+
+    # ⚠️ The CSRF cookie is issued HERE, on the SPA's own HTML response, rather
+    # than at login. A browser cannot send any XHR — the login POST included —
+    # before it has loaded this page, so every later request carries a token
+    # with no exemption and no assumption about what the client does at boot.
+    plug StacksWeb.Plugs.CsrfCookie
   end
 
   pipeline :authenticated do
