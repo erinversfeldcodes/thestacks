@@ -92,7 +92,8 @@ CASES = [
     (
         '[ Http.header "Authorization" ("Bearer " ++ token) ]',
         True,
-        "the legacy inline form — 70 sites still use it",
+        "the legacy inline form — 0 sites now, kept so the two gates fail in the "
+        "same direction if check-one-credential-derivation.sh is ever narrowed",
     ),
     ("authedHeaders authed", True, "the legacy shared derivation, 8 callers"),
     (

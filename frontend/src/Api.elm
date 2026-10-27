@@ -351,10 +351,29 @@ licence.**
 ⚖️ **The reason that survives checking is a domain one.** `Optional` means _this
 endpoint accepts a credential when the reader holds one_ — the 15
 optionally-authenticated routes. `NoCredential` means _this endpoint never takes
-one_ — `putFileToR2`, a `PUT` at third-party object storage. Collapsing them
-makes an endpoint that **refuses** credentials indistinguishable from one that
-merely **lacks** one, which is this project's absent-versus-declared-none
-distinction: a declared "none" can be checked against intent, an absence cannot.
+one_. Collapsing them makes an endpoint that **refuses** credentials
+indistinguishable from one that merely **lacks** one, which is this project's
+absent-versus-declared-none distinction: a declared "none" can be checked
+against intent, an absence cannot.
+
+⚠️ And `Optional Nothing` is not even writable at most of those call sites: it
+needs a `Maybe` in scope, and an unauthenticated endpoint has no token argument
+to pass. The distinction is forced by the call sites, not just preferred.
+
+**The five `NoCredential` requests, and they are not one kind:**
+
+  - `putFileToR2` — `CrossOrigin`, a `PUT` at third-party object storage. The
+    credential must not go, and the destination already guarantees that.
+  - `resetPassword`, `requestListingRemoval`, `adminLogin`, `adminVerifyMfa` —
+    `SameOrigin`, and unauthenticated. These are the interesting ones: a
+    state-changing POST at our own origin carrying no session. They are not CSRF
+    targets, because there is no ambient authority for a cross-site request to
+    borrow — each one carries its own capability token in the body, or IS the
+    step that authenticates.
+
+⚠️ The second group is listed because a reader looking for "what does
+`NoCredential` mean" will reach for the first example and generalise from it,
+and the cross-origin case is the one that generalises worst.
 
 -}
 type Credential
@@ -409,23 +428,43 @@ the gap stands.
 -}
 requestHeaders : Destination -> Credential -> List ( String, String )
 requestHeaders destination credential =
-    case destination of
-        CrossOrigin ->
+    -- ⚠️ The scheme literal appears ONCE. It used to appear twice — the
+    -- `Session` and `Optional (Just _)` arms each spelled `"Bearer " ++ token`
+    -- — and Elm has no or-patterns, so collapsing them means mapping the
+    -- credential to its token first. `scripts/check-one-credential-derivation.sh`
+    -- counts the spellings, and two identical ones make its "there is one
+    -- place" report read as a number to be interpreted rather than a fact.
+    case ( destination, tokenFor credential ) of
+        ( CrossOrigin, _ ) ->
             []
 
-        SameOrigin ->
-            case credential of
-                Session token ->
-                    [ ( "Authorization", "Bearer " ++ token ) ]
+        ( SameOrigin, Nothing ) ->
+            []
 
-                Optional (Just token) ->
-                    [ ( "Authorization", "Bearer " ++ token ) ]
+        ( SameOrigin, Just token ) ->
+            [ ( "Authorization", "Bearer " ++ token ) ]
 
-                Optional Nothing ->
-                    []
 
-                NoCredential ->
-                    []
+{-| The token a credential carries, if any.
+
+⚠️ This is NOT the place to decide whether to send it — that is the destination's
+call, above. This only answers "is there a token", so the three constructors
+collapse to a `Maybe` for the one arm that needs it. `Optional Nothing` and
+`NoCredential` answer the same way here and stay distinct at the call site,
+which is where the distinction means something.
+
+-}
+tokenFor : Credential -> Maybe String
+tokenFor credential =
+    case credential of
+        Session token ->
+            Just token
+
+        Optional maybeToken ->
+            maybeToken
+
+        NoCredential ->
+            Nothing
 
 
 {-| `requestHeaders` converted to `elm/http`'s own header type.
@@ -5672,23 +5711,30 @@ getGroupFeed :
     -> Cmd msg
 getGroupFeed groupId token maybeCursor toMsg =
     let
-        -- ⚠️ The PATH is let-bound and `baseUrl` is applied at the request, so
-        -- the url expression stays textually recognisable as same-origin.
-        -- `check-credential-origin.sh` relates a declared `SameOrigin` to the
-        -- URL beside it and reads text — it cannot follow a let-binding, so a
-        -- `url = url` form would be an unprovable claim rather than a wrong one.
-        path =
+        -- ⚠️ Only the QUERY is let-bound. The url below leads with a literal
+        -- path, which is what makes it same-origin by CONSTRUCTION rather than
+        -- by inspection: once a url starts with `"/api/…"`, nothing appended
+        -- later can change its origin.
+        --
+        -- ⛔ It used to bind the whole path and write `url = baseUrl ++ path`.
+        -- That reads as same-origin and is not provably so — `baseUrl` is `""`,
+        -- so `baseUrl ++ path` IS `path`, and a variable there could hold any
+        -- absolute URL. `check-credential-origin.sh` accepted it because its
+        -- rule was "leads with `baseUrl`", which guaranteed nothing; the rule is
+        -- now "leads with `baseUrl ++ "/…"`", and this was the one site in the
+        -- module that relied on the weaker version.
+        query =
             case maybeCursor of
                 Nothing ->
-                    "/api/groups/" ++ groupId ++ "/feed"
+                    ""
 
                 Just cursor ->
-                    "/api/groups/" ++ groupId ++ "/feed?before=" ++ cursor
+                    "?before=" ++ cursor
     in
     Http.request
         { method = "GET"
         , headers = httpHeaders SameOrigin (Session token)
-        , url = baseUrl ++ path
+        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/feed" ++ query
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg feedResponseDecoder
         , timeout = standardTimeout

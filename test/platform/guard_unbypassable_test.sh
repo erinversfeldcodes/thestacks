@@ -41,7 +41,7 @@ run_gate() {
 test_case "the_real_tree_has_no_bypassable_guard" "every declared count sits above its exits"
 run_gate
 assert_exit_zero "$RC" "the gate passes over the tree as it stands"
-assert_contains "$OUT" "17 of 17" "and states the population it enumerated"
+assert_contains "$OUT" "18 of 18" "and states the population it enumerated"
 assert_contains "$OUT" "enumerated from" "naming its enumeration source"
 
 # ⚠️ The gate is in its OWN corpus, which is deliberate: a gate policing

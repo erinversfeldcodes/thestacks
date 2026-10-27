@@ -44,14 +44,33 @@ def top_level_definitions(text):
         definitions.setdefault(name, []).extend(buffer)
     return {key: "\n".join(value) for key, value in definitions.items()}
 
-# ⛔ THREE FORMS, BECAUSE A MIGRATION IS IN FLIGHT AND THE OLD TWO MUST KEEP
-# WORKING UNTIL IT FINISHES.
+# ⛔ THREE FORMS. The migration that needed the third one has FINISHED; the
+# inline form is kept deliberately, and the reason changed when it did.
 #
-# `Api.elm`'s 70 inline `Http.header "Authorization"` derivations are being
-# consolidated onto `Api.requestHeaders`. The moment a site migrates, the old
-# patterns stop matching it — so without the new form below this gate's
-# population would fall silently as the refactor proceeded, and its floor is an
-# EMPTINESS check, so it would stay green all the way down to one endpoint.
+# `Api.elm`'s 70 inline `Http.header "Authorization"` derivations were
+# consolidated onto `Api.requestHeaders` — **the count is now 0, and
+# `scripts/check-one-credential-derivation.sh` holds it there**, refusing any
+# new site that spells the credential outside the builder.
+#
+# ⚠️ MEASURED when that gate landed: deleting the inline alternative below
+# changes NOTHING — 70 endpoints, 25 pages, byte-identical output. So it is dead
+# as far as today's source goes.
+#
+# ⚖️ It stays anyway, and the argument is composition rather than caution. A
+# re-introduced inline derivation is now refused outright by the sibling gate, so
+# this pattern is no longer the thing standing between that mistake and a green
+# run. What it does instead is make the two gates fail in the same direction: if
+# the absence gate is ever narrowed, bypassed, or applied to a corpus that
+# excludes some file, an inline site still classifies as mandatorily
+# authenticated here rather than silently dropping out of the population a page
+# is checked against.
+#
+# ⚠️ What was WRONG with this comment before, recorded because the prose outlived
+# the fact it asserted: it said a migration was "in flight" and that "70 sites
+# still use" the inline form. Both were true when written and false within days,
+# and nothing checks a comment. The claim that replaces them — that deleting the
+# alternative changes no output — is one `git stash` and one run away from being
+# verified by anyone who doubts it.
 #
 # ⚠️ Matched on the CREDENTIAL CONSTRUCTOR rather than on the wrapper
 # function's name, because there are two wrappers — `requestHeaders` returning

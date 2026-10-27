@@ -42,6 +42,7 @@ in code by" and check it before relying on it.
 | `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | A story that describes the system as it stands must cite things that exist. |
 | `scripts/check-never-serialized.sh` | `scripts/lint-elixir.sh`, `test/platform/never_serialized_test.sh` | A credential must not appear in any JSON serializer, generated or hand-written. |
 | `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented Oban queues must be the queues that exist. |
+| `scripts/check-one-credential-derivation.sh` | `scripts/lint-elm.sh`, `test/platform/one_credential_derivation_test.sh` | The credential is spelled in exactly one place, and nothing may spell it again. |
 | `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |
 | `scripts/check-outbound-test-default.sh` | `scripts/lint-elixir.sh`, `test/platform/platform_suites_job_test.sh` |  |
 | `scripts/check-phase-scheme.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Every story's Phase cell must name a phase that exists, and nothing else. |
@@ -99,7 +100,7 @@ in code by" and check it before relying on it.
 | `scripts/lib/squawk-rules.sh` | `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/squawk_worktree_selection_test.sh` | Single source of truth for which squawk rules this repo suppresses. |
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/platform_suites_job_test.sh` … |  |
-| `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/credential_origin_gate_test.sh` |  |
+| `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/credential_origin_gate_test.sh` … |  |
 | `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/lint_migrations_test.sh`, `test/platform/migration_gate_syntax_test.sh` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
 | `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` … |  |
 | `scripts/lint-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
