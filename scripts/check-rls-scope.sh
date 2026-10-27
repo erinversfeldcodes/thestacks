@@ -123,25 +123,37 @@ allow_kind() {
     # the honest state. The seam lets the suite drive each kind and each query
     # form against fixtures instead. It is read ONLY from the environment, so
     # no committed entry can hide in it.
-    # ⚠️ A plain word-split loop, NOT `… | while read`. A while loop at the end
-    # of a pipeline is a subshell in bash 3.2, and this function's output is
-    # consumed by a command substitution — a combination that proved to behave
-    # differently inside a sourced suite than standalone, for reasons not worth
-    # chasing when the pipeline buys nothing.
+    # ⚠️ NOT `… | while read`. A while loop at the end of a pipeline is a
+    # subshell in bash 3.2, and this function's output is consumed by a command
+    # substitution — a combination that proved to behave differently inside a
+    # sourced suite than standalone, for reasons not worth chasing when the
+    # pipeline buys nothing.
+    #
+    # ⚠️ AND NOT `IFS=','` EITHER, which is how this was first written. Setting
+    # IFS changes how EVERY later unquoted expansion in the shell splits, and
+    # restoring it on each exit path is a correctness burden carried by hand —
+    # here across three separate `return`/fall-through routes, any one of which
+    # could be missed by a later edit. `bash.lang.security.ifs-tampering`
+    # refuses it for that reason, and the refusal is right: the split below is
+    # done by parameter expansion, which affects nothing outside this loop and
+    # needs no save/restore at all.
     if [[ -n "${RLS_SCOPE_TEST_ALLOWLIST:-}" ]]; then
+        local rest="$RLS_SCOPE_TEST_ALLOWLIST"
         local entry path kind
-        local saved_ifs="$IFS"
-        IFS=','
-        for entry in $RLS_SCOPE_TEST_ALLOWLIST; do
+        while [[ -n "$rest" ]]; do
+            entry="${rest%%,*}"
+            if [[ "$entry" == "$rest" ]]; then
+                rest=""
+            else
+                rest="${rest#*,}"
+            fi
             path="${entry%%=*}"
             kind="${entry#*=}"
             if [[ "$path" == "$1" ]]; then
-                IFS="$saved_ifs"
                 printf '%s' "$kind"
                 return
             fi
         done
-        IFS="$saved_ifs"
         printf '%s' ""
         return
     fi
