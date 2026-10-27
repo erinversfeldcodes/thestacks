@@ -46,6 +46,29 @@ run_on() {
     RC=$?
 }
 
+# A `RequestSpec` builder. Every fixture needs enough of these to clear the
+# gate's SECOND floor — the one over the plan path — or each case below fails on
+# that floor rather than on the thing it asserts.
+spec() {
+    local name="$1" url="$2"
+    cat <<EOF
+
+$name : RequestSpec
+$name =
+    { method = "GET"
+    , url = $url
+    , body = Nothing
+    }
+EOF
+}
+
+spec_filler() {
+    local count="$1" i
+    for ((i = 0; i < count; i++)); do
+        spec "fillerSpec$i" "baseUrl ++ \"/api/thing\""
+    done
+}
+
 # A request record, parameterised by its url expression and headers expression.
 # ⚠️ `method` and `headers` are both present in every fixture because that pair
 # is what the gate uses to tell a request record from an adapter record — a
@@ -89,7 +112,7 @@ fi
 # ── the clean baseline, so a non-zero exit below carries information ─────────
 test_case "a_provably_same_origin_corpus_passes" \
     "the green half — a baseline, or every refusal below is satisfied by the fixture"
-run_on "$(filler 75)"
+run_on "$(spec_filler 32)$(filler 75)"
 assert_exit_zero "$RC" "75 provably same-origin records is a clean run"
 assert_contains "$OUT" "75 request record(s) parsed" "and it reports the population it read"
 
@@ -100,7 +123,7 @@ assert_contains "$OUT" "75 request record(s) parsed" "and it reports the populat
 # mistake, not the exotic one.
 test_case "a_SameOrigin_claim_over_an_unprovable_url_is_refused" \
     "declared is not derived, so the claim has to be checked against the URL"
-run_on "$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
 assert_exit_nonzero "$RC" "the claim is refused"
 assert_contains "$OUT" "declare SameOrigin with a URL that is not" "the refusal names the condition"
 assert_contains "$OUT" "uploadToStorage" "and the function, not just a line"
@@ -111,7 +134,7 @@ assert_contains "$OUT" "DECLARED, not derived" "and says why the claim cannot be
 # undeclared, and `putFileToR2` would have no legal form.
 test_case "the_same_unprovable_url_declaring_CrossOrigin_passes" \
     "an unprovable URL is undeclared, not forbidden"
-run_on "$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders CrossOrigin NoCredential |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders CrossOrigin NoCredential |> List.map toHeader")"
 assert_exit_zero "$RC" "declaring CrossOrigin is the legal form for an unprovable URL"
 
 # ── each recognised same-origin form, driven ─────────────────────────────────
@@ -122,15 +145,15 @@ assert_exit_zero "$RC" "declaring CrossOrigin is the legal form for an unprovabl
 # gate would be loudly wrong rather than quietly wrong — but only if something
 # drives the shape.
 test_case "spec_url_is_recognised_as_same_origin" "the plan path builds its url upstream from baseUrl"
-run_on "$(filler 75)$(record "viaSpec" "spec.url" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaSpec" "spec.url" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
 assert_exit_zero "$RC" "spec.url is same-origin by construction"
 
 test_case "absolute_path_builder_is_recognised" "an absolute PATH is our origin"
-run_on "$(filler 75)$(record "viaBuilder" "Url.Builder.absolute [ \"api\", \"thing\" ] []" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaBuilder" "Url.Builder.absolute [ \"api\", \"thing\" ] []" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
 assert_exit_zero "$RC" "Url.Builder.absolute yields a path, not a host"
 
 test_case "a_literal_relative_path_is_recognised" "a leading slash is our origin"
-run_on "$(filler 75)$(record "viaLiteral" "\"/api/thing\"" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaLiteral" "\"/api/thing\"" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
 assert_exit_zero "$RC" "a literal \"/path\" is same-origin"
 
 # ── the floor is on RECORDS PARSED, not on findings ─────────────────────────
@@ -145,7 +168,7 @@ assert_exit_zero "$RC" "a literal \"/path\" is same-origin"
 # campaign failed on.
 test_case "a_corpus_below_the_floor_is_refused_even_with_no_violations" \
     "a floor on findings is satisfied by almost-total parser loss"
-run_on "$(filler 3)"
+run_on "$(spec_filler 32)$(filler 3)"
 assert_exit_nonzero "$RC" "three records is not a cleared file, whatever the findings say"
 assert_contains "$OUT" "parsed only 3 request record(s)" "the refusal quotes what it read"
 assert_contains "$OUT" "parser having drifted" "and names the cause it cannot distinguish otherwise"
@@ -165,7 +188,7 @@ assert_not_contains "$OUT" "declare SameOrigin with a URL that is not" \
 # `method` AND `headers` together, and this pins that.
 test_case "a_record_with_a_url_field_but_no_method_is_not_counted" \
     "an adapter is not a request, and a url-keyed scan would have counted it"
-run_on "$(filler 75)
+run_on "$(spec_filler 32)$(filler 75)
 fromProtoThing : Proto -> Thing
 fromProtoThing proto =
     { id = proto.id
@@ -210,7 +233,7 @@ fi
 # precondition rather than a refinement.
 test_case "the_keyword_in_a_comment_is_not_a_declaration" \
     "the text explaining the rule must not trip it"
-run_on "$(filler 75)
+run_on "$(spec_filler 32)$(filler 75)
 putFileToStorage : String -> Cmd msg
 putFileToStorage presignedUrl =
     Http.request
@@ -233,7 +256,7 @@ assert_exit_zero "$RC" \
 # strip would leave the other half open.
 test_case "a_block_comment_mentioning_the_keyword_is_also_stripped" \
     "Elm has two comment forms and stripping one leaves the other"
-run_on "$(filler 75)
+run_on "$(spec_filler 32)$(filler 75)
 putFileToStorage : String -> Cmd msg
 putFileToStorage presignedUrl =
     Http.request
@@ -248,5 +271,80 @@ putFileToStorage presignedUrl =
         }
 "
 assert_exit_zero "$RC" "a block comment is stripped too"
+
+# ── the rules must hold BY CONSTRUCTION, not by population ──────────────────
+#
+# ⛔ TWO RULES HERE WERE TRUE ONLY OF TODAY'S CALL SITES, which review caught
+# after the gate had already shipped and passed.
+#
+# The guarantee this gate rests on is POSITIONAL: once a url starts with `/x`,
+# nothing appended after it can change the origin. So a rule that does not pin
+# the FIRST characters proves nothing, and both of these did not.
+
+# ⚠️ `baseUrl` is `""` in this project. So `baseUrl ++ X` is literally `X`, and
+# the old rule "leads with `baseUrl`" accepted `baseUrl ++ someVariable` — a
+# variable that could hold `https://evil.test/`. ONE site in `Api.elm` relied on
+# exactly that shape, so the rule was not merely theoretically weak.
+test_case "baseUrl_followed_by_a_variable_is_refused" \
+    "baseUrl is the empty string, so it guarantees nothing on its own"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaVariable" "baseUrl ++ path" "httpHeaders SameOrigin (Session token)")"
+assert_exit_nonzero "$RC" "a variable after baseUrl is not provably same-origin"
+assert_contains "$OUT" "viaVariable" "the refusal names the function"
+
+test_case "baseUrl_followed_by_a_literal_path_is_accepted" \
+    "and the discriminating half, or the rule above would forbid the normal form"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaLiteralBase" "baseUrl ++ \"/api/groups/\" ++ groupId ++ \"/feed\"" "httpHeaders SameOrigin (Session token)")"
+assert_exit_zero "$RC" "a literal path after baseUrl is provable, interpolation after it or not"
+
+# ⚠️ `Url.Builder.absolute` DOES NOT ENCODE ITS PATH SEGMENTS. Its whole body is
+#     absolute pathSegments params = "/" ++ String.join "/" pathSegments ++ toQuery params
+# with `percentEncode` applied only to QUERY keys and values. So
+# `absolute [ "/evil.test" ] []` yields `//evil.test`, a protocol-relative URL
+# that leaves the origin. The gate accepted any `Url.Builder.absolute` call.
+test_case "an_absolute_builder_segment_that_escapes_the_origin_is_refused" \
+    "Url.Builder.absolute does not percent-encode path segments"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaEscape" "Url.Builder.absolute [ \"/evil.test\" ] []" "httpHeaders SameOrigin (Session token)")"
+assert_exit_nonzero "$RC" "a leading-slash segment is refused"
+assert_contains "$OUT" "viaEscape" "the refusal names the function"
+
+# ── the plan path, which cannot declare a destination at all ────────────────
+#
+# ⛔ `Effect.RequestPlan` is `{ spec, token, onResponse }` — no destination
+# field — and `Effect.perform` sends every plan through `Api.authHeaders`, which
+# hardcodes `SameOrigin`. So a spec whose URL leaves our origin carries the
+# reader's token there, and NO declaration exists anywhere for this gate's
+# per-call-site check to question. The hardcode is justified only by the whole
+# `RequestSpec` population, which nothing checked until review asked.
+test_case "a_RequestSpec_url_that_leaves_the_origin_is_refused" \
+    "a plan cannot declare a destination, so the population is the declaration"
+run_on "$(spec_filler 32)$(filler 75)$(spec "runawaySpec" "\"https://evil.test/api/x\"")"
+assert_exit_nonzero "$RC" "a spec url off our origin is refused"
+assert_contains "$OUT" "runawaySpec" "the refusal names the builder"
+assert_contains "$OUT" "cannot declare a destination" "and says why no call site could have said so"
+assert_contains "$OUT" "Effect.perform" "and names the function whose hardcode it justifies"
+
+# ⚠️ The spec population needs its OWN floor, for the reason every floor here
+# exists: a pattern that stopped matching would report "every spec is
+# same-origin" over a population of zero.
+test_case "a_spec_population_below_its_floor_is_refused" \
+    "otherwise the plan-path check passes by having found nothing to check"
+run_on "$(spec_filler 2)$(filler 75)"
+assert_exit_nonzero "$RC" "two spec builders is not a checked plan path"
+assert_contains "$OUT" "RequestSpec builder(s)" "the refusal quotes what it read"
+assert_contains "$OUT" "hardcoded SameOrigin" "and names what the population is justifying"
+
+test_case "the_sub_floor_spec_corpus_contained_no_violations" \
+    "so the refusal above is about the population, not about a finding"
+assert_not_contains "$OUT" "leaves our origin" \
+    "nothing in the small spec corpus is a violation — the floor is what refused it"
+
+# ⚠️ And the green path must SAY it checked the plan path. A check with no
+# per-site declaration to point at, printing nothing when it passes, is
+# indistinguishable from a check that never ran.
+test_case "the_green_run_reports_the_plan_path_population" \
+    "a silent success cannot be told from a check that did not run"
+run_on "$(spec_filler 32)$(filler 75)"
+assert_exit_zero "$RC" "the clean corpus passes"
+assert_contains "$OUT" "32 RequestSpec builder(s) parsed" "and reports the plan-path population"
 
 summarise

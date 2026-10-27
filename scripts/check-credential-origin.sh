@@ -72,17 +72,57 @@ RECORD = re.compile(r"\{(?:[^{}]|\{[^{}]*\})*\}", re.S)
 # of recognised expression shapes is a property of the language, and anything
 # outside it is required to declare its destination instead.
 #
-#   baseUrl ++ …                     built from our own base
-#   spec.url                         a RequestSpec's url, built upstream from baseUrl
-#   Url.Builder.absolute …           an absolute PATH, so our origin
-#   Url.Builder.crossOrigin baseUrl  our origin named explicitly
+# ⛔ EVERY FORM MUST BEGIN WITH A LITERAL PATH, and two of these rules did not
+# until review caught them. The guarantee is positional: **once a url starts with
+# `/x`, nothing appended after it can change the origin.** So the question is
+# only ever "what are the first characters", and a rule that does not pin those
+# proves nothing.
+#
+# ⚠️ `baseUrl` is `""`. So `baseUrl ++ X` is literally `X`, and the old rule
+# "leads with `baseUrl`" guaranteed NOTHING — `baseUrl ++ someVariable` passed,
+# and that variable could hold `https://evil.test/`. One site in `Api.elm`
+# relied on exactly that (`getGroupFeed`, which bound its whole path); it now
+# leads with the literal. The rule reads `baseUrl ++ "/…"`.
+#
+# ⚠️ `Url.Builder.absolute` DOES NOT ENCODE ITS PATH SEGMENTS. Its whole body is
+#     absolute pathSegments params = "/" ++ String.join "/" pathSegments ++ toQuery params
+# and `percentEncode` is applied only to query keys and values. So
+# `absolute [ "/evil.test" ] []` yields `//evil.test` — a protocol-relative URL
+# that leaves the origin entirely, and `absolute [ "", "evil.test" ]` does the
+# same. The rule therefore requires a LITERAL first segment that does not itself
+# begin with `/` and is not empty. All four call sites already comply; the point
+# is that they now comply by rule rather than by luck.
+#
+#   baseUrl ++ "/…"                  our own base, then a literal path
 #   "/…"                             a literal relative path
+#   Url.Builder.absolute [ "x", … ]  an absolute path from a literal segment
+#   Url.Builder.crossOrigin baseUrl  our origin named explicitly
+#   spec.url                         a RequestSpec url — checked separately below
 SAME_ORIGIN = [
-    re.compile(r"^\s*baseUrl\b"),
-    re.compile(r"^\s*spec\.url\s*$"),
-    re.compile(r"^\s*Url\.Builder\.absolute\b"),
-    re.compile(r"^\s*Url\.Builder\.crossOrigin\s+baseUrl\b"),
+    re.compile(r'^\s*baseUrl\s*\+\+\s*"/'),
     re.compile(r'^\s*"/'),
+    re.compile(r'^\s*Url\.Builder\.absolute\s*\[\s*"[^"/][^"]*"'),
+    re.compile(r"^\s*Url\.Builder\.crossOrigin\s+baseUrl\b"),
+    re.compile(r"^\s*spec\.url\s*$"),
+]
+
+# ⛔ `spec.url` IS AN INHERITED CLAIM, so the population it inherits from has to
+# be checked — and until review it was not.
+#
+# `Effect.perform` sends any `RequestPlan` with `Api.authHeaders plan.token`,
+# which hardcodes `httpHeaders SameOrigin (Optional …)`. `RequestPlan` has NO
+# destination field, so a plan cannot declare one and there is no `SameOrigin`
+# token at the call site for the check above to relate to a URL. The hardcode is
+# correct only if every `RequestSpec` url is same-origin by construction — which
+# was true, and true by nobody's design.
+#
+# ⚠️ So this is the declaration the plan path cannot make for itself, made once
+# over the whole population instead of at each of its call sites.
+SPEC_SAME_ORIGIN = [
+    re.compile(r'^\s*baseUrl\s*\+\+\s*"/'),
+    re.compile(r'^\s*"/'),
+    re.compile(r'^\s*Url\.Builder\.absolute\s*\[\s*"[^"/][^"]*"'),
+    re.compile(r"^\s*Url\.Builder\.crossOrigin\s+baseUrl\b"),
 ]
 
 def strip_elm_comments(text):
@@ -151,18 +191,86 @@ for match in RECORD.finditer(src):
 
     url_match = re.search(r"url\s*=\s*(.*?)(?=\n\s*,|\n\s*\})", body, re.S)
     url_expr = url_match.group(1).strip() if url_match else ""
-    first_line = url_expr.split("\n")[0].strip()
 
-    provable = any(p.match(first_line) for p in SAME_ORIGIN)
+    # ⚠️ NORMALISED to one line rather than read first-line-only. `elm-format`
+    # breaks a long url across lines and puts the `++` at the START of the
+    # continuation, so `url =\n    baseUrl\n        ++ "/api/x"` has `baseUrl`
+    # alone on its first line — and a first-line match sees a bare `baseUrl`,
+    # which the tightened rule correctly refuses. The expression is one
+    # expression; reading one line of it was an accident of formatting.
+    flattened = re.sub(r"\s+", " ", url_expr).strip()
+
+    provable = any(p.match(flattened) for p in SAME_ORIGIN)
     declares_same_origin = re.search(r"\bSameOrigin\b", body) is not None
 
     if not provable:
-        unprovable.append((name, line_no, first_line[:48]))
+        unprovable.append((name, line_no, flattened[:48]))
         if declares_same_origin:
-            violations.append((name, line_no, first_line[:48]))
+            violations.append((name, line_no, flattened[:48]))
+
+# ── the plan path: every RequestSpec url, since no plan can declare one ──────
+#
+# ⛔ A FLOOR OF ITS OWN, for the same reason the record floor exists: if the spec
+# pattern stopped matching, this would report "every spec is same-origin" over a
+# population of zero, which is the same output as a clean run.
+MIN_SPEC_BUILDERS = 30
+
+specs = 0
+spec_violations = []
+
+for match in re.finditer(r"^([a-z][A-Za-z0-9_']*)\s*:[^\n]*RequestSpec\s*$", src, re.M):
+    fname = match.group(1)
+    rest = src[match.end() :]
+    stop = re.search(r"\n(?=[a-z][A-Za-z0-9_']*\s*:)", rest)
+    body = strip_elm_comments(rest[: stop.start()] if stop else rest)
+
+    url_match = re.search(r"url\s*=\s*(.*?)(?=\n\s*,|\n\s*\}|\Z)", body, re.S)
+    if not url_match:
+        continue
+
+    specs += 1
+    flattened = re.sub(r"\s+", " ", url_match.group(1).strip()).strip()
+    if not any(p.match(flattened) for p in SPEC_SAME_ORIGIN):
+        line_no = src[: match.start()].count("\n") + 1
+        spec_violations.append((fname, line_no, flattened[:48]))
 
 # ⛔ The floor, checked BEFORE the verdict. A parser that saw three records and
 # found nothing has not cleared this file.
+if specs < MIN_SPEC_BUILDERS:
+    print(
+        f"FAIL: parsed only {specs} RequestSpec builder(s) in {path}; "
+        f"expected at least {MIN_SPEC_BUILDERS}.",
+        file=sys.stderr,
+    )
+    print(
+        "      `Effect.perform` sends every plan with a hardcoded SameOrigin, so this\n"
+        "      population is the only thing justifying that. A verdict over a corpus this\n"
+        "      small is the parser having drifted, not the source having become safe.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+if spec_violations:
+    print(
+        f"FAIL: {len(spec_violations)} RequestSpec(s) have a URL that is not provably "
+        f"same-origin:",
+        file=sys.stderr,
+    )
+    for fname, line_no, expr in spec_violations:
+        print(f"  {path}:{line_no}  {fname}  url = {expr}", file=sys.stderr)
+    print(
+        "\n⛔ A spec cannot declare a destination. `Effect.RequestPlan` is\n"
+        "`{ spec, token, onResponse }` with no destination field, and `Effect.perform`\n"
+        "sends it with `Api.authHeaders`, which hardcodes `SameOrigin`. So a spec whose\n"
+        "URL leaves our origin would carry the reader's token there, and no declaration\n"
+        "exists anywhere for a reviewer or a gate to question.\n"
+        "\n"
+        "Rewrite the URL to lead with a literal path (`baseUrl ++ \"/…\"`), or give\n"
+        "`RequestPlan` a destination field and make `Effect.perform` honour it.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 if records < floor:
     print(
         f"FAIL: parsed only {records} request record(s) in {path}; expected at least {floor}.",
@@ -193,6 +301,14 @@ if violations:
 print(
     f"OK: {records} request record(s) parsed in {path}; "
     f"none declares SameOrigin with an unprovable URL."
+)
+# ⚠️ Reported on the GREEN path, not only on failure. The plan-path check has no
+# per-call-site declaration to point at, so if it printed nothing when it passed
+# there would be no way to tell it from a check that never ran — which is the
+# distinction this gate's floors exist to preserve everywhere else.
+print(
+    f"    {specs} RequestSpec builder(s) parsed; every URL leads with a literal path, "
+    f"which is what justifies the hardcoded SameOrigin in Effect.perform."
 )
 
 # ⚠️ Reported, not failed. A request with an unprovable URL that declares
