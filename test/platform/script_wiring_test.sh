@@ -34,7 +34,43 @@ mkdir -p "$SANDBOX/scripts"
 
 # The gate resolves its corpus relative to the working directory, so the sandbox
 # has to look like a repository root.
-cp "$GATE" "$SANDBOX/scripts/"
+#
+# ⛔ THE GATE IS INSTALLED WITH ITS `ALLOWLIST` EMPTIED, and that is not
+# tidiness. A plain `cp` carries the REAL allowlist into the sandbox, where
+# every entry names a script that does not exist here — so the gate's
+# stale-entry check fires ("vanished") and EVERY case below fails for a reason
+# unrelated to what it asserts. Measured: adding the first real allowlist entry
+# broke five passing cases at once.
+#
+# ⚠️ So the sandbox must not inherit the repository's allowlist contents. Pass a
+# path to `install_gate` to repoint the real entry at a sandbox script, which is
+# how the allowlist case exercises the actual construct rather than a
+# restatement of it.
+install_gate() {
+    python3 - "$GATE" "$SANDBOX/scripts/check-script-wiring.sh" "${1:-}" <<'PREP'
+import pathlib
+import re
+import sys
+
+src, dst, repoint = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
+text = src.read_text(encoding="utf-8")
+match = re.search(r"^ALLOWLIST = \{.*?^\}\n", text, re.S | re.M)
+if not match:
+    raise SystemExit("HARNESS: the gate no longer declares an ALLOWLIST block")
+if repoint:
+    # ⚠️ Anti-vacuity: if the real ALLOWLIST is emptied, this refuses rather
+    # than quietly exempting nothing and passing.
+    paths = re.findall(r'^\s*"([^"]+)":', match.group(0), re.M)
+    if not paths:
+        raise SystemExit("HARNESS: the real ALLOWLIST is empty, so this case proves nothing")
+    body = match.group(0).replace(paths[0], repoint)
+else:
+    body = "ALLOWLIST = {}\n"
+dst.write_text(text[: match.start()] + body + text[match.end() :], encoding="utf-8")
+PREP
+}
+
+install_gate
 
 write_script() {
     printf '#!/usr/bin/env bash\n# %s\necho hi\n' "$2" > "$SANDBOX/scripts/$1"
@@ -259,5 +295,74 @@ assert_exit_zero "$RC" "the gate passes: a bare quoted path in config is an invo
 assert_contains "$OUT" "all wired" "the script is not reported as an orphan"
 assert_contains "$(cat "$SANDBOX/scripts/README.md")" ".claude/settings.json" \
     "and the config is recorded as its caller"
+
+# --- a MAPPING KEY is data too, and the ALLOWLIST is the proof -------------
+
+# ⛔ MEASURED 2026-10-27, the first time anything was ever put in this gate's own
+# ALLOWLIST. The bare-quoted-string rule above covers `"scripts/x.sh"` alone on
+# a line; it does NOT cover `"scripts/x.sh": (`, which is a quoted string
+# followed by a colon. So the allowlist entry counted as a CALLER of the very
+# script it exempts, the entry was reported stale — "gained a caller" — and the
+# gate refused the exemption it had just been given.
+#
+# ⚠️ **The escape hatch was unusable, and nobody knew, because `ALLOWLIST` had
+# been empty since the gate was written.** An exemption mechanism with no
+# entries has never been exercised: the dict was syntactically present and
+# semantically dead, which is indistinguishable from working.
+#
+# ⚠️ The shape generalises past this gate. Any exemption map, fixture pairing or
+# routing table in a `.sh`/`.py` file keyed BY SCRIPT PATH has this form, and
+# each one manufactures a false caller for the script it names.
+rm -f "$SANDBOX/.claude/settings.json"
+write_script "orphan.sh" "orphan.sh — named as a mapping key, called by nobody"
+cat > "$SANDBOX/scripts/mapper.sh" <<'EOF'
+#!/usr/bin/env bash
+# mapper.sh — names the script as a mapping key without ever running it
+REASONS='{
+    "scripts/orphan.sh": (
+        "a reason spanning lines, the way a real exemption reason does"
+    ),
+}'
+printf '%s\n' "$REASONS" | wc -l
+EOF
+write_justfile <<'EOF'
+build:
+    bash scripts/mapper.sh
+EOF
+
+test_case "a_mapping_key_is_not_a_caller" "naming a script as a dict key wires nothing"
+run_gate
+assert_exit_nonzero "$RC" "the gate still reports the orphan"
+assert_contains "$OUT" "scripts/orphan.sh" "the orphan is named despite appearing as a key"
+assert_contains "$OUT" "NO caller" "the failure is the orphan check, not a stale inventory"
+
+# --- and therefore the ALLOWLIST actually exempts something ----------------
+
+# ⚖️ The discriminating half. The case above proves a mapping key is not a
+# caller; this proves the consequence that motivated it — that an allowlisted
+# script is exempt AND is not then reported stale. Without this, the data rule
+# could be correct while the allowlist stayed unusable for some other reason.
+#
+# ⚠️ The sandbox gate is the REAL gate with its live ALLOWLIST entry repointed at
+# the sandbox orphan, so this exercises the actual construct rather than a
+# restatement of it. If the real ALLOWLIST is ever emptied, the substitution
+# below stops matching and this case fails rather than silently passing.
+rm -f "$SANDBOX/scripts/mapper.sh"
+write_justfile <<'EOF'
+build:
+    echo building
+EOF
+install_gate "scripts/orphan.sh"
+
+test_case "the_allowlist_actually_exempts_a_script" \
+    "an exemption mechanism with no entries has never been exercised"
+assert_contains "$(cat "$SANDBOX/scripts/check-script-wiring.sh")" '"scripts/orphan.sh":' \
+    "precondition: the real ALLOWLIST entry was found and repointed"
+(cd "$SANDBOX" && bash scripts/check-script-wiring.sh --write >/dev/null 2>&1)
+run_gate
+assert_exit_zero "$RC" "an allowlisted orphan does not fail the gate"
+assert_not_contains "$OUT" "stale ALLOWLIST" \
+    "and the entry is not reported stale — which is what the mapping-key rule fixes"
+assert_contains "$OUT" "wired or allowlisted" "the verdict says the allowlist carried it"
 
 summarise

@@ -63,6 +63,7 @@ in code by" and check it before relying on it.
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/check-workflow-health.sh` | `.github/workflows/workflow-health.yml`, `test/platform/workflow_health_test.sh` | A workflow nobody's pull request depends on can stay red indefinitely. |
 | `scripts/ci.sh` | `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push`, `scripts/lib/python-tools.sh` … |  |
+| `scripts/classify-credential-rewrite-equivalence.sh` | _manual: Evidence over three fixed commits, not a gate. It classifies every credential rewrite in the one-builder migration against a table of equivalences; its corpus is historical and the question it answers can only be asked once, so wiring it into CI would re-run a settled measurement forever. The STANDING protection for the same property is check-credential-origin.sh and frontend/tests/ApiRequestHeadersTest.elm, both of which do run._ | Every credential rewrite in the one-builder migration, classified against a |
 | `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/dashboard-render-gate.sh` | `.github/workflows/ci.yml`, `justfile` |  |

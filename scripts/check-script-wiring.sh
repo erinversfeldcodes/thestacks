@@ -26,7 +26,16 @@ MODE = sys.argv[1].lstrip("-")
 
 # Manual tools with no automated caller. Every entry carries its reason; a
 # stale entry (the script gained a caller, or vanished) fails the gate.
-ALLOWLIST = {}
+ALLOWLIST = {
+    "scripts/classify-credential-rewrite-equivalence.sh": (
+        "Evidence over three fixed commits, not a gate. It classifies every credential "
+        "rewrite in the one-builder migration against a table of equivalences; its corpus "
+        "is historical and the question it answers can only be asked once, so wiring it "
+        "into CI would re-run a settled measurement forever. The STANDING protection for "
+        "the same property is check-credential-origin.sh and "
+        "frontend/tests/ApiRequestHeadersTest.elm, both of which do run."
+    ),
+}
 
 SKIP_DIRS = (".venv", "__pycache__")
 scripts = sorted(
@@ -136,6 +145,25 @@ def _code_lines(txt, path=""):
         # which is the cheapest moment to close it rather than the moment it
         # manufactures an orphan.
         if path.endswith((".sh", ".py")) and re.fullmatch(r"""(['"])[^'"]*\1,?""", stripped):
+            continue
+        # ⛔ A MAPPING KEY IS DATA TOO, and this gate's own ALLOWLIST is the
+        # proof — the rule above only covers a BARE string literal.
+        #
+        # MEASURED 2026-10-27, the first time anything was ever put in the
+        # ALLOWLIST: `"scripts/x.sh": (` is a quoted string followed by `: (`,
+        # so the rule above does not strip it, so the entry counted as a CALLER
+        # of the script it exempts, so the entry was immediately reported
+        # stale — "gained a caller". **The allowlist was unusable, and nobody
+        # knew because it had been empty since the gate was written.** An
+        # escape hatch with no entries is an escape hatch nobody has tried.
+        #
+        # ⚠️ The shape generalises past this gate: any exemption map, fixture
+        # pairing or routing table in a `.sh`/`.py` file keyed BY SCRIPT PATH
+        # has exactly this form, and each one would manufacture a false caller
+        # for the script it names.
+        if path.endswith((".sh", ".py")) and re.fullmatch(
+            r"""(['"])[^'"]*\1\s*:\s*(?:[(\[{]|(['"])[^'"]*\2)?,?""", stripped
+        ):
             continue
         out.append(line)
     return out
