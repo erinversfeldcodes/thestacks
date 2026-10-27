@@ -37,7 +37,7 @@ libraryEndpoint =
 -}
 afterRemoval : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 afterRemoval =
-    ProgramTest.start () (bookshelfUndoProgram Bookshelf.libraryConfig (Just "owner-token") removal)
+    ProgramTest.start () (bookshelfUndoProgram Bookshelf.libraryConfig (Just (TestHelpers.creds "owner-token")) removal)
         |> ProgramTest.simulateHttpResponse "GET"
             libraryEndpoint
             (simulateBookshelfResponse [ testPlacement ])
@@ -51,7 +51,7 @@ of `mutationToken`, not because of how the page happens to be reached.
 readOnlyAfterRemoval : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 readOnlyAfterRemoval =
     ProgramTest.start ()
-        (bookshelfUndoProgram (Bookshelf.profileConfig "alice" "library") (Just "viewer-token") removal)
+        (bookshelfUndoProgram (Bookshelf.profileConfig "alice" "library") (Just (TestHelpers.creds "viewer-token")) removal)
 
 
 suite : Test
@@ -105,7 +105,7 @@ mainHandsTheRemovalToTheShelf =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "owner-token") "u1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "owner-token")) "u1"
 
                 ( page, _ ) =
                     Main.applyPendingUndo (Just removal) ( Main.PageBookshelf model, Cmd.none )
@@ -124,7 +124,7 @@ mainKeepsAPlainVisitPlain =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "owner-token") "u1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "owner-token")) "u1"
 
                 ( page, _ ) =
                     Main.applyPendingUndo Nothing ( Main.PageBookshelf model, Cmd.none )
@@ -211,7 +211,7 @@ readOnlyUndoIsInert =
                 ( initial, _ ) =
                     Bookshelf.init
                         (Bookshelf.profileConfig "alice" "library")
-                        (Just "viewer-token")
+                        (Just (TestHelpers.creds "viewer-token"))
                         "viewer-user-id"
 
                 ( seeded, _ ) =
@@ -362,7 +362,7 @@ plainVisitOffersNoUndo =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "owner-token") "test-user-id"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "owner-token")) "test-user-id"
 
                 ( untouched, cmd ) =
                     Bookshelf.withPendingUndo Nothing ( model, Cmd.none )

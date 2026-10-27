@@ -28,6 +28,7 @@ module Api exposing
     , ConfirmOutcome(..)
     , ConfirmResponse
     , Credential(..)
+    , Credentials
     , Deanonymisation
     , Destination(..)
     , GroupMember
@@ -103,6 +104,7 @@ module Api exposing
     , authorEventDecoder
     , authorEventsDecoder
     , awaitingConfirmationCount
+    , bearerOf
     , blockUser
     , blockedUserDecoder
     , blockedUsersResponseDecoder
@@ -124,6 +126,7 @@ module Api exposing
     , createGroup
     , createListing
     , createShelfRequest
+    , credentials
     , deactivateListing
     , declineInvitation
     , declineRemovalRequest
@@ -377,9 +380,70 @@ and the cross-origin case is the one that generalises worst.
 
 -}
 type Credential
-    = Session String
-    | Optional (Maybe String)
+    = Session Credentials
+    | Optional (Maybe Credentials)
     | NoCredential
+
+
+{-| What a signed-in reader carries: the bearer token, and the CSRF token the
+double-submit scheme requires.
+
+⛔ **OPAQUE, and the reason is that these two must travel together.** A CSRF
+token is only a same-origin proof if it accompanies the credential it protects;
+a call site that could hold one without the other would be able to send a
+state-changing request with a session and no proof, which is the exact hole
+being closed. Making it one value means there is no call site at which they can
+come apart.
+
+⚖️ **Why this is one value rather than a second parameter**, measured: either
+shape costs the same today — about 45 signatures and 45 call sites. The
+difference is the second touch. The work that moves sessions onto a cookie
+removes the `Authorization` header entirely and deletes stored-token handling, at
+which point a second parameter has to be removed from all 45 again — while this
+record's SHAPE changes in one place and every call site keeps passing the single
+value it already passes.
+
+⚠️ The CSRF token is a `Maybe` because it is read from a cookie that may not be
+there yet — a page loaded before the cookie was issued, or a test harness that
+mints a session directly. An absent token is a request that will be REFUSED once
+enforcement lands, which is the correct outcome and is why it is not defaulted
+to `""`.
+
+-}
+type Credentials
+    = Credentials { bearer : String, csrf : Maybe String }
+
+
+{-| Build a reader's credentials. The only constructor, so the pairing above
+cannot be bypassed.
+-}
+credentials : String -> Maybe String -> Credentials
+credentials bearer csrf =
+    Credentials { bearer = bearer, csrf = csrf }
+
+
+{-| The bearer token as a bare string.
+
+⛔ **ONE CALLER, AND IT IS THE ONE THIS WAVE IS REMOVING.** `EventSource` cannot
+set headers, so the upload progress stream passes the credential in a QUERY
+STRING — `/api/upload/:id/stream?token=…` — which puts it in request logs, in
+`Referer`, and in browser history. Moving the stream onto the session cookie is
+what fixes it, and that change is planned.
+
+⚠️ This accessor exists so that call site is **named and findable** rather than
+hidden behind a page holding a second, bare copy of the token. When the stream
+moves onto the cookie, its caller goes and so does this function; a `grep` for
+`bearerOf` is the to-do list.
+
+⚠️ Do NOT reach for this to build a header. `Api.requestHeaders` is the one
+derivation and `scripts/check-one-credential-derivation.sh` refuses any other —
+this returns the token precisely because the one legitimate caller is not
+building a header at all.
+
+-}
+bearerOf : Credentials -> String
+bearerOf (Credentials creds) =
+    creds.bearer
 
 
 {-| WHERE a request is going, as a decision rather than a default.
@@ -441,8 +505,8 @@ requestHeaders destination credential =
         ( SameOrigin, Nothing ) ->
             []
 
-        ( SameOrigin, Just token ) ->
-            [ ( "Authorization", "Bearer " ++ token ) ]
+        ( SameOrigin, Just (Credentials creds) ) ->
+            [ ( "Authorization", "Bearer " ++ creds.bearer ) ]
 
 
 {-| The token a credential carries, if any.
@@ -454,14 +518,14 @@ collapse to a `Maybe` for the one arm that needs it. `Optional Nothing` and
 which is where the distinction means something.
 
 -}
-tokenFor : Credential -> Maybe String
+tokenFor : Credential -> Maybe Credentials
 tokenFor credential =
     case credential of
-        Session token ->
-            Just token
+        Session creds ->
+            Just creds
 
-        Optional maybeToken ->
-            maybeToken
+        Optional maybeCreds ->
+            maybeCreds
 
         NoCredential ->
             Nothing
@@ -753,7 +817,7 @@ uploadInboxDecoder =
     Decode.field "items" (Decode.list inboxItemDecoder)
 
 
-getUploadInbox : String -> (Result Http.Error (List InboxItem) -> msg) -> Cmd msg
+getUploadInbox : Credentials -> (Result Http.Error (List InboxItem) -> msg) -> Cmd msg
 getUploadInbox token toMsg =
     Http.request
         { method = "GET"
@@ -922,7 +986,7 @@ importRowDecoder =
 The parse happens synchronously server-side, so a refusal (wrong file, one
 already running, too large) arrives on THIS response, not minutes later.
 -}
-createGoodreadsImport : String -> File -> (Result ImportError LibraryImport -> msg) -> Cmd msg
+createGoodreadsImport : Credentials -> File -> (Result ImportError LibraryImport -> msg) -> Cmd msg
 createGoodreadsImport token file toMsg =
     Http.request
         { method = "POST"
@@ -1003,7 +1067,7 @@ importRefusal body =
 
 {-| `GET /api/imports/:id` — polled while the job runs.
 -}
-getImport : String -> String -> (Result Http.Error LibraryImport -> msg) -> Cmd msg
+getImport : Credentials -> String -> (Result Http.Error LibraryImport -> msg) -> Cmd msg
 getImport token importId toMsg =
     Http.request
         { method = "GET"
@@ -1018,7 +1082,7 @@ getImport token importId toMsg =
 
 {-| `GET /api/imports/:id/rows` — the per-row report.
 -}
-getImportRows : String -> String -> (Result Http.Error (List ImportRow) -> msg) -> Cmd msg
+getImportRows : Credentials -> String -> (Result Http.Error (List ImportRow) -> msg) -> Cmd msg
 getImportRows token importId toMsg =
     Http.request
         { method = "GET"
@@ -1464,7 +1528,7 @@ expiry does not compile.
 -}
 type Authed err ok msg
     = Authed
-        { token : String
+        { token : Credentials
         , onExpired : msg
         , onResult : Result err ok -> msg
         }
@@ -1476,7 +1540,7 @@ The record is the gate: `onExpired` cannot be omitted, defaulted, or inferred.
 
 -}
 authed :
-    String
+    Credentials
     -> { onExpired : msg, onResult : Result err ok -> msg }
     -> Authed err ok msg
 authed token handlers =
@@ -1600,7 +1664,7 @@ here means the session is no longer renewable and the caller falls through to th
 session-expiry interceptor.
 -}
 refresh :
-    String
+    Credentials
     -> (Result Http.Error AuthResponse -> msg)
     -> Cmd msg
 refresh token toMsg =
@@ -1638,7 +1702,7 @@ to match the router; a POST silently 404s the SPA catch-all, leaving the token
 valid until its TTL — caught by the logout E2E (auth.spec.ts).
 -}
 logout :
-    String
+    Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 logout token toMsg =
@@ -2093,7 +2157,7 @@ searchBooksRequest query deep =
 
 getBookshelf :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error BookshelfResponse -> msg)
     -> Cmd msg
 getBookshelf shelfName token toMsg =
@@ -2363,7 +2427,7 @@ not consumed.
 
 -}
 requestExport :
-    String
+    Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 requestExport token toMsg =
@@ -2401,7 +2465,7 @@ not consumed. On success the caller is logged out.
 
 -}
 deleteAccount :
-    String
+    Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 deleteAccount token toMsg =
@@ -2434,7 +2498,7 @@ deleteAccountRequest =
 -}
 saveConsent :
     Bool
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 saveConsent consent token toMsg =
@@ -2456,7 +2520,7 @@ purge of the user's writing-assistant data.
 -}
 saveWritingAssistantConsent :
     Bool
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 saveWritingAssistantConsent consent token toMsg =
@@ -2637,7 +2701,7 @@ auditLogResponseDecoder =
 {-| GET /api/settings/audit-log — fetch the current user's audit history.
 -}
 getAuditLog :
-    String
+    Credentials
     -> (Result Http.Error AuditLogResponse -> msg)
     -> Cmd msg
 getAuditLog token toMsg =
@@ -2811,7 +2875,7 @@ response includes the labelled risk-inference illustrations.
 -}
 getInferences :
     Bool
-    -> String
+    -> Credentials
     -> (Result Http.Error PersonalInferences -> msg)
     -> Cmd msg
 getInferences revealRisk token toMsg =
@@ -2909,7 +2973,7 @@ expectPlace toMsg =
 placeBook :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result PlaceError Placement -> msg)
     -> Cmd msg
 placeBook bookshelfName bookId token toMsg =
@@ -2957,7 +3021,7 @@ setBookAgeGateRequest bookId =
 {-| GET /api/placements/mine — fetch summary of user's active placements.
 -}
 getUserPlacements :
-    String
+    Credentials
     -> (Result Http.Error (List PlacementSummary) -> msg)
     -> Cmd msg
 getUserPlacements token toMsg =
@@ -3599,7 +3663,7 @@ type alias ListingParams =
 {-| GET /api/listings — fetch active marketplace listings.
 -}
 getListings :
-    Maybe String
+    Maybe Credentials
     -> (Result Http.Error ListingsResponse -> msg)
     -> Cmd msg
 getListings maybeToken toMsg =
@@ -3617,7 +3681,7 @@ getListings maybeToken toMsg =
 {-| GET /api/listings/mine — fetch the current user's listings.
 -}
 getMyListings :
-    String
+    Credentials
     -> (Result Http.Error ListingsResponse -> msg)
     -> Cmd msg
 getMyListings token toMsg =
@@ -3636,7 +3700,7 @@ getMyListings token toMsg =
 -}
 createListing :
     ListingParams
-    -> String
+    -> Credentials
     -> (Result Http.Error Listing -> msg)
     -> Cmd msg
 createListing params token toMsg =
@@ -3667,7 +3731,7 @@ createListing params token toMsg =
 -}
 activateListing :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error Listing -> msg)
     -> Cmd msg
 activateListing listingId token toMsg =
@@ -3686,7 +3750,7 @@ activateListing listingId token toMsg =
 -}
 deactivateListing :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error Listing -> msg)
     -> Cmd msg
 deactivateListing listingId token toMsg =
@@ -3705,7 +3769,7 @@ deactivateListing listingId token toMsg =
 -}
 soldListing :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error Listing -> msg)
     -> Cmd msg
 soldListing listingId token toMsg =
@@ -3724,7 +3788,7 @@ soldListing listingId token toMsg =
 Used by the create listing form to select which book to list.
 -}
 getMyPlacements :
-    String
+    Credentials
     -> (Result Http.Error (List Placement) -> msg)
     -> Cmd msg
 getMyPlacements token toMsg =
@@ -3769,7 +3833,7 @@ back what the server sent and never construct one.
 
 -}
 getBlogPosts :
-    Maybe String
+    Maybe Credentials
     -> Maybe String
     -> (Result Http.Error BlogPostPage -> msg)
     -> Cmd msg
@@ -3796,7 +3860,7 @@ getBlogPosts maybeToken maybeCursor toMsg =
 -}
 getBlogPost :
     String
-    -> Maybe String
+    -> Maybe Credentials
     -> (Result Http.Error BlogPost -> msg)
     -> Cmd msg
 getBlogPost postId maybeToken toMsg =
@@ -3815,7 +3879,7 @@ getBlogPost postId maybeToken toMsg =
 -}
 createBlogPost :
     { title : String, body : String, visibility : String }
-    -> String
+    -> Credentials
     -> (Result Http.Error String -> msg)
     -> Cmd msg
 createBlogPost postData token toMsg =
@@ -3842,7 +3906,7 @@ createBlogPost postData token toMsg =
 updateBlogPost :
     String
     -> { title : String, body : String, visibility : String }
-    -> String
+    -> Credentials
     -> (Result Http.Error String -> msg)
     -> Cmd msg
 updateBlogPost postId postData token toMsg =
@@ -3900,7 +3964,7 @@ syndicationDecoder =
 {-| `GET /api/blog/posts/:id/syndication?format=html|markdown`.
 -}
 fetchSyndicationExport :
-    String
+    Credentials
     -> String
     -> String
     -> (Result Http.Error SyndicationExport -> msg)
@@ -3931,7 +3995,7 @@ the field to enter one vanished with it.
 
 -}
 listSyndications :
-    String
+    Credentials
     -> String
     -> (Result Http.Error (List Syndication) -> msg)
     -> Cmd msg
@@ -3951,7 +4015,7 @@ listSyndications token postId toMsg =
 {-| `POST /api/blog/posts/:id/syndications` — record that a copy went out.
 -}
 recordSyndication :
-    String
+    Credentials
     -> String
     -> String
     -> (Result Http.Error Syndication -> msg)
@@ -3972,7 +4036,7 @@ recordSyndication token postId method toMsg =
 back in, closing the POSSE loop.
 -}
 updateSyndicationUrl :
-    String
+    Credentials
     -> String
     -> String
     -> String
@@ -3994,7 +4058,7 @@ updateSyndicationUrl token postId sid url toMsg =
 tickbox. Partial on purpose: title/body/visibility stay untouched.
 -}
 setPostSyndicated :
-    String
+    Credentials
     -> String
     -> Bool
     -> (Result Http.Error Bool -> msg)
@@ -4015,7 +4079,7 @@ setPostSyndicated token postId syndicated toMsg =
 -}
 publishBlogPost :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 publishBlogPost postId token toMsg =
@@ -4035,7 +4099,7 @@ publishBlogPost postId token toMsg =
 confirmAssociation :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 confirmAssociation postId associationId token toMsg =
@@ -4055,7 +4119,7 @@ confirmAssociation postId associationId token toMsg =
 dismissAssociation :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 dismissAssociation postId associationId token toMsg =
@@ -4074,7 +4138,7 @@ dismissAssociation postId associationId token toMsg =
 -}
 getPostComments :
     String
-    -> Maybe String
+    -> Maybe Credentials
     -> (Result Http.Error (List Comment) -> msg)
     -> Cmd msg
 getPostComments postId maybeToken toMsg =
@@ -4095,7 +4159,7 @@ createComment :
     String
     -> String
     -> Maybe String
-    -> String
+    -> Credentials
     -> (Result Http.Error Comment -> msg)
     -> Cmd msg
 createComment postId body maybeParentId token toMsg =
@@ -4127,7 +4191,7 @@ createComment postId body maybeParentId token toMsg =
 -}
 deleteComment :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 deleteComment commentId token toMsg =
@@ -4146,7 +4210,7 @@ deleteComment commentId token toMsg =
 -}
 updateProfileVisibility :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 updateProfileVisibility visibility token toMsg =
@@ -4170,7 +4234,7 @@ updateProfileVisibility visibility token toMsg =
 updateShelfVisibility :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 updateShelfVisibility shelfName visibility token toMsg =
@@ -4443,7 +4507,7 @@ reader's content bidirectionally on the next fetch.
 -}
 blockUser :
     String
-    -> String
+    -> Credentials
     -> (Result BlockError () -> msg)
     -> Cmd msg
 blockUser targetUserId token toMsg =
@@ -4463,7 +4527,7 @@ on success, 404 `not_found` when no block existed.
 -}
 unblockUser :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 unblockUser targetUserId token toMsg =
@@ -4483,7 +4547,7 @@ page (20 readers) at a time. `page` is 1-based; the response echoes back the
 page and total so the caller can offer a "Load more" affordance.
 -}
 listBlockedUsers :
-    String
+    Credentials
     -> Int
     -> (Result Http.Error BlockedUsersResponse -> msg)
     -> Cmd msg
@@ -4539,7 +4603,7 @@ privacySettingsDecoder =
 per-shelf visibility overrides, used to seed the privacy settings screen.
 -}
 getPrivacySettings :
-    String
+    Credentials
     -> (Result Http.Error PrivacySettings -> msg)
     -> Cmd msg
 getPrivacySettings token toMsg =
@@ -4623,7 +4687,7 @@ optionalString field =
 {-| GET /api/u/:handle. Optional auth — pass the viewer's token when signed in so
 the server resolves what THIS viewer may see; `Nothing` for an anonymous viewer.
 -}
-getProfile : Maybe String -> String -> (Result Http.Error PublicProfile -> msg) -> Cmd msg
+getProfile : Maybe Credentials -> String -> (Result Http.Error PublicProfile -> msg) -> Cmd msg
 getProfile maybeToken handle toMsg =
     Http.request
         { method = "GET"
@@ -4736,7 +4800,7 @@ peopleSearchDecoder =
     Decode.field "users" (Decode.list publicProfileSummaryDecoder)
 
 
-authHeaders : Maybe String -> List Http.Header
+authHeaders : Maybe Credentials -> List Http.Header
 authHeaders maybeToken =
     httpHeaders SameOrigin (Optional maybeToken)
 
@@ -4918,7 +4982,7 @@ type alias AdminMfaEnrolment =
 
 {-| POST /api/admin/auth/mfa/setup — takes the ORDINARY owner token (no admin session exists yet).
 -}
-adminMfaSetup : String -> (Result Http.Error AdminMfaEnrolment -> msg) -> Cmd msg
+adminMfaSetup : Credentials -> (Result Http.Error AdminMfaEnrolment -> msg) -> Cmd msg
 adminMfaSetup ownerToken toMsg =
     Http.request
         { method = "POST"
@@ -4949,7 +5013,7 @@ own setup call publishes (2026-07-29) rather than have every client base32-decod
 
 -}
 adminMfaConfirm :
-    String
+    Credentials
     -> { code : String, secret : String, recoveryCodes : List String }
     -> (Result Http.Error () -> msg)
     -> Cmd msg
@@ -5065,7 +5129,7 @@ removalRequestDecoder =
 
 {-| GET /api/admin/removal-requests — the pending queue, oldest first.
 -}
-getRemovalRequests : String -> (Result Http.Error (List RemovalRequest) -> msg) -> Cmd msg
+getRemovalRequests : Credentials -> (Result Http.Error (List RemovalRequest) -> msg) -> Cmd msg
 getRemovalRequests token toMsg =
     Http.request
         { method = "GET"
@@ -5191,7 +5255,7 @@ server's default and leaves everything past it with no way to be asked for.
 
 -}
 getAdminFeedback :
-    String
+    Credentials
     -> { limit : Int, offset : Int }
     -> (Result Http.Error AdminFeedbackPage -> msg)
     -> Cmd msg
@@ -5253,7 +5317,7 @@ sendFeedbackRequest body =
 
 {-| GET /api/admin/invites — every invitation, newest first.
 -}
-getAdminInvites : String -> (Result Http.Error (List AdminInvite) -> msg) -> Cmd msg
+getAdminInvites : Credentials -> (Result Http.Error (List AdminInvite) -> msg) -> Cmd msg
 getAdminInvites token toMsg =
     Http.request
         { method = "GET"
@@ -5270,7 +5334,7 @@ getAdminInvites token toMsg =
 is the ONLY time the full code exists in the clear.
 -}
 createAdminInvite :
-    String
+    Credentials
     -> { note : String, invitedEmail : String, maxUses : Int, expiresInDays : Maybe Int }
     -> (Result Http.Error ( AdminInvite, String ) -> msg)
     -> Cmd msg
@@ -5311,7 +5375,7 @@ blankAsAbsent key value =
 
 {-| DELETE /api/admin/invites/:id — revoke. A timestamp, never a row delete.
 -}
-revokeAdminInvite : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+revokeAdminInvite : Credentials -> String -> (Result Http.Error () -> msg) -> Cmd msg
 revokeAdminInvite token id toMsg =
     Http.request
         { method = "DELETE"
@@ -5332,19 +5396,19 @@ and this function are named for what happens to the _listing_, not for the revie
 on the request. Read the name twice before wiring a button to it.
 
 -}
-honourRemovalRequest : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+honourRemovalRequest : String -> Credentials -> (Result Http.Error () -> msg) -> Cmd msg
 honourRemovalRequest requestId token toMsg =
     removalDecision requestId "honour" token toMsg
 
 
 {-| PUT /api/admin/removal-requests/:id/decline — the listing stays up.
 -}
-declineRemovalRequest : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+declineRemovalRequest : String -> Credentials -> (Result Http.Error () -> msg) -> Cmd msg
 declineRemovalRequest requestId token toMsg =
     removalDecision requestId "decline" token toMsg
 
 
-removalDecision : String -> String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+removalDecision : String -> String -> Credentials -> (Result Http.Error () -> msg) -> Cmd msg
 removalDecision requestId action token toMsg =
     Http.request
         { method = "PUT"
@@ -5361,7 +5425,7 @@ removalDecision requestId action token toMsg =
 -}
 getAdminSources :
     { status : Maybe String, page : Int }
-    -> String
+    -> Credentials
     -> (Result Http.Error AdminSourcesResponse -> msg)
     -> Cmd msg
 getAdminSources params token toMsg =
@@ -5387,7 +5451,7 @@ getAdminSources params token toMsg =
 -}
 approveSource :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error AdminSource -> msg)
     -> Cmd msg
 approveSource sourceId token toMsg =
@@ -5406,7 +5470,7 @@ approveSource sourceId token toMsg =
 -}
 rejectSource :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error AdminSource -> msg)
     -> Cmd msg
 rejectSource sourceId token toMsg =
@@ -5468,7 +5532,7 @@ filtered by tier (`public` | `age_gated`) and/or a title search.
 -}
 adminListBooks :
     { tier : Maybe String, search : Maybe String, page : Int }
-    -> String
+    -> Credentials
     -> (Result Http.Error AdminBooksResponse -> msg)
     -> Cmd msg
 adminListBooks params token toMsg =
@@ -5512,7 +5576,7 @@ direction. Body `{"age_gated": Bool}`. Returns the updated book.
 adminSetBookAgeGate :
     String
     -> Bool
-    -> String
+    -> Credentials
     -> (Result Http.Error AdminBook -> msg)
     -> Cmd msg
 adminSetBookAgeGate bookId ageGated token toMsg =
@@ -5586,7 +5650,7 @@ sourceHealthListDecoder =
 {-| GET /api/admin/source-health — fetch per-source health status.
 -}
 getSourceHealth :
-    String
+    Credentials
     -> (Result Http.Error (List SourceHealth) -> msg)
     -> Cmd msg
 getSourceHealth token toMsg =
@@ -5629,7 +5693,7 @@ onboardingStatusDecoder =
 {-| GET /api/onboarding/status — fetch current step completion state.
 -}
 getOnboardingStatus :
-    String
+    Credentials
     -> (Result Http.Error OnboardingStatus -> msg)
     -> Cmd msg
 getOnboardingStatus token toMsg =
@@ -5648,7 +5712,7 @@ getOnboardingStatus token toMsg =
 -}
 completeOnboardingStep :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error OnboardingStatus -> msg)
     -> Cmd msg
 completeOnboardingStep step token toMsg =
@@ -5665,7 +5729,7 @@ completeOnboardingStep step token toMsg =
 
 createGroup :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error Group -> msg)
     -> Cmd msg
 createGroup name token toMsg =
@@ -5688,7 +5752,7 @@ createGroup name token toMsg =
 
 getGroup :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error Group -> msg)
     -> Cmd msg
 getGroup groupId token toMsg =
@@ -5705,7 +5769,7 @@ getGroup groupId token toMsg =
 
 getGroupFeed :
     String
-    -> String
+    -> Credentials
     -> Maybe String
     -> (Result Http.Error FeedResponse -> msg)
     -> Cmd msg
@@ -5745,7 +5809,7 @@ getGroupFeed groupId token maybeCursor toMsg =
 inviteToGroup :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error GroupInvitation -> msg)
     -> Cmd msg
 inviteToGroup groupId identifier token toMsg =
@@ -5768,7 +5832,7 @@ inviteToGroup groupId identifier token toMsg =
 acceptInvitation :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 acceptInvitation groupId invitationId token toMsg =
@@ -5786,7 +5850,7 @@ acceptInvitation groupId invitationId token toMsg =
 declineInvitation :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 declineInvitation groupId invitationId token toMsg =
@@ -5822,7 +5886,7 @@ groupMemberDecoder =
 -}
 getGroupMembers :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error (List GroupMember) -> msg)
     -> Cmd msg
 getGroupMembers groupId token toMsg =
@@ -5846,7 +5910,7 @@ remove a member from the app at all; only leaving was wired.
 removeGroupMember :
     String
     -> String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 removeGroupMember groupId memberUserId token toMsg =
@@ -5863,7 +5927,7 @@ removeGroupMember groupId memberUserId token toMsg =
 
 leaveGroup :
     String
-    -> String
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 leaveGroup groupId token toMsg =

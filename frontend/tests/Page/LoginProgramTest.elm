@@ -229,7 +229,7 @@ loginSuccessTransition =
                 |> ProgramTest.clickButton "Enter the Stacks"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/login"
-                    (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
+                    (simulateAuthResponse (TestHelpers.creds "jwt-token") "user-1" "reader@stacks.dev" "A Reader")
                 |> ProgramTest.expectViewHas
                     [ Selector.class "login-card__submit"
                     , Selector.disabled True
@@ -304,7 +304,7 @@ submitDisabledDuringTransition =
                 |> ProgramTest.clickButton "Enter the Stacks"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/login"
-                    (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
+                    (simulateAuthResponse (TestHelpers.creds "jwt-token") "user-1" "reader@stacks.dev" "A Reader")
                 |> ProgramTest.expectViewHas
                     [ Selector.class "login-card__submit"
                     , Selector.disabled True

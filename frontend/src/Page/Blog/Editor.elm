@@ -50,7 +50,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Mode -> Maybe String -> ( Model, Cmd Msg )
+init : Mode -> Maybe Api.Credentials -> ( Model, Cmd Msg )
 init mode maybeToken =
     let
         baseModel =
@@ -81,7 +81,7 @@ init mode maybeToken =
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetTitle val ->

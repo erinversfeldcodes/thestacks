@@ -53,7 +53,7 @@ pilePlacement =
 
 startDetailWith : Placement -> ProgramTest BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 startDetailWith placement =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponseWithPlacement "book-test-001" testBook placement)
@@ -163,7 +163,7 @@ describesItsTarget : Test
 describesItsTarget =
     test "a failed save renders the error AND the input that references it" <|
         \() ->
-            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing)
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacement "book-test-001" testBook libraryPlacement)
@@ -210,7 +210,7 @@ contractCase : ProgressSaveContract.Classification -> Test
 contractCase classification =
     test (ProgressSaveContract.label classification) <|
         \() ->
-            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing)
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacement "book-test-001" testBook libraryPlacement)

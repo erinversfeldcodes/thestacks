@@ -11,6 +11,7 @@ import Page.Import as ImportPage
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 runningImport : LibraryImport
@@ -87,7 +88,7 @@ viewAfter msgs =
         (\msg model ->
             let
                 ( next, _, _ ) =
-                    ImportPage.update msg model (Just "token")
+                    ImportPage.update msg model (Just (TestHelpers.creds "token"))
             in
             next
         )

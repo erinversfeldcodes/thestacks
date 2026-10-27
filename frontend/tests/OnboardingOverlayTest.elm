@@ -16,9 +16,10 @@ import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
-noToken : Maybe String
+noToken : Maybe Api.Credentials
 noToken =
     Nothing
 
@@ -402,7 +403,7 @@ embeddedSurfaces =
     describe "embedded real surfaces"
         [ test "the Upload step renders the real upload surface, not a prompt" <|
             \_ ->
-                Overlay.view { init | currentIndex = uploadIx } (Just "tok")
+                Overlay.view { init | currentIndex = uploadIx } (Just (TestHelpers.creds "tok"))
                     |> Query.fromHtml
                     |> Query.has
                         [ byTestId "onboarding-upload-embed"

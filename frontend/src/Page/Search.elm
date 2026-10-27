@@ -71,7 +71,7 @@ init =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     let
         ( newModel, effect, out ) =
@@ -88,7 +88,7 @@ is decided here and nowhere else. `update` is this composed with
 `Effect.perform`.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model maybeToken =
     case msg of
         QueryChanged query ->
@@ -233,7 +233,7 @@ debounceMillis =
 {-| The book search a query runs — shared by the debounce tick and the
 deep-search toggle so the two cannot ask for different things.
 -}
-booksSearch : String -> Bool -> Maybe String -> Effect Msg
+booksSearch : String -> Bool -> Maybe Api.Credentials -> Effect Msg
 booksSearch query deep maybeToken =
     Effect.public (Api.searchBooksRequest query deep)
         maybeToken

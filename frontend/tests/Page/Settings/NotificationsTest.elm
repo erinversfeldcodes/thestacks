@@ -17,6 +17,7 @@ import Page.Settings.Notifications as Notifications exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -51,9 +52,9 @@ modelOf ( model, _, _ ) =
 -}
 loadedWith : Api.NotificationPreferences -> Notifications.Model
 loadedWith prefs =
-    Notifications.init (Just "test-token")
+    Notifications.init (Just (TestHelpers.creds "test-token"))
         |> Tuple.first
-        |> (\model -> Notifications.update (Loaded (Ok prefs)) model (Just "test-token"))
+        |> (\model -> Notifications.update (Loaded (Ok prefs)) model (Just (TestHelpers.creds "test-token")))
         |> modelOf
 
 
@@ -68,7 +69,7 @@ suite =
     describe "Page.Settings.Notifications — hydration"
         [ test "init starts in the Loading state (no toggles at silently-wrong defaults)" <|
             \_ ->
-                Notifications.init (Just "test-token")
+                Notifications.init (Just (TestHelpers.creds "test-token"))
                     |> Tuple.first
                     |> .prefs
                     |> Expect.equal Loading
@@ -106,9 +107,9 @@ suite =
             \_ ->
                 let
                     failed =
-                        Notifications.init (Just "test-token")
+                        Notifications.init (Just (TestHelpers.creds "test-token"))
                             |> Tuple.first
-                            |> (\model -> Notifications.update (Loaded (Err (Http.BadStatus 500))) model (Just "test-token"))
+                            |> (\model -> Notifications.update (Loaded (Err (Http.BadStatus 500))) model (Just (TestHelpers.creds "test-token")))
                             |> modelOf
                 in
                 Expect.all
@@ -125,34 +126,34 @@ suite =
                     ()
         , test "toggling a loaded preference flips only that value" <|
             \_ ->
-                Notifications.update TogglePriceDrops (loadedWith allOff) (Just "test-token")
+                Notifications.update TogglePriceDrops (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | priceDrops = True })
         , test "ToggleNewReviews flips only new reviews" <|
             \_ ->
-                Notifications.update ToggleNewReviews (loadedWith allOff) (Just "test-token")
+                Notifications.update ToggleNewReviews (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | newReviews = True })
         , test "ToggleAuthorUpdates flips only author updates" <|
             \_ ->
-                Notifications.update ToggleAuthorUpdates (loadedWith allOff) (Just "test-token")
+                Notifications.update ToggleAuthorUpdates (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | authorUpdates = True })
         , test "ToggleEventAlerts flips only event alerts" <|
             \_ ->
-                Notifications.update ToggleEventAlerts (loadedWith allOff) (Just "test-token")
+                Notifications.update ToggleEventAlerts (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | eventAlerts = True })
         , test "toggling a loaded preference clears any prior save result" <|
             \_ ->
                 loadedWith allOff
-                    |> (\model -> Notifications.update (SaveCompleted (Ok ())) model (Just "test-token"))
+                    |> (\model -> Notifications.update (SaveCompleted (Ok ())) model (Just (TestHelpers.creds "test-token")))
                     |> modelOf
-                    |> (\model -> Notifications.update ToggleNewReviews model (Just "test-token"))
+                    |> (\model -> Notifications.update ToggleNewReviews model (Just (TestHelpers.creds "test-token")))
                     |> modelOf
                     |> .saving
                     |> Expect.equal NotAsked
@@ -160,22 +161,22 @@ suite =
             \_ ->
                 let
                     loadingModel =
-                        Notifications.init (Just "test-token") |> Tuple.first
+                        Notifications.init (Just (TestHelpers.creds "test-token")) |> Tuple.first
                 in
-                Notifications.update TogglePriceDrops loadingModel (Just "test-token")
+                Notifications.update TogglePriceDrops loadingModel (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> .prefs
                     |> Expect.equal Loading
         , test "a completed save shows the saved confirmation" <|
             \_ ->
-                Notifications.update (SaveCompleted (Ok ())) (loadedWith allOff) (Just "test-token")
+                Notifications.update (SaveCompleted (Ok ())) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Preferences saved." ]
         , test "a dropped connection says the connection dropped" <|
             \_ ->
-                Notifications.update (SaveCompleted (Err Http.NetworkError)) (loadedWith allOff) (Just "test-token")
+                Notifications.update (SaveCompleted (Err Http.NetworkError)) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
@@ -183,21 +184,21 @@ suite =
         , -- ⛔ All three of these were "Could not save notification
           test "a 422 sends the reader to a reload, not to a repeat" <|
             \_ ->
-                Notifications.update (SaveCompleted (Err (Http.BadStatus 422))) (loadedWith allOff) (Just "test-token")
+                Notifications.update (SaveCompleted (Err (Http.BadStatus 422))) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "The library would not accept that change to your notification preferences. Reload the page and try again." ]
         , test "a timeout does not claim the change was lost" <|
             \_ ->
-                Notifications.update (SaveCompleted (Err Http.Timeout)) (loadedWith allOff) (Just "test-token")
+                Notifications.update (SaveCompleted (Err Http.Timeout)) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "we cannot say whether your notification preferences were saved" ]
         , test "an unrecognised status admits it is unrecognised" <|
             \_ ->
-                Notifications.update (SaveCompleted (Err (Http.BadStatus 502))) (loadedWith allOff) (Just "test-token")
+                Notifications.update (SaveCompleted (Err (Http.BadStatus 502))) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml

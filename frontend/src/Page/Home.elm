@@ -51,7 +51,7 @@ type Msg
 `Collection` face with the Library shelf-preview read in flight, reusing the same
 `GET /api/bookshelves/:name` every bookshelf page already uses.
 -}
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
         Nothing ->

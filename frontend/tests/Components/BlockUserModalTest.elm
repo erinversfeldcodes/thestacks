@@ -15,6 +15,7 @@ import Http
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -43,7 +44,7 @@ suite =
             \_ ->
                 let
                     ( m, _, _ ) =
-                        BlockModal.update MenuToggled initModel (Just "tok")
+                        BlockModal.update MenuToggled initModel (Just (TestHelpers.creds "tok"))
                 in
                 m.menuOpen |> Expect.equal True
         , test "BlockRequested opens the confirmation modal and closes the menu" <|
@@ -53,7 +54,7 @@ suite =
                         { initModel | menuOpen = True }
 
                     ( m, _, _ ) =
-                        BlockModal.update BlockRequested opened (Just "tok")
+                        BlockModal.update BlockRequested opened (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \x -> x.confirming |> Expect.equal True
@@ -67,7 +68,7 @@ suite =
                         { initModel | confirming = True }
 
                     ( m, _, _ ) =
-                        BlockModal.update BlockConfirmed confirming (Just "tok")
+                        BlockModal.update BlockConfirmed confirming (Just (TestHelpers.creds "tok"))
                 in
                 m.status |> Expect.equal Loading
         , test "BlockConfirmed without a token does not fire (stays NotAsked)" <|
@@ -91,7 +92,7 @@ suite =
                         { initModel | confirming = True, status = Loading }
 
                     ( m, _, out ) =
-                        BlockModal.update BlockConfirmed inFlight (Just "tok")
+                        BlockModal.update BlockConfirmed inFlight (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.status |> Expect.equal Loading
@@ -105,7 +106,7 @@ suite =
                         { initModel | confirming = True, status = Loading }
 
                     ( m, _, out ) =
-                        BlockModal.update (BlockCompleted (Ok ())) loading (Just "tok")
+                        BlockModal.update (BlockCompleted (Ok ())) loading (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.status |> Expect.equal (Success ())
@@ -120,7 +121,7 @@ suite =
                         { initModel | confirming = True, status = Loading }
 
                     ( m, _, out ) =
-                        BlockModal.update (BlockCompleted (Err Api.AlreadyBlocked)) loading (Just "tok")
+                        BlockModal.update (BlockCompleted (Err Api.AlreadyBlocked)) loading (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.status |> Expect.equal (Failure Api.AlreadyBlocked)
@@ -138,7 +139,7 @@ suite =
                         { initModel | confirming = True, status = Loading }
 
                     ( m, _, out ) =
-                        BlockModal.update (BlockCompleted (Err Api.NotFound)) loading (Just "tok")
+                        BlockModal.update (BlockCompleted (Err Api.NotFound)) loading (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.status |> Expect.equal (Failure Api.NotFound)
@@ -159,7 +160,7 @@ suite =
                         BlockModal.update
                             (BlockCompleted (Err (Api.BlockRequestFailed (Http.BadStatus 401))))
                             loading
-                            (Just "tok")
+                            (Just (TestHelpers.creds "tok"))
                 in
                 out |> Expect.equal SessionExpired
         , test "BlockDismissed closes the modal and clears status" <|
@@ -169,7 +170,7 @@ suite =
                         { initModel | confirming = True, status = Failure Api.AlreadyBlocked }
 
                     ( m, _, _ ) =
-                        BlockModal.update BlockDismissed failed (Just "tok")
+                        BlockModal.update BlockDismissed failed (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \x -> x.confirming |> Expect.equal False
@@ -229,7 +230,7 @@ suite =
             \_ ->
                 let
                     ( m, _, out ) =
-                        BlockModal.update MenuClosed { initModel | menuOpen = True } (Just "tok")
+                        BlockModal.update MenuClosed { initModel | menuOpen = True } (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.menuOpen |> Expect.equal False
@@ -240,7 +241,7 @@ suite =
             \_ ->
                 let
                     ( m, _, out ) =
-                        BlockModal.update EscapePressed { initModel | menuOpen = True } (Just "tok")
+                        BlockModal.update EscapePressed { initModel | menuOpen = True } (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.menuOpen |> Expect.equal False
@@ -251,7 +252,7 @@ suite =
             \_ ->
                 let
                     ( m, _, out ) =
-                        BlockModal.update EscapePressed { initModel | confirming = True } (Just "tok")
+                        BlockModal.update EscapePressed { initModel | confirming = True } (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.confirming |> Expect.equal False
@@ -265,7 +266,7 @@ suite =
                         { initModel | confirming = True, status = Loading }
 
                     ( m, _, out ) =
-                        BlockModal.update EscapePressed inFlight (Just "tok")
+                        BlockModal.update EscapePressed inFlight (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.confirming |> Expect.equal True
@@ -276,7 +277,7 @@ suite =
             \_ ->
                 let
                     ( m, _, out ) =
-                        BlockModal.update EscapePressed initModel (Just "tok")
+                        BlockModal.update EscapePressed initModel (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.menuOpen |> Expect.equal False

@@ -27,9 +27,9 @@ import Test.Html.Selector as Selector
 import TestHelpers
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
 suite : Test

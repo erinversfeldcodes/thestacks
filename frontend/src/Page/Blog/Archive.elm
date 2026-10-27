@@ -21,7 +21,7 @@ import Types.RemoteData exposing (RemoteData(..))
 type alias Model =
     { posts : RemoteData Http.Error (List BlogPostSummary)
     , isAuthenticated : Bool
-    , token : Maybe String
+    , token : Maybe Api.Credentials
 
     -- The server's cursor for the next page, `Nothing` once the feed is
     -- exhausted. ⚠️ It is the ONLY end-of-feed signal: the window is read before
@@ -38,7 +38,7 @@ type Msg
     | LoadMore
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { posts = Loading
       , isAuthenticated = maybeToken /= Nothing

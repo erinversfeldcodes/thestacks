@@ -18,6 +18,7 @@ import Main
 import Navigation.Route exposing (ConfirmStatus(..), Route(..))
 import Page.Login as Login
 import Test exposing (Test, describe, test)
+import TestHelpers
 
 
 {-| The intended auth policy, declared independently of `Main.requiresAuth` and
@@ -298,7 +299,7 @@ ownerAuth =
         , consentAnalytics = False
         , consentWritingAssistant = False
         }
-    , token = "ordinary-guardian-token"
+    , token = TestHelpers.creds "ordinary-guardian-token"
     }
 
 
@@ -324,7 +325,7 @@ suite =
                         |> Expect.equal True
             , test "with an admin token the real page loads" <|
                 \() ->
-                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) (Just "admin-tok") Nothing Login.Fresh
+                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) (Just (TestHelpers.creds "admin-tok")) Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal False

@@ -45,7 +45,7 @@ import TestHelpers
 server for this book.
 -}
 loadedFor :
-    Maybe String
+    Maybe Api.Credentials
     -> List ( String, String, Maybe String )
     -> ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 loadedFor maybeToken posts =
@@ -57,7 +57,7 @@ loadedFor maybeToken posts =
 
 signedIn : List ( String, String, Maybe String ) -> ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 signedIn =
-    loadedFor (Just "test-token")
+    loadedFor (Just (TestHelpers.creds "test-token"))
 
 
 {-| As `signedIn`, but each post's `publication_state` is given verbatim —
@@ -72,7 +72,7 @@ withStates :
     List ( String, String, ( Maybe String, Maybe String ) )
     -> ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 withStates posts =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponseWithWritingStates "book-test-001" testBook posts)

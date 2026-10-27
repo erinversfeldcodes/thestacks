@@ -157,7 +157,7 @@ type Msg
     | FocusWrapNoOp
 
 
-init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
+init : String -> Maybe Api.Credentials -> Maybe Route -> ( Model, Cmd Msg )
 init bookId maybeToken maybePreviousRoute =
     let
         ( model, effect ) =
@@ -168,7 +168,7 @@ init bookId maybeToken maybePreviousRoute =
 
 {-| `init`, with its effects as data — see `updateWithEffect`.
 -}
-initWithEffect : String -> Maybe String -> Maybe Route -> ( Model, Effect Msg )
+initWithEffect : String -> Maybe Api.Credentials -> Maybe Route -> ( Model, Effect Msg )
 initWithEffect bookId maybeToken maybePreviousRoute =
     ( { book = Loading
       , placement = Nothing
@@ -270,7 +270,7 @@ A book with no placement is on no shelf at all, and a signed-out reader cannot
 be shown their own rows, so both send nothing rather than an unusable request.
 
 -}
-fetchShelfRows : Maybe Placement -> String -> Maybe String -> Effect Msg
+fetchShelfRows : Maybe Placement -> String -> Maybe Api.Credentials -> Effect Msg
 fetchShelfRows maybePlacement bookshelfName maybeToken =
     case ( maybePlacement, maybeToken ) of
         ( Just _, Just token ) ->
@@ -450,7 +450,7 @@ firstAvailableBookshelf current =
         |> Maybe.withDefault "antilibrary"
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     let
         ( newModel, effect, out ) =
@@ -467,7 +467,7 @@ the same value. `update` is this composed with `Effect.perform`; nothing else
 differs between them.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model maybeToken =
     case msg of
         BookLoaded result ->

@@ -77,7 +77,7 @@ bookshelf401BubblesOutMsg =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "auth-token")) "user-1"
 
                 ( _, _, outMsg ) =
                     Bookshelf.update
@@ -98,13 +98,13 @@ bookDetail401BubblesOutMsg =
         \() ->
             let
                 ( model, _ ) =
-                    BookDetail.init "book-1" (Just "auth-token") Nothing
+                    BookDetail.init "book-1" (Just (TestHelpers.creds "auth-token")) Nothing
 
                 ( _, _, outMsg ) =
                     BookDetail.update
                         (BookDetail.BookLoaded (Err (Http.BadStatus 401)))
                         model
-                        (Just "auth-token")
+                        (Just (TestHelpers.creds "auth-token"))
             in
             outMsg |> Expect.notEqual BookDetail.NoOut
 
@@ -118,7 +118,7 @@ bookshelfSuccessStaysLocal =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "auth-token")) "user-1"
 
                 ( _, _, outMsg ) =
                     Bookshelf.update (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Ok { shelves = [], visibility = "owner" })) model
@@ -136,7 +136,7 @@ bookshelf403StaysLocal =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "auth-token")) "user-1"
 
                 ( _, _, outMsg ) =
                     Bookshelf.update
@@ -189,7 +189,7 @@ startingUser =
 
 startingAuth : Main.Auth
 startingAuth =
-    { user = startingUser, token = "old.token" }
+    { user = startingUser, token = TestHelpers.creds "old.token" }
 
 
 {-| Drivers for the renewal harness.
@@ -248,7 +248,7 @@ renewProgram =
             \model ->
                 case model of
                     Just auth ->
-                        Html.text ("token:" ++ auth.token)
+                        Html.text ("token:" ++ Api.bearerOf auth.token)
 
                     Nothing ->
                         Html.text "signed-out"
@@ -264,7 +264,7 @@ renewalSuccessAdoptsNewToken =
                 |> ProgramTest.update TriggerRenewal
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
-                    (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
+                    (simulateAuthResponse (TestHelpers.creds "new.token") "user-1" "reader@stacks.dev" "A Reader")
                 |> ProgramTest.expectViewHas [ Selector.text "token:new.token" ]
 
 
@@ -276,7 +276,7 @@ renewalSuccessKeepsUserLoggedIn =
                 |> ProgramTest.update TriggerRenewal
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
-                    (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
+                    (simulateAuthResponse (TestHelpers.creds "new.token") "user-1" "reader@stacks.dev" "A Reader")
                 |> ProgramTest.expectViewHasNot [ Selector.text "closed your session" ]
 
 
@@ -314,7 +314,7 @@ renewAuthTokenSwapsTokenKeepsUser =
                         startingAuth
             in
             Expect.all
-                [ \r -> r.token |> Expect.equal "new.token"
+                [ \r -> Api.bearerOf r.token |> Expect.equal "new.token"
                 , \r -> r.user |> Expect.equal startingUser
                 ]
                 refreshed

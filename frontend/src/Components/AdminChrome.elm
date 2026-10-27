@@ -59,7 +59,7 @@ init =
 
 {-| `updateWithEffect` composed with `Effect.perform`.
 -}
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model adminToken =
     let
         ( newModel, effect, out ) =
@@ -78,7 +78,7 @@ rest of its window. A 401 is the one failure that does end it — the token is
 already gone — so it re-gates rather than nagging.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model adminToken =
     case msg of
         EndSession ->

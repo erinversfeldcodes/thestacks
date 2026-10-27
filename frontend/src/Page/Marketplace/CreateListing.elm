@@ -85,7 +85,7 @@ type alias Draft =
     }
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         ( placementsState, cmd ) =
@@ -111,7 +111,7 @@ init maybeToken =
     )
 
 
-update : Msg -> Model -> Maybe String -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken maybeUserId =
     case msg of
         PlacementsReceived result ->

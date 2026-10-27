@@ -13,6 +13,7 @@ import Http
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
 byTestId : String -> Selector.Selector
@@ -73,7 +74,7 @@ afterSaveFailure err =
             Syndication.update
                 (Syndication.UrlSaved (Err err))
                 (afterFetch [ recorded Nothing ])
-                (Just "tok")
+                (Just (TestHelpers.creds "tok"))
     in
     render model True
 
@@ -119,10 +120,10 @@ suite =
             \_ ->
                 let
                     ( afterClick, _, _ ) =
-                        Syndication.update Syndication.ClickedCopyCanonical initModel (Just "tok")
+                        Syndication.update Syndication.ClickedCopyCanonical initModel (Just (TestHelpers.creds "tok"))
 
                     ( afterRefusal, _, _ ) =
-                        Syndication.update (Syndication.CopyOutcome False) afterClick (Just "tok")
+                        Syndication.update (Syndication.CopyOutcome False) afterClick (Just (TestHelpers.creds "tok"))
                 in
                 render afterRefusal True
                     |> Query.find [ byTestId "syndication-copy-fallback" ]
@@ -131,10 +132,10 @@ suite =
             \_ ->
                 let
                     ( afterClick, _, _ ) =
-                        Syndication.update Syndication.ClickedCopyCanonical initModel (Just "tok")
+                        Syndication.update Syndication.ClickedCopyCanonical initModel (Just (TestHelpers.creds "tok"))
 
                     ( afterCopy, _, _ ) =
-                        Syndication.update (Syndication.CopyOutcome True) afterClick (Just "tok")
+                        Syndication.update (Syndication.CopyOutcome True) afterClick (Just (TestHelpers.creds "tok"))
                 in
                 render afterCopy True
                     |> Query.has [ Selector.text "Canonical address copied." ]
@@ -145,13 +146,13 @@ suite =
                         Syndication.update
                             (Syndication.ToggledIncludeInFeed False)
                             initModel
-                            (Just "tok")
+                            (Just (TestHelpers.creds "tok"))
 
                     ( snappedBack, _, _ ) =
                         Syndication.update
                             (Syndication.ToggleSaved (Err Http.NetworkError))
                             toggledOff
-                            (Just "tok")
+                            (Just (TestHelpers.creds "tok"))
                 in
                 render snappedBack True
                     |> Query.find [ byTestId "syndication-include-toggle" ]

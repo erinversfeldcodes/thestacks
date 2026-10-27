@@ -18,11 +18,12 @@ import Page.Admin.Session as Session
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
-ownerToken : Maybe String
+ownerToken : Maybe Api.Credentials
 ownerToken =
-    Just "ordinary-owner-token"
+    Just (TestHelpers.creds "ordinary-owner-token")
 
 
 {-| Runs a message through `update` and keeps only the model, for the many assertions that do not
@@ -72,7 +73,7 @@ suite =
             [ test "a verified code emits the admin token" <|
                 \_ ->
                     out (Session.Verified (Ok "admin-token-abc")) awaitingCode
-                        |> Expect.equal (Session.Authenticated "admin-token-abc")
+                        |> Expect.equal (Session.Authenticated (TestHelpers.creds "admin-token-abc"))
             , test "nothing else emits a token" <|
                 \_ ->
                     [ out (Session.SetEmail "x") Session.init

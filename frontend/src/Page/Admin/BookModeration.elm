@@ -56,7 +56,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         model =
@@ -71,7 +71,7 @@ init maybeToken =
     ( model, fetchBooks model maybeToken )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         BooksReceived result ->
@@ -161,7 +161,7 @@ update msg model maybeToken =
                         )
 
 
-fetchBooks : Model -> Maybe String -> Cmd Msg
+fetchBooks : Model -> Maybe Api.Credentials -> Cmd Msg
 fetchBooks model maybeToken =
     case maybeToken of
         Just token ->

@@ -7,6 +7,7 @@ signed-out reader at /upload sat in a tab titled "Add a Book". One case
 per divergence site, each failing if title derivation reverts to route.
 -}
 
+import Api
 import Expect
 import Http
 import Main exposing (Page(..))
@@ -19,6 +20,7 @@ import Page.Home as Home
 import Page.Login as Login
 import Page.Profile as ProfilePage
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Book exposing (Book, VisibilityTier(..))
 import Types.RemoteData
 import Types.User exposing (User)
@@ -71,12 +73,12 @@ readerUser =
 
 ownerAuth : Main.Auth
 ownerAuth =
-    { user = ownerUser, token = "tok" }
+    { user = ownerUser, token = TestHelpers.creds "tok" }
 
 
 readerAuth : Main.Auth
 readerAuth =
-    { user = readerUser, token = "tok" }
+    { user = readerUser, token = TestHelpers.creds "tok" }
 
 
 ageGatingOff : Main.AppConfig
@@ -92,7 +94,7 @@ ageGatingOn =
 {-| Build a page exactly the way the shell does, so a test cannot assert about a
 page arrangement production never produces.
 -}
-pageFor : Main.AppConfig -> Route -> Maybe Main.Auth -> Maybe String -> Page
+pageFor : Main.AppConfig -> Route -> Maybe Main.Auth -> Maybe Api.Credentials -> Page
 pageFor config route maybeAuth adminToken =
     Main.initPage config route "https://thestacks.test" maybeAuth adminToken Nothing Login.Fresh
         |> Tuple.first
@@ -134,7 +136,7 @@ driftOwnerRefusal =
         \() ->
             let
                 title =
-                    pageTitleOf (pageFor ageGatingOff Route.AdminRemovalRequests (Just readerAuth) (Just "admin-tok"))
+                    pageTitleOf (pageFor ageGatingOff Route.AdminRemovalRequests (Just readerAuth) (Just (TestHelpers.creds "admin-tok")))
             in
             Expect.all
                 [ \t -> Expect.equal "Not Found — The Stacks" t
@@ -153,10 +155,10 @@ driftAgeGatingRefusal =
         \() ->
             Expect.all
                 [ \() ->
-                    pageTitleOf (pageFor ageGatingOff Route.AdminBookModeration (Just ownerAuth) (Just "admin-tok"))
+                    pageTitleOf (pageFor ageGatingOff Route.AdminBookModeration (Just ownerAuth) (Just (TestHelpers.creds "admin-tok")))
                         |> Expect.equal "Not Found — The Stacks"
                 , \() ->
-                    pageTitleOf (pageFor ageGatingOn Route.AdminBookModeration (Just ownerAuth) (Just "admin-tok"))
+                    pageTitleOf (pageFor ageGatingOn Route.AdminBookModeration (Just ownerAuth) (Just (TestHelpers.creds "admin-tok")))
                         |> Expect.equal "Book Moderation — The Stacks"
                 ]
                 ()
@@ -216,7 +218,7 @@ driftAdminReauth =
 
 bookshelfPage : Bookshelf.Config -> Page
 bookshelfPage config =
-    Bookshelf.init config (Just "tok") "u1"
+    Bookshelf.init config (Just (TestHelpers.creds "tok")) "u1"
         |> Tuple.first
         |> PageBookshelf
 
@@ -274,7 +276,7 @@ bookDetailModel : Types.RemoteData.RemoteData Http.Error Book -> BookDetail.Mode
 bookDetailModel bookState =
     let
         base =
-            BookDetail.init "b1" (Just "tok") Nothing |> Tuple.first
+            BookDetail.init "b1" (Just (TestHelpers.creds "tok")) Nothing |> Tuple.first
     in
     { base | book = bookState }
 
@@ -308,7 +310,7 @@ blogEditorDistinguishesNewFromEdit =
         \() ->
             let
                 editorFor mode =
-                    BlogEditor.init mode (Just "tok")
+                    BlogEditor.init mode (Just (TestHelpers.creds "tok"))
                         |> Tuple.first
                         |> PageBlogEditor
                         |> pageTitleOf
@@ -324,7 +326,7 @@ publicProfileNamesTheReader =
         \() ->
             let
                 title =
-                    ProfilePage.init (Just "tok") "ada"
+                    ProfilePage.init (Just (TestHelpers.creds "tok")) "ada"
                         |> Tuple.first
                         |> PageProfile
                         |> pageTitleOf

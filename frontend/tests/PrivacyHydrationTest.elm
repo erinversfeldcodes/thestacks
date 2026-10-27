@@ -18,6 +18,7 @@ import Page.Settings.Privacy as Privacy
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -28,7 +29,7 @@ seed =
 
 loadingModel : Privacy.Model
 loadingModel =
-    Privacy.initWithToken (Just "token") seed |> Tuple.first
+    Privacy.initWithToken (Just (TestHelpers.creds "token")) seed |> Tuple.first
 
 
 hydrated : Api.PrivacySettings
@@ -42,7 +43,7 @@ hydrated =
 
 hydratedModel : Privacy.Model
 hydratedModel =
-    Privacy.update (Privacy.GotPrivacySettings (Ok hydrated)) loadingModel (Just "token")
+    Privacy.update (Privacy.GotPrivacySettings (Ok hydrated)) loadingModel (Just (TestHelpers.creds "token"))
         |> (\( m, _, _ ) -> m)
 
 
@@ -96,7 +97,7 @@ suite =
                         Privacy.update
                             (Privacy.GotPrivacySettings (Err (Http.BadStatus 500)))
                             loadingModel
-                            (Just "token")
+                            (Just (TestHelpers.creds "token"))
                             |> (\( m, _, _ ) -> m)
                 in
                 Privacy.view failed

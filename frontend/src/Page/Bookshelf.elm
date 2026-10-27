@@ -160,7 +160,7 @@ type alias Model =
     , rssLink : RSSLink.Model
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
-    , token : Maybe String
+    , token : Maybe Api.Credentials
     , organiser : ShelfOrganiser.State
     , organiserBusy : Bool
     , organiserError : Maybe String
@@ -243,12 +243,12 @@ browsing, tagged with the profile's `requestKey` so nothing downstream can tell.
 
 -}
 type ShelvesSource
-    = OwnShelf String String
-    | ProfileShelf (Maybe String) String String
+    = OwnShelf Api.Credentials String
+    | ProfileShelf (Maybe Api.Credentials) String String
     | NoShelvesRequest
 
 
-shelvesSource : Config -> Maybe String -> ShelvesSource
+shelvesSource : Config -> Maybe Api.Credentials -> ShelvesSource
 shelvesSource config maybeToken =
     case ( config.readOnly, config.profileHandle ) of
         ( True, Just handle ) ->
@@ -266,7 +266,7 @@ shelvesSource config maybeToken =
 {-| The one shelf read in this module. `init` and every refetch go through it,
 so there is no second place for the read-only dispatch above to be got wrong.
 -}
-fetchShelves : Config -> Maybe String -> Effect Msg
+fetchShelves : Config -> Maybe Api.Credentials -> Effect Msg
 fetchShelves config maybeToken =
     case shelvesSource config maybeToken of
         ProfileShelf token handle bookshelfName ->
@@ -303,7 +303,7 @@ type Msg
     | SpineFocusAttempted
 
 
-init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
+init : Config -> Maybe Api.Credentials -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
         ( model, effect ) =
@@ -314,7 +314,7 @@ init config maybeToken userId =
 
 {-| `init`, with its effect as data — see `updateWithEffect`.
 -}
-initWithEffect : Config -> Maybe String -> String -> ( Model, Effect Msg )
+initWithEffect : Config -> Maybe Api.Credentials -> String -> ( Model, Effect Msg )
 initWithEffect config maybeToken userId =
     let
         apiEffect =
@@ -571,7 +571,7 @@ and mutating someone else's shelf. `read_only_undo_is_inert_SECURITY`
 pins it.
 
 -}
-mutationToken : Model -> Maybe String
+mutationToken : Model -> Maybe Api.Credentials
 mutationToken model =
     if model.config.readOnly then
         Nothing
@@ -644,7 +644,7 @@ handleOrganiser subMsg model =
 
 {-| Apply an already-computed order locally and persist the whole list.
 -}
-persistOrder : List Shelf -> String -> Model -> ( Model, Effect Msg, OutMsg )
+persistOrder : List Shelf -> Api.Credentials -> Model -> ( Model, Effect Msg, OutMsg )
 persistOrder reordered token model =
     ( { model | shelves = Success reordered, organiserBusy = True, organiserError = Nothing }
     , Effect.authed

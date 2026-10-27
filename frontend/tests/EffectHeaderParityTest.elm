@@ -54,12 +54,12 @@ suite =
         ]
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
-startSearch : Maybe String -> ProgramTest.ProgramTest Search.Model Search.Msg (ProgramTest.SimulatedEffect Search.Msg)
+startSearch : Maybe Api.Credentials -> ProgramTest.ProgramTest Search.Model Search.Msg (ProgramTest.SimulatedEffect Search.Msg)
 startSearch maybeToken =
     ProgramTest.start () (searchProgram maybeToken)
 

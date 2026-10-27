@@ -83,7 +83,7 @@ isSendable model =
         && (model.sending /= Loading)
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         MessageChanged value ->

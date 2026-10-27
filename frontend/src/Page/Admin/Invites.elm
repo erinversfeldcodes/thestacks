@@ -57,7 +57,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { invites = Loading
       , note = ""
@@ -73,7 +73,7 @@ init maybeToken =
     )
 
 
-fetch : Maybe String -> Cmd Msg
+fetch : Maybe Api.Credentials -> Cmd Msg
 fetch maybeToken =
     case maybeToken of
         Just token ->
@@ -83,7 +83,7 @@ fetch maybeToken =
             Cmd.none
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         InvitesReceived (Ok invites) ->

@@ -13,6 +13,7 @@ import Json.Decode as Decode
 import Json.Encode
 import Page.Marketplace.CreateListing as CreateListing
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Listing exposing (Condition(..), ListingStatus(..), PricingMode(..))
 
 
@@ -32,7 +33,7 @@ filledModel : CreateListing.Model
 filledModel =
     let
         base =
-            Tuple.first (CreateListing.init (Just "tok"))
+            Tuple.first (CreateListing.init (Just (TestHelpers.creds "tok")))
     in
     { base
         | selectedBookId = Just "plc-1"
@@ -46,7 +47,7 @@ filledModel =
 
 emptyModel : CreateListing.Model
 emptyModel =
-    Tuple.first (CreateListing.init (Just "tok"))
+    Tuple.first (CreateListing.init (Just (TestHelpers.creds "tok")))
 
 
 sampleDraft : CreateListing.Draft
@@ -86,7 +87,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.ListingCreated (Err unauthorized))
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     case outMsg of
@@ -115,7 +116,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.ListingCreated (Err nonAuth))
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     outMsg |> Expect.equal CreateListing.NoOut
@@ -128,7 +129,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.DraftLoaded (CreateListing.encodeDraft sampleDraft))
                                 emptyModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( outMsg
@@ -153,7 +154,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.DraftLoaded (CreateListing.encodeDraft sampleDraft))
                                 emptyModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "someone-else")
                     in
                     ( newModel.selectedBookId, newModel.contactInfo, outMsg )
@@ -165,7 +166,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.DraftLoaded (Json.Encode.string "not-a-draft"))
                                 emptyModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( newModel.contactInfo, outMsg )
@@ -193,7 +194,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.ListingCreated (Ok sampleListing))
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( outMsg, newModel.createdListing )
@@ -207,7 +208,7 @@ suite =
                             CreateListing.update
                                 CreateListing.DiscardDraft
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( outMsg

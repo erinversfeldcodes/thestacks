@@ -18,6 +18,7 @@ import Navigation.Route exposing (Route(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData
 import Types.User exposing (User)
 
@@ -34,12 +35,12 @@ readerUser =
 
 ownerAuth : Main.Auth
 ownerAuth =
-    { user = ownerUser, token = "tok" }
+    { user = ownerUser, token = TestHelpers.creds "tok" }
 
 
 readerAuth : Main.Auth
 readerAuth =
-    { user = readerUser, token = "tok" }
+    { user = readerUser, token = TestHelpers.creds "tok" }
 
 
 {-| The Add Book badge, found the way a test should find it.

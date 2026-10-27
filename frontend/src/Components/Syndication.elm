@@ -80,7 +80,7 @@ syndication. The writer's only route back was to export again, writing a
 duplicate row.
 
 -}
-init : String -> String -> Bool -> Maybe String -> ( Model, Cmd Msg )
+init : String -> String -> Bool -> Maybe Api.Credentials -> ( Model, Cmd Msg )
 init postId origin syndicated maybeToken =
     ( initialModel postId origin syndicated
     , case maybeToken of
@@ -140,7 +140,7 @@ feedUrl model handle =
     model.origin ++ "/api/feeds/u/" ++ handle ++ "/blog"
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         ClickedCopyCanonical ->
@@ -289,7 +289,7 @@ record it now, not at fetch time.
 -}
 recordIfExport :
     { target : CopyTarget, payload : String }
-    -> Maybe String
+    -> Maybe Api.Credentials
     -> ( Model, Cmd Msg, OutMsg )
     -> ( Model, Cmd Msg, OutMsg )
 recordIfExport pending maybeToken ( model, cmd, out ) =

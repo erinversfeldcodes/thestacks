@@ -38,7 +38,7 @@ suite =
                         |> Expect.equal Landing
             , test "signed in → Collection with the preview Loading" <|
                 \() ->
-                    case Tuple.first (Home.init (Just "token-abc")) of
+                    case Tuple.first (Home.init (Just (TestHelpers.creds "token-abc"))) of
                         Collection { preview } ->
                             Expect.equal Loading preview
 

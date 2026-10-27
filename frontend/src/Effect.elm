@@ -48,7 +48,7 @@ both can wrap.
 -}
 type alias RequestPlan msg =
     { spec : Api.RequestSpec
-    , token : Maybe String
+    , token : Maybe Api.Credentials
     , onResponse : Http.Response String -> msg
     }
 
@@ -69,7 +69,7 @@ batch =
 
 {-| A request carrying the reader's credentials.
 -}
-authed : Api.RequestSpec -> String -> (Http.Response String -> msg) -> Effect msg
+authed : Api.RequestSpec -> Api.Credentials -> (Http.Response String -> msg) -> Effect msg
 authed spec token onResponse =
     Request { spec = spec, token = Just token, onResponse = onResponse }
 
@@ -78,7 +78,7 @@ authed spec token onResponse =
 to have them — the optional-auth endpoints, where the server answers an
 anonymous reader too.
 -}
-public : Api.RequestSpec -> Maybe String -> (Http.Response String -> msg) -> Effect msg
+public : Api.RequestSpec -> Maybe Api.Credentials -> (Http.Response String -> msg) -> Effect msg
 public spec maybeToken onResponse =
     Request { spec = spec, token = maybeToken, onResponse = onResponse }
 

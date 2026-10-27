@@ -30,9 +30,9 @@ suite =
         ]
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
 start : ProgramTest.ProgramTest Privacy.Model Privacy.Msg (SimulatedEffect Privacy.Msg)

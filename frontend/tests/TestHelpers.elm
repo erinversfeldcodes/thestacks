@@ -9,6 +9,7 @@ module TestHelpers exposing
     , bookDetailProgramWithOut
     , bookshelfProgram
     , bookshelfUndoProgram
+    , creds
     , libraryProgram
     , loginProgram
     , loginProgramFrom
@@ -77,6 +78,18 @@ import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement, readingStatusToString)
 import Types.RemoteData
 import Types.Visibility
+
+
+{-| A reader's credentials for a test, from a bearer token alone.
+
+⚠️ The CSRF half is `Nothing` because almost no test is about CSRF. A test that
+IS about it passes `Api.credentials bearer (Just csrf)` directly, so the default
+here cannot quietly satisfy an assertion that should have been explicit.
+
+-}
+creds : String -> Api.Credentials
+creds bearer =
+    Api.credentials bearer Nothing
 
 
 {-| A default edition for tests.
@@ -436,13 +449,13 @@ simulateMergeFormatResponse bookId editionId isbn formatLabel =
 {-| Create a successful auth HTTP response.
 Parameters: token, userId, email, displayName.
 -}
-simulateAuthResponse : String -> String -> String -> String -> Http.Response String
+simulateAuthResponse : Api.Credentials -> String -> String -> String -> Http.Response String
 simulateAuthResponse token userId email displayName =
     let
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "token", Encode.string token )
+                    [ ( "token", Encode.string (Api.bearerOf token) )
                     , ( "user"
                       , Encode.object
                             [ ( "id", Encode.string userId )
@@ -1032,7 +1045,7 @@ these tests assert against.
 -}
 authedRequestFromSpec :
     Api.RequestSpec
-    -> String
+    -> Api.Credentials
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
 authedRequestFromSpec spec token expect =
@@ -1085,7 +1098,7 @@ header appears only when the viewer has a token, which is what
 -}
 requestFromSpec :
     Api.RequestSpec
-    -> Maybe String
+    -> Maybe Api.Credentials
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
 requestFromSpec spec maybeToken expect =
@@ -1126,7 +1139,7 @@ optional-auth endpoints send the header only when the viewer has one, and so
 does `Effect.perform` on the production side.
 
 -}
-authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
+authHeaderList : Maybe Api.Credentials -> List SimulatedEffect.Http.Header
 authHeaderList maybeToken =
     Api.requestHeaders Api.SameOrigin (Api.Optional maybeToken)
         |> List.map (\( name, value ) -> SimulatedEffect.Http.header name value)
@@ -1152,7 +1165,7 @@ click produces comes from `AdminChrome.updateWithEffect` through
 `simulateEffect`, so nothing here restates which endpoint sign-out calls.
 
 -}
-adminChromeProgram : Maybe String -> ProgramDefinition () AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
+adminChromeProgram : Maybe Api.Credentials -> ProgramDefinition () AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
 adminChromeProgram adminToken =
     ProgramTest.createElement
         { init =
@@ -1176,7 +1189,7 @@ adminChromeProgram adminToken =
 seeds the server-config flag so tests can drive both the
 flag-on (age UI present) and flag-off (age UI hidden) states.
 -}
-uploadProgram : Bool -> Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgram : Bool -> Maybe Api.Credentials -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgram ageGatingEnabled maybeToken =
     uploadProgramWithInbox ageGatingEnabled maybeToken Types.RemoteData.NotAsked
 
@@ -1193,7 +1206,7 @@ own reading of the same value, and `UploadControllerTest` covers the query).
 -}
 uploadProgramWithInbox :
     Bool
-    -> Maybe String
+    -> Maybe Api.Credentials
     -> Types.RemoteData.RemoteData Http.Error (List Api.InboxItem)
     -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
@@ -1220,7 +1233,7 @@ uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
 
 {-| Create a ProgramTest harness for the Bookshelf page in its Library config.
 -}
-libraryProgram : Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+libraryProgram : Maybe Api.Credentials -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 libraryProgram =
     bookshelfProgram Bookshelf.libraryConfig
 
@@ -1231,7 +1244,7 @@ so the only thing that varies between them is the `Config` — pass
 `Bookshelf.antiLibraryConfig` / `Bookshelf.wishListConfig` to drive those
 surfaces.
 -}
-bookshelfProgram : Bookshelf.Config -> Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+bookshelfProgram : Bookshelf.Config -> Maybe Api.Credentials -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 bookshelfProgram config maybeToken =
     ProgramTest.createElement
         { init =
@@ -1270,7 +1283,7 @@ type alias ReadingPileTestModel =
 
 {-| Create a ProgramTest harness for the Reading Pile page.
 -}
-readingPileProgram : Maybe String -> ProgramDefinition () ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
+readingPileProgram : Maybe Api.Credentials -> ProgramDefinition () ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
 readingPileProgram maybeToken =
     ProgramTest.createElement
         { init =
@@ -1308,7 +1321,7 @@ profile shelf; `BookshelfUndoRemoveTest` runs both and requires them to differ.
 -}
 bookshelfUndoProgram :
     Bookshelf.Config
-    -> Maybe String
+    -> Maybe Api.Credentials
     -> Bookshelf.Removal
     -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 bookshelfUndoProgram config maybeToken removal =
@@ -1338,7 +1351,7 @@ bookshelfUndoProgram config maybeToken removal =
 {-| Create a ProgramTest harness for the read-only profile-shelf browse view
 (`Page.Bookshelf` in its `profileConfig` — /).
 -}
-profileShelfProgram : Maybe String -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+profileShelfProgram : Maybe Api.Credentials -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 profileShelfProgram maybeToken handle bookshelfName =
     let
         config =
@@ -1366,7 +1379,7 @@ profileShelfProgram maybeToken handle bookshelfName =
 
 {-| Create a ProgramTest harness for the Search page.
 -}
-searchProgram : Maybe String -> ProgramDefinition () Search.Model Search.Msg (SimulatedEffect Search.Msg)
+searchProgram : Maybe Api.Credentials -> ProgramDefinition () Search.Model Search.Msg (SimulatedEffect Search.Msg)
 searchProgram maybeToken =
     ProgramTest.createElement
         { init = \() -> ( Search.init, SimulatedEffect.Cmd.none )
@@ -1417,7 +1430,7 @@ loginProgramFrom arrival =
 enabled so the 403-driven age-gate block renders under test; the
 production default is off, which hides it (covered by the flag guard).
 -}
-bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgram : String -> Maybe Api.Credentials -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailProgram bookId maybeToken =
     ProgramTest.createElement
         { init =
@@ -1457,7 +1470,7 @@ the page's `OutMsg`. `bookDetailProgram` discards it; this one keeps the latest
 one so a test can observe `NavigateTo previousRoute` from a confirmed remove.
 Takes the previous route so the navigation target is a concrete, asserted value.
 -}
-bookDetailProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgramWithOut : String -> Maybe Api.Credentials -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
     ProgramTest.createElement
         { init =
@@ -1486,7 +1499,7 @@ modal chrome: backdrop, close button, focus sentinel) instead of the routed
 `view`. Records the page's `OutMsg` so a test can assert that dismissing the
 overlay via the X button or a backdrop click emits `RequestCloseOverlay`.
 -}
-bookDetailOverlayProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailOverlayProgramWithOut : String -> Maybe Api.Credentials -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailOverlayProgramWithOut bookId maybeToken maybePreviousRoute =
     ProgramTest.createElement
         { init =

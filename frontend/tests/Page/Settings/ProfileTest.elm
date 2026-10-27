@@ -17,6 +17,7 @@ import Page.Settings.Profile as Profile exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (User)
 
@@ -111,7 +112,7 @@ by the save-dispatch and email-change paths that only fire with a token.
 -}
 applyWithToken : Msg -> Profile.Model -> Profile.Model
 applyWithToken msg model =
-    Profile.update msg model (Just "test-token") |> modelOf
+    Profile.update msg model (Just (TestHelpers.creds "test-token")) |> modelOf
 
 
 currentPasswordPlaceholder : Selector.Selector

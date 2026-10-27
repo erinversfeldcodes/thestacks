@@ -13,6 +13,7 @@ import Dict
 import Expect
 import Http
 import Test exposing (Test, describe, test)
+import TestHelpers
 
 
 {-| Stands in for a page's `Msg`. `Expired` is what `onExpired` produces;
@@ -28,7 +29,7 @@ which is the guarantee this whole module exists to protect.
 -}
 authedOutcome : Api.Authed err ok (Outcome err ok)
 authedOutcome =
-    Api.authed "tok" { onExpired = Expired, onResult = Completed }
+    Api.authed (TestHelpers.creds "tok") { onExpired = Expired, onResult = Completed }
 
 
 metadata : Int -> Http.Metadata

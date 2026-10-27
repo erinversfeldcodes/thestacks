@@ -25,7 +25,7 @@ import Util.TestId exposing (testId)
 
 
 type alias Model =
-    { token : Maybe String
+    { token : Maybe Api.Credentials
     , data : RemoteData Http.Error PersonalInferences
     , riskLoading : Bool
     , riskError : Bool
@@ -43,7 +43,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
         Just token ->

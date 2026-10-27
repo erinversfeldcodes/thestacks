@@ -73,7 +73,7 @@ unrecordedPlacement =
 
 startPile : ProgramTest ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
 startPile =
-    ProgramTest.start () (readingPileProgram (Just "test-token"))
+    ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             pileUrl
             (simulateBookshelfResponse [ readingPlacement ])
@@ -81,7 +81,7 @@ startPile =
 
 startPileUnrecorded : ProgramTest ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
 startPileUnrecorded =
-    ProgramTest.start () (readingPileProgram (Just "test-token"))
+    ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             pileUrl
             (simulateBookshelfResponse [ unrecordedPlacement ])

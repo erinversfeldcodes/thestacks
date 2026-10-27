@@ -22,7 +22,7 @@ type alias Model =
     , pendingInvitations : RemoteData Http.Error (List GroupInvitation)
     , createForm : CreateForm
     , currentUserId : String
-    , token : String
+    , token : Api.Credentials
     }
 
 
@@ -42,7 +42,7 @@ type OutMsg
     | SessionExpired
 
 
-init : String -> String -> ( Model, Cmd Msg )
+init : String -> Api.Credentials -> ( Model, Cmd Msg )
 init userId token =
     ( { groups = Success []
       , pendingInvitations = Success []

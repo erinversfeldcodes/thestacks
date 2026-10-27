@@ -98,10 +98,10 @@ staleSiblingShelfResponseIsDiscarded =
         \() ->
             let
                 ( libraryModel, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( antiLibraryModel, _ ) =
-                    Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.antiLibraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( afterStale, _, _ ) =
                     Bookshelf.update
@@ -127,7 +127,7 @@ staleSiblingShelfResponseDoesNotRender =
         \() ->
             let
                 ( antiLibraryModel, _ ) =
-                    Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.antiLibraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( afterStale, _, _ ) =
                     Bookshelf.update
@@ -151,7 +151,7 @@ matchingShelfResponseIsStillApplied =
         \() ->
             let
                 ( libraryModel, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( afterFresh, _, _ ) =
                     Bookshelf.update
@@ -182,10 +182,10 @@ pilePagesStartIndependentlyLoading =
         \() ->
             let
                 ( readingPileModel, _ ) =
-                    ReadingPile.init (Just "test-token")
+                    ReadingPile.init (Just (TestHelpers.creds "test-token"))
 
                 ( lookingForHomeModel, _ ) =
-                    LookingForHome.init (Just "test-token")
+                    LookingForHome.init (Just (TestHelpers.creds "test-token"))
             in
             Expect.all
                 [ \_ -> readingPileModel.books |> Expect.equal Loading
@@ -203,7 +203,7 @@ navigateToUpload =
                     fromPath "/upload"
 
                 view =
-                    Upload.view Upload.init (Just "test-token") Types.RemoteData.NotAsked
+                    Upload.view Upload.init (Just (TestHelpers.creds "test-token")) Types.RemoteData.NotAsked
             in
             Expect.all
                 [ \_ -> route |> Expect.equal Upload

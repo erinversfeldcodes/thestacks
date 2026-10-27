@@ -34,7 +34,7 @@ type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
     , selectedBookId : Maybe String
-    , token : Maybe String
+    , token : Maybe Api.Credentials
     , cards : List Card.Model
     , saveState : RemoteData Api.ProgressError ()
     , finishedPrompt : Maybe String
@@ -65,7 +65,7 @@ type Msg
 {-| The one read of the pile: `init` and every refetch go through it, so a
 refetch cannot end up asking for something other than what the page shows.
 -}
-fetchPile : Maybe String -> Effect Msg
+fetchPile : Maybe Api.Credentials -> Effect Msg
 fetchPile maybeToken =
     case maybeToken of
         Just token ->
@@ -108,7 +108,7 @@ cardProgressWrite card =
             )
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         ( model, effect ) =
@@ -119,7 +119,7 @@ init maybeToken =
 
 {-| `init`, with its effect as data — see `updateWithEffect`.
 -}
-initWithEffect : Maybe String -> ( Model, Effect Msg )
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
 initWithEffect maybeToken =
     let
         effect =

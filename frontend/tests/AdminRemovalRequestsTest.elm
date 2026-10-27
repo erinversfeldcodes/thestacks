@@ -15,6 +15,7 @@ import Page.Admin.RemovalRequests as Queue
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -220,6 +221,6 @@ updateQueue : Queue.Msg -> Queue.Model -> ( Queue.Model, Cmd Queue.Msg )
 updateQueue msg model =
     let
         ( newModel, cmd, _ ) =
-            Queue.update msg model (Just "token")
+            Queue.update msg model (Just (TestHelpers.creds "token"))
     in
     ( newModel, cmd )

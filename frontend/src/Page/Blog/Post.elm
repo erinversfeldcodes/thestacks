@@ -61,7 +61,7 @@ type OutMsg
     | RequestCopy String
 
 
-init : String -> Maybe String -> Maybe String -> String -> ( Model, Cmd Msg )
+init : String -> Maybe Api.Credentials -> Maybe String -> String -> ( Model, Cmd Msg )
 init postId maybeToken currentUserId origin =
     ( { postId = postId
       , post = Loading
@@ -82,7 +82,7 @@ init postId maybeToken currentUserId origin =
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         PostLoaded result ->

@@ -51,7 +51,7 @@ timeoutIsVisibleToTheReader =
     describe "what a reader sees when a request is given up on"
         [ test "timeout_leaves_the_loading_state: the shelf stops claiming a request is in flight" <|
             \() ->
-                ProgramTest.start () (libraryProgram (Just "test-token"))
+                ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
@@ -59,7 +59,7 @@ timeoutIsVisibleToTheReader =
                     |> ProgramTest.expectViewHasNot [ Selector.class "bookshelf--loading" ]
         , test "timeout_says_the_answer_never_came: not 'could not load', and above all not an empty shelf" <|
             \() ->
-                ProgramTest.start () (libraryProgram (Just "test-token"))
+                ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
                         Test.Http.timeout
@@ -70,7 +70,7 @@ timeoutIsVisibleToTheReader =
                         [ Selector.text "Your library is waiting. Move a book here when you've finished reading it." ]
         , test "network_error_points_at_the_connection: a different failure gets different words" <|
             \() ->
-                ProgramTest.start () (libraryProgram (Just "test-token"))
+                ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
                         Test.Http.networkError
@@ -81,7 +81,7 @@ timeoutIsVisibleToTheReader =
                         )
         , test "server_error_stays_generic: the positive control proving the two negatives above are real" <|
             \() ->
-                ProgramTest.start () (libraryProgram (Just "test-token"))
+                ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
                         (Test.Http.httpResponse

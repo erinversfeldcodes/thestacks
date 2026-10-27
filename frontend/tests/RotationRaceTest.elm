@@ -8,10 +8,12 @@ newer credential via the storage event — and before any forced logout,
 re-checks storage once in case the write raced.
 -}
 
+import Api
 import Expect
 import Json.Encode as Encode
 import Main
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.User exposing (User)
 
 
@@ -62,7 +64,7 @@ aReader =
     }
 
 
-authWith : String -> Main.Auth
+authWith : Api.Credentials -> Main.Auth
 authWith token =
     { user = aReader, token = token }
 
@@ -91,18 +93,18 @@ differentTokenWhileAuthedAdopts : Test
 differentTokenWhileAuthedAdopts =
     test "different_token_while_authed_adopts: a sibling tab's newer token is adopted" <|
         \() ->
-            Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith "T0"))
-                |> Expect.equal (Main.AdoptAuth (authWith "T1"))
+            Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith (TestHelpers.creds "T0")))
+                |> Expect.equal (Main.AdoptAuth (authWith (TestHelpers.creds "T1")))
 
 
 differentTokenPreservesUser : Test
 differentTokenPreservesUser =
     test "different_token_preserves_user: adoption swaps the token but keeps the same user" <|
         \() ->
-            case Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith "T0")) of
+            case Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith (TestHelpers.creds "T0"))) of
                 Main.AdoptAuth adopted ->
                     Expect.all
-                        [ \a -> a.token |> Expect.equal "T1"
+                        [ \a -> Api.bearerOf a.token |> Expect.equal "T1"
                         , \a -> a.user |> Expect.equal aReader
                         ]
                         adopted
@@ -115,7 +117,7 @@ sameTokenIsIgnored : Test
 sameTokenIsIgnored =
     test "same_token_is_ignored: a storage write echoing the in-memory token is a no-op" <|
         \() ->
-            Main.adoptExternalAuth (storedAuthValue "T0") (Just (authWith "T0"))
+            Main.adoptExternalAuth (storedAuthValue "T0") (Just (authWith (TestHelpers.creds "T0")))
                 |> Expect.equal Main.IgnoreExternal
 
 
@@ -123,7 +125,7 @@ clearedWhileAuthedLogsOut : Test
 clearedWhileAuthedLogsOut =
     test "cleared_while_authed_logs_out: a sibling clearAuth (null) logs this tab out" <|
         \() ->
-            Main.adoptExternalAuth Encode.null (Just (authWith "T0"))
+            Main.adoptExternalAuth Encode.null (Just (authWith (TestHelpers.creds "T0")))
                 |> Expect.equal Main.LogOutExternally
 
 
@@ -139,7 +141,7 @@ garbageStringIsIgnored : Test
 garbageStringIsIgnored =
     test "garbage_string_is_ignored: an undecodable string never logs out or crashes" <|
         \() ->
-            Main.adoptExternalAuth (Encode.string "{not-valid-json") (Just (authWith "T0"))
+            Main.adoptExternalAuth (Encode.string "{not-valid-json") (Just (authWith (TestHelpers.creds "T0")))
                 |> Expect.equal Main.IgnoreExternal
 
 
@@ -147,7 +149,7 @@ garbageNonStringIsIgnored : Test
 garbageNonStringIsIgnored =
     test "garbage_non_string_is_ignored: a non-string, non-null value is a no-op" <|
         \() ->
-            Main.adoptExternalAuth (Encode.int 42) (Just (authWith "T0"))
+            Main.adoptExternalAuth (Encode.int 42) (Just (authWith (TestHelpers.creds "T0")))
                 |> Expect.equal Main.IgnoreExternal
 
 
@@ -163,15 +165,15 @@ recheckNewerStoredTokenAdopts : Test
 recheckNewerStoredTokenAdopts =
     test "recheck_newer_stored_token_adopts: on a 401, a newer stored token is adopted instead of logging out" <|
         \() ->
-            Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith "T0-dead"))
-                |> Expect.equal (Main.AdoptAuth (authWith "T1"))
+            Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith (TestHelpers.creds "T0-dead")))
+                |> Expect.equal (Main.AdoptAuth (authWith (TestHelpers.creds "T1")))
 
 
 recheckSameStoredTokenProceedsToLogout : Test
 recheckSameStoredTokenProceedsToLogout =
     test "recheck_same_stored_token_proceeds_to_logout: nothing newer stored -> not adopted (caller logs out)" <|
         \() ->
-            Main.adoptExternalAuth (storedAuthValue "T0-dead") (Just (authWith "T0-dead"))
+            Main.adoptExternalAuth (storedAuthValue "T0-dead") (Just (authWith (TestHelpers.creds "T0-dead")))
                 |> Expect.equal Main.IgnoreExternal
 
 
@@ -193,8 +195,8 @@ renewalOriginAdoptReschedules : Test
 renewalOriginAdoptReschedules =
     test "renewal_origin_adopt_reschedules: a renewal-origin re-check adopt re-arms renewal" <|
         \() ->
-            Main.resolveRecheck (Just renewalOrigin) (Main.AdoptAuth (authWith "T1"))
-                |> Expect.equal (Main.ResolveAdopt (authWith "T1") True)
+            Main.resolveRecheck (Just renewalOrigin) (Main.AdoptAuth (authWith (TestHelpers.creds "T1")))
+                |> Expect.equal (Main.ResolveAdopt (authWith (TestHelpers.creds "T1")) True)
 
 
 {-| P1b (the bug): a re-check from a PAGE 401 still has its 7h renewal tick armed,
@@ -205,8 +207,8 @@ pageOriginAdoptDoesNotReschedule : Test
 pageOriginAdoptDoesNotReschedule =
     test "page_origin_adopt_does_not_reschedule: a page-origin re-check adopt does NOT re-arm renewal" <|
         \() ->
-            Main.resolveRecheck (Just pageOrigin) (Main.AdoptAuth (authWith "T1"))
-                |> Expect.equal (Main.ResolveAdopt (authWith "T1") False)
+            Main.resolveRecheck (Just pageOrigin) (Main.AdoptAuth (authWith (TestHelpers.creds "T1")))
+                |> Expect.equal (Main.ResolveAdopt (authWith (TestHelpers.creds "T1")) False)
 
 
 recheckSameTokenForcesLogoutCarryingDraft : Test

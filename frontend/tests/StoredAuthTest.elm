@@ -9,6 +9,7 @@ something rewrote it (half-write, old release, flat-vs-nested drift).
 signing out.
 -}
 
+import Api
 import Expect
 import Html.Attributes
 import Json.Encode as Encode
@@ -124,7 +125,7 @@ validBlobSignsThemIn =
         \() ->
             Main.decodeFlags validFlags
                 |> Main.storedSession
-                |> Maybe.map .token
+                |> Maybe.map (.token >> Api.bearerOf)
                 |> Expect.equal (Just "jwt-token")
 
 

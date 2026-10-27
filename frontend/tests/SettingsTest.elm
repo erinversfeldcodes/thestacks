@@ -7,6 +7,7 @@ import Page.Settings.Consent as Consent
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -59,7 +60,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False }) (Just "tok")
+                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False }) (Just (TestHelpers.creds "tok"))
                     in
                     model.saving |> Expect.equal Loading
             , test "SaveConsent without token leaves saving as NotAsked" <|
@@ -89,13 +90,13 @@ suite =
                         ( inFlight, _, _ ) =
                             Consent.update Consent.SaveConsent
                                 (Consent.init { analytics = False, writingAssistant = False })
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
 
                         ( settled, _, out ) =
                             Consent.update
                                 (Consent.SaveCompleted (Err (Http.BadStatus 401)))
                                 inFlight
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \_ -> inFlight.saving |> Expect.equal Loading
@@ -115,7 +116,7 @@ suite =
                         ( model, _, _ ) =
                             Consent.update Consent.ToggleWritingAssistant
                                 (Consent.init { analytics = False, writingAssistant = False })
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.writingAssistantSaving |> Expect.equal Loading
@@ -131,7 +132,7 @@ suite =
                             Consent.update
                                 (Consent.SaveWritingAssistantCompleted True (Err (Http.BadStatus 500)))
                                 (Consent.init { analytics = False, writingAssistant = True })
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.writingAssistantSaving |> Expect.equal (Failure (Http.BadStatus 500))
@@ -159,7 +160,7 @@ suite =
                                 (Consent.init { analytics = False, writingAssistant = False }
                                     |> (\m -> { m | writingAssistantConsent = True })
                                 )
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
 
                         rendered =
                             Consent.viewSection False model |> Query.fromHtml
@@ -197,7 +198,7 @@ suite =
                                     (Err (Http.BadStatus 500))
                                 )
                                 (Consent.init { analytics = False, writingAssistant = False })
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
 
                         rendered =
                             Consent.viewSection False model |> Query.fromHtml
@@ -263,7 +264,7 @@ suite =
                                 (Consent.init { analytics = False, writingAssistant = False }
                                     |> (\m -> { m | writingAssistantConsent = True })
                                 )
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \_ -> model.writingAssistantConsent |> Expect.equal False
@@ -290,7 +291,7 @@ suite =
                                     (Err (Http.BadStatus 500))
                                 )
                                 (Consent.init { analytics = False, writingAssistant = True })
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                     in
                     model.writingAssistantConsent
                         |> Expect.equal True
@@ -303,7 +304,7 @@ suite =
                             Consent.update
                                 (Consent.SaveCompleted (Err (Http.BadStatus 500)))
                                 (Consent.init { analytics = True, writingAssistant = False })
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.saving |> Expect.equal (Failure (Http.BadStatus 500))
@@ -321,14 +322,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update (Consent.SaveCompleted (Ok ())) (Consent.init { analytics = False, writingAssistant = False }) (Just "tok")
+                            Consent.update (Consent.SaveCompleted (Ok ())) (Consent.init { analytics = False, writingAssistant = False }) (Just (TestHelpers.creds "tok"))
                     in
                     model.saving |> Expect.equal (Success ())
             , test "SaveCompleted Err sets saving to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update (Consent.SaveCompleted (Err Http.NetworkError)) (Consent.init { analytics = False, writingAssistant = False }) (Just "tok")
+                            Consent.update (Consent.SaveCompleted (Err Http.NetworkError)) (Consent.init { analytics = False, writingAssistant = False }) (Just (TestHelpers.creds "tok"))
                     in
                     model.saving |> Expect.equal (Failure Http.NetworkError)
             ]
@@ -387,6 +388,6 @@ consentUpdate : Consent.Msg -> Consent.Model -> Consent.Model
 consentUpdate msg model =
     let
         ( newModel, _, _ ) =
-            Consent.update msg model (Just "tok")
+            Consent.update msg model (Just (TestHelpers.creds "tok"))
     in
     newModel

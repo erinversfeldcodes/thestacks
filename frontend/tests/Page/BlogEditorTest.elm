@@ -1,16 +1,18 @@
 module Page.BlogEditorTest exposing (suite)
 
+import Api
 import Expect
 import Http
 import Page.Blog.Editor as Editor exposing (Mode(..), Msg(..))
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.BlogPost exposing (Visibility(..))
 import Types.RemoteData exposing (RemoteData(..))
 
 
-token : Maybe String
+token : Maybe Api.Credentials
 token =
-    Just "tok"
+    Just (TestHelpers.creds "tok")
 
 
 newModel : Editor.Model

@@ -143,7 +143,7 @@ one it hides. Only `Failure` speaks up, because then the fields on screen are
 the blob's and the reader deserves to know that.
 
 -}
-initWithToken : Maybe String -> User -> String -> ( Model, Cmd Msg )
+initWithToken : Maybe Api.Credentials -> User -> String -> ( Model, Cmd Msg )
 initWithToken maybeToken user origin =
     let
         ( model, effect ) =
@@ -161,7 +161,7 @@ leave that harness, and the whole suite, green. The save paths below still
 return `Cmd`; they were not the thing at risk.
 
 -}
-initWithEffect : Maybe String -> User -> ( Model, Effect Msg )
+initWithEffect : Maybe Api.Credentials -> User -> ( Model, Effect Msg )
 initWithEffect maybeToken user =
     let
         seeded =
@@ -276,7 +276,7 @@ handleChanged model =
     model.handle /= model.initialHandle
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetDisplayName val ->

@@ -62,7 +62,7 @@ type Msg
 
 type OutMsg
     = NoOut
-    | Authenticated String
+    | Authenticated Api.Credentials
 
 
 init : Model
@@ -112,7 +112,7 @@ enrolmentSecret enrolment =
         |> List.head
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model ownerToken =
     case msg of
         SetEmail value ->
@@ -168,7 +168,10 @@ update msg model ownerToken =
                     ( model, Cmd.none, NoOut )
 
         Verified (Ok token) ->
-            ( { model | busy = False, code = "" }, Cmd.none, Authenticated token )
+            ( { model | busy = False, code = "" }
+            , Cmd.none
+            , Authenticated (Api.credentials token Nothing)
+            )
 
         Verified (Err err) ->
             ( { model | busy = False, code = "", error = Just (authErrorMessage err) }
@@ -237,7 +240,7 @@ update msg model ownerToken =
 
 
 startEnrolmentIfPossible :
-    Maybe String
+    Maybe Api.Credentials
     -> ( Model, Cmd Msg, OutMsg )
     -> ( Model, Cmd Msg, OutMsg )
 startEnrolmentIfPossible ownerToken ( model, cmd, out ) =

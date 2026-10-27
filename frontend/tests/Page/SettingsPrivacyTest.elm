@@ -9,14 +9,15 @@ import Page.Settings.Privacy as Privacy exposing (Msg(..), OutMsg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
 {-| No token means Save messages short-circuit; most tests supply one.
 -}
-token : Maybe String
+token : Maybe Api.Credentials
 token =
-    Just "tok"
+    Just (TestHelpers.creds "tok")
 
 
 suite : Test
@@ -255,7 +256,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            Privacy.initWithToken (Just "tok")
+                            Privacy.initWithToken (Just (TestHelpers.creds "tok"))
                                 { analytics = True, writingAssistant = True }
                     in
                     Expect.all

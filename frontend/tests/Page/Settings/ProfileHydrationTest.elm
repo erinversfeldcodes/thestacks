@@ -15,6 +15,7 @@ can pass on a coincidence.
 
 -}
 
+import Api
 import Effect
 import Expect
 import Html.Attributes as Attr
@@ -87,7 +88,7 @@ serverJson =
 
 start : ProgramTest.ProgramTest Profile.Model Profile.Msg (SimulatedEffect Profile.Msg)
 start =
-    ProgramTest.start () (program (Just "test-token"))
+    ProgramTest.start () (program (Just (TestHelpers.creds "test-token")))
 
 
 {-| The page's own `initWithEffect`, run in the simulated runtime — so a
@@ -100,7 +101,7 @@ would silently observe no request at all. Give the page an `updateWithEffect`
 before adding one.
 
 -}
-program : Maybe String -> ProgramDefinition () Profile.Model Profile.Msg (SimulatedEffect Profile.Msg)
+program : Maybe Api.Credentials -> ProgramDefinition () Profile.Model Profile.Msg (SimulatedEffect Profile.Msg)
 program maybeToken =
     ProgramTest.createElement
         { init =

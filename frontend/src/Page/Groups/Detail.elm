@@ -32,7 +32,7 @@ type alias Model =
     , inviteInput : String
     , inviteState : InviteState
     , currentUserId : String
-    , token : String
+    , token : Api.Credentials
     , activeTab : Tab
     , feed : RemoteData Http.Error FeedResponse
     , loadingMoreFeed : Bool
@@ -73,7 +73,7 @@ type OutMsg
     | EscapeUnhandled
 
 
-init : String -> String -> String -> ( Model, Cmd Msg )
+init : String -> String -> Api.Credentials -> ( Model, Cmd Msg )
 init groupId userId token =
     ( { groupId = groupId
       , group = Loading

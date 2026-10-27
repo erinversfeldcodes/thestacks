@@ -13,6 +13,7 @@ import Main
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.User exposing (User)
 
 
@@ -32,7 +33,7 @@ readerUser =
 
 readerAuth : Main.Auth
 readerAuth =
-    { user = readerUser, token = "jwt-token" }
+    { user = readerUser, token = TestHelpers.creds "jwt-token" }
 
 
 suite : Test

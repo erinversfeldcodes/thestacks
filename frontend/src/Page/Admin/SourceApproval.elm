@@ -56,7 +56,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         model =
@@ -70,7 +70,7 @@ init maybeToken =
     ( model, fetchSources model maybeToken )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SourcesReceived result ->
@@ -163,7 +163,7 @@ handleActionResult model sourceId result =
                 ( { model | actionInProgress = Nothing, actionError = Just "Action failed. Please try again." }, Cmd.none, NoOut )
 
 
-fetchSources : Model -> Maybe String -> Cmd Msg
+fetchSources : Model -> Maybe Api.Credentials -> Cmd Msg
 fetchSources model maybeToken =
     case maybeToken of
         Just token ->

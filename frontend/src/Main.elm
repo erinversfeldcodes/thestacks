@@ -114,7 +114,7 @@ import Task
 import Time
 import Types.Placement
 import Types.RemoteData exposing (RemoteData(..))
-import Types.User exposing (AuthToken, User)
+import Types.User exposing (User)
 import Url exposing (Url)
 import Util.TestId exposing (testId)
 
@@ -284,7 +284,7 @@ type Page
 
 type alias Auth =
     { user : User
-    , token : AuthToken
+    , token : Api.Credentials
     }
 
 
@@ -453,7 +453,7 @@ type alias Model =
     , url : Url
     , route : Route
     , auth : AuthState
-    , adminAuth : Maybe String
+    , adminAuth : Maybe Api.Credentials
     , adminChrome : AdminChrome.Model
     , page : Page
     , previousRoute : Maybe Route
@@ -628,7 +628,7 @@ authDecoder =
                 , consentAnalytics = False
                 , consentWritingAssistant = False
                 }
-            , token = token
+            , token = Api.credentials token Nothing
             }
         )
         (Decode.field "token" Decode.string)
@@ -878,7 +878,7 @@ pass. `/api/admin/*` requires the MFA-verified admin session token and
 drifted and every admin action 401'd behind a loaded page. One function,
 five callers, zero drift.
 -}
-adminTokenFor : Model -> Maybe String
+adminTokenFor : Model -> Maybe Api.Credentials
 adminTokenFor model =
     model.adminAuth
 
@@ -951,7 +951,7 @@ there is more than one way to reach the card (protected-route bounce,
 `/login`, `/forgot-password`), and the notice used to be attached at only
 one of them.
 -}
-initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe Api.Credentials -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
 initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
     if loginRedirectFor route maybeAuth /= Nothing then
         ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
@@ -1047,7 +1047,7 @@ initBookshelf config maybeAuth =
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
 
-initPageAuthenticated : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPageAuthenticated : AppConfig -> Route -> String -> Maybe Auth -> Maybe Api.Credentials -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
 initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival =
     let
         maybeToken =
@@ -1337,7 +1337,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
         Groups ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = Api.credentials "" Nothing } maybeAuth
 
                 ( m, cmd ) =
                     Groups.init auth.user.id auth.token
@@ -1347,7 +1347,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
         GroupDetail groupId ->
             let
                 auth =
-                    Maybe.withDefault { user = { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = "" } maybeAuth
+                    Maybe.withDefault { user = { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }, token = Api.credentials "" Nothing } maybeAuth
 
                 ( m, cmd ) =
                     GroupsDetail.init groupId auth.user.id auth.token
@@ -1383,7 +1383,7 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 encodeAuth : Auth -> Json.Encode.Value
 encodeAuth auth =
     Json.Encode.object
-        [ ( "token", Json.Encode.string auth.token )
+        [ ( "token", Json.Encode.string (Api.bearerOf auth.token) )
         , ( "userId", Json.Encode.string auth.user.id )
         , ( "email", Json.Encode.string auth.user.email )
         , ( "displayName", Json.Encode.string auth.user.displayName )
@@ -1605,7 +1605,7 @@ current ones. Pure and key-free, so the renewal-success path is unit-testable.
 -}
 renewAuthToken : Api.AuthResponse -> Auth -> Auth
 renewAuthToken authResponse auth =
-    { auth | token = authResponse.token }
+    { auth | token = Api.credentials authResponse.token Nothing }
 
 
 {-| How long to wait after receiving an access token before silently renewing it.
@@ -1711,7 +1711,7 @@ completeLogin authResponse =
                 , consentAnalytics = authResponse.consentAnalytics
                 , consentWritingAssistant = authResponse.consentWritingAssistant
                 }
-            , token = authResponse.token
+            , token = Api.credentials authResponse.token Nothing
             }
     in
     { session = session

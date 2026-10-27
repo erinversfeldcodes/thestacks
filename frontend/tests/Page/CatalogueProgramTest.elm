@@ -39,10 +39,10 @@ suite =
 
 startCatalogue : ProgramTest.ProgramTest Catalogue.Model Catalogue.Msg (SimulatedEffect Catalogue.Msg)
 startCatalogue =
-    ProgramTest.start () (catalogueProgram (Just "test-token"))
+    ProgramTest.start () (catalogueProgram (Just (TestHelpers.creds "test-token")))
 
 
-catalogueProgram : Maybe String -> ProgramDefinition () Catalogue.Model Catalogue.Msg (SimulatedEffect Catalogue.Msg)
+catalogueProgram : Maybe Api.Credentials -> ProgramDefinition () Catalogue.Model Catalogue.Msg (SimulatedEffect Catalogue.Msg)
 catalogueProgram maybeToken =
     ProgramTest.createElement
         { init =
@@ -64,7 +64,7 @@ catalogueProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-catalogueInitEffects : Maybe String -> SimulatedEffect Catalogue.Msg
+catalogueInitEffects : Maybe Api.Credentials -> SimulatedEffect Catalogue.Msg
 catalogueInitEffects maybeToken =
     case maybeToken of
         Just token ->
@@ -79,7 +79,7 @@ catalogueInitEffects maybeToken =
             SimulatedEffect.Cmd.none
 
 
-catalogueEffects : Catalogue.Msg -> Catalogue.Model -> Maybe String -> SimulatedEffect Catalogue.Msg
+catalogueEffects : Catalogue.Msg -> Catalogue.Model -> Maybe Api.Credentials -> SimulatedEffect Catalogue.Msg
 catalogueEffects msg model maybeToken =
     case msg of
         Catalogue.SearchChanged _ ->
@@ -128,7 +128,7 @@ catalogueEffects msg model maybeToken =
             SimulatedEffect.Cmd.none
 
 
-fetchSimulated : Catalogue.Model -> Maybe String -> SimulatedEffect Catalogue.Msg
+fetchSimulated : Catalogue.Model -> Maybe Api.Credentials -> SimulatedEffect Catalogue.Msg
 fetchSimulated model maybeToken =
     case maybeToken of
         Just token ->

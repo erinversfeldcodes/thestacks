@@ -55,7 +55,7 @@ type OutMsg
 {-| `init` keeps its 2-tuple: the load's 401 arrives as `SessionExpiryDetected`
 in `update`, which is the only place an `OutMsg` can be raised anyway.
 -}
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
         Just token ->
@@ -72,7 +72,7 @@ init maybeToken =
             ( { prefs = NotAsked, saving = NotAsked }, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         Loaded (Ok prefs) ->
@@ -108,7 +108,7 @@ update msg model maybeToken =
 {-| Flip one preference on the loaded values and immediately auto-save. A toggle
 is a no-op until the preferences have loaded — there is nothing to flip yet.
 -}
-flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg, OutMsg )
+flipAndSave : Model -> Maybe Api.Credentials -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg, OutMsg )
 flipAndSave model maybeToken flip =
     case model.prefs of
         Success prefs ->
@@ -125,7 +125,7 @@ flipAndSave model maybeToken flip =
             ( model, Cmd.none, NoOut )
 
 
-savePreferences : NotificationPreferences -> Maybe String -> Cmd Msg
+savePreferences : NotificationPreferences -> Maybe Api.Credentials -> Cmd Msg
 savePreferences prefs maybeToken =
     case maybeToken of
         Just token ->

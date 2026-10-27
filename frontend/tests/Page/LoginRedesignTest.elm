@@ -231,7 +231,7 @@ transitionStateTests =
                     |> ProgramTest.clickButton "Enter the Stacks"
                     |> ProgramTest.simulateHttpResponse "POST"
                         "/api/auth/login"
-                        (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
+                        (simulateAuthResponse (TestHelpers.creds "jwt-token") "user-1" "reader@stacks.dev" "A Reader")
                     |> ProgramTest.expectViewHasNot
                         [ Selector.class "login-door--opening" ]
         , test "old door DOM structure is removed — no .login-door element" <|

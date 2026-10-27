@@ -128,8 +128,8 @@ type Msg
     | DragOver
     | DragLeave
     | FilepickerRequested
-    | UploadInitialised File String (Result Http.Error Api.UploadInit)
-    | R2PutCompleted String String (Result Http.Error ())
+    | UploadInitialised File Api.Credentials (Result Http.Error Api.UploadInit)
+    | R2PutCompleted String Api.Credentials (Result Http.Error ())
     | UploadAccepted (Result Http.Error String)
     | StatusReceived (Result Http.Error PollResponse)
     | StreamEvent String
@@ -353,7 +353,7 @@ terminal model result =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     let
         ( newModel, effect, out ) =
@@ -370,7 +370,7 @@ the same value. `update` is this composed with `Effect.perform`; nothing else
 differs between them.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model maybeToken =
     case msg of
         GotFile file ->
@@ -436,7 +436,7 @@ updateWithEffect msg model maybeToken =
                         Just token ->
                             ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
                             , Effect.none
-                            , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                            , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ Api.bearerOf token)
                             )
 
                         Nothing ->
@@ -770,7 +770,7 @@ updateWithEffect msg model maybeToken =
                         )
                         token
                         (Api.resolveWhatever >> RejectIdentificationCompleted)
-                    , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                    , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ Api.bearerOf token)
                     )
 
                 _ ->
@@ -925,7 +925,7 @@ resolvedBookReads response =
             List.map (\bid -> ( bid, GotIdentifiedBook bid )) ids
 
 
-bookReadEffect : String -> PollResponse -> Effect Msg
+bookReadEffect : Api.Credentials -> PollResponse -> Effect Msg
 bookReadEffect token response =
     Effect.batch
         (List.map
@@ -959,7 +959,7 @@ placementStub =
     }
 
 
-view : Model -> Maybe String -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+view : Model -> Maybe Api.Credentials -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
 view model maybeToken inbox =
     div [ class "page page--upload" ]
         [ h1 [ class "page__title" ] [ text "Add a Book" ]

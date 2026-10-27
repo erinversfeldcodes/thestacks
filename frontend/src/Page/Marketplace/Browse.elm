@@ -33,7 +33,7 @@ type Msg
     = ListingsReceived (Result Http.Error ListingsResponse)
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { listings = Loading }
     , Api.getListings maybeToken ListingsReceived

@@ -36,7 +36,7 @@ logoutEndpoint =
 
 start : ProgramTest.ProgramTest TestHelpers.AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
 start =
-    ProgramTest.start () (TestHelpers.adminChromeProgram (Just adminToken))
+    ProgramTest.start () (TestHelpers.adminChromeProgram (Just (TestHelpers.creds adminToken)))
 
 
 {-| The chrome as it appears to someone who arrived without an admin token —

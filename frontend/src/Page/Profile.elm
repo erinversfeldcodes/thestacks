@@ -17,7 +17,7 @@ import Types.RemoteData exposing (RemoteData(..))
 
 type alias Model =
     { handle : String
-    , token : Maybe String
+    , token : Maybe Api.Credentials
     , profile : RemoteData Http.Error PublicProfile
     }
 
@@ -34,7 +34,7 @@ type OutMsg
 {-| `maybeToken` is the viewer's session token when signed in (so the server
 resolves what THIS viewer may see), or `Nothing` for an anonymous viewer.
 -}
-init : Maybe String -> String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> String -> ( Model, Cmd Msg )
 init maybeToken handle =
     ( { handle = handle, token = maybeToken, profile = Loading }
     , Api.getProfile maybeToken handle GotProfile

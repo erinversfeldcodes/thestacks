@@ -17,6 +17,7 @@ import Page.Settings.Password as Password exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -34,7 +35,7 @@ with a token; the non-dispatch branches ignore it).
 -}
 applyWithToken : Msg -> Password.Model -> Password.Model
 applyWithToken msg model =
-    Password.update msg model (Just "test-token") |> modelOf
+    Password.update msg model (Just (TestHelpers.creds "test-token")) |> modelOf
 
 
 {-| A model with valid, matching input ready to save.

@@ -168,7 +168,7 @@ signed-in user's current consent so the folded-in toggles open showing reality
 (same seeding the standalone consent page used to do). The bare `init` is kept
 for tests and flows that don't need the network.
 -}
-initWithToken : Maybe String -> { analytics : Bool, writingAssistant : Bool } -> ( Model, Cmd Msg )
+initWithToken : Maybe Api.Credentials -> { analytics : Bool, writingAssistant : Bool } -> ( Model, Cmd Msg )
 initWithToken maybeToken consentSeed =
     let
         seeded =
@@ -187,7 +187,7 @@ initWithToken maybeToken consentSeed =
             ( seeded, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetProfileVisibility val ->

@@ -22,6 +22,7 @@ import Page.Feedback as Feedback
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -34,7 +35,7 @@ update : Feedback.Msg -> Feedback.Model -> ( Feedback.Model, Cmd Feedback.Msg )
 update msg model =
     let
         ( newModel, cmd, _ ) =
-            Feedback.update msg model (Just "token")
+            Feedback.update msg model (Just (TestHelpers.creds "token"))
     in
     ( newModel, cmd )
 
@@ -76,7 +77,7 @@ adminUpdate :
     -> AdminQueue.Model
     -> ( AdminQueue.Model, Cmd AdminQueue.Msg, AdminQueue.OutMsg )
 adminUpdate msg model =
-    AdminQueue.update msg model (Just "token")
+    AdminQueue.update msg model (Just (TestHelpers.creds "token"))
 
 
 {-| Every route with an argument, given an argument no path segment could be

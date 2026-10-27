@@ -35,7 +35,7 @@ type Msg
     = ListingReceived (Result Http.Error Listing)
 
 
-init : String -> Maybe String -> ( Model, Cmd Msg )
+init : String -> Maybe Api.Credentials -> ( Model, Cmd Msg )
 init listingId maybeToken =
     ( { listingId = listingId
       , listing = Loading
@@ -44,7 +44,7 @@ init listingId maybeToken =
     )
 
 
-fetchListing : String -> Maybe String -> Cmd Msg
+fetchListing : String -> Maybe Api.Credentials -> Cmd Msg
 fetchListing listingId maybeToken =
     Http.request
         { method = "GET"

@@ -26,6 +26,7 @@ credential, and that precedence is what the cases below pin.
 import Api
 import Expect
 import Test exposing (Test, describe, test)
+import TestHelpers
 
 
 suite : Test
@@ -34,11 +35,11 @@ suite =
         [ describe "same-origin requests carry the credential they were given"
             [ test "a Session credential becomes a bearer header" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Session "tok-abc")
+                    Api.requestHeaders Api.SameOrigin (Api.Session (TestHelpers.creds "tok-abc"))
                         |> Expect.equal [ ( "Authorization", "Bearer tok-abc" ) ]
             , test "an Optional credential that is present becomes the same header" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Optional (Just "tok-abc"))
+                    Api.requestHeaders Api.SameOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
                         |> Expect.equal [ ( "Authorization", "Bearer tok-abc" ) ]
 
             -- ⚠️ `Optional Nothing` and `NoCredential` both yield no header, and
@@ -80,11 +81,11 @@ suite =
             -- to pass the right credential. The origin decision wins.
             [ test "even when handed a Session credential" <|
                 \() ->
-                    Api.requestHeaders Api.CrossOrigin (Api.Session "tok-abc")
+                    Api.requestHeaders Api.CrossOrigin (Api.Session (TestHelpers.creds "tok-abc"))
                         |> Expect.equal []
             , test "even when handed a present Optional credential" <|
                 \() ->
-                    Api.requestHeaders Api.CrossOrigin (Api.Optional (Just "tok-abc"))
+                    Api.requestHeaders Api.CrossOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
                         |> Expect.equal []
             , test "and trivially when handed none" <|
                 \() ->
@@ -97,8 +98,8 @@ suite =
             -- that is the gap — so the assertion enumerates every constructor.
             , test "no credential constructor can produce a cross-origin header" <|
                 \() ->
-                    [ Api.Session "tok-abc"
-                    , Api.Optional (Just "tok-abc")
+                    [ Api.Session (TestHelpers.creds "tok-abc")
+                    , Api.Optional (Just (TestHelpers.creds "tok-abc"))
                     , Api.Optional Nothing
                     , Api.NoCredential
                     ]
@@ -118,7 +119,7 @@ suite =
             -- the same `Maybe String`.
             [ test "the header name and value are inspectable without a runtime" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Session "tok-abc")
+                    Api.requestHeaders Api.SameOrigin (Api.Session (TestHelpers.creds "tok-abc"))
                         |> List.map Tuple.first
                         |> Expect.equal [ "Authorization" ]
             ]

@@ -37,7 +37,7 @@ type Msg
     | DismissAgeGate
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         cmd =

@@ -57,7 +57,7 @@ type OutMsg
     = NoOut
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { spaces = Loading
       , selectedSpace = Nothing

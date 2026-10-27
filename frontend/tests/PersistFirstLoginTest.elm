@@ -8,6 +8,7 @@ authenticated in memory and anonymous on disk. Persistence now happens
 on the same update that decodes the 200; the animation is decoration.
 -}
 
+import Api
 import Expect
 import Main
 import Navigation.Route as Route exposing (Route(..))
@@ -79,7 +80,7 @@ applyEffect arrival effect model =
     in
     case effect of
         Main.PersistAuth ->
-            { logged | storedToken = Just arrival.session.token }
+            { logged | storedToken = Just (Api.bearerOf arrival.session.token) }
 
         Main.FetchPlacements ->
             logged
@@ -155,7 +156,7 @@ signIn =
         |> ProgramTest.clickButton "Enter the Stacks"
         |> ProgramTest.simulateHttpResponse "POST"
             "/api/auth/login"
-            (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
+            (simulateAuthResponse (TestHelpers.creds "jwt-token") "user-1" "reader@stacks.dev" "A Reader")
 
 
 persistFirstNoAnimationSignal : Test
@@ -217,13 +218,13 @@ arrivalIsSignedInImmediately =
                     (\model ->
                         Main.currentAuth model.authState
                             |> Maybe.map .token
-                            |> Expect.equal (Just "jwt-token")
+                            |> Expect.equal (Just (TestHelpers.creds "jwt-token"))
                     )
 
 
 fakeResponse : Main.Auth -> { token : String, userId : String, email : String, displayName : String, handle : String, role : String, consentAnalytics : Bool, consentWritingAssistant : Bool }
 fakeResponse auth =
-    { token = auth.token
+    { token = Api.bearerOf auth.token
     , userId = auth.user.id
     , email = auth.user.email
     , displayName = auth.user.displayName
@@ -250,7 +251,7 @@ readerUser =
 
 readerAuth : Main.Auth
 readerAuth =
-    { user = readerUser, token = "jwt-token" }
+    { user = readerUser, token = TestHelpers.creds "jwt-token" }
 
 
 completeLoginAlwaysPersists : Test
@@ -272,7 +273,7 @@ completeLoginCarriesTheResponsesToken =
     test "completeLogin's session is the token the server issued" <|
         \() ->
             (Main.completeLogin (fakeResponse readerAuth)).session.token
-                |> Expect.equal "jwt-token"
+                |> Expect.equal (TestHelpers.creds "jwt-token")
 
 
 completeLoginStartsArriving : Test

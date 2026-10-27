@@ -359,7 +359,7 @@ readingPileSpineIsSoftened : Test
 readingPileSpineIsSoftened =
     test "reading pile spines render Softened wear (', well-loved')" <|
         \() ->
-            ProgramTest.start () (readingPileProgram (Just "test-token"))
+            ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "test-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/reading_pile"
                     (simulateBookshelfResponse [ namedPlacement "book-rp" "Reading Now" ])
