@@ -111,7 +111,7 @@ perform effect =
         Request plan ->
             Http.request
                 { method = plan.spec.method
-                , headers = Api.authHeaders plan.token
+                , headers = Api.authHeaders plan.spec.method plan.token
                 , url = plan.spec.url
                 , body = Api.specHttpBody plan.spec
                 , expect = expectResponse plan.onResponse

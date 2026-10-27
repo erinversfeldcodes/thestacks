@@ -74,6 +74,26 @@ spec_filler() {
 # is what the gate uses to tell a request record from an adapter record — a
 # fixture missing one would be silently skipped and the case would pass for the
 # wrong reason.
+# A record whose sent method and header-builder method can differ, for the
+# agreement rule below.
+record_with_methods() {
+    local name="$1" sent="$2" told="$3"
+    cat <<EOF
+
+$name : String -> Cmd msg
+$name arg =
+    Http.request
+        { method = "$sent"
+        , headers = httpHeaders "$told" SameOrigin (Session token)
+        , url = baseUrl ++ "/api/thing"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever Done
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+EOF
+}
+
 record() {
     local name="$1" url="$2" headers="$3"
     cat <<EOF
@@ -346,5 +366,50 @@ test_case "the_green_run_reports_the_plan_path_population" \
 run_on "$(spec_filler 32)$(filler 75)"
 assert_exit_zero "$RC" "the clean corpus passes"
 assert_contains "$OUT" "32 RequestSpec builder(s) parsed" "and reports the plan-path population"
+
+# ── the method sent and the method the builder is told ──────────────────────
+#
+# ⛔ THE SILENT-FAILURE SHAPE. `requestHeaders` attaches the CSRF token based on
+# the method it is GIVEN; the request goes out with the method in the record's
+# own field. When they disagree, a write ships with no proof and every test that
+# does not read the header still passes.
+#
+# ⚖️ The duplication is deliberate — the alternative is 45 call sites each
+# deciding whether to add the header — and this is what makes it safe.
+test_case "a_record_that_sends_one_method_and_builds_for_another_is_refused" \
+    "a write told the builder it was a read carries no proof, silently"
+run_on "$(spec_filler 32)$(filler 75)$(record_with_methods "sneakyWrite" "POST" "GET")"
+assert_exit_nonzero "$RC" "the disagreement is refused"
+assert_contains "$OUT" "sneakyWrite" "the refusal names the function"
+assert_contains "$OUT" "send one method and tell the header builder another" \
+    "and names the condition"
+assert_contains "$OUT" "no proof" "and says what the consequence is"
+
+# ⚠️ The discriminating half: agreement must PASS, or the rule would forbid every
+# request rather than the mismatched ones.
+test_case "a_record_whose_methods_agree_is_accepted" \
+    "otherwise the rule refuses correct code and tells us nothing"
+run_on "$(spec_filler 32)$(filler 75)$(record_with_methods "honestWrite" "POST" "POST")"
+assert_exit_zero "$RC" "matching methods are fine"
+
+# ⚠️ `spec.method` on both sides is ONE expression read twice, not two statements
+# that can disagree — so it must not be reported. A rule that demanded literals
+# would fire on every plan-backed request in the file.
+test_case "spec_method_on_both_sides_is_not_a_disagreement" \
+    "one expression read twice cannot disagree with itself"
+run_on "$(spec_filler 32)$(filler 75)
+viaSpec : String -> Cmd msg
+viaSpec arg =
+    Http.request
+        { method = spec.method
+        , headers = httpHeaders spec.method SameOrigin (Session token)
+        , url = spec.url
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever Done
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+"
+assert_exit_zero "$RC" "spec.method on both sides is not duplication"
 
 summarise

@@ -72,6 +72,15 @@ def top_level_definitions(text):
 # alternative changes no output — is one `git stash` and one run away from being
 # verified by anyone who doubts it.
 #
+# ⚠️ `(?:\s+\S+){1,2}` because the builder gained a METHOD parameter: a call
+# now reads `httpHeaders "POST" SameOrigin (Session token)` — two words before
+# the constructor where there used to be one. A fixed `\s+\w+\s+` silently
+# stopped matching every migrated site, and this gate reported a STALE EXEMPTION
+# rather than a drop in population, because the page it exempts had vanished
+# from the set. ⚖️ That is the floor working sideways: the definitions still
+# parsed, so MIN_PARSED_DEFINITIONS was satisfied, and what caught it was the
+# exemption having nothing left to protect.
+#
 # ⚠️ Matched on the CREDENTIAL CONSTRUCTOR rather than on the wrapper
 # function's name, because there are two wrappers — `requestHeaders` returning
 # data and `httpHeaders` returning `Http.Header` — and a third would otherwise
@@ -87,14 +96,14 @@ MANDATORY = re.compile(
     r"headers\s*=\s*("
     r"authedHeaders\b"
     r"|\[\s*Http\.header\s+\"Authorization\""
-    r"|\w*[Hh]eaders\s+\w+\s+\(\s*Session\b"
+    r"|\w*[Hh]eaders(?:\s+\S+){1,2}\s+\(\s*Session\b"
     r")"
 )
 OPTIONAL = re.compile(
     r"headers\s*=\s*("
     r"authHeaders\b"
-    r"|\w*[Hh]eaders\s+\w+\s+\(\s*Optional\b"
-    r"|\w*[Hh]eaders\s+\w+\s+NoCredential\b"
+    r"|\w*[Hh]eaders(?:\s+\S+){1,2}\s+\(\s*Optional\b"
+    r"|\w*[Hh]eaders(?:\s+\S+){1,2}\s+NoCredential\b"
     r"|$)",
     re.M,
 )

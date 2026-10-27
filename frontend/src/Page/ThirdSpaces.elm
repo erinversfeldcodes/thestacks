@@ -64,7 +64,7 @@ init maybeToken =
       }
     , Http.request
         { method = spacesRequest.method
-        , headers = Api.authHeaders maybeToken
+        , headers = Api.authHeaders spacesRequest.method maybeToken
         , url = spacesRequest.url
         , body = Api.specHttpBody spacesRequest
         , expect = Http.expectJson SpacesLoaded thirdSpacesResponseDecoder

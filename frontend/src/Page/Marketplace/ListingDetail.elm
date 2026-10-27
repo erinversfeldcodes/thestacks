@@ -61,7 +61,7 @@ fetchListing listingId maybeToken =
         -- session-expiry interceptor, so naming `Session` here would demand
         -- 401-routing for a request that legitimately succeeds anonymously.
         , headers =
-            Api.requestHeaders Api.SameOrigin (Api.Optional maybeToken)
+            Api.requestHeaders "GET" Api.SameOrigin (Api.Optional maybeToken)
                 |> List.map (\( name, value ) -> Http.header name value)
         , url = "/api/listings/" ++ listingId
         , body = Http.emptyBody

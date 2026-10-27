@@ -208,6 +208,74 @@ for match in RECORD.finditer(src):
         if declares_same_origin:
             violations.append((name, line_no, flattened[:48]))
 
+# ── the method a header call is told must be the method the record sends ────
+#
+# ⛔ TWO STATEMENTS OF ONE FACT IN ONE RECORD, and the disagreement is silent in
+# the dangerous direction. `requestHeaders` decides whether to attach the CSRF
+# token from the method it is GIVEN; the request is sent with the method in the
+# record's own field. `method = "POST"` beside `httpHeaders "GET" …` produces a
+# write with no proof, and every test that does not read the header still passes.
+#
+# ⚖️ The duplication is accepted deliberately — the alternative is each call site
+# deciding whether to add the header, which is 45 chances to decide wrongly with
+# nothing able to tell a considered omission from a forgotten one. What makes it
+# safe is that both literals sit in the SAME record, so the check is textual.
+#
+# ⚠️ `spec.method` on both sides is NOT duplication: it is one expression read
+# twice, so it cannot disagree with itself. Those sites need no agreement check
+# and get none.
+mismatched = []
+
+for match in RECORD.finditer(src):
+    body = strip_elm_comments(match.group(0))
+    if "method =" not in body or "headers =" not in body:
+        continue
+
+    declared = re.search(r'method\s*=\s*("(?:[A-Za-z]+)"|spec\.method)', body)
+    # ⚠️ ONLY a method-shaped first argument. An earlier version accepted any
+    # identifier and matched `requestHeaders SameOrigin (…)` — reading the
+    # DESTINATION as the method and reporting every correct call as a
+    # disagreement. A call that passes no method at all does not compile, so
+    # there is nothing for this rule to catch there.
+    passed = re.search(
+        r"headers\s*=\s*(?:httpHeaders|requestHeaders|Api\.httpHeaders|Api\.requestHeaders"
+        r"|authedHeaders|authHeaders)\s+(\"[A-Za-z]+\"|[a-zA-Z_][A-Za-z0-9_]*\.method)",
+        body,
+    )
+    if not declared or not passed:
+        continue
+
+    if declared.group(1) != passed.group(1):
+        line_no = src[: match.start()].count("\n") + 1
+        name = "?"
+        for i in range(line_no - 1, -1, -1):
+            m = re.match(r"^([a-z][A-Za-z0-9_]*)\s*:", lines[i])
+            if m:
+                name = m.group(1)
+                break
+        mismatched.append((name, line_no, declared.group(1), passed.group(1)))
+
+if mismatched:
+    print(
+        f"FAIL: {len(mismatched)} request(s) send one method and tell the header builder another:",
+        file=sys.stderr,
+    )
+    for name, line_no, declared_m, passed_m in mismatched:
+        print(
+            f"  {path}:{line_no}  {name}  sends {declared_m}, builds headers for {passed_m}",
+            file=sys.stderr,
+        )
+    print(
+        "\n⛔ The CSRF token is attached on the method the BUILDER is told about, and the\n"
+        "request is sent with the method in the record's own field. When they disagree a\n"
+        "state-changing request can go out with no proof, and nothing that does not read\n"
+        "the header will notice.\n"
+        "\n"
+        "Pass the record's own method, verbatim.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
 # ── the plan path: every RequestSpec url, since no plan can declare one ──────
 #
 # ⛔ A FLOOR OF ITS OWN, for the same reason the record floor exists: if the spec

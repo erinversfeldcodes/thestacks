@@ -1104,7 +1104,7 @@ requestFromSpec :
 requestFromSpec spec maybeToken expect =
     SimulatedEffect.Http.request
         { method = spec.method
-        , headers = authHeaderList maybeToken
+        , headers = authHeaderList spec.method maybeToken
         , url = spec.url
         , body =
             case spec.body of
@@ -1139,9 +1139,9 @@ optional-auth endpoints send the header only when the viewer has one, and so
 does `Effect.perform` on the production side.
 
 -}
-authHeaderList : Maybe Api.Credentials -> List SimulatedEffect.Http.Header
-authHeaderList maybeToken =
-    Api.requestHeaders Api.SameOrigin (Api.Optional maybeToken)
+authHeaderList : String -> Maybe Api.Credentials -> List SimulatedEffect.Http.Header
+authHeaderList method maybeToken =
+    Api.requestHeaders method Api.SameOrigin (Api.Optional maybeToken)
         |> List.map (\( name, value ) -> SimulatedEffect.Http.header name value)
 
 

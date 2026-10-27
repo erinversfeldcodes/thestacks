@@ -35,11 +35,11 @@ suite =
         [ describe "same-origin requests carry the credential they were given"
             [ test "a Session credential becomes a bearer header" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Session (TestHelpers.creds "tok-abc"))
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.Session (TestHelpers.creds "tok-abc"))
                         |> Expect.equal [ ( "Authorization", "Bearer tok-abc" ) ]
             , test "an Optional credential that is present becomes the same header" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
                         |> Expect.equal [ ( "Authorization", "Bearer tok-abc" ) ]
 
             -- ⚠️ `Optional Nothing` and `NoCredential` both yield no header, and
@@ -67,11 +67,11 @@ suite =
             -- homes, corrected in one of them.
             , test "an Optional credential that is absent carries nothing" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Optional Nothing)
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.Optional Nothing)
                         |> Expect.equal []
             , test "NoCredential carries nothing" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin Api.NoCredential
+                    Api.requestHeaders "GET" Api.SameOrigin Api.NoCredential
                         |> Expect.equal []
             ]
         , describe "a cross-origin request never carries a credential"
@@ -81,15 +81,15 @@ suite =
             -- to pass the right credential. The origin decision wins.
             [ test "even when handed a Session credential" <|
                 \() ->
-                    Api.requestHeaders Api.CrossOrigin (Api.Session (TestHelpers.creds "tok-abc"))
+                    Api.requestHeaders "GET" Api.CrossOrigin (Api.Session (TestHelpers.creds "tok-abc"))
                         |> Expect.equal []
             , test "even when handed a present Optional credential" <|
                 \() ->
-                    Api.requestHeaders Api.CrossOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
+                    Api.requestHeaders "GET" Api.CrossOrigin (Api.Optional (Just (TestHelpers.creds "tok-abc")))
                         |> Expect.equal []
             , test "and trivially when handed none" <|
                 \() ->
-                    Api.requestHeaders Api.CrossOrigin Api.NoCredential
+                    Api.requestHeaders "GET" Api.CrossOrigin Api.NoCredential
                         |> Expect.equal []
 
             -- ⚠️ Stated as its own case because it is the property, not an
@@ -103,8 +103,75 @@ suite =
                     , Api.Optional Nothing
                     , Api.NoCredential
                     ]
-                        |> List.map (Api.requestHeaders Api.CrossOrigin)
+                        |> List.map (Api.requestHeaders "GET" Api.CrossOrigin)
                         |> Expect.equal [ [], [], [], [] ]
+            ]
+        , describe "the double-submit proof rides with the credential"
+            -- ⛔ THE OMISSION IS AS LOAD-BEARING AS THE INCLUSION. A token sent
+            -- on every read trains the server to see the header everywhere, and
+            -- the first thing anyone does with a header that is always present
+            -- is stop checking it where it matters.
+            [ test "a write carries the CSRF token" <|
+                \() ->
+                    Api.requestHeaders "POST" Api.SameOrigin (Api.Session (Api.credentials "tok" (Just "csrf-abc")))
+                        |> Expect.equal
+                            [ ( "Authorization", "Bearer tok" )
+                            , ( "X-CSRF-Token", "csrf-abc" )
+                            ]
+            , test "a read does not" <|
+                \() ->
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.Session (Api.credentials "tok" (Just "csrf-abc")))
+                        |> Expect.equal [ ( "Authorization", "Bearer tok" ) ]
+
+            -- ⚠️ Every unsafe verb, enumerated rather than sampled: the rule is
+            -- about EFFECT, and a list that covered only POST would let a
+            -- `DELETE` ship unproven the first time one was added.
+            , test "every state-changing verb carries it" <|
+                \() ->
+                    [ "POST", "PUT", "PATCH", "DELETE" ]
+                        |> List.map
+                            (\verb ->
+                                Api.requestHeaders verb Api.SameOrigin (Api.Session (Api.credentials "tok" (Just "c")))
+                                    |> List.member ( "X-CSRF-Token", "c" )
+                            )
+                        |> Expect.equal [ True, True, True, True ]
+
+            -- ⚠️ And every safe one, for the same reason in reverse. `HEAD` and
+            -- `OPTIONS` are here because the rule is about effect, not about
+            -- which verbs this client happens to send today.
+            , test "no safe verb carries it" <|
+                \() ->
+                    [ "GET", "HEAD", "OPTIONS" ]
+                        |> List.map
+                            (\verb ->
+                                Api.requestHeaders verb Api.SameOrigin (Api.Session (Api.credentials "tok" (Just "c")))
+                                    |> List.member ( "X-CSRF-Token", "c" )
+                            )
+                        |> Expect.equal [ False, False, False ]
+
+            -- ⛔ ABSENT, NOT EMPTY. The server has to tell "this client has no
+            -- proof" from "this client proved nothing"; an empty-string header
+            -- would compare equal to an empty cookie and pass a careless check.
+            , test "a write with no CSRF token sends no header at all" <|
+                \() ->
+                    Api.requestHeaders "POST" Api.SameOrigin (Api.Session (Api.credentials "tok" Nothing))
+                        |> Expect.equal [ ( "Authorization", "Bearer tok" ) ]
+
+            -- ⚠️ The origin decision still wins. A cross-origin write must carry
+            -- neither the credential nor the proof — sending the CSRF token to a
+            -- third party would hand them the value the scheme rests on.
+            , test "a cross-origin write carries neither" <|
+                \() ->
+                    Api.requestHeaders "POST" Api.CrossOrigin (Api.Session (Api.credentials "tok" (Just "c")))
+                        |> Expect.equal []
+
+            -- ⚠️ The verb is matched case-insensitively, because a method is a
+            -- string and nothing stops a call site writing "post".
+            , test "a lowercase verb is still recognised as unsafe" <|
+                \() ->
+                    Api.requestHeaders "post" Api.SameOrigin (Api.Session (Api.credentials "tok" (Just "c")))
+                        |> List.member ( "X-CSRF-Token", "c" )
+                        |> Expect.equal True
             ]
         , describe "the derivation is data, so both runtimes convert one value"
             -- ⛔ The headers are returned as `( String, String )` pairs rather
@@ -119,7 +186,7 @@ suite =
             -- the same `Maybe String`.
             [ test "the header name and value are inspectable without a runtime" <|
                 \() ->
-                    Api.requestHeaders Api.SameOrigin (Api.Session (TestHelpers.creds "tok-abc"))
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.Session (TestHelpers.creds "tok-abc"))
                         |> List.map Tuple.first
                         |> Expect.equal [ "Authorization" ]
             ]

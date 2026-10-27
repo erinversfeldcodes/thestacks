@@ -78,7 +78,7 @@ authedRequestCarriesTheBuildersHeaders =
                     "/api/search?q=habit"
                     (\request ->
                         Expect.equal
-                            (Api.requestHeaders Api.SameOrigin (Api.Optional (Just token)))
+                            (Api.requestHeaders "GET" Api.SameOrigin (Api.Optional (Just token)))
                             request.headers
                     )
 
@@ -98,7 +98,7 @@ anonymousRequestCarriesTheBuildersHeaders =
                     "/api/search?q=habit"
                     (\request ->
                         Expect.equal
-                            (Api.requestHeaders Api.SameOrigin (Api.Optional Nothing))
+                            (Api.requestHeaders "GET" Api.SameOrigin (Api.Optional Nothing))
                             request.headers
                     )
 
@@ -124,10 +124,10 @@ theBuilderIsReachedWithTheSameArgumentsBothRuntimesUse =
             Expect.all
                 [ \() ->
                     Expect.equal
-                        (Api.requestHeaders Api.SameOrigin (Api.Session token))
-                        (Api.requestHeaders Api.SameOrigin (Api.Optional (Just token)))
+                        (Api.requestHeaders "GET" Api.SameOrigin (Api.Session token))
+                        (Api.requestHeaders "GET" Api.SameOrigin (Api.Optional (Just token)))
                 , \() ->
                     Expect.equal []
-                        (Api.requestHeaders Api.SameOrigin (Api.Optional Nothing))
+                        (Api.requestHeaders "GET" Api.SameOrigin (Api.Optional Nothing))
                 ]
                 ()
