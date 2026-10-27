@@ -184,7 +184,7 @@ defmodule StacksWeb.BlogControllerTest do
       assert length(first) == 50
       assert is_binary(cursor)
 
-      second_conn = get(build_conn(), "/api/blog/posts", %{after: cursor})
+      second_conn = get(CoreWeb.ConnCase.proven_conn(), "/api/blog/posts", %{after: cursor})
       assert %{"posts" => second, "next_cursor" => nil} = json_response(second_conn, 200)
       assert length(second) == 1
 

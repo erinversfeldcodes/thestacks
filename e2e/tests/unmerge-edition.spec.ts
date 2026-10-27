@@ -33,7 +33,8 @@
  * shared secret (readOwnerMfaSecret) and derives codes with freshTotp.
  * Enrolling here would replace the secret under the admin-session specs.
  */
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import { type APIRequestContext } from "@playwright/test";
 import { mintSession, ownerAdminToken } from "./helpers";
 
 /**

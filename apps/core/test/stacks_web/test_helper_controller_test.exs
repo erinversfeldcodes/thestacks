@@ -334,7 +334,7 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert Core.Repo.get_by(Stacks.Accounts.AuthTokenFamily, user_id: user.id)
 
       authed =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put_req_header("authorization", "Bearer " <> token)
         |> get("/api/placements/mine")
 
@@ -343,7 +343,7 @@ defmodule StacksWeb.TestHelperControllerTest do
 
     test "each call mints a distinct user (unique default email)", %{conn: conn} do
       first = json_response(post(conn, "/api/test/session", %{}), 201)
-      second = json_response(post(build_conn(), "/api/test/session", %{}), 201)
+      second = json_response(post(CoreWeb.ConnCase.proven_conn(), "/api/test/session", %{}), 201)
 
       assert first["email"] != second["email"]
     end
@@ -445,7 +445,10 @@ defmodule StacksWeb.TestHelperControllerTest do
 
       second =
         json_response(
-          post(build_conn(), "/api/test/book-description", %{title: "B", description: "y"}),
+          post(CoreWeb.ConnCase.proven_conn(), "/api/test/book-description", %{
+            title: "B",
+            description: "y"
+          }),
           201
         )
 

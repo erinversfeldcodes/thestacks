@@ -1,4 +1,5 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import { type APIRequestContext, type Page } from "@playwright/test";
 import { mintSession } from "./helpers";
 
 const GRAFANA_URL = process.env.GRAFANA_URL;

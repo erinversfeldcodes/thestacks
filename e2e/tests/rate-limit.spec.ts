@@ -1,4 +1,4 @@
-import { test, expect, APIRequestContext } from "@playwright/test";
+import { test, expect, APIRequestContext } from "./fixtures";
 
 const WRONG_PASSWORD = "wrong-password-xyz";
 

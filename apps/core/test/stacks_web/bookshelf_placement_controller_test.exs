@@ -544,7 +544,10 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
 
     test "returns 401 when not authenticated", %{conn: _conn, placement: placement} do
-      conn = build_conn() |> put("/api/placements/#{placement.id}/formats", %{formats: []})
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> put("/api/placements/#{placement.id}/formats", %{formats: []})
+
       assert json_response(conn, 401)
     end
 
@@ -581,7 +584,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       other_user = insert(:user)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(other_user)
         |> put("/api/placements/#{placement.id}/visibility", %{visibility: "owner"})
 
@@ -604,7 +607,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
     test "returns 401 when not authenticated", %{placement: placement} do
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put("/api/placements/#{placement.id}/visibility", %{visibility: "owner"})
 
       assert json_response(conn, 401)
@@ -654,7 +657,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       other_user = insert(:user)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(other_user)
         |> put("/api/placements/#{placement.id}/progress", %{reading_status: "reading"})
 
@@ -686,7 +689,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
     test "returns 401 when not authenticated", %{placement: placement} do
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put("/api/placements/#{placement.id}/progress", %{reading_status: "reading"})
 
       assert json_response(conn, 401)

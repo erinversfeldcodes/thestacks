@@ -849,7 +849,7 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending")
 
-      get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
 
       assert_receive {:telemetry, [:core, :repo, :query], measurements, _metadata}, 2_000
       assert is_integer(measurements.total_time)

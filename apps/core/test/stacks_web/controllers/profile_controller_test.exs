@@ -428,7 +428,7 @@ defmodule StacksWeb.ProfileControllerTest do
     end
 
     test "an anonymous viewer does NOT get the marketplace punch", %{count_for: count_for} do
-      assert count_for.(build_conn()) == 0
+      assert count_for.(CoreWeb.ConnCase.proven_conn()) == 0
     end
 
     test "a blocked viewer does not see it — block beats the marketplace exception (SEC-2)",
@@ -579,13 +579,16 @@ defmodule StacksWeb.ProfileControllerTest do
       viewer = insert(:user)
 
       body =
-        build_conn() |> auth_conn(viewer) |> get("/api/u/public_reader") |> json_response(200)
+        CoreWeb.ConnCase.proven_conn()
+        |> auth_conn(viewer)
+        |> get("/api/u/public_reader")
+        |> json_response(200)
 
       assert [%{"name" => "library", "has_feed" => true}] = body["bookshelves"],
              "a public bookshelf was advertised as having no feed: " <>
                inspect(body["bookshelves"])
 
-      feed = build_conn() |> get("/api/feeds/u/public_reader/library")
+      feed = CoreWeb.ConnCase.proven_conn() |> get("/api/feeds/u/public_reader/library")
       assert response(feed, 200)
       assert shelf.visibility == "public"
     end

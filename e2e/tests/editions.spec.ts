@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page } from "./fixtures";
 import { suiteAuthFile, assertSeedOrSkip } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("editions") });

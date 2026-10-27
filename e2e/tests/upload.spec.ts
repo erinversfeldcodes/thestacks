@@ -1,5 +1,5 @@
 import path from "path";
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page } from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 const PIPELINE_TIMEOUT = 300_000;

@@ -48,7 +48,7 @@ defmodule StacksWeb.UploadControllerTest do
     end
 
     test "returns 401 without auth token" do
-      conn = build_conn() |> post("/api/upload/init", %{})
+      conn = CoreWeb.ConnCase.proven_conn() |> post("/api/upload/init", %{})
       assert json_response(conn, 401)
     end
   end
@@ -91,7 +91,9 @@ defmodule StacksWeb.UploadControllerTest do
     test "returns 404 when image_id does not belong to the caller", %{init: init} do
       other = insert(:user)
       {:ok, other_token, _} = Guardian.encode_and_sign(other)
-      other_conn = build_conn() |> put_req_header("authorization", "Bearer #{other_token}")
+
+      other_conn =
+        CoreWeb.ConnCase.proven_conn() |> put_req_header("authorization", "Bearer #{other_token}")
 
       StorageMock.seed("uploads/#{init.image_id}", "fake")
       conn = post(other_conn, "/api/upload/#{init.image_id}/commit", %{})
@@ -132,7 +134,7 @@ defmodule StacksWeb.UploadControllerTest do
 
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
       assert conn2.status == 200
       [content_type | _] = get_resp_header(conn2, "content-type")
       assert String.contains?(content_type, "text/event-stream")
@@ -154,7 +156,7 @@ defmodule StacksWeb.UploadControllerTest do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put_req_header("accept", "text/event-stream")
         |> get("/api/upload/#{image.id}/stream?token=#{token}")
 
@@ -169,7 +171,12 @@ defmodule StacksWeb.UploadControllerTest do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      conn = get(build_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream?token=#{token}")
+      conn =
+        get(
+          CoreWeb.ConnCase.proven_conn(),
+          "/api/upload/#{Ecto.UUID.generate()}/stream?token=#{token}"
+        )
+
       assert json_response(conn, 404)
     end
 
@@ -177,12 +184,12 @@ defmodule StacksWeb.UploadControllerTest do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      conn = get(build_conn(), "/api/upload/not-a-uuid/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/not-a-uuid/stream?token=#{token}")
       assert conn.status in [400, 422]
     end
 
     test "returns 401 without auth token" do
-      conn = get(build_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream")
+      conn = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream")
       assert json_response(conn, 401)
     end
 
@@ -195,7 +202,12 @@ defmodule StacksWeb.UploadControllerTest do
 
       image = insert(:uploaded_image, status: "pending", user_id: owner.id)
 
-      conn = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{requester_token}")
+      conn =
+        get(
+          CoreWeb.ConnCase.proven_conn(),
+          "/api/upload/#{image.id}/stream?token=#{requester_token}"
+        )
+
       assert conn.status == 403
     end
 
@@ -213,7 +225,7 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
       assert conn2.status == 200
       assert String.contains?(conn2.resp_body, "resolved")
       assert String.contains?(conn2.resp_body, book.id)
@@ -233,7 +245,7 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
       assert conn2.status == 200
       assert String.contains?(conn2.resp_body, "resolved")
       assert String.contains?(conn2.resp_body, book.id)
@@ -385,7 +397,7 @@ defmodule StacksWeb.UploadControllerTest do
 
     test "returns 401 without auth token" do
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> post("/api/upload/#{Ecto.UUID.generate()}/reject-identification", %{
           "rejected_book_ids" => []
         })
@@ -401,7 +413,9 @@ defmodule StacksWeb.UploadControllerTest do
       image = insert(:uploaded_image, status: "resolved", user_id: other.id)
 
       {:ok, token, _} = Guardian.encode_and_sign(user)
-      requester_conn = build_conn() |> put_req_header("authorization", "Bearer #{token}")
+
+      requester_conn =
+        CoreWeb.ConnCase.proven_conn() |> put_req_header("authorization", "Bearer #{token}")
 
       conn =
         post(requester_conn, "/api/upload/#{image.id}/reject-identification", %{
@@ -590,7 +604,7 @@ defmodule StacksWeb.UploadControllerTest do
     end
 
     test "returns 401 without auth token" do
-      assert build_conn() |> get("/api/uploads/inbox") |> json_response(401)
+      assert CoreWeb.ConnCase.proven_conn() |> get("/api/uploads/inbox") |> json_response(401)
     end
 
     test "reading the inbox places nothing on a bookshelf", %{conn: conn, user: user} do

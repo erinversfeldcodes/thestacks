@@ -92,7 +92,7 @@ defmodule StacksWeb.MeInferenceControllerTest do
       refute Map.has_key?(default, "risk_inferences")
 
       revealed =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(user)
         |> get("/api/me/inferences", reveal_risk: "true")
         |> json_response(200)

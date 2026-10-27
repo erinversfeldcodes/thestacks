@@ -94,7 +94,7 @@ defmodule StacksWeb.FeedControllerTest do
       {"etag", etag} = List.keyfind(conn1.resp_headers, "etag", 0)
 
       conn2 =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> as_reader()
         |> put_req_header("if-none-match", etag)
         |> get("/api/feeds/#{user.id}/library")

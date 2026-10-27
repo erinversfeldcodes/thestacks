@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
 

@@ -38,7 +38,7 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   defp mirror_response(path, email) do
-    conn = post(build_conn(), path, %{email: email})
+    conn = post(CoreWeb.ConnCase.proven_conn(), path, %{email: email})
 
     %{
       status: conn.status,

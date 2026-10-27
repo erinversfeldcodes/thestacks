@@ -114,7 +114,7 @@ defmodule Stacks.UploadPipelineTest do
       try do
         results =
           Enum.map(1..121, fn _ ->
-            build_conn()
+            CoreWeb.ConnCase.proven_conn()
             |> auth_conn(token)
             |> post("/api/upload/init", %{})
             |> Map.get(:status)
@@ -2021,7 +2021,7 @@ defmodule Stacks.UploadPipelineTest do
       book_id = List.first(resolved_image.book_ids)
 
       book_conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(token)
         |> get("/api/books/#{book_id}")
 
@@ -2030,7 +2030,7 @@ defmodule Stacks.UploadPipelineTest do
       assert is_binary(book_resp["book"]["title"])
 
       place_conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(token)
         |> post("/api/bookshelves/wishlist/placements", %{"book_id" => book_id})
 

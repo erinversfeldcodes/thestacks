@@ -8,8 +8,10 @@ defmodule StacksWeb.Plugs.CsrfCounterTest do
   alias StacksWeb.Plugs.CsrfCookie
   alias StacksWeb.Plugs.CsrfCounter
 
-  defp write(conn, method \\ "POST") do
-    %{conn | method: method}
+  # ⛔ A BARE conn, not the proven one `ConnCase` provides: these cases are
+  # about the request WITHOUT a proof.
+  defp write(_conn, method \\ "POST") do
+    %{Phoenix.ConnTest.build_conn() | method: method}
   end
 
   defp with_cookie(conn, value) do

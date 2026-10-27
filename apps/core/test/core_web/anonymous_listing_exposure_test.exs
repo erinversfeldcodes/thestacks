@@ -50,12 +50,12 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     listing = insert(:listing, status: "active")
 
     index =
-      build_conn()
+      CoreWeb.ConnCase.proven_conn()
       |> get("/api/listings")
       |> json_response(200)
 
     show =
-      build_conn()
+      CoreWeb.ConnCase.proven_conn()
       |> get("/api/listings/#{listing.id}")
       |> json_response(200)
 
@@ -73,12 +73,12 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     listing = insert(:listing, seller: seller, status: "active")
 
     index =
-      build_conn()
+      CoreWeb.ConnCase.proven_conn()
       |> get("/api/listings")
       |> json_response(200)
 
     show =
-      build_conn()
+      CoreWeb.ConnCase.proven_conn()
       |> get("/api/listings/#{listing.id}")
       |> json_response(200)
 
@@ -209,7 +209,7 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     listing = insert(:listing, seller: seller, status: "active")
 
     body =
-      build_conn()
+      CoreWeb.ConnCase.proven_conn()
       |> get("/api/listings")
       |> response(200)
 
@@ -240,7 +240,7 @@ defmodule CoreWeb.AnonymousListingExposureTest do
     listing = insert(:listing, seller: seller, status: "active")
 
     body =
-      build_conn()
+      CoreWeb.ConnCase.proven_conn()
       |> get("/api/listings")
       |> response(200)
 

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { signInViaForm, suiteAuthFile } from "./helpers";
 
 const DEV_EMAIL = "owner@thestacks.app";

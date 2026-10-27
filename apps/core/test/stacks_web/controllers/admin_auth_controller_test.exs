@@ -328,7 +328,10 @@ defmodule StacksWeb.AdminAuthControllerTest do
       auth = fn c -> put_req_header(c, "authorization", "Bearer #{token}") end
 
       %{"provisioning_uri" => uri, "recovery_codes" => codes} =
-        build_conn() |> auth.() |> post("/api/admin/auth/mfa/setup") |> json_response(200)
+        CoreWeb.ConnCase.proven_conn()
+        |> auth.()
+        |> post("/api/admin/auth/mfa/setup")
+        |> json_response(200)
 
       secret_param =
         uri
@@ -340,7 +343,7 @@ defmodule StacksWeb.AdminAuthControllerTest do
       {:ok, raw} = Base.decode32(secret_param, padding: false)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth.()
         |> post("/api/admin/auth/mfa/confirm", %{
           totp_code: NimbleTOTP.verification_code(raw),

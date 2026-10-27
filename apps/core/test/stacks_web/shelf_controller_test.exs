@@ -265,7 +265,7 @@ defmodule StacksWeb.ShelfControllerTest do
       placement = insert(:placement, bookshelf: bookshelf, book: book, shelf: shelf_a)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put("/api/placements/#{placement.id}/shelf", %{shelf_id: shelf_b.id})
 
       assert json_response(conn, 401)

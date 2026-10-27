@@ -1,4 +1,4 @@
-import { test, expect, Page, Route } from "@playwright/test";
+import { test, expect, Page, Route } from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("upload") });

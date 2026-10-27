@@ -156,7 +156,7 @@ defmodule StacksWeb.ImportControllerTest do
 
     test "another user's import is a 404, not a leak", %{conn: _conn, import: import} do
       stranger = insert(:user)
-      conn = auth_conn(Phoenix.ConnTest.build_conn(), stranger)
+      conn = auth_conn(CoreWeb.ConnCase.proven_conn(), stranger)
 
       assert json_response(get(conn, "/api/imports/#{import.id}"), 404)
       assert json_response(get(conn, "/api/imports/#{import.id}/rows"), 404)

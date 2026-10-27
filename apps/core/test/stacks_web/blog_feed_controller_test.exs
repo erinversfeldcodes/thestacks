@@ -31,7 +31,7 @@ defmodule StacksWeb.BlogFeedControllerTest do
       assert body =~ "/blog/#{post.id}"
 
       conn2 =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put_req_header("if-none-match", etag)
         |> get("/api/feeds/u/#{user.handle}/blog")
 
@@ -51,14 +51,14 @@ defmodule StacksWeb.BlogFeedControllerTest do
       refute response(first, 200) =~ "<entry>"
 
       second =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> get("/api/feeds/u/#{user.handle}/blog")
 
       assert get_resp_header(second, "etag") == [etag],
              "the validator must not change when nothing has changed"
 
       conditional =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put_req_header("if-none-match", etag)
         |> get("/api/feeds/u/#{user.handle}/blog")
 

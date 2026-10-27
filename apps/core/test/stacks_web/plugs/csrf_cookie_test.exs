@@ -7,6 +7,12 @@ defmodule StacksWeb.Plugs.CsrfCookieTest do
 
   alias StacksWeb.Plugs.CsrfCookie
 
+  # ⛔ A BARE conn. `ConnCase` now provides one that already carries the proof,
+  # which is right for the 475 controller tests and wrong for these: this file
+  # is about ISSUING the cookie, so starting with one present would make every
+  # case vacuous.
+  defp bare, do: Phoenix.ConnTest.build_conn()
+
   defp set_cookie_header(conn) do
     conn
     |> Plug.Conn.send_resp(200, "")
@@ -15,7 +21,8 @@ defmodule StacksWeb.Plugs.CsrfCookieTest do
   end
 
   describe "issuing" do
-    test "a request with no cookie gets one", %{conn: conn} do
+    test "a request with no cookie gets one" do
+      conn = bare()
       header = conn |> CsrfCookie.call([]) |> set_cookie_header()
 
       assert header
@@ -25,7 +32,9 @@ defmodule StacksWeb.Plugs.CsrfCookieTest do
     # ⚠️ Re-issuing on every page load would rotate the token out from under any
     # other tab the reader has open, and that tab's next write would be refused
     # with nothing to explain it.
-    test "a request that already has one is left alone", %{conn: conn} do
+    test "a request that already has one is left alone" do
+      conn = bare()
+
       header =
         conn
         |> Plug.Test.put_req_cookie(CsrfCookie.cookie_name(), "already-here")
@@ -38,7 +47,9 @@ defmodule StacksWeb.Plugs.CsrfCookieTest do
     # ⚠️ An empty cookie is not a token. Treating it as one would leave the
     # client echoing "" and the server comparing "" to "" — a check that passes
     # while proving nothing.
-    test "an empty cookie is replaced rather than accepted", %{conn: conn} do
+    test "an empty cookie is replaced rather than accepted" do
+      conn = bare()
+
       header =
         conn
         |> Plug.Test.put_req_cookie(CsrfCookie.cookie_name(), "")
@@ -50,8 +61,8 @@ defmodule StacksWeb.Plugs.CsrfCookieTest do
   end
 
   describe "the attributes, each for a stated reason" do
-    setup %{conn: conn} do
-      %{header: conn |> CsrfCookie.call([]) |> set_cookie_header()}
+    setup do
+      %{header: bare() |> CsrfCookie.call([]) |> set_cookie_header()}
     end
 
     # ⛔ THE ONE THAT LOOKS LIKE A BUG. Every other cookie in this wave is
@@ -112,7 +123,8 @@ defmodule StacksWeb.Plugs.CsrfCookieTest do
     # ⛔ A plug nothing invokes is not a plug. The whole scheme rests on this
     # cookie existing before the SPA's first write, so the SPA's own response is
     # the thing to assert against — not the plug in isolation.
-    test "the SPA's HTML response carries the cookie", %{conn: conn} do
+    test "the SPA's HTML response carries the cookie" do
+      conn = bare()
       conn = get(conn, "/")
 
       header =

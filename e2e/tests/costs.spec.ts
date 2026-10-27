@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 test.describe("Cost Transparency", () => {
   test("page loads without authentication and shows cost breakdown", async ({

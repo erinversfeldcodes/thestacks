@@ -99,7 +99,7 @@ defmodule StacksWeb.BookControllerTest do
 
       assert %{"visibility" => "platform"} = json_response(put_conn, 200)
 
-      get_conn = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      get_conn = CoreWeb.ConnCase.proven_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert %{"placement" => placement} = json_response(get_conn, 200)
       assert placement["bookshelf_visibility"] == "platform"
     end
@@ -711,13 +711,13 @@ defmodule StacksWeb.BookControllerTest do
   describe "GET /api/books/:id — visibility gates" do
     test "age_gated book returns 403 for unauthenticated viewer" do
       {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
-      conn = build_conn() |> get("/api/books/#{book.id}")
+      conn = CoreWeb.ConnCase.proven_conn() |> get("/api/books/#{book.id}")
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end
 
     test "public book returns 200 for unauthenticated viewer" do
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
-      conn = build_conn() |> get("/api/books/#{book.id}")
+      conn = CoreWeb.ConnCase.proven_conn() |> get("/api/books/#{book.id}")
       assert %{"book" => returned} = json_response(conn, 200)
       assert returned["id"] == book.id
     end
@@ -960,7 +960,7 @@ defmodule StacksWeb.BookControllerTest do
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       BookDetailCache.invalidate(book.id)
 
-      conn1 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      conn1 = CoreWeb.ConnCase.proven_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn1, 200)["book"]["id"] == book.id
 
       assert_receive {:telemetry, [:stacks, :book_detail_cache, :miss], %{count: 1},
@@ -971,7 +971,7 @@ defmodule StacksWeb.BookControllerTest do
 
       assert book_id == book.id
 
-      conn2 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      conn2 = CoreWeb.ConnCase.proven_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn2, 200)["book"]["id"] == book.id
 
       assert_receive {:telemetry, [:stacks, :book_detail_cache, :hit], %{count: 1},
@@ -1021,7 +1021,7 @@ defmodule StacksWeb.BookControllerTest do
         })
 
         before_body =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> get("/api/books/#{book.id}")
           |> json_response(200)
@@ -1029,7 +1029,7 @@ defmodule StacksWeb.BookControllerTest do
         assert before_body["book"]["edition_count"] == 1
 
         merge_body =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> post("/api/books/#{book.id}/merge-format", %{
             "isbn" => "9780099466031",
@@ -1047,7 +1047,7 @@ defmodule StacksWeb.BookControllerTest do
         Oban.drain_queue(queue: :events)
 
         after_body =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> get("/api/books/#{book.id}")
           |> json_response(200)
@@ -1070,7 +1070,7 @@ defmodule StacksWeb.BookControllerTest do
       BookDetailCache.invalidate(book.id)
 
       before_body =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(reader)
         |> get("/api/books/#{book.id}")
         |> json_response(200)
@@ -1078,7 +1078,7 @@ defmodule StacksWeb.BookControllerTest do
       assert before_body["book"]["visibility_tier"] == "public"
 
       marked =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(insert(:user))
         |> put("/api/books/#{book.id}/age-gate", %{"adults_only" => true})
         |> json_response(200)
@@ -1086,7 +1086,7 @@ defmodule StacksWeb.BookControllerTest do
       assert marked["book"]["visibility_tier"] == "age_gated"
 
       assert %{"error" => "age_verification_required"} =
-               build_conn()
+               CoreWeb.ConnCase.proven_conn()
                |> auth_conn(reader)
                |> get("/api/books/#{book.id}")
                |> json_response(403),
@@ -1122,7 +1122,7 @@ defmodule StacksWeb.BookControllerTest do
            }}
         )
 
-        assert build_conn()
+        assert CoreWeb.ConnCase.proven_conn()
                |> auth_conn(user)
                |> get("/api/books/#{book.id}")
                |> json_response(200)
@@ -1132,7 +1132,7 @@ defmodule StacksWeb.BookControllerTest do
 
         Oban.drain_queue(queue: :events)
 
-        assert build_conn()
+        assert CoreWeb.ConnCase.proven_conn()
                |> auth_conn(user)
                |> get("/api/books/#{book.id}")
                |> json_response(200)

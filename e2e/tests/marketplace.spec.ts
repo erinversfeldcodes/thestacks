@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 /** Ensure at least one active listing exists for the current user.

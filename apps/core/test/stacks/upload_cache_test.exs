@@ -213,7 +213,7 @@ defmodule Stacks.UploadCacheTest do
       non_verified = insert(:user, age_verified: false)
 
       conn =
-        Phoenix.ConnTest.build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> Guardian.Plug.put_current_resource(non_verified)
         |> AgeGate.enforce(read_as_controller(book.id))
 
