@@ -4,4 +4,4 @@ starlette==1.6.0
 uvicorn[standard]==0.52.4
 modal==1.5.5
 pyzbar==0.1.9
-Pillow==12.3.0
+Pillow==13.0.0
