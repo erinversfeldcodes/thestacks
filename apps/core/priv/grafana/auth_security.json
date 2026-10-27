@@ -816,6 +816,94 @@
           "legendFormat": "{{enforces}}/s"
         }
       ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "CSRF proof on state-changing requests \u2014 the enforcement gate",
+      "description": "WHAT: rate of state-changing requests by whether they carried a usable double-submit proof. HOW: rate over stacks_auth_csrf_proof_count_total by outcome, emitted from StacksWeb.Plugs.CsrfCounter on the :api pipeline; safe methods are counted as `safe` so the series has a denominator \u2014 without it, zero unproven writes and a plug that never ran are the same empty result. MEANS: `proven` should be the whole of the write traffic. The two absences are DIFFERENT BUGS: absent_header is a client that did not send the proof, absent_cookie a browser that never received one. WATCH: SCOPE is the :api pipeline, 83 of 91 state-changing routes \u2014 the 4 partner_auth routes carry an Argon2 key and no cookie, and the 4 /api/test/* helpers are unreachable in production. A zero here is a statement about those 83, not about all writes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(stacks_auth_csrf_proof_count_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "CSRF refusals \u2014 expected to sit at zero",
+      "description": "WHAT: rate of state-changing requests REFUSED for failing the double-submit check. HOW: rate over stacks_auth_csrf_refused_count_total by reason, emitted from StacksWeb.Plugs.CsrfEnforce, which runs AFTER the counter so a refused request is counted before it is turned away. MEANS: this is the only signal that enforcement is turning REAL traffic away, and the reason says whose bug it is \u2014 absent_header a client, absent_cookie a server or cookie-attribute problem, mismatched the only one consistent with an attack. WATCH: non-zero and rising after a release means a client path was missed; compare against the proof panel above, where the same request will show as the same reason.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(stacks_auth_csrf_refused_count_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
     }
   ]
 }

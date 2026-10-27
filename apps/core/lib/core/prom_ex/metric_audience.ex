@@ -30,6 +30,14 @@ defmodule Core.PromEx.MetricAudience do
     # token or session. It is the only thing that distinguishes a systemic
     # cookie failure from the rollout not having begun.
     "stacks_auth_session_cookie_rejected_count_total" => :public,
+
+    # ⚠️ Both are aggregate counts with BOUNDED labels — four outcomes and
+    # three refusal reasons, all atoms chosen in code. Neither carries a token
+    # value, a user id, or anything from the request: a CSRF proof is a
+    # per-document value, and labelling by it would turn a counter into a
+    # session tracker with unbounded cardinality.
+    "stacks_auth_csrf_proof_count_total" => :public,
+    "stacks_auth_csrf_refused_count_total" => :public,
     "stacks_auth_login_failure_count_total" => :public,
     "stacks_auth_mfa_verify_count_total" => :public,
     # Invite-gate outcomes. `:public` like its registration sibling: the counter is an

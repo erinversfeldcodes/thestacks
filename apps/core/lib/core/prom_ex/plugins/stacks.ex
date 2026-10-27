@@ -102,6 +102,13 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:reason]
         ),
         counter(
+          [:stacks, :auth, :csrf_refused, :count, :total],
+          event_name: [:stacks, :auth, :csrf_refused],
+          description:
+            "State-changing requests REFUSED for failing the double-submit check, by bounded reason (absent_header/absent_cookie/mismatched). Separate from the proof counter because that one counts what arrived and this one counts what was rejected: a rise here is the only signal that enforcement is turning real traffic away, and the reason says whose bug it is — absent_header a client, absent_cookie a server or cookie-attribute problem, mismatched the only one consistent with an attack. Expected to sit at zero; non-zero and rising after a release means a client path was missed.",
+          tags: [:reason]
+        ),
+        counter(
           [:stacks, :auth, :csrf_proof, :count, :total],
           event_name: [:stacks, :auth, :csrf_proof],
           description:

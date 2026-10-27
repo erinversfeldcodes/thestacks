@@ -15,6 +15,11 @@ defmodule CoreWeb.Router do
     # state-changing and they are exactly the routes a token issued at login
     # would have missed.
     plug StacksWeb.Plugs.CsrfCounter
+
+    # ⛔ REFUSES, and it runs AFTER the counter so a rejected request is counted
+    # before it is turned away — otherwise enforcement would hide the very
+    # signal that says whether enforcement is correct.
+    plug StacksWeb.Plugs.CsrfEnforce
   end
 
   pipeline :spa do
