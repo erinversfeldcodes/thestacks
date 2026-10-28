@@ -14,13 +14,18 @@ defmodule StacksWeb.Plugs.RateLimiter do
       by opting into one of the `rate_limit_*` pipelines; `:api` and `:spa`
       carry none, so there is no floor underneath the rest.
 
-      Overrides: only `RATE_LIMIT_AUTH` and `RATE_LIMIT_PASSWORD_CHANGE` are
-      read, by `Server.init/1` at boot. ⚠️ `RATE_LIMIT_PUBLIC` and
-      `RATE_LIMIT_E2E_HELPER` are set by the deploy and read by nothing, so
-      `:public` and `:e2e_helper` run at the figures above on every deployed
-      stack whatever the environment says. Tracked separately; not annotated
-      above, because an override that is advertised and unread is how the
-      `global` bucket came to be believed in.
+      Overrides, and there are two mechanisms rather than one:
+      `RATE_LIMIT_AUTH`, `RATE_LIMIT_PUBLIC` and `RATE_LIMIT_E2E_HELPER` are
+      applied in the umbrella's ROOT `config/runtime.exs` for every non-test
+      environment, and `RATE_LIMIT_AUTH` plus `RATE_LIMIT_PASSWORD_CHANGE` are
+      applied again by `Server.init/1` at boot. ⚠️ `:admin` and `:feedback`
+      read an `Application` key that nothing writes, so the figures above are
+      the only ones they ever take — a reader with no writer, which is the
+      mirror image of the bucket this docstring used to advertise.
+
+      ⚠️ `apps/core/config/` is NOT the whole config tree. The root
+      `config/` is what a release evaluates, and reading only the inner one
+      says these overrides are unwired when they are wired.
 
       Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
       rotate IPs; NATs share them), so auth values slow naive scripts without
