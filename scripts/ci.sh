@@ -21,6 +21,25 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+
+# ⛔ THE PROOF A BROWSER WOULD HAVE, for the stack at $1. Every login below is a
+# state-changing request and is refused without a double-submit proof: the
+# readable `stacks_csrf` cookie echoed in `X-CSRF-Token`.
+#
+# ⚠️ THE COST OF NOT DOING THIS WAS TWO SECURITY SCANS GOING DARK. The jwt_tool
+# and IDOR lanes each log in to obtain a token; unproven, both got 403, found no
+# token, and reported `SKIP: … could not obtain JWT` / `SKIP: IDOR — could not
+# authenticate both seed users`. A scan that skips is not a clean scan, which
+# the jwt_tool lane's own comment says three lines from where it skips.
+_csrf_proof_for() {
+    CSRF_JAR="$(mktemp)"
+    curl -sf -o /dev/null --cookie-jar "${CSRF_JAR}" --max-time 15 "$1/" || true
+    CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${CSRF_JAR}" 2>/dev/null | tail -1)"
+    if [[ -z "${CSRF_PROOF}" ]]; then
+        echo "WARN: no stacks_csrf cookie from $1/ — every login below will be refused 403" >&2
+    fi
+}
+
 pass() { echo -e "${GREEN}${BOLD}PASS${RESET} $1"; }
 fail() { echo -e "${RED}${BOLD}FAIL${RESET} $1"; }
 SKIPPED=()
@@ -251,7 +270,9 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             _warm_pids+=("$!")
         done
         for i in {1..5}; do
+            _csrf_proof_for "${_core_url}"
             curl -sf --max-time 30 "${_core_url}/api/auth/login" \
+                -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
                 -H "Content-Type: application/json" \
                 -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
                 >/dev/null 2>&1 &
@@ -259,6 +280,7 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         done
         for i in {1..3}; do
             _db_warm_token="$(curl -sf --max-time 30 "${_core_url}/api/auth/login" \
+                -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
                 -H "Content-Type: application/json" \
                 -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
                 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
@@ -280,9 +302,29 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         (fly logs --app "${_core_app}" 2>&1) > "${_fly_logs}" &
         _fly_logs_pid=$!
 
-        if ! CI=1 E2E_SERVICES=none BASE_URL="${_core_url}" \
+        # ⛔ The same enforcement the workflow applies: without
+        # E2E_EXPECT_EMAIL_DELIVERY the email-budget gate is a permanent silent
+        # skip, and this path deploys a fresh stack whose send budget is intact.
+        if ! CI=1 E2E_SERVICES=none E2E_EXPECT_EMAIL_DELIVERY=1 BASE_URL="${_core_url}" \
                 run_group "deploy: e2e" bash scripts/test-e2e.sh; then
             FAILED+=(deploy-e2e)
+        fi
+
+        # ⛔ REPEATABILITY, AND IT BELONGS HERE RATHER THAN BESIDE THE LOCAL E2E.
+        # The subject is state a run LEAVES BEHIND on a shared stack, so it needs
+        # a persistent deployed target — the local run tears its stack down and
+        # cannot exhibit the defect at all.
+        #
+        # ⚠️ Why it is worth two extra runs of two spec files: without it a
+        # failure COUNT is not a measurement. This suite reported 44, 34, 18, 13
+        # and 15 failures across one session, and part of that was real
+        # improvement while part was residue from the run before — which cannot
+        # be separated afterwards. The standing rule that every failure gets
+        # fixed silently assumes a stable denominator.
+        if ! CI=1 BASE_URL="${_core_url}" \
+                run_group "deploy: e2e repeatability" \
+                bash scripts/check-e2e-repeatability.sh; then
+            FAILED+=(deploy-e2e-repeatability)
         fi
 
         kill "${_keep_alive_pid}" 2>/dev/null || true
@@ -306,21 +348,36 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
 
         echo -e "\n${CYAN}${BOLD}=== deploy: security-live ===${RESET}"
 
-        if command -v docker &>/dev/null; then
+        # ⚠️ The DAEMON, not the binary. `command -v docker` succeeds whenever the
+        # client is installed, which it is on any developer machine with Docker
+        # Desktop or colima — while the daemon may well be stopped. The scan
+        # then fails with "Cannot connect to the Docker daemon", its output
+        # contains no "FAIL-NEW: 0", and the branch below reported
+        # **"ZAP baseline found new failures"**: a missing scanner announced as
+        # a security finding.
+        if docker info &>/dev/null; then
             echo "==> OWASP ZAP baseline scan..."
             zap_out="$(docker run --rm \
                 --mount type=tmpfs,destination=/zap/wrk \
                 ghcr.io/zaproxy/zaproxy:2.16.1 \
                 zap-baseline.py -t "${_core_url}" 2>&1)" || true
             echo "${zap_out}"
+            # ⛔ THREE OUTCOMES, NOT TWO, and collapsing them is what made the
+            # message wrong. "Clean", "found something", and "did not run" are
+            # different facts, and only the first two are about the application.
             if grep -q "FAIL-NEW: 0" <<< "${zap_out}"; then
                 pass "deploy: ZAP baseline"
-            else
+            elif grep -qE "FAIL-NEW: [0-9]+" <<< "${zap_out}"; then
                 fail "deploy: ZAP baseline found new failures"
+                FAILED+=(deploy-security)
+            else
+                # A scanner that did not run is not a clean scan — the ruling the
+                # jwt_tool lane already states — but it is not a FINDING either.
+                fail "deploy: ZAP did not run (no FAIL-NEW line in its output) — NOT a clean scan"
                 FAILED+=(deploy-security)
             fi
         else
-            echo "SKIP: docker not available — skipping OWASP ZAP"
+            echo "SKIP: docker daemon not reachable — skipping OWASP ZAP"
         fi
 
         if command -v nuclei &>/dev/null; then
@@ -363,35 +420,78 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
 
         if command -v jwt_tool &>/dev/null; then
             echo "==> jwt_tool..."
+            _csrf_proof_for "${_core_url}"
             _jwt_resp="$(curl -sf "${_core_url}/api/auth/login" \
+                -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
                 -H "Content-Type: application/json" \
                 -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
                 2>/dev/null || true)"
             _jwt="$(echo "${_jwt_resp}" | python3 -c \
                 "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
             if [[ -n "${_jwt}" ]]; then
-                jwt_out="$(jwt_tool "${_jwt}" \
+                # ⛔ THREE THINGS WERE WRONG HERE AT ONCE, and together they made
+                # a lane that could not pass and could not fail honestly. All
+                # three were measured against a local stack, not reasoned.
+                #
+                # 1. `-rh "Authorization: Bearer *JWT*"` with the token as the
+                #    FIRST POSITIONAL found nothing: jwt_tool answered
+                #    `Cannot find a valid JWT` and printed `None | [...] | None`.
+                #    Its own usage says the token needs no positional "if in
+                #    header/cookies" — so the header must carry the REAL token
+                #    and there is no placeholder to substitute.
+                # 2. It proxies to 127.0.0.1:8080 (Burp) BY DEFAULT. Without
+                #    `-np` every request died with
+                #    `ProxyError - check proxy is up`, so even a correct
+                #    invocation never reached the target.
+                # 3. ⚠️ **It exits 1 on a SUCCESSFUL run.** Measured: a bare
+                #    `jwt_tool <token>` decodes the token, prints the claims, and
+                #    returns 1. So `jwt_rc -ne 0` as the "did it run?" test can
+                #    never be satisfied — which is why this lane went from
+                #    silently skipping to deterministically failing and never
+                #    passed in between.
+                jwt_out="$(jwt_tool \
                     -t "${_core_url}/api/auth/me" \
-                    -rh "Authorization: Bearer *JWT*" \
-                    -X a 2>&1)"
-                jwt_rc=$?
+                    -rh "Authorization: Bearer ${_jwt}" \
+                    -np -X a 2>&1)"
                 echo "${jwt_out}"
-                # A scanner that did not run is not a clean scan. This grepped
-                # for "EXPLOIT" and called anything else clean, so when jwt_tool
-                # died on `ModuleNotFoundError: No module named 'ratelimit'` the
-                # lane reported "jwt_tool clean" — a green tick for a scan that
-                # never happened. Prove it ran before believing what it found.
-                if [[ ${jwt_rc} -ne 0 ]] || grep -q "Traceback (most recent call last)" <<< "${jwt_out}"; then
-                    fail "deploy: jwt_tool did not run (exit ${jwt_rc}) — this is NOT a clean scan"
+
+                # The colour codes have to go before anything is counted, or
+                # every pattern below is matched against escape sequences.
+                jwt_clean="$(sed -E $'s/\033\[[0-9;]*m//g' <<< "${jwt_out}")"
+                # ⬜ ANTI-VACUITY: the number of tampered tokens it actually sent.
+                # Zero means it found the token and attacked nothing, which reads
+                # identically to a clean scan in every other respect.
+                jwt_attacks="$(grep -cE 'Exploit: .*Response Code: [0-9]+' <<< "${jwt_clean}")"
+                # ⛔ A FINDING IS A 2xx, NOT THE WORD "EXPLOIT". `grep -i EXPLOIT`
+                # matched jwt_tool's own label for each attack it TRIED — the
+                # four `"alg":"none"` variants print `Exploit: … Response Code:
+                # 401`, all correctly refused. So the old check would have called
+                # a perfectly defended stack vulnerable the moment the
+                # invocation above started working. The result is in the code.
+                jwt_accepted="$(grep -cE 'Exploit: .*Response Code: 2[0-9][0-9]' <<< "${jwt_clean}")"
+
+                if grep -q "Traceback (most recent call last)" <<< "${jwt_clean}" \
+                    || grep -q "\[ERROR\]" <<< "${jwt_clean}" \
+                    || ! grep -q "^Original JWT:" <<< "${jwt_clean}" \
+                    || [[ "${jwt_attacks}" -eq 0 ]]; then
+                    fail "deploy: jwt_tool did not run (found-token=$(grep -c '^Original JWT:' <<< "${jwt_clean}"), attacks=${jwt_attacks}) — this is NOT a clean scan"
                     FAILED+=(deploy-security)
-                elif grep -qi "EXPLOIT" <<< "${jwt_out}"; then
-                    fail "deploy: jwt_tool found exploitable vulnerability"
+                elif [[ "${jwt_accepted}" -gt 0 ]]; then
+                    fail "deploy: jwt_tool — ${jwt_accepted} of ${jwt_attacks} tampered tokens were ACCEPTED (2xx)"
                     FAILED+=(deploy-security)
                 else
-                    pass "deploy: jwt_tool clean"
+                    pass "deploy: jwt_tool clean — ${jwt_attacks} tampered tokens all refused"
                 fi
             else
-                echo "SKIP: jwt_tool — could not obtain JWT"
+                # ⛔ Same ruling as the comment above: a scan that did not run is
+                # not a clean scan, and "could not obtain JWT" is exactly how a
+                # broken login looks from here.
+                if [[ "${CI:-}" == "1" ]]; then
+                    fail "deploy: jwt_tool could not obtain a JWT — NOT a clean scan"
+                    FAILED+=(deploy-security)
+                else
+                    echo "SKIP: jwt_tool — could not obtain JWT"
+                fi
             fi
         else
             echo "SKIP: jwt_tool not installed (run setup.sh)"
@@ -399,17 +499,35 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
 
         echo "==> IDOR test (cross-user resource access)..."
         _u1="$(curl -sf "${_core_url}/api/auth/login" \
+                -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
             -H "Content-Type: application/json" \
             -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null \
             | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" \
             2>/dev/null || true)"
         _u2="$(curl -sf "${_core_url}/api/auth/login" \
+                -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
             -H "Content-Type: application/json" \
             -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
             | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" \
             2>/dev/null || true)"
         if [[ -z "${_u1}" ]] || [[ -z "${_u2}" ]]; then
-            echo "SKIP: IDOR — could not authenticate both seed users"
+            # ⛔ A SECURITY CHECK THAT COULD NOT RUN IS NOT A PASS, and this
+            # skipped silently through the exact failure it exists to catch:
+            # once CSRF enforcement landed, both logins above were refused 403,
+            # yielded no token, and this lane printed SKIP while the IDOR
+            # cross-user DELETE went unexercised. Nothing in the run was red.
+            #
+            # ⚖️ The same ruling the jwt_tool lane already states three branches
+            # down — "a scanner that did not run is NOT a clean scan" — applied
+            # to its sibling. A target that genuinely lacks the seed users is a
+            # real scenario, so the refusal is scoped to CI, where the stack is
+            # freshly seeded and a missing seed user is itself a defect.
+            if [[ "${CI:-}" == "1" ]]; then
+                fail "deploy: IDOR could not authenticate the seed users — NOT a clean scan"
+                FAILED+=(deploy-security)
+            else
+                echo "SKIP: IDOR — could not authenticate both seed users"
+            fi
         else
             _placement="$(curl -sf "${_core_url}/api/bookshelves/library" \
                 -H "Authorization: Bearer ${_u1}" 2>/dev/null \
@@ -417,9 +535,28 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
                     "import json,sys; d=json.load(sys.stdin); s=d.get('shelves',[]); p=[pl for sh in s for pl in sh.get('placements',[])]; print(p[0]['id'] if p else '')" \
                 2>/dev/null || true)"
             if [[ -n "${_placement}" ]]; then
+                # ⛔ THE PROOF IS WHAT KEEPS THIS TEST MEANINGFUL, not a
+                # formality. This check treats 403 and 404 as "denied" — and a
+                # request with no CSRF proof is refused with **403**. So without
+                # the proof this assertion passes no matter what the
+                # authorization layer does: it would report "IDOR cross-user
+                # DELETE blocked (HTTP 403)" over a stack whose row-level checks
+                # had been deleted entirely. The proof makes the 403 mean
+                # authorization again.
+                _idor_jar="$(mktemp)"
+                curl -s -o /dev/null --cookie-jar "${_idor_jar}" --max-time 10 "${_core_url}/" || true
+                _idor_proof="$(awk '$6 == "stacks_csrf" { print $7 }' "${_idor_jar}" 2>/dev/null | tail -1)"
+                if [[ -z "${_idor_proof}" ]]; then
+                    echo "FAIL idor: no stacks_csrf cookie, so a 403 below would not mean denied"
+                    rm -f "${_idor_jar}"
+                    exit 1
+                fi
                 _idor_code="$(curl -o /dev/null -s -w "%{http_code}" \
                     -X DELETE "${_core_url}/api/placements/${_placement}" \
+                    -b "${_idor_jar}" \
+                    -H "X-CSRF-Token: ${_idor_proof}" \
                     -H "Authorization: Bearer ${_u2}")"
+                rm -f "${_idor_jar}"
                 # Fail on anything that is not an explicit denial.
                 #
                 # This used to fail only on 200 — and a successful placement
