@@ -407,10 +407,46 @@ defmodule Stacks.EmailTest do
       watch_outcomes([:stacks, :auth, :email_change])
       before = enqueued_count()
 
-      assert {:error, :rate_limited} = Email.send_email_change_pair(user)
+      # ⛔ The LIMB is asserted, not merely the refusal. Ten sends for one
+      # account is this user hammering the form; the stack's hourly total being
+      # full is everyone's traffic. A caller that cannot tell them apart
+      # attributes the refusal wrongly — an E2E gate enforcing delivery read the
+      # second as the first and would have made CI red for the test suite's own
+      # exhaust.
+      assert {:error, {:rate_limited, :per_user}} = Email.send_email_change_pair(user)
 
       assert enqueued_count() == before
       assert [{:rate_limited, _}] = outcomes()
+    end
+
+    # ⚖️ The other limb, and the discriminating case: the refused user is
+    # UNDER its own limit, so only the stack-wide total can be refusing. Without
+    # this, `:per_user` could be hard-coded and the pair above would still pass.
+    #
+    # ⚠️ The shared `check_rate_limit/1` limb logic is ALSO covered in
+    # `email_delivery_job_test.exs`, which saturated each bucket separately
+    # before this change and asserted the same undifferentiated value for both.
+    # This case is not that duplicate: it pins that `send_email_change_pair/1`
+    # PROPAGATES the limb, which is the path the E2E budget gate reads.
+    test "names the GLOBAL limb when the stack's hourly total is full, not the user's" do
+      user = user_with_pending_change()
+
+      # A hundred sends spread across OTHER accounts: the global total is full
+      # while this user has sent nothing.
+      for _ <- 1..100 do
+        EmailDeliveryJob.new(%{
+          "template" => "registration_confirmation",
+          "user_id" => Ecto.UUID.generate(),
+          "params" => %{"token" => "saturating-the-global-limiter"}
+        })
+        |> Oban.insert!()
+      end
+
+      before = enqueued_count()
+
+      assert {:error, {:rate_limited, :global}} = Email.send_email_change_pair(user)
+
+      assert enqueued_count() == before
     end
   end
 

@@ -252,7 +252,13 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
         assert {:ok, _user} = Email.send_registration_confirmation(user)
       end
 
-      assert {:error, :rate_limited} = Email.send_registration_confirmation(user)
+      # ⛔ The LIMB, not just the refusal. This test already saturated the
+      # per-user bucket specifically, so the distinction was observable here all
+      # along and was being thrown away — both limbs asserted the same
+      # undifferentiated value, which is what let a caller attribute one as the
+      # other.
+      assert {:error, {:rate_limited, :per_user}} =
+               Email.send_registration_confirmation(user)
 
       assert length(all_enqueued(worker: EmailDeliveryJob)) == 10
     end
@@ -268,7 +274,12 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
       end
 
       fresh_user = insert(:user)
-      assert {:error, :rate_limited} = Email.send_registration_confirmation(fresh_user)
+      # ⚖️ The discriminating half: this user has sent NOTHING, so only the
+      # stack-wide total can be refusing. On a test stack that limb is filled by
+      # the suite itself, which is why an E2E gate must skip on it rather than
+      # enforce delivery against it.
+      assert {:error, {:rate_limited, :global}} =
+               Email.send_registration_confirmation(fresh_user)
     end
   end
 

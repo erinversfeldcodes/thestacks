@@ -45,11 +45,22 @@ defmodule StacksWeb.UserSettingsController do
       # The change could not be recorded because the two letters it is made of
       # could not be sent. Recording it anyway would leave a pending change nobody
       # holds a link to, so this is a refusal, not a partial success.
-      {:error, :rate_limited} ->
+      # ⛔ THE LIMB IS NAMED, because the two mean opposite things to a caller
+      # and a bare `email_rate_limited` forces it to guess. `per_user` is this
+      # account sending too much — a refusal worth acting on. `global` is the
+      # whole stack's hourly volume, and on a test stack the dominant source of
+      # that is the SUITE ITSELF (a user per test, each queuing a confirmation),
+      # so it says "the bucket is full", not "delivery is broken".
+      #
+      # ⚠️ Same reasoning as the two CSRF 403s, which carry a `reason` for
+      # exactly this: a refusal a client cannot attribute gets attributed
+      # wrongly. The deploy warmup's 403 was read as bad credentials for the
+      # same lack.
+      {:error, {:rate_limited, limb}} ->
         conn
         |> put_status(429)
         |> put_resp_header("retry-after", "3600")
-        |> json(%{error: "email_rate_limited"})
+        |> json(%{error: "email_rate_limited", limb: limb})
 
       {:error, :argon2_busy} ->
         conn

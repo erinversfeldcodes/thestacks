@@ -113,14 +113,15 @@ defmodule Stacks.Email do
       on, carrying an undo link.
 
       Called as the last step of the transaction that records the change, so it can
-      refuse the whole thing: `{:error, :rate_limited}` rolls the pending state
+      refuse the whole thing: `{:error, {:rate_limited, limb}}` rolls the pending state
       back rather than leaving a reader with a change they cannot resolve and no
       letter explaining why. A pending change and the links that resolve it exist
       together or not at all.
 
       Both outcomes are counted on `[:stacks, :auth, :email_change]`.
   """
-  @spec send_email_change_pair(User.t()) :: {:ok, User.t()} | {:error, :rate_limited}
+  @spec send_email_change_pair(User.t()) ::
+          {:ok, User.t()} | {:error, {:rate_limited, :per_user | :global}}
   def send_email_change_pair(%User{} = user) do
     case check_rate_limit(user.id) do
       :ok ->
@@ -142,8 +143,8 @@ defmodule Stacks.Email do
 
         email_change_outcome(:requested, {:ok, user})
 
-      {:error, :rate_limited} ->
-        email_change_outcome(:rate_limited, {:error, :rate_limited})
+      {:error, {:rate_limited, limb}} ->
+        email_change_outcome(:rate_limited, {:error, {:rate_limited, limb}})
     end
   end
 
@@ -258,7 +259,7 @@ defmodule Stacks.Email do
 
         reset_outcome(:sent)
 
-      {:error, :rate_limited} ->
+      {:error, {:rate_limited, _limb}} ->
         reset_outcome(:rate_limited)
     end
   end
@@ -299,7 +300,7 @@ defmodule Stacks.Email do
 
         resend_outcome(:sent)
 
-      {:error, :rate_limited} ->
+      {:error, {:rate_limited, _limb}} ->
         resend_outcome(:rate_limited)
     end
   end
@@ -370,29 +371,81 @@ defmodule Stacks.Email do
     end
   end
 
-  defp check_rate_limit(user_id) do
+  @doc """
+      The send budget as it stands right now: both counts and both limits.
+
+      ⛔ EXISTS SO A CALLER CAN ASK BEFORE IT SENDS, which is a different
+      question from the refusal `check_rate_limit/1` returns afterwards. The two
+      opaque flows — "forgot my password" and "resend confirmation" — answer the
+      same way whether or not a letter was queued, deliberately, so that neither
+      can be used to find out whether an address has an account. A test driving
+      one of those therefore CANNOT tell "the mail never arrived because the
+      feature is broken" from "… because the bucket was full" by looking at the
+      response, and the suite fills that bucket itself: measured 101
+      `EmailDeliveryJob` rows in an hour on a local stack after three runs,
+      against a global limit of 100.
+
+      ⚠️ The counts are the SAME query the refusal uses, not a second
+      implementation of the rule — a budget report that could disagree with the
+      decision would be worse than none.
+  """
+  @spec budget(binary() | nil) :: %{
+          per_user_count: non_neg_integer(),
+          per_user_limit: pos_integer(),
+          global_count: non_neg_integer(),
+          global_limit: pos_integer()
+        }
+  def budget(user_id \\ nil) do
     one_hour_ago = DateTime.add(DateTime.utc_now(), -3600, :second)
 
-    user_count =
-      from(j in Oban.Job,
-        where:
-          j.worker == "Stacks.Workers.EmailDeliveryJob" and
-            fragment("?->>'user_id' = ?", j.args, ^user_id) and
-            j.inserted_at > ^one_hour_ago
-      )
-      |> Repo.aggregate(:count)
+    %{
+      per_user_count: if(user_id, do: user_send_count(user_id, one_hour_ago), else: 0),
+      per_user_limit: @per_user_hourly_limit,
+      global_count: global_send_count(one_hour_ago),
+      global_limit: @global_hourly_limit
+    }
+  end
 
-    global_count =
-      from(j in Oban.Job,
-        where:
-          j.worker == "Stacks.Workers.EmailDeliveryJob" and
-            j.inserted_at > ^one_hour_ago
-      )
-      |> Repo.aggregate(:count)
+  defp user_send_count(user_id, since) do
+    from(j in Oban.Job,
+      where:
+        j.worker == "Stacks.Workers.EmailDeliveryJob" and
+          fragment("?->>'user_id' = ?", j.args, ^user_id) and
+          j.inserted_at > ^since
+    )
+    |> Repo.aggregate(:count)
+  end
 
+  defp global_send_count(since) do
+    from(j in Oban.Job,
+      where:
+        j.worker == "Stacks.Workers.EmailDeliveryJob" and
+          j.inserted_at > ^since
+    )
+    |> Repo.aggregate(:count)
+  end
+
+  defp check_rate_limit(user_id) do
+    one_hour_ago = DateTime.add(DateTime.utc_now(), -3600, :second)
+    user_count = user_send_count(user_id, one_hour_ago)
+    global_count = global_send_count(one_hour_ago)
+
+    # ⛔ THE TWO LIMBS ARE REPORTED SEPARATELY, because they mean opposite things
+    # to a caller and an undifferentiated `:rate_limited` forces it to guess.
+    #
+    # `:per_user` is about THIS account: ten sends in an hour is a user hammering
+    # the form, and a test that hits it is exercising something real.
+    #
+    # `:global` is about the whole stack: a hundred sends in an hour is traffic
+    # from everyone. ⚠️ On a test stack the dominant source of that traffic is
+    # the SUITE ITSELF — it registers a user per test and each registration
+    # queues a confirmation — so a global refusal there says "the harness filled
+    # the bucket", not "email delivery is broken". Collapsing the two made an
+    # E2E enforcement gate unable to tell a real delivery failure from the
+    # suite's own exhaust.
     cond do
-      user_count >= @per_user_hourly_limit -> {:error, :rate_limited}
-      global_count >= @global_hourly_limit -> {:error, :rate_limited}
+      user_count >= @per_user_hourly_limit -> {:error, {:rate_limited, :per_user}}
+      global_count >= @global_hourly_limit -> {:error, {:rate_limited, :global}}
       true -> :ok
     end
   end

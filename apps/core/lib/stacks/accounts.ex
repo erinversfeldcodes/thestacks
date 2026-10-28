@@ -1261,7 +1261,11 @@ defmodule Stacks.Accounts do
   """
   @spec update_profile(User.t(), map()) ::
           {:ok, User.t()}
-          | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy | :rate_limited}
+          | {:error,
+             Ecto.Changeset.t()
+             | :invalid_password
+             | :argon2_busy
+             | {:rate_limited, :per_user | :global}}
   def update_profile(%User{} = user, attrs) do
     if email_change?(user, attrs) do
       update_profile_with_email(user, attrs)
