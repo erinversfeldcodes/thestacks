@@ -222,13 +222,17 @@ else
     # unprovable by construction. 200 clears the burst (~100/min peak) with
     # 2x headroom and is floodable in ~30s by the spec, which runs LAST and
     # serially so its own flood cannot starve a concurrent login. The spec
-    # reads the value via E2E_AUTH_RATE_LIMIT (exported below) so the two
+    # reads the value via E2E_AUTH_RATE_LIMIT (handed over below) so the two
     # cannot drift apart. Prod keeps the config default.
     RATE_LIMIT_AUTH="200"
-    # Hand the ceiling to the E2E step (same job) so the spec floods past it.
-    if [[ -n "${GITHUB_ENV:-}" ]]; then
-        echo "E2E_AUTH_RATE_LIMIT=${RATE_LIMIT_AUTH}" >> "${GITHUB_ENV}"
-    fi
+    # Hand the ceiling to the E2E step. ⛔ Through a file rather than
+    # `$GITHUB_ENV`, which exists only inside a GitHub Actions job — and this
+    # project's integration gate is `just ci`, which deploys this same stack
+    # with no such variable. The library carries what that cost.
+    # shellcheck source=scripts/lib/e2e-handoff.sh
+    source "${REPO_ROOT}/scripts/lib/e2e-handoff.sh"
+    e2e_handoff_reset
+    e2e_handoff_write E2E_AUTH_RATE_LIMIT "${RATE_LIMIT_AUTH}"
     SMOKE_TESTS_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 

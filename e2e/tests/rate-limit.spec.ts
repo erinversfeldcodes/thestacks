@@ -7,11 +7,23 @@ const WRONG_PASSWORD = "wrong-password-xyz";
 // the suite's own opening burst of real form logins (two workers ripping
 // through register/login specs) cannot eat the budget out from under the
 // specs behind it — which once 429'd every owner sign-in for a 90-second
-// window and failed three runs straight. The deploy step exports the value it
-// set (E2E_AUTH_RATE_LIMIT) so this flood always overshoots the real ceiling;
-// a hardcoded 65 against a raised ceiling proves nothing and fails honestly.
-const AUTH_BUCKET_LIMIT = Number(process.env.E2E_AUTH_RATE_LIMIT || 60);
-const MAX_FLOOD_ATTEMPTS = AUTH_BUCKET_LIMIT + 10;
+// window and failed three runs straight. The deploy hands the value it set
+// over as E2E_AUTH_RATE_LIMIT so this flood always overshoots the real
+// ceiling; a hardcoded 65 against a raised ceiling proves nothing.
+//
+// ⛔ THERE IS NO DEFAULT, AND ITS ABSENCE IS THE POINT. This read was
+// `Number(process.env.E2E_AUTH_RATE_LIMIT || 60)`, and the handoff meant to
+// supply it wrote to `$GITHUB_ENV` — a channel that exists only inside a
+// GitHub Actions job. Under the gate that deploys this same stack and runs
+// this same suite from a shell, nothing arrived: the flood was sized at 70
+// against a ceiling of 200, no 429 was reachable at any point in the loop,
+// and this test failed with the message below. Brute-force protection was
+// reported absent because a variable was unset.
+//
+// ⚖️ The default is what let a harness fault wear a security verdict, and a
+// believable wrong answer is worse than a refusal. So the spec refuses to
+// guess, and names the channel that should have told it.
+const DECLARED_AUTH_CEILING = process.env.E2E_AUTH_RATE_LIMIT;
 
 function floodEmail(i: number): string {
   return `flood-${i}-${Date.now()}@ratelimit.test`;
@@ -79,10 +91,24 @@ test.describe("auth rate limiting (live Fly stack)", () => {
   test("brute-force login trips 429 and rotating X-Forwarded-For cannot bypass it", async ({
     request,
   }) => {
+    expect(
+      DECLARED_AUTH_CEILING,
+      "E2E_AUTH_RATE_LIMIT is unset: the deploy's :auth ceiling never reached " +
+        "this suite, so any flood length here is a guess — and a guess that " +
+        "falls short of the real ceiling reports brute-force protection " +
+        "absent when the only thing absent is this value. The preview deploy " +
+        "writes it through scripts/lib/e2e-handoff.sh and scripts/ci.sh loads " +
+        "it; set it by hand when aiming this spec at a stack deployed another " +
+        "way.",
+    ).toBeTruthy();
+
+    const authBucketLimit = Number(DECLARED_AUTH_CEILING);
+    const maxFloodAttempts = authBucketLimit + 10;
+
     let sawRateLimit = false;
     let attemptsUsed = 0;
 
-    for (let i = 0; i < MAX_FLOOD_ATTEMPTS; i++) {
+    for (let i = 0; i < maxFloodAttempts; i++) {
       attemptsUsed = i + 1;
       const status = await attemptLogin(request, floodEmail(i));
 
@@ -99,11 +125,13 @@ test.describe("auth rate limiting (live Fly stack)", () => {
 
     expect(
       sawRateLimit,
-      `expected a 429 within ${MAX_FLOOD_ATTEMPTS} login attempts but saw none after ` +
+      `expected a 429 within ${maxFloodAttempts} login attempts but saw none after ` +
         `${attemptsUsed} — the per-IP :auth bucket is not limiting on a stack where ` +
         `rate limiting is expected (BASE_URL set, or E2E_EXPECT_RATE_LIMITING=1). ` +
-        `This is the only E2E proof of that bucket: treat it as brute-force ` +
-        `protection being absent, not as a flaky test.`,
+        `The stack told this suite its ceiling is ${authBucketLimit}, so the flood ` +
+        `overshot it by 10 and a limiting bucket had to answer. This is the only ` +
+        `E2E proof of that bucket: treat it as brute-force protection being ` +
+        `absent, not as a flaky test.`,
     ).toBe(true);
 
     for (let n = 1; n <= 5; n++) {

@@ -66,7 +66,7 @@ in code by" and check it before relying on it.
 | `scripts/check-unbounded-sweeps.sh` | `scripts/lint-elixir.sh`, `test/platform/unbounded_sweeps_test.sh` | A retention sweep whose cost grows with how long it has been failing cannot |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/check-workflow-health.sh` | `.github/workflows/workflow-health.yml`, `test/platform/workflow_health_test.sh` | A workflow nobody's pull request depends on can stay red indefinitely. |
-| `scripts/ci.sh` | `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push`, `scripts/lib/python-tools.sh` … |  |
+| `scripts/ci.sh` | `e2e/tests/rate-limit.spec.ts`, `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` … |  |
 | `scripts/classify-credential-rewrite-equivalence.sh` | _manual: Evidence over three fixed commits, not a gate. It classifies every credential rewrite in the one-builder migration against a table of equivalences; its corpus is historical and the question it answers can only be asked once, so wiring it into CI would re-run a settled measurement forever. The STANDING protection for the same property is check-credential-origin.sh and frontend/tests/ApiRequestHeadersTest.elm, both of which do run._ | Every credential rewrite in the one-builder migration, classified against a |
 | `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
@@ -97,6 +97,7 @@ in code by" and check it before relying on it.
 | `scripts/install-hooks.sh` | `justfile` |  |
 | `scripts/lib/blank-shell-data.py` | `scripts/check-cli-stub-provenance.sh`, `scripts/check-sigpipe-hazards.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Blank out the parts of a shell script that are DATA, keeping line numbers. |
 | `scripts/lib/derive-app-database-url.py` | `scripts/deploy-stack.sh`, `test/platform/app_database_url_derivation_test.sh` | Derive the least-privilege runtime connection URL from the owner's. |
+| `scripts/lib/e2e-handoff.sh` | `e2e/tests/rate-limit.spec.ts`, `scripts/ci.sh`, `scripts/deploy-stack.sh`, `test/platform/e2e_auth_ceiling_handoff_test.sh` | What a preview deploy DECIDES that the E2E step has to be told. |
 | `scripts/lib/postgres.sh` | `scripts/test-dbt.sh`, `scripts/test-e2e.sh`, `scripts/test-elixir.sh` |  |
 | `scripts/lib/preview-names.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `scripts/cleanup-preview.sh`, `scripts/deploy-preview.sh` … |  |
 | `scripts/lib/python-tools.sh` | `scripts/lint-dbt.sh`, `scripts/lint-sql.sh`, `scripts/test-dbt.sh` |  |
@@ -128,7 +129,7 @@ in code by" and check it before relying on it.
 | `scripts/sweep-preview-orphans.sh` | `.github/workflows/cleanup-preview.yml`, `test/platform/sweep_preview_orphans_test.sh` | scripts/sweep-preview-orphans.sh — destroy preview resources no open PR owns. |
 | `scripts/test-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-deployed.sh` | `justfile`, `test/platform/exclusion_tags_have_runners_test.sh` |  |
-| `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/e2e_warmup_guard_test.sh` |  |
+| `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/e2e_auth_ceiling_handoff_test.sh` … |  |
 | `scripts/test-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |

@@ -302,6 +302,21 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         (fly logs --app "${_core_app}" 2>&1) > "${_fly_logs}" &
         _fly_logs_pid=$!
 
+        # ⛔ WHAT THE DEPLOY DECIDED, HANDED TO THE SUITE THAT HAS TO KNOW IT.
+        # The preview runs a raised `:auth` ceiling and rate-limit.spec.ts
+        # sizes its flood from it. The old handoff was `$GITHUB_ENV`, which
+        # does not exist here, so the spec fell back to a default BELOW the
+        # real ceiling, never saw a 429, and reported brute-force protection
+        # absent — a security verdict manufactured by a missing variable.
+        # Refuse rather than run the suite half-informed.
+        # shellcheck source=lib/e2e-handoff.sh
+        source "${REPO_ROOT}/scripts/lib/e2e-handoff.sh"
+        e2e_handoff_load
+        if [[ -z "${E2E_AUTH_RATE_LIMIT:-}" ]]; then
+            echo -e "${RED}${BOLD}FAIL${RESET} deploy: the preview deploy left no E2E handoff at $(e2e_handoff_path) — rate-limit.spec.ts would size its flood from a guess, and a flood that falls short of the ceiling reads as absent brute-force protection. See scripts/lib/e2e-handoff.sh." >&2
+            FAILED+=(deploy-e2e-handoff)
+        fi
+
         # ⛔ The same enforcement the workflow applies: without
         # E2E_EXPECT_EMAIL_DELIVERY the email-budget gate is a permanent silent
         # skip, and this path deploys a fresh stack whose send budget is intact.

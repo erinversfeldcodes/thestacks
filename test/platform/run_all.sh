@@ -81,6 +81,7 @@ SUITES=(
     "$HERE/e2e_warmup_guard_test.sh"
     "$HERE/e2e_global_setup_guard_test.sh"
     "$HERE/e2e_global_setup_behavior_test.sh"
+    "$HERE/e2e_auth_ceiling_handoff_test.sh"
 )
 
 # Fail loudly if a suite lands on disk without joining SUITES — otherwise the
