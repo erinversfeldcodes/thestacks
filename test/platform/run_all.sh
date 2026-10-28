@@ -37,6 +37,10 @@ SUITES=(
     "$HERE/credential_origin_gate_test.sh"
     "$HERE/session_expiry_forms_test.sh"
     "$HERE/one_credential_derivation_test.sh"
+    # The client-side half of the CSRF invariant. Its route-side twin is
+    # `check-csrf-scope.sh`, which has no suite of its own — recorded rather
+    # than quietly skipped.
+    "$HERE/csrf_clients_gate_test.sh"
     "$HERE/sigpipe_hazard_gate_test.sh"
     "$HERE/cli_stub_provenance_test.sh"
     "$HERE/ci_gate_reachability_test.sh"
