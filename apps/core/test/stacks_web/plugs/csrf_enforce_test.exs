@@ -6,6 +6,7 @@ defmodule StacksWeb.Plugs.CsrfEnforceTest do
   use CoreWeb.ConnCase, async: false
 
   alias StacksWeb.Plugs.CsrfCookie
+  alias StacksWeb.Plugs.CsrfCounter
   alias StacksWeb.Plugs.CsrfEnforce
 
   # ⛔ A BARE conn, not the proven one `ConnCase` provides. These cases are
@@ -135,15 +136,39 @@ defmodule StacksWeb.Plugs.CsrfEnforceTest do
   end
 
   describe "ordering and telemetry" do
-    # ⛔ The counter must see a request BEFORE enforcement turns it away, or
-    # enforcement hides the signal that says whether enforcement is correct.
-    test "the router runs the counter before the enforcer" do
-      router = File.read!("lib/core_web/router.ex")
-      counter_at = :binary.match(router, "CsrfCounter") |> elem(0)
-      enforce_at = :binary.match(router, "CsrfEnforce") |> elem(0)
+    # ⛔ THIS IS THE ONLY CASE THAT PROVES THE PLUG IS REACHED. Every other case
+    # in this file calls `CsrfEnforce.call/2` directly, so all of them pass just
+    # as happily when the plug is piped nowhere. Moving `plug CsrfEnforce` off
+    # the `:api` pipeline left this file, the counter's file,
+    # `scripts/check-csrf-scope.sh` and `guard_unbypassable_test.sh` ALL GREEN
+    # while none of the 83 state-changing routes was protected — a security gate
+    # that could not fire, which is the failure this work exists to prevent.
+    #
+    # ⚠️ And `ConnCase` hands out a PROVEN conn, so the suite's other 475
+    # controller tests would stay green too. Nothing in the local gate set
+    # noticed. Hence a bare `build_conn()` driven through the real router.
+    #
+    # ⚖️ The ordering claim is asserted here too, and behaviourally: the
+    # counter's event must arrive even though the enforcer refused the request.
+    # The previous version of this case compared BYTE OFFSETS of the two module
+    # names in the router source — which a mere comment naming `CsrfEnforce`
+    # earlier in the file could turn red, and which stayed green when the two
+    # plugs sat in different pipelines with their textual order intact. It was
+    # wrong in both directions and is replaced rather than repaired.
+    test "an unproven write is refused BY THE PIPELINE, and counted before it is" do
+      ref = :telemetry_test.attach_event_handlers(self(), [CsrfCounter.event()])
+      on_exit(fn -> :telemetry.detach(ref) end)
 
-      assert counter_at < enforce_at,
-             "CsrfCounter must be piped before CsrfEnforce, or a refused request goes uncounted"
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> post("/api/auth/login", %{email: "nobody@example.test", password: "wrong"})
+
+      body = json_response(conn, 403)
+      assert body["error"] == "csrf_check_failed"
+      assert body["reason"] == "absent_header"
+      assert conn.halted
+
+      assert_received {_event, _ref, %{count: 1}, %{outcome: :absent_header}}
     end
 
     test "a refusal emits its reason" do

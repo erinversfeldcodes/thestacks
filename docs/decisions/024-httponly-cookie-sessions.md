@@ -111,14 +111,38 @@ top-level GET**: the reader clicks a link in their mail client, which is a
 different site. Under `SameSite=Strict` the browser withholds the cookie on that
 navigation, so a reader who has just confirmed their address lands on a
 logged-out page — the exact moment the product most needs to look like it works.
-`Lax` sends the cookie on top-level navigation and withholds it on cross-site
-subrequests, which is the property wanted.
+`Lax` sends the cookie on a cross-site top-level navigation **made with a safe
+method** — GET or HEAD — and withholds it on cross-site subrequests, which is
+the property wanted.
 
-⛔ **What `Lax` does not buy, stated because it is the whole reason the next
-decision exists.** `Lax` permits the cookie on a cross-site **top-level** request
-— and a form POST that navigates the top-level frame is exactly that. So `Lax`
-is not CSRF protection for state-changing requests. Treating it as such is the
-most likely way this ADR gets misread.
+⛔ **What `Lax` does not buy — CORRECTED 2026-10-28, and the original version of
+this paragraph was wrong in the direction that matters.** It read: *"`Lax`
+permits the cookie on a cross-site top-level request — and a form POST that
+navigates the top-level frame is exactly that. So `Lax` is not CSRF protection
+for state-changing requests."* **That is false.** The safe-method condition is
+part of the rule: a cross-site top-level form POST does **not** carry a
+`SameSite=Lax` cookie, which is precisely why Lax mitigates CSRF for POST. The
+error came from the sentence above it, which dropped the method qualifier and
+was then reasoned from.
+
+⚠️ Chrome's "Lax-allowing-unsafe" intervention *did* permit cross-site POST for
+cookies under two minutes old — but only for cookies that are Lax **by
+default**, with no `SameSite` attribute. Both cookies here set the attribute
+explicitly, so it never applied to this system.
+
+⚖️ **The decision to add a double-submit token is unchanged, and the real
+argument for it is narrower than the false one.** What `Lax` leaves open is:
+(1) clients that do not enforce `SameSite` at all — pre-2018 browsers and some
+embedded webviews, which is OWASP's stated reason for treating `SameSite` as
+defence-in-depth and a token as the primary control; (2) top-level cross-site
+GET, which Lax does permit — harmless here only because every session-authorised
+GET is confirmed to be a read, and that is a property to re-check whenever one
+is added; and (3) a same-site attacker, such as a subdomain, for whom
+`SameSite` means nothing. ⛔ A token does **not** close an XSS on our own
+origin: the cookie is readable by design, so a script on the page can echo it.
+Anyone tempted to weaken `SameSite` on the strength of "we have a token" should
+read this paragraph twice — the two controls cover different attackers and
+neither subsumes the other.
 
 ### 3. CSRF: a double-submit token
 
