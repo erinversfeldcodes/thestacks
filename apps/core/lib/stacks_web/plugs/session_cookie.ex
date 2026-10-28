@@ -169,6 +169,31 @@ defmodule StacksWeb.Plugs.SessionCookie do
   def cookie_name, do: @cookie
 
   @doc """
+      How long the session cookie should live, derived from the ONE place the
+      session's lifetime is configured: Guardian's `:ttl`.
+
+      ⛔ HERE RATHER THAN ON A CONTROLLER, because it is now needed by two
+      callers and a second copy is how the two drift. A cookie outliving the
+      token it carries leaves the browser holding a credential the server will
+      refuse — a session that looks live to the client and is dead on arrival,
+      which is indistinguishable from a server fault. A cookie that dies first
+      logs the reader out early for no stated reason. Both are avoided by
+      deriving from the token's own TTL rather than restating a number.
+  """
+  @spec session_max_age() :: pos_integer()
+  def session_max_age do
+    {amount, unit} = Application.fetch_env!(:core, Stacks.Accounts.Guardian)[:ttl]
+
+    case unit do
+      :seconds -> amount
+      :minutes -> amount * 60
+      :hours -> amount * 60 * 60
+      :days -> amount * 24 * 60 * 60
+      :weeks -> amount * 7 * 24 * 60 * 60
+    end
+  end
+
+  @doc """
       Writes the session cookie. Called by whatever issues a session.
 
       ⚠️ `max_age` rather than a bare session cookie: the session must survive a

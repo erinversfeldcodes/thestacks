@@ -388,19 +388,7 @@ defmodule StacksWeb.AuthController do
   # credential the server will refuse — a session that looks live to the browser
   # and is dead on arrival, which is indistinguishable from a server fault.
   defp put_session_cookie(conn, token) do
-    SessionCookie.put_session_cookie(conn, token, session_max_age())
-  end
-
-  defp session_max_age do
-    {amount, unit} = Application.fetch_env!(:core, Stacks.Accounts.Guardian)[:ttl]
-
-    case unit do
-      :seconds -> amount
-      :minutes -> amount * 60
-      :hours -> amount * 60 * 60
-      :days -> amount * 24 * 60 * 60
-      :weeks -> amount * 7 * 24 * 60 * 60
-    end
+    SessionCookie.put_session_cookie(conn, token, SessionCookie.session_max_age())
   end
 
   defp get_ip(conn), do: StacksWeb.ClientIP.get(conn)
