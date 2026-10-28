@@ -278,8 +278,28 @@ defmodule Stacks.GDPR.Deletion do
       # bytea column, and the reader already maps a null to `%{}`, so this lands
       # on the same value a scrubbed event_log row reads back as — without
       # writing a fresh ciphertext whose key would then outlive the erasure.
-      {count, _} =
-        repo.update_all(user_audit_log_query(user_id), set: [metadata: nil, ip_address: nil])
+      #
+      # ⛔ Through a SECURITY DEFINER function rather than `update_all`, because
+      # the runtime role deliberately does NOT hold UPDATE on `audit.audit_log`
+      # — the audit trail stays append-only at the role level, so no bug in
+      # application code can reach an audit row's columns at all. The function
+      # is narrower than the grant it replaces: two columns, selected by one
+      # user id, with no way to delete a row or touch `action`,
+      # `resource_type`, `resource_id` or `occurred_at`.
+      #
+      # ⚠️ Measured before it existed: the role held INSERT only, this step
+      # raised `42501 permission denied for table audit_log`, and because it
+      # runs AFTER `repo.delete(user)` the abort rolled the user deletion back
+      # too — so erasure was discarded on its only attempt while the caller had
+      # already been handed a 202.
+      #
+      # The `app.audit_gdpr_erasure` authorisation armed earlier in this Multi
+      # still governs the mutation: the function does not arm it, the
+      # append-only trigger still checks it, and the statement-level trigger
+      # still disarms it afterwards, so one authorisation still covers exactly
+      # one statement.
+      %{rows: [[count]]} =
+        repo.query!("SELECT audit.scrub_for_erasure($1)", [Ecto.UUID.dump!(user_id)])
 
       {:ok, count}
     end)
