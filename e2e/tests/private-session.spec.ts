@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, newProvenContext} from "./fixtures";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -7,7 +7,7 @@ test.describe("Private/incognito session isolation", () => {
   test("fresh browser context has no stored auth and shows login state", async ({
     browser,
   }) => {
-    const context = await browser.newContext();
+    const context = await newProvenContext(browser);
     const page = await context.newPage();
 
     await page.goto("/");
@@ -24,7 +24,7 @@ test.describe("Private/incognito session isolation", () => {
   });
 
   test("auth does not leak between browser contexts", async ({ browser }) => {
-    const ctx1 = await browser.newContext();
+    const ctx1 = await newProvenContext(browser);
     const page1 = await ctx1.newPage();
 
     await page1.goto("/login");
@@ -38,7 +38,7 @@ test.describe("Private/incognito session isolation", () => {
     );
     expect(authInCtx1).toBeTruthy();
 
-    const ctx2 = await browser.newContext();
+    const ctx2 = await newProvenContext(browser);
     const page2 = await ctx2.newPage();
 
     await page2.goto("/");
@@ -58,7 +58,7 @@ test.describe("Private/incognito session isolation", () => {
   test("navigating to a protected page without auth shows login", async ({
     browser,
   }) => {
-    const context = await browser.newContext();
+    const context = await newProvenContext(browser);
     const page = await context.newPage();
 
     await page.goto("/library");

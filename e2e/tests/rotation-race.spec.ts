@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, newProvenContext} from "./fixtures";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -36,7 +36,7 @@ test.describe("Cross-tab token rotation race", () => {
   test("a sibling tab's token rotation does NOT log the other tab out", async ({
     browser,
   }) => {
-    const context = await browser.newContext();
+    const context = await newProvenContext(browser);
     const pageA = await context.newPage();
     await signIn(pageA);
 
@@ -69,7 +69,7 @@ test.describe("Cross-tab token rotation race", () => {
   test("a sibling tab's logout (clearAuth) logs the other tab out", async ({
     browser,
   }) => {
-    const context = await browser.newContext();
+    const context = await newProvenContext(browser);
     const pageA = await context.newPage();
     await signIn(pageA);
 

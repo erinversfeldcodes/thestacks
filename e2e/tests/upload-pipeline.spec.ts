@@ -1,4 +1,4 @@
-import { test, expect, Page, Route } from "./fixtures";
+import { test, expect, Page, Route, newProvenContext} from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("upload") });
@@ -761,7 +761,7 @@ test.describe("Sad paths", () => {
     browser,
     baseURL,
   }) => {
-    const context = await browser.newContext({ baseURL });
+    const context = await newProvenContext(browser, { baseURL });
     const page = await context.newPage();
 
     await page.goto("/upload", { waitUntil: "networkidle" });

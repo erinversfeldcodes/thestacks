@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { createHmac } from "node:crypto";
-import { test, expect } from "./fixtures";
+import type { APIResponse } from "@playwright/test";
+import { test, expect, SESSION_COOKIE } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
 
 export const OWNER_AUTH_FILE = path.join(__dirname, "../.auth/owner.json");
@@ -63,15 +64,17 @@ export const E2E_SUITES = [
  */
 export async function ensureBookOnLibrary(page: Page): Promise<void> {
   await page.goto("/library");
-  const placed = await page.evaluate(async () => {
+  const outcome = await page.evaluate(async () => {
     const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    if (!auth.token) return false;
+    if (!auth.token) return { why: "no_token" as const };
 
     const firstPageResp = await fetch("/api/catalogue");
-    if (!firstPageResp.ok) return false;
+    if (!firstPageResp.ok) {
+      return { why: "catalogue" as const, status: firstPageResp.status };
+    }
     const firstPage = await firstPageResp.json();
     const visibleBooks: { id: string }[] = firstPage.books ?? [];
-    if (visibleBooks.length === 0) return false;
+    if (visibleBooks.length === 0) return { why: "catalogue_empty" as const };
 
     const mineResp = await fetch("/api/placements/mine", {
       headers: { Authorization: `Bearer ${auth.token}` },
@@ -81,10 +84,12 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
       (mineData.placements ?? []).map((p: any) => p.book_id),
     );
 
-    if (visibleBooks.some((b) => placedIds.has(b.id))) return true;
+    if (visibleBooks.some((b) => placedIds.has(b.id))) {
+      return { why: "already" as const };
+    }
 
     const unplaced = visibleBooks.find((b) => !placedIds.has(b.id));
-    if (!unplaced) return false;
+    if (!unplaced) return { why: "all_placed" as const };
 
     const placeResp = await fetch("/api/bookshelves/library/placements", {
       method: "POST",
@@ -94,13 +99,47 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
       },
       body: JSON.stringify({ book_id: unplaced.id }),
     });
-    return placeResp.ok;
+    if (placeResp.ok) return { why: "placed" as const };
+    return {
+      why: "refused" as const,
+      status: placeResp.status,
+      body: (await placeResp.text()).slice(0, 300),
+    };
   });
 
-  if (!placed) {
-    console.log(
-      "WARN: could not ensure a placed book is visible on the catalogue first page",
-    );
+  switch (outcome.why) {
+    case "already":
+    case "placed":
+    case "all_placed":
+      return;
+
+    case "catalogue_empty":
+      assertSeedOrSkip(
+        false,
+        "the catalogue's first page is empty, so no book can be placed to satisfy this precondition",
+      );
+      return;
+
+    default:
+      // ⛔ THE WARNING THIS REPLACES COST A WHOLE DIAGNOSIS. This helper used
+      // to `console.log("WARN: could not ensure a placed book…")` and return
+      // normally, so a refused precondition surfaced as whatever the test
+      // asserted next — `audit-log.spec.ts` failed on
+      // `locator('.audit-log__row') … element(s) not found`, which reads as an
+      // empty audit page rather than as a book that was never placed.
+      //
+      // ⚠️ And the warning was not even reliably visible: with the `list`
+      // reporter the line is attached to the test's stdout, so "no WARN in the
+      // log" is not evidence the placement succeeded. I read it as evidence
+      // anyway and spent a pass hunting an audit-log defect.
+      //
+      // ⚖️ An empty catalogue stays a SKIP above — that is an environment
+      // without seeds, not a fault. Everything here is the harness or the
+      // server saying no, and both deserve to fail by name.
+      expect(
+        outcome,
+        `could not place a book to satisfy this test's precondition: ${JSON.stringify(outcome)}`,
+      ).toBeUndefined();
   }
 }
 
@@ -147,14 +186,19 @@ export async function ensureBookOnShelf(
         },
         body: JSON.stringify({ book_id: unplaced.id }),
       });
-      return placeResp.ok;
+      if (placeResp.ok) return true;
+      return `${placeResp.status} ${(await placeResp.text()).slice(0, 200)}`;
     },
     { shelf: shelfName },
   );
 
-  if (!placed) {
-    console.log(`WARN: could not ensure a book on ${shelfName} shelf`);
-  }
+  // ⚠️ Same reasoning as `ensureBookOnLibrary` above: a precondition that
+  // reports its own failure to a log nobody reads is a precondition that fails
+  // silently, and the test then fails somewhere that does not name the cause.
+  expect(
+    placed,
+    `could not ensure a book on the ${shelfName} shelf: ${typeof placed === "string" ? placed : "no token, empty catalogue, or every visible book already placed"}`,
+  ).toBe(true);
 }
 
 /**
@@ -364,16 +408,55 @@ export async function seedBookWriting(
 }
 
 /**
- * Land the browser authenticated as a minted user by injecting the session
- * into localStorage under "stacks-auth" — the exact shape the Elm saveAuth
- * port writes and auth.setup.ts injects. The NEXT page.goto() boots the SPA
- * with the session present, skipping the login form and door animation.
+ * Make this browser context be this user, and nobody else.
+ *
+ * ⛔ THE CONTRACT IS EXCLUSIVE, and that is the part worth stating. The server
+ * accepts a session by cookie OR by bearer header during the rollout, and
+ * `AuthPipeline` runs `SessionCookie` BEFORE `VerifyHeader`, so **the cookie
+ * wins when present**. A context that already holds a different user's
+ * `stacks_session` would therefore keep authenticating as that user while the
+ * token injected here sat unused — and the symptom is not an error, it is the
+ * minted user's data being absent. A spec would report "my placement did not
+ * render" over a stack that rendered the wrong reader's shelf correctly.
+ *
+ * ⚖️ So this clears before it sets, and sets BOTH transports:
+ *   * the cookie, because that is what the server now prefers;
+ *   * the `localStorage` blob, because the SPA still reads identity from it and
+ *     the specs that inject a bearer have not all moved. The blob goes when the
+ *     SPA stops reading it — a separate change, deliberately, so the two are
+ *     bisectable.
+ *
+ * ⚠️ The cookie's attributes must MATCH the ones the server sets
+ * (`HttpOnly; Secure; SameSite=Lax`). A cookie that differs is silently ignored
+ * and looks exactly like logged-out — the same class of trap as the old
+ * "`stacks-auth` must be a FLAT blob" one it replaces, and a `clearCookies`
+ * whose filter does not match clears nothing at all.
  */
 export async function injectSession(
   page: Page,
   session: MintedSession,
 ): Promise<void> {
+  const context = page.context();
+
+  // ⚠️ Navigate FIRST, so the origin the cookie is scoped to comes from the page
+  // rather than from a constant this file would have to keep in step with
+  // `BASE_URL`. `addCookies` takes a `url` and derives domain and path from it,
+  // which is one fewer attribute to get silently wrong.
   await page.goto("/");
+  const origin = new URL(page.url()).origin;
+
+  await context.clearCookies({ name: SESSION_COOKIE });
+  await context.addCookies([
+    {
+      name: SESSION_COOKIE,
+      value: session.token,
+      url: origin,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+    },
+  ]);
+
   await page.evaluate(
     (auth) => {
       localStorage.setItem("stacks-auth", JSON.stringify(auth));
@@ -385,6 +468,71 @@ export async function injectSession(
       displayName: session.displayName,
     },
   );
+}
+
+/**
+ * Make this context carry no credential at all, on either transport.
+ *
+ * ⛔ WHY OMITTING A HEADER IS NO LONGER ENOUGH, and this is the half that broke
+ * four specs the moment the harness started saving the session cookie. A spec
+ * that wanted an anonymous request used to get one for free by leaving
+ * `Authorization` off, because the bearer header was the only credential a
+ * context could hold. The server now accepts a session by cookie too, and
+ * `AuthPipeline` prefers it — so an in-page `fetch` with no header is
+ * authenticated, and an assertion like "these endpoints return 401 when not
+ * authenticated" reads 200 instead.
+ *
+ * ⚠️ DELETES rather than corrupts, which is the opposite choice from
+ * `expireSession` and for the opposite reason: "never signed in" is exactly the
+ * state being asserted here, whereas a present-but-invalid credential would
+ * exercise the expiry path instead and could answer 401 for the wrong reason.
+ */
+export async function goAnonymous(page: Page): Promise<void> {
+  await page.context().clearCookies({ name: SESSION_COOKIE });
+  await page.evaluate(() => {
+    try {
+      localStorage.removeItem("stacks-auth");
+    } catch {
+      // a context with storage access denied is already anonymous
+    }
+  });
+}
+
+/**
+ * End the session on BOTH transports, the way the application now ends one.
+ *
+ * ⛔ WHY THIS EXISTS AS A HELPER. Five specs ended a session by corrupting the
+ * bearer token in `localStorage`, which was complete before the cookie existed
+ * and is now a no-op on the path that matters: measured on a preview, a context
+ * whose stored token had been corrupted still got **200** from
+ * `/api/placements/mine`, `/api/bookshelves/library` and
+ * `/api/onboarding/status`, because the HttpOnly cookie authenticated every one
+ * of them — and nothing redirected to `/login`.
+ *
+ * ⚠️ Corrupts rather than deletes, deliberately. Deleting both credentials
+ * produces "never signed in", which routes to `/login` for a different reason
+ * and would let a spec asserting the session-expired notice pass without the
+ * expiry path running at all. A present-but-invalid credential is what an
+ * expired session actually looks like.
+ */
+export async function expireSession(page: Page): Promise<void> {
+  const context = page.context();
+  const existing = (await context.cookies()).find((c) => c.name === SESSION_COOKIE);
+
+  if (existing) {
+    await context.clearCookies({ name: SESSION_COOKIE });
+    await context.addCookies([
+      { ...existing, value: `${existing.value}.expired` },
+    ]);
+  }
+
+  await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+    if (raw.token) {
+      raw.token = `${raw.token}.expired`;
+      localStorage.setItem("stacks-auth", JSON.stringify(raw));
+    }
+  });
 }
 
 /**
@@ -446,6 +594,118 @@ export function assertSeedOrSkip(sufficient: boolean, message: string): void {
 }
 
 /**
+ * Email-send budget gate, mirroring `assertSeedOrSkip` — but limb-aware,
+ * because the two limbs of this limit mean opposite things.
+ *
+ * ⛔ WHY A GATE AND NOT A RETRY. An email change is refused with
+ * `429 {"error":"email_rate_limited"}` and `retry-after: 3600` when the two
+ * letters it is made of cannot be sent — a deliberate refusal, because
+ * recording the change anyway would leave a pending change nobody holds a link
+ * to. The window is an HOUR, so the `retryOn503` treatment used for Argon2
+ * back-pressure is not available: there is nothing to wait out inside a test.
+ *
+ * ⚠️ MEASURED: a brand-new minted user is refused on its FIRST attempt, so the
+ * budget is not per-user and giving the spec its own user does not help. It is
+ * exhausted by the suite's own repeated runs against a shared stack, which is
+ * why a spec asserting the email-change journey fails deterministically for an
+ * hour after enough runs — looking exactly like a broken feature.
+ *
+ * ⛔ NOT A SILENT SKIP. This repository has a recorded case of
+ * `test.skip(status === 502)` swallowing a real failure and making a test unable
+ * to fail. So `E2E_EXPECT_EMAIL_DELIVERY=1` — set it on any stack that is
+ * supposed to be able to send — turns the skip into a HARD FAILURE, and the skip
+ * reason names the budget rather than the feature.
+ */
+export async function assertEmailBudgetOrSkip(
+  response: APIResponse,
+): Promise<void> {
+  if (response.status() !== 429) return;
+
+  const body = (await response.json().catch(() => ({}))) as { limb?: string };
+
+  // ⛔ THE GLOBAL LIMB IS THE SUITE'S OWN EXHAUST, NOT A FAILURE. The limit is
+  // counted from `oban_jobs` rows in the last hour — 10 per user, 100 across
+  // the stack — and this suite registers a user per test, each queuing a
+  // confirmation. So it fills the global bucket by running, and enforcing
+  // delivery against that would make CI deterministically red for a condition
+  // the harness creates. Always a skip, flag or no flag.
+  if (body.limb === "global") {
+    test.skip(
+      true,
+      "the stack's HOURLY GLOBAL email budget is full (429 email_rate_limited, " +
+        "limb=global). That bucket is filled by this suite itself — a user per " +
+        "test, each queuing a confirmation — so it is harness volume, not a " +
+        "delivery fault. Not enforceable by E2E_EXPECT_EMAIL_DELIVERY.",
+    );
+    return;
+  }
+
+  // ⚠️ `per_user` is a different claim: ten sends in an hour for ONE account,
+  // and these specs mint a fresh user, so reaching it means something real.
+  // Enforceable, and NOT a silent skip — this repository has a recorded case of
+  // `test.skip(status === 502)` swallowing a real failure.
+  const message =
+    `the email-change send was refused 429 email_rate_limited (limb=` +
+    `${body.limb ?? "unreported"}) for a freshly minted user, which is not the ` +
+    `suite's shared budget — ten sends in an hour for one account`;
+  if (process.env.E2E_EXPECT_EMAIL_DELIVERY === "1") {
+    expect(false, `E2E_EXPECT_EMAIL_DELIVERY=1 but ${message}`).toBe(true);
+  } else {
+    test.skip(true, message);
+  }
+}
+
+/**
+ * The same gate as `assertEmailBudgetOrSkip`, asked BEFORE the send instead of
+ * read off the refusal.
+ *
+ * ⛔ WHY BOTH SHAPES EXIST. An email CHANGE refuses out loud —
+ * `429 {"error":"email_rate_limited","limb":…}` — so the refusal carries its
+ * own reason and the response-shaped helper can read it. "Forgot my password"
+ * and "resend confirmation" answer identically whether or not a letter was
+ * queued, deliberately, so that neither reveals whether an address has an
+ * account. A spec driving one of those sees only "no mail arrived", which is
+ * the same observation for a broken feature and for a full bucket.
+ *
+ * ⚠️ AND THE SUITE IS WHAT FILLS THE BUCKET. The limit counts `oban_jobs`
+ * rows in the last hour — 10 per user, 100 across the stack — and this suite
+ * registers a user per test, each queuing a confirmation. Measured on a local
+ * stack after three consecutive runs: 101 `EmailDeliveryJob` rows in the hour,
+ * and the three email specs all failed with `expected a password-reset email`.
+ * That looked like a delivery defect and is not one.
+ *
+ * ⚖️ Global exhaustion is always a skip — harness volume, not a fault, and not
+ * enforceable by `E2E_EXPECT_EMAIL_DELIVERY`, exactly as in the sibling. A
+ * missing helper endpoint is NOT a skip: it means the harness could not ask,
+ * and a spec that skipped on that would go quiet for the wrong reason.
+ */
+export async function skipIfGlobalEmailBudgetFull(
+  request: APIRequestContext,
+): Promise<void> {
+  const resp = await request.get("/api/test/email-budget");
+  if (resp.status() === 404) return;
+
+  expect(
+    resp.ok(),
+    `GET /api/test/email-budget answered ${resp.status()}, so the email budget ` +
+      `could not be read and a missing letter cannot be attributed`,
+  ).toBeTruthy();
+
+  const budget = (await resp.json()) as {
+    global_count: number;
+    global_limit: number;
+  };
+
+  test.skip(
+    budget.global_count >= budget.global_limit,
+    `the stack's HOURLY GLOBAL email budget is full (${budget.global_count} of ` +
+      `${budget.global_limit} sends in the last hour). That bucket is filled by ` +
+      `this suite itself — a user per test, each queuing a confirmation — so it ` +
+      `is harness volume, not a delivery fault.`,
+  );
+}
+
+/**
  * Mint a fresh, empty-collection user, place one catalogue book on `shelf` via
  * the normal placement API, and land the browser authenticated as that user.
  * Returns the session and the placed book's id.
@@ -476,7 +736,15 @@ export async function provisionBookOnShelf(
     headers: { Authorization: `Bearer ${session.token}` },
     data: { book_id: book.id },
   });
-  expect(place.status(), `place book on ${shelf}`).toBe(201);
+  // ⚠️ The body is in the message because the status alone is not diagnosable:
+  // a 422 here was read as a product defect in placements for a stretch, and the
+  // reason the server gave was discarded by this very line.
+  expect(
+    place.status(),
+    `place book ${book.id} on ${shelf} as a freshly minted user: ${
+      place.status() === 201 ? "" : (await place.text()).slice(0, 300)
+    }`,
+  ).toBe(201);
   await injectSession(page, session);
   return { session, bookId: book.id };
 }

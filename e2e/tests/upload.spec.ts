@@ -1,5 +1,5 @@
 import path from "path";
-import { test, expect, Page } from "./fixtures";
+import { test, expect, Page, newProvenContext} from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 const PIPELINE_TIMEOUT = 300_000;
@@ -156,7 +156,7 @@ test.describe("Upload pipeline — duplicate detection", () => {
   }
 
   test.beforeAll(async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newProvenContext(browser, {
       storageState: suiteAuthFile("upload"),
     });
     const page = await context.newPage();

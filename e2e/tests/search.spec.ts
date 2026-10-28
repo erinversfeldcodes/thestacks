@@ -12,6 +12,37 @@ test.use({ storageState: suiteAuthFile("search") });
 
 const BOOK_QUERY = "Book";
 
+/**
+ * A public, searchable book nothing else in this suite can touch.
+ *
+ * ⚖️ Exists so a test whose claim is about the ABSENCE of rows can state it
+ * about a title no other test knows. The shared seed books are the right
+ * fixture for "does search render results"; they are the wrong one for "this
+ * book is nowhere on the platform", because a sibling test listing the same
+ * book for sale makes that false without touching the test that asserts it.
+ */
+async function seedUniqueBook(
+  request: APIRequestContext,
+): Promise<{ id: string; title: string }> {
+  const unique = `${Date.now().toString(36)}${Math.floor(
+    Math.random() * 1e6,
+  ).toString(36)}`;
+  const title = `Zzsolo${unique} Anchor`;
+
+  const resp = await request.post("/api/test/book-description", {
+    data: {
+      title,
+      description: `A solitary volume shelved for ${unique} and nothing else.`,
+    },
+  });
+  assertSeedOrSkip(
+    resp.status() !== 404,
+    "POST /api/test/book-description unavailable (STACKS_E2E_TEST_HELPERS off)",
+  );
+  expect(resp.status(), "create this test's own book").toBe(201);
+  return { id: (await resp.json()).book_id as string, title };
+}
+
 const LEGENDARY = "The Book of Legendary Lands";
 const SAND = "The Book of Sand";
 const LAUGHTER = "The Book of Laughter and Forgetting";
@@ -478,13 +509,27 @@ test.describe("Sectioned search", () => {
     request,
   }) => {
     const owner = await mintOrSkip(request);
-    const book = await catalogueBookAt(request, 0);
+
+    // ⛔ A BOOK OF THIS TEST'S OWN, because the assertion below is "this book
+    // appears NOWHERE on the platform" — a claim about every OTHER member's
+    // listings, which no shared anchor book can keep true. It used
+    // `catalogueBookAt(request, 0)`, and two sibling tests in this very file put
+    // that same book up for sale; after three local runs the platform section
+    // held three active listings of it and the dedup assertion read
+    // `Expected: 0, Received: 3`.
+    //
+    // ⚠️ The dedup rule is PER-VIEWER — your own listing folds into Your
+    // Collection, a stranger's stays on the platform, which the sibling at :392
+    // depends on. So three strangers' listings were the CORRECT answer and the
+    // precondition was what was wrong. A uniquely-titled book makes the claim
+    // true by construction instead of by hoping nobody else listed it.
+    const book = await seedUniqueBook(request);
 
     const place = await request.post("/api/bookshelves/library/placements", {
       headers: { Authorization: `Bearer ${owner.token}` },
       data: { book_id: book.id },
     });
-    expect(place.status(), "place anchor book on library").toBe(201);
+    expect(place.status(), "place this test's own book on library").toBe(201);
 
     await injectSession(page, owner);
     await page.goto("/search");

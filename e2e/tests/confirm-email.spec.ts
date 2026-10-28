@@ -4,6 +4,7 @@ import {
   fetchConfirmationToken,
   fetchSentEmails,
   registerViaApi,
+  skipIfGlobalEmailBudgetFull,
   uniqueEmail,
 } from "./helpers";
 
@@ -89,6 +90,7 @@ test.describe("Email confirmation — full flow", () => {
     page,
     request,
   }) => {
+    await skipIfGlobalEmailBudgetFull(request);
     const email = uniqueEmail("e2e-mailflow");
     const reg = await registerViaApi(request, {
       email,

@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, newProvenContext} from "./fixtures";
 import type { Browser, Page } from "@playwright/test";
 import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
@@ -43,7 +43,7 @@ async function setProfileVisibility(
   browser: Browser,
   visibility: string,
 ): Promise<void> {
-  const context = await browser.newContext({
+  const context = await newProvenContext(browser, {
     storageState: suiteAuthFile("bookshelf"),
   });
   try {
@@ -118,7 +118,7 @@ async function currentUserId(page: Page): Promise<string> {
 
 test.describe("RSS affordance on a bookshelf", () => {
   test.afterAll(async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newProvenContext(browser, {
       storageState: suiteAuthFile("bookshelf"),
     });
     const page = await context.newPage();
@@ -181,7 +181,7 @@ test.describe("RSS affordance on a bookshelf", () => {
 
 test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name", () => {
   test.afterAll(async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newProvenContext(browser, {
       storageState: suiteAuthFile("bookshelf"),
     });
     const page = await context.newPage();

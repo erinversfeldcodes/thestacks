@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { signInViaForm, suiteAuthFile } from "./helpers";
+import { signInViaForm, suiteAuthFile, expireSession } from "./helpers";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -526,11 +526,13 @@ test.describe("Session expiry", () => {
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
-    });
+    // ⛔ BOTH TRANSPORTS. Corrupting only the stored bearer token stopped ending
+    // the session once the server began issuing an HttpOnly cookie: measured on
+    // a preview, a context whose stored token had been corrupted still got 200
+    // from /api/placements/mine, /api/bookshelves/library and
+    // /api/onboarding/status, and nothing redirected — the cookie authenticated
+    // every one of them. `expireSession` corrupts the cookie too.
+    await expireSession(page);
 
     await page.goto("/library");
 
@@ -549,7 +551,7 @@ test.describe("Session expiry", () => {
     expect(stored).toBeFalsy();
   });
 
-  test("Session expiry redirects from a newly-covered page (Settings/Privacy) []", async ({
+  test("Session expiry redirects from a newly-covered page (Settings/Privacy)", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
@@ -587,16 +589,18 @@ test.describe("Session expiry", () => {
     expect(stored).toBeFalsy();
   });
 
-  test("Session expiry redirects at boot when the placement check 401s (boot hook) []", async ({
+  test("Session expiry redirects at boot when the placement check 401s (boot hook)", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
-    });
+    // ⛔ BOTH TRANSPORTS. Corrupting only the stored bearer token stopped ending
+    // the session once the server began issuing an HttpOnly cookie: measured on
+    // a preview, a context whose stored token had been corrupted still got 200
+    // from /api/placements/mine, /api/bookshelves/library and
+    // /api/onboarding/status, and nothing redirected — the cookie authenticated
+    // every one of them. `expireSession` corrupts the cookie too.
+    await expireSession(page);
 
     await page.goto("/");
 

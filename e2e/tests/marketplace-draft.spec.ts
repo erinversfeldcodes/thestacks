@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, provenHeaders } from "./fixtures";
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
@@ -13,8 +13,8 @@ const DRAFT_CONTACT = "e2e-182-draft@thestacks.test";
 const DRAFT_DESCRIPTION =
   "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry";
 
-test.describe("Marketplace listing draft []", () => {
-  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login []", async ({
+test.describe("Marketplace listing draft", () => {
+  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
@@ -45,7 +45,10 @@ test.describe("Marketplace listing draft []", () => {
     );
     expect(liveToken).toBeTruthy();
     const revokeResp = await page.request.delete("/api/auth/logout", {
-      headers: { Authorization: `Bearer ${liveToken}` },
+      headers: {
+        Authorization: `Bearer ${liveToken}`,
+        ...(await provenHeaders(page)),
+      },
     });
     expect(revokeResp.status()).toBe(204);
 

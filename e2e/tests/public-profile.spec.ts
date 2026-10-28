@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, newProvenContext} from "./fixtures";
 import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
 import {
   uniqueEmail,
@@ -275,7 +275,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setProfileVisibility(request, platAuth, "platform");
     const platHandle = await claimHandle(request, platAuth, "e2e_platform");
 
-    const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const anonCtx = await newProvenContext(browser, { storageState: { cookies: [], origins: [] } });
     const page = await anonCtx.newPage();
     try {
       await page.goto(`/u/${pubHandle}`);

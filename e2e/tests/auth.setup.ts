@@ -1,4 +1,4 @@
-import { test as setup } from "./fixtures";
+import { test as setup, newProvenContext, SESSION_COOKIE } from "./fixtures";
 import path from "path";
 import {
   DEV_EMAIL,
@@ -37,6 +37,29 @@ async function authenticateUser(
   const body = await resp.json();
 
   await page.goto("/");
+
+  // ⛔ THE COOKIE HAS TO BE CARRIED ACROSS BY HAND, and the reason is structural
+  // rather than an oversight. The login above runs through the `request`
+  // fixture, which has its own cookie jar — so the server's
+  // `Set-Cookie: stacks_session=…` landed in THAT context and the page context
+  // never saw it. Measured before this change: every saved state in
+  // `e2e/.auth/*.json` held exactly one cookie, `stacks_csrf`, and no session
+  // cookie at all — so the whole suite authenticated by bearer while the server
+  // had been issuing cookies since the transport landed.
+  //
+  // ⚠️ Attributes must match what the server sets (`HttpOnly; Secure;
+  // SameSite=Lax`). A cookie that differs is not sent, and the symptom is
+  // indistinguishable from logged-out.
+  await page.context().addCookies([
+    {
+      name: SESSION_COOKIE,
+      value: body.token,
+      url: new URL(page.url()).origin,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+    },
+  ]);
 
   await page.evaluate(
     (auth: any) => {
@@ -82,7 +105,7 @@ setup("enrol the owner's admin MFA factor", async ({ request }) => {
 setup("authenticate E2E suite users", async ({ request, browser }) => {
   setup.setTimeout(120_000); // 16 suite users × ~2s each against remote preview
   for (const slug of E2E_SUITES) {
-    const context = await browser.newContext();
+    const context = await newProvenContext(browser);
     const page = await context.newPage();
     await authenticateUser(
       request,
