@@ -295,4 +295,16 @@ assert_contains "$SPEC_SRC" "BUCKET_WINDOW_MS + 2_000 - (Date.now() - floodLastR
 assert_contains "$SPEC_SRC" "had not drained" \
     "and asserting the drain worked rather than assuming the arithmetic held"
 
+# ⚖️ A GREEN RUN MUST SAY WHAT IT MEASURED. The failure messages carry the rate,
+# the peak and the ceiling; without the same numbers on success, a passing run
+# records no margin — and the ceiling can drift toward the rate the probe
+# achieves with nothing in any log to show it coming. The spec would keep
+# passing until the day it could not.
+test_case "a_passing_flood_records_its_margin" \
+    "the measurement is reported when it is good news, not only when it is bad"
+assert_contains "$SPEC_SRC" "console.log" \
+    "the spec prints on the success path"
+assert_contains "$SPEC_SRC" "which needs" \
+    "naming the rate the declared ceiling demands, so the margin is readable"
+
 summarise

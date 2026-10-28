@@ -225,6 +225,11 @@ test.describe("auth rate limiting (live Fly stack)", () => {
 
     const remainingMs =
       BUCKET_WINDOW_MS + 2_000 - (Date.now() - floodLastRequestAt);
+    console.log(
+      `[ratelimit] draining the :auth bucket for the stage behind this one: ` +
+        `waiting ${Math.max(0, Math.round(remainingMs / 1000))}s for the ` +
+        `${BUCKET_WINDOW_MS / 1000}s window to expire`,
+    );
     if (remainingMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, remainingMs));
     }
@@ -304,6 +309,21 @@ test.describe("auth rate limiting (live Fly stack)", () => {
         `bucket: treat it as brute-force protection being absent, not as a flaky ` +
         `test.`,
     ).toBe(true);
+
+    // ⚖️ THE MARGIN, RECORDED ON SUCCESS AND NOT ONLY ON FAILURE. The two
+    // assertions above carry these numbers in their messages, so a red run
+    // explains itself — and a green run said nothing at all. That is the gap
+    // that let this spec sit one configuration change away from being unable to
+    // prove anything: the ceiling can drift toward the rate the probe achieves,
+    // and the test keeps passing until the day it cannot, with no trend in any
+    // log to show it coming. Same measurement, printed when it is good news.
+    console.log(
+      `[ratelimit] 429 after ${flooded.attempts} attempt(s) in ` +
+        `${spanSeconds.toFixed(1)}s (${ratePerSecond.toFixed(1)}/s); peak ${peak} ` +
+        `inside one ${windowSeconds}s window against a declared ceiling of ` +
+        `${authBucketLimit}, which needs ` +
+        `${(authBucketLimit / windowSeconds).toFixed(2)}/s`,
+    );
 
     for (let n = 1; n <= 5; n++) {
       const spoofedStatus = await attemptLogin(request, floodEmail(1000 + n), {
