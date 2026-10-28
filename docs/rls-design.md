@@ -118,8 +118,8 @@ The following tables have RLS policies enabled today (migration `20260319000008`
 
 | Table | Policies |
 |-------|----------|
-| `op.bookshelves` | `bookshelves_owner` (USING + WITH CHECK on `user_id`), `bookshelves_platform_select` (SELECT where `visibility = 'platform'`) |
-| `op.bookshelf_placements` | `bookshelf_placements_owner` (USING + WITH CHECK via parent bookshelf ownership), `bookshelf_placements_platform_select` (SELECT where both placement and parent bookshelf are `'platform'`) |
+| `op.bookshelves` | `bookshelves_owner` (USING + WITH CHECK on `user_id`), `bookshelves_audience_select` (SELECT where `visibility = 'public'`, or `'platform'` for a signed-in reader) |
+| `op.bookshelf_placements` | `bookshelf_placements_owner` (USING + WITH CHECK via parent bookshelf ownership), `bookshelf_placements_audience_select` (SELECT where both placement and parent bookshelf are visible to that viewer — `'public'` to anyone, `'platform'` to a signed-in reader) |
 | `op.user_blocks` | `user_blocks_owner` (USING + WITH CHECK on `blocker_id`) |
 | `op.visibility_grants` | `visibility_grants_granter` (USING + WITH CHECK on `granted_by_id`), `visibility_grants_grantee_select` (SELECT where `granted_to_id` matches) |
 
@@ -173,10 +173,13 @@ CREATE POLICY bookshelves_owner ON op.bookshelves
   USING (user_id = current_setting('app.current_user_id')::uuid)
   WITH CHECK (user_id = current_setting('app.current_user_id')::uuid);
 
--- Others: can SELECT platform-visibility bookshelves
-CREATE POLICY bookshelves_platform_select ON op.bookshelves
+-- Others: public to anyone, platform only to a signed-in reader
+CREATE POLICY bookshelves_audience_select ON op.bookshelves
   FOR SELECT
-  USING (visibility = 'platform');
+  USING (
+    visibility = 'public'
+    OR (visibility = 'platform' AND op.current_scope() IS NOT NULL)
+  );
 ```
 
 ---
@@ -185,7 +188,7 @@ CREATE POLICY bookshelves_platform_select ON op.bookshelves
 
 **Access rules:**
 - Owner of the parent bookshelf can CRUD placements on their own shelves.
-- Others can SELECT placements where both the placement's `visibility` and the parent bookshelf's `visibility` are `'platform'`.
+- Others can SELECT a placement only when both the placement and its parent bookshelf are visible to that viewer: `'public'` to anyone, `'platform'` only to a signed-in reader.
 
 ```sql
 -- Enable RLS
@@ -207,13 +210,20 @@ CREATE POLICY bookshelf_placements_owner ON op.bookshelf_placements
     )
   );
 
--- Others: can SELECT platform-visible placements on platform-visible bookshelves
-CREATE POLICY bookshelf_placements_platform_select ON op.bookshelf_placements
+-- Others: a placement is only as visible as the shelf it sits on, and both
+-- halves are asked for the same viewer.
+CREATE POLICY bookshelf_placements_audience_select ON op.bookshelf_placements
   FOR SELECT
   USING (
-    visibility = 'platform'
+    (
+      visibility = 'public'
+      OR (visibility = 'platform' AND op.current_scope() IS NOT NULL)
+    )
     AND bookshelf_id IN (
-      SELECT id FROM op.bookshelves WHERE visibility = 'platform'
+      SELECT b.id
+      FROM op.bookshelves b
+      WHERE b.visibility = 'public'
+         OR (b.visibility = 'platform' AND op.current_scope() IS NOT NULL)
     )
   );
 ```
