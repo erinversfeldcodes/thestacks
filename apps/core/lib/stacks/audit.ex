@@ -202,11 +202,25 @@ defmodule Stacks.Audit do
 
     user_id_binary = Ecto.UUID.dump!(user_id)
 
-    total =
-      case Repo.query("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary]) do
-        {:ok, %{rows: [[count]]}} -> count
-        _ -> 0
-      end
+    # ⛔ Both queries below are deliberately LOUD. They used to map every error
+    # to an empty success — `_ -> 0` and `_ -> []` — which made this surface
+    # unable to distinguish "this reader has no audit history" from "the query
+    # was refused", and it answered `200 {"total":0,"entries":[]}` for both.
+    #
+    # Measured on a deployed stack: the runtime role holds INSERT and no SELECT
+    # on `audit.audit_log`, so every read was refused and every reader was told
+    # their history was empty — a confident lie on a surface whose entire job is
+    # to tell someone what was recorded about them. An absent key would have
+    # been honest; a zero is a claim.
+    #
+    # ⚠️ A failed read must therefore reach the caller as an error, not as a
+    # shorter list. The one thing that IS tolerated is an unreadable `metadata`
+    # blob on an otherwise-readable row — that rescue lives in
+    # `decrypt_metadata/1` and is a different mechanism with its own tests,
+    # because the row is the record that something happened and the metadata is
+    # the least important part of it.
+    %{rows: [[total]]} =
+      Repo.query!("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary])
 
     sql = """
     SELECT id, action, resource_type, resource_id, metadata, occurred_at
@@ -216,11 +230,7 @@ defmodule Stacks.Audit do
     LIMIT $2 OFFSET $3
     """
 
-    rows =
-      case Repo.query(sql, [user_id_binary, per_page, offset]) do
-        {:ok, %{rows: r}} -> r
-        _ -> []
-      end
+    %{rows: rows} = Repo.query!(sql, [user_id_binary, per_page, offset])
 
     :telemetry.execute([:stacks, :gdpr, :audit, :read], %{count: 1}, %{})
 
