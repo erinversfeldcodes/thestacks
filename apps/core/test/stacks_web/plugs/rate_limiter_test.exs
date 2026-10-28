@@ -47,20 +47,28 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
     end
   end
 
-  describe "call/2 global bucket" do
-    test "allows first request", %{conn: conn} do
-      conn = %{conn | remote_ip: {10, 0, 0, 2}}
-      result = RateLimiter.call(conn, [])
-      refute result.halted
+  describe "init/1 refuses a plug site with no usable bucket" do
+    test "a missing bucket is refused rather than defaulted" do
+      assert_raise ArgumentError, ~r/requires an explicit `bucket:`/, fn ->
+        RateLimiter.init([])
+      end
     end
 
-    test "allows multiple requests below the global limit", %{conn: conn} do
-      conn = %{conn | remote_ip: {10, 0, 0, 3}}
-
-      for _ <- 1..10 do
-        result = RateLimiter.call(conn, [])
-        refute result.halted
+    test "a bucket with no limit is refused at the plug site" do
+      assert_raise ArgumentError, ~r/no limit for bucket :nowhere/, fn ->
+        RateLimiter.init(bucket: :nowhere)
       end
+    end
+
+    # ⚠️ The router's pipelines are the other half of this, and the compiler
+    # enforces them: `init/1` runs at compile time under the default plug init
+    # mode, so a `bucket:` with no `get_limit/1` clause cannot reach a request
+    # because the suite would not compile. This case covers a direct caller,
+    # which is the only way the old `:global` default was ever reached.
+    test "call/2 with no bucket raises instead of choosing one", %{conn: conn} do
+      conn = %{conn | remote_ip: {10, 0, 0, 4}}
+
+      assert_raise KeyError, fn -> RateLimiter.call(conn, []) end
     end
   end
 
@@ -340,7 +348,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
         %{conn | remote_ip: {10, 9, 0, 1}}
         |> put_req_header("fly-client-ip", "198.51.100.77")
 
-      refute RateLimiter.call(conn, []).halted
+      refute RateLimiter.call(conn, bucket: :auth).halted
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
       assert metadata == %{source: :trusted_proxy}
@@ -350,7 +358,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
          %{conn: conn} do
       conn = %{conn | remote_ip: {10, 9, 0, 2}}
 
-      refute RateLimiter.call(conn, []).halted
+      refute RateLimiter.call(conn, bucket: :auth).halted
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
       assert metadata == %{source: :remote_ip}
@@ -361,7 +369,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
         %{conn | remote_ip: {10, 9, 0, 3}}
         |> put_req_header("fly-client-ip", "")
 
-      refute RateLimiter.call(conn, []).halted
+      refute RateLimiter.call(conn, bucket: :auth).halted
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
       assert metadata == %{source: :remote_ip}
@@ -385,7 +393,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
 
       Process.exit(pid, :kill)
 
-      result = RateLimiter.call(conn, [])
+      result = RateLimiter.call(conn, bucket: :auth)
       refute result.halted
     end
   end

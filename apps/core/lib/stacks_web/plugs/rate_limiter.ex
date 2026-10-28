@@ -1,9 +1,26 @@
 defmodule StacksWeb.Plugs.RateLimiter do
   @moduledoc """
-      ETS-backed sliding-window rate limiter. Buckets: global 1000/60s per
-      IP; `:auth` 60/60s per IP; `:upload` 120/60s per user; `:social` 20/60s
-      per user; `:public` 200/60s per IP (`RATE_LIMIT_PUBLIC`);
-      `:password_change` 20/60s per IP; `:feedback` 10/60s per user.
+      ETS-backed sliding-window rate limiter. Buckets: `:auth` 60/60s per IP;
+      `:password_change` 20/60s per IP; `:public` 200/60s per IP; `:admin`
+      30/60s per IP; `:e2e_helper` 10/60s per IP; `:upload` 120/60s per user;
+      `:social` 20/60s per user; `:feedback` 10/60s per user.
+
+      ⛔ There is no default bucket, and no limit that applies to everything.
+      `init/1` refuses a plug site that names no `:bucket`, or names one with no
+      limit, so a new pipeline cannot inherit another's budget by omitting it.
+      The default removed here was a `global` 1000/60s: all eight plug sites
+      passed an explicit bucket, so it governed no request in this limiter's
+      lifetime while this docstring advertised it first. A route is limited only
+      by opting into one of the `rate_limit_*` pipelines; `:api` and `:spa`
+      carry none, so there is no floor underneath the rest.
+
+      Overrides: only `RATE_LIMIT_AUTH` and `RATE_LIMIT_PASSWORD_CHANGE` are
+      read, by `Server.init/1` at boot. ⚠️ `RATE_LIMIT_PUBLIC` and
+      `RATE_LIMIT_E2E_HELPER` are set by the deploy and read by nothing, so
+      `:public` and `:e2e_helper` run at the figures above on every deployed
+      stack whatever the environment says. Tracked separately; not annotated
+      above, because an override that is advertised and unread is how the
+      `global` bucket came to be believed in.
 
       Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
       rotate IPs; NATs share them), so auth values slow naive scripts without
@@ -20,7 +37,6 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   @table :rate_limiter
   @window_ms 60_000
-  @global_limit 1_000
   @auth_limit 60
   @upload_limit 120
   @password_change_limit 20
@@ -30,7 +46,27 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @e2e_helper_limit 10
   @feedback_limit 10
 
-  def init(opts), do: opts
+  # ⛔ The bucket is resolved here, at the plug site, not per request. `init/1`
+  # runs at compile time under the default plug init mode, so a pipeline that
+  # names no bucket — or names one with no limit — cannot be built, rather than
+  # 500ing on the first request that reaches it. `get_limit/1` is the single
+  # source of truth for which buckets exist; calling it here is the whole
+  # validation, so the two cannot disagree.
+  def init(opts) do
+    bucket =
+      Keyword.get(opts, :bucket) ||
+        raise ArgumentError, """
+        StacksWeb.Plugs.RateLimiter requires an explicit `bucket:`.
+
+        There is no default: a bucket omitted here used to mean a 1000/60s
+        budget that nothing else shared, which read as a floor and was not one.
+        Name the bucket this pipeline should spend from, and give it a
+        `get_limit/1` clause if it does not have one yet.
+        """
+
+    _ = get_limit(bucket)
+    opts
+  end
 
   def call(conn, opts) do
     if Application.get_env(:core, :rate_limiting_enabled, true) do
@@ -41,7 +77,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   end
 
   defp do_rate_check(conn, opts) do
-    bucket = Keyword.get(opts, :bucket, :global)
+    bucket = Keyword.fetch!(opts, :bucket)
     key = get_key(conn, bucket)
     limit = get_limit(bucket)
 
@@ -82,7 +118,13 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(:feedback), do: Application.get_env(:core, :rate_limit_feedback, @feedback_limit)
 
-  defp get_limit(_), do: @global_limit
+  defp get_limit(bucket) do
+    raise ArgumentError,
+          "StacksWeb.Plugs.RateLimiter has no limit for bucket #{inspect(bucket)}. " <>
+            "Add a get_limit/1 clause for it — there is deliberately no catch-all, " <>
+            "because the catch-all that used to be here answered for every bucket " <>
+            "nobody had defined and made the mistake invisible."
+  end
 
   # ⛔ `Guardian.Plug.current_resource/1`, NOT `conn.assigns[:guardian_default_resource]`.
   #
