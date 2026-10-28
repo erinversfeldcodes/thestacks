@@ -137,6 +137,26 @@ if real_send? do
 end
 
 if config_env() == :prod do
+  # ⛔ FAIL CLOSED ON THE SESSION SIGNING KEY. The override above is written as
+  # `if guardian_secret = System.get_env(...)`, so an absent variable is not an
+  # error there — it silently leaves the compile-time default in place, and that
+  # default is a literal committed to this repository. A production node booted
+  # that way would sign and accept session tokens under a publicly known key,
+  # which is forgeable by anyone who can read the source.
+  #
+  # ⚠️ The permissive form is CORRECT for dev and must stay: dev deliberately
+  # runs on the committed default so a fresh clone works. What was missing is
+  # the half that makes prod different, and the two secrets immediately above
+  # (`CLOAK_KEY`, `VISION_HMAC_SECRET`) already have it — they raise. This is
+  # the same ruling applied to the third one.
+  System.get_env("GUARDIAN_SECRET_KEY") ||
+    raise """
+    environment variable GUARDIAN_SECRET_KEY is missing.
+    It signs session tokens. Without it the node falls back to the default
+    committed in config.exs, which is public, so every session token would be
+    forgeable. Generate with: openssl rand -base64 48
+    """
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
