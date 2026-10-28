@@ -1141,7 +1141,7 @@ uploadSendFailures =
           test "a 429 on the R2 PUT keeps its status instead of becoming a network error" <|
             \() ->
                 startUpload
-                    |> ProgramTest.update (Upload.R2PutCompleted "img-test-001" (TestHelpers.creds "test-token") (Err (Http.BadStatus 429)))
+                    |> ProgramTest.update (Upload.UploadBytesSent "img-test-001" (TestHelpers.creds "test-token") (Err (Http.BadStatus 429)))
                     |> ProgramTest.expectViewHas
                         [ Selector.text "Too many attempts from here just now. Please wait a little while before trying again." ]
         ]

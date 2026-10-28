@@ -219,7 +219,7 @@ module Api exposing
     , publicProfileDecoder
     , publicProfileSummaryDecoder
     , publishBlogPost
-    , putFileToR2
+    , putUploadBytes
     , recordSyndication
     , refresh
     , refreshRequest
@@ -367,20 +367,28 @@ against intent, an absence cannot.
 needs a `Maybe` in scope, and an unauthenticated endpoint has no token argument
 to pass. The distinction is forced by the call sites, not just preferred.
 
-**The five `NoCredential` requests, and they are not one kind:**
+**The four `NoCredential` requests, and they are now one kind:**
 
-  - `putFileToR2` — `CrossOrigin`, a `PUT` at third-party object storage. The
-    credential must not go, and the destination already guarantees that.
   - `resetPassword`, `requestListingRemoval`, `adminLogin`, `adminVerifyMfa` —
-    `SameOrigin`, and unauthenticated. These are the interesting ones: a
-    state-changing POST at our own origin carrying no session. They are not CSRF
-    targets, because there is no ambient authority for a cross-site request to
-    borrow — each one carries its own capability token in the body, or IS the
-    step that authenticates.
+    `SameOrigin`, and unauthenticated: a state-changing POST at our own origin
+    carrying no session. They are not CSRF targets, because there is no ambient
+    authority for a cross-site request to borrow — each one carries its own
+    capability token in the body, or IS the step that authenticates. ⚠️ They do
+    still carry a PROOF, which is what `NoCredential (Maybe String)` holds the
+    `Maybe` for.
 
-⚠️ The second group is listed because a reader looking for "what does
-`NoCredential` mean" will reach for the first example and generalise from it,
-and the cross-origin case is the one that generalises worst.
+⛔ **There was a fifth, and it was the example this comment led with — corrected
+2026-10-28.** It was the upload byte PUT, described here as "`CrossOrigin`, a
+`PUT` at third-party object storage", and that description was false: the server
+had been returning a path on OUR origin since July, so the request was
+same-origin, state-changing, and sending nothing. Enforcement then refused every
+photo upload.
+
+⚠️ The lesson is not "check the comments". The claim was _consistent_ — a
+third-party destination with no credential is a coherent, safe-sounding design,
+and three separate pieces of prose agreed on it while the code twenty lines
+above the decoder said the opposite. What makes a destination claim checkable is
+a URL the compiler can see, which is why the byte PUT now builds its own.
 
 -}
 type Credential
@@ -508,9 +516,15 @@ bearerOf (Credentials creds) =
 {-| WHERE a request is going, as a decision rather than a default.
 
 ⛔ REQUIRED AT EVERY CALL SITE, so a new request cannot inherit "attach the
-credential" by saying nothing. Measured: exactly one site in this file is
-genuinely cross-origin — `putFileToR2`, a `PUT` to a presigned object-storage
-URL — and it must carry no credential.
+credential" by saying nothing.
+
+⚠️ **As of 2026-10-28 NO site in this file is cross-origin**, and the one that
+claimed to be was wrong — see the `Credential` docs above. So `CrossOrigin` now
+has no production caller: it is exercised only by `ApiRequestHeadersTest`, and
+it is kept because deleting the ability to SAY "this leaves our origin" is how
+the next such request ends up saying nothing instead. ⛔ Read
+`check-credential-origin.sh`'s clean exit accordingly — it is currently
+forward-looking, not a report on a live population.
 
 ⚠️ A header-carried token has no `SameSite` equivalent: nothing in the browser
 stops a shared derivation attaching `Authorization: Bearer …` to a request at
@@ -1995,24 +2009,33 @@ getTransparencyMetrics toMsg =
 -}
 type alias UploadInit =
     { imageId : String
-    , uploadUrl : String
     , expiresIn : Int
     }
 
 
+{-| ⚠️ `upload_url` is in the response and is deliberately NOT decoded. The
+server still sends it, and it is correct — but a URL received at runtime cannot
+be proven same-origin by anything that reads this file, and believing it was a
+third-party URL is what dropped the CSRF proof from every photo upload.
+`putUploadBytes` builds the path instead, from the `image_id` above.
+-}
 decodeUploadInit : Decoder UploadInit
 decodeUploadInit =
-    Decode.map3 UploadInit
+    Decode.map2 UploadInit
         (Decode.field "image_id" Decode.string)
-        (Decode.field "upload_url" Decode.string)
         (Decode.field "expires_in" Decode.int)
 
 
-{-| `POST /api/upload/init` — allocates an image\_id server-side and returns a
-Phoenix-served `upload_url` (`PUT /api/upload/:id/data`) the client PUTs the
-bytes to. Phoenix proxies them to the configured storage backend (R2 in
-production, Local in dev/preview); same-origin, so no R2 CORS allowlisting is
-needed.
+{-| `POST /api/upload/init` — allocates an image\_id server-side and reserves a
+row for it. The bytes then go to `PUT /api/upload/:id/data`, a route on OUR
+origin which proxies them to the configured storage backend; no object-storage
+CORS allowlisting is involved, because the browser never talks to object
+storage.
+
+⚠️ This docstring said "R2 in production, Local in dev/preview" and that is not
+established — nothing selects the R2 backend in any environment. Which store the
+bytes reach is a deployment question, deliberately not asserted here.
+
 -}
 initUploadRequest : String -> RequestSpec
 initUploadRequest contentType =
@@ -2022,38 +2045,40 @@ initUploadRequest contentType =
     }
 
 
-{-| PUT the file bytes to the presigned R2 URL. Sends the raw File body;
-Elm's Http uses XHR under the hood, so the JS-side compression
-monkey-patch in `apps/core/assets/js/app.js` intercepts this
-automatically. No auth header — the presigned URL signature IS the
-authorisation.
+{-| PUT the file bytes to our own upload route. Sends the raw File body; Elm's
+Http uses XHR under the hood, so the JS-side compression monkey-patch in
+`apps/core/assets/js/app.js` intercepts this automatically.
 
 The one request on `uploadTimeout` rather than `standardTimeout`: it is the only
 one carrying a file body, so its elapsed time is bytes moving rather than a
 server thinking. See `uploadTimeout`.
 
+⛔ **IT TAKES AN `imageId`, NOT A URL, AND THAT IS THE WHOLE POINT.** It used to
+take the `upload_url` the server returned and declare the destination
+`CrossOrigin`, on the belief that the URL was a presigned object-storage link.
+It had not been one since July — the server returns a path on our own origin —
+so the request was same-origin, state-changing, and sent no headers at all,
+because `CrossOrigin` yields `[]` by construction. Once CSRF enforcement went
+on, every photo upload was refused `absent_header`. Measured on a deployed
+stack: `403` without the proof, `200` with it.
+
+⚖️ Building the path here is what makes the destination checkable. A URL handed
+over at runtime cannot be related to a `SameOrigin` claim by the compiler or by
+`check-credential-origin.sh`; a literal prefix can, and the prefix is a path, so
+the result is on our origin whatever the `imageId` contains.
+
 -}
-putFileToR2 :
+putUploadBytes :
     String
     -> File
+    -> Credentials
     -> (Result Http.Error () -> msg)
     -> Cmd msg
-putFileToR2 url file toMsg =
+putUploadBytes imageId file creds toMsg =
     Http.request
         { method = "PUT"
-
-        -- ⛔ THE ONE CROSS-ORIGIN REQUEST IN THIS MODULE, declared rather than
-        -- left as an empty list. `httpHeaders CrossOrigin (NoCredential Nothing)` yields
-        -- `[]`, so the behaviour is identical — what changes is that the absence
-        -- is now a STATEMENT a reader and a gate can both check, instead of an
-        -- absence indistinguishable from an oversight.
-        --
-        -- ⚠️ The url is a presigned object-storage URL passed in by the caller,
-        -- so it cannot be proven same-origin from this file and must not be: a
-        -- `SameOrigin` claim here would attach a bearer token to a third-party
-        -- host. `check-credential-origin.sh` refuses that combination.
-        , headers = httpHeaders "PUT" CrossOrigin (NoCredential Nothing)
-        , url = url
+        , headers = httpHeaders "PUT" SameOrigin (Session creds)
+        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/data"
         , body = Http.fileBody file
         , expect = Http.expectWhatever toMsg
         , timeout = uploadTimeout

@@ -14,12 +14,24 @@ a fact about its callers, not about the function holding it.** This builder
 exists to make the seam the only path.
 
 ⚠️ **The security-relevant case is `CrossOrigin`, and it is not symmetrical with
-the others.** Exactly one request in the file leaves our origin — `putFileToR2`,
-a `PUT` to a presigned object-storage URL — and a header-carried bearer token has
-**no `SameSite` equivalent** to stop a blind derivation attaching it there. (The
-cookie transport is not implicated: `SameSite=Lax` already blocks the cookie
-cross-site with no code involved.) So the origin decision has to win over the
-credential, and that precedence is what the cases below pin.
+the others.** A header-carried bearer token has **no `SameSite` equivalent** to
+stop a blind derivation attaching it to a foreign host. (The cookie transport is
+not implicated: `SameSite=Lax` already blocks the cookie cross-site with no code
+involved.) So the origin decision has to win over the credential, and that
+precedence is what the cases below pin.
+
+⛔ **As of 2026-10-28, NO request in `Api.elm` is cross-origin — and the sentence
+that used to stand here said exactly one was.** It named the upload byte `PUT`
+"a `PUT` to a presigned object-storage URL". The server had been returning a
+path on our own origin since July, so that request was same-origin and sent no
+headers at all, and CSRF enforcement refused every photo upload.
+
+⚖️ **So these cases now guard a population of zero, and they are kept anyway.**
+They pin the precedence for the next cross-origin request rather than reporting
+on a current one — and a reader who finds them green must not read that as
+"the cross-origin requests are safe". There are none. The thing that went wrong
+was a call site DECLARING an origin it had no way to prove, which this file
+cannot see; `putUploadBytes` now builds its own URL so that the compiler can.
 
 -}
 

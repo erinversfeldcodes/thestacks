@@ -99,13 +99,23 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-      Init step of the presigned-URL flow: allocates `image_id`, reserves the
-      R2 key, inserts the row as `"awaiting_upload"`, returns a short-lived
-      presigned PUT URL. Bytes never touch Phoenix — the client PUTs straight to
-      R2, then calls `commit_upload/2`.
+      Init step: allocates `image_id`, reserves the storage key, inserts the row
+      as `"awaiting_upload"`, and returns the route the client PUTs the bytes
+      to. The client then calls `commit_upload/2`.
 
-      Options: `:content_type` (client MUST send the matching header on its PUT
-      or R2 rejects the signature) and `:ttl_seconds` (default 900).
+      ⛔ **The bytes DO travel through Phoenix, and this docstring said they did
+      not.** `upload_url` is `/api/upload/:image_id/data` — a route on our own
+      origin, chosen deliberately so the browser never needs an object-storage
+      CORS allowlist, and returned as a relative path ever since. The sentence
+      that used to stand here ("Bytes never touch Phoenix — the client PUTs
+      straight to R2") outlived the design by three months and was then read as
+      a premise by the client, which declared the PUT cross-origin and therefore
+      sent it with no CSRF proof at all. Every photo upload was refused.
+
+      ⚠️ So `:ttl_seconds` (default 900) is advisory — there is no signature to
+      expire. `:content_type` is accepted and recorded; it is not baked into a
+      presigned signature, because there is no presigned signature.
+
       `{:ok, %{image_id, upload_url, expires_in}}` or `{:error, reason}`.
   """
   @spec init_upload(binary(), keyword()) ::
@@ -128,7 +138,7 @@ defmodule Stacks.Uploads do
       Commit step: HEAD-verifies the client's PUT actually landed (no vision
       work against a missing object), flips the row to `"pending"`, enqueues
       `IdentifyBookJob`. Errors: `:not_found` (no row / not owner),
-      `:not_yet_uploaded` (R2 HEAD 404 — racing or failed PUT),
+      `:not_yet_uploaded` (storage HEAD 404 — racing or failed PUT),
       `:already_committed` (idempotent, no re-enqueue), `:image_too_small`
       (under `#{@min_image_bytes}` bytes → rejected via the pipeline's own
       machinery so SSE reports it normally).

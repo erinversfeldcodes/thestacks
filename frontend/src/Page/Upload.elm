@@ -129,7 +129,7 @@ type Msg
     | DragLeave
     | FilepickerRequested
     | UploadInitialised File Api.Credentials (Result Http.Error Api.UploadInit)
-    | R2PutCompleted String Api.Credentials (Result Http.Error ())
+    | UploadBytesSent String Api.Credentials (Result Http.Error ())
     | UploadAccepted (Result Http.Error String)
     | StatusReceived (Result Http.Error PollResponse)
     | StreamEvent String
@@ -405,14 +405,14 @@ updateWithEffect msg model maybeToken =
             -- A file body cannot be described as an `Api.RequestSpec` (JSON only),
             -- so this one request stays opaque to the simulated runtime.
             ( model
-            , Effect.Custom (Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token))
+            , Effect.Custom (Api.putUploadBytes init_.imageId file token (UploadBytesSent init_.imageId token))
             , NoOut
             )
 
-        R2PutCompleted _ _ (Err err) ->
+        UploadBytesSent _ _ (Err err) ->
             ( { model | uploadState = Failure err }, Effect.none, NoOut )
 
-        R2PutCompleted imageId token (Ok ()) ->
+        UploadBytesSent imageId token (Ok ()) ->
             ( model
             , Effect.authed (Api.commitUploadRequest imageId)
                 token
