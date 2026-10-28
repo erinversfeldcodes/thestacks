@@ -31,7 +31,26 @@
       "Bash(fly logs *)",
       "Bash(gh run watch *)",
       "Bash(actionlint *)",
-      "mcp__Neon__describe_project"
+      "mcp__Neon__describe_project",
+      "Bash(cargo clippy *)",
+      "Bash(cargo check *)",
+      "Bash(cargo fmt --check*)",
+      "Bash(shellcheck *)",
+      "Bash(buf lint *)",
+      "Bash(buf breaking *)",
+      "Bash(ruff check *)",
+      "Bash(elm-format --validate*)",
+      "Bash(just wave-status *)",
+      "Bash(just campaign-residue*)",
+      "Bash(fly apps list*)",
+      "mcp__claude-in-chrome__find",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__read_page",
+      "mcp__claude-in-chrome__read_console_messages",
+      "mcp__claude-in-chrome__read_network_requests",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__Neon__list_branches",
+      "mcp__Neon__list_projects"
     ]
   }
 }
