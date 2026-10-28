@@ -6,6 +6,7 @@ defmodule StacksWeb.SearchController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books
   alias Stacks.Marketplace
+  alias Stacks.Scope
   alias Stacks.Shelving
   alias Stacks.Visibility
   alias StacksWeb.ProtoJSON
@@ -102,11 +103,33 @@ defmodule StacksWeb.SearchController do
 
   defp discovery_labels(:unauthenticated, _books), do: %{}
 
-  defp discovery_labels(_viewer, books) do
+  # ⛔ Both label reads run inside the viewer's scope, though only one needs it
+  # today. `looking_for_home_labels/1` joins `op.bookshelves` and
+  # `op.bookshelf_placements`, which carry row-level policies under FORCE, so an
+  # unscoped call does not return an empty list — it RAISES
+  # `42501 query on a row-level-secured table with no request scope set`, and the
+  # entire search answers 500 to every signed-in reader. Measured on a deployed
+  # stack: authenticated 500 at both scopes, anonymous 200, because the clause
+  # above returns before the query. ⚠️ It raises while evaluating the policy, so
+  # an empty table fails exactly the same way — row count is not the variable.
+  #
+  # `op.listings` carries no policies, so the listing read would survive on its
+  # own. It is wrapped anyway: both are reads of someone else's shelf, and
+  # splitting the pair would leave the next reader to work out which half needs
+  # a scope and why.
+  #
+  # ⚠️ The scope is established here, not inside the two helpers. The placement
+  # lookups elsewhere scope themselves because each always knows its user; these
+  # two deliberately do not — they take book ids and are cross-user by design, so
+  # the caller is the only place that holds a viewer to scope to.
+  defp discovery_labels({:platform_user, user_id}, books) do
     book_ids = Enum.map(books, & &1.id)
-    lfh = Shelving.looking_for_home_labels(book_ids)
-    listed = Marketplace.active_listing_labels(book_ids)
-    Map.merge(lfh, listed)
+
+    Scope.for_viewer(user_id, fn ->
+      lfh = Shelving.looking_for_home_labels(book_ids)
+      listed = Marketplace.active_listing_labels(book_ids)
+      Map.merge(lfh, listed)
+    end)
   end
 
   defp parse_limit(nil), do: 20
