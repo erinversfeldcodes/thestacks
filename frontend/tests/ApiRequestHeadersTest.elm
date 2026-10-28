@@ -260,6 +260,43 @@ suite =
                         |> List.length
                         |> Expect.equal 2
             ]
+        , describe "a session the SPA holds no bearer for"
+            -- ⛔ THIS IS THE NORMAL STATE AFTER A RELOAD, and it was
+            -- unrepresentable until `cookieSession` existed. The session cookie
+            -- is HttpOnly, so JavaScript cannot read it, and `GET
+            -- /api/auth/me` answers with the account rather than a token — so a
+            -- reader who refreshes the page is genuinely signed in while the
+            -- SPA has no bearer to show for it.
+            --
+            -- ⚖️ What must happen on the wire: NO `Authorization` header, and
+            -- the proof still sent. The cookie authenticates the request and
+            -- the proof shows it came from a document on our origin. These two
+            -- cases are the whole contract.
+            [ test "sends the proof and no Authorization header" <|
+                \() ->
+                    Api.cookieSession (Just "proof")
+                        |> (\creds ->
+                                Api.requestHeaders "POST" Api.SameOrigin (Api.Session creds)
+                           )
+                        |> Expect.equal [ ( "X-CSRF-Token", "proof" ) ]
+
+            -- ⚠️ An empty `Bearer ` would be a credential that cannot work sent
+            -- as though it could, which is the failure this repository has paid
+            -- for in other shapes. The header must be ABSENT, not blank.
+            , test "the absent bearer is absent, not an empty Bearer" <|
+                \() ->
+                    Api.cookieSession (Just "proof")
+                        |> (\creds ->
+                                Api.requestHeaders "POST" Api.SameOrigin (Api.Session creds)
+                           )
+                        |> List.map Tuple.first
+                        |> Expect.equal [ "X-CSRF-Token" ]
+            , test "and it reports no bearer rather than an empty one" <|
+                \() ->
+                    Api.cookieSession (Just "proof")
+                        |> Api.bearerOf
+                        |> Expect.equal Nothing
+            ]
         , describe "a refresh replaces the bearer and keeps the proof"
             -- ⛔ THE SILENT-LOSS CASE. A token refresh that rebuilt the whole
             -- credential from the refresh response would drop the CSRF token,
@@ -275,7 +312,7 @@ suite =
                     Api.credentials "old-bearer" (Just "proof")
                         |> Api.withBearer "new-bearer"
                         |> Api.bearerOf
-                        |> Expect.equal "new-bearer"
+                        |> Expect.equal (Just "new-bearer")
             , test "and the proof is still sent on a write" <|
                 \() ->
                     Api.credentials "old-bearer" (Just "proof")

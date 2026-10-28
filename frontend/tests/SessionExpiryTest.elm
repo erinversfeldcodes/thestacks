@@ -248,7 +248,10 @@ renewProgram =
             \model ->
                 case model of
                     Just auth ->
-                        Html.text ("token:" ++ Api.bearerOf auth.token)
+                        Html.text
+                            ("token:"
+                                ++ Maybe.withDefault "<cookie-only>" (Api.bearerOf auth.token)
+                            )
 
                     Nothing ->
                         Html.text "signed-out"
@@ -314,7 +317,7 @@ renewAuthTokenSwapsTokenKeepsUser =
                         startingAuth
             in
             Expect.all
-                [ \r -> Api.bearerOf r.token |> Expect.equal "new.token"
+                [ \r -> Api.bearerOf r.token |> Expect.equal (Just "new.token")
                 , \r -> r.user |> Expect.equal startingUser
                 ]
                 refreshed

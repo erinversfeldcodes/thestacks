@@ -106,7 +106,7 @@ differentTokenPreservesUser =
             case Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith (TestHelpers.creds "T0"))) of
                 Main.AdoptAuth adopted ->
                     Expect.all
-                        [ \a -> Api.bearerOf a.token |> Expect.equal "T1"
+                        [ \a -> Api.bearerOf a.token |> Expect.equal (Just "T1")
                         , \a -> a.user |> Expect.equal aReader
                         ]
                         adopted

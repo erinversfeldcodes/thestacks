@@ -123,6 +123,32 @@ type OutMsg
     | RefreshInbox
 
 
+{-| The live progress stream for an upload, when one can be opened.
+
+⛔ **`EventSource` cannot set headers, so this credential travels in a QUERY
+STRING** — which puts it in request logs, in `Referer` and in browser history.
+That is why moving the stream onto the session cookie is planned work and why
+`Api.bearerOf` exists to make this call site findable rather than hidden.
+
+⚠️ **A reader who has reloaded has NO bearer** — the session cookie is
+`HttpOnly`, so the SPA cannot see it — and there is no token to put in the
+query string. The honest outcome is the one this page already has for a reader
+with no credential at all: the upload itself succeeds and there is simply no
+live progress stream. ⛔ NOT `Maybe.withDefault ""`: a `?token=` with an empty
+value is a request that cannot work, sent as though it could, and this
+repository has paid for the difference between an absent key and a lying one.
+
+-}
+streamFor : String -> Api.Credentials -> OutMsg
+streamFor imageId token =
+    case Api.bearerOf token of
+        Nothing ->
+            NoOut
+
+        Just bearer ->
+            OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ bearer)
+
+
 type Msg
     = GotFile File
     | DragOver
@@ -436,7 +462,7 @@ updateWithEffect msg model maybeToken =
                         Just token ->
                             ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
                             , Effect.none
-                            , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ Api.bearerOf token)
+                            , streamFor imageId token
                             )
 
                         Nothing ->
@@ -770,7 +796,7 @@ updateWithEffect msg model maybeToken =
                         )
                         token
                         (Api.resolveWhatever >> RejectIdentificationCompleted)
-                    , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ Api.bearerOf token)
+                    , streamFor imageId token
                     )
 
                 _ ->

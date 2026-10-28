@@ -125,7 +125,7 @@ validBlobSignsThemIn =
         \() ->
             Main.decodeFlags validFlags
                 |> Main.storedSession
-                |> Maybe.map (.token >> Api.bearerOf)
+                |> Maybe.andThen (.token >> Api.bearerOf)
                 |> Expect.equal (Just "jwt-token")
 
 

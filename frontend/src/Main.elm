@@ -1407,16 +1407,39 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageNotFound, Cmd.none )
 
 
+{-| ⚠️ The stored token is ABSENT, not empty, when the session is carried by the
+cookie alone. A reader who has reloaded has no bearer for the SPA to persist,
+and writing `"token": ""` would store a credential that cannot work while
+looking like one that can — the stored-auth decoder would then hand back a
+session whose every request is refused. Omitting the key makes the decoder's
+own "no token" branch the one that runs.
+
+⛔ This whole function is slated for deletion along with the stored blob; it is
+made honest rather than clever because a half-deleted persistence path is worse
+than either end state.
+
+-}
 encodeAuth : Auth -> Json.Encode.Value
 encodeAuth auth =
     Json.Encode.object
-        [ ( "token", Json.Encode.string (Api.bearerOf auth.token) )
-        , ( "userId", Json.Encode.string auth.user.id )
-        , ( "email", Json.Encode.string auth.user.email )
-        , ( "displayName", Json.Encode.string auth.user.displayName )
-        , ( "handle", Json.Encode.string auth.user.handle )
-        , ( "role", Json.Encode.string auth.user.role )
-        ]
+        (bearerField auth
+            ++ [ ( "userId", Json.Encode.string auth.user.id )
+               , ( "email", Json.Encode.string auth.user.email )
+               , ( "displayName", Json.Encode.string auth.user.displayName )
+               , ( "handle", Json.Encode.string auth.user.handle )
+               , ( "role", Json.Encode.string auth.user.role )
+               ]
+        )
+
+
+bearerField : Auth -> List ( String, Json.Encode.Value )
+bearerField auth =
+    case Api.bearerOf auth.token of
+        Nothing ->
+            []
+
+        Just bearer ->
+            [ ( "token", Json.Encode.string bearer ) ]
 
 
 {-| The single, central deferred session-expiry entry point. EVERY authenticated page routes its `SessionExpired` OutMsg here, and a

@@ -80,7 +80,7 @@ applyEffect arrival effect model =
     in
     case effect of
         Main.PersistAuth ->
-            { logged | storedToken = Just (Api.bearerOf arrival.session.token) }
+            { logged | storedToken = Api.bearerOf arrival.session.token }
 
         Main.FetchPlacements ->
             logged
@@ -224,7 +224,10 @@ arrivalIsSignedInImmediately =
 
 fakeResponse : Main.Auth -> { token : String, userId : String, email : String, displayName : String, handle : String, role : String, consentAnalytics : Bool, consentWritingAssistant : Bool }
 fakeResponse auth =
-    { token = Api.bearerOf auth.token
+    -- Every fixture builds its credential with a real bearer, so this default
+    -- never fires; it is a loud sentinel rather than "" so that if one ever
+    -- stops doing so the assertion fails on something readable.
+    { token = Maybe.withDefault "FIXTURE-BUILT-NO-BEARER" (Api.bearerOf auth.token)
     , userId = auth.user.id
     , email = auth.user.email
     , displayName = auth.user.displayName

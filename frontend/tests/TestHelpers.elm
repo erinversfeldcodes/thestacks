@@ -455,7 +455,10 @@ simulateAuthResponse token userId email displayName =
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "token", Encode.string (Api.bearerOf token) )
+                    [ ( "token"
+                      , Encode.string
+                            (Maybe.withDefault "FIXTURE-BUILT-NO-BEARER" (Api.bearerOf token))
+                      )
                     , ( "user"
                       , Encode.object
                             [ ( "id", Encode.string userId )

@@ -119,6 +119,7 @@ module Api exposing
     , confirmBookRequest
     , confirmResponseDecoder
     , confirmResponseToResult
+    , cookieSession
     , createAdminInvite
     , createBlogPost
     , createComment
@@ -423,7 +424,7 @@ to `""`.
 
 -}
 type Credentials
-    = Credentials { bearer : String, csrf : Maybe String }
+    = Credentials { bearer : Maybe String, csrf : Maybe String }
 
 
 {-| Build a reader's credentials. The only constructor, so the pairing above
@@ -431,7 +432,32 @@ cannot be bypassed.
 -}
 credentials : String -> Maybe String -> Credentials
 credentials bearer csrf =
-    Credentials { bearer = bearer, csrf = csrf }
+    Credentials { bearer = Just bearer, csrf = csrf }
+
+
+{-| A session the SPA holds no bearer for, because the cookie carries it.
+
+⛔ **THIS IS THE NORMAL STATE AFTER A RELOAD, and it was previously
+unrepresentable.** The session cookie is `HttpOnly`, so JavaScript cannot read
+it, and `GET /api/auth/me` answers with the account rather than a token. So a
+reader who reloads is genuinely signed in while the SPA has no bearer to show
+for it — and `Credentials` used to require one, which meant the only way to
+survive a reload was to keep a copy of the token in `localStorage`.
+
+⚖️ The proof is still carried, and must be: it is a property of the DOCUMENT,
+not of the session, so it comes from the boot flags and is present whether or
+not a bearer is. A write from this credential sends `x-csrf-token` and no
+`Authorization`, and the cookie authenticates it — which is exactly the header
+set `NoCredential` already produced for the signed-out login POST.
+
+⚠️ Deliberately a separate constructor rather than widening `credentials/2`.
+Twenty-two call sites pass a real bearer and should go on saying so in their
+types; only the boot path has no bearer, and it should have to name that.
+
+-}
+cookieSession : Maybe String -> Credentials
+cookieSession csrf =
+    Credentials { bearer = Nothing, csrf = csrf }
 
 
 {-| Replace the bearer token, keeping the same-origin proof.
@@ -445,7 +471,7 @@ and silently stop every subsequent write from proving itself.
 -}
 withBearer : String -> Credentials -> Credentials
 withBearer bearer (Credentials creds) =
-    Credentials { creds | bearer = bearer }
+    Credentials { creds | bearer = Just bearer }
 
 
 {-| Do these two credentials name the SAME session?
@@ -486,7 +512,16 @@ prove where it came from, so every subsequent write is refused 403.
 -}
 withBearerOf : Credentials -> Credentials -> Credentials
 withBearerOf (Credentials incoming) current =
-    withBearer incoming.bearer current
+    case incoming.bearer of
+        -- ⛔ Nothing to adopt. A sibling tab whose credential carries no bearer
+        -- is one relying on the session cookie, which this tab already sends —
+        -- so the correct adoption is no change, not a bearer-less overwrite
+        -- that would discard a working token this tab still holds.
+        Nothing ->
+            current
+
+        Just bearer ->
+            withBearer bearer current
 
 
 {-| The bearer token as a bare string.
@@ -508,7 +543,7 @@ this returns the token precisely because the one legitimate caller is not
 building a header at all.
 
 -}
-bearerOf : Credentials -> String
+bearerOf : Credentials -> Maybe String
 bearerOf (Credentials creds) =
     creds.bearer
 
@@ -594,7 +629,16 @@ bearerHeader maybeCreds =
             []
 
         Just (Credentials creds) ->
-            [ ( "Authorization", "Bearer " ++ creds.bearer ) ]
+            case creds.bearer of
+                -- ⛔ No bearer is not an error: the session cookie carries the
+                -- session, and omitting the header is what lets it. An empty
+                -- `Bearer ` would be a credential that cannot work, sent as
+                -- though it could.
+                Nothing ->
+                    []
+
+                Just bearer ->
+                    [ ( "Authorization", "Bearer " ++ bearer ) ]
 
 
 {-| The same-origin proof a credential carries, from whichever constructor holds
