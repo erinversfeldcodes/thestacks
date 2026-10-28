@@ -117,6 +117,87 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
     end
   end
 
+  # ———————————————————— revocation, ON THE COOKIE PATH ————————————————————
+  #
+  # ⛔ WHY THESE ARE NOT REDUNDANT WITH THE BEARER-PATH REVOCATION TESTS. The
+  # repository already asserts that a revoked session is refused, and **all 14
+  # of those cases drive the bearer header**. Revocation lives inside
+  # `Guardian.decode_and_verify`, which the cookie path also calls, so the
+  # invariant SHOULD carry across — but "should carry across" is precisely the
+  # reasoning the cookie transport invalidates, because the cookie path's decode
+  # failure is deliberately NON-fatal: it falls through to `conn` unchanged so a
+  # stale cookie cannot refuse a request that also carries a live bearer.
+  #
+  # ⚠️ That fall-through is the risk these cases cover. A revoked cookie must
+  # end as a 401 from `EnsureAuthenticated` — not as an authenticated request,
+  # and not as a request that silently proceeds as anonymous.
+  describe "a revoked session carried by cookie" do
+    test "is refused, exactly as the bearer path refuses it", %{conn: conn, token: token} do
+      {:ok, _claims} = Guardian.revoke(token)
+
+      conn =
+        conn
+        |> put_req_cookie(SessionCookie.cookie_name(), token)
+        |> authenticated_get()
+
+      assert conn.status == 401
+    end
+
+    # ⚖️ The same token, the same revocation, the other transport — so a pass
+    # above cannot be read as "revocation works" when it might be "the cookie
+    # was ignored". Both transports must reach the same refusal.
+    test "is refused on the bearer path too, which is what makes the pair meaningful", %{
+      conn: conn,
+      token: token
+    } do
+      {:ok, _claims} = Guardian.revoke(token)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> authenticated_get()
+
+      assert conn.status == 401
+    end
+
+    # ⛔ A revoked cookie must not be counted as a working cookie transport. The
+    # bearer deletion is decided on that series, and counting refusals as
+    # successful cookie traffic would license the deletion on false evidence.
+    test "is not counted as a live cookie transport", %{conn: conn, token: token} do
+      {:ok, _claims} = Guardian.revoke(token)
+
+      conn
+      |> put_req_cookie(SessionCookie.cookie_name(), token)
+      |> authenticated_get()
+
+      refute_receive {:transport, _, %{transport: :cookie}}
+    end
+  end
+
+  # ———————————————— boot_id is NOT reachable by cookie yet ————————————————
+  #
+  # ⛔ THERE IS DELIBERATELY NO CASE HERE, and the absence is the finding.
+  # `boot_id` invalidation guards exactly one claim shape — `typ ==
+  # "admin_session"` in `Stacks.Accounts.Guardian.verify_claims/2` — and this
+  # plug is installed on `AuthPipeline` and `OptionalAuthPipeline` only, never
+  # on the admin pipeline, which is hand-rolled and reads the `Authorization`
+  # header and nothing else. So no route exists on which an admin session can
+  # arrive by cookie.
+  #
+  # ⚠️ A case WAS written here and then deleted, because a mutation probe showed
+  # it could not fail. It asserted `refute conn.status == 200` for an admin-typ
+  # token placed in the session cookie; teaching the admin pipeline to read that
+  # cookie left the suite green, because the admin route answers `401
+  # unauthorized` in every state this layer can construct — with no credential,
+  # with the token in the cookie, AND with a valid admin-typ token in the
+  # header. There is no discriminating signal to assert against until a real
+  # elevated admin session (with its `SessionContext` and MFA state) can be
+  # built, which is the work that moves admin elevation onto the cookie.
+  #
+  # ⚖️ So the assertion belongs to that change and not to this one. Recorded in
+  # the issue's notes and the residue ledger rather than left as a green test
+  # that means nothing.
+
   # ⛔ THE DISCRIMINATING CASE, and the reason the plug reads the transport from
   # `conn.private` rather than re-deriving it at response time. A client
   # mid-migration sends BOTH: a cookie it was given and a bearer header it has
@@ -177,6 +258,14 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
     # ⚠️ Asserted on the written header rather than on the helper's arguments,
     # because the attributes are the security claim and a helper can be correct
     # while the header it produces is not.
+    #
+    # ⛔ THESE FOUR VALUES HAVE A SECOND AUTHOR OUTSIDE ELIXIR. The Playwright
+    # harness writes the cookie by hand when it installs a session into a
+    # browser context (`injectSession` and the setup project in `e2e/tests/`),
+    # so a change here that is not carried across there produces a cookie the
+    # browser never sends — and a session that never sends is indistinguishable
+    # from never having signed in, which is the hardest failure in this suite to
+    # read. If this test reds, the harness is the other place to edit.
     test "are HttpOnly, Secure and SameSite=Lax", %{conn: conn, token: token} do
       # ⚠️ SENT, not just built. `put_resp_cookie/4` writes `conn.resp_cookies`;
       # the `set-cookie` HEADER is only materialised on send. Asserting on

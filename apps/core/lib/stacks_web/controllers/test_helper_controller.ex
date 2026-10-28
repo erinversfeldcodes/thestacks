@@ -15,6 +15,7 @@ defmodule StacksWeb.TestHelperController do
   alias Stacks.AgeVerification
   alias Stacks.Blog
   alias Stacks.Books
+  alias Stacks.Email
   alias Swoosh.Adapters.Local.Storage.Memory
 
   require Logger
@@ -244,6 +245,41 @@ defmodule StacksWeb.TestHelperController do
     "e2e-mint-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}@thestacks.test"
   end
 
+  @doc """
+      GET /api/test/email-budget[?email=…]
+
+      Reports the hourly email-send budget: both counts and both limits, from
+      `Stacks.Email.budget/1`.
+
+      ⛔ WHY THE HARNESS NEEDS THIS. "Forgot my password" and "resend
+      confirmation" answer identically whether or not a letter was queued —
+      deliberately, so neither can be used to discover whether an address has an
+      account. A spec driving one of them therefore cannot tell a broken feature
+      from a full bucket by reading the response, and **the suite is the thing
+      that fills the bucket**: it registers a user per test and each
+      registration queues a confirmation. Three local runs put 101 sends in an
+      hour against a global limit of 100, and the three email specs then failed
+      with "expected a password-reset email" — which reads as a product defect.
+
+      ⚠️ Counts only, never an address or a subject, and the `email` parameter
+      is held to the same `.test`-domain rule as every other helper here, so
+      this cannot be turned into an account-existence oracle. 404 out of scope.
+  """
+  def email_budget(conn, params) do
+    case Map.get(params, "email") do
+      nil ->
+        json(conn, Email.budget())
+
+      email ->
+        with true <- e2e_test_email?(email),
+             %{} = user <- Accounts.get_user_by_email(email) do
+          json(conn, Email.budget(user.id))
+        else
+          _ -> not_found(conn)
+        end
+    end
+  end
+
   defp issue_session(conn, user) do
     fid = Ecto.UUID.generate()
     {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
@@ -257,6 +293,28 @@ defmodule StacksWeb.TestHelperController do
 
     case Accounts.rotate_token_family(family_attrs) do
       {:ok, _family} ->
+        # ⛔ NO SET-COOKIE HERE, AND THE REASON IS WHAT THIS ENDPOINT IS FOR.
+        # It fabricates a credential for an identity the caller will act as
+        # SOMEWHERE ELSE — a browser context, a bearer header — which is a
+        # different job from `POST /api/auth/login`, where the client doing the
+        # logging in is the client that gets the session. This version did set
+        # the cookie, through the real login's own helper, for the good reason
+        # that a helper issuing a session differently from production is a
+        # harness that passes while production is broken.
+        #
+        # ⚠️ MEASURED COST OF THAT FIDELITY: `AuthPipeline` installs the cookie
+        # plug BEFORE `VerifyHeader`, so the cookie WINS when both are present.
+        # A caller that mints two identities down one HTTP client — which is
+        # the normal shape of a harness that needs an owner and a member — had
+        # its second mint silently overwrite the first, and every later request
+        # then acted as whoever was minted LAST no matter which bearer token it
+        # carried. An owner inviting a member became that member inviting
+        # themselves, and the refusal looked like a product fault in groups.
+        #
+        # ⚖️ So the response describes the credential and changes nothing about
+        # who the caller is. The cookie's attributes still have exactly one
+        # author — `SessionCookie` — and the harness that writes them by hand is
+        # held to it by the attribute test in `session_cookie_test.exs`.
         conn
         |> put_status(:created)
         |> json(%{

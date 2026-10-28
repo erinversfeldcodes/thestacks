@@ -314,6 +314,98 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
+  describe "GET /api/test/email-budget" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    # ⛔ THE POINT OF THIS ENDPOINT IS ATTRIBUTION, so the test that matters is
+    # that the numbers it reports are the ones the refusal is made of — not that
+    # the shape parses. A budget report that can disagree with the decision would
+    # be worse than none: it would make the suite confident and wrong.
+    test "reports the global count and limit, and counts a queued send", %{conn: conn} do
+      before = json_response(get(conn, "/api/test/email-budget"), 200)
+
+      assert before["global_limit"] == 100
+      assert before["per_user_limit"] == 10
+      assert is_integer(before["global_count"])
+
+      user =
+        insert(:user,
+          email: "e2e-budget-global@thestacks.test",
+          email_confirmed: false,
+          email_confirmation_token: "budget-probe-token-global"
+        )
+
+      {:ok, _} = Stacks.Email.send_registration_confirmation(user)
+
+      after_send =
+        json_response(get(CoreWeb.ConnCase.proven_conn(), "/api/test/email-budget"), 200)
+
+      assert after_send["global_count"] == before["global_count"] + 1
+    end
+
+    test "scopes the per-user count to the address asked about", %{conn: conn} do
+      user =
+        insert(:user,
+          email: "e2e-budget-mine@thestacks.test",
+          email_confirmed: false,
+          email_confirmation_token: "budget-probe-token-mine"
+        )
+
+      insert(:user, email: "e2e-budget-theirs@thestacks.test")
+      {:ok, _} = Stacks.Email.send_registration_confirmation(user)
+
+      mine =
+        json_response(
+          get(conn, "/api/test/email-budget", %{email: "e2e-budget-mine@thestacks.test"}),
+          200
+        )
+
+      theirs =
+        json_response(
+          get(CoreWeb.ConnCase.proven_conn(), "/api/test/email-budget", %{
+            email: "e2e-budget-theirs@thestacks.test"
+          }),
+          200
+        )
+
+      assert mine["per_user_count"] == 1
+      assert theirs["per_user_count"] == 0
+    end
+
+    # ⚠️ The address rule is the same one every other helper here is held to, and
+    # it matters more than it looks: without it, a caller could ask about any
+    # address and read "does this account exist" off the 200/404.
+    test "returns 404 for a NON-e2e-domain email even when that user exists", %{conn: conn} do
+      insert(:user, email: "real-person@gmail.com")
+
+      conn = get(conn, "/api/test/email-budget", %{email: "real-person@gmail.com"})
+
+      assert conn.status == 404
+    end
+
+    test "returns 404 for an unknown (but e2e-domain) email", %{conn: conn} do
+      conn = get(conn, "/api/test/email-budget", %{email: "nobody-here@thestacks.test"})
+
+      assert conn.status == 404
+    end
+  end
+
+  describe "GET /api/test/email-budget with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404", %{conn: conn} do
+      conn = get(conn, "/api/test/email-budget")
+
+      assert conn.status == 404
+    end
+  end
+
   describe "POST /api/test/session with the flag ON" do
     setup do
       System.put_env(@flag, "1")
@@ -339,6 +431,42 @@ defmodule StacksWeb.TestHelperControllerTest do
         |> get("/api/placements/mine")
 
       assert json_response(authed, 200)
+    end
+
+    # ⛔ THE MINT MUST NOT LOG ITS CALLER IN, and this is a regression test for
+    # a defect that read as a product fault in groups. The helper used to set
+    # the session cookie through the real login's own helper — defensible, since
+    # a helper that issues a session differently from production is a harness
+    # that passes while production is broken.
+    #
+    # ⚠️ But `AuthPipeline` installs the cookie plug before `VerifyHeader`, so
+    # the cookie WINS when a request carries both. A harness that needs two
+    # identities mints them down ONE HTTP client, so the second mint overwrote
+    # the first and every later request acted as whoever was minted last —
+    # whatever bearer token it passed. An owner inviting a member became that
+    # member inviting themselves, which the server refuses, and the refusal
+    # looked like broken group invitations.
+    #
+    # ⚖️ Asserted on the SENT header rather than on `resp_cookies`, for the same
+    # reason the attribute test in `session_cookie_test.exs` does: the header is
+    # what a client acts on.
+    test "sets no session cookie, so minting twice does not reassign the caller", %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{})
+
+      assert json_response(conn, 201)
+
+      # ⚠️ Counted, not quoted. The header's value IS a live session token, and a
+      # failure message that echoes it writes a working credential into CI logs.
+      session_cookies =
+        conn
+        |> Plug.Conn.get_resp_header("set-cookie")
+        |> Enum.count(&String.starts_with?(&1, "stacks_session="))
+
+      assert session_cookies == 0,
+             "the mint response must leave the caller's identity alone; " <>
+               "it set #{session_cookies} stacks_session cookie(s)"
+
+      refute Map.has_key?(conn.resp_cookies, "stacks_session")
     end
 
     test "each call mints a distinct user (unique default email)", %{conn: conn} do

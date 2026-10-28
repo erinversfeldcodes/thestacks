@@ -391,6 +391,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
     get "/confirmation-token", TestHelperController, :confirmation_token
     get "/sent-emails", TestHelperController, :sent_emails
+    get "/email-budget", TestHelperController, :email_budget
     put "/age-verification", TestHelperController, :set_age_verification
     post "/session", TestHelperController, :mint_session
     post "/book-writing", TestHelperController, :seed_book_writing
