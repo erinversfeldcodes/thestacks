@@ -126,6 +126,14 @@ gate check-tracker-refs.sh
 gate check-error-token-spelling.sh
 gate check-rls-scope.sh
 gate check-csrf-scope.sh
+# ⛔ Beside the scope gate deliberately: they are the two halves of the same
+# invariant, from opposite ends. `check-csrf-scope.sh` asks whether every
+# state-changing ROUTE is covered by the check; this one asks whether every
+# non-browser CLIENT carries the proof the check demands. A route gate cannot
+# see a broken client, because the route is correctly protected — and the one
+# that broke a deploy reported `FAIL warmup: could not authenticate as warmup
+# user (HTTP 403) / Check PROBE_SEED_EMAIL`, naming the wrong cause entirely.
+gate check-csrf-clients.sh
 gate check-protojson-completeness.sh
 # Beside the completeness gate on purpose: they watch the two halves of the same
 # manifest decision. That one asks whether the hand-written serializer DROPS a

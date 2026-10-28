@@ -27,12 +27,14 @@ in code by" and check it before relying on it.
 | `scripts/check-cli-stub-provenance.sh` | `scripts/lint-elixir.sh`, `test/platform/cli_stub_provenance_test.sh` | A stubbed CLI must say which real tool output it was copied from, and when. |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-credential-origin.sh` | `scripts/lint-elm.sh`, `test/platform/credential_origin_gate_test.sh` | A request that attaches a credential must have a PROVABLY same-origin URL. |
+| `scripts/check-csrf-clients.sh` | `scripts/lint-elixir.sh`, `test/platform/csrf_clients_gate_test.sh` | Every non-browser client that writes to our own API carries the CSRF proof. |
 | `scripts/check-csrf-scope.sh` | `scripts/lint-elixir.sh` | The CSRF counter's declared scope must match the router's actual population. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
+| `scripts/check-e2e-repeatability.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | A spec that passes must pass again, immediately, against the same stack. |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh`, `test/platform/error_token_spelling_test.sh` | Two spellings of one error token is a client that matches on one of them. |
@@ -100,7 +102,7 @@ in code by" and check it before relying on it.
 | `scripts/lib/python-tools.sh` | `scripts/lint-dbt.sh`, `scripts/lint-sql.sh`, `scripts/test-dbt.sh` |  |
 | `scripts/lib/squawk-rules.sh` | `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/squawk_worktree_selection_test.sh` | Single source of truth for which squawk rules this repo suppresses. |
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/platform_suites_job_test.sh` … |  |
+| `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/csrf_clients_gate_test.sh` … |  |
 | `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/credential_origin_gate_test.sh` … |  |
 | `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/lint_migrations_test.sh`, `test/platform/migration_gate_syntax_test.sh` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
 | `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` … |  |

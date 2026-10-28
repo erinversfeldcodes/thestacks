@@ -1185,6 +1185,29 @@ if [[ $edge_ready -ne 1 ]]; then
     exit 0
 fi
 
+# ⛔ THE PROOF A BROWSER WOULD HAVE. State-changing API requests are refused
+# without a double-submit proof: the readable `stacks_csrf` cookie echoed in an
+# `X-CSRF-Token` header. This script is not a browser, so it has to do by hand
+# what a browser does for free — fetch a page to be issued the cookie, then send
+# the matching header on every write below.
+#
+# ⚠️ Login is deliberately NOT exempt from that check. Login CSRF is a real
+# attack (an attacker forcing a victim's browser to sign in as the attacker, so
+# subsequent activity lands in an account they control), so the route that
+# starts a session is exactly the wrong one to carve out.
+WARMUP_JAR="$(mktemp)"
+curl -4 -s -o /dev/null --cookie-jar "${WARMUP_JAR}" --max-time 15 "${CORE_URL}/" || true
+WARMUP_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${WARMUP_JAR}" | tail -1)"
+# The jar holds a live session proof, so it does not outlive the script.
+trap 'rm -f "${WARMUP_JAR}"' EXIT
+if [[ -z "${WARMUP_PROOF}" ]]; then
+    echo "FAIL warmup: the page response issued no stacks_csrf cookie, so every write below"
+    echo "     would be refused with 403 csrf_check_failed and read as a credentials problem."
+    echo "     Check that StacksWeb.Plugs.CsrfCookie is on the :spa pipeline."
+    rm -f "${WARMUP_JAR}"
+    exit 1
+fi
+
 login_body_file="$(mktemp)"
 login_payload_file="$(mktemp)"
 python3 -c "import json,sys; json.dump({'email':sys.argv[1],'password':sys.argv[2]}, sys.stdout)" \
@@ -1192,6 +1215,8 @@ python3 -c "import json,sys; json.dump({'email':sys.argv[1],'password':sys.argv[
 smoke_login_code="$(curl -4 -s -o "${login_body_file}" -w "%{http_code}" \
     --max-time 30 \
     "${CORE_URL}/api/auth/login" \
+    -b "${WARMUP_JAR}" \
+    -H "X-CSRF-Token: ${WARMUP_PROOF}" \
     -H "Content-Type: application/json" \
     --data-binary @"${login_payload_file}" \
     || true)"
@@ -1203,7 +1228,12 @@ smoke_token="$(echo "${smoke_login}" | python3 -c \
 
 if [[ -z "${smoke_token}" ]]; then
     echo "FAIL warmup: could not authenticate as warmup user (HTTP ${smoke_login_code})"
-    echo "    Check PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD."
+    if [[ "${smoke_login_code}" == "403" ]]; then
+        echo "    A 403 here is the CSRF check, NOT the credentials: the body names the reason"
+        echo "    (absent_header / absent_cookie / mismatched). Response: ${smoke_login}"
+    else
+        echo "    Check PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD."
+    fi
     exit 1
 fi
 
@@ -1218,6 +1248,7 @@ for img in "${warmup_canaries[@]}"; do
         init_code="$(curl -4 -s -o "${init_body}" -w "%{http_code}" \
             --max-time 15 \
             -X POST "${CORE_URL}/api/upload/init" \
+            -b "${WARMUP_JAR}" -H "X-CSRF-Token: ${WARMUP_PROOF}" \
             -H "Authorization: Bearer ${smoke_token}" \
             -H "Content-Type: application/json" \
             -d '{"content_type":"image/jpeg"}' 2>/dev/null || true)"
@@ -1239,15 +1270,42 @@ for img in "${warmup_canaries[@]}"; do
             exit 0
         fi
 
+        # ⛔ `upload_url` MAY BE OUR OWN API, and whether it is cannot be known
+        # until runtime. `/api/upload/init` returns a RELATIVE url on this stack
+        # — measured: `upload_url` starts with `/` — which resolves to
+        # `${CORE_URL}` below and is therefore a state-changing request to us,
+        # needing the proof like any other. Against a real object store the same
+        # field is an absolute presigned URL, where the proof must NOT be sent:
+        # it would be an unsigned header on a signed request (breaking the
+        # signature) and would hand our CSRF token to a third party.
+        #
+        # ⚠️ So the branch is the point, not the duplication. A single call that
+        # always sent the proof would break real presigned uploads; one that
+        # never did fails here with 403 — which is what happened, reported as
+        # "PUT to upload_url returned 403" and read as a broken object store.
+        upload_is_ours=0
         if [[ "${upload_url}" == /* ]]; then
             upload_url="${CORE_URL}${upload_url}"
+            upload_is_ours=1
+        elif [[ "${upload_url}" == "${CORE_URL}"* ]]; then
+            upload_is_ours=1
         fi
 
-        put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
-            --max-time 30 \
-            -X PUT "${upload_url}" \
-            -H "Content-Type: image/jpeg" \
-            --data-binary "@${img}" 2>/dev/null || true)"
+        if [[ ${upload_is_ours} -eq 1 ]]; then
+            put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+                --max-time 30 \
+                -X PUT "${upload_url}" \
+                -b "${WARMUP_JAR}" \
+                -H "X-CSRF-Token: ${WARMUP_PROOF}" \
+                -H "Content-Type: image/jpeg" \
+                --data-binary "@${img}" 2>/dev/null || true)"
+        else
+            put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+                --max-time 30 \
+                -X PUT "${upload_url}" \
+                -H "Content-Type: image/jpeg" \
+                --data-binary "@${img}" 2>/dev/null || true)"
+        fi
 
         if [[ "${put_code}" != "200" ]]; then
             echo "    ${img_name}: PUT to upload_url returned ${put_code} — skipping"
@@ -1258,6 +1316,7 @@ for img in "${warmup_canaries[@]}"; do
         commit_code="$(curl -4 -s -o "${commit_body}" -w "%{http_code}" \
             --max-time 15 \
             -X POST "${CORE_URL}/api/upload/${img_id}/commit" \
+            -b "${WARMUP_JAR}" -H "X-CSRF-Token: ${WARMUP_PROOF}" \
             -H "Authorization: Bearer ${smoke_token}" 2>/dev/null || true)"
 
         if [[ "${commit_code}" == "202" ]]; then
