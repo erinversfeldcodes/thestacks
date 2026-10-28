@@ -1,4 +1,5 @@
 import { test, expect, APIRequestContext } from "./fixtures";
+import { BUCKET_WINDOW_MS, windowProfile } from "./bucket-window";
 
 const WRONG_PASSWORD = "wrong-password-xyz";
 
@@ -41,13 +42,6 @@ async function attemptLogin(
   });
   return resp.status();
 }
-
-// The limiter's window. ⚠️ This must equal `@window_ms` in
-// `StacksWeb.Plugs.RateLimiter`; `test/platform/e2e_auth_ceiling_handoff_test.sh`
-// relates the two so the arithmetic below cannot drift away from the limiter it
-// reasons about. A bucket of N per window can only answer once N requests land
-// inside ONE window — which is the fact the flood below is built around.
-const BUCKET_WINDOW_MS = 60_000;
 
 // ⛔ CONCURRENT, AND THE SEQUENTIAL VERSION WAS ARITHMETICALLY UNABLE TO PROVE
 // ANYTHING. `Accounts.check_password(nil, _)` runs a full Argon2 hash for an
@@ -127,34 +121,6 @@ async function flood(
   );
 
   return result;
-}
-
-/**
- * The most attempts that sat inside any single window — the number the limiter
- * actually compares against its ceiling — plus the rate that produced it.
- */
-function windowProfile(countedAt: number[]): {
-  peak: number;
-  spanSeconds: number;
-  ratePerSecond: number;
-} {
-  const times = [...countedAt].sort((a, b) => a - b);
-  let peak = 0;
-  let start = 0;
-
-  for (let end = 0; end < times.length; end++) {
-    while (times[end] - times[start] >= BUCKET_WINDOW_MS) start++;
-    peak = Math.max(peak, end - start + 1);
-  }
-
-  const spanSeconds =
-    times.length > 1 ? (times[times.length - 1] - times[0]) / 1000 : 0;
-
-  return {
-    peak,
-    spanSeconds,
-    ratePerSecond: spanSeconds > 0 ? times.length / spanSeconds : 0,
-  };
 }
 
 /**

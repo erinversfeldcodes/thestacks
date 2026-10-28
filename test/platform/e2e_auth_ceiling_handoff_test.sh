@@ -38,6 +38,8 @@ LIB="$REPO_ROOT/scripts/lib/e2e-handoff.sh"
 SCRIPT="$REPO_ROOT/scripts/deploy-stack.sh"
 CI="$REPO_ROOT/scripts/ci.sh"
 SPEC="$REPO_ROOT/e2e/tests/rate-limit.spec.ts"
+WINDOW_MODULE="$REPO_ROOT/e2e/tests/bucket-window.ts"
+WINDOW_SPEC="$REPO_ROOT/e2e/tests/unit/bucket-window.spec.ts"
 
 test_case "inputs_exist" "every file this suite reasons about is where it expects"
 assert_path_exists "$LIB" "scripts/lib/e2e-handoff.sh exists"
@@ -227,7 +229,7 @@ assert_contains "$SPEC_SRC" "e2e-handoff.sh" \
 
 # ── the flood's arithmetic, against the limiter it reasons about ─────────────
 
-# ⛔ A DRIFT GUARD, because the spec now does ARITHMETIC about someone else's
+# ⛔ A DRIFT GUARD, because the spec does ARITHMETIC about someone else's
 # constant. It sizes and times its flood against a 60s window declared in
 # TypeScript; the window that actually governs the bucket is `@window_ms` in the
 # plug. Change the plug and the spec keeps computing confidently against a
@@ -237,15 +239,54 @@ test_case "the_specs_window_matches_the_limiters" \
     "the flood's arithmetic is about the window the limiter really runs"
 LIMITER="$REPO_ROOT/apps/core/lib/stacks_web/plugs/rate_limiter.ex"
 assert_path_exists "$LIMITER" "the rate limiter plug exists"
+assert_path_exists "$WINDOW_MODULE" "e2e/tests/bucket-window.ts exists"
 ELIXIR_WINDOW="$(awk -F'@window_ms ' '/^  @window_ms /{ gsub(/_/, "", $2); print $2; exit }' "$LIMITER")"
-SPEC_WINDOW="$(awk -F'= ' '/^const BUCKET_WINDOW_MS/{ gsub(/[_;]/, "", $2); print $2; exit }' "$SPEC")"
+SPEC_WINDOW="$(awk -F'= ' '/^export const BUCKET_WINDOW_MS/{ gsub(/[_;]/, "", $2); print $2; exit }' "$WINDOW_MODULE")"
 if [ -z "$ELIXIR_WINDOW" ] || [ -z "$SPEC_WINDOW" ]; then
-    _record_fail "could not read both windows (plug='${ELIXIR_WINDOW:-<none>}', spec='${SPEC_WINDOW:-<none>}') — one of the two declarations moved, so this guard is no longer comparing anything"
+    _record_fail "could not read both windows (plug='${ELIXIR_WINDOW:-<none>}', module='${SPEC_WINDOW:-<none>}') — one of the two declarations moved, so this guard is no longer comparing anything"
 elif [ "$ELIXIR_WINDOW" = "$SPEC_WINDOW" ]; then
     _record_pass "both declare a ${ELIXIR_WINDOW}ms window"
 else
-    _record_fail "the limiter runs a ${ELIXIR_WINDOW}ms window and rate-limit.spec.ts computes against ${SPEC_WINDOW}ms. The flood's reachability maths is wrong by that ratio, and it will report the bucket's behaviour instead of its own miscalculation."
+    _record_fail "the limiter runs a ${ELIXIR_WINDOW}ms window and bucket-window.ts computes against ${SPEC_WINDOW}ms. The flood's reachability maths is wrong by that ratio, and it will report the bucket's behaviour instead of its own miscalculation."
 fi
+
+# ⛔ AND THE SPEC MUST USE THAT DECLARATION, not a second copy of the number.
+# The comparison above is only worth running while the spec's window and the
+# module's window are the same value — a local `const BUCKET_WINDOW_MS` in the
+# spec would shadow the import, leave this suite comparing the module to the
+# plug, and let the spec drift away from both with every check still green.
+test_case "the_spec_shares_the_tested_window_rather_than_copying_it" \
+    "one declaration of the window, so the guard above governs the spec too"
+assert_contains "$SPEC_SRC" 'from "./bucket-window"' \
+    "the spec imports the window and the profile it reasons with"
+if grep -qE '^(export )?const BUCKET_WINDOW_MS' <<< "$SPEC_CODE"; then
+    _record_fail "rate-limit.spec.ts declares its own BUCKET_WINDOW_MS: $(grep -nE '^(export )?const BUCKET_WINDOW_MS' <<< "$SPEC_CODE" | head -2). That shadows the import, so the drift guard above compares a constant the spec no longer uses."
+else
+    _record_pass "the spec declares no window of its own"
+fi
+
+# ⚖️ THE PROFILE IS THE ONE PIECE OF LOGIC HERE THAT CAN BE WRONG OFFLINE, so it
+# is the one piece that must be checked offline. Both of the spec's assertions
+# read its answer: the first to decide whether the flood ever reached the
+# ceiling, the second to report what the bucket did. The wrong answer was once
+# reported as a security finding, and reaching that code used to require
+# deploying a stack and flooding it.
+test_case "the_flood_profile_is_tested_without_a_stack" \
+    "the arithmetic behind the reachability verdict has its own offline cases"
+assert_path_exists "$WINDOW_SPEC" "e2e/tests/unit/bucket-window.spec.ts exists"
+if [ -f "$WINDOW_SPEC" ]; then
+    WINDOW_CASES="$(grep -cE '^[[:space:]]*test\(' "$WINDOW_SPEC")"
+    if [ "${WINDOW_CASES:-0}" -ge 5 ]; then
+        _record_pass "${WINDOW_CASES} offline case(s) exercise windowProfile"
+    else
+        _record_fail "only ${WINDOW_CASES:-0} case(s) in $WINDOW_SPEC — the half-open window boundary and the sub-ceiling rate each need one, since those are the two answers that were wrong"
+    fi
+fi
+# ⚠️ A test file no project selects runs nowhere and is green by never
+# executing. The offline cases live outside every browser project's reach, so
+# the project that claims them is part of the wiring, not configuration detail.
+assert_contains "$(cat "$REPO_ROOT/e2e/playwright.config.ts")" 'testDir: "./tests/unit"' \
+    "and a Playwright project selects them, so they run rather than merely exist"
 
 test_case "the_flood_is_concurrent" \
     "a serial flood cannot reach a ceiling above the endpoint's own throughput"
