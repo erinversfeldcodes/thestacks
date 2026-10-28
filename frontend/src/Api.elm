@@ -248,6 +248,7 @@ module Api exposing
     , restoreBookRequest
     , retryAfterSeconds
     , revokeAdminInvite
+    , sameSession
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooksRequest
@@ -284,6 +285,7 @@ module Api exposing
     , uploadInboxDecoder
     , uploadTimeout
     , withBearer
+    , withBearerOf
     )
 
 {-| Every HTTP call the SPA makes, and every decoder that reads a server
@@ -436,6 +438,47 @@ and silently stop every subsequent write from proving itself.
 withBearer : String -> Credentials -> Credentials
 withBearer bearer (Credentials creds) =
     Credentials { creds | bearer = bearer }
+
+
+{-| Do these two credentials name the SAME session?
+
+⛔ **NOT `==`, AND THIS IS THE DEFECT IT CLOSES.** A `Credentials` holds two
+things that answer to different owners: the bearer, which identifies the
+session, and the same-origin proof, which is a property of the BROWSING
+CONTEXT. Comparing the whole value therefore answers "same session AND same
+document", which is not a question anyone wants to ask.
+
+⚠️ Where that bit: the 401 re-check's echo defence compared
+`incoming.token == current.token` to decide "nothing newer to adopt, proceed to
+logout". The stored auth blob deliberately carries no CSRF token — a proof read
+from a cookie must not be persisted — so the re-read credential always had
+`csrf = Nothing` while the live one had `Just …`. Every echo therefore looked
+like a NEWER session, the app silently re-adopted the same bearer, cancelled the
+pending logout, and left the reader on a page whose every write would 401. No
+redirect, no notice, no cleared credential.
+
+⚖️ The unit suite could not see it: its fixtures build both sides with
+`csrf = Nothing`, which is a state the running application never reaches after
+the proof landed.
+
+-}
+sameSession : Credentials -> Credentials -> Bool
+sameSession (Credentials a) (Credentials b) =
+    a.bearer == b.bearer
+
+
+{-| `withBearerOf incoming current` — `current`, carrying `incoming`'s bearer.
+
+⚖️ The same reasoning as `withBearer`, applied to adopting a sibling tab's
+credential: what arrives is a new SESSION, and the proof that the request came
+from a document on our origin is ours, not theirs. Rebuilding from the incoming
+value would take its `csrf = Nothing` — adopting a working bearer that cannot
+prove where it came from, so every subsequent write is refused 403.
+
+-}
+withBearerOf : Credentials -> Credentials -> Credentials
+withBearerOf (Credentials incoming) current =
+    withBearer incoming.bearer current
 
 
 {-| The bearer token as a bare string.

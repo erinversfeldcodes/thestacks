@@ -1552,7 +1552,9 @@ type ExternalAuthOutcome
 {-| Pure decision for an externally-observed stored-auth value (a sibling
 tab's `storage` event, or the re-check response). The port delivers the
 RAW localStorage payload. Differing valid token while authed →
-`AdoptAuth`; same token → `IgnoreExternal` (echo defence); `null`/corrupt
+`AdoptAuth`; same token → `IgnoreExternal` (echo defence, compared on the
+BEARER via `Api.sameSession` — the stored blob carries no same-origin proof, so
+a whole-value `==` read every echo as a newer session); `null`/corrupt
 while authed → `DropAuth` (a sibling signed out or the blob was
 clobbered); anything while not authed → adopt-or-ignore without a drop.
 -}
@@ -1562,11 +1564,20 @@ adoptExternalAuth value maybeAuth =
         Ok (Just raw) ->
             case ( Decode.decodeString authDecoder raw, maybeAuth ) of
                 ( Ok incoming, Just current ) ->
-                    if incoming.token == current.token then
+                    if Api.sameSession incoming.token current.token then
                         IgnoreExternal
 
                     else
-                        AdoptAuth incoming
+                        -- ⛔ THE PROOF IS OURS, NOT THEIRS. What arrived is a
+                        -- newer SESSION; the same-origin proof belongs to this
+                        -- browsing context and the stored blob deliberately
+                        -- carries none. Taking `incoming` whole would adopt a
+                        -- working bearer that cannot prove where it came from,
+                        -- so every later write would be refused 403.
+                        AdoptAuth
+                            { incoming
+                                | token = Api.withBearerOf incoming.token current.token
+                            }
 
                 ( Ok _, Nothing ) ->
                     IgnoreExternal

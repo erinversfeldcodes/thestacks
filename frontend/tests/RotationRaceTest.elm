@@ -33,6 +33,8 @@ suite =
         , describe "adoptExternalAuth — reused for the 401 re-check net"
             [ recheckNewerStoredTokenAdopts
             , recheckSameStoredTokenProceedsToLogout
+            , recheckEchoWithALiveProofIsStillAnEcho
+            , adoptKeepsThisContextsProof
             ]
         , describe "resolveRecheck — origin-aware reschedule + parked-intent handling"
             [ renewalOriginAdoptReschedules
@@ -119,6 +121,49 @@ sameTokenIsIgnored =
         \() ->
             Main.adoptExternalAuth (storedAuthValue "T0") (Just (authWith (TestHelpers.creds "T0")))
                 |> Expect.equal Main.IgnoreExternal
+
+
+{-| ⛔ THE REGRESSION THIS FILE COULD NOT SEE, and the reason it could not is
+the point. Every other case here builds both sides with `TestHelpers.creds`,
+which is `Api.credentials bearer Nothing` — a credential with no same-origin
+proof. The running application has not been in that state since the proof
+landed: the LIVE credential carries `Just …` and the one re-read from
+localStorage carries `Nothing`, because a proof read from a cookie is a property
+of the browsing context and is deliberately not persisted.
+
+So a whole-value `incoming.token == current.token` compared a live credential
+against a proofless one, found them different, and read every echo as a NEWER
+session. The 401 re-check then re-adopted the same bearer, cancelled the pending
+logout, and left the reader on a page whose every write would 401 — no redirect,
+no notice, nothing cleared. Driven and confirmed on a local stack:
+`204 DELETE /api/auth/logout`, then `401 PUT /api/settings/profile_visibility`,
+url unchanged, `stacks-auth` still present.
+
+-}
+recheckEchoWithALiveProofIsStillAnEcho : Test
+recheckEchoWithALiveProofIsStillAnEcho =
+    test "recheck_echo_with_a_live_proof_is_still_an_echo: the same bearer is an echo even though only the live credential carries a proof" <|
+        \() ->
+            Main.adoptExternalAuth
+                (storedAuthValue "T0")
+                (Just (authWith (Api.credentials "T0" (Just "csrf-abc"))))
+                |> Expect.equal Main.IgnoreExternal
+
+
+{-| ⚖️ The other half: adopting a sibling's newer bearer must keep THIS
+context's proof. Taking the incoming value whole would adopt `csrf = Nothing` —
+a working credential that cannot prove where it came from, so every subsequent
+write is refused 403.
+-}
+adoptKeepsThisContextsProof : Test
+adoptKeepsThisContextsProof =
+    test "adopt_keeps_this_contexts_proof: a newer bearer is adopted onto the proof we already hold" <|
+        \() ->
+            Main.adoptExternalAuth
+                (storedAuthValue "T1")
+                (Just (authWith (Api.credentials "T0" (Just "csrf-abc"))))
+                |> Expect.equal
+                    (Main.AdoptAuth (authWith (Api.credentials "T1" (Just "csrf-abc"))))
 
 
 clearedWhileAuthedLogsOut : Test
