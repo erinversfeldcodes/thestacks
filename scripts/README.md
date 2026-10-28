@@ -73,7 +73,7 @@ in code by" and check it before relying on it.
 | `scripts/dashboard-render-gate.sh` | `.github/workflows/ci.yml`, `justfile` |  |
 | `scripts/dbt-deployed.sh` | `.github/workflows/scheduled-dbt-refresh.yml`, `scripts/test-deployed.sh`, `test/platform/scheduled_dbt_refresh_test.sh` |  |
 | `scripts/deploy-preview.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/deploy-stack.sh` … |  |
-| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-preview.sh`, `scripts/lib/derive-app-database-url.py` … |  |
+| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `e2e/tests/rate-limit.spec.ts`, `scripts/deploy-preview.sh` … |  |
 | `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/extract_migration_sql_test.sh` … | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
 | `scripts/format.sh` | `justfile` |  |
 | `scripts/gen-ecto-proto.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml` … |  |

@@ -224,4 +224,75 @@ assert_contains "$SPEC_SRC" "E2E_AUTH_RATE_LIMIT is unset" \
 assert_contains "$SPEC_SRC" "e2e-handoff.sh" \
     "naming the channel that should have, so the reader is not left guessing"
 
+
+# ── the flood's arithmetic, against the limiter it reasons about ─────────────
+
+# ⛔ A DRIFT GUARD, because the spec now does ARITHMETIC about someone else's
+# constant. It sizes and times its flood against a 60s window declared in
+# TypeScript; the window that actually governs the bucket is `@window_ms` in the
+# plug. Change the plug and the spec keeps computing confidently against a
+# window that no longer exists — and its failure message would once again
+# describe the bucket rather than itself.
+test_case "the_specs_window_matches_the_limiters" \
+    "the flood's arithmetic is about the window the limiter really runs"
+LIMITER="$REPO_ROOT/apps/core/lib/stacks_web/plugs/rate_limiter.ex"
+assert_path_exists "$LIMITER" "the rate limiter plug exists"
+ELIXIR_WINDOW="$(awk -F'@window_ms ' '/^  @window_ms /{ gsub(/_/, "", $2); print $2; exit }' "$LIMITER")"
+SPEC_WINDOW="$(awk -F'= ' '/^const BUCKET_WINDOW_MS/{ gsub(/[_;]/, "", $2); print $2; exit }' "$SPEC")"
+if [ -z "$ELIXIR_WINDOW" ] || [ -z "$SPEC_WINDOW" ]; then
+    _record_fail "could not read both windows (plug='${ELIXIR_WINDOW:-<none>}', spec='${SPEC_WINDOW:-<none>}') — one of the two declarations moved, so this guard is no longer comparing anything"
+elif [ "$ELIXIR_WINDOW" = "$SPEC_WINDOW" ]; then
+    _record_pass "both declare a ${ELIXIR_WINDOW}ms window"
+else
+    _record_fail "the limiter runs a ${ELIXIR_WINDOW}ms window and rate-limit.spec.ts computes against ${SPEC_WINDOW}ms. The flood's reachability maths is wrong by that ratio, and it will report the bucket's behaviour instead of its own miscalculation."
+fi
+
+test_case "the_flood_is_concurrent" \
+    "a serial flood cannot reach a ceiling above the endpoint's own throughput"
+FLOOD_CONCURRENCY_VALUE="$(awk -F'= ' '/^const FLOOD_CONCURRENCY/{ gsub(/[_;]/, "", $2); print $2; exit }' "$SPEC")"
+if [ -z "$FLOOD_CONCURRENCY_VALUE" ]; then
+    _record_fail "rate-limit.spec.ts declares no FLOOD_CONCURRENCY — a serial flood measured 3.0 req/s against a 200/60s ceiling needing 3.34/s, and reported brute-force protection absent"
+elif [ "$FLOOD_CONCURRENCY_VALUE" -gt 1 ]; then
+    _record_pass "the flood runs ${FLOOD_CONCURRENCY_VALUE} requests in flight"
+else
+    _record_fail "FLOOD_CONCURRENCY is ${FLOOD_CONCURRENCY_VALUE}, which is serial. Each failed login costs an Argon2 hash through ArgonPool's two workers, so a client that awaits each reply leaves one idle and tops out at roughly half the endpoint's throughput."
+fi
+assert_contains "$SPEC_SRC" "Promise.all" \
+    "and issues them together rather than one at a time"
+
+# ⛔ THE ORDER OF THE TWO FAILURE MESSAGES IS THE FIX, not the messages. A flood
+# that never delivered the ceiling's worth of attempts inside one window never
+# asked the bucket anything, so its silence is a fact about the probe. If the
+# security verdict is asserted first, that is the message a reader gets — which
+# is exactly the false verdict this whole suite exists to prevent, rebuilt one
+# layer up.
+test_case "an_unreachable_ceiling_is_not_a_security_verdict" \
+    "the probe's own shortfall is reported as itself, and reported first"
+REACH_LINE="$(awk '/this probe never reached the ceiling/{ print NR; exit }' <<< "$SPEC_CODE")"
+VERDICT_LINE="$(awk '/is not limiting on a stack where rate limiting is/{ print NR; exit }' <<< "$SPEC_CODE")"
+if [ -z "$REACH_LINE" ]; then
+    _record_fail "the spec has no message for a flood that could not reach the ceiling, so an unreachable ceiling is still reported as absent brute-force protection"
+elif [ -z "$VERDICT_LINE" ]; then
+    _record_fail "the spec no longer carries the security verdict for a bucket that genuinely does not limit — the one finding it exists to make"
+elif [ "$REACH_LINE" -lt "$VERDICT_LINE" ]; then
+    _record_pass "reachability is asserted at line ${REACH_LINE}, before the verdict at ${VERDICT_LINE}"
+else
+    _record_fail "the security verdict (line ${VERDICT_LINE}) is asserted before the reachability check (line ${REACH_LINE}), so a probe too slow to reach the ceiling still fails as absent brute-force protection"
+fi
+assert_contains "$SPEC_SRC" "NOT a finding about rate limiting" \
+    "and says plainly which of the two findings it is not"
+
+# ⛔ A SPEC THAT SPENDS A SHARED BUDGET MUST GIVE IT BACK. Every allowed attempt
+# sits in the bucket for a full window, and the gate's next stage logs in — so
+# without this the stage behind it inherits a spent budget and fails as a broken
+# stack. Measured once: run B of the repeatability check executed ZERO tests.
+test_case "the_flood_does_not_outlive_the_spec" \
+    "the bucket is drained before the stage behind this one logs in"
+assert_contains "$SPEC_SRC" "test.afterEach" \
+    "a hook runs after the test, so the drain happens on failure too"
+assert_contains "$SPEC_SRC" "BUCKET_WINDOW_MS + 2_000 - (Date.now() - floodLastRequestAt)" \
+    "waiting out the remainder of the window the flood filled"
+assert_contains "$SPEC_SRC" "had not drained" \
+    "and asserting the drain worked rather than assuming the arithmetic held"
+
 summarise

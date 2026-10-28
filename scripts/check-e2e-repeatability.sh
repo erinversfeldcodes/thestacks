@@ -89,7 +89,16 @@ a_path, b_path, floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
 
 
 def failures(path):
-    """(set of failing test ids, total tests seen). Ids are file:line:title.
+    """(failing test ids, tests seen, run-level errors). Ids are file:line:title.
+
+    ⛔ THE RUN-LEVEL ERRORS ARE RETURNED, and leaving them out cost a gate run.
+    A run whose `globalSetup` or `setup` project fails writes a perfectly valid
+    report with `suites: []` and the reason in `errors` — so the floor below
+    fired with "run B saw 0" while the sentence explaining WHY sat unread in the
+    object this function had already parsed. `run_once` only prints stderr when
+    the report is EMPTY, and this report was not empty, so nothing surfaced it.
+    Same shape as the defect this script exists to prevent: a measurement that
+    reports a number instead of a cause it was holding.
 
     ⚠️ The report is NOT the whole file. Playwright's json reporter writes to
     stdout, and the suite's `globalSetup` logs to stdout first — so the stream
@@ -120,12 +129,22 @@ def failures(path):
             walk(suite.get("suites"), here)
 
     walk(report.get("suites"))
-    return failed, total
+    return failed, total, report.get("errors") or []
+
+
+def describe_errors(label, errors):
+    if not errors:
+        return
+    print(f"      {label} reported {len(errors)} run-level error(s):", file=sys.stderr)
+    for err in errors[:5]:
+        message = (err.get("message") or str(err)).strip()
+        for line in message.split("\n")[:6]:
+            print(f"        {line}", file=sys.stderr)
 
 
 try:
-    a_fail, a_total = failures(a_path)
-    b_fail, b_total = failures(b_path)
+    a_fail, a_total, a_errors = failures(a_path)
+    b_fail, b_total, b_errors = failures(b_path)
 except (OSError, ValueError, KeyError) as exc:
     print(f"FAIL: could not read a run's JSON report ({exc}).", file=sys.stderr)
     print(
@@ -147,6 +166,24 @@ if a_total < floor or b_total < floor:
         "      the same output as real repeatability.",
         file=sys.stderr,
     )
+    describe_errors("run A", a_errors)
+    describe_errors("run B", b_errors)
+    if not a_errors and not b_errors:
+        print(
+            "      ⚠️ Neither run reported a run-level error, so the specs were\n"
+            "      collected and simply did not match: check the spec names above\n"
+            "      against what is on disk.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "      ⚖️ A run that collected nothing failed BEFORE its first test, so\n"
+            "      this is not a repeatability result — read the error above as the\n"
+            "      finding. One known cause is the preceding stage: rate-limit.spec.ts\n"
+            "      floods the :auth bucket, and a login here 429s until that window\n"
+            "      drains.",
+            file=sys.stderr,
+        )
     raise SystemExit(1)
 
 both = sorted(a_fail & b_fail)

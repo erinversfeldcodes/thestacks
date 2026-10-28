@@ -220,10 +220,24 @@ else
     # that spec is the only E2E proof the bucket limits at all, and at a
     # ceiling of 5000 it could never see a 429 — brute-force protection
     # unprovable by construction. 200 clears the burst (~100/min peak) with
-    # 2x headroom and is floodable in ~30s by the spec, which runs LAST and
-    # serially so its own flood cannot starve a concurrent login. The spec
-    # reads the value via E2E_AUTH_RATE_LIMIT (handed over below) so the two
-    # cannot drift apart. Prod keeps the config default.
+    # 2x headroom.
+    #
+    # ⛔ "FLOODABLE IN ~30s BY THE SPEC, WHICH RUNS SERIALLY" USED TO STAND
+    # HERE AND WAS FALSE, which is how a reachable-looking ceiling became
+    # unreachable. A serial flood measured 3.0 req/s against this preview
+    # (210 attempts in 70s), because each failed login costs an Argon2 hash
+    # through ArgonPool's two workers and a serial client leaves one idle. 200
+    # per 60s needs 3.34/s sustained, so the sliding window dropped entries
+    # faster than the flood added them and the spec reported brute-force
+    # protection ABSENT about a bucket it could not reach. The number was
+    # checked against the suite's burst and merely asserted against the flood.
+    #
+    # ⚖️ The spec now floods concurrently and MEASURES whether it reached the
+    # ceiling, so this ceiling is held honest from the other side: raising it
+    # again produces "this probe never reached the ceiling" with the arithmetic,
+    # not a security verdict. The spec reads the value via E2E_AUTH_RATE_LIMIT
+    # (handed over below) so the two cannot drift apart. Prod keeps the config
+    # default of 60, which a serial client reaches comfortably.
     RATE_LIMIT_AUTH="200"
     # Hand the ceiling to the E2E step. ⛔ Through a file rather than
     # `$GITHUB_ENV`, which exists only inside a GitHub Actions job — and this
