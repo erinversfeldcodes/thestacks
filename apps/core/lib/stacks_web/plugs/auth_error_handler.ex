@@ -40,12 +40,24 @@ defmodule StacksWeb.Plugs.AuthErrorHandler do
   # A session that WAS presented and refused is reported as such; anything else
   # keeps the Guardian type it already reported, so no existing client sees a
   # changed token for a case whose meaning has not changed.
-  defp error_token(conn, :unauthenticated) do
+  #
+  # ⛔ KEYED ON THE REJECTION, NOT ON GUARDIAN'S TYPE, and the first version got
+  # that backwards. It matched `:unauthenticated` specifically — which worked,
+  # but only because a rejected cookie leaves no token behind and Guardian
+  # therefore reports `:unauthenticated`. That is an implicit contract between
+  # `SessionCookie`'s deliberate fall-through and this pattern match, and
+  # nothing named it or tested it.
+  #
+  # MEASURED: a refused cookie sent alongside ANY bearer reports
+  # `invalid_token`, because `VerifyHeader` reaches the error handler first with
+  # a different type — so the reader loses the expiry notice in exactly the
+  # mixed-transport case the rollout exists to support. Reading the flag makes
+  # the question "was a session refused?" rather than "which word did Guardian
+  # use?", which is the question this module is actually asking.
+  defp error_token(conn, type) do
     case conn.private[:stacks_session_cookie_rejected] do
-      nil -> "unauthenticated"
+      nil -> Atom.to_string(type)
       _rejected -> "session_expired"
     end
   end
-
-  defp error_token(_conn, type), do: Atom.to_string(type)
 end

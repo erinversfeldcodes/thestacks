@@ -363,6 +363,46 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"error" => "session_expired"} = json_response(conn, 401)
     end
 
+    test "a refused cookie reports session_expired EVEN alongside a bearer", %{conn: conn} do
+      # ⛔ THE CASE THAT PINS THE MECHANISM, and the one the first version of
+      # this handler got wrong. It matched Guardian's `:unauthenticated`
+      # specifically, which works only because a rejected cookie leaves no token
+      # and Guardian therefore uses that word. Send a bearer as well and
+      # `VerifyHeader` reaches the error handler first with `:invalid_token`,
+      # and the expiry notice vanishes — in exactly the mixed-transport case the
+      # two-transport rollout exists to support.
+      #
+      # ⚠⚠ Without this case the suite cannot tell the two implementations
+      # apart: all the others go through the no-bearer path, and rekeying the
+      # handler left them 81/0 either way.
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session("refused-cookie")
+        |> put_req_header("authorization", "Bearer also-rubbish")
+        |> get("/api/auth/me")
+
+      assert %{"error" => "session_expired"} = json_response(conn, 401)
+    end
+
+    test "a refused cookie alongside a VALID bearer authenticates, and says nothing", %{
+      conn: conn
+    } do
+      # The control for the case above: the rollout accepts both transports, so
+      # a junk cookie must not poison a request a live bearer can carry. There
+      # is no 401 here at all, and therefore no reason token to get wrong.
+      user = insert(:user, email: "both-transports@example.com")
+      {:ok, bearer, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session("refused-cookie")
+        |> put_req_header("authorization", "Bearer #{bearer}")
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned} = json_response(conn, 200)
+      assert returned["email"] == "both-transports@example.com"
+    end
+
     test "a VALID cookie is not a 401 at all", %{conn: conn} do
       # The anti-vacuity control. Without it, a handler that answered
       # `session_expired` for every request would satisfy both cases above.

@@ -25,7 +25,6 @@ the shape this wave has been removing.
 
 import Api
 import Expect
-import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Main
@@ -40,6 +39,11 @@ suite =
             , resolvingIsNotSignedIn
             , aSignedOutAnswerIsResolved
             , aFailedCheckIsResolvedButHoldsNoSession
+            ]
+        , describe "a 401 whose body we cannot read is not an answer about the session"
+            [ anUnreadable401IsNeitherSignedOutNorExpired
+            , aKnownReasonTokenIsAnAnswer
+            , anExpiryReasonIsAnAnswer
             ]
         , describe "the identity decoder — a required role, and the fields that may be absent"
             [ anOwnerIsDecodedAsAnOwner
@@ -168,8 +172,8 @@ aFailedCheckIsResolvedButHoldsNoSession =
     test "unresolved_is_resolved_without_a_session: a check that failed stops waiting, and claims nothing" <|
         \() ->
             Expect.all
-                [ \() -> Main.authResolved (Main.Unresolved Http.NetworkError) |> Expect.equal True
-                , \() -> Main.currentAuth (Main.Unresolved Http.NetworkError) |> Expect.equal Nothing
+                [ \() -> Main.authResolved (Main.Unresolved Api.Unreachable) |> Expect.equal True
+                , \() -> Main.currentAuth (Main.Unresolved Api.Unreachable) |> Expect.equal Nothing
                 ]
                 ()
 
@@ -287,3 +291,41 @@ anErrorEnvelopeIsNotAnAccount =
                 (Encode.object [ ( "error", Encode.string "unauthenticated" ) ])
                 |> Result.toMaybe
                 |> Expect.equal Nothing
+
+
+
+-- AN UNREADABLE 401 ----------------------------------------------------------
+
+
+{-| ⛔ The case that nearly restored the regression this reason token exists to
+fix. The first version read an unparseable 401 body as `NoSession`, which
+renders a clean signed-out app — so a proxy's HTML error page, or an error shape
+that changed under us, would silently sign a reader out with no explanation and
+nothing would report it.
+-}
+anUnreadable401IsNeitherSignedOutNorExpired : Test
+anUnreadable401IsNeitherSignedOutNorExpired =
+    test "unreadable_401_is_unavailable: a 401 we cannot parse says nothing about the session" <|
+        \() ->
+            Api.refusalFrom "<html><body>502 Bad Gateway</body></html>"
+                |> Expect.equal (Api.IdentityUnavailable Api.Unreadable)
+
+
+{-| The paired control. Without it the case above would pass on a function that
+answered `IdentityUnavailable` to every 401, which would mean a signed-out
+reader never resolves at all.
+-}
+aKnownReasonTokenIsAnAnswer : Test
+aKnownReasonTokenIsAnAnswer =
+    test "known_reason_is_an_answer: a reason token we understand resolves the boot" <|
+        \() ->
+            Api.refusalFrom "{\"error\":\"unauthenticated\"}"
+                |> Expect.equal Api.NoSession
+
+
+anExpiryReasonIsAnAnswer : Test
+anExpiryReasonIsAnAnswer =
+    test "expiry_reason_is_an_answer: the server naming an expiry is the one that raises the notice" <|
+        \() ->
+            Api.refusalFrom "{\"error\":\"session_expired\"}"
+                |> Expect.equal Api.SessionRefused

@@ -278,7 +278,7 @@ settled session.
 -}
 type AuthState
     = Resolving
-    | Unresolved Http.Error
+    | Unresolved Api.BootFailure
     | Anonymous
     | Arriving Auth
     | Authenticated Auth
@@ -3322,9 +3322,22 @@ subscriptions model =
         -- leaves. A `stacks-auth` write used to fire a `storage` event in every
         -- sibling tab, so a sign-out propagated instantly; an httpOnly cookie
         -- being cleared fires nothing anywhere. So a tab re-asks when the
-        -- reader returns to it — which is the moment before they would act on
-        -- a session that is no longer theirs, and also the moment a changed
-        -- role catches up without a reload.
+        -- reader returns to it — the moment before they would act on a session
+        -- that is no longer theirs, and also the moment a changed role catches
+        -- up without a reload.
+        --
+        -- ⚠️ NOT THE SAME GUARANTEE, and the difference is worth stating rather
+        -- than calling this "restored". `visibilitychange` fires when a
+        -- DOCUMENT becomes hidden or visible — switching tabs within a window,
+        -- minimising it. Two windows side by side are both `visible`, so no
+        -- event ever fires and a sign-out in one never reaches the other. The
+        -- old `storage` event had no such gap.
+        --
+        -- ⚖️ Left as is rather than papered over with a `window.focus` port:
+        -- the remaining exposure is stale CHROME, since every request the
+        -- second window makes is refused by the server, and a port is a new
+        -- mechanism to maintain for a case nobody has reported. Recorded so the
+        -- next person reads a limit rather than a promise.
         , Browser.Events.onVisibilityChange TabVisibilityChanged
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
@@ -4396,29 +4409,31 @@ viewBooting authState =
 
 {-| Why the boot check did not answer, in the reader’s voice.
 
-A `BadBody` is deliberately not called a network problem: it means the server
-answered and the answer was not an account, which is OURS to fix and not
-something a retry is likely to clear — so the copy stops short of promising
-that it will.
+⚠️ `Unreadable` is deliberately not called a network problem: it means the
+server answered and the answer was not something we could read, which is OURS to
+fix and not something a retry is likely to clear — so the copy stops short of
+promising that it will.
+
+⚖️ This takes a `BootFailure` rather than an `Http.Error`. The mapping used to
+happen here, which meant a transport error travelled through two domain types to
+reach the one `case` that turned it into a sentence; `Api` now names the reason
+where the response is, and this says it in the reader's words.
 
 -}
-bootFailureReason : Http.Error -> String
-bootFailureReason err =
-    case err of
-        Http.NetworkError ->
+bootFailureReason : Api.BootFailure -> String
+bootFailureReason failure =
+    case failure of
+        Api.Unreachable ->
             "the library is unreachable"
 
-        Http.Timeout ->
+        Api.TooSlow ->
             "the library took too long to answer"
 
-        Http.BadStatus status ->
+        Api.ServerSaid status ->
             "the library answered " ++ String.fromInt status
 
-        Http.BadBody _ ->
+        Api.Unreadable ->
             "the library’s answer could not be read"
-
-        Http.BadUrl _ ->
-            "the request could not be addressed"
 
 
 {-| What the gate says to an operator who ended their own session. It names the

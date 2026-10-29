@@ -158,7 +158,7 @@ suite =
                         |> Query.has [ Selector.text "Bookshelves" ]
             , test "a boot whose check FAILED is resolved, and says so rather than spinning" <|
                 \() ->
-                    Main.viewNav Catalogue (Main.Unresolved Http.NetworkError) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue (Main.Unresolved Api.Unreachable) Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             ]

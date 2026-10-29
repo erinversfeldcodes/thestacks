@@ -22,6 +22,7 @@ module Api exposing
     , BlockedUsersResponse
     , BlogPostPage
     , BookDetailResponse
+    , BootFailure(..)
     , CatalogueResponse
     , CollectionHit
     , ConfirmError(..)
@@ -227,6 +228,7 @@ module Api exposing
     , recordSyndication
     , refresh
     , refreshRequest
+    , refusalFrom
     , registerErrorsDecoder
     , registerRequest
     , registrationResponseDecoder
@@ -3643,7 +3645,28 @@ type IdentityOutcome
     = IdentityKnown Identity
     | NoSession
     | SessionRefused
-    | IdentityUnavailable Http.Error
+    | IdentityUnavailable BootFailure
+
+
+{-| Why asking who you are did not get an answer, in terms the app can act on.
+
+⛔ A DOMAIN REASON RATHER THAN AN `Http.Error`, because the only thing anyone
+does with it is tell the reader what went wrong — and that mapping has to
+happen somewhere. Doing it here, at the boundary where the response is, keeps
+`Http` out of the model entirely; doing it at render time (which is where it
+used to live) meant an `Http.Error` travelled through two domain types to reach
+a `case` that turned it into a sentence.
+
+⚖️ `Unreadable` is NOT a network problem and is kept separate for that reason:
+it means the server answered and the answer was not something we can read,
+which is ours to fix and is not likely to clear on a retry.
+
+-}
+type BootFailure
+    = Unreachable
+    | TooSlow
+    | ServerSaid Int
+    | Unreadable
 
 
 {-| Read one `/api/auth/me` response into its outcome.
@@ -3656,34 +3679,45 @@ identityOutcome response =
                 Ok identity ->
                     IdentityKnown identity
 
-                Err decodeError ->
+                Err _ ->
                     -- A 200 that is not an account is a broken answer, not a
                     -- signed-out reader. It must not quietly sign anyone out.
-                    IdentityUnavailable (Http.BadBody (Decode.errorToString decodeError))
+                    IdentityUnavailable Unreadable
 
         Http.BadStatus_ metadata body ->
             if metadata.statusCode == 401 then
                 refusalFrom body
 
             else
-                IdentityUnavailable (Http.BadStatus metadata.statusCode)
+                IdentityUnavailable (ServerSaid metadata.statusCode)
 
         Http.NetworkError_ ->
-            IdentityUnavailable Http.NetworkError
+            IdentityUnavailable Unreachable
 
         Http.Timeout_ ->
-            IdentityUnavailable Http.Timeout
+            IdentityUnavailable TooSlow
 
-        Http.BadUrl_ url ->
-            IdentityUnavailable (Http.BadUrl url)
+        Http.BadUrl_ _ ->
+            IdentityUnavailable Unreadable
 
 
 {-| Which kind of 401 this is.
 
-⚠️ An UNREADABLE 401 body is `NoSession`, deliberately. The alternative —
-defaulting to `SessionRefused` — would raise "we closed your session" at a
-reader who never had one, every time the server's error shape changed. The
-quieter answer is the safe one when the body cannot be read.
+⛔ AN UNREADABLE 401 BODY IS NEITHER, and the first version of this function
+chose between two wrong answers. It read an unparseable body as `NoSession` —
+the quiet option — on the grounds that defaulting to `SessionRefused` would
+raise "we closed your session" at a reader who never had one.
+
+⚖️ Both were wrong because the question had a third answer. A 401 whose body
+we cannot read is not evidence about the session at all: a proxy's HTML error
+page, or an error shape that changed under us, means we never reached the
+application. Reading it as `NoSession` silently restores the very regression
+this reason token exists to fix — the reader is signed out with no explanation
+and nothing reports it. Reading it as `SessionRefused` tells a first-time
+visitor something false.
+
+So it says what is true: we asked, and we could not read the answer. The boot
+screen offers a retry, which is the one response that fits not knowing.
 
 -}
 refusalFrom : String -> IdentityOutcome
@@ -3692,8 +3726,13 @@ refusalFrom body =
         Ok "session_expired" ->
             SessionRefused
 
-        _ ->
+        Ok _ ->
+            -- A reason token we DO understand the shape of, naming something
+            -- else: the server is telling us there is no session.
             NoSession
+
+        Err _ ->
+            IdentityUnavailable Unreadable
 
 
 {-| A profile-update failure.
