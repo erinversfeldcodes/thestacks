@@ -19,9 +19,17 @@ defmodule StacksWeb.Plugs.RateLimiter do
       applied in the umbrella's ROOT `config/runtime.exs` for every non-test
       environment, and `RATE_LIMIT_AUTH` plus `RATE_LIMIT_PASSWORD_CHANGE` are
       applied again by `Server.init/1` at boot. ⚠️ `:admin` and `:feedback`
-      read an `Application` key that nothing writes, so the figures above are
-      the only ones they ever take — a reader with no writer, which is the
-      mirror image of the bucket this docstring used to advertise.
+      read an `Application` key that no runtime configuration writes, so the
+      figures above are the only ones they take in a running system — a reader
+      with no writer, which is the mirror image of the bucket this docstring
+      used to advertise.
+
+      ⚖️ The two are not symmetric, and the difference is worth a line for
+      whoever makes them configurable: nothing anywhere writes
+      `:rate_limit_admin`, while `:rate_limit_feedback` IS written by two test
+      files (`rate_limiter_test.exs` and `feedback_controller_test.exs`) to
+      exercise the ceiling. So a grep for the feedback key finds writers and
+      they are not a config mechanism.
 
       ⚠️ `apps/core/config/` is NOT the whole config tree. The root
       `config/` is what a release evaluates, and reading only the inner one
@@ -53,10 +61,18 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   # ⛔ The bucket is resolved here, at the plug site, not per request. `init/1`
   # runs at compile time under the default plug init mode, so a pipeline that
-  # names no bucket — or names one with no limit — cannot be built, rather than
-  # 500ing on the first request that reaches it. `get_limit/1` is the single
-  # source of truth for which buckets exist; calling it here is the whole
-  # validation, so the two cannot disagree.
+  # names no bucket — or names one with no limit — fails the BUILD rather than
+  # the first request that reaches it. `get_limit/1` is the single source of
+  # truth for which buckets exist; calling it here is the whole validation, so
+  # the two cannot disagree.
+  #
+  # ⚠️ WHICH BUILD, precisely — `dev` is the exception and it is the environment
+  # you are probably in. `apps/core/config/dev.exs` sets
+  # `plug_init_mode: :runtime`, so in dev this runs per request and a typo'd
+  # bucket 500s on first contact exactly as it would have before. MEASURED: a
+  # planted `bucket: :uploads` left `mix compile` at RC=0 and
+  # `MIX_ENV=test mix compile` at RC=1 with the ArgumentError. So `mix test` is
+  # what catches it before a push, and prod builds cannot ship it.
   def init(opts) do
     bucket =
       Keyword.get(opts, :bucket) ||

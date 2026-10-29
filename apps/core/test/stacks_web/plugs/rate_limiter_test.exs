@@ -68,7 +68,13 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
     test "call/2 with no bucket raises instead of choosing one", %{conn: conn} do
       conn = %{conn | remote_ip: {10, 0, 0, 4}}
 
-      assert_raise KeyError, fn -> RateLimiter.call(conn, []) end
+      # ⚠️ The key is pinned, not just the exception type. A bare
+      # `assert_raise KeyError` passed when the fetched key was swapped to one
+      # nothing passes either — it asserted that SOMETHING was missing, which is
+      # a weaker claim than the two cases above make.
+      assert_raise KeyError, ~r/key :bucket not found/, fn ->
+        RateLimiter.call(conn, [])
+      end
     end
   end
 
