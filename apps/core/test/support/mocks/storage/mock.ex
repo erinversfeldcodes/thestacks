@@ -23,6 +23,11 @@ defmodule Stacks.Storage.Mock do
       nil ->
         store = Process.get(__MODULE__, %{})
         Process.put(__MODULE__, Map.put(store, key, data))
+        # ⚠️ AFTER the bytes are in, not before: the point of the hook is to let
+        # a test observe the store at the instant an object exists, and a
+        # callback that runs first sees the state before the write it was aimed
+        # at. The first version ran it first and a probe stayed green.
+        run_callback(:put)
         {:ok, key}
 
       reason ->
@@ -49,11 +54,17 @@ defmodule Stacks.Storage.Mock do
   @impl true
   @spec head(String.t()) :: {:ok, non_neg_integer()} | {:error, :not_found | term()}
   def head(key) do
-    store = Process.get(__MODULE__, %{})
+    case steered_error(:head) do
+      nil ->
+        store = Process.get(__MODULE__, %{})
 
-    case Map.fetch(store, key) do
-      {:ok, data} -> {:ok, byte_size(data)}
-      :error -> {:error, :not_found}
+        case Map.fetch(store, key) do
+          {:ok, data} -> {:ok, byte_size(data)}
+          :error -> {:error, :not_found}
+        end
+
+      reason ->
+        {:error, reason}
     end
   end
 
@@ -133,7 +144,35 @@ defmodule Stacks.Storage.Mock do
     :ok
   end
 
-  @steerable [:put, :list, :delete, :presign]
+  @doc """
+      Run `fun` the next time `operation` is called, before it does its work.
+
+      ⛔ THE ONLY WAY TO TEST AN ORDERING. Code that writes bytes and then
+      inserts a row is indistinguishable, from the outside, from code that does
+      it the other way round: both end in the same state and both compensate the
+      same way on failure. What differs is what a concurrent reader sees BETWEEN
+      the two steps — so a test needs to be that reader, and this is the seam
+      that lets it be.
+  """
+  @spec steer_callback(atom(), (-> any())) :: :ok
+  def steer_callback(operation, fun) when is_function(fun, 0) do
+    Process.put({__MODULE__, :callback, operation}, fun)
+    :ok
+  end
+
+  defp run_callback(operation) do
+    case Process.get({__MODULE__, :callback, operation}) do
+      nil ->
+        :ok
+
+      fun ->
+        Process.delete({__MODULE__, :callback, operation})
+        fun.()
+        :ok
+    end
+  end
+
+  @steerable [:put, :list, :delete, :presign, :head]
 
   defp steered_error(operation) do
     case Process.get({__MODULE__, operation}, :undefined) do

@@ -47,6 +47,10 @@ defmodule Stacks.GDPR.ImageRetention do
   # The prefix `Storage.upload_image/3` writes under (`"uploads/\#{image_id}"`).
   @upload_prefix "uploads/"
 
+  # How many keys go into one `storage_path in (...)` query. Keeps a large
+  # prefix off a single enormous parameter list without capping what is seen.
+  @known_chunk 500
+
   @doc """
       Deletes up to `:limit` uploaded_images records where `expires_at < now`,
       oldest expiry first.
@@ -112,37 +116,40 @@ defmodule Stacks.GDPR.ImageRetention do
       `store_upload_bytes/3` refuses an id with no row. So an object without a
       row is one whose row has gone, never one whose row is still coming.
 
-      ⚠️ WHY THE BOUND IS ON THE OBJECT LIST AND NOT IN THE QUERY. The two
-      sweeps above bound themselves with `limit` in the `Repo` call, because
-      what they read is rows. Here the expensive unbounded read is
-      `Storage.list_objects/1`, which answers with the whole prefix and which
-      no `limit` inside a query could have constrained — so the bound is
-      applied to its result first, and the database is then asked about at most
-      `@batch_size` keys. `drain/1` works the backlog down across runs exactly
-      as it does for the others.
+      ⛔ WHY THE BOUND IS ON THE DELETES AND NOT ON THE KEYS EXAMINED. The
+      obvious bound — take the first `limit` keys and diff those — makes the
+      sweep **blind**, and that is not a performance opinion. Object keys are
+      UUIDs, so a listing's order is arbitrary but STABLE: the same first
+      `limit` keys come back every run. If they all have rows, the sweep
+      reports `{:ok, 0}` forever while an orphan sits further down the listing,
+      never examined. A sweep that cannot see most of its own prefix is worse
+      than no sweep, because it reports success.
+
+      So the whole listing is examined, the `in` query is chunked to
+      `@known_chunk` keys per round trip, and `limit` caps the DELETES — the
+      expensive and irreversible half. `drain/1` then works a real backlog down
+      across runs, as it does for the two sweeps above.
+
+      ⚠️ `Storage.list_objects/1` still answers with the whole prefix in one
+      list, which grows with total uploads stored rather than with work to do.
+      Bounding that needs a paged `list/2` on the storage behaviour and its
+      three other callers; it is a cost, not a correctness problem, and it is
+      not fixed here.
   """
   @spec cleanup_orphan_objects(keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
-  # BOUNDED SWEEP: `where storage_path in ^batch`, and `batch` is
-  # `Enum.take(keys, limit)` — at most `limit` rows by construction. See the
-  # @doc for why the bound sits on the object list rather than in the query.
+  # BOUNDED SWEEP: the `in` query is chunked to `@known_chunk` keys per call and
+  # the DELETES are capped at `limit`. ⚠️ The bound is deliberately NOT on the
+  # keys examined — see the @doc; capping those makes the sweep blind.
   def cleanup_orphan_objects(opts \\ []) do
     limit = Keyword.get(opts, :limit, @batch_size)
 
     case Stacks.Storage.list_objects(@upload_prefix) do
       {:ok, keys} ->
-        # ⚠️ ONE BATCH, like the sweeps above. `list_objects/1` answers with the
-        # whole prefix, so the bound is applied here before anything else loads
-        # a working set from it.
-        batch = Enum.take(keys, limit)
-
-        known =
-          UploadedImage
-          |> where([i], i.storage_path in ^batch)
-          |> select([i], i.storage_path)
-          |> Repo.all()
-          |> MapSet.new()
-
-        orphans = Enum.reject(batch, &MapSet.member?(known, &1))
+        orphans =
+          keys
+          |> Enum.chunk_every(@known_chunk)
+          |> Enum.flat_map(&reject_known(&1))
+          |> Enum.take(limit)
 
         Enum.each(orphans, &Stacks.Storage.delete_object/1)
 
@@ -167,6 +174,17 @@ defmodule Stacks.GDPR.ImageRetention do
     end
   rescue
     error -> {:error, error}
+  end
+
+  defp reject_known(keys) do
+    known =
+      UploadedImage
+      |> where([i], i.storage_path in ^keys)
+      |> select([i], i.storage_path)
+      |> Repo.all()
+      |> MapSet.new()
+
+    Enum.reject(keys, &MapSet.member?(known, &1))
   end
 
   @doc """

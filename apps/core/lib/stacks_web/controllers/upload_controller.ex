@@ -116,6 +116,13 @@ defmodule StacksWeb.UploadController do
       {:error, :already_written} ->
         conn |> put_status(409) |> json(%{error: "already_uploaded"})
 
+      # ⚠️ 503, not 500. Object storage could not say whether bytes are already
+      # there, so this write is refused rather than risking an overwrite — but
+      # the reader's upload was probably fine and retrying is the right advice,
+      # which a 500 does not give.
+      {:error, :storage_unavailable} ->
+        conn |> put_status(503) |> json(%{error: "storage_unavailable"})
+
       {:error, reason} ->
         Logger.error(
           "UploadController.upload_data: storage failed for #{image_id}: #{inspect(reason)}"

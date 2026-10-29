@@ -7,6 +7,7 @@ defmodule StacksWeb.UploadControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
+  alias Stacks.GDPR.ImageRetention
   alias Stacks.Storage
   alias Stacks.Storage.Mock, as: StorageMock
   alias Stacks.Uploads
@@ -218,6 +219,121 @@ defmodule StacksWeb.UploadControllerTest do
       conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image.id, "bytes")
 
       assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+  end
+
+  defp temp_upload(contents) do
+    path = Path.join(System.tmp_dir!(), "upload_probe_#{System.unique_integer([:positive])}.jpg")
+    File.write!(path, contents)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  describe "no upload path ever leaves bytes that no row points at" do
+    # ⛔ THE INVARIANT THE ORPHAN SWEEP'S SAFETY RESTS ON. `cleanup_orphan_objects/1`
+    # deletes any object with no row, and its correctness argument is that such an
+    # object is one whose row has GONE, never one whose row is still COMING. That
+    # argument is a claim about every writer to the prefix, so it is asserted here
+    # rather than left in a comment.
+
+    test "a failed store_upload leaves neither bytes nor a row" do
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: temp_upload("some image bytes"),
+        filename: "test.jpg",
+        content_type: "image/jpeg"
+      }
+
+      StorageMock.steer_error(:put, :unavailable)
+
+      assert {:error, :unavailable} = Uploads.store_upload(user.id, upload)
+
+      {:ok, keys} = Storage.list_objects("uploads/")
+
+      assert keys == [],
+             "bytes-first ordering would strand an object here that nothing points at"
+
+      assert Core.Repo.aggregate(UploadedImage, :count) == 0,
+             "and the compensating delete must take the row with it"
+    end
+
+    test "the sweep running AT THE MOMENT the bytes land does not eat them" do
+      # ⛔ THIS IS THE ASSERTION THE ORDERING EXISTS FOR, and the first version of
+      # this test did not make it. That one steered `put` to fail and checked
+      # nothing was left behind — which passes under BOTH orderings, because the
+      # failure states are identical and the compensating delete covers them. A
+      # probe that swapped the two lines back left it green.
+      #
+      # The difference is only visible to a reader who looks BETWEEN the row
+      # insert and the byte write. So this test is that reader: the sweep runs
+      # from inside `put`, at the one instant where bytes-first would have left
+      # an object no row pointed at.
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: temp_upload("some image bytes"),
+        filename: "test.jpg",
+        content_type: "image/jpeg"
+      }
+
+      StorageMock.steer_callback(:put, fn ->
+        ImageRetention.cleanup_orphan_objects()
+      end)
+
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
+
+      assert {:ok, _size} = Storage.head_image(image.storage_path),
+             "the sweep ran mid-write and the reader's bytes must have survived it"
+
+      assert Core.Repo.get(UploadedImage, image.id),
+             "and the row must still point at them"
+    end
+
+    test "a successful store_upload leaves bytes WITH a row, so the sweep spares them" do
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: temp_upload("some image bytes"),
+        filename: "test.jpg",
+        content_type: "image/jpeg"
+      }
+
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
+
+      assert {:ok, 0} = ImageRetention.cleanup_orphan_objects(),
+             "a committed upload must not look like an orphan to the sweep"
+
+      assert {:ok, _size} = Storage.head_image(image.storage_path)
+    end
+  end
+
+  describe "a HEAD that cannot be answered refuses, and says it is retryable" do
+    setup do
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      {:ok, user: user, token: token}
+    end
+
+    test "answers 503, not 500, when object storage cannot be reached",
+         %{user: user, token: token} do
+      # ⚠️ R2's `head` sits behind a circuit breaker, so this is a routine value
+      # in production — and until this test the branch handling it was reachable
+      # by nothing in the suite.
+      {:ok, %{image_id: image_id}} = Uploads.init_upload(user.id)
+
+      StorageMock.steer_error(:head, :circuit_open)
+
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/upload/#{image_id}/data", "bytes")
+
+      assert %{"error" => "storage_unavailable"} = json_response(conn, 503)
+
+      assert {:ok, []} = Storage.list_objects("uploads/"),
+             "a refused write must not have stored anything"
     end
   end
 

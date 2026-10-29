@@ -398,6 +398,38 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
       assert {:ok, []} = Stacks.Storage.list_objects("uploads/")
     end
 
+    test "finds an orphan that sorts AFTER the batch limit's worth of live keys" do
+      # ⛔ THE SWEEP MUST NOT BE BLIND PAST ITS OWN LIMIT. Bounding the KEYS
+      # EXAMINED instead of the DELETES looks equivalent and is not: object keys
+      # are UUIDs, so a listing's order is arbitrary but STABLE, and the same
+      # first N keys come back every run. An orphan below that cut is never
+      # examined and the sweep reports `{:ok, 0}` — success — forever.
+      user = insert(:user)
+
+      live =
+        for _ <- 1..3 do
+          {:ok, %{image_id: id}} = Stacks.Uploads.init_upload(user.id)
+          :ok = Stacks.Uploads.store_upload_bytes(user.id, id, "a real upload")
+          "uploads/#{id}"
+        end
+
+      # An orphan guaranteed to sort last: `f` is above every hex digit a UUID
+      # can start with, so no amount of luck puts it inside the first page.
+      orphan_id = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+      {:ok, _} = Stacks.Storage.upload_image(orphan_id, "row-less bytes")
+
+      {:ok, listed} = Stacks.Storage.list_objects("uploads/")
+      assert length(listed) == 4
+
+      # `limit: 1` — one delete allowed. The orphan is the 4th key.
+      assert {:ok, 1} = ImageRetention.cleanup_orphan_objects(limit: 1)
+
+      {:ok, after_keys} = Stacks.Storage.list_objects("uploads/")
+
+      assert Enum.sort(after_keys) == Enum.sort(live),
+             "the orphan past the limit must still be found, and the live keys untouched"
+    end
+
     test "respects its batch limit, like the sweeps above it" do
       for _ <- 1..3, do: Stacks.Storage.upload_image(Ecto.UUID.generate(), "orphan")
 

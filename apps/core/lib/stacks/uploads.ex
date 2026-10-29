@@ -52,9 +52,23 @@ defmodule Stacks.Uploads do
     image_id = Ecto.UUID.generate()
     storage_key = "uploads/#{image_id}"
 
+    # ⛔ THE ROW IS INSERTED BEFORE THE BYTES, and the order is the whole point.
+    # Written the other way round — bytes first, row second — there is a window
+    # in which an object exists that no row points at, and an object with no row
+    # is reachable by NEITHER erasure (which selects rows by `user_id`) nor the
+    # expiry sweep (which selects rows by `expires_at`). That is a right-to-
+    # erasure hole, and it is also the window in which
+    # `GDPR.ImageRetention.cleanup_orphan_objects/1` would delete a legitimate
+    # upload mid-flight.
+    #
+    # ⚖️ Both orderings can fail; they fail toward different states. Row-first
+    # leaves a row with no bytes: reachable by erasure, visible to its owner,
+    # and collected by `cleanup_stuck_images/1` within hours. Bytes-first leaves
+    # bytes nobody can attribute, erase or expire. Fail toward the reachable
+    # state.
     with {:ok, bytes} <- File.read(tmp_path),
-         {:ok, _key} <- Stacks.Storage.upload_image(image_id, bytes),
-         {:ok, image} <- insert_uploaded_image(image_id, storage_key, user_id) do
+         {:ok, image} <- insert_uploaded_image(image_id, storage_key, user_id),
+         {:ok, _key} <- Stacks.Storage.upload_image(image_id, bytes) do
       Events.emit_safe(%{
         event_type: "image.submitted",
         aggregate_type: "image",
@@ -65,7 +79,10 @@ defmodule Stacks.Uploads do
       {:ok, image}
     else
       {:error, reason} ->
+        # Compensate in both directions, and delete the ROW LAST: if that delete
+        # is the one that fails, what survives is the reachable half.
         Stacks.Storage.delete_image(storage_key)
+        Repo.delete_all(from(i in UploadedImage, where: i.id == ^image_id))
         {:error, reason}
     end
   end
@@ -127,11 +144,19 @@ defmodule Stacks.Uploads do
   # "Have the bytes landed" is a fact about the object, and `uploaded_at` cannot
   # answer it — `init_upload/2` sets that at RESERVATION time, before any bytes
   # exist.
+  # ⚠️ A HEAD THAT CANNOT BE ANSWERED IS NOT EVIDENCE EITHER WAY, and the third
+  # clause is a decision rather than a fall-through. Allowing the write risks
+  # overwriting bytes the reader already stored; refusing fails a write that was
+  # probably fine. Refusing is the lesser harm — the upload is retryable, an
+  # overwrite is not — but it must say so: `:storage_unavailable` becomes a 503,
+  # not the 500 that reads as "this endpoint is broken". R2's `head` sits behind
+  # a circuit breaker, so `{:error, :circuit_open}` is a routine value here, not
+  # an exotic one.
   defp refuse_if_already_written(storage_path) do
     case Stacks.Storage.head_image(storage_path) do
       {:error, :not_found} -> :ok
       {:ok, _size} -> {:error, :already_written}
-      {:error, reason} -> {:error, reason}
+      {:error, _reason} -> {:error, :storage_unavailable}
     end
   end
 
