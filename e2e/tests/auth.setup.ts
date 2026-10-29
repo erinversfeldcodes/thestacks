@@ -63,6 +63,9 @@ async function authenticateUser(
 
   await page.evaluate(
     (auth: any) => {
+      // ⚠️ The SPA does not read this. It is written into the saved storage
+      // state because around thirty specs still pull a bearer out of it for a
+      // direct `fetch`; the session itself is the cookie above.
       localStorage.setItem("stacks-auth", JSON.stringify(auth));
     },
     {

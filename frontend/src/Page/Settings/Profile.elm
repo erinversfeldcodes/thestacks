@@ -11,23 +11,24 @@ module Page.Settings.Profile exposing
 
 {-| Settings → Profile: the reader's own account, as an editable form.
 
-**This page owns account freshness.** Nothing else in the app asks the server
-who the reader is. `Main` reconstructs `auth.user` from the `stacks-auth` blob
-in localStorage, which carries only what a login response put there — id,
-email, display name, handle, role — and hard-codes the rest to `Nothing`;
-`app.js` fetches `/api/config` for server feature flags and nothing else. So
-the blob is a credential cache, not a record of the account: it has no country,
-no city, no website, and it never learns that any of them changed. Seeding this
-form from it and calling the result "your profile" is how a saved location came
-back blank on the next visit.
+**This page owns the FULL account, not identity.** `Main` now asks
+`GET /api/auth/me` at boot and holds the answer, so `auth.user` is the server's
+own record rather than a cache — but it keeps only what the app needs to render
+itself (id, email, display name, handle, role, the two consent flags) and
+leaves country, city and website out deliberately: a field carried for
+completeness is a field that drifts unobserved.
 
-`initWithToken` therefore asks `GET /api/auth/me` when the page opens and
-hydrates the form from the answer. The blob still seeds the fields first, so
-the form is filled the instant it renders instead of flashing empty — but it is
-a placeholder with no authority, and the response replaces it. If a wider
-surface later needs fresh account data, that fetch belongs in `Main` and this
-page should read it from there; two independent fetchers would be two answers
-to one question.
+So this form cannot be seeded from the session and called "your profile" — it
+would show a blank location to a reader who has set one, which is how a saved
+location came back empty on the next visit. `initWithToken` asks the same
+endpoint again, for the wider record, and the session seeds only the fields it
+actually holds so the form is filled the instant it renders instead of flashing
+empty.
+
+⚠️ Two callers of one endpoint, which is worth naming rather than leaving to
+be rediscovered: boot wants an identity and this page wants an account, and they
+read different subsets of the same answer. If a third surface needs the wider
+record, it belongs in `Main` beside the identity rather than as a third fetch.
 
 -}
 

@@ -28,8 +28,6 @@ suite =
             , expiryShowsExpiryNotice
             , draftExpiryReassures
             , deletionSaysGoodbye
-            , unreadableTellsTheReader
-            , unreadableCarriesTheReason
             , forgotOpensTheResetForm
             , confirmationExpiredOpensTheResendForm
             ]
@@ -68,11 +66,6 @@ farewellCopy =
     "Your account deletion has been queued. We're sorry to see you go — thank you for the time you spent in The Stacks."
 
 
-unreadableCopy : String
-unreadableCopy =
-    "A saved sign-in was found here but could not be read, so you have been signed out. Please sign in again."
-
-
 cardFor : Login.Arrival -> Query.Single Login.Msg
 cardFor arrival =
     Login.init Nothing arrival
@@ -93,7 +86,6 @@ freshShowsNoNotice =
                     [ Selector.text expiryCopy
                     , Selector.text draftExpiryCopy
                     , Selector.text farewellCopy
-                    , Selector.text unreadableCopy
                     ]
 
 
@@ -135,29 +127,6 @@ deletionSaysGoodbye =
 unreadable stored credential put them back at a bare login card that looked
 exactly like a deliberate sign-out.
 -}
-unreadableTellsTheReader : Test
-unreadableTellsTheReader =
-    test "unreadable_tells_the_reader: a stored credential that would not decode is explained, not swallowed" <|
-        \() ->
-            Expect.all
-                [ Query.has [ Selector.text unreadableCopy ]
-                , Query.hasNot [ Selector.text expiryCopy ]
-                , Query.hasNot [ Selector.text farewellCopy ]
-                ]
-                (cardFor (Login.StoredSessionUnreadable "Problem with the value at json.userId"))
-
-
-unreadableCarriesTheReason : Test
-unreadableCarriesTheReason =
-    test "unreadable_carries_the_reason: the decoder's own account of the failure reaches the page" <|
-        \() ->
-            cardFor (Login.StoredSessionUnreadable "Problem with the value at json.userId")
-                |> Query.has
-                    [ Selector.attribute
-                        (Html.Attributes.title "Problem with the value at json.userId")
-                    ]
-
-
 forgotOpensTheResetForm : Test
 forgotOpensTheResetForm =
     test "forgot_opens_the_reset_form: /forgot-password is an arrival, and opens the card on its reset mode" <|
@@ -294,13 +263,12 @@ draftFlagIsOnlyMeaningfulForAnExpiry =
             [ Login.Fresh
             , Login.AccountDeleted
             , Login.ForgotPassword
-            , Login.StoredSessionUnreadable "boom"
             , Login.ConfirmationExpired
             , Login.SessionExpired { draftSaved = False }
             , Login.SessionExpired { draftSaved = True }
             ]
                 |> List.map Login.draftWasSaved
-                |> Expect.equalLists [ False, False, False, False, False, False, True ]
+                |> Expect.equalLists [ False, False, False, False, False, True ]
 
 
 onlyAnExpiryIsAnExpiry : Test
@@ -310,13 +278,12 @@ onlyAnExpiryIsAnExpiry =
             [ Login.Fresh
             , Login.AccountDeleted
             , Login.ForgotPassword
-            , Login.StoredSessionUnreadable "boom"
             , Login.ConfirmationExpired
             , Login.SessionExpired { draftSaved = False }
             , Login.SessionExpired { draftSaved = True }
             ]
                 |> List.map Login.isSessionExpiry
-                |> Expect.equalLists [ False, False, False, False, False, True, True ]
+                |> Expect.equalLists [ False, False, False, False, True, True ]
 
 
 {-| The seam, joined: the arrival `Main.forceSessionExpiry` raises, fed through
@@ -349,7 +316,6 @@ everyOtherArrivalLeavesTheCaptureAlone =
             [ Login.Fresh
             , Login.AccountDeleted
             , Login.ForgotPassword
-            , Login.StoredSessionUnreadable "boom"
             , Login.ConfirmationExpired
             ]
                 |> List.map
@@ -361,4 +327,4 @@ everyOtherArrivalLeavesTheCaptureAlone =
                             , auth = Nothing
                             }
                     )
-                |> Expect.equalLists [ Nothing, Nothing, Nothing, Nothing, Nothing ]
+                |> Expect.equalLists [ Nothing, Nothing, Nothing, Nothing ]

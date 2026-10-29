@@ -1,11 +1,18 @@
-module PersistFirstLoginTest exposing (suite)
+module LoginEffectOrderTest exposing (suite)
 
-{-| The login credential must never be downstream of an animation. Login
-used to park the auth response, play the door dolly-shot, and persist
-only when the browser reported the animation done — a report an
-occluded window never sends (rAF doesn't fire), leaving the reader
-authenticated in memory and anonymous on disk. Persistence now happens
-on the same update that decodes the 200; the animation is decoration.
+{-| A login's real work must never be downstream of an animation. Login
+used to park the auth response, play the door dolly-shot, and act only
+when the browser reported the animation done — a report an occluded
+window never sends (rAF doesn't fire), leaving the reader signed in to
+an app that had fetched nothing. Everything now happens on the same
+update that decodes the 200; the animation is decoration and goes last.
+
+⚠️ This file was `PersistFirstLoginTest` and the effect it guarded was
+`PersistAuth`, writing the credential to `localStorage`. That effect is
+gone with the stored session — the browser holds the cookie, and there
+is nothing for the SPA to make durable. The ORDERING lesson outlived
+the effect that taught it, which is why this file did too.
+
 -}
 
 import Api
@@ -23,14 +30,14 @@ import Types.User exposing (User)
 suite : Test
 suite =
     describe "Persist-first login"
-        [ describe "a 200 is durable before anything the browser can decline to run"
-            [ persistFirstNoAnimationSignal
-            , persistFirstBeforeAnyAnimation
-            , persistFirstIsTheFirstEffect
+        [ describe "a 200 does its work before anything the browser can decline to run"
+            [ everyEffectFiresWithNoAnimationSignal
+            , theSessionsWorkPrecedesTheAnimation
+            , theAnimationIsLast
             , arrivalIsSignedInImmediately
             ]
         , describe "completeLogin — the only door into an authenticated state"
-            [ completeLoginAlwaysPersists
+            [ completeLoginAlwaysFetchesWhatTheAppNeeds
             , completeLoginCarriesTheResponsesToken
             , completeLoginStartsArriving
             ]
@@ -55,7 +62,6 @@ observable consequences of the effects a completed login fires.
 type alias ShellModel =
     { page : Login.Model
     , authState : Main.AuthState
-    , storedToken : Maybe String
     , effectLog : List Main.LoginEffect
     }
 
@@ -64,7 +70,6 @@ shellInit : ShellModel
 shellInit =
     { page = Login.init Nothing Login.Fresh
     , authState = Main.Anonymous
-    , storedToken = Nothing
     , effectLog = []
     }
 
@@ -72,16 +77,13 @@ shellInit =
 {-| Realise one `LoginEffect`, recording what it means. Deliberately total: a new
 effect must be classified here rather than silently ignored.
 -}
-applyEffect : Main.CompletedLogin -> Main.LoginEffect -> ShellModel -> ShellModel
-applyEffect arrival effect model =
+applyEffect : Main.LoginEffect -> ShellModel -> ShellModel
+applyEffect effect model =
     let
         logged =
             { model | effectLog = model.effectLog ++ [ effect ] }
     in
     case effect of
-        Main.PersistAuth ->
-            { logged | storedToken = Api.bearerOf arrival.session.token }
-
         Main.FetchPlacements ->
             logged
 
@@ -124,7 +126,7 @@ shellUpdate msg model =
                         arrival =
                             Main.completeLogin Nothing authResponse
                     in
-                    List.foldl (applyEffect arrival)
+                    List.foldl applyEffect
                         { withPage | authState = arrival.authState }
                         arrival.effects
 
@@ -159,53 +161,53 @@ signIn =
             (simulateAuthResponse (TestHelpers.creds "jwt-token") "user-1" "reader@stacks.dev" "A Reader")
 
 
-persistFirstNoAnimationSignal : Test
-persistFirstNoAnimationSignal =
-    test "persist_first_no_animation_signal: the token is stored with no animation message ever delivered" <|
+everyEffectFiresWithNoAnimationSignal : Test
+everyEffectFiresWithNoAnimationSignal =
+    test "login_effects_need_no_animation_signal: all of them fire with no animation message ever delivered" <|
         \() ->
             signIn
                 |> ProgramTest.expectModel
                     (\model ->
-                        model.storedToken
-                            |> Expect.equal (Just "jwt-token")
+                        model.effectLog
+                            |> Expect.equal Main.loginEffects
                     )
 
 
-persistFirstBeforeAnyAnimation : Test
-persistFirstBeforeAnyAnimation =
-    test "persist_first_before_any_animation: PersistAuth is realised before PlayDoorAnimation" <|
+theSessionsWorkPrecedesTheAnimation : Test
+theSessionsWorkPrecedesTheAnimation =
+    test "login_work_before_animation: every effect the session needs is realised before PlayDoorAnimation" <|
         \() ->
             signIn
                 |> ProgramTest.expectModel
                     (\model ->
+                        let
+                            animationAt =
+                                indexOf Main.PlayDoorAnimation model.effectLog
+                        in
                         Expect.all
-                            [ \log ->
-                                indexOf Main.PersistAuth log
-                                    |> Expect.notEqual Nothing
-                            , \log ->
-                                indexOf Main.PlayDoorAnimation log
-                                    |> Expect.notEqual Nothing
-                            , \log ->
-                                Expect.equal True
-                                    (Maybe.map2 (<)
-                                        (indexOf Main.PersistAuth log)
-                                        (indexOf Main.PlayDoorAnimation log)
-                                        |> Maybe.withDefault False
-                                    )
+                            [ \() -> Expect.notEqual Nothing animationAt
+                            , \() ->
+                                [ Main.FetchPlacements, Main.InitOnboarding, Main.ScheduleRenewal ]
+                                    |> List.filterMap
+                                        (\effect ->
+                                            Maybe.map2 (<) (indexOf effect model.effectLog) animationAt
+                                        )
+                                    |> Expect.equal [ True, True, True ]
                             ]
-                            model.effectLog
+                            ()
                     )
 
 
-persistFirstIsTheFirstEffect : Test
-persistFirstIsTheFirstEffect =
-    test "persist_first_is_first: nothing at all is fired before the credential is durable" <|
+theAnimationIsLast : Test
+theAnimationIsLast =
+    test "login_animation_is_last: the one effect a browser may decline to run is the one nothing waits on" <|
         \() ->
             signIn
                 |> ProgramTest.expectModel
                     (\model ->
-                        List.head model.effectLog
-                            |> Expect.equal (Just Main.PersistAuth)
+                        List.reverse model.effectLog
+                            |> List.head
+                            |> Expect.equal (Just Main.PlayDoorAnimation)
                     )
 
 
@@ -257,14 +259,15 @@ readerAuth =
     { user = readerUser, token = TestHelpers.creds "jwt-token" }
 
 
-completeLoginAlwaysPersists : Test
-completeLoginAlwaysPersists =
-    test "completeLogin cannot produce an authenticated state without the effect that saves it" <|
+completeLoginAlwaysFetchesWhatTheAppNeeds : Test
+completeLoginAlwaysFetchesWhatTheAppNeeds =
+    test "completeLogin cannot produce an authenticated state without the effects that make it usable" <|
         \() ->
             Main.completeLogin Nothing (fakeResponse readerAuth)
                 |> (\arrival ->
                         Expect.all
-                            [ \a -> Expect.equal True (List.member Main.PersistAuth a.effects)
+                            [ \a -> Expect.equal True (List.member Main.FetchPlacements a.effects)
+                            , \a -> Expect.equal True (List.member Main.InitOnboarding a.effects)
                             , \a -> Expect.notEqual Nothing (Main.currentAuth a.authState)
                             ]
                             arrival

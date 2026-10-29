@@ -4,41 +4,31 @@ port module Main exposing
     , AuthState(..)
     , CompletedLogin
     , Connectivity(..)
-    , ExternalAuthOutcome(..)
     , LoginEffect(..)
     , Msg(..)
     , NavMenu(..)
     , Page(..)
-    , PendingLogout
-    , StoredAuth(..)
-    , StoredAuthResolution(..)
     , adminGateAfterEnding
-    , adoptExternalAuth
     , applyPendingUndo
-    , arrivalForBoot
+    , authResolved
     , completeLogin
     , connectivityFromOnline
     , consumeArrival
     , currentAuth
     , decodeConfig
-    , decodeFlags
     , decodeSwipe
     , initPage
     , loginEffects
     , loginRedirectFor
     , main
     , pageTitle
-    , parkPending
     , reconnectShouldRefetch
     , redirectAfterNavigation
     , refreshShelfBehindOverlay
-    , renewAuthToken
     , requiresAuth
     , resetPasswordDestination
-    , resolveRecheck
     , settleArrival
     , shouldShowOnboarding
-    , storedSession
     , toggleNavMenu
     , viewArrivalDoor
     , viewConnectivity
@@ -128,12 +118,6 @@ port playLoginTransition : Json.Encode.Value -> Cmd msg
 port onLoginTransitionComplete : (Decode.Value -> msg) -> Sub msg
 
 
-port saveAuth : Json.Encode.Value -> Cmd msg
-
-
-port clearAuth : () -> Cmd msg
-
-
 port saveOnboardingCompleted : () -> Cmd msg
 
 
@@ -161,26 +145,6 @@ port requestListingDraft : () -> Cmd msg
 
 
 port gotListingDraft : (Decode.Value -> msg) -> Sub msg
-
-
-{-| Cross-tab token propagation. Fires when ANOTHER tab
-writes `stacks-auth` in localStorage: `saveAuth` (a sibling tab just rotated its
-token → the raw new JSON string) or `clearAuth` (a sibling logged out → `null`).
-The writing tab never receives its own event, so there is no feedback loop. The
-payload is the raw string / `null`; it is decoded in Elm via `adoptExternalAuth`.
--}
-port authChanged : (Decode.Value -> msg) -> Sub msg
-
-
-{-| Belt-and-suspenders re-check net. Asks JS to read the
-CURRENT `stacks-auth` from localStorage; the answer arrives on `gotStoredAuth`.
-Fired just before a 401-driven session expiry so a token another tab refreshed
-can be adopted instead of logging everyone out.
--}
-port requestStoredAuth : () -> Cmd msg
-
-
-port gotStoredAuth : (Decode.Value -> msg) -> Sub msg
 
 
 {-| Server-config channel. Elm boots immediately with age-gating OFF
@@ -236,7 +200,8 @@ main =
 
 
 type Page
-    = PageHome Home.Model
+    = PageBooting
+    | PageHome Home.Model
     | PageLogin Login.Model
     | PageBookshelf Bookshelf.Model
     | PageReadingPile ReadingPile.Model
@@ -290,15 +255,31 @@ type alias Auth =
 
 {-| Who the app currently believes is signed in.
 
-⛔ What this type makes impossible: the old `auth: Maybe Auth` let login
-set an in-memory credential the app had not yet persisted (parked on the
-door animation, which an occluded window never finishes) — authenticated
-in memory, anonymous on disk. `Arriving` carries both the auth AND the
-proof of persistence; `Authed` is only reachable after the write.
+⛔ **`Resolving` is not `Anonymous`, and conflating them is the whole point of
+this type.** The SPA cannot know who it is until the server says: the session
+lives in a cookie the page cannot read. So there are two different states that
+both answer "no session in hand" — _we have not been told yet_ and _we have been
+told there is nobody_ — and only the second one may render a signed-out app.
+Collapse them and every boot flashes the signed-out chrome, and a reader who
+reloads a protected page is bounced to the sign-in card before the answer
+arrives.
+
+`Unresolved` is the third: we asked and the answer never came. It is NOT
+`Anonymous` either, for the reason this codebase has now learned twice — a
+silent sign-out is indistinguishable from a deliberate one, so a reader whose
+network blipped must be told the check failed, not told they are signed out.
+
+⛔ What this type also makes impossible, and did before `Resolving` existed:
+the old `auth: Maybe Auth` let login set an in-memory credential the app had not
+yet persisted (parked on the door animation, which an occluded window never
+finishes). `Arriving` is the render window for the door; `Authenticated` is the
+settled session.
 
 -}
 type AuthState
-    = Anonymous
+    = Resolving
+    | Unresolved Http.Error
+    | Anonymous
     | Arriving Auth
     | Authenticated Auth
 
@@ -389,6 +370,12 @@ can be made, or `Arriving` would start meaning "not really signed in".
 currentAuth : AuthState -> Maybe Auth
 currentAuth authState =
     case authState of
+        Resolving ->
+            Nothing
+
+        Unresolved _ ->
+            Nothing
+
         Anonymous ->
             Nothing
 
@@ -397,6 +384,60 @@ currentAuth authState =
 
         Authenticated auth ->
             Just auth
+
+
+{-| Has the server answered who this browser is?
+
+⛔ The ONE question the chrome may ask. `currentAuth` answers "is there a
+session to make requests with", and for both `Resolving` and `Anonymous` that
+answer is `Nothing` — correctly, because neither can carry a request. But the
+nav must not draw a "Sign in" link off that `Nothing`: during `Resolving` it
+would be a claim the app has no business making yet, and a reader who IS signed
+in sees themselves signed out for one round-trip. Asking this instead is what
+keeps "cannot request" and "is signed out" from being the same test.
+
+`Unresolved` counts as resolved: the check is over, it failed, and the reader is
+owed that answer rather than a spinner that never stops.
+
+-}
+authResolved : AuthState -> Bool
+authResolved authState =
+    case authState of
+        Resolving ->
+            False
+
+        Unresolved _ ->
+            True
+
+        Anonymous ->
+            True
+
+        Arriving _ ->
+            True
+
+        Authenticated _ ->
+            True
+
+
+{-| Change the session in place, if there is one.
+
+The companion to `currentAuth`: that one reads, this one writes, and between
+them no caller needs to know which constructor holds a session. The catch-all is
+the right answer rather than a convenience — there is nothing to change about a
+boot that has not resolved, or about a reader who is signed out.
+
+-}
+mapSession : (Auth -> Auth) -> AuthState -> AuthState
+mapSession change authState =
+    case authState of
+        Arriving auth ->
+            Arriving (change auth)
+
+        Authenticated auth ->
+            Authenticated (change auth)
+
+        sessionless ->
+            sessionless
 
 
 {-| Settle an arrival. Total and idempotent on purpose: it is driven by two
@@ -411,34 +452,6 @@ settleArrival authState =
 
         settled ->
             settled
-
-
-{-| A parked session-expiry intent. Raised when an
-authenticated 401 wants to log out; the actual clear+redirect is deferred one
-port round-trip (`requestStoredAuth` → `gotStoredAuth`) so a token another tab
-refreshed can be adopted first.
-
-  - `draftSaved` carries the marketplace-draft-saved notice across that
-    round-trip so it still shows on the login page.
-  - `fromRenewal` records whether the expiry originated from a CONSUMED proactive
-    renewal tick (a failed silent refresh). Only then does adopting a newer token
-    on re-check re-arm renewal — a page-origin 401 still has its renewal tick
-    armed, so re-arming there would spawn a duplicate timer (a refresh storm).
-
--}
-type alias PendingLogout =
-    { draftSaved : Bool, fromRenewal : Bool }
-
-
-{-| Merge a new parked expiry with any intent already in flight. Both flags are STICKY (OR-ed): a later plain expiry must not erase
-a `draftSaved` reassurance a draft-expiry parked, and if any origin consumed a
-renewal tick the eventual adopt must still re-arm renewal. Pure + testable.
--}
-parkPending : Bool -> Bool -> Maybe PendingLogout -> PendingLogout
-parkPending draftSaved fromRenewal existing =
-    { draftSaved = draftSaved || (existing |> Maybe.map .draftSaved |> Maybe.withDefault False)
-    , fromRenewal = fromRenewal || (existing |> Maybe.map .fromRenewal |> Maybe.withDefault False)
-    }
 
 
 type alias BookDetailOverlay =
@@ -473,11 +486,6 @@ type alias Model =
     , hasAnyPlacements : Bool
     , pendingUndo : Maybe Bookshelf.Removal
     , arrival : Login.Arrival
-
-    -- A deferred session-expiry intent (Phase 2): set while the
-    -- re-check-before-logout port round-trip is in flight, cleared when it
-    -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
-    , pendingLogout : Maybe PendingLogout
     , config : AppConfig
     , connectivity : Connectivity
     , uploadInbox : RemoteData Http.Error (List Api.InboxItem)
@@ -546,18 +554,30 @@ decodeConfig flags =
         |> Result.withDefault defaultConfig
 
 
+{-| Boot.
+
+⛔ **No page is built here, and that is the change.** Boot used to read a
+session out of `localStorage` and build the asked-for page from it
+immediately — which is why a reader whose role had changed server-side kept the
+old one until they signed out and in again, and why a reader with no stored blob
+but a live cookie was shown the sign-in card. The SPA cannot know either answer
+for itself: the session is in a cookie it cannot read.
+
+So boot asks (`GET /api/auth/me`) and builds nothing until the answer arrives.
+`GotBootIdentity` builds the page, once, with the identity in hand — one page
+build, one code path, and no state where the app has rendered a claim it is
+about to revise.
+
+⚠️ The cost, stated: content now waits one same-origin round-trip. The
+request is tiny and the alternative is rendering a guess, but it IS a round-trip
+on the critical path of every boot, and it would not be needed if the document
+the SPA is served in carried the identity the way it already carries the CSRF
+proof.
+
+-}
 init : Decode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
-        stored =
-            decodeFlags flags
-
-        maybeAuth =
-            storedSession stored
-
-        arrival =
-            arrivalForBoot stored
-
         config =
             decodeConfig flags
 
@@ -567,22 +587,18 @@ init flags url key =
 
         route =
             Route.fromUrl url
-
-        ( page, cmd ) =
-            initPage config route (originOf url) maybeAuth Nothing Nothing arrival
     in
     ( { key = key
       , url = url
       , route = route
-      , auth =
-            maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
+      , auth = Resolving
       , adminAuth = Nothing
       , csrf = csrf
       , adminChrome = AdminChrome.init
-      , page = page
+      , page = PageBooting
       , previousRoute = Nothing
       , transition = Nothing
-      , redirectAfterLogin = loginRedirectFor route maybeAuth
+      , redirectAfterLogin = Nothing
       , bookDetailOverlay = Nothing
       , userMenu = UserMenu.init
       , openNavMenu = Nothing
@@ -590,27 +606,129 @@ init flags url key =
       , onboardingCompleted = False
       , hasAnyPlacements = True
       , pendingUndo = Nothing
-      , arrival = consumeArrival page arrival
-      , pendingLogout = Nothing
+      , arrival = Login.Fresh
       , config = config
       , connectivity = Online
       , uploadInbox = NotAsked
       }
-    , Cmd.batch
-        [ cmd
-        , case maybeAuth of
-            Just auth ->
-                Cmd.batch
-                    [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
-                    , Api.getMyPlacements auth.token GotPlacementCheck
-                    , scheduleRenewal
-                    , Api.getUploadInbox auth.token GotUploadInbox
-                    ]
-
-            Nothing ->
-                Cmd.none
-        ]
+    , resolveIdentity csrf
     )
+
+
+{-| Ask the server who this browser is.
+
+The credential is `Api.cookieSession`: at boot there is no bearer and the SPA
+must not pretend to one. The proof rides along so that a reader with no session
+gets a 401 — an answer — rather than a 403, which would say only that the
+request could not establish where it came from.
+
+-}
+resolveIdentity : Maybe String -> Cmd Msg
+resolveIdentity csrf =
+    Api.getIdentity (Api.cookieSession csrf) GotBootIdentity
+
+
+{-| The session an identity plus this browsing context amount to.
+
+The credential is the cookie’s, every time: the server set it, the browser
+sends it, and the SPA never sees it. Only the proof is ours to carry.
+
+-}
+sessionFor : Maybe String -> Api.Identity -> Auth
+sessionFor csrf identity =
+    { user =
+        { id = identity.id
+        , email = identity.email
+        , displayName = identity.displayName
+        , handle = identity.handle
+        , role = identity.role
+        , countryCode = Nothing
+        , city = Nothing
+        , consentAnalytics = identity.consentAnalytics
+        , consentWritingAssistant = identity.consentWritingAssistant
+        }
+    , token = Api.cookieSession csrf
+    }
+
+
+{-| Turn the boot answer into the app the reader asked for.
+
+Three answers, three outcomes, and the middle one is the one worth naming: a
+**401 is an answer**. It is the server saying there is nobody here, which is the
+only thing that licenses the app to render itself signed out — route guard,
+sign-in link and all. Any other failure is not an answer, and `Unresolved` keeps
+the app from acting on it.
+
+⚠️ Boot is the single place the page is built from the identity, so both
+answering branches route through the SAME `initPage` the rest of the app uses.
+A second, boot-only page build is how the guard and the bounce drift apart.
+
+-}
+resolveBoot : Result Http.Error Api.Identity -> Model -> ( Model, Cmd Msg )
+resolveBoot answer model =
+    case answer of
+        Ok identity ->
+            let
+                session =
+                    sessionFor model.csrf identity
+
+                ( page, pageCmd ) =
+                    bootPage model (Just session)
+            in
+            ( { model
+                | auth = Authenticated session
+                , page = page
+                , arrival = consumeArrival page Login.Fresh
+                , redirectAfterLogin = loginRedirectFor model.route (Just session)
+              }
+            , Cmd.batch [ pageCmd, bootCommandsFor session ]
+            )
+
+        Err err ->
+            if Api.isUnauthorized err then
+                let
+                    ( page, pageCmd ) =
+                        bootPage model Nothing
+                in
+                ( { model
+                    | auth = Anonymous
+                    , page = page
+                    , arrival = consumeArrival page Login.Fresh
+                    , redirectAfterLogin = loginRedirectFor model.route Nothing
+                  }
+                , pageCmd
+                )
+
+            else
+                ( { model | auth = Unresolved err }, Cmd.none )
+
+
+{-| Build the page the boot URL asked for, now that there is an answer about who
+is asking.
+-}
+bootPage : Model -> Maybe Auth -> ( Page, Cmd Msg )
+bootPage model maybeAuth =
+    initPage model.config
+        model.route
+        (originOf model.url)
+        maybeAuth
+        (adminTokenFor model)
+        model.previousRoute
+        Login.Fresh
+
+
+{-| The commands a resolved, signed-in boot owes: the same four a stored-auth
+boot used to fire from `init`, moved here because this is now where a session
+first exists.
+-}
+bootCommandsFor : Auth -> Cmd Msg
+bootCommandsFor auth =
+    Cmd.batch
+        [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
+        , Api.getMyPlacements auth.token GotPlacementCheck
+        , scheduleRenewal
+        , Api.getUploadInbox auth.token GotUploadInbox
+        ]
 
 
 {-| Ask the server what is waiting for this reader.
@@ -627,168 +745,6 @@ fetchUploadInbox maybeAuth =
 
         Nothing ->
             Cmd.none
-
-
-{-| Decoder for a stored-auth JSON object (the exact shape `encodeAuth` writes to
-localStorage `stacks-auth`). Lifted to the top level so both `decodeFlags` (boot)
-and `adoptExternalAuth` (cross-tab propagation,) share one contract.
--}
-authDecoder : Decode.Decoder Auth
-authDecoder =
-    Decode.map7
-        (\token userId email displayName handle role csrf ->
-            { user =
-                { id = userId
-                , email = email
-                , displayName = displayName
-                , handle = handle
-                , role = role
-                , countryCode = Nothing
-                , city = Nothing
-                , consentAnalytics = False
-                , consentWritingAssistant = False
-                }
-            , token = Api.credentials token csrf
-            }
-        )
-        (Decode.field "token" Decode.string)
-        (Decode.field "userId" Decode.string)
-        (Decode.field "email" Decode.string)
-        (Decode.field "displayName" Decode.string)
-        (Decode.oneOf
-            [ Decode.field "handle" Decode.string
-            , Decode.succeed ""
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "role" Decode.string
-            , Decode.succeed "user"
-            ]
-        )
-        -- ⚠️ The same-origin proof, read from the boot flags rather than from
-        -- the stored auth blob: it is a property of the BROWSING CONTEXT, not
-        -- of the session, and it comes from a cookie the page can read. An
-        -- absent one decodes to `Nothing`, which sends no header and will be
-        -- refused once enforcement lands — the correct outcome, and the reason
-        -- it is not defaulted to `""`.
-        (Decode.maybe (Decode.field "csrfToken" Decode.string))
-
-
-{-| What boot found in localStorage. Three outcomes, three
-constructors — the old `Maybe Auth` folded "no stored credential" and
-"stored but would not decode" into one `Nothing`. The blob is written by
-`saveAuth` and read by the same decoder, so a decode failure means
-something rewrote it; treating it as an ordinary signed-out boot hides
-that, and `CorruptAuth` lets boot clear the bad blob and say why.
--}
-type StoredAuth
-    = NoStoredAuth
-    | CorruptStoredAuth String
-    | ValidStoredAuth Auth
-
-
-{-| The session a boot recovered, if any. The ONE accessor — mirroring
-`currentAuth` for `AuthState` — so no consumer pattern-matches `StoredAuth` to
-decide whether a request can be made and accidentally makes `CorruptStoredAuth`
-mean something other than "signed out".
--}
-storedSession : StoredAuth -> Maybe Auth
-storedSession stored =
-    case stored of
-        ValidStoredAuth auth ->
-            Just auth
-
-        NoStoredAuth ->
-            Nothing
-
-        CorruptStoredAuth _ ->
-            Nothing
-
-
-{-| What a boot owes the reader an explanation for.
-
-⛔ This is the whole point of `CorruptStoredAuth`: the boot outcome is
-turned into something the reader can SEE. Before, `decodeFlags` answered
-`Nothing` and `init` simply started anonymous — the app knew a credential had
-been found and rejected, and told nobody. A silent sign-out is indistinguishable
-from a deliberate one, so the failure could only ever be diagnosed from the
-outside, which is exactly what made the private-session auth bug expensive.
-
-Named and exposed rather than inlined in `init`, because `init` needs a
-`Nav.Key` and is therefore unreachable from elm-test: the whole chain from raw
-boot flags to rendered notice would otherwise have no test that could run.
-
--}
-arrivalForBoot : StoredAuth -> Login.Arrival
-arrivalForBoot stored =
-    case stored of
-        CorruptStoredAuth reason ->
-            Login.StoredSessionUnreadable reason
-
-        NoStoredAuth ->
-            Login.Fresh
-
-        ValidStoredAuth _ ->
-            Login.Fresh
-
-
-{-| The flag keys that mean "a stored credential was here". `authDecoder`
-failing tells us the blob is not a session; these tell us a blob was _attempted_,
-which is the difference between a corrupt credential and a clean signed-out boot.
-
-`user` is in the list although no valid blob has it: it is the exact shape of the
-nested-blob mistake, and the whole point is to name that case rather than let it
-fall through to "never signed in". Every other entry is a field `encodeAuth`
-writes, so any partial or truncated write is caught by at least one.
-
--}
-storedAuthMarkers : List String
-storedAuthMarkers =
-    [ "token", "userId", "user", "email", "displayName" ]
-
-
-{-| Read the stored credential out of the boot flags.
-
-`storedAuthUnreadable` is checked first: `app.js` cannot hand over a blob it
-could not `JSON.parse`, or could not read at all because `localStorage` threw
-(private browsing, storage disabled), so it sends the reason under that key
-instead of dropping it in a bare `catch`. Those are the two failure modes Elm
-cannot see for itself.
-
--}
-decodeFlags : Decode.Value -> StoredAuth
-decodeFlags flags =
-    case Decode.decodeValue (Decode.field "storedAuthUnreadable" Decode.string) flags of
-        Ok reason ->
-            CorruptStoredAuth reason
-
-        Err _ ->
-            case Decode.decodeValue authDecoder flags of
-                Ok auth ->
-                    ValidStoredAuth auth
-
-                Err decodeError ->
-                    if hasStoredAuthMarker flags then
-                        CorruptStoredAuth (Decode.errorToString decodeError)
-
-                    else
-                        NoStoredAuth
-
-
-{-| Whether the flags carry any trace of a stored credential.
--}
-hasStoredAuthMarker : Decode.Value -> Bool
-hasStoredAuthMarker flags =
-    List.any
-        (\field ->
-            case Decode.decodeValue (Decode.field field Decode.value) flags of
-                Ok _ ->
-                    True
-
-                Err _ ->
-                    False
-        )
-        storedAuthMarkers
 
 
 isOwner : Maybe Auth -> Bool
@@ -1407,89 +1363,40 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageNotFound, Cmd.none )
 
 
-{-| ⚠️ The stored token is ABSENT, not empty, when the session is carried by the
-cookie alone. A reader who has reloaded has no bearer for the SPA to persist,
-and writing `"token": ""` would store a credential that cannot work while
-looking like one that can — the stored-auth decoder would then hand back a
-session whose every request is refused. Omitting the key makes the decoder's
-own "no token" branch the one that runs.
+{-| The single, central session-expiry entry point. EVERY authenticated page
+routes its `SessionExpired` OutMsg here, and a failed silent renewal falls
+through here too — so the answer to a 401 lives in ONE place, not scattered
+across the ~25 call sites.
 
-⛔ This whole function is slated for deletion along with the stored blob; it is
-made honest rather than clever because a half-deleted persistence path is worse
-than either end state.
-
--}
-encodeAuth : Auth -> Json.Encode.Value
-encodeAuth auth =
-    Json.Encode.object
-        (bearerField auth
-            ++ [ ( "userId", Json.Encode.string auth.user.id )
-               , ( "email", Json.Encode.string auth.user.email )
-               , ( "displayName", Json.Encode.string auth.user.displayName )
-               , ( "handle", Json.Encode.string auth.user.handle )
-               , ( "role", Json.Encode.string auth.user.role )
-               ]
-        )
-
-
-bearerField : Auth -> List ( String, Json.Encode.Value )
-bearerField auth =
-    case Api.bearerOf auth.token of
-        Nothing ->
-            []
-
-        Just bearer ->
-            [ ( "token", Json.Encode.string bearer ) ]
-
-
-{-| The single, central deferred session-expiry entry point. EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
-failed silent renewal falls through here too — so the re-check net lives in ONE
-place, not scattered across the ~25 call sites.
-
-Rather than logging out immediately, it parks a `pendingLogout` intent and asks
-JS for the CURRENT stored auth (`requestStoredAuth`). The answer arrives on
-`gotStoredAuth`, where `adoptExternalAuth` decides: if another tab has stored a
-newer token, adopt it (cancel the logout); otherwise fall through to
-`forceSessionExpiry`. The round-trip is a single JS tick, so there is no visible
-flash. In-memory `auth` is intentionally left intact during the round-trip.
+⛔ It logs out immediately, and the round-trip it used to make first is gone
+with the credential it was looking for. A 401 used to be ambiguous: the token
+this tab held could be stale while a sibling tab had already refreshed and
+written a newer one to `localStorage`, so the honest response was to ask what
+was on disk before tearing anything down. Every tab now presents the SAME
+session cookie, which a sibling cannot replace with a newer one the server would
+accept — so a 401 means the session is gone for all of them, and there is
+nothing left to re-check.
 
 -}
 handleSessionExpiry : Model -> ( Model, Cmd Msg )
 handleSessionExpiry model =
-    ( { model | pendingLogout = Just (parkPending False False model.pendingLogout) }
-    , requestStoredAuth ()
-    )
-
-
-{-| As `handleSessionExpiry`, but for a CONSUMED renewal tick (a failed silent
-refresh). `fromRenewal = True` so a re-check that adopts a newer token re-arms
-renewal — the proactive tick that would have kept the session alive is gone.
--}
-handleSessionExpiryFromRenewal : Model -> ( Model, Cmd Msg )
-handleSessionExpiryFromRenewal model =
-    ( { model | pendingLogout = Just (parkPending False True model.pendingLogout) }
-    , requestStoredAuth ()
-    )
+    forceSessionExpiry False model
 
 
 {-| As `handleSessionExpiry`, but for the marketplace-compose expiry: the
-in-progress draft is persisted immediately, and the parked intent remembers to
-raise the draft-saved notice if the round-trip does end in a logout.
+in-progress draft is persisted on the way out, and the login page says so.
 -}
 handleSessionExpiryWithDraft : Json.Encode.Value -> Model -> ( Model, Cmd Msg )
 handleSessionExpiryWithDraft draft model =
-    ( { model | pendingLogout = Just (parkPending True False model.pendingLogout) }
-    , Cmd.batch
-        [ saveListingDraft draft
-        , requestStoredAuth ()
-        ]
-    )
+    let
+        ( expired, expiryCmd ) =
+            forceSessionExpiry True model
+    in
+    ( expired, Cmd.batch [ saveListingDraft draft, expiryCmd ] )
 
 
-{-| The actual, irreversible session-expiry path. Reached only after
-the re-check net (`handleSessionExpiry` → `gotStoredAuth`) confirms there is no
-newer token to adopt, or from a sibling-tab `clearAuth`. Mirrors sign-out: clears
-`model.auth`, drops the `clearAuth` port, and redirects to `/login` — raising
+{-| The actual, irreversible session-expiry path. Mirrors sign-out: clears
+`model.auth` and redirects to `/login` — raising
 `sessionExpiredNotice` (and `draftSavedNotice` when a draft was parked) so the
 login page shows an "expired" message distinct from invalid-credentials. The
 notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
@@ -1505,12 +1412,8 @@ forceSessionExpiry draftSaved model =
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
-        , pendingLogout = Nothing
       }
-    , Cmd.batch
-        [ clearAuth ()
-        , Nav.pushUrl model.key (Route.toPath Login)
-        ]
+    , Nav.pushUrl model.key (Route.toPath Login)
     )
 
 
@@ -1532,11 +1435,9 @@ handleAccountDeleted model =
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
-        , pendingLogout = Nothing
       }
     , Cmd.batch
-        [ clearAuth ()
-        , clearListingDraft ()
+        [ clearListingDraft ()
         , Nav.pushUrl model.key (Route.toPath Login)
         ]
     )
@@ -1561,112 +1462,6 @@ consumeArrival page arrival =
 
         _ ->
             arrival
-
-
-{-| The outcome of interpreting a stored-auth value, used
-for BOTH cross-tab propagation and the 401 re-check net.
--}
-type ExternalAuthOutcome
-    = AdoptAuth Auth
-    | LogOutExternally
-    | IgnoreExternal
-
-
-{-| Pure decision for an externally-observed stored-auth value (a sibling
-tab's `storage` event, or the re-check response). The port delivers the
-RAW localStorage payload. Differing valid token while authed →
-`AdoptAuth`; same token → `IgnoreExternal` (echo defence, compared on the
-BEARER via `Api.sameSession` — the stored blob carries no same-origin proof, so
-a whole-value `==` read every echo as a newer session); `null`/corrupt
-while authed → `DropAuth` (a sibling signed out or the blob was
-clobbered); anything while not authed → adopt-or-ignore without a drop.
--}
-adoptExternalAuth : Decode.Value -> Maybe Auth -> ExternalAuthOutcome
-adoptExternalAuth value maybeAuth =
-    case Decode.decodeValue (Decode.nullable Decode.string) value of
-        Ok (Just raw) ->
-            case ( Decode.decodeString authDecoder raw, maybeAuth ) of
-                ( Ok incoming, Just current ) ->
-                    if Api.sameSession incoming.token current.token then
-                        IgnoreExternal
-
-                    else
-                        -- ⛔ THE PROOF IS OURS, NOT THEIRS. What arrived is a
-                        -- newer SESSION; the same-origin proof belongs to this
-                        -- browsing context and the stored blob deliberately
-                        -- carries none. Taking `incoming` whole would adopt a
-                        -- working bearer that cannot prove where it came from,
-                        -- so every later write would be refused 403.
-                        AdoptAuth
-                            { incoming
-                                | token = Api.withBearerOf incoming.token current.token
-                            }
-
-                ( Ok _, Nothing ) ->
-                    IgnoreExternal
-
-                ( Err _, _ ) ->
-                    IgnoreExternal
-
-        Ok Nothing ->
-            case maybeAuth of
-                Just _ ->
-                    LogOutExternally
-
-                Nothing ->
-                    IgnoreExternal
-
-        Err _ ->
-            IgnoreExternal
-
-
-{-| The resolution of a re-check (`gotStoredAuth`) answer against the parked
-intent. Pure, so the reschedule decision — opaque as a `Cmd`
-— is unit-testable.
-
-  - `ResolveAdopt auth reschedule` — adopt `auth`, cancel the logout; `reschedule`
-    is `True` only for a renewal-origin expiry (P1b: a page-origin 401 still has
-    its renewal tick armed, so re-arming would duplicate the timer).
-  - `ResolveForceLogout draftSaved` — nothing newer to adopt; proceed to logout.
-  - `ResolveNoop` — no parked intent (e.g. a cross-tab adopt already cancelled it,
-    P1a): a late answer must NOT log out.
-
--}
-type StoredAuthResolution
-    = ResolveAdopt Auth Bool
-    | ResolveForceLogout Bool
-    | ResolveNoop
-
-
-{-| Decide what a re-check answer means, given the parked intent and the decoded
-outcome. See `StoredAuthResolution`. Pure and key-free.
--}
-resolveRecheck : Maybe PendingLogout -> ExternalAuthOutcome -> StoredAuthResolution
-resolveRecheck maybePending outcome =
-    case maybePending of
-        Nothing ->
-            ResolveNoop
-
-        Just pending ->
-            case outcome of
-                AdoptAuth newAuth ->
-                    ResolveAdopt newAuth pending.fromRenewal
-
-                LogOutExternally ->
-                    ResolveForceLogout pending.draftSaved
-
-                IgnoreExternal ->
-                    ResolveForceLogout pending.draftSaved
-
-
-{-| Adopt a freshly-refreshed access token, keeping the same authenticated user.
-A token refresh only rotates the credential — identity, role, and location are
-unchanged — so the refresh response's user fields are ignored in favour of the
-current ones. Pure and key-free, so the renewal-success path is unit-testable.
--}
-renewAuthToken : Api.AuthResponse -> Auth -> Auth
-renewAuthToken authResponse auth =
-    { auth | token = Api.withBearer authResponse.token auth.token }
 
 
 {-| How long to wait after receiving an access token before silently renewing it.
@@ -1702,8 +1497,7 @@ instead of an ordering buried in a `Cmd.batch` nobody can inspect.
 
 -}
 type LoginEffect
-    = PersistAuth
-    | FetchPlacements
+    = FetchPlacements
     | InitOnboarding
     | ScheduleRenewal
     | NavigateToRequestedPage
@@ -1711,23 +1505,27 @@ type LoginEffect
     | PlayDoorAnimation
 
 
-{-| Effects performed when a login completes. Mirrors what `init` does for a
-stored auth, plus the arrival ornament.
+{-| Effects performed when a login completes. Mirrors what a resolved boot does
+for a session, plus the arrival ornament.
 
-⛔ The ORDER is the fix. `PersistAuth` is first and `PlayDoorAnimation` is
-last, and every one of them is fired from the single update that decodes the
-`200` — nothing here waits for a message from the browser. It used to be the
-other way round: the animation was started, and the token was written only when
-the browser reported the animation had finished. `requestAnimationFrame` does
-not fire while a window is occluded, so on a backgrounded tab the report never
-came and the login was discarded in silence. Anything a browser may decline to
-run belongs after the credential is durable, never in front of it.
+⛔ The ORDER is the fix. `PlayDoorAnimation` is LAST, and every effect before
+it is fired from the single update that decodes the `200` — nothing here waits
+for a message from the browser. It used to be the other way round: the animation
+was started, and the session's work was done only when the browser reported the
+animation had finished. `requestAnimationFrame` does not fire while a window is
+occluded, so on a backgrounded tab the report never came and the login was
+discarded in silence. Anything a browser may decline to run belongs after the
+work that matters, never in front of it.
+
+⚠️ The first effect used to be `PersistAuth`, writing the credential to
+`localStorage`, and the rule was "nothing before the credential is durable".
+There is no longer a credential to make durable — the browser holds the session
+cookie before this update runs — so the rule is now about the animation alone.
 
 -}
 loginEffects : List LoginEffect
 loginEffects =
-    [ PersistAuth
-    , FetchPlacements
+    [ FetchPlacements
     , InitOnboarding
     , ScheduleRenewal
     , NavigateToRequestedPage
@@ -1738,12 +1536,12 @@ loginEffects =
 
 {-| Everything a completed login produces, as one indivisible value: the session
 to hold in memory, the state that session puts the app in, and the effects that
-make it durable.
+make the app usable in it.
 
 ⛔ This is the ONLY function that turns an `AuthResponse` into an `AuthState`.
-Returning the state and its effects together is what makes "authenticated but
-never saved" unwritable: a caller cannot reach `Arriving auth` without also
-being handed the `PersistAuth` that backs it.
+Returning the state and its effects together is what makes "signed in to an app
+that fetched nothing" unwritable: a caller cannot reach `Arriving auth` without
+also being handed the effects that furnish it.
 
 -}
 type alias CompletedLogin =
@@ -1795,9 +1593,6 @@ arrivalBackstopMs =
 loginEffectCmd : Nav.Key -> Maybe Route -> Auth -> LoginEffect -> Cmd Msg
 loginEffectCmd key redirect auth effect =
     case effect of
-        PersistAuth ->
-            saveAuth (encodeAuth auth)
-
         FetchPlacements ->
             Api.getMyPlacements auth.token GotPlacementCheck
 
@@ -1910,10 +1705,12 @@ type Msg
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
     | GotUploadInbox (Result Http.Error (List Api.InboxItem))
+    | GotBootIdentity (Result Http.Error Api.Identity)
+    | TabVisibilityChanged Browser.Events.Visibility
+    | RetryBootIdentity
+    | RevalidatedIdentity (Result Http.Error Api.Identity)
     | RenewToken
     | TokenRefreshed (Result Http.Error Api.AuthResponse)
-    | AuthChangedExternally Decode.Value
-    | GotStoredAuth Decode.Value
     | AgeGatingConfigReceived Bool
     | InviteOnlyConfigReceived Bool
     | ConnectivityChanged Bool
@@ -2363,48 +2160,32 @@ update msg model =
                         Profile.SessionExpired ->
                             handleSessionExpiry model
 
-                        -- The nav renders the reader's name out of the stored
-                        -- session, and a profile save rewrote the account
-                        -- without rewriting that. So the corner of every page
-                        -- kept showing the old name until the reader signed out
-                        -- and back in. Re-persist through the same `saveAuth`
-                        -- port that login uses, so both paths write the blob the
-                        -- one decoder reads.
+                        -- The nav renders the reader's name out of the session
+                        -- in memory, and a profile save rewrote the account
+                        -- without rewriting that — so the corner of every page
+                        -- kept showing the old name. There is no longer a second
+                        -- copy on disk to keep in step: the save updates the one
+                        -- the nav reads, and the next boot asks the server.
                         Profile.IdentityChanged identity ->
                             let
-                                withIdentity auth =
+                                renamed auth =
+                                    let
+                                        user =
+                                            auth.user
+                                    in
                                     { auth
                                         | user =
-                                            let
-                                                user =
-                                                    auth.user
-                                            in
                                             { user
                                                 | displayName = identity.displayName
                                                 , handle = identity.handle
                                             }
                                     }
-
-                                ( newAuthState, persist ) =
-                                    case model.auth of
-                                        Anonymous ->
-                                            ( model.auth, Cmd.none )
-
-                                        Arriving auth ->
-                                            ( Arriving (withIdentity auth)
-                                            , saveAuth (encodeAuth (withIdentity auth))
-                                            )
-
-                                        Authenticated auth ->
-                                            ( Authenticated (withIdentity auth)
-                                            , saveAuth (encodeAuth (withIdentity auth))
-                                            )
                             in
                             ( { model
                                 | page = PageSettingsProfile newSubModel
-                                , auth = newAuthState
+                                , auth = mapSession renamed model.auth
                               }
-                            , Cmd.batch [ Cmd.map ProfileMsg subCmd, persist ]
+                            , Cmd.map ProfileMsg subCmd
                             )
 
                 _ ->
@@ -3105,7 +2886,6 @@ update msg model =
                       }
                     , Cmd.batch
                         [ logoutCmd
-                        , clearAuth ()
                         , clearListingDraft ()
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
@@ -3237,6 +3017,45 @@ update msg model =
                     else
                         ( { model | uploadInbox = Failure err }, Cmd.none )
 
+        GotBootIdentity answer ->
+            resolveBoot answer model
+
+        RetryBootIdentity ->
+            ( { model | auth = Resolving }, resolveIdentity model.csrf )
+
+        TabVisibilityChanged visibility ->
+            case ( visibility, currentAuth model.auth ) of
+                ( Browser.Events.Visible, Just _ ) ->
+                    ( model, Api.getIdentity (Api.cookieSession model.csrf) RevalidatedIdentity )
+
+                -- A tab with no session has nothing to revalidate: asking would
+                -- be a request per tab switch for every visitor, and a
+                -- signed-out reader who signs in elsewhere is not owed a
+                -- surprise session here. Going hidden is not a moment to ask
+                -- anything at all.
+                _ ->
+                    ( model, Cmd.none )
+
+        RevalidatedIdentity (Ok identity) ->
+            -- The reader is still signed in, and this is where a role or a
+            -- renamed account catches up without a reload.
+            ( { model | auth = Authenticated (sessionFor model.csrf identity) }
+            , Cmd.none
+            )
+
+        RevalidatedIdentity (Err err) ->
+            if Api.isUnauthorized err then
+                -- The cross-tab logout, restored. Nothing in the browser tells
+                -- a tab that an httpOnly cookie was cleared elsewhere, so the
+                -- tab asks when the reader comes back to it.
+                handleSessionExpiry model
+
+            else
+                -- A revalidation that could not reach the server says nothing
+                -- about the session. The app keeps what it has; the reader's
+                -- next real request is what will discover a dead one.
+                ( model, Cmd.none )
+
         RenewToken ->
             case currentAuth model.auth of
                 Just auth ->
@@ -3245,52 +3064,16 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        TokenRefreshed (Ok authResponse) ->
-            case currentAuth model.auth of
-                Just auth ->
-                    let
-                        renewedAuth =
-                            renewAuthToken authResponse auth
-                    in
-                    ( { model | auth = Authenticated renewedAuth }
-                    , Cmd.batch [ saveAuth (encodeAuth renewedAuth), scheduleRenewal ]
-                    )
-
-                Nothing ->
-                    ( model, Cmd.none )
+        TokenRefreshed (Ok _) ->
+            -- ⛔ The response's token is DELIBERATELY dropped. Renewal is a
+            -- server-side cookie re-set: the browser has the new credential
+            -- before this message arrives, and the body's copy is the transport
+            -- being retired. Adopting it would put a bearer back in the SPA's
+            -- hands for no reader's benefit.
+            ( model, scheduleRenewal )
 
         TokenRefreshed (Err _) ->
-            handleSessionExpiryFromRenewal model
-
-        AuthChangedExternally value ->
-            case adoptExternalAuth value (currentAuth model.auth) of
-                AdoptAuth newAuth ->
-                    ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
-                    , Cmd.none
-                    )
-
-                LogOutExternally ->
-                    forceSessionExpiry False model
-
-                IgnoreExternal ->
-                    ( model, Cmd.none )
-
-        GotStoredAuth value ->
-            case resolveRecheck model.pendingLogout (adoptExternalAuth value (currentAuth model.auth)) of
-                ResolveAdopt newAuth reschedule ->
-                    ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
-                    , if reschedule then
-                        scheduleRenewal
-
-                      else
-                        Cmd.none
-                    )
-
-                ResolveForceLogout draftSaved ->
-                    forceSessionExpiry draftSaved model
-
-                ResolveNoop ->
-                    ( model, Cmd.none )
+            handleSessionExpiry model
 
         SwipeReceived direction ->
             let
@@ -3515,11 +3298,18 @@ subscriptions model =
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> ArrivalSettled)
         , onOnboardingStatus OnboardingStatusReceived
-        , authChanged AuthChangedExternally
-        , gotStoredAuth GotStoredAuth
         , ageGatingConfig AgeGatingConfigReceived
         , inviteOnlyConfig InviteOnlyConfigReceived
         , connectivityChanged ConnectivityChanged
+
+        -- ⛔ The cross-tab logout, rebuilt on the only signal a cookie session
+        -- leaves. A `stacks-auth` write used to fire a `storage` event in every
+        -- sibling tab, so a sign-out propagated instantly; an httpOnly cookie
+        -- being cleared fires nothing anywhere. So a tab re-asks when the
+        -- reader returns to it — which is the moment before they would act on
+        -- a session that is no longer theirs, and also the moment a changed
+        -- role catches up without a reload.
+        , Browser.Events.onVisibilityChange TabVisibilityChanged
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen
@@ -3600,7 +3390,7 @@ view model =
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
             , viewConnectivity model.connectivity
-            , viewNav model.route (currentAuth model.auth) model.openNavMenu model.userMenu model.uploadInbox
+            , viewNav model.route model.auth model.openNavMenu model.userMenu model.uploadInbox
             , main_
                 [ id "main-content"
                 , tabindex -1
@@ -3652,6 +3442,12 @@ viewArrivalDoor authState =
                 , div [ class "layer-wash", id "wash" ] []
                 ]
 
+        Resolving ->
+            text ""
+
+        Unresolved _ ->
+            text ""
+
         Anonymous ->
             text ""
 
@@ -3668,6 +3464,9 @@ was looking at a login card in a tab titled "Add a Book".
 pageTitle : Page -> String
 pageTitle page =
     case page of
+        PageBooting ->
+            "The Stacks"
+
         PageHome _ ->
             "The Stacks"
 
@@ -3879,20 +3678,41 @@ bookDetailTitle detailModel =
             "Book"
 
 
-viewNav : Route -> Maybe Auth -> Maybe NavMenu -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
-viewNav route maybeAuth openNavMenu userMenu inbox =
+{-| The header.
+
+⛔ It takes the whole `AuthState`, not a `Maybe Auth`, because it is the one
+view that must distinguish "signed out" from "not told yet" — and a `Maybe`
+cannot. Handed `currentAuth`'s `Nothing` it would draw a "Sign In" link on every
+boot before the server has answered, which for a signed-in reader is the app
+stating the opposite of the truth for a round-trip, and then correcting itself.
+
+The withheld claim is exactly ONE item. Everything a visitor can reach is
+reachable while the answer is outstanding, so the header does not jump when it
+arrives; the only thing it waits for is the invitation to sign in.
+
+-}
+viewNav : Route -> AuthState -> Maybe NavMenu -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+viewNav route authState openNavMenu userMenu inbox =
+    let
+        visitorItems : List (Html Msg)
+        visitorItems =
+            [ navItem route Catalogue "Catalogue"
+            , navItem route Search "Search"
+            , navItem route MarketplaceBrowse "Marketplace"
+            , navItem route About "About"
+            ]
+    in
     header [ class "app-header" ]
         [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
         , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
-                (case maybeAuth of
+                (case currentAuth authState of
                     Nothing ->
-                        [ navItem route Catalogue "Catalogue"
-                        , navItem route Search "Search"
-                        , navItem route MarketplaceBrowse "Marketplace"
-                        , navItem route About "About"
-                        , navItem route Login "Sign In"
-                        ]
+                        if authResolved authState then
+                            visitorItems ++ [ navItem route Login "Sign In" ]
+
+                        else
+                            visitorItems
 
                     Just auth ->
                         [ -- The five bookshelves, grouped under one disclosure
@@ -4205,6 +4025,9 @@ viewNavDropdownLink item =
 viewPage : Model -> Html Msg
 viewPage model =
     case model.page of
+        PageBooting ->
+            viewBooting model.auth
+
         PageHome subModel ->
             Html.map HomeMsg (Home.view subModel)
 
@@ -4509,6 +4332,77 @@ viewConnectivity connectivity =
                 [ p [ class "connectivity-banner__text" ]
                     [ text "You are offline. The Stacks can’t reach the library right now — anything already on screen stays put, and this will clear as soon as you reconnect." ]
                 ]
+
+
+{-| The whole app while it is finding out who is looking at it.
+
+Two states, two different things to say. A check still in flight gets a quiet
+line and no retry — offering one would invite the reader to interrupt a request
+that is about to answer. A check that FAILED gets the reason and a button,
+because the alternative is a spinner that never stops, and because the thing
+that failed is retryable: nothing was lost, the question was simply not
+answered.
+
+⛔ Neither state says anything about whether the reader is signed in. That is
+the claim the app does not get to make yet, and every version of this screen
+that mentions signing in is a version that has guessed.
+
+-}
+viewBooting : AuthState -> Html Msg
+viewBooting authState =
+    case authState of
+        Unresolved err ->
+            div
+                [ class "app-booting"
+                , testId "boot-identity-failed"
+                , attribute "role" "status"
+                , attribute "aria-live" "polite"
+                ]
+                [ p [ class "app-booting__text" ]
+                    [ text ("The Stacks couldn’t check whether you’re signed in — " ++ bootFailureReason err ++ ".") ]
+                , button
+                    [ class "app-booting__retry"
+                    , testId "boot-identity-retry"
+                    , Html.Events.onClick RetryBootIdentity
+                    ]
+                    [ text "Try again" ]
+                ]
+
+        _ ->
+            div
+                [ class "app-booting"
+                , testId "boot-resolving"
+                , attribute "role" "status"
+                , attribute "aria-live" "polite"
+                ]
+                [ p [ class "app-booting__text" ] [ text "Opening the doors…" ] ]
+
+
+{-| Why the boot check did not answer, in the reader’s voice.
+
+A `BadBody` is deliberately not called a network problem: it means the server
+answered and the answer was not an account, which is OURS to fix and not
+something a retry is likely to clear — so the copy stops short of promising
+that it will.
+
+-}
+bootFailureReason : Http.Error -> String
+bootFailureReason err =
+    case err of
+        Http.NetworkError ->
+            "the library is unreachable"
+
+        Http.Timeout ->
+            "the library took too long to answer"
+
+        Http.BadStatus status ->
+            "the library answered " ++ String.fromInt status
+
+        Http.BadBody _ ->
+            "the library’s answer could not be read"
+
+        Http.BadUrl _ ->
+            "the request could not be addressed"
 
 
 {-| What the gate says to an operator who ended their own session. It names the

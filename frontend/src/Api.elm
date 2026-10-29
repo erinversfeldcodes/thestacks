@@ -32,6 +32,7 @@ module Api exposing
     , Deanonymisation
     , Destination(..)
     , GroupMember
+    , Identity
     , ImportError(..)
     , ImportRow
     , InboxItem
@@ -158,6 +159,7 @@ module Api exposing
     , getGroup
     , getGroupFeed
     , getGroupMembers
+    , getIdentity
     , getImport
     , getImportRows
     , getInferences
@@ -179,6 +181,7 @@ module Api exposing
     , getUserPlacementsRequest
     , groupMemberDecoder
     , honourRemovalRequest
+    , identityDecoder
     , importRefusal
     , importRowDecoder
     , inboxItemDecoder
@@ -249,7 +252,6 @@ module Api exposing
     , restoreBookRequest
     , retryAfterSeconds
     , revokeAdminInvite
-    , sameSession
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooksRequest
@@ -286,7 +288,6 @@ module Api exposing
     , uploadInboxDecoder
     , uploadTimeout
     , withBearer
-    , withBearerOf
     )
 
 {-| Every HTTP call the SPA makes, and every decoder that reads a server
@@ -472,56 +473,6 @@ and silently stop every subsequent write from proving itself.
 withBearer : String -> Credentials -> Credentials
 withBearer bearer (Credentials creds) =
     Credentials { creds | bearer = Just bearer }
-
-
-{-| Do these two credentials name the SAME session?
-
-⛔ **NOT `==`, AND THIS IS THE DEFECT IT CLOSES.** A `Credentials` holds two
-things that answer to different owners: the bearer, which identifies the
-session, and the same-origin proof, which is a property of the BROWSING
-CONTEXT. Comparing the whole value therefore answers "same session AND same
-document", which is not a question anyone wants to ask.
-
-⚠️ Where that bit: the 401 re-check's echo defence compared
-`incoming.token == current.token` to decide "nothing newer to adopt, proceed to
-logout". The stored auth blob deliberately carries no CSRF token — a proof read
-from a cookie must not be persisted — so the re-read credential always had
-`csrf = Nothing` while the live one had `Just …`. Every echo therefore looked
-like a NEWER session, the app silently re-adopted the same bearer, cancelled the
-pending logout, and left the reader on a page whose every write would 401. No
-redirect, no notice, no cleared credential.
-
-⚖️ The unit suite could not see it: its fixtures build both sides with
-`csrf = Nothing`, which is a state the running application never reaches after
-the proof landed.
-
--}
-sameSession : Credentials -> Credentials -> Bool
-sameSession (Credentials a) (Credentials b) =
-    a.bearer == b.bearer
-
-
-{-| `withBearerOf incoming current` — `current`, carrying `incoming`'s bearer.
-
-⚖️ The same reasoning as `withBearer`, applied to adopting a sibling tab's
-credential: what arrives is a new SESSION, and the proof that the request came
-from a document on our origin is ours, not theirs. Rebuilding from the incoming
-value would take its `csrf = Nothing` — adopting a working bearer that cannot
-prove where it came from, so every subsequent write is refused 403.
-
--}
-withBearerOf : Credentials -> Credentials -> Credentials
-withBearerOf (Credentials incoming) current =
-    case incoming.bearer of
-        -- ⛔ Nothing to adopt. A sibling tab whose credential carries no bearer
-        -- is one relying on the session cookie, which this tab already sends —
-        -- so the correct adoption is no change, not a bearer-less overwrite
-        -- that would discard a working token this tab still holds.
-        Nothing ->
-            current
-
-        Just bearer ->
-            withBearer bearer current
 
 
 {-| The bearer token as a bare string.
@@ -3600,6 +3551,85 @@ getAccountRequest =
     }
 
 
+{-| Who the server says the reader is.
+
+⛔ This is the identity the app runs on, and it comes from the server on every
+boot. It replaces a blob the SPA wrote to `localStorage` and read back — a copy
+that went stale the moment anything changed server-side, and whose `role` field
+decided what the reader could see. A promotion, a demotion or a renamed account
+took effect only once the reader signed out and in again; until then the app
+rendered an answer it had no business still believing.
+
+`countryCode` and `city` are deliberately absent. They are on the wire, but
+nothing reads them off the session, and a field carried for completeness is a
+field that drifts unobserved.
+
+-}
+type alias Identity =
+    { id : String
+    , email : String
+    , displayName : String
+    , handle : String
+    , role : String
+    , consentAnalytics : Bool
+    , consentWritingAssistant : Bool
+    }
+
+
+{-| Decode `GET /api/auth/me` into an identity.
+
+⛔ `role` is REQUIRED, and that is the point of this decoder existing rather
+than reusing the lenient proto one. The decoder it replaces read an absent role
+as `"user"`, so a response that had lost the field — a serializer allowlist
+edited, a proxy stripping it, an error envelope with a 200 — demoted an owner
+to a reader and told nobody. The column is `null: false`, so an absent `role`
+is never the account's real state; it is a broken answer, and a broken answer
+must fail where it can be seen rather than resolve to the least-privileged
+guess.
+
+`id` and `email` are required for the same reason: there is no account without
+them, so their absence means this is not an account. `displayName` and `handle`
+are genuinely unset for some readers (both columns are nullable), so they
+default — but only when ABSENT or `null`, never when the server sent something
+unreadable.
+
+-}
+identityDecoder : Decoder Identity
+identityDecoder =
+    Decode.field "user"
+        (Decode.map7 Identity
+            (Decode.field "id" Decode.string)
+            (Decode.field "email" Decode.string)
+            (optionalString "display_name")
+            (optionalString "handle")
+            (Decode.field "role" Decode.string)
+            (optionalBool "consent_analytics")
+            (optionalBool "consent_writing_assistant")
+        )
+
+
+{-| GET /api/auth/me — ask the server who this browser is.
+
+⛔ The credential is `cookieSession`: at boot the SPA holds no bearer and must
+not pretend to. The session cookie travels on its own because the request is
+same-origin, which is the whole reason this request can answer at all — and the
+proof rides along so the answer is a 401 for a reader with no session rather
+than a 403 for a request that could not say where it came from.
+
+-}
+getIdentity : Credentials -> (Result Http.Error Identity -> msg) -> Cmd msg
+getIdentity token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = httpHeaders "GET" SameOrigin (Session token)
+        , url = baseUrl ++ "/api/auth/me"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg identityDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
 {-| A profile-update failure.
 
 Like registration, a 422 carries per-field validation errors (`handle`,
@@ -4940,6 +4970,30 @@ optionalString field =
                     Just _ ->
                         Decode.field field (Decode.nullable Decode.string)
                             |> Decode.map (Maybe.withDefault "")
+            )
+
+
+{-| `optionalString`'s rule for a boolean: an absent or `null` flag is `False`,
+and anything present that is not a boolean fails.
+
+A consent flag's column carries `default: false` but no `NOT NULL`, so `null`
+on the wire is reachable and means "never consented" — the same answer as
+absent. A value that is neither is a response we cannot read, and reading it as
+`False` would quietly withdraw a consent the reader gave.
+
+-}
+optionalBool : String -> Decoder Bool
+optionalBool field =
+    Decode.maybe (Decode.field field Decode.value)
+        |> Decode.andThen
+            (\present ->
+                case present of
+                    Nothing ->
+                        Decode.succeed False
+
+                    Just _ ->
+                        Decode.field field (Decode.nullable Decode.bool)
+                            |> Decode.map (Maybe.withDefault False)
             )
 
 

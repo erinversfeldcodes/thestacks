@@ -420,11 +420,18 @@ export async function seedBookWriting(
  * render" over a stack that rendered the wrong reader's shelf correctly.
  *
  * ⚖️ So this clears before it sets, and sets BOTH transports:
- *   * the cookie, because that is what the server now prefers;
- *   * the `localStorage` blob, because the SPA still reads identity from it and
- *     the specs that inject a bearer have not all moved. The blob goes when the
- *     SPA stops reading it — a separate change, deliberately, so the two are
- *     bisectable.
+ *   * the cookie, which is the session — the server sets it, prefers it, and it
+ *     is the only credential the SPA has any more;
+ *   * the `localStorage` blob, which the SPA NO LONGER READS. It is kept for
+ *     the SPECS: around thirty of them still pull a bearer out of it to make a
+ *     direct `fetch`, and a handful assert on its contents. Those calls are
+ *     same-origin from the page, so the cookie would authenticate them without
+ *     the header at all; migrating them is the harness half of this wave and is
+ *     tracked separately.
+ *
+ * ⛔ So a spec asserting anything about this blob is now asserting about the
+ * harness, not about the application. The app writes no session to
+ * `localStorage` and reads none from it.
  *
  * ⚠️ The cookie's attributes must MATCH the ones the server sets
  * (`HttpOnly; Secure; SameSite=Lax`). A cookie that differs is silently ignored

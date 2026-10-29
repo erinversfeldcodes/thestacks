@@ -140,27 +140,14 @@ function readCookie(name) {
   return null;
 }
 
-var storedAuth = null;
-var storedAuthUnreadable = null;
-try {
-  var raw = localStorage.getItem("stacks-auth");
-  if (raw) {
-    storedAuth = JSON.parse(raw);
-  }
-} catch (e) {
-  storedAuthUnreadable = String((e && e.message) || e);
-}
-
+// The boot flags carry NO session. There used to be one here: a `stacks-auth`
+// blob read out of localStorage and spread into the flags, which is how the SPA
+// knew who it was before its first request. The session is now an httpOnly
+// cookie this script cannot read, so the app asks the server instead
+// (`GET /api/auth/me`), and the only thing boot still reads from the browser is
+// the same-origin proof below.
 function boot() {
   var flags = {};
-  if (storedAuth && typeof storedAuth === "object") {
-    Object.keys(storedAuth).forEach(function (key) {
-      flags[key] = storedAuth[key];
-    });
-  }
-  if (storedAuthUnreadable !== null) {
-    flags.storedAuthUnreadable = storedAuthUnreadable;
-  }
   // The same-origin proof the SPA echoes in `X-CSRF-Token` on every write.
   //
   // Read from the cookie the server set on THIS page's response. A browser
@@ -186,24 +173,6 @@ function boot() {
     flags: flags,
   });
 
-if (app.ports && app.ports.saveAuth) {
-  app.ports.saveAuth.subscribe(function (authData) {
-    try {
-      localStorage.setItem("stacks-auth", JSON.stringify(authData));
-    } catch (e) {
-    }
-  });
-}
-
-if (app.ports && app.ports.clearAuth) {
-  app.ports.clearAuth.subscribe(function () {
-    try {
-      localStorage.removeItem("stacks-auth");
-    } catch (e) {
-    }
-  });
-}
-
 var ONBOARDING_DONE_KEY = "stacks-onboarding-completed";
 
 if (app.ports && app.ports.saveOnboardingCompleted) {
@@ -223,28 +192,6 @@ if (app.ports && app.ports.onOnboardingStatus) {
     onboardingDone = false;
   }
   app.ports.onOnboardingStatus.send(onboardingDone);
-}
-
-if (app.ports && app.ports.authChanged) {
-  window.addEventListener("storage", function (e) {
-    if (e.key === "stacks-auth") {
-      app.ports.authChanged.send(e.newValue);
-    }
-  });
-}
-
-if (app.ports && app.ports.requestStoredAuth) {
-  app.ports.requestStoredAuth.subscribe(function () {
-    var current = null;
-    try {
-      current = localStorage.getItem("stacks-auth");
-    } catch (e) {
-      current = null;
-    }
-    if (app.ports && app.ports.gotStoredAuth) {
-      app.ports.gotStoredAuth.send(current);
-    }
-  });
 }
 
 var LISTING_DRAFT_KEY = "stacks-listing-draft";

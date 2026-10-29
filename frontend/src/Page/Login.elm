@@ -80,7 +80,6 @@ type Arrival
     | SessionExpired { draftSaved : Bool }
     | AccountDeleted
     | ForgotPassword
-    | StoredSessionUnreadable String
     | ConfirmationExpired
 
 
@@ -1093,14 +1092,6 @@ viewArrivalNotice model =
                     , testId "account-deleted-notice"
                     ]
                     "Your account deletion has been queued. We're sorry to see you go — thank you for the time you spent in The Stacks."
-
-            StoredSessionUnreadable reason ->
-                notice
-                    [ class "login-card__notice login-card__notice--stored-session-unreadable"
-                    , testId "stored-session-unreadable-notice"
-                    , attribute "title" reason
-                    ]
-                    "A saved sign-in was found here but could not be read, so you have been signed out. Please sign in again."
 
 
 {-| One notice, one shape. Five hand-written notice blocks would be five
