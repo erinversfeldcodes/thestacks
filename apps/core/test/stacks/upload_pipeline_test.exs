@@ -136,7 +136,7 @@ defmodule Stacks.UploadPipelineTest do
     } do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       [content_type | _] = get_resp_header(conn, "content-type")
@@ -165,7 +165,11 @@ defmodule Stacks.UploadPipelineTest do
           user_id: owner.id
         )
 
-      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{requester_token}")
+      conn =
+        get(
+          CoreWeb.ConnCase.with_session(conn, requester_token),
+          "/api/upload/#{image.id}/stream"
+        )
 
       assert conn.status == 403
     end
@@ -174,14 +178,14 @@ defmodule Stacks.UploadPipelineTest do
     test "returns 404 for unknown image_id", %{conn: conn, token: token} do
       fake_id = Ecto.UUID.generate()
 
-      conn = get(conn, "/api/upload/#{fake_id}/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{fake_id}/stream")
 
       assert conn.status == 404
     end
 
     @tag suite: :api
     test "returns 400 or 422 for invalid (non-UUID) image_id", %{conn: conn, token: token} do
-      conn = get(conn, "/api/upload/not-a-uuid/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/not-a-uuid/stream")
 
       assert conn.status in [400, 422]
     end
@@ -201,7 +205,7 @@ defmodule Stacks.UploadPipelineTest do
           user_id: user.id
         )
 
-      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       body = conn.resp_body
@@ -222,7 +226,7 @@ defmodule Stacks.UploadPipelineTest do
 
       task =
         Task.async(fn ->
-          get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+          get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
         end)
 
       Process.sleep(50)
@@ -256,7 +260,7 @@ defmodule Stacks.UploadPipelineTest do
 
       {elapsed_us, _conn} =
         :timer.tc(fn ->
-          get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+          get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
         end)
 
       assert elapsed_us < 1_000_000,
@@ -425,7 +429,9 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      stream_conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      stream_conn =
+        get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
+
       assert stream_conn.status == 200
 
       body = stream_conn.resp_body

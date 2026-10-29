@@ -475,7 +475,8 @@ defmodule Stacks.UploadTelemetryTest do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
       conn
-      |> get("/api/upload/#{image.id}/stream?token=#{token}")
+      |> CoreWeb.ConnCase.with_session(token)
+      |> get("/api/upload/#{image.id}/stream")
 
       assert_receive {:telemetry, [:phoenix, :endpoint, :stop], measurements, _metadata}, 2_000
       assert is_integer(measurements.duration)
@@ -546,7 +547,8 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> get("/api/upload/#{image.id}/stream?token=#{token}")
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
 
@@ -581,7 +583,8 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> get("/api/upload/#{image.id}/stream?token=#{token}")
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "resolved")
@@ -601,7 +604,8 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> get("/api/upload/#{fake_id}/stream?token=#{token}")
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{fake_id}/stream")
 
       assert json_response(conn, 404)["error"] == "not_found"
 
@@ -849,7 +853,10 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending")
 
-      get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      get(
+        CoreWeb.ConnCase.with_session(CoreWeb.ConnCase.proven_conn(), token),
+        "/api/upload/#{image.id}/stream"
+      )
 
       assert_receive {:telemetry, [:core, :repo, :query], measurements, _metadata}, 2_000
       assert is_integer(measurements.total_time)
@@ -1070,7 +1077,8 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> get("/api/upload/#{image.id}/stream?token=#{token}")
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "true")
@@ -1118,7 +1126,8 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn =
         conn
-        |> get("/api/upload/#{image.id}/stream?token=#{token}")
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, book1.id)
