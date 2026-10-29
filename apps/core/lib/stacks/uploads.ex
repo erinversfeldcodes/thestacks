@@ -71,15 +71,66 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-      Store raw image bytes for an upload initiated via `init_upload/2`.
+      Write the bytes for a RESERVED upload, for the reader who reserved it.
 
-      Called by `UploadController.upload_data/2` when the browser PUTs file bytes
-      to the Phoenix-proxied upload endpoint. Returns `:ok` on success.
+      ⛔ EVERY CHECK IS HERE, IN THE CONTEXT, and not in the controller. This
+      function used to be two lines — `Storage.upload_image(image_id, bytes)` —
+      with no lookup of any kind, and `Storage.upload_image/3` interpolates its
+      first argument straight into a storage key (`"uploads/\#{image_id}"`). So
+      the caller's path segment WAS the key, and nothing established that the
+      caller had reserved it, owned it, or that it was a uuid.
+
+      MEASURED on a deployed stack before this change: a `PUT` with no
+      credential, an `image_id` of `probe-1793184812-readback`, and 20,361
+      bytes of JPEG returned **200**.
+
+      ⚖️ The capability model was sound and simply unimplemented. `init_upload/2`
+      mints an unguessable uuid and reserves it for one user, so "holding the
+      id" is meant to BE the authorisation — and that only works if the id is
+      one we issued. Without that check the capability is not a capability,
+      because an id nobody issued is as good as one we did.
+
+      Four refusals, all `:not_found`, and that is deliberate: a caller must not
+      be able to tell a malformed id from an unreserved one from somebody
+      else's, or the endpoint becomes an oracle for which ids exist.
+
+      ⚠️ `:already_written` is separate because it is NOT an authorisation
+      failure — the caller holds a valid capability and has already spent it.
+      A reserved id must not be reusable to overwrite an image the pipeline is
+      already working on.
   """
-  @spec store_upload_bytes(binary(), binary()) :: :ok | {:error, term()}
-  def store_upload_bytes(image_id, bytes) when is_binary(bytes) do
-    case Stacks.Storage.upload_image(image_id, bytes) do
-      {:ok, _key} -> :ok
+  @spec store_upload_bytes(binary(), binary(), binary()) ::
+          :ok | {:error, :not_found | :already_written | term()}
+  def store_upload_bytes(user_id, image_id, bytes)
+      when is_binary(user_id) and is_binary(bytes) do
+    with {:ok, uuid} <- cast_reserved_id(image_id),
+         {:ok, image} <- fetch_owned_awaiting_upload(user_id, uuid),
+         :ok <- refuse_if_already_written(image.storage_path),
+         {:ok, _key} <- Stacks.Storage.upload_image(uuid, bytes) do
+      :ok
+    end
+  end
+
+  # ⛔ A non-uuid is refused BEFORE it can reach a storage key, which closes the
+  # key-injection and path-traversal question by construction rather than by
+  # sanitising. `Path.join` does not normalise `..`, and a `%2F` in the segment
+  # decodes to a `/` inside the value — so a check that merely rejected known
+  # bad shapes would be a list of the ones somebody thought of.
+  defp cast_reserved_id(image_id) do
+    case Ecto.UUID.cast(image_id) do
+      {:ok, uuid} -> {:ok, uuid}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  # The single-write guarantee, asked of the store rather than of a column.
+  # "Have the bytes landed" is a fact about the object, and `uploaded_at` cannot
+  # answer it — `init_upload/2` sets that at RESERVATION time, before any bytes
+  # exist.
+  defp refuse_if_already_written(storage_path) do
+    case Stacks.Storage.head_image(storage_path) do
+      {:error, :not_found} -> :ok
+      {:ok, _size} -> {:error, :already_written}
       {:error, reason} -> {:error, reason}
     end
   end

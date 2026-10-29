@@ -31,17 +31,30 @@ defmodule Stacks.Workers.ImageRetentionJob do
     with {:ok, stuck_count, stuck_state} <-
            ImageRetention.drain(&ImageRetention.cleanup_stuck_images/1, budget_ms: 30_000),
          {:ok, expired_count, expired_state} <-
-           ImageRetention.drain(&ImageRetention.cleanup_expired_images/1, budget_ms: 30_000) do
+           ImageRetention.drain(&ImageRetention.cleanup_expired_images/1, budget_ms: 30_000),
+         # ⛔ The orphan sweep runs LAST and from this job, because a sweep
+         # nothing invokes is a sweep that does not run — this repository has
+         # recorded a runner proven working and left uncalled. It goes last
+         # because the two above DELETE rows, which is how objects become
+         # orphaned in the first place; sweeping before them would leave this
+         # run's own leavings for the next one.
+         {:ok, orphan_count, orphan_state} <-
+           ImageRetention.drain(&ImageRetention.cleanup_orphan_objects/1, budget_ms: 30_000) do
       Logger.info(
         "ImageRetentionJob: cleaned up #{stuck_count} stuck (#{stuck_state}) + " <>
-          "#{expired_count} expired (#{expired_state}) image records"
+          "#{expired_count} expired (#{expired_state}) image records, and " <>
+          "#{orphan_count} row-less object(s) (#{orphan_state})"
       )
 
       # ⚠️ Said out loud, because the alternative is a log line that reads like
       # success. Hitting the deadline means rows REMAIN past their expiry when
       # this job reports `:ok` — the job completing is not the sweep being done,
       # and conflating the two is what let the backlog hide.
-      for {label, state} <- [{"stuck", stuck_state}, {"expired", expired_state}],
+      for {label, state} <- [
+            {"stuck", stuck_state},
+            {"expired", expired_state},
+            {"orphan", orphan_state}
+          ],
           state == :deadline do
         Logger.warning(
           "ImageRetentionJob: #{label} sweep hit its time budget with work remaining — " <>

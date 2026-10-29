@@ -39,7 +39,6 @@ EXEMPT = {
     "GET /api/auth/confirm/:token": "single-use token; guessing is bounded by the token space, not by request count",
     "GET /api/auth/confirm-email-change/:token": "single-use token, as above",
     "GET /api/auth/revert-email-change/:token": "single-use token, as above",
-    "PUT /api/upload/:image_id/data": "presigned single-use image PUT; the init call that mints the id is metered",
     "POST /api/internal/smoke/circuit_breakers": "internal smoke hook, not routable from the internet",
 }
 

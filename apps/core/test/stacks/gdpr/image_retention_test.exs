@@ -346,6 +346,68 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
   alias Stacks.GDPR.ImageRetentionTest.FailingStorage
   alias Stacks.GDPR.ImageRetentionTest.RecordingStorage
 
+  describe "cleanup_orphan_objects/1 — the objects no row points at" do
+    # ⛔ EVERY CASE HERE PLANTS A REAL ORPHAN, because a sweep attested clean
+    # against a store that contains none proves nothing. That is the mutation
+    # probe this issue turns on: the other requirements assert REFUSALS, which
+    # a stricter pipeline gives for free.
+
+    test "removes a planted orphan, and the count says how many" do
+      user = insert(:user)
+      {:ok, %{image_id: kept}} = Stacks.Uploads.init_upload(user.id)
+      :ok = Stacks.Uploads.store_upload_bytes(user.id, kept, "a reader's real upload")
+
+      # The orphan: bytes at a key no row points at, which is exactly what a
+      # crash between the write and the commit leaves behind.
+      {:ok, _} = Stacks.Storage.upload_image(Ecto.UUID.generate(), "row-less bytes")
+
+      {:ok, before_keys} = Stacks.Storage.list_objects("uploads/")
+      assert length(before_keys) == 2, "the fixture must contain one of each"
+
+      assert {:ok, 1} = ImageRetention.cleanup_orphan_objects()
+
+      {:ok, after_keys} = Stacks.Storage.list_objects("uploads/")
+
+      assert after_keys == ["uploads/#{kept}"],
+             "the orphan must go and the reader's upload must stay"
+    end
+
+    test "leaves a store with no orphans alone" do
+      # The anti-vacuity control. Without it the case above would pass on a
+      # sweep that deleted everything under the prefix.
+      user = insert(:user)
+      {:ok, %{image_id: image_id}} = Stacks.Uploads.init_upload(user.id)
+      :ok = Stacks.Uploads.store_upload_bytes(user.id, image_id, "bytes")
+
+      assert {:ok, 0} = ImageRetention.cleanup_orphan_objects()
+
+      assert {:ok, ["uploads/#{image_id}"]} == Stacks.Storage.list_objects("uploads/")
+    end
+
+    test "an object whose row was deleted becomes collectable" do
+      # ⚖️ The journey that makes this a GDPR control rather than tidiness: a
+      # row goes (erasure, expiry), and until this sweep existed its bytes were
+      # unreachable by every mechanism that works from the rows.
+      user = insert(:user)
+      {:ok, %{image_id: image_id}} = Stacks.Uploads.init_upload(user.id)
+      :ok = Stacks.Uploads.store_upload_bytes(user.id, image_id, "bytes to be erased")
+
+      Core.Repo.delete_all(from(i in Stacks.Books.UploadedImage, where: i.id == ^image_id))
+
+      assert {:ok, 1} = ImageRetention.cleanup_orphan_objects()
+      assert {:ok, []} = Stacks.Storage.list_objects("uploads/")
+    end
+
+    test "respects its batch limit, like the sweeps above it" do
+      for _ <- 1..3, do: Stacks.Storage.upload_image(Ecto.UUID.generate(), "orphan")
+
+      assert {:ok, 2} = ImageRetention.cleanup_orphan_objects(limit: 2)
+
+      {:ok, remaining} = Stacks.Storage.list_objects("uploads/")
+      assert length(remaining) == 1
+    end
+  end
+
   describe "storage deletion is invoked per row" do
     setup do
       Application.put_env(:core, :storage, RecordingStorage)

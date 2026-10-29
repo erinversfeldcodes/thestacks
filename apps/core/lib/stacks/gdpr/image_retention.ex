@@ -44,6 +44,9 @@ defmodule Stacks.GDPR.ImageRetention do
   # and every individual job run reaches a clean `:ok`.
   @batch_size 200
 
+  # The prefix `Storage.upload_image/3` writes under (`"uploads/\#{image_id}"`).
+  @upload_prefix "uploads/"
+
   @doc """
       Deletes up to `:limit` uploaded_images records where `expires_at < now`,
       oldest expiry first.
@@ -82,6 +85,78 @@ defmodule Stacks.GDPR.ImageRetention do
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "expired"})
 
     {:ok, count}
+  rescue
+    error -> {:error, error}
+  end
+
+  @doc """
+      Deletes upload objects that no `op.uploaded_images` row points at.
+
+      ⛔ WHY A ROW-LESS OBJECT IS A GDPR PROBLEM AND NOT MERE UNTIDINESS. Both
+      mechanisms that are supposed to reach image bytes work FROM the rows:
+      `cleanup_expired_images/1` selects rows and deletes their `storage_path`,
+      and `GDPR.Deletion`'s `:delete_image_objects` step collects `id` +
+      `storage_path` for a user's rows *before* `repo.delete(user)`, precisely
+      because the rows are the only pointer to the bytes. An object with no row
+      is outside both: not erasable, not expirable, and not attributable to any
+      user — so it can be neither reached by a subject-access request nor
+      deleted on one.
+
+      ⚠️ They already exist independently of any defect: a crash between
+      `store_upload_bytes/3` and `commit_upload/2` leaves bytes with a row that
+      a later sweep removes, and until this function there was nothing that
+      could collect the remainder.
+
+      ⚖️ Safe to delete unconditionally because the ordering is one-way: a row
+      is reserved by `init_upload/2` BEFORE any bytes can be written, and
+      `store_upload_bytes/3` refuses an id with no row. So an object without a
+      row is one whose row has gone, never one whose row is still coming.
+
+      ⚠️ WHY THE BOUND IS ON THE OBJECT LIST AND NOT IN THE QUERY. The two
+      sweeps above bound themselves with `limit` in the `Repo` call, because
+      what they read is rows. Here the expensive unbounded read is
+      `Storage.list_objects/1`, which answers with the whole prefix and which
+      no `limit` inside a query could have constrained — so the bound is
+      applied to its result first, and the database is then asked about at most
+      `@batch_size` keys. `drain/1` works the backlog down across runs exactly
+      as it does for the others.
+  """
+  @spec cleanup_orphan_objects(keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
+  # BOUNDED SWEEP: `where storage_path in ^batch`, and `batch` is
+  # `Enum.take(keys, limit)` — at most `limit` rows by construction. See the
+  # @doc for why the bound sits on the object list rather than in the query.
+  def cleanup_orphan_objects(opts \\ []) do
+    limit = Keyword.get(opts, :limit, @batch_size)
+
+    case Stacks.Storage.list_objects(@upload_prefix) do
+      {:ok, keys} ->
+        # ⚠️ ONE BATCH, like the sweeps above. `list_objects/1` answers with the
+        # whole prefix, so the bound is applied here before anything else loads
+        # a working set from it.
+        batch = Enum.take(keys, limit)
+
+        known =
+          UploadedImage
+          |> where([i], i.storage_path in ^batch)
+          |> select([i], i.storage_path)
+          |> Repo.all()
+          |> MapSet.new()
+
+        orphans = Enum.reject(batch, &MapSet.member?(known, &1))
+
+        Enum.each(orphans, &Stacks.Storage.delete_object/1)
+
+        :telemetry.execute(
+          [:stacks, :gdpr, :image, :expired],
+          %{count: length(orphans)},
+          %{reason: "orphaned"}
+        )
+
+        {:ok, length(orphans)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   rescue
     error -> {:error, error}
   end

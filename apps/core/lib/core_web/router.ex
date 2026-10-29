@@ -196,7 +196,19 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api", StacksWeb do
-    pipe_through :api
+    # ⛔ AUTHENTICATED AND RATE-LIMITED, like the two endpoints that bracket it.
+    #
+    # This scope carried `:api` alone, so the one route that accepts 20 MB of
+    # bytes was the only part of the upload flow with neither. MEASURED on a
+    # deployed stack: a `PUT` with no `Authorization` header, an `image_id` that
+    # is not a UUID and was never reserved, and 20,361 bytes of JPEG returned
+    # **200**.
+    #
+    # ⚠️ The CSRF proof in front of it was never the missing control. It
+    # establishes that a request came from a document on our origin, which any
+    # browser and any scripted client can arrange; it says nothing about WHO is
+    # asking or WHAT they may write to.
+    pipe_through [:api, :authenticated, :rate_limit_upload]
     put "/upload/:image_id/data", UploadController, :upload_data
   end
 

@@ -89,11 +89,32 @@ defmodule StacksWeb.UploadController do
   """
   @spec upload_data(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def upload_data(conn, %{"image_id" => image_id}) do
+    user = Guardian.Plug.current_resource(conn)
     {:ok, body, conn} = Plug.Conn.read_body(conn, length: 20_971_520)
 
-    case Uploads.store_upload_bytes(image_id, body) do
+    case Uploads.store_upload_bytes(user.id, image_id, body) do
       :ok ->
         send_resp(conn, 200, "")
+
+      # ⛔ ONE STATUS FOR FOUR DIFFERENT REFUSALS, deliberately. Malformed id,
+      # no such row, somebody else's row and a row past `awaiting_upload` all
+      # answer `404`. Distinguishing them would turn this endpoint into an
+      # oracle for which upload ids exist, and the id IS the capability.
+      #
+      # ⚠️ `:already_committed` is collapsed HERE rather than in the context,
+      # because `commit_upload/2` shares the same lookup and genuinely needs to
+      # tell that case apart — it answers `409 already_committed` to a reader
+      # re-committing their own upload, which is useful and leaks nothing. The
+      # two callers want different answers to the same question, so the mapping
+      # belongs at the edge that knows which question was asked.
+      {:error, reason} when reason in [:not_found, :already_committed] ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      # ⚖️ Named separately because it is not an authorisation failure: the
+      # caller holds a valid capability and has already spent it. Telling them
+      # so is useful and leaks nothing they did not already know.
+      {:error, :already_written} ->
+        conn |> put_status(409) |> json(%{error: "already_uploaded"})
 
       {:error, reason} ->
         Logger.error(

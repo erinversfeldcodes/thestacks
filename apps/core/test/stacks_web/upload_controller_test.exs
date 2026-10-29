@@ -7,7 +7,9 @@ defmodule StacksWeb.UploadControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
+  alias Stacks.Storage
   alias Stacks.Storage.Mock, as: StorageMock
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
 
   setup %{conn: conn} do
@@ -55,7 +57,7 @@ defmodule StacksWeb.UploadControllerTest do
 
   describe "POST /api/upload/:id/commit" do
     setup %{user: user} do
-      {:ok, init} = Stacks.Uploads.init_upload(user.id)
+      {:ok, init} = Uploads.init_upload(user.id)
       {:ok, init: init}
     end
 
@@ -124,6 +126,123 @@ defmodule StacksWeb.UploadControllerTest do
     test "returns 404 for unknown image_id", %{conn: conn} do
       conn = post(conn, "/api/upload/#{Ecto.UUID.generate()}/commit", %{})
       assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+  end
+
+  describe "PUT /api/upload/:image_id/data — the byte sink" do
+    # ⛔ THIS ROUTE HAD NO TEST AT ALL until this issue. That is why a `PUT`
+    # with no credential, a non-uuid id nobody reserved, and 20 KB of JPEG
+    # returned 200 on a deployed stack: every suite was green because none of
+    # them touched it.
+
+    setup do
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      {:ok, user: user, token: token}
+    end
+
+    defp reserve(user) do
+      {:ok, %{image_id: image_id}} = Uploads.init_upload(user.id)
+      image_id
+    end
+
+    defp put_bytes(conn, token, image_id, bytes) do
+      conn
+      |> CoreWeb.ConnCase.with_session(token)
+      |> put_req_header("content-type", "application/octet-stream")
+      |> put("/api/upload/#{image_id}/data", bytes)
+    end
+
+    test "refuses a write with no credential at all", %{user: user} do
+      image_id = reserve(user)
+
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/upload/#{image_id}/data", "bytes")
+
+      assert json_response(conn, 401)
+    end
+
+    test "refuses an id that is not a uuid, so it never reaches a storage key",
+         %{token: token} do
+      conn =
+        put_bytes(CoreWeb.ConnCase.proven_conn(), token, "probe-1793184812-readback", "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "refuses a well-formed uuid nobody reserved", %{token: token} do
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, Ecto.UUID.generate(), "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "refuses another reader's reserved id — with the SAME status", %{token: token} do
+      # ⛔ 404, not 403. A different status here would let a caller distinguish
+      # "this id exists and is not yours" from "this id does not exist", and the
+      # id IS the capability.
+      stranger = insert(:user)
+      someone_elses = reserve(stranger)
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, someone_elses, "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "accepts the reader's own reserved id, and the bytes land",
+         %{user: user, token: token} do
+      image_id = reserve(user)
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image_id, "the-image-bytes")
+
+      assert conn.status == 200
+      assert {:ok, 15} = Storage.head_image("uploads/#{image_id}")
+    end
+
+    test "refuses a SECOND write to the same id", %{user: user, token: token} do
+      image_id = reserve(user)
+
+      assert put_bytes(CoreWeb.ConnCase.proven_conn(), token, image_id, "first").status == 200
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image_id, "second")
+      assert %{"error" => "already_uploaded"} = json_response(conn, 409)
+
+      assert {:ok, 5} = Storage.head_image("uploads/#{image_id}"),
+             "the first write must survive — a refused second write must not have overwritten it"
+    end
+
+    test "refuses a row that has moved past awaiting_upload", %{user: user, token: token} do
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image.id, "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+  end
+
+  describe "Uploads.store_upload_bytes/3 — the context function is safe on its own" do
+    # ⚠️ Asserted on the CONTEXT rather than through the router, because the
+    # requirement is that the function is safe for every caller — not that one
+    # controller happens to check first.
+
+    test "a non-uuid never reaches a storage key" do
+      user = insert(:user)
+
+      assert {:error, :not_found} =
+               Uploads.store_upload_bytes(user.id, "../../etc/passwd", "bytes")
+
+      assert {:error, :not_found} = Storage.head_image("uploads/../../etc/passwd")
+    end
+
+    test "a uuid nobody reserved never reaches a storage key" do
+      user = insert(:user)
+      unreserved = Ecto.UUID.generate()
+
+      assert {:error, :not_found} =
+               Uploads.store_upload_bytes(user.id, unreserved, "bytes")
+
+      assert {:error, :not_found} = Storage.head_image("uploads/#{unreserved}")
     end
   end
 
