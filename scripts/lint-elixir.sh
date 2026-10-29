@@ -148,6 +148,7 @@ gate check-api-only-is-skipped.sh
 # used to offer to carry the field. This one states the credential list itself.
 gate check-never-serialized.sh
 gate check-unbounded-sweeps.sh
+gate check-storage-selection-is-deliberate.sh
 # ⚠️ Not an Elixir gate. It lives in this lane because this is where the `gate`
 # helper runs every `scripts/check-*.sh`, and therefore the only lane that
 # actually executes in `just verify` and `just ci` — a gate nothing invokes is

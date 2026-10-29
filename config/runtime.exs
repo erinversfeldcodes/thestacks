@@ -57,20 +57,36 @@ else
     config :core, :rate_limit_e2e_helper, String.to_integer(e2e_helper_limit)
   end
 
-  if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
-    config :core, :storage, Stacks.Storage.R2
+  # ⛔ THE BACKEND IS A DELIBERATE STATEMENT, NEVER INFERRED FROM A CREDENTIAL.
+  # The reasoning, the two measured failures it prevents, and why `Local` stays
+  # a legitimate production choice all live in `Stacks.Storage.Selection` —
+  # along with a test per branch, including the two that refuse to boot. A
+  # config file is the one place where "it looked right" is the only available
+  # check, and this one had been wrong in production for seven months.
+  case Stacks.Storage.Selection.choose(System.get_env(), config_env() == :prod) do
+    {:ok, {:r2, r2}} ->
+      config :core, :storage, Stacks.Storage.R2
+      config :core, :r2_bucket, r2[:bucket]
 
-    config :ex_aws,
-      access_key_id: System.fetch_env!("R2_ACCESS_KEY_ID"),
-      secret_access_key: System.fetch_env!("R2_SECRET_ACCESS_KEY"),
-      region: "auto"
+      config :ex_aws,
+        access_key_id: r2[:access_key_id],
+        secret_access_key: r2[:secret_access_key],
+        region: "auto"
 
-    config :ex_aws, :s3,
-      scheme: "https://",
-      host: "#{r2_account_id}.r2.cloudflarestorage.com",
-      region: "auto"
+      config :ex_aws, :s3,
+        scheme: "https://",
+        host: "#{r2[:account_id]}.r2.cloudflarestorage.com",
+        region: "auto"
 
-    config :core, :r2_bucket, System.get_env("R2_BUCKET_NAME", "stacks-images")
+    {:ok, {:local, local}} ->
+      config :core, :storage, Stacks.Storage.Local
+
+      if dir = local[:upload_dir] do
+        config :core, :upload_dir, dir
+      end
+
+    {:error, message} ->
+      raise message
   end
 
   # How long a mailed GDPR export link — and the stored copy behind it — lives.

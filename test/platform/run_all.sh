@@ -69,6 +69,7 @@ SUITES=(
     "$HERE/workflow_health_test.sh"
     "$HERE/deployed_posture_test.sh"
     "$HERE/unbounded_sweeps_test.sh"
+    "$HERE/storage_selection_test.sh"
     "$HERE/ports_wired_test.sh"
     "$HERE/sweep_preview_orphans_test.sh"
     "$HERE/decoder_coverage_test.sh"
