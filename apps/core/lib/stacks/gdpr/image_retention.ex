@@ -146,10 +146,18 @@ defmodule Stacks.GDPR.ImageRetention do
 
         Enum.each(orphans, &Stacks.Storage.delete_object/1)
 
+        # ⛔ `reason: "rowless"`, NOT `"orphaned"`, and the word matters here.
+        # `[:stacks, :gdpr, :image, :orphan]` already exists and means the
+        # OPPOSITE defect — "images past expiry still in the DB", a row the
+        # sweep failed to collect — and it is alarm-wired: the GDPR dashboard
+        # says ANY non-zero orphan is alert-worthy. This counts an OBJECT with
+        # no row, which is a routine collection rather than an alarm. Two
+        # different facts sharing a name on the same dashboard is how an
+        # operator mis-reads an incident.
         :telemetry.execute(
           [:stacks, :gdpr, :image, :expired],
           %{count: length(orphans)},
-          %{reason: "orphaned"}
+          %{reason: "rowless"}
         )
 
         {:ok, length(orphans)}
