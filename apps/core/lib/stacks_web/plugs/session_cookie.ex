@@ -55,19 +55,26 @@ defmodule StacksWeb.Plugs.SessionCookie do
 
       This plug sits in `AuthPipeline` only, and the counter is registered
       inside it, so **a pipeline that does not include this plug emits
-      nothing at all.** Measured 2026-10-23, four pipelines authenticate:
+      nothing at all.** Re-measured 2026-10-29, THREE pipelines authenticate:
 
         * `AuthPipeline` — cookie or Bearer header. **Counted.**
         * `AdminAuthPipeline` — Bearer header, `admin_session` type. NOT counted.
         * `OptionalAuthPipeline` — Bearer header, `allow_blank: true`. NOT counted.
-        * `SseAuthPipeline` — JWT in the `?token=` QUERY PARAMETER. NOT counted.
 
       ⛔ So "the bearer series reads zero" means *zero bearer-authenticated
-      requests through the user-session pipeline* — and three other pipelines
-      read bearer tokens whose use is invisible here. Deleting bearer support
-      repository-wide on this reading would break the admin console, every
-      optional-auth page and the SSE stream. The admin and SSE transports move
-      with their own pipelines, each of which must bring its own measurement.
+      requests through the user-session pipeline* — and two other pipelines read
+      bearer tokens whose use is invisible here. Deleting bearer support
+      repository-wide on this reading would break the admin console and every
+      optional-auth page. The admin transport moves with its own pipeline, which
+      must bring its own measurement.
+
+      ✅ There was a FOURTH: `SseAuthPipeline`, which read a JWT out of a
+      `?token=` query parameter and was likewise uncounted. It is **deleted** —
+      the upload stream authenticates by cookie through `AuthPipeline` now, so
+      that traffic became counted rather than invisible. ⚠️ Worth knowing when
+      reading the series: the cookie count gained the stream's requests on the
+      deploy that landed it, and a step up in the cookie series around then is
+      that, not a change in client behaviour.
 
       ⚠️ And a narrower exclusion inside the counted pipeline: only requests
       that AUTHENTICATE are counted, so **zero authenticated bearer requests is
