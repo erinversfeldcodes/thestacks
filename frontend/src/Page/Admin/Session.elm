@@ -10,10 +10,17 @@ module Page.Admin.Session exposing
     )
 
 {-| The admin sign-in gate — the module whose absence made every
-admin page dead: `/api/admin/*` demands an MFA-verified `admin_session`
-token (IP- and boot\_id-bound, 30-min MFA window), and the pages were
-sending the ordinary token, 401ing every action. Two steps: password →
-challenge, TOTP → admin token, held in memory only.
+admin page dead: `/api/admin/*` demands an MFA-verified admin session
+(IP- and boot\_id-bound, 30-min MFA window), and the pages were sending
+the ordinary token with no elevation recorded, 401ing every action. Two
+steps: password → challenge, TOTP → the server marks the session verified.
+
+⛔ The second step no longer yields a credential. It used to return an
+admin token this page handed upward to be held in memory, which a reload
+dropped — so an operator was re-prompted for a code the server had
+already accepted. The elevation now lives only on the server's session,
+and `/api/admin/*` is reached with the ordinary session cookie.
+
 -}
 
 import Api exposing (AdminAuthError(..), AdminMfaEnrolment)
@@ -57,7 +64,7 @@ type Msg
     | SubmitCredentials
     | LoggedIn (Result AdminAuthError Api.AdminSession)
     | SubmitCode
-    | Verified (Result AdminAuthError String)
+    | Verified (Result AdminAuthError ())
     | StartEnrolment
     | EnrolmentStarted (Result Http.Error AdminMfaEnrolment)
     | ConfirmEnrolment
@@ -66,7 +73,13 @@ type Msg
 
 type OutMsg
     = NoOut
-    | Authenticated String
+      -- ⛔ CARRIES NOTHING, and the absence is the change. This used to be
+      -- `Authenticated String` — the admin token the server minted at the end
+      -- of the MFA step, which the app held in memory and lost on reload,
+      -- re-prompting for a code the server had already accepted. Elevation is
+      -- now a fact about the session the server holds, so the only thing worth
+      -- telling the parent is that it happened.
+    | Elevated
 
 
 init : Maybe String -> Model
@@ -181,8 +194,8 @@ update msg model ownerToken =
         -- `Main`, which pairs the two when it stores the admin session. A page
         -- that built the whole credential would need the proof threaded into
         -- it for no reason other than to hand it straight back.
-        Verified (Ok token) ->
-            ( { model | busy = False, code = "" }, Cmd.none, Authenticated token )
+        Verified (Ok ()) ->
+            ( { model | busy = False, code = "" }, Cmd.none, Elevated )
 
         Verified (Err err) ->
             ( { model | busy = False, code = "", error = Just (authErrorMessage err) }

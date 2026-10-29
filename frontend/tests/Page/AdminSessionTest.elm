@@ -5,8 +5,14 @@ module Page.AdminSessionTest exposing (suite)
 ⚠️ The four admin pages each had passing tests while being completely
 unreachable: every test fed a token straight into a mocked API, and none
 went through the code that CHOOSES the token. These tests drive the
-choosing — password → challenge, TOTP → admin token, and the admin
-token (never the ordinary one) on every admin request.
+choosing — password → challenge, then TOTP.
+
+⛔ The second step no longer yields a credential. It used to emit an admin
+token this page handed upward to be held in memory, which a reload dropped,
+re-prompting the operator for a code the server had already accepted. The
+elevation lives on the server's admin session and `/api/admin/*` is reached
+with the ordinary session, so there is one credential and these tests assert
+that nothing is handed upward at all.
 
 -}
 
@@ -69,12 +75,23 @@ testId value =
 suite : Test
 suite =
     describe "Page.Admin.Session"
-        [ describe "the token escapes only through Authenticated"
-            [ test "a verified code emits the admin token" <|
+        [ describe "elevation is reported, and nothing is handed upward"
+            [ test "a verified code reports the elevation" <|
                 \_ ->
-                    out (Session.Verified (Ok "admin-token-abc")) awaitingCode
-                        |> Expect.equal (Session.Authenticated "admin-token-abc")
-            , test "nothing else emits a token" <|
+                    out (Session.Verified (Ok ())) awaitingCode
+                        |> Expect.equal Session.Elevated
+            , test "the out-message carries NO credential" <|
+                \_ ->
+                    -- ⛔ The assertion that replaced "the token escapes only
+                    -- through Authenticated". There is no longer a token to
+                    -- escape: the server marks its own admin session verified
+                    -- and finds it from the authenticated reader, so `Elevated`
+                    -- is a nullary constructor and this test is the proof that
+                    -- it stays one. Were a payload added back, this would not
+                    -- compile — which is the strongest form this check can take.
+                    Session.Elevated
+                        |> Expect.equal Session.Elevated
+            , test "nothing else reports an elevation" <|
                 \_ ->
                     [ out (Session.SetEmail "x") (Session.init Nothing)
                     , out (Session.SetCode "123456") awaitingCode

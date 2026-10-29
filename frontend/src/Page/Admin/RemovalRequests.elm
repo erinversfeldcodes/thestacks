@@ -11,8 +11,9 @@ module Page.Admin.RemovalRequests exposing
 act immediately; anything else parks with the LISTING STILL LIVE until a
 human rules. This page is that human's only view — before it, the
 endpoints were live and tested and the queue was invisible, so parked
-requests aged unanswered. Uses the admin session token
-(`Main.adminTokenFor`), never the ordinary one.
+requests aged unanswered. Uses the ordinary session credential
+(`Main.sessionCredentials`): admin elevation is a fact about the session the
+server holds, not a second token this page carries.
 -}
 
 import Api exposing (RemovalRequest)

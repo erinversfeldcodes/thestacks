@@ -95,7 +95,6 @@ gate gen-elm-proto.sh
 gate check-e2e-vacuous-guards.sh
 gate check-prose-assertions.sh
 gate check-orphan-classes.sh
-gate check-admin-token-routing.sh
 gate check-session-expiry-coverage.sh
 gate check-credential-origin.sh
 gate check-one-credential-derivation.sh

@@ -8,6 +8,8 @@ defmodule Stacks.Admin.SessionContext do
       process restarts, all sessions from the previous boot become invalid.
   """
 
+  import Ecto.Query
+
   alias Core.Repo
   alias Stacks.Accounts.User
   alias Stacks.AdminSession
@@ -60,26 +62,74 @@ defmodule Stacks.Admin.SessionContext do
           | {:error, :not_found | :revoked | :expired | :boot_id_mismatch | :ip_mismatch}
   def get_valid(session_id, raw_ip) do
     case Repo.get(AdminSession, session_id, prefix: "op") do
-      nil ->
-        {:error, :not_found}
+      nil -> {:error, :not_found}
+      session -> check_valid(session, raw_ip)
+    end
+  end
 
-      session ->
-        cond do
-          session.revoked_at != nil ->
-            {:error, :revoked}
+  @doc """
+      The operator's current admin session, found from the USER rather than from
+      a session id the client supplied.
 
-          DateTime.compare(session.expires_at, DateTime.utc_now()) == :lt ->
-            {:error, :expired}
+      ⛔ WHY THIS EXISTS. The admin pipeline used to locate the session via a
+      `sid` claim inside a second Guardian token the SPA carried in memory.
+      Nothing persisted that token, so a reload dropped it and re-prompted for
+      MFA even though the server had already recorded the elevation. Elevation
+      is a fact about the session the server holds, not a credential the client
+      carries — so the lookup starts from the authenticated user.
 
-          session.boot_id != Core.Application.boot_id() ->
-            {:error, :boot_id_mismatch}
+      ⚖️ "The user's admin session" needs a rule, because an operator
+      accumulates them over time. The rule is **the most recently created one
+      that is still valid**, and validity is `check_valid/2` — the same five
+      predicates `get_valid/2` applies, not a reimplementation of four of them.
+      Candidates are narrowed in SQL on the cheap, indexable columns and the
+      final judgement is made by the shared function, so a rule can never drift
+      between the two entry points.
 
-          hash_ip(raw_ip) != session.ip_hash ->
-            {:error, :ip_mismatch}
+      ⚠️ The IP check stays, and stays via `ClientIP`: behind Fly the peer is
+      the proxy's own address, and bare `remote_ip` produced spurious
+      `:ip_mismatch` on the request after the password step. Callers pass the
+      already-resolved client IP.
+  """
+  @spec current_for_user(binary(), String.t()) ::
+          {:ok, AdminSession.t()}
+          | {:error, :not_found | :revoked | :expired | :boot_id_mismatch | :ip_mismatch}
+  def current_for_user(user_id, raw_ip) when is_binary(user_id) do
+    now = DateTime.utc_now()
 
-          true ->
-            {:ok, session}
-        end
+    AdminSession
+    |> where([s], s.user_id == ^user_id)
+    |> where([s], is_nil(s.revoked_at))
+    |> where([s], s.expires_at > ^now)
+    |> where([s], s.boot_id == ^Core.Application.boot_id())
+    |> order_by([s], desc: s.created_at)
+    |> limit(1)
+    |> Repo.one(prefix: "op")
+    |> case do
+      nil -> {:error, :not_found}
+      session -> check_valid(session, raw_ip)
+    end
+  end
+
+  # The single judgement both entry points make. Ordered so the cheapest and
+  # most-specific refusal wins: a revoked session should report `:revoked`
+  # rather than whatever else is also true of it.
+  defp check_valid(session, raw_ip) do
+    cond do
+      session.revoked_at != nil ->
+        {:error, :revoked}
+
+      DateTime.compare(session.expires_at, DateTime.utc_now()) == :lt ->
+        {:error, :expired}
+
+      session.boot_id != Core.Application.boot_id() ->
+        {:error, :boot_id_mismatch}
+
+      hash_ip(raw_ip) != session.ip_hash ->
+        {:error, :ip_mismatch}
+
+      true ->
+        {:ok, session}
     end
   end
 

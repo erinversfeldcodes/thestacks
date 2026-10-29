@@ -27,14 +27,7 @@ defmodule StacksWeb.DataCorrectionControllerTest do
     {:ok, session} = SessionContext.create(user, "127.0.0.1", boot_id)
     {:ok, session} = SessionContext.mark_mfa_verified(session)
 
-    {:ok, token, _} =
-      Guardian.encode_and_sign(user, %{},
-        token_type: "admin",
-        session_id: session.id,
-        boot_id: boot_id,
-        ttl: {30, :minute}
-      )
-
+    {:ok, token, _} = Guardian.encode_and_sign(user)
     {put_req_header(conn, "authorization", "Bearer #{token}"), session}
   end
 

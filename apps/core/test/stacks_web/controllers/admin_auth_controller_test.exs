@@ -6,6 +6,7 @@ defmodule StacksWeb.AdminAuthControllerTest do
   alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Admin.SessionContext
+  alias Stacks.AdminSession
   alias Stacks.MFA
 
   @raw_ip "127.0.0.1"
@@ -106,7 +107,7 @@ defmodule StacksWeb.AdminAuthControllerTest do
       {:ok, user: user, session: session, secret: secret}
     end
 
-    test "returns 200 with admin JWT for valid TOTP code", %{
+    test "a valid TOTP code elevates the session and hands back NO credential", %{
       conn: conn,
       user: _user,
       session: session,
@@ -120,10 +121,25 @@ defmodule StacksWeb.AdminAuthControllerTest do
           totp_code: totp_code
         })
 
-      assert %{"token" => _token} = json_response(conn, 200)
+      body = json_response(conn, 200)
+
+      assert body == %{"verified" => true}
+
+      # ⛔ THE ASSERTION THAT REPLACED `%{"token" => _token}`. This endpoint used
+      # to mint a second Guardian token with a 30-minute TTL, which the SPA held
+      # in memory and nothing persisted — so a reload dropped it and re-prompted
+      # the operator for a code the server had already accepted. The elevation
+      # is recorded on the admin session itself and `AdminAuthPipeline` finds it
+      # from the authenticated reader, so a credential here would be a
+      # regression rather than a convenience.
+      refute Map.has_key?(body, "token"),
+             "a credential in this response is the defect: the client cannot keep it across a reload"
+
+      assert Repo.get(AdminSession, session.id, prefix: "op").mfa_verified_at,
+             "and the elevation must be recorded where a reload CAN find it"
     end
 
-    test "returns 200 with admin JWT for valid recovery code", %{
+    test "a recovery code elevates the session and hands back NO credential", %{
       conn: conn,
       user: user,
       session: session
@@ -140,7 +156,13 @@ defmodule StacksWeb.AdminAuthControllerTest do
           recovery_code: recovery_code
         })
 
-      assert %{"token" => _token} = json_response(conn, 200)
+      body = json_response(conn, 200)
+
+      assert body == %{"verified" => true}
+      refute Map.has_key?(body, "token")
+
+      assert Repo.get(AdminSession, session.id, prefix: "op").mfa_verified_at,
+             "a recovery code elevates the session exactly as a TOTP code does"
     end
 
     test "returns 401 for invalid TOTP code", %{conn: conn, session: session} do

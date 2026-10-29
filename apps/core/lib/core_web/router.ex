@@ -95,6 +95,19 @@ defmodule CoreWeb.Router do
   end
 
   pipeline :admin do
+    # ⛔ THE ORDINARY SESSION FIRST, and this line is the whole point of the
+    # change that introduced it. `AdminAuthPipeline` used to authenticate from a
+    # SECOND Guardian token the SPA held in memory, so a reload dropped the
+    # elevation and re-prompted for MFA that the server had already recorded.
+    # Now the operator is identified exactly as on every other authenticated
+    # route — the HttpOnly cookie — and their admin session is looked up from
+    # that user.
+    #
+    # ⚠️ Here rather than added to each route's `pipe_through`, so the pipeline
+    # states its own prerequisite: an admin route that reached
+    # `AdminAuthPipeline` without an authenticated reader would 401 on every
+    # request, which is a confusing way to learn about a missing plug.
+    plug StacksWeb.Plugs.AuthPipeline
     plug StacksWeb.Plugs.AdminAuthPipeline
     plug StacksWeb.Plugs.RequireMFA
     plug StacksWeb.Plugs.AuditAdminCall

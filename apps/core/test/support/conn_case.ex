@@ -1,4 +1,7 @@
 defmodule CoreWeb.ConnCase do
+  alias Stacks.Accounts.Guardian
+  alias Stacks.Admin.SessionContext
+  alias Stacks.Factory
   alias StacksWeb.Plugs.CsrfCookie
   alias StacksWeb.Plugs.SessionCookie
 
@@ -67,5 +70,38 @@ defmodule CoreWeb.ConnCase do
   """
   def with_session(conn, token) when is_binary(token) do
     Plug.Test.put_req_cookie(conn, SessionCookie.cookie_name(), token)
+  end
+
+  @doc """
+      An elevated operator: an ordinary authenticated session, plus the
+      MFA-verified admin session the server holds for that user.
+
+      ⛔ THERE IS NO ADMIN CREDENTIAL ON THE CONN, and that absence is the
+      point. Eight test files each built their own version of this, and every
+      one of them minted a second Guardian token (`token_type: "admin"`,
+      carrying `session_id`) and sent it as a Bearer — mirroring a client that
+      held an admin token in memory, lost it on reload, and re-prompted for MFA
+      the server had already recorded. Elevation is a fact about the session,
+      so the conn carries only the ordinary session cookie and the elevation
+      lives in `op.admin_sessions`.
+
+      ⚠️ The IP must match what `StacksWeb.ClientIP.get/1` resolves for a test
+      conn, because `SessionContext` stores a hash of it and refuses a
+      mismatch. `Phoenix.ConnTest` gives `127.0.0.1`, which is what
+      `SessionContext.create/3` is handed here — change one and the other has
+      to move with it.
+
+      Returns `{conn, user, admin_session}`.
+  """
+  def elevated_conn(conn, user \\ nil) do
+    user = user || Factory.insert(:owner_user)
+
+    {:ok, session} =
+      SessionContext.create(user, "127.0.0.1", Core.Application.boot_id())
+
+    {:ok, session} = SessionContext.mark_mfa_verified(session)
+    {:ok, token, _} = Guardian.encode_and_sign(user)
+
+    {with_session(conn, token), user, session}
   end
 end

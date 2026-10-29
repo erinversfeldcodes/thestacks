@@ -5375,7 +5375,7 @@ adminLogin proof body toMsg =
 adminVerifyMfa :
     Maybe String
     -> { sessionId : String, code : String }
-    -> (Result AdminAuthError String -> msg)
+    -> (Result AdminAuthError () -> msg)
     -> Cmd msg
 adminVerifyMfa proof body toMsg =
     Http.request
@@ -5395,7 +5395,13 @@ adminVerifyMfa proof body toMsg =
                     , ( "totp_code", Encode.string body.code )
                     ]
                 )
-        , expect = expectAdminJson toMsg (Decode.field "token" Decode.string)
+
+        -- ⛔ NO TOKEN TO DECODE. The server records the elevation on the admin
+        -- session itself and `AdminAuthPipeline` finds it from the authenticated
+        -- reader, so success is a fact rather than a credential. This used to
+        -- decode a second Guardian token the app then held in memory, where a
+        -- reload lost it and re-prompted for a code the server had accepted.
+        , expect = expectAdminJson toMsg (Decode.succeed ())
         , timeout = standardTimeout
         , tracker = Nothing
         }
@@ -5403,9 +5409,10 @@ adminVerifyMfa proof body toMsg =
 
 {-| DELETE /api/admin/auth/logout — revoke THIS admin session server-side.
 
-Send it with the admin token (`Main.adminTokenFor`), never the ordinary one: the
-route reads the session off the admin pipeline, so the Guardian token 401s here
-exactly as it does on every other `/api/admin/*` path.
+Send it with the ordinary session credential (`Main.sessionCredentials`). The
+route reads the admin session off the admin pipeline, which now finds it from
+the authenticated reader rather than from a token the client carries — so there
+is one credential for this path and every other `/api/admin/*` path.
 
 A `RequestSpec` rather than a `Cmd`-returning function because the caller
 dispatches it through `Effect`, which is what lets a program test read the

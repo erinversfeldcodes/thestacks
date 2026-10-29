@@ -466,7 +466,6 @@ type alias Model =
     , url : Url
     , route : Route
     , auth : AuthState
-    , adminAuth : Maybe Api.Credentials
 
     -- ⚠️ The same-origin proof, held independently of any session. A visitor
     -- who is signed OUT still needs it: the login POST is itself a
@@ -592,7 +591,6 @@ init flags url key =
       , url = url
       , route = route
       , auth = Resolving
-      , adminAuth = Nothing
       , csrf = csrf
       , adminChrome = AdminChrome.init
       , page = PageBooting
@@ -723,7 +721,7 @@ bootPage model maybeAuth =
         model.route
         (originOf model.url)
         maybeAuth
-        (adminTokenFor model)
+        (sessionCredentials model)
         model.previousRoute
         Login.Fresh
 
@@ -866,15 +864,22 @@ requiresAuth route =
             True
 
 
-{-| The token for `/api/admin/*` — the ONLY thing any admin call site may
-pass. `/api/admin/*` requires the MFA-verified admin session token and
-401s the ordinary one; when the five call sites each read a field, two
-drifted and every admin action 401'd behind a loaded page. One function,
-five callers, zero drift.
+{-| The ordinary session credential, which is now what admin pages use too.
+
+⛔ This replaced `adminTokenFor`, which read a separate `model.adminAuth` holding
+a second Guardian token. Admin elevation is a fact about the session the server
+holds — `AdminAuthPipeline` looks it up from the authenticated reader — so there
+is one credential in this application and no way to be signed in to the admin
+surfaces but not to the app.
+
+⚠️ Still ONE function with five callers, which is the half of the old note worth
+keeping: when those call sites each read a field themselves, two drifted and
+every admin action 401'd behind a page that had loaded fine.
+
 -}
-adminTokenFor : Model -> Maybe Api.Credentials
-adminTokenFor model =
-    model.adminAuth
+sessionCredentials : Model -> Maybe Api.Credentials
+sessionCredentials model =
+    Maybe.map .token (currentAuth model.auth)
 
 
 {-| The page the reader asked for but is being bounced off (`Nothing` when
@@ -1416,7 +1421,6 @@ forceSessionExpiry : Bool -> Model -> ( Model, Cmd Msg )
 forceSessionExpiry draftSaved model =
     ( { model
         | auth = Anonymous
-        , adminAuth = Nothing
         , arrival =
             Login.SessionExpired
                 { draftSaved = draftSaved || Login.draftWasSaved model.arrival }
@@ -1441,7 +1445,6 @@ handleAccountDeleted : Model -> ( Model, Cmd Msg )
 handleAccountDeleted model =
     ( { model
         | auth = Anonymous
-        , adminAuth = Nothing
         , arrival = Login.AccountDeleted
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
@@ -1760,7 +1763,7 @@ update msg model =
                         newRoute
                         (originOf url)
                         (currentAuth model.auth)
-                        (adminTokenFor model)
+                        (sessionCredentials model)
                         (Just model.route)
                         model.arrival
                         |> applyPendingUndo model.pendingUndo
@@ -2557,7 +2560,7 @@ update msg model =
                 PageAdminFeedback subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminFeedback.update subMsg subModel (adminTokenFor model)
+                            AdminFeedback.update subMsg subModel (sessionCredentials model)
                     in
                     case outMsg of
                         AdminFeedback.NoOut ->
@@ -2576,7 +2579,7 @@ update msg model =
                 PageAdminSourceApproval subModel ->
                     let
                         adminToken =
-                            adminTokenFor model
+                            sessionCredentials model
 
                         ( newSubModel, subCmd, outMsg ) =
                             AdminSourceApproval.update subMsg subModel adminToken
@@ -2598,7 +2601,7 @@ update msg model =
                 PageAdminInvites subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminInvites.update subMsg subModel (adminTokenFor model)
+                            AdminInvites.update subMsg subModel (sessionCredentials model)
                     in
                     case outMsg of
                         AdminInvites.NoOut ->
@@ -2636,7 +2639,7 @@ update msg model =
                 PageAdminBookModeration subModel ->
                     let
                         adminToken =
-                            adminTokenFor model
+                            sessionCredentials model
 
                         ( newSubModel, subCmd, outMsg ) =
                             AdminBookModeration.update subMsg subModel adminToken
@@ -2658,7 +2661,7 @@ update msg model =
                 PageAdminGate gatedRoute subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminSession.update subMsg subModel (Maybe.map .token (currentAuth model.auth))
+                            AdminSession.update subMsg subModel (sessionCredentials model)
                     in
                     case outMsg of
                         AdminSession.NoOut ->
@@ -2666,21 +2669,24 @@ update msg model =
                             , Cmd.map AdminSessionMsg subCmd
                             )
 
-                        AdminSession.Authenticated adminToken ->
+                        -- ⛔ NOTHING IS STORED. The elevation is recorded on the
+                        -- server's admin session, so the gated page is simply
+                        -- re-initialised with the ordinary session credential —
+                        -- the same one every other authenticated page uses.
+                        -- This branch used to put a second credential in the
+                        -- model, which no reload could recover.
+                        AdminSession.Elevated ->
                             let
-                                withToken =
-                                    { model | adminAuth = Just (Api.credentials adminToken model.csrf) }
-
                                 ( page, pageCmd ) =
                                     initPage model.config
                                         gatedRoute
                                         (originOf model.url)
                                         (currentAuth model.auth)
-                                        (adminTokenFor withToken)
+                                        (sessionCredentials model)
                                         (Just model.route)
                                         model.arrival
                             in
-                            ( { withToken | page = page, arrival = consumeArrival page model.arrival }
+                            ( { model | page = page, arrival = consumeArrival page model.arrival }
                             , pageCmd
                             )
 
@@ -2690,7 +2696,7 @@ update msg model =
         AdminChromeMsg subMsg ->
             let
                 ( newChrome, subCmd, outMsg ) =
-                    AdminChrome.update subMsg model.adminChrome (adminTokenFor model)
+                    AdminChrome.update subMsg model.adminChrome (sessionCredentials model)
 
                 withChrome =
                     { model | adminChrome = newChrome }
@@ -2707,7 +2713,7 @@ update msg model =
                 PageAdminRemovalRequests subModel ->
                     let
                         adminToken =
-                            adminTokenFor model
+                            sessionCredentials model
 
                         ( newSubModel, subCmd, outMsg ) =
                             AdminRemovalRequests.update subMsg subModel adminToken
@@ -2891,7 +2897,6 @@ update msg model =
                     ( { model
                         | userMenu = newUserMenu
                         , auth = Anonymous
-                        , adminAuth = Nothing
                         , page = PageLogin (Login.init model.config.proof Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
                         , arrival = Login.Fresh
                       }
@@ -2992,7 +2997,7 @@ update msg model =
                             model.route
                             (originOf model.url)
                             (currentAuth model.auth)
-                            (adminTokenFor model)
+                            (sessionCredentials model)
                             (Just model.route)
                             model.arrival
                 in
@@ -4078,7 +4083,7 @@ viewPage model =
         PageUpload subModel ->
             Html.map UploadMsg
                 (Upload.view subModel
-                    (Maybe.map .token (currentAuth model.auth))
+                    (sessionCredentials model)
                     model.uploadInbox
                 )
 
@@ -4256,7 +4261,7 @@ viewOnboarding model =
     if shouldShowOnboarding (currentAuth model.auth) model.onboardingCompleted model.hasAnyPlacements then
         Html.map OnboardingMsg
             (OnboardingOverlay.view model.onboarding
-                (Maybe.map .token (currentAuth model.auth))
+                (sessionCredentials model)
             )
 
     else
@@ -4471,8 +4476,7 @@ the two cannot drift apart again.
 endAdminSession : Model -> Model
 endAdminSession model =
     { model
-        | adminAuth = Nothing
-        , page = adminGateAfterEnding model.config.proof model.route
+        | page = adminGateAfterEnding model.config.proof model.route
     }
 
 
