@@ -49,7 +49,7 @@
   - `GotFile file` -> sets `uploadState = Loading`, calls `Api.initUpload`
   - `UploadInitialised _ _ (Ok init_)` -> calls `Api.putFileToR2 init_.uploadUrl file ...`
   - `R2PutCompleted imageId token (Ok ())` -> calls `Api.commitUpload imageId token UploadAccepted`
-  - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`; emits `OpenStream "/api/upload/<id>/stream?token=..."` OutMsg so Main subscribes to SSE
+  - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`; emits `OpenStream "/api/upload/<id>/stream"` OutMsg so Main subscribes to SSE (no credential in the URL — `EventSource` sends the session cookie)
   - `StreamEvent rawJson` -> decodes via `Api.streamEventDecoder` and recurses into `StatusReceived (Ok pollResponse)`
   - `StreamError` -> if `sseTerminalReceived` then no-op, else `result = IdentificationFailed`
   - `StatusReceived (Ok {status: Resolved, bookIds, isDuplicate})` -> calls `Api.getBook` for each ID (single id with `isDuplicate == Just True` routes to `GotDuplicateBook` instead)
@@ -92,8 +92,8 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **Response (error)**: `{ error: "not_found" }` -- HTTP 404; `{ error: "not_yet_uploaded" }` -- HTTP 409; `{ error: "already_committed" }` -- HTTP 409; `{ error: "commit_failed" }` -- HTTP 500
 
 ### `GET /api/upload/:image_id/stream`
-- **Auth**: Required (Bearer token; passed as `?token=` query param so EventSource can authenticate).
-- **Pipeline**: `:sse_api` -> `:sse_auth`
+- **Auth**: Required — the **session cookie**, which `EventSource` sends on a same-origin request. ⚠️ It used to be a Bearer token in a `?token=` query parameter, because `EventSource` cannot set headers; that put a live credential into request logs, into `Referer` and into browser history. The cookie removes it from all three without the client doing anything.
+- **Pipeline**: `:sse_api` -> `:authenticated` — the same pipeline as every other authenticated route. The bespoke `:sse_auth` pipeline and `StacksWeb.Plugs.SSEAuthPipeline` are **deleted**: reading the query parameter was the only thing they did differently.
 - **Controller**: `StacksWeb.UploadController.stream/2`
 - **Response**: `text/event-stream`. Emits the current image status immediately, then streams pubsub updates until the row reaches `resolved` or `rejected` (or `:sse_max_timeout_ms` elapses, default 60s). Each `message` event payload is the same shape the Elm client decodes via `Api.streamEventDecoder`: `{ image_id, status: "pending"|"resolved"|"rejected", book_id, book_ids, rejection_reason, is_duplicate }`.
 
@@ -119,7 +119,7 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 
 - **Plugs fired** (init / commit): `SecurityHeaders` -> `AuthPipeline` -> `RateLimiter (bucket: :upload)`
 - **Plugs fired** (raw PUT to `/upload/:image_id/data`): `SecurityHeaders` only — no auth (the unguessable `image_id` is the bearer; commit re-verifies ownership)
-- **Plugs fired** (SSE stream): `:sse_api` -> `:sse_auth` (token passed as `?token=` query param)
+- **Plugs fired** (SSE stream): `SecurityHeaders` -> `AuthPipeline` (the session cookie; no credential in the URL)
 - **Plugs fired** (book detail): `SecurityHeaders` -> `OptionalAuthPipeline`
 - **Plugs fired** (placement): `SecurityHeaders` -> `AuthPipeline`
 - **Visibility checks**: `Visibility.resolve_visibility/2` is called in `BookController.show/2` -- returns `:hidden` for books the viewer cannot see.
@@ -352,7 +352,7 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 | `UploadInitialised _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
 | `R2PutCompleted imageId token (Ok ())` | (none) | `Api.commitUpload imageId token UploadAccepted` | `NoOut` |
 | `R2PutCompleted _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
-| `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | None | `OpenStream "/api/upload/<id>/stream?token=..."` |
+| `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | None | `OpenStream "/api/upload/<id>/stream"` |
 | `UploadAccepted (Err err)` | `uploadState = Failure err` | None | `NoOut` |
 | `StreamEvent rawJson` | (decoded payload re-dispatched as `StatusReceived (Ok pollResponse)`; malformed events are ignored) | None | `NoOut` |
 | `StreamError` | If `sseTerminalReceived` then no-op; else `result = IdentificationFailed` | None | `NoOut` |

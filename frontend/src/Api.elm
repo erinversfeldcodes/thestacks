@@ -105,7 +105,6 @@ module Api exposing
     , authorEventDecoder
     , authorEventsDecoder
     , awaitingConfirmationCount
-    , bearerOf
     , blockUser
     , blockedUserDecoder
     , blockedUsersResponseDecoder
@@ -473,30 +472,6 @@ and silently stop every subsequent write from proving itself.
 withBearer : String -> Credentials -> Credentials
 withBearer bearer (Credentials creds) =
     Credentials { creds | bearer = Just bearer }
-
-
-{-| The bearer token as a bare string.
-
-⛔ **ONE CALLER, AND IT IS THE ONE THIS WAVE IS REMOVING.** `EventSource` cannot
-set headers, so the upload progress stream passes the credential in a QUERY
-STRING — `/api/upload/:id/stream?token=…` — which puts it in request logs, in
-`Referer`, and in browser history. Moving the stream onto the session cookie is
-what fixes it, and that change is planned.
-
-⚠️ This accessor exists so that call site is **named and findable** rather than
-hidden behind a page holding a second, bare copy of the token. When the stream
-moves onto the cookie, its caller goes and so does this function; a `grep` for
-`bearerOf` is the to-do list.
-
-⚠️ Do NOT reach for this to build a header. `Api.requestHeaders` is the one
-derivation and `scripts/check-one-credential-derivation.sh` refuses any other —
-this returns the token precisely because the one legitimate caller is not
-building a header at all.
-
--}
-bearerOf : Credentials -> Maybe String
-bearerOf (Credentials creds) =
-    creds.bearer
 
 
 {-| WHERE a request is going, as a decision rather than a default.

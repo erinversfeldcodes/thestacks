@@ -449,16 +449,13 @@ simulateMergeFormatResponse bookId editionId isbn formatLabel =
 {-| Create a successful auth HTTP response.
 Parameters: token, userId, email, displayName.
 -}
-simulateAuthResponse : Api.Credentials -> String -> String -> String -> Http.Response String
-simulateAuthResponse token userId email displayName =
+simulateAuthResponse : String -> String -> String -> String -> Http.Response String
+simulateAuthResponse bearer userId email displayName =
     let
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "token"
-                      , Encode.string
-                            (Maybe.withDefault "FIXTURE-BUILT-NO-BEARER" (Api.bearerOf token))
-                      )
+                    [ ( "token", Encode.string bearer )
                     , ( "user"
                       , Encode.object
                             [ ( "id", Encode.string userId )

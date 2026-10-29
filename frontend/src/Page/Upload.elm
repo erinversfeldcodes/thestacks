@@ -123,30 +123,26 @@ type OutMsg
     | RefreshInbox
 
 
-{-| The live progress stream for an upload, when one can be opened.
+{-| The live progress stream for an upload.
 
-⛔ **`EventSource` cannot set headers, so this credential travels in a QUERY
-STRING** — which puts it in request logs, in `Referer` and in browser history.
-That is why moving the stream onto the session cookie is planned work and why
-`Api.bearerOf` exists to make this call site findable rather than hidden.
+⛔ **No credential in the URL, and none needed.** `EventSource` cannot set an
+`Authorization` header, which is why this used to carry the bearer in a QUERY
+STRING — putting a live credential into request logs, into `Referer` and into
+browser history. It does send cookies on a same-origin request, and every
+request this SPA makes is same-origin, so the session now travels the way it
+does for everything else.
 
-⚠️ **A reader who has reloaded has NO bearer** — the session cookie is
-`HttpOnly`, so the SPA cannot see it — and there is no token to put in the
-query string. The honest outcome is the one this page already has for a reader
-with no credential at all: the upload itself succeeds and there is simply no
-live progress stream. ⛔ NOT `Maybe.withDefault ""`: a `?token=` with an empty
-value is a request that cannot work, sent as though it could, and this
-repository has paid for the difference between an absent key and a lying one.
+⚠️ **It no longer takes a credential at all**, and that is the shape worth
+noticing rather than the deletion. The previous version answered `NoOut` for a
+reader with no bearer — and after the stored session was deleted, that was
+every reader who had not just signed in, so reloading the upload page cost you
+live progress. The stream opens for all of them now, and the server decides
+whether to serve it.
 
 -}
-streamFor : String -> Api.Credentials -> OutMsg
-streamFor imageId token =
-    case Api.bearerOf token of
-        Nothing ->
-            NoOut
-
-        Just bearer ->
-            OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ bearer)
+streamFor : String -> OutMsg
+streamFor imageId =
+    OpenStream ("/api/upload/" ++ imageId ++ "/stream")
 
 
 type Msg
@@ -457,16 +453,17 @@ updateWithEffect msg model maybeToken =
 
         UploadAccepted result ->
             case result of
+                -- ⛔ The stream opens unconditionally now. This used to branch
+                -- on whether the page held a credential, because the stream URL
+                -- was BUILT from one — so a reader without a bearer got
+                -- `uploadState = Success` and no progress. The stream carries no
+                -- credential any more; an accepted upload has a stream to watch,
+                -- and the server decides whether to serve it.
                 Ok imageId ->
-                    case maybeToken of
-                        Just token ->
-                            ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
-                            , Effect.none
-                            , streamFor imageId token
-                            )
-
-                        Nothing ->
-                            ( { model | uploadState = Success imageId }, Effect.none, NoOut )
+                    ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
+                    , Effect.none
+                    , streamFor imageId
+                    )
 
                 Err err ->
                     ( { model | uploadState = Failure err }, Effect.none, NoOut )
@@ -796,7 +793,7 @@ updateWithEffect msg model maybeToken =
                         )
                         token
                         (Api.resolveWhatever >> RejectIdentificationCompleted)
-                    , streamFor imageId token
+                    , streamFor imageId
                     )
 
                 _ ->

@@ -14,6 +14,19 @@ which is deliberately narrow.
 
 ## Context
 
+⚠️ **This section describes the system AS IT WAS WHEN THE DECISION WAS TAKEN
+(2026-10-22), in the present tense, and three of its four problems are now
+closed.** It is left in that tense deliberately — an ADR's context is the
+evidence the decision rested on, and rewriting it would destroy the argument.
+Where each problem stands:
+
+| Problem | Status |
+|---|---|
+| 1. A reload loses the proof of elevation | **open** — the admin half, now its own issue |
+| 2. The token is readable by any script on the page | **closed** — the stored session is deleted; `check-no-stored-session.sh` holds it |
+| 3. A live credential appears in URLs | **closed** — the upload stream authenticates by cookie |
+| 4. Identity goes stale in storage | **closed** — identity comes from `GET /api/auth/me` on every boot, and the `role` decoder now FAILS rather than defaulting |
+
 The session is carried as a bearer token in a JSON response body, stored by the
 SPA in `localStorage`, and attached to each request as an `Authorization` header.
 Four problems follow from that, each measured rather than inferred.
@@ -205,6 +218,17 @@ cross-origin without `withCredentials`, and the server would then need CORS
 credentials configured. If any deployment ever serves the SPA from a different
 origin than the API, this decision needs revisiting — it is recorded as an
 assumption rather than left implicit.
+
+✅ **The assumption was VERIFIED before the change landed, not asserted.**
+`Api.baseUrl` is the empty string, so every request the SPA builds is a relative
+URL and therefore same-origin by construction; `scripts/check-credential-origin.sh`
+reports *"83 request record(s) parsed in frontend/src/Api.elm; none declares
+SameOrigin with an unprovable URL"*, and as of 2026-10-28 **no request in
+`Api.elm` is cross-origin at all** — the one that claimed to be was the upload
+byte `PUT`, and it had been same-origin since July while declaring otherwise.
+⚠️ So `withCredentials` is deliberately NOT set: setting it would have no effect
+today and would quietly make a future cross-origin deployment appear to work
+while the server lacked the CORS credentials to complete it.
 
 ### 6. Admin elevation survives a reload
 

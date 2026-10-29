@@ -134,7 +134,11 @@ defmodule StacksWeb.UploadControllerTest do
 
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn2 = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn2.status == 200
       [content_type | _] = get_resp_header(conn2, "content-type")
       assert String.contains?(content_type, "text/event-stream")
@@ -157,8 +161,9 @@ defmodule StacksWeb.UploadControllerTest do
 
       conn =
         CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
         |> put_req_header("accept", "text/event-stream")
-        |> get("/api/upload/#{image.id}/stream?token=#{token}")
+        |> get("/api/upload/#{image.id}/stream")
 
       refute conn.status == 406,
              "the SSE route rejected `Accept: text/event-stream` — the SSE pipeline has " <>
@@ -172,10 +177,9 @@ defmodule StacksWeb.UploadControllerTest do
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
       conn =
-        get(
-          CoreWeb.ConnCase.proven_conn(),
-          "/api/upload/#{Ecto.UUID.generate()}/stream?token=#{token}"
-        )
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{Ecto.UUID.generate()}/stream")
 
       assert json_response(conn, 404)
     end
@@ -184,12 +188,33 @@ defmodule StacksWeb.UploadControllerTest do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      conn = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/not-a-uuid/stream?token=#{token}")
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/not-a-uuid/stream")
+
       assert conn.status in [400, 422]
     end
 
-    test "returns 401 without auth token" do
+    test "returns 401 without a session" do
+      # ⛔ The conn carries the CSRF proof and NO session cookie, which is
+      # exactly what an unauthenticated browser sends. Before the stream moved
+      # onto the cookie this case passed by omitting a `?token=` query
+      # parameter — the same verdict for a different reason, and the reason is
+      # the part worth pinning: there is no credential anywhere in the request.
       conn = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream")
+      assert json_response(conn, 401)
+    end
+
+    test "returns 401 when the session cookie is not a token we issued" do
+      # The paired control for the case above. Without it, a pipeline that
+      # accepted ANY cookie value would still answer 401 to the no-cookie case,
+      # and nothing would report that presence was all it ever checked.
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session("not-a-token")
+        |> get("/api/upload/#{Ecto.UUID.generate()}/stream")
+
       assert json_response(conn, 401)
     end
 
@@ -203,10 +228,9 @@ defmodule StacksWeb.UploadControllerTest do
       image = insert(:uploaded_image, status: "pending", user_id: owner.id)
 
       conn =
-        get(
-          CoreWeb.ConnCase.proven_conn(),
-          "/api/upload/#{image.id}/stream?token=#{requester_token}"
-        )
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(requester_token)
+        |> get("/api/upload/#{image.id}/stream")
 
       assert conn.status == 403
     end
@@ -225,7 +249,11 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn2.status == 200
       assert String.contains?(conn2.resp_body, "resolved")
       assert String.contains?(conn2.resp_body, book.id)
@@ -245,7 +273,11 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn2.status == 200
       assert String.contains?(conn2.resp_body, "resolved")
       assert String.contains?(conn2.resp_body, book.id)

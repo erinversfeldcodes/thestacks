@@ -12,8 +12,14 @@
 # here with a reason.
 #
 # A scope is treated as anonymously reachable unless it requires a real
-# identity: `:authenticated`, `:admin`, `:partner_auth` and `:sse_auth` all
-# establish a caller before the action runs, and each carries its own limits.
+# identity: `:authenticated`, `:admin` and `:partner_auth` all establish a
+# caller before the action runs, and each carries its own limits.
+#
+# ⚠️ `:sse_auth` used to be a fourth entry. It was deleted with the plug it
+# named: the upload stream read its credential from a `?token=` query parameter
+# because `EventSource` cannot set headers, and it now pipes through
+# `:authenticated` like everything else. One fewer authentication path, and one
+# fewer name this list has to know about.
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
@@ -38,7 +44,7 @@ EXEMPT = {
 }
 
 # Pipelines that establish a caller before the action runs.
-IDENTIFIED = (":authenticated", ":admin", ":partner_auth", ":sse_auth")
+IDENTIFIED = (":authenticated", ":admin", ":partner_auth")
 
 src = open(ROUTER, encoding="utf-8").read()
 

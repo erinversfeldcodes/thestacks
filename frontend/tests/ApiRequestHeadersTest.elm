@@ -291,11 +291,24 @@ suite =
                            )
                         |> List.map Tuple.first
                         |> Expect.equal [ "X-CSRF-Token" ]
-            , test "and it reports no bearer rather than an empty one" <|
+            , -- ⚠️ The third case here used to read the credential back with
+              -- `Api.bearerOf` and assert `Nothing`. That accessor is deleted:
+              -- its one production caller was the upload stream's `?token=`
+              -- URL, and with the stream on the cookie there was nothing left
+              -- for it to serve. What it asserted is covered by the two cases
+              -- above, which ask the question that matters — what reaches the
+              -- wire — rather than whether an accessor agrees with a
+              -- constructor.
+              test "a cookie-only credential sends NOTHING on a safe method" <|
                 \() ->
-                    Api.cookieSession (Just "proof")
-                        |> Api.bearerOf
-                        |> Expect.equal Nothing
+                    -- ⛔ The empty list is the correct answer and it is worth
+                    -- pinning: no `Authorization` because there is no bearer,
+                    -- and no proof either because the proof is attached only to
+                    -- unsafe methods. A GET must never be refused for failing to
+                    -- prove itself, and a harness that added the header here
+                    -- would diverge from a browser on the majority of requests.
+                    Api.requestHeaders "GET" Api.SameOrigin (Api.Session (Api.cookieSession (Just "proof")))
+                        |> Expect.equal []
             ]
         , describe "a refresh replaces the bearer and keeps the proof"
             -- ⛔ THE SILENT-LOSS CASE. A token refresh that rebuilt the whole
@@ -311,8 +324,8 @@ suite =
                 \() ->
                     Api.credentials "old-bearer" (Just "proof")
                         |> Api.withBearer "new-bearer"
-                        |> Api.bearerOf
-                        |> Expect.equal (Just "new-bearer")
+                        |> (\creds -> Api.requestHeaders "GET" Api.SameOrigin (Api.Session creds))
+                        |> Expect.equal [ ( "Authorization", "Bearer new-bearer" ) ]
             , test "and the proof is still sent on a write" <|
                 \() ->
                     Api.credentials "old-bearer" (Just "proof")

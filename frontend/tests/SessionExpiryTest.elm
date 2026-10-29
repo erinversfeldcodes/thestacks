@@ -258,9 +258,23 @@ renewProgram =
             \model ->
                 case model of
                     Just auth ->
+                        -- ⛔ Rendered from the HEADERS the credential would send,
+                        -- not from an accessor on it. The question this suite
+                        -- asks is whether a renewal puts a bearer back in the
+                        -- SPA's hands, and the only form of that question worth
+                        -- answering is "does one reach the wire".
+                        -- ⚠️ A POST, not a GET, and that is not incidental: the
+                        -- CSRF proof is attached to UNSAFE methods only, so a
+                        -- GET with a cookie-only credential sends no headers at
+                        -- all and the rendering could not tell "no bearer" from
+                        -- "no credential". A write distinguishes them.
                         Html.text
-                            ("token:"
-                                ++ Maybe.withDefault "<cookie-only>" (Api.bearerOf auth.token)
+                            ("headers:"
+                                ++ String.join
+                                    ","
+                                    (List.map Tuple.first
+                                        (Api.requestHeaders "POST" Api.SameOrigin (Api.Session auth.token))
+                                    )
                             )
 
                     Nothing ->
@@ -277,7 +291,7 @@ renewalSuccessKeepsTheReaderSignedIn =
                 |> ProgramTest.update TriggerRenewal
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
-                    (simulateAuthResponse (TestHelpers.creds "new.token") "user-1" "reader@stacks.dev" "A Reader")
+                    (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
                 |> ProgramTest.expectViewHasNot [ Selector.text "signed-out" ]
 
 
@@ -297,8 +311,8 @@ renewalSuccessTakesNoBearerFromTheResponse =
                 |> ProgramTest.update TriggerRenewal
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
-                    (simulateAuthResponse (TestHelpers.creds "new.token") "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.expectViewHas [ Selector.text "token:<cookie-only>" ]
+                    (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
+                |> ProgramTest.expectViewHas [ Selector.text "headers:X-CSRF-Token" ]
 
 
 renewalFailureClearsAuth : Test

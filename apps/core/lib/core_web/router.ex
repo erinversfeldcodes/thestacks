@@ -64,10 +64,9 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
 
-  pipeline :sse_auth do
-    plug StacksWeb.Plugs.SSEAuthPipeline
-  end
-
+  # ⚠️ Not `:api`: that pipeline carries the CSRF counter and enforcement, and
+  # the stream is a GET. Keeping it out leaves the counter's declared scope
+  # exactly the set of state-changing routes it says it covers.
   pipeline :sse_api do
     plug StacksWeb.Plugs.SecurityHeaders
   end
@@ -187,7 +186,15 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api", StacksWeb do
-    pipe_through [:sse_api, :sse_auth]
+    # ⛔ `:authenticated`, the same pipeline every other authenticated route
+    # uses. There used to be a bespoke `:sse_auth` here reading the token from
+    # `?token=`, because `EventSource` cannot set an `Authorization` header —
+    # which put a live credential in request logs, in `Referer` and in browser
+    # history. `EventSource` DOES send cookies on a same-origin request, and
+    # every request this SPA makes is same-origin (`Api.baseUrl` is `""`), so
+    # the session travels the way it does everywhere else and the second
+    # authentication path is gone.
+    pipe_through [:sse_api, :authenticated]
     get "/upload/:image_id/stream", UploadController, :stream
   end
 

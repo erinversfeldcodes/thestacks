@@ -15,7 +15,6 @@ the effect that taught it, which is why this file did too.
 
 -}
 
-import Api
 import Expect
 import Main
 import Navigation.Route as Route exposing (Route(..))
@@ -158,7 +157,7 @@ signIn =
         |> ProgramTest.clickButton "Enter the Stacks"
         |> ProgramTest.simulateHttpResponse "POST"
             "/api/auth/login"
-            (simulateAuthResponse (TestHelpers.creds "jwt-token") "user-1" "reader@stacks.dev" "A Reader")
+            (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
 
 
 everyEffectFiresWithNoAnimationSignal : Test
@@ -224,12 +223,13 @@ arrivalIsSignedInImmediately =
                     )
 
 
-fakeResponse : Main.Auth -> { token : String, userId : String, email : String, displayName : String, handle : String, role : String, consentAnalytics : Bool, consentWritingAssistant : Bool }
-fakeResponse auth =
-    -- Every fixture builds its credential with a real bearer, so this default
-    -- never fires; it is a loud sentinel rather than "" so that if one ever
-    -- stops doing so the assertion fails on something readable.
-    { token = Maybe.withDefault "FIXTURE-BUILT-NO-BEARER" (Api.bearerOf auth.token)
+fakeResponse : String -> Main.Auth -> { token : String, userId : String, email : String, displayName : String, handle : String, role : String, consentAnalytics : Bool, consentWritingAssistant : Bool }
+fakeResponse bearer auth =
+    -- ⚠️ The bearer is a PARAMETER rather than read back off `auth.token`.
+    -- It used to be unwrapped from the credential with `Api.bearerOf`, behind a
+    -- `Maybe.withDefault` sentinel — a round-trip through a type that every
+    -- caller had just built from this very string.
+    { token = bearer
     , userId = auth.user.id
     , email = auth.user.email
     , displayName = auth.user.displayName
@@ -263,7 +263,7 @@ completeLoginAlwaysFetchesWhatTheAppNeeds : Test
 completeLoginAlwaysFetchesWhatTheAppNeeds =
     test "completeLogin cannot produce an authenticated state without the effects that make it usable" <|
         \() ->
-            Main.completeLogin Nothing (fakeResponse readerAuth)
+            Main.completeLogin Nothing (fakeResponse "jwt-token" readerAuth)
                 |> (\arrival ->
                         Expect.all
                             [ \a -> Expect.equal True (List.member Main.FetchPlacements a.effects)
@@ -278,7 +278,7 @@ completeLoginCarriesTheResponsesToken : Test
 completeLoginCarriesTheResponsesToken =
     test "completeLogin's session is the token the server issued" <|
         \() ->
-            (Main.completeLogin Nothing (fakeResponse readerAuth)).session.token
+            (Main.completeLogin Nothing (fakeResponse "jwt-token" readerAuth)).session.token
                 |> Expect.equal (TestHelpers.creds "jwt-token")
 
 
@@ -286,7 +286,7 @@ completeLoginStartsArriving : Test
 completeLoginStartsArriving =
     test "completeLogin starts in Arriving — the door ornament is still owed a signal" <|
         \() ->
-            (Main.completeLogin Nothing (fakeResponse readerAuth)).authState
+            (Main.completeLogin Nothing (fakeResponse "jwt-token" readerAuth)).authState
                 |> Expect.equal (Main.Arriving readerAuth)
 
 
