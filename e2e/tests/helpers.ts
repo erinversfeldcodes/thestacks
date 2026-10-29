@@ -65,9 +65,10 @@ export const E2E_SUITES = [
 export async function ensureBookOnLibrary(page: Page): Promise<void> {
   await page.goto("/library");
   const outcome = await page.evaluate(async () => {
-    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    if (!auth.token) return { why: "no_token" as const };
-
+    // ⚠️ No `Authorization` header anywhere below, and no "do we have a
+    // token" guard. These run in the page, so the session cookie goes with
+    // every request automatically; the header was always redundant and the
+    // guard was the shape that makes a precondition unable to fail.
     const firstPageResp = await fetch("/api/catalogue");
     if (!firstPageResp.ok) {
       return { why: "catalogue" as const, status: firstPageResp.status };
@@ -76,9 +77,7 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
     const visibleBooks: { id: string }[] = firstPage.books ?? [];
     if (visibleBooks.length === 0) return { why: "catalogue_empty" as const };
 
-    const mineResp = await fetch("/api/placements/mine", {
-      headers: { Authorization: `Bearer ${auth.token}` },
-    });
+    const mineResp = await fetch("/api/placements/mine");
     const mineData = mineResp.ok ? await mineResp.json() : { placements: [] };
     const placedIds = new Set(
       (mineData.placements ?? []).map((p: any) => p.book_id),
@@ -93,10 +92,7 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
 
     const placeResp = await fetch("/api/bookshelves/library/placements", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${auth.token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ book_id: unplaced.id }),
     });
     if (placeResp.ok) return { why: "placed" as const };
@@ -154,12 +150,7 @@ export async function ensureBookOnShelf(
   await page.goto(`/${shelfName}`);
   const placed = await page.evaluate(
     async ({ shelf }) => {
-      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      if (!auth.token) return false;
-
-      const shelfResp = await fetch(`/api/bookshelves/${shelf}`, {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const shelfResp = await fetch(`/api/bookshelves/${shelf}`);
       if (!shelfResp.ok) return false;
       const shelfData = await shelfResp.json();
       const allPlacements = (shelfData.shelves ?? []).flatMap(
@@ -167,9 +158,7 @@ export async function ensureBookOnShelf(
       );
       if (allPlacements.length > 0) return true;
 
-      const mineResp = await fetch("/api/placements/mine", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const mineResp = await fetch("/api/placements/mine");
       const mineData = mineResp.ok ? await mineResp.json() : { placements: [] };
       const placedIds = new Set(mineData.placements.map((p: any) => p.book_id));
 
@@ -180,10 +169,7 @@ export async function ensureBookOnShelf(
 
       const placeResp = await fetch(`/api/bookshelves/${shelf}/placements`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${auth.token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ book_id: unplaced.id }),
       });
       if (placeResp.ok) return true;
@@ -197,7 +183,7 @@ export async function ensureBookOnShelf(
   // silently, and the test then fails somewhere that does not name the cause.
   expect(
     placed,
-    `could not ensure a book on the ${shelfName} shelf: ${typeof placed === "string" ? placed : "no token, empty catalogue, or every visible book already placed"}`,
+    `could not ensure a book on the ${shelfName} shelf: ${typeof placed === "string" ? placed : "empty catalogue, or every visible book already placed"}`,
   ).toBe(true);
 }
 
@@ -213,9 +199,10 @@ export async function apiCallFromPage(
 ): Promise<{ status: number; data: unknown }> {
   return page.evaluate(
     async ({ method, path, body }) => {
-      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+      // ⚠️ The credential is the cookie, which this `fetch` carries because
+      // it runs in the page. The CSRF proof for an unsafe method is added by
+      // the init script in `fixtures.ts`, not here.
       const headers: Record<string, string> = {};
-      if (auth.token) headers["Authorization"] = `Bearer ${auth.token}`;
       if (body) headers["Content-Type"] = "application/json";
 
       const resp = await fetch(path, {
@@ -419,19 +406,10 @@ export async function seedBookWriting(
  * minted user's data being absent. A spec would report "my placement did not
  * render" over a stack that rendered the wrong reader's shelf correctly.
  *
- * ⚖️ So this clears before it sets, and sets BOTH transports:
- *   * the cookie, which is the session — the server sets it, prefers it, and it
- *     is the only credential the SPA has any more;
- *   * the `localStorage` blob, which the SPA NO LONGER READS. It is kept for
- *     the SPECS: around thirty of them still pull a bearer out of it to make a
- *     direct `fetch`, and a handful assert on its contents. Those calls are
- *     same-origin from the page, so the cookie would authenticate them without
- *     the header at all; migrating them is the harness half of this wave and is
- *     tracked separately.
- *
- * ⛔ So a spec asserting anything about this blob is now asserting about the
- * harness, not about the application. The app writes no session to
- * `localStorage` and reads none from it.
+ * ⚖️ So this clears before it sets, and sets ONE credential: the cookie. It
+ * used to set a `localStorage` blob beside it, because the SPA read its
+ * identity from there — that blob is gone, along with every spec that read it,
+ * so there is nothing left for a second write to keep in step.
  *
  * ⚠️ The cookie's attributes must MATCH the ones the server sets
  * (`HttpOnly; Secure; SameSite=Lax`). A cookie that differs is silently ignored
@@ -463,31 +441,77 @@ export async function injectSession(
       sameSite: "Lax",
     },
   ]);
-
-  await page.evaluate(
-    (auth) => {
-      localStorage.setItem("stacks-auth", JSON.stringify(auth));
-    },
-    {
-      token: session.token,
-      userId: session.userId,
-      email: session.email,
-      displayName: session.displayName,
-    },
-  );
 }
 
 /**
- * Make this context carry no credential at all, on either transport.
+ * Sign this browser context in as the seeded OWNER, without the login form.
+ *
+ * ⛔ Replaces two private copies of the same helper (`admin-session.spec.ts`
+ * and `admin-feedback.spec.ts` each had one, both titled "Must be a FLAT blob")
+ * which logged in through `request` and then wrote the response into
+ * `localStorage`. Both halves of that stopped working: the SPA reads no blob,
+ * and the `request` fixture is a SEPARATE context, so the login's `Set-Cookie`
+ * landed in the request context's jar and never reached the page.
+ *
+ * ⚠️ `mintSession` is NOT a substitute here. It mints a `.test`-domain user by
+ * server-enforced allowlist, and these specs need the owner specifically — the
+ * surfaces under test are role-gated.
+ */
+export async function signInAsOwner(
+  page: Page,
+  request: APIRequestContext,
+): Promise<void> {
+  const login = await request.post("/api/auth/login", {
+    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
+  });
+  expect(login.status(), "owner login for an admin spec").toBe(200);
+  const body = await login.json();
+
+  await injectSession(page, {
+    email: body.user.email as string,
+    token: body.token as string,
+    userId: body.user.id as string,
+    displayName: body.user.display_name as string,
+  });
+}
+
+
+/**
+ * Whether this browser context holds a session cookie.
+ *
+ * ⛔ THE REPLACEMENT FOR `localStorage.getItem("stacks-auth")`, which around
+ * thirty assertions used as a stand-in for "is this reader signed in". That
+ * stand-in stopped meaning anything when the SPA stopped writing the blob: a
+ * reader who signs in through the form now has a live session and an empty
+ * `localStorage`, so `toBeFalsy()` passes and `toBeTruthy()` fails, and NEITHER
+ * is reporting on the session.
+ *
+ * ⚠️ Asks the CONTEXT, not the page. The cookie is `HttpOnly`, so
+ * `document.cookie` cannot see it and an in-page `evaluate` would answer "no
+ * session" for every signed-in reader — the same silent wrong answer in a new
+ * disguise. Playwright's context sees it because it owns the cookie jar.
+ *
+ * ⚖️ It reports PRESENCE, not validity. A corrupted cookie (what `expireSession`
+ * installs) is still a cookie, so a test asserting that an expired session is
+ * refused must assert on the REFUSAL, not on this. The one thing this answers is
+ * whether a credential was issued or torn down.
+ */
+export async function hasSessionCookie(page: Page): Promise<boolean> {
+  const cookies = await page.context().cookies();
+  return cookies.some((c) => c.name === SESSION_COOKIE);
+}
+
+
+/**
+ * Make this context carry no credential at all.
  *
  * ⛔ WHY OMITTING A HEADER IS NO LONGER ENOUGH, and this is the half that broke
  * four specs the moment the harness started saving the session cookie. A spec
  * that wanted an anonymous request used to get one for free by leaving
  * `Authorization` off, because the bearer header was the only credential a
- * context could hold. The server now accepts a session by cookie too, and
- * `AuthPipeline` prefers it — so an in-page `fetch` with no header is
- * authenticated, and an assertion like "these endpoints return 401 when not
- * authenticated" reads 200 instead.
+ * context could hold. The session is a cookie now, which `AuthPipeline` prefers
+ * — so an in-page `fetch` with no header is authenticated, and an assertion like
+ * "these endpoints return 401 when not authenticated" reads 200 instead.
  *
  * ⚠️ DELETES rather than corrupts, which is the opposite choice from
  * `expireSession` and for the opposite reason: "never signed in" is exactly the
@@ -496,25 +520,19 @@ export async function injectSession(
  */
 export async function goAnonymous(page: Page): Promise<void> {
   await page.context().clearCookies({ name: SESSION_COOKIE });
-  await page.evaluate(() => {
-    try {
-      localStorage.removeItem("stacks-auth");
-    } catch {
-      // a context with storage access denied is already anonymous
-    }
-  });
 }
 
 /**
- * End the session on BOTH transports, the way the application now ends one.
+ * End the session the way an expiry actually ends one.
  *
  * ⛔ WHY THIS EXISTS AS A HELPER. Five specs ended a session by corrupting the
  * bearer token in `localStorage`, which was complete before the cookie existed
- * and is now a no-op on the path that matters: measured on a preview, a context
+ * and became a no-op on the path that matters: measured on a preview, a context
  * whose stored token had been corrupted still got **200** from
  * `/api/placements/mine`, `/api/bookshelves/library` and
  * `/api/onboarding/status`, because the HttpOnly cookie authenticated every one
- * of them — and nothing redirected to `/login`.
+ * of them — and nothing redirected to `/login`. The blob is gone now, so the
+ * cookie is the only thing there is to corrupt.
  *
  * ⚠️ Corrupts rather than deletes, deliberately. Deleting both credentials
  * produces "never signed in", which routes to `/login` for a different reason
@@ -526,20 +544,22 @@ export async function expireSession(page: Page): Promise<void> {
   const context = page.context();
   const existing = (await context.cookies()).find((c) => c.name === SESSION_COOKIE);
 
-  if (existing) {
-    await context.clearCookies({ name: SESSION_COOKIE });
-    await context.addCookies([
-      { ...existing, value: `${existing.value}.expired` },
-    ]);
+  // ⛔ THROWS rather than no-opping on an absent cookie. A silent no-op here
+  // leaves the session INTACT, and the test then asserts expiry behaviour
+  // against a live session — passing or failing for a reason that has nothing to
+  // do with what it set out to measure.
+  if (!existing) {
+    throw new Error(
+      `expireSession: this context holds no ${SESSION_COOKIE} cookie, so there ` +
+        `is no session to expire. Establish one first (injectSession or ` +
+        `signInViaForm).`,
+    );
   }
 
-  await page.evaluate(() => {
-    const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    if (raw.token) {
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
-    }
-  });
+  await context.clearCookies({ name: SESSION_COOKIE });
+  await context.addCookies([
+    { ...existing, value: `${existing.value}.expired` },
+  ]);
 }
 
 /**

@@ -1,10 +1,12 @@
 import { test, expect } from "./fixtures";
-import { type APIRequestContext, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
   freshTotp,
+  hasSessionCookie,
   readOwnerMfaSecret,
+  signInAsOwner,
 } from "./helpers";
 
 /**
@@ -42,25 +44,6 @@ import {
  * protection, so parallel specs presenting the same code are fine.
  */
 
-/** Stores an ordinary session so the SPA is signed in. Must be a FLAT blob. */
-async function signInOrdinary(page: Page, request: APIRequestContext) {
-  const login = await request.post("/api/auth/login", {
-    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
-  });
-  expect(login.status()).toBe(200);
-  const body = await login.json();
-  await page.goto("/");
-  await page.evaluate((blob) => {
-    window.localStorage.setItem("stacks-auth", JSON.stringify(blob));
-  }, {
-    token: body.token,
-    userId: body.user.id,
-    email: body.user.email,
-    displayName: body.user.display_name,
-    handle: body.user.handle,
-    role: body.user.role,
-  });
-}
 
 /**
  * Signs in through the gate's own form — the path a person takes.
@@ -126,7 +109,7 @@ async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string
 
 test.describe("Admin session gate", () => {
   test("an owner cannot reach an admin page without an admin session", async ({ page, request }) => {
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
 
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
@@ -138,7 +121,7 @@ test.describe("Admin session gate", () => {
 
   test("signing in through the gate loads the real page with rows", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
@@ -151,7 +134,7 @@ test.describe("Admin session gate", () => {
 
   test("a pending source offers Approve and Reject", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
@@ -161,7 +144,7 @@ test.describe("Admin session gate", () => {
 
   test("an admin ACTION succeeds, not merely the page load", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
@@ -201,7 +184,7 @@ test.describe("Admin session gate", () => {
    */
   test("ending an admin session revokes it server-side", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
 
     const verified = page.waitForResponse(
       (r) => r.url().includes("/api/admin/auth/verify_mfa") && r.status() === 200,
@@ -241,7 +224,7 @@ test.describe("Admin session gate", () => {
    */
   test("ending an admin session re-gates the surface in place", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });
@@ -260,25 +243,22 @@ test.describe("Admin session gate", () => {
 
   test("ending an admin session leaves the ordinary session alone", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
     await page.getByTestId("admin-end-session").click();
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
 
-    const ordinarySession = await page.evaluate(() =>
-      window.localStorage.getItem("stacks-auth"),
-    );
     expect(
-      ordinarySession,
+      await hasSessionCookie(page),
       "ending the ADMIN session signed the operator out of the whole product",
-    ).not.toBeNull();
+    ).toBe(true);
   });
 
   test("an admin failure does NOT sign the operator out of the app", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
     await expect(page.getByTestId("source-approve").first()).toBeVisible({ timeout: 15000 });
@@ -291,12 +271,9 @@ test.describe("Admin session gate", () => {
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
     expect(page.url(), "an admin 401 must not redirect to /login").toContain("/admin/sources");
 
-    const ordinarySession = await page.evaluate(() =>
-      window.localStorage.getItem("stacks-auth"),
-    );
     expect(
-      ordinarySession,
+      await hasSessionCookie(page),
       "the ordinary session was cleared by an ADMIN failure",
-    ).not.toBeNull();
+    ).toBe(true);
   });
 });

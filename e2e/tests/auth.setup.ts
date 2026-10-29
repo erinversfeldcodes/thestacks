@@ -61,21 +61,11 @@ async function authenticateUser(
     },
   ]);
 
-  await page.evaluate(
-    (auth: any) => {
-      // ⚠️ The SPA does not read this. It is written into the saved storage
-      // state because around thirty specs still pull a bearer out of it for a
-      // direct `fetch`; the session itself is the cookie above.
-      localStorage.setItem("stacks-auth", JSON.stringify(auth));
-    },
-    {
-      token: body.token,
-      userId: body.user.id,
-      email: body.user.email,
-      displayName: body.user.display_name,
-    }
-  );
-
+  // ⛔ NOTHING ELSE IS SAVED. A `stacks-auth` blob used to be written into the
+  // storage state beside the cookie, because the SPA read its identity from it
+  // and around thirty specs pulled a bearer out of it for direct `fetch` calls.
+  // The SPA now asks `GET /api/auth/me`, and those specs now let the cookie
+  // authenticate them — so the saved state is the cookie jar and nothing more.
   await page.context().storageState({ path: stateFile });
 }
 

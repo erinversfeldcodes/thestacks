@@ -11,13 +11,8 @@ import { suiteAuthFile } from "./helpers";
  *  the parallel test's activated listing is returned instead. */
 async function createActiveListing(page: import("@playwright/test").Page): Promise<string> {
   const listing = await page.evaluate(async () => {
-    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    const token: string = auth?.token ?? auth?.jwt ?? "";
-
     const getActiveListing = async (): Promise<string> => {
-      const mineResp = await fetch("/api/listings/mine", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const mineResp = await fetch("/api/listings/mine");
       if (!mineResp.ok) return "";
       const mineData = await mineResp.json();
       const active = (mineData?.listings ?? []).find((l: any) => l.status === "active");
@@ -27,18 +22,13 @@ async function createActiveListing(page: import("@playwright/test").Page): Promi
     const existingId = await getActiveListing();
     if (existingId) return existingId;
 
-    const placementsResp = await fetch("/api/placements/mine", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const placementsResp = await fetch("/api/placements/mine");
     const placementsData = placementsResp.ok ? await placementsResp.json() : { placements: [] };
     const bookId: string = placementsData?.placements?.[0]?.book_id ?? "";
 
     const createResp = await fetch("/api/listings", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         book_id: bookId,
         pricing_mode: "fixed",
@@ -56,10 +46,7 @@ async function createActiveListing(page: import("@playwright/test").Page): Promi
       return await getActiveListing();
     }
 
-    await fetch(`/api/listings/${listingId}/activate`, {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    await fetch(`/api/listings/${listingId}/activate`, { method: "PUT" });
 
     return listingId;
   });

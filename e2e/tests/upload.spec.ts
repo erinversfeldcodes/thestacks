@@ -56,12 +56,7 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
             .poll(
               () =>
                 page.evaluate(async (id) => {
-                  const auth = JSON.parse(
-                    localStorage.getItem("stacks-auth") || "{}"
-                  );
-                  const resp = await fetch(`/api/books/${id}`, {
-                    headers: { Authorization: `Bearer ${auth.token}` },
-                  });
+                  const resp = await fetch(`/api/books/${id}`);
                   if (!resp.ok) return "";
                   const data = await resp.json();
                   return (data.book?.title ?? "") as string;

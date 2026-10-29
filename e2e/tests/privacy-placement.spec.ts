@@ -75,11 +75,7 @@ async function setShelfCeiling(
   }
   return page.evaluate(
     async ({ shelfName, visibility }) => {
-      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      const headers = {
-        Authorization: `Bearer ${auth.token}`,
-        "Content-Type": "application/json",
-      };
+      const headers = { "Content-Type": "application/json" };
       await fetch(`/api/settings/profile_visibility`, {
         method: "PUT",
         headers,

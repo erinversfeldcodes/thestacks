@@ -249,11 +249,9 @@ test.describe("Settings — Profile & Account API", () => {
         path: string;
         body: Record<string, unknown>;
       }) => {
-        const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
         const resp = await fetch(path, {
           method,
           headers: {
-            Authorization: `Bearer ${auth.token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
@@ -380,10 +378,10 @@ test.describe("Settings — Profile & Account API", () => {
   }) => {
     await page.goto("/");
 
-    // ⛔ Explicitly credential-free on BOTH transports. Omitting the
-    // `Authorization` header below is no longer sufficient: the suite's storage
-    // state now carries the session cookie, which the server prefers, so these
-    // requests would be authenticated and every assertion would read 200.
+    // ⛔ Explicitly credential-free. Sending no `Authorization` header below
+    // proves nothing: the suite's storage state carries the session cookie,
+    // which the server prefers over any header, so these requests would be
+    // authenticated and every assertion would read 200.
     await goAnonymous(page);
 
     const unauthResults = await page.evaluate(async () => {

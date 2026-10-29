@@ -6,6 +6,7 @@ import {
   freshTotp,
   mintOrSkip,
   readOwnerMfaSecret,
+  signInAsOwner,
 } from "./helpers";
 
 /**
@@ -53,25 +54,6 @@ const PER_USER = 9;
  */
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-/** Stores an ordinary session so the SPA is signed in. Must be a FLAT blob. */
-async function signInOrdinary(page: Page, request: APIRequestContext) {
-  const login = await request.post("/api/auth/login", {
-    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
-  });
-  expect(login.status()).toBe(200);
-  const body = await login.json();
-  await page.goto("/");
-  await page.evaluate((blob) => {
-    window.localStorage.setItem("stacks-auth", JSON.stringify(blob));
-  }, {
-    token: body.token,
-    userId: body.user.id,
-    email: body.user.email,
-    displayName: body.user.display_name,
-    handle: body.user.handle,
-    role: body.user.role,
-  });
-}
 
 /**
  * Signs in through the admin gate's own form — the path a person takes, and the path whose
@@ -171,7 +153,7 @@ async function reportedTotal(page: Page): Promise<number> {
 
 test.describe("Admin feedback queue", () => {
   test("the queue is not reachable without an admin session", async ({ page, request }) => {
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/feedback");
 
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
@@ -186,7 +168,7 @@ test.describe("Admin feedback queue", () => {
     const secret = readOwnerMfaSecret();
     const submitted = await submitFeedback(request, 1);
 
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/feedback");
     await passTheGate(page, secret);
 
@@ -208,7 +190,7 @@ test.describe("Admin feedback queue", () => {
     const secret = readOwnerMfaSecret();
     await submitFeedback(request, 1);
 
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/feedback");
     await passTheGate(page, secret);
 
@@ -239,7 +221,7 @@ test.describe("Admin feedback queue", () => {
 
     const secret = readOwnerMfaSecret();
 
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/feedback");
     await passTheGate(page, secret);
     await expect(page.getByTestId("admin-feedback-count")).toBeVisible({ timeout: 15000 });
