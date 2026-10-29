@@ -64,9 +64,24 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
 
-  # ⚠️ Not `:api`: that pipeline carries the CSRF counter and enforcement, and
-  # the stream is a GET. Keeping it out leaves the counter's declared scope
-  # exactly the set of state-changing routes it says it covers.
+  # ⚠️ Not `:api`, and the reason is the COUNTER rather than the scope gate.
+  #
+  # ⛔ The first version of this comment said keeping the stream out "leaves the
+  # counter's declared scope exactly the set of state-changing routes it says it
+  # covers" — which is not a reason, because `scripts/check-csrf-scope.sh`
+  # parses only `post|put|patch|delete`. A GET was never in its population, so
+  # joining `:api` could not have moved its numbers either way.
+  #
+  # ⚖️ The real reason: `CsrfCounter` counts safe methods as `:safe` rather than
+  # skipping them (`@safe_methods ~w(GET HEAD OPTIONS)`). Putting the upload
+  # stream on `:api` would pour every one of its requests into that series —
+  # and the series is how the rollout decides whether the CSRF proof is
+  # arriving. A long-lived SSE connection is structurally incapable of needing a
+  # proof, so counting it is noise in the one reading that has to stay clean.
+  #
+  # ⚠️ Stated at this length because the wrong version was ACTIONABLE: a reader
+  # could "fix the inconsistency" by joining `:api`, see the scope gate
+  # unchanged exactly as the old comment promised, and conclude it was safe.
   pipeline :sse_api do
     plug StacksWeb.Plugs.SecurityHeaders
   end
