@@ -180,6 +180,13 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # shell/.env export can promote it onto the prod app — production must launch with
     # age-gating invisible and inert.
     AGE_GATING_ENABLED=""
+    # ⛔ Pinned empty on BOTH branches, which is the lesson the paragraph above
+    # records rather than a new one. Production takes its backend from its own
+    # R2_* secrets; a stale `STORAGE_BACKEND=local` exported in a deploying
+    # shell would otherwise put production's reader photos on a container
+    # filesystem, and `UPLOAD_DIR` would make that choice pass its own check.
+    STORAGE_BACKEND=""
+    UPLOAD_DIR=""
     # Invite-only registration is the LAUNCH posture, so unlike the dark flags
     # above this is set ON rather than forced empty — but it is set HERE, which
     # is the point. Every other posture flag is pinned on BOTH branches, and
@@ -209,6 +216,34 @@ else
     STACKS_E2E_TEST_HELPERS="1"
     AGE_GATING_ENABLED="true"
     INVITE_ONLY_REGISTRATION="true"
+
+    # ⛔ A PREVIEW MUST NEVER SHARE PRODUCTION'S OBJECT STORAGE BUCKET.
+    #
+    # The R2_* forwarding below is unconditional on presence, so sourcing .env
+    # before a preview deploy hands the preview production's credentials AND
+    # production's bucket name. Nothing had noticed because the one live
+    # preview predates that forwarding and had no storage secrets at all — it
+    # was silently writing to the container filesystem instead.
+    #
+    # So the bucket is overridden here rather than inherited. R2_PREVIEW_BUCKET_NAME
+    # upgrades a preview to real object storage; without it the preview uses
+    # local storage DELIBERATELY, which is the only other honest option.
+    if [ -n "${R2_PREVIEW_BUCKET_NAME:-}" ]; then
+        R2_BUCKET_NAME="${R2_PREVIEW_BUCKET_NAME}"
+    else
+        # ⚠️ /app/uploads is NOT durable: deploy/fly.core.toml mounts no volume,
+        # and preview machines stop when idle. So preview uploads survive within
+        # a drive and not across a restart. That is a STATED limitation, not a
+        # hidden one — which is the whole difference from what this replaced.
+        # It also means a deployed stack still has not exercised the R2 backend;
+        # set R2_PREVIEW_BUCKET_NAME to a preview-only bucket to do that.
+        R2_ACCOUNT_ID=""
+        R2_ACCESS_KEY_ID=""
+        R2_SECRET_ACCESS_KEY=""
+        R2_BUCKET_NAME=""
+        STORAGE_BACKEND="local"
+        UPLOAD_DIR="/app/uploads"
+    fi
     RATE_LIMIT_PUBLIC="5000"
     RATE_LIMIT_E2E_HELPER="5000"
     # The :auth ceiling serves two masters on a preview, and the number lives
@@ -812,6 +847,8 @@ fly secrets set \
     ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
     ${R2_SECRET_ACCESS_KEY:+R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"} \
     ${R2_BUCKET_NAME:+R2_BUCKET_NAME="${R2_BUCKET_NAME}"} \
+    ${STORAGE_BACKEND:+STORAGE_BACKEND="${STORAGE_BACKEND}"} \
+    ${UPLOAD_DIR:+UPLOAD_DIR="${UPLOAD_DIR}"} \
     ${VISION_TOGETHER_API_KEY:+VISION_TOGETHER_API_KEY="${VISION_TOGETHER_API_KEY}"} \
     ${SCRAPER_HMAC_SECRET:+SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}"} \
     ${SCRAPER_INTERNAL_URL:+SCRAPER_SERVICE_URL="${SCRAPER_INTERNAL_URL}"} \

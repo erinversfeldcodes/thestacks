@@ -52,6 +52,8 @@ POSTURE_FLAGS=(
     RATE_LIMIT_PUBLIC
     SMOKE_TESTS_ENABLED
     STACKS_E2E_TEST_HELPERS
+    STORAGE_BACKEND
+    UPLOAD_DIR
 )
 
 # The value each flag must NOT have in production, for the suite that executes
@@ -73,6 +75,12 @@ POSTURE_HOSTILE_VALUES=(
     "RATE_LIMIT_PUBLIC=9999"
     "SMOKE_TESTS_ENABLED=true"
     "STACKS_E2E_TEST_HELPERS=1"
+    # ⛔ The dangerous direction for storage is a stale `local`: it moves
+    # production's reader photos onto a container filesystem that is discarded
+    # on the next deploy, and UPLOAD_DIR would make that choice satisfy its own
+    # durability check.
+    "STORAGE_BACKEND=local"
+    "UPLOAD_DIR=/tmp/uploads"
 )
 
 # The value each flag must HAVE after the production branch runs. Empty means
@@ -86,4 +94,6 @@ POSTURE_PRODUCTION_VALUES=(
     "RATE_LIMIT_PUBLIC="
     "SMOKE_TESTS_ENABLED="
     "STACKS_E2E_TEST_HELPERS="
+    "STORAGE_BACKEND="
+    "UPLOAD_DIR="
 )

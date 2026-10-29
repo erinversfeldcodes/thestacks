@@ -114,7 +114,7 @@ fi
 # `[A-Z_]+`, which excludes digits, so two flags were silently absent from the
 # population for as long as the suite existed. A declared count would have
 # turned that into a red run the day the regex was written: 7 expected, 5 found.
-EXPECTED_LITERAL_ASSIGNMENTS=7
+EXPECTED_LITERAL_ASSIGNMENTS=9
 
 test_case "the_derived_population_is_the_declared_size" \
     "the derivation finds as many literal assignments as this suite says it should"
