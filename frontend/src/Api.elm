@@ -33,6 +33,7 @@ module Api exposing
     , Destination(..)
     , GroupMember
     , Identity
+    , IdentityOutcome(..)
     , ImportError(..)
     , ImportRow
     , InboxItem
@@ -3592,17 +3593,107 @@ proof rides along so the answer is a 401 for a reader with no session rather
 than a 403 for a request that could not say where it came from.
 
 -}
-getIdentity : Credentials -> (Result Http.Error Identity -> msg) -> Cmd msg
+getIdentity : Credentials -> (IdentityOutcome -> msg) -> Cmd msg
 getIdentity token toMsg =
     Http.request
         { method = "GET"
         , headers = httpHeaders "GET" SameOrigin (Session token)
         , url = baseUrl ++ "/api/auth/me"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg identityDecoder
+        , expect =
+            -- `expectStringResponse` insists on a `Result`, and this reader
+            -- cannot fail: every response shape is already an outcome. The
+            -- error type is `Never`, so the impossible branch is written as
+            -- such rather than as a default nobody would notice being taken.
+            Http.expectStringResponse
+                (\result ->
+                    case result of
+                        Ok outcome ->
+                            toMsg outcome
+
+                        Err impossible ->
+                            never impossible
+                )
+                (identityOutcome >> Ok)
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| What asking who you are can tell you — four answers, not a `Result`.
+
+⛔ **`NoSession` and `SessionRefused` are both 401s and they are NOT the same
+thing.** One is a reader who was never signed in; the other is a reader whose
+session the server has just refused. The second is owed an explanation, and the
+first must not be given one — an unexplained sign-out is indistinguishable from
+a deliberate one, and telling someone their session expired when they simply
+arrived is the same defect pointing the other way.
+
+⚠️ The CLIENT cannot make this distinction. The session cookie is `HttpOnly`,
+so the page cannot see whether the browser sent one; only the server knows. It
+reports it as the 401's `error` token, which is why this reads the body of a
+failed response rather than taking `Http.expectJson`'s `BadStatus 401`.
+
+⚖️ Four constructors rather than `Result Http.Error Identity` so the caller
+never re-classifies an `Http.Error` it was handed. The decision "is this an
+answer or a failure to get one" is made once, here, where the response is.
+
+-}
+type IdentityOutcome
+    = IdentityKnown Identity
+    | NoSession
+    | SessionRefused
+    | IdentityUnavailable Http.Error
+
+
+{-| Read one `/api/auth/me` response into its outcome.
+-}
+identityOutcome : Http.Response String -> IdentityOutcome
+identityOutcome response =
+    case response of
+        Http.GoodStatus_ _ body ->
+            case Decode.decodeString identityDecoder body of
+                Ok identity ->
+                    IdentityKnown identity
+
+                Err decodeError ->
+                    -- A 200 that is not an account is a broken answer, not a
+                    -- signed-out reader. It must not quietly sign anyone out.
+                    IdentityUnavailable (Http.BadBody (Decode.errorToString decodeError))
+
+        Http.BadStatus_ metadata body ->
+            if metadata.statusCode == 401 then
+                refusalFrom body
+
+            else
+                IdentityUnavailable (Http.BadStatus metadata.statusCode)
+
+        Http.NetworkError_ ->
+            IdentityUnavailable Http.NetworkError
+
+        Http.Timeout_ ->
+            IdentityUnavailable Http.Timeout
+
+        Http.BadUrl_ url ->
+            IdentityUnavailable (Http.BadUrl url)
+
+
+{-| Which kind of 401 this is.
+
+⚠️ An UNREADABLE 401 body is `NoSession`, deliberately. The alternative —
+defaulting to `SessionRefused` — would raise "we closed your session" at a
+reader who never had one, every time the server's error shape changed. The
+quieter answer is the safe one when the body cannot be read.
+
+-}
+refusalFrom : String -> IdentityOutcome
+refusalFrom body =
+    case Decode.decodeString (Decode.field "error" Decode.string) body of
+        Ok "session_expired" ->
+            SessionRefused
+
+        _ ->
+            NoSession
 
 
 {-| A profile-update failure.

@@ -664,10 +664,10 @@ answering branches route through the SAME `initPage` the rest of the app uses.
 A second, boot-only page build is how the guard and the bounce drift apart.
 
 -}
-resolveBoot : Result Http.Error Api.Identity -> Model -> ( Model, Cmd Msg )
+resolveBoot : Api.IdentityOutcome -> Model -> ( Model, Cmd Msg )
 resolveBoot answer model =
     case answer of
-        Ok identity ->
+        Api.IdentityKnown identity ->
             let
                 session =
                     sessionFor model.csrf identity
@@ -684,23 +684,34 @@ resolveBoot answer model =
             , Cmd.batch [ pageCmd, bootCommandsFor session ]
             )
 
-        Err err ->
-            if Api.isUnauthorized err then
-                let
-                    ( page, pageCmd ) =
-                        bootPage model Nothing
-                in
-                ( { model
-                    | auth = Anonymous
-                    , page = page
-                    , arrival = consumeArrival page Login.Fresh
-                    , redirectAfterLogin = loginRedirectFor model.route Nothing
-                  }
-                , pageCmd
-                )
+        Api.NoSession ->
+            let
+                ( page, pageCmd ) =
+                    bootPage model Nothing
+            in
+            ( { model
+                | auth = Anonymous
+                , page = page
+                , arrival = consumeArrival page Login.Fresh
+                , redirectAfterLogin = loginRedirectFor model.route Nothing
+              }
+            , pageCmd
+            )
 
-            else
-                ( { model | auth = Unresolved err }, Cmd.none )
+        Api.SessionRefused ->
+            -- ⛔ A session was presented and the server refused it, so this
+            -- reader HAD one a moment ago and is owed the explanation. It routes
+            -- through the same expiry path a 401 mid-session takes — notice and
+            -- all — rather than resolving quietly to signed-out, because an
+            -- unexplained sign-out is indistinguishable from a deliberate one.
+            --
+            -- ⚠️ This is the case the boot rewrite nearly lost. Resolving it as
+            -- `NoSession` renders a clean signed-out app: correct about the
+            -- session, silent about why, and the suite caught it.
+            forceSessionExpiry False model
+
+        Api.IdentityUnavailable err ->
+            ( { model | auth = Unresolved err }, Cmd.none )
 
 
 {-| Build the page the boot URL asked for, now that there is an answer about who
@@ -1705,10 +1716,10 @@ type Msg
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
     | GotUploadInbox (Result Http.Error (List Api.InboxItem))
-    | GotBootIdentity (Result Http.Error Api.Identity)
+    | GotBootIdentity Api.IdentityOutcome
     | TabVisibilityChanged Browser.Events.Visibility
     | RetryBootIdentity
-    | RevalidatedIdentity (Result Http.Error Api.Identity)
+    | RevalidatedIdentity Api.IdentityOutcome
     | RenewToken
     | TokenRefreshed (Result Http.Error Api.AuthResponse)
     | AgeGatingConfigReceived Bool
@@ -3036,25 +3047,30 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        RevalidatedIdentity (Ok identity) ->
+        RevalidatedIdentity (Api.IdentityKnown identity) ->
             -- The reader is still signed in, and this is where a role or a
             -- renamed account catches up without a reload.
             ( { model | auth = Authenticated (sessionFor model.csrf identity) }
             , Cmd.none
             )
 
-        RevalidatedIdentity (Err err) ->
-            if Api.isUnauthorized err then
-                -- The cross-tab logout, restored. Nothing in the browser tells
-                -- a tab that an httpOnly cookie was cleared elsewhere, so the
-                -- tab asks when the reader comes back to it.
-                handleSessionExpiry model
+        RevalidatedIdentity Api.SessionRefused ->
+            -- The cross-tab logout, restored. Nothing in the browser tells a
+            -- tab that an httpOnly cookie was cleared elsewhere, so the tab
+            -- asks when the reader comes back to it.
+            handleSessionExpiry model
 
-            else
-                -- A revalidation that could not reach the server says nothing
-                -- about the session. The app keeps what it has; the reader's
-                -- next real request is what will discover a dead one.
-                ( model, Cmd.none )
+        RevalidatedIdentity Api.NoSession ->
+            -- This tab believed it had a session and the server says there is
+            -- none. Same outcome as a refusal: the reader is signed out, and
+            -- they were signed in a moment ago, so they are owed the notice.
+            handleSessionExpiry model
+
+        RevalidatedIdentity (Api.IdentityUnavailable _) ->
+            -- A revalidation that could not reach the server says nothing
+            -- about the session. The app keeps what it has; the reader's next
+            -- real request is what will discover a dead one.
+            ( model, Cmd.none )
 
         RenewToken ->
             case currentAuth model.auth of

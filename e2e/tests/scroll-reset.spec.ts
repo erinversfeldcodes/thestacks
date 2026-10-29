@@ -32,6 +32,19 @@ test.describe("scroll on navigation", () => {
     // placeholder while the essay is drafted, and this spec needs real length.
     await page.goto("/faq");
 
+    // ⛔ WAIT FOR THE CONTENT BEFORE MEASURING, because a `goto` no longer
+    // means the page is there. Boot asks `GET /api/auth/me` before it builds
+    // anything, so for one round-trip every route renders a short booting
+    // screen — and measuring `scrollHeight` in that window reads a page that
+    // is not the one under test. MEASURED: without this wait the spec failed
+    // 2 runs in 5 at the `scrollY === 1500` poll, because the scroll was
+    // clamped by a body that had not grown yet.
+    //
+    // ⚠️ This is the SOURCE-page twin of the hazard the header already names
+    // for the destination. The spec guarded one end against a page too short
+    // to hold the offset and not the other.
+    await expect(page.getByTestId("faq-page")).toBeVisible();
+
     // The defect is only observable if the page is genuinely long: the browser
     // clamps a carried-over offset to the destination's height, so on a short
     // page the bug hides itself.
@@ -76,6 +89,9 @@ test.describe("scroll on navigation", () => {
     // The reset must key on the ROUTE, not on every UrlChanged: the fragment
     // moving is how in-page anchors work, and resetting there would fight them.
     await page.goto("/faq");
+    // Same reason as the wait in the test above: scrolling a page that has not
+    // finished booting is scrolling a short page, and the offset is clamped.
+    await expect(page.getByTestId("faq-page")).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 1200));
     await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(1200);
 

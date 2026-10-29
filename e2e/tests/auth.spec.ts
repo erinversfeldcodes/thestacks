@@ -379,9 +379,9 @@ test.describe("Login is not downstream of the door animation", () => {
     await page.getByTestId("login-submit").click();
     await response;
 
-    const { elapsed, token } = await msUntilTokenStored(page, 1000);
+    const { elapsed, signedIn } = await msUntilSignedIn(page, 1000);
     expect(
-      token,
+      signedIn,
       "the 200 was discarded while every animation was stalled"
     ).toBeTruthy();
     expect(elapsed).toBeLessThan(1000);

@@ -301,7 +301,15 @@ defmodule StacksWeb.Plugs.SessionCookie do
         # else is collapsed to `:other`. An unbounded label on a counter is a
         # cardinality leak, and this one is fed by a value a client controls.
         :telemetry.execute(@cookie_rejected_event, %{count: 1}, %{reason: reject_label(reason)})
-        conn
+
+        # ⛔ RECORDED ON THE CONN, not only on a counter, because the CLIENT
+        # cannot work this out for itself. A session cookie is `HttpOnly`, so
+        # the SPA cannot see whether it sent one — and "I presented a session
+        # and you refused it" and "I presented nothing" are the difference
+        # between a reader who should be told their session ended and one who
+        # was simply never signed in. The server is the only party that can
+        # tell them apart; `AuthErrorHandler` turns this into the 401's reason.
+        put_private(conn, :stacks_session_cookie_rejected, reject_label(reason))
     end
   end
 

@@ -170,9 +170,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "viewer age-verify"
     );
     const verifiedGated = await expectOk(
-      request.get(gatedShelfPath, {
-        headers: { Authorization: `Bearer ${viewerAuth}` },
-      }),
+      page.request.get(gatedShelfPath),
       "verified gated shelf"
     );
     expect(

@@ -320,6 +320,65 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
+  describe "GET /api/auth/me — a 401 says WHICH kind of 401 it is" do
+    # ⛔ THE SPA CANNOT WORK THIS OUT FOR ITSELF, which is why the server has
+    # to say it. The session cookie is `HttpOnly`, so the page cannot see
+    # whether the browser sent one — and "I presented a session and you refused
+    # it" and "I presented nothing" are the difference between a reader who
+    # must be told their session ended and one who must not be.
+    #
+    # ⚠️ This was a REGRESSION, caught by the E2E suite rather than by
+    # reasoning. Moving boot onto this endpoint made a dead session resolve to
+    # a clean signed-out app: correct about the session, silent about why, and
+    # the reader lost the "we closed your session" notice they used to get.
+
+    test "no credential at all is `unauthenticated`", %{conn: conn} do
+      conn = get(conn, "/api/auth/me")
+
+      assert %{"error" => "unauthenticated"} = json_response(conn, 401)
+    end
+
+    test "a session cookie the server refuses is `session_expired`", %{conn: conn} do
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session("not-a-token-we-issued")
+        |> get("/api/auth/me")
+
+      assert %{"error" => "session_expired"} = json_response(conn, 401),
+             "a presented-and-refused session must be distinguishable from no session, " <>
+               "or the SPA cannot tell an expiry from a signed-out boot"
+    end
+
+    test "an EXPIRED token in the cookie is also `session_expired`", %{conn: conn} do
+      # The realistic case, as opposed to a garbage value: a token this server
+      # really did issue, whose time has passed.
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user, %{}, ttl: {-1, :hour})
+
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/auth/me")
+
+      assert %{"error" => "session_expired"} = json_response(conn, 401)
+    end
+
+    test "a VALID cookie is not a 401 at all", %{conn: conn} do
+      # The anti-vacuity control. Without it, a handler that answered
+      # `session_expired` for every request would satisfy both cases above.
+      user = insert(:user, email: "still-here@example.com")
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned} = json_response(conn, 200)
+      assert returned["email"] == "still-here@example.com"
+    end
+  end
+
   describe "GET /api/auth/me" do
     test "returns current user when authenticated", %{conn: conn} do
       user = insert(:user, email: "me@example.com")
