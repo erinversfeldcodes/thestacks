@@ -25,7 +25,7 @@
 1. User navigates to `/upload`.
 2. User sees the drop zone with "Drag a photo of a book cover here" prompt and a "Choose Photo" button. Below the drop zone, an "Enter ISBN manually instead" link is visible.
 3. User drops or selects an image file (`image/*` MIME type).
-4. The drop zone shows a spinner with "Processing image..." while the three-step presigned-URL upload is in flight (`uploadState = Loading` through `UploadInitialised` → `R2PutCompleted` → `UploadAccepted`), then continues showing the spinner while the SSE stream is open (`uploadState = Success imageId`).
+4. The drop zone shows a spinner with "Processing image..." while the three-step upload handshake is in flight (`uploadState = Loading` through `UploadInitialised` → `UploadBytesSent` → `UploadAccepted`), then continues showing the spinner while the SSE stream is open (`uploadState = Success imageId`).
 5. The SSE stream delivers a terminal `Resolved` event. The system fetches the identified book via `Api.getBook`.
 6. **Verification view** (`step = Verifying book`): "We think this is..." heading, book cover image (or "No cover" placeholder), title, author. Two buttons: "Yes, that's it" and "No, try again".
 7. User clicks "Yes, that's it" (`ConfirmIdentification`). State transitions to `step = ChoosingShelf book`.
@@ -47,8 +47,8 @@
 - **Model fields involved**: `file`, `uploadState`, `result`, `step`, `selectedShelf`, `placementState`, `pendingBookIds`, `collectedBooks`, `failedBookIds`, `sseTerminalReceived`, `isDragging`, `manualIsbn`
 - **Msg flow**:
   - `GotFile file` -> sets `uploadState = Loading`, calls `Api.initUpload`
-  - `UploadInitialised _ _ (Ok init_)` -> calls `Api.putFileToR2 init_.uploadUrl file ...`
-  - `R2PutCompleted imageId token (Ok ())` -> calls `Api.commitUpload imageId token UploadAccepted`
+  - `UploadInitialised _ _ (Ok init_)` -> calls `Api.putUploadBytes init_.imageId file ...` — ⚠️ it was `putFileToR2 init_.uploadUrl`, and BOTH halves of that name were wrong: the bytes go to a route on our OWN origin, and taking the URL from the server's response is what let the call site declare an origin it could not prove. It builds the path from the `image_id` now, so the compiler can see the origin.
+  - `UploadBytesSent imageId token (Ok ())` -> calls `Api.commitUpload imageId token UploadAccepted`
   - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`; emits `OpenStream "/api/upload/<id>/stream"` OutMsg so Main subscribes to SSE (no credential in the URL — `EventSource` sends the session cookie)
   - `StreamEvent rawJson` -> decodes via `Api.streamEventDecoder` and recurses into `StatusReceived (Ok pollResponse)`
   - `StreamError` -> if `sseTerminalReceived` then no-op, else `result = IdentificationFailed`
@@ -65,7 +65,9 @@
 
 ## 3. API Calls
 
-The canonical upload flow is a three-step presigned-URL handshake followed by an SSE stream for identification progress. (`POST /api/upload` still exists as a deprecated multipart fallback and rollback target — see `UploadController.create/2`.)
+The canonical upload flow is a three-step handshake — init, PUT the bytes, commit — followed by an SSE stream for identification progress. (`POST /api/upload` still exists as a deprecated multipart fallback and rollback target — see `UploadController.create/2`.)
+
+⚠️ **It is NOT a presigned-URL handshake, and calling it one is the premise that broke every photo upload.** `upload_url` is `/api/upload/:image_id/data` — a route on our own origin, chosen so the browser never needs an object-storage CORS allowlist — and `expires_in` is advisory because there is no signature to expire (`Stacks.Uploads.init_upload/2`). A client that read "presigned" as "object storage" declared the PUT cross-origin, therefore sent it without the CSRF proof, and had it refused. ⚖️ The word survives below in a DIFFERENT and still-true sense: `Storage.get_image_url/1` really does mint a presigned URL, for the vision service to READ the image.
 
 ### `POST /api/upload/init`
 - **Auth**: Required (Bearer token)
@@ -348,10 +350,10 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 | `DragOver` | `isDragging = True` | None | `NoOut` |
 | `DragLeave` | `isDragging = False` | None | `NoOut` |
 | `FilepickerRequested` | (none) | `Select.files ["image/*"]` | `NoOut` |
-| `UploadInitialised _ _ (Ok init_)` | (none) | `Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token)` | `NoOut` |
+| `UploadInitialised _ _ (Ok init_)` | (none) | `Api.putUploadBytes init_.imageId file token (UploadBytesSent init_.imageId token)` | `NoOut` |
 | `UploadInitialised _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
-| `R2PutCompleted imageId token (Ok ())` | (none) | `Api.commitUpload imageId token UploadAccepted` | `NoOut` |
-| `R2PutCompleted _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
+| `UploadBytesSent imageId token (Ok ())` | (none) | `Api.commitUpload imageId token UploadAccepted` | `NoOut` |
+| `UploadBytesSent _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
 | `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | None | `OpenStream "/api/upload/<id>/stream"` |
 | `UploadAccepted (Err err)` | `uploadState = Failure err` | None | `NoOut` |
 | `StreamEvent rawJson` | (decoded payload re-dispatched as `StatusReceived (Ok pollResponse)`; malformed events are ignored) | None | `NoOut` |
