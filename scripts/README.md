@@ -44,6 +44,7 @@ in code by" and check it before relying on it.
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/gate_fail_closed_test.sh` |  |
 | `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | A story that describes the system as it stands must cite things that exist. |
 | `scripts/check-never-serialized.sh` | `scripts/lint-elixir.sh`, `test/platform/never_serialized_test.sh` | A credential must not appear in any JSON serializer, generated or hand-written. |
+| `scripts/check-no-stored-session.sh` | `scripts/lint-elm.sh` | The session is never written to, or read from, browser storage. |
 | `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented Oban queues must be the queues that exist. |
 | `scripts/check-one-credential-derivation.sh` | `scripts/lint-elm.sh`, `test/platform/one_credential_derivation_test.sh` | The credential is spelled in exactly one place, and nothing may spell it again. |
 | `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |

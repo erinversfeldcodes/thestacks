@@ -80,7 +80,7 @@ SUCCESS_EXIT = re.compile(
 # "fix" the friction by converting this to `>=` — a floor here would let a gate
 # join the population without anyone noticing it had, which is the whole thing
 # this file exists to prevent one level down.
-EXPECTED_GUARDED_SCRIPTS = 21
+EXPECTED_GUARDED_SCRIPTS = 22
 
 guarded = {}
 violations = []
