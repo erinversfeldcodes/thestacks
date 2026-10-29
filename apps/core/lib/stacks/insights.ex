@@ -45,15 +45,19 @@ defmodule Stacks.Insights do
         {active_placements(user_id), history_move_times(user_id)}
       end)
 
-    # ⛔ DELIBERATELY OUTSIDE the scope above. `deanonymisation/2` asks how many
-    # OTHER users shelve the same rare books — `bs.user_id <> $1` — which is the
-    # whole point of a uniqueness fingerprint and cannot be answered from one
-    # user's rows. Scoped, the owner policy admits only this user's rows and the
-    # `<>` then excludes them, so it returns a confident ZERO and the page tells
-    # every reader they are maximally identifiable. Left unscoped it raises,
-    # which its own rescue logs and reports as "could not compute" — a worse
-    # user experience and a far better failure. It needs a definer function, the
-    # same mechanism as the wishlist question.
+    # ⛔ DELIBERATELY OUTSIDE the scope above, and now answerable there.
+    # `deanonymisation/2` asks how many OTHER users shelve the same rare books —
+    # `bs.user_id <> subject` — which is the whole point of a uniqueness
+    # fingerprint and cannot be answered from one user's rows. Scoped, the owner
+    # policy admits only this user's rows and the `<>` then excludes them, so it
+    # would return a confident ZERO and tell every reader they are maximally
+    # identifiable.
+    #
+    # It goes through `op.count_others_sharing_all/3`, a SECURITY DEFINER
+    # narrowed to this one question and returning one integer — the same
+    # mechanism as the wishlist question and the transparency-page totals. That
+    # function carries the argument guard, because a definer's arguments are its
+    # whole attack surface.
     deanon = deanonymisation(user_id, placements)
 
     interest = interest_profile(placements)
@@ -280,26 +284,28 @@ defmodule Stacks.Insights do
     %{}
   end
 
+  # ⛔ THROUGH THE DEFINER, AND THE RESCUE IS GONE RATHER THAN KEPT AS A NET.
+  #
+  # The inline query asked `bs.user_id <> $2`, an aggregate over other readers'
+  # rows, which no per-user scope can answer: scoped it returned a confident
+  # ZERO and told every reader they were maximally identifiable; unscoped the
+  # policy refused with 42501 and the rescue below reported "could not compute"
+  # to every reader on every deployed stack since row-level security went on.
+  #
+  # ⚠️ The rescue is DELETED, not retained-and-proven-unreachable. Keeping it
+  # would preserve this surface's whole failure character — that nobody becomes
+  # suspicious. A refusal now propagates: `op.count_others_sharing_all/3`
+  # raises `42501` on a NULL subject or a caller asking about somebody else,
+  # and either is a defect in this module rather than a condition to paper
+  # over. The remaining `log_and_nil/1` covers only a result shape Postgres
+  # should never return, which is the one case where continuing is honest.
   defp count_others_sharing_all(user_id, book_ids, sample_size) do
-    sql = """
-    SELECT count(*) FROM (
-      SELECT bs.user_id
-      FROM op.bookshelf_placements p
-      JOIN op.bookshelves bs ON bs.id = p.bookshelf_id
-      WHERE p.book_id = ANY($1::uuid[]) AND p.removed_at IS NULL AND bs.user_id <> $2::uuid
-      GROUP BY bs.user_id
-      HAVING count(DISTINCT p.book_id) = $3
-    ) t
-    """
+    sql = "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)"
 
-    case Repo.query(sql, [book_ids, user_id, sample_size]) do
+    case Repo.query(sql, [user_id, book_ids, sample_size]) do
       {:ok, %{rows: [[count]]}} -> count
       other -> log_and_nil(other)
     end
-  rescue
-    e ->
-      Logger.warning("Insights.count_others_sharing_all failed: #{inspect(e)}")
-      nil
   end
 
   defp log_and_nil(other) do
