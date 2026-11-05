@@ -28,6 +28,33 @@
 # unrecognisable URL expression must declare `CrossOrigin` or be rewritten into
 # a recognisable form. That keeps the check total: there is no third outcome
 # where the gate shrugs.
+#
+# ⛔ AND THE RULE IS ASYMMETRIC IN THE DANGEROUS DIRECTION, which this gate
+# cannot fix and must therefore say out loud.
+#
+# An unrecognisable URL has exactly ONE declaration this gate permits, and it is
+# `CrossOrigin` — the one that drops the CSRF proof. So when the gate cannot
+# read a URL it pushes the author toward the insecure answer, and then reports
+# green for it. That is not hypothetical: the photo-upload PUT declared
+# `CrossOrigin` for a route on our OWN origin, carried no `x-csrf-token`, and
+# every upload in every browser was refused with `403 absent_header` while this
+# gate passed.
+#
+# ⚖️ Why it is not fixed here. The second question — "may this request declare
+# CrossOrigin at all?" — is a question about where the URL POINTS, and a gate
+# that reads text cannot answer it for an expression it already admits it cannot
+# follow. Adding a checked-reason allowlist would move the judgement into a
+# comment, and this repository has already shipped a guard whose allowlist
+# carried a written justification that was simply false with nothing checking
+# it. A justification a machine cannot check is a sentence, not a guard.
+#
+# ⚖️ Where it IS fixable: make the wrong declaration unrepresentable rather than
+# detectable — an opaque same-origin URL type that encodes its own path
+# segments, so a request to our own origin cannot be constructed as cross-origin
+# and cannot take a credential parameter. That is a type-system change in
+# `Api.elm`, it retires this gate rather than extending it, and it is tracked
+# separately. Until then this header is the record that the asymmetry is known
+# and deliberate, not overlooked.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
