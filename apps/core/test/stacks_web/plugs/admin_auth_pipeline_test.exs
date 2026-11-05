@@ -41,7 +41,9 @@ defmodule StacksWeb.Plugs.AdminAuthPipelineTest do
   end
 
   describe "AdminAuthPipeline" do
-    test "passes with valid admin token and valid session", %{conn: conn} do
+    test "passes on the ordinary session when the operator has a valid admin session", %{
+      conn: conn
+    } do
       user = insert(:owner_user)
       {token, session} = setup_admin_session(user)
 
@@ -52,14 +54,14 @@ defmodule StacksWeb.Plugs.AdminAuthPipelineTest do
       assert conn.assigns[:admin_session].id == session.id
     end
 
-    test "halts with 401 when no Authorization header", %{conn: conn} do
+    test "halts with 401 when no reader has been authenticated", %{conn: conn} do
       conn = AdminAuthPipeline.call(conn, [])
 
       assert conn.halted
       assert conn.status == 401
     end
 
-    test "halts with 401 for regular user token (not admin type)", %{conn: conn} do
+    test "halts with 401 for an authenticated reader with no admin session", %{conn: conn} do
       user = insert(:user)
       {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
@@ -69,18 +71,19 @@ defmodule StacksWeb.Plugs.AdminAuthPipelineTest do
       assert conn.status == 401
     end
 
-    test "halts with 401 when token has wrong boot_id", %{conn: conn} do
+    test "halts with 401 when the admin session was minted under a different boot_id",
+         %{conn: conn} do
+      # ⛔ THE BOOT_ID LIVES ON THE SESSION, NOT ON A TOKEN CLAIM, and this case
+      # used to assert that against a session whose boot_id was CORRECT. It
+      # minted a token carrying `token_type: "admin"`, `session_id` and a bogus
+      # `boot_id` — claims this pipeline no longer reads — and passed because
+      # those extra claims made `AuthPipeline` reject the token one step
+      # earlier. Swapping in an ordinary token made it fail, which is how the
+      # vacuity surfaced: the name said boot_id, the mechanism was a malformed
+      # credential, and no boot_id mismatch existed anywhere in the test.
       user = insert(:owner_user)
-      boot_id = Core.Application.boot_id()
-      {:ok, session} = SessionContext.create(user, @raw_ip, boot_id)
-
-      {:ok, token, _claims} =
-        Guardian.encode_and_sign(user, %{},
-          token_type: "admin",
-          session_id: session.id,
-          boot_id: Ecto.UUID.generate(),
-          ttl: {30, :minute}
-        )
+      {:ok, _session} = SessionContext.create(user, @raw_ip, Ecto.UUID.generate())
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
       conn = authenticate_then_elevate(conn, token)
 
