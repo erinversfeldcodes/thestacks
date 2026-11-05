@@ -56,6 +56,7 @@ simulators, and test data builders.
 -}
 
 import Api
+import Api.Url
 import Components.AdminChrome as AdminChrome
 import Dict
 import Effect
@@ -1105,7 +1106,7 @@ requestFromSpec spec maybeToken expect =
     SimulatedEffect.Http.request
         { method = spec.method
         , headers = authHeaderList spec.method maybeToken
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body =
             case spec.body of
                 Just value ->

@@ -12,6 +12,7 @@ module Page.ThirdSpaces exposing
     )
 
 import Api
+import Api.Url
 import Html exposing (Html, a, button, div, h3, li, p, text, ul)
 import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
@@ -65,7 +66,7 @@ init maybeToken =
     , Http.request
         { method = spacesRequest.method
         , headers = Api.authHeaders spacesRequest.method maybeToken
-        , url = spacesRequest.url
+        , url = Api.Url.toString spacesRequest.url
         , body = Api.specHttpBody spacesRequest
         , expect = Http.expectJson SpacesLoaded thirdSpacesResponseDecoder
         , timeout = Api.standardTimeout
@@ -79,7 +80,7 @@ init maybeToken =
 spacesRequest : Api.RequestSpec
 spacesRequest =
     { method = "GET"
-    , url = "/api/third-spaces"
+    , url = Api.Url.path [ "api", "third-spaces" ] []
     , body = Nothing
     }
 

@@ -298,6 +298,7 @@ so tests wire the REAL decoder into simulated effects — a hand-written
 test mirror is what let the upload SSE wire format drift for months.
 -}
 
+import Api.Url
 import Dict
 import File exposing (File)
 import Http
@@ -717,7 +718,13 @@ the whole suite. Both production and tests now consume the same spec.
 -}
 type alias RequestSpec =
     { method : String
-    , url : String
+
+    -- ⛔ A `SameOriginUrl`, NOT A `String`, AND THAT IS WHAT MAKES THE
+    -- GUARANTEE LOAD-BEARING. `Api.Url.path` is the only way to build one and
+    -- it cannot produce a URL that leaves our origin, so "the credential never
+    -- reaches another origin" is a fact about this field's type rather than a
+    -- property a script re-derives by parsing every builder.
+    , url : Api.Url.SameOriginUrl
     , body : Maybe Encode.Value
     }
 
@@ -1029,7 +1036,7 @@ no token, and none is sent even when the viewer has one.
 getAuthorEventsRequest : String -> RequestSpec
 getAuthorEventsRequest authorId =
     { method = "GET"
-    , url = baseUrl ++ "/api/authors/" ++ authorId ++ "/events"
+    , url = Api.Url.path [ "api", "authors", authorId, "events" ] []
     , body = Nothing
     }
 
@@ -1436,7 +1443,7 @@ filters it.
 checkInviteRequest : String -> RequestSpec
 checkInviteRequest code =
     { method = "POST"
-    , url = baseUrl ++ "/api/auth/invite/check"
+    , url = Api.Url.path [ "api", "auth", "invite", "check" ] []
     , body = Just (Encode.object [ ( "code", Encode.string code ) ])
     }
 
@@ -1450,7 +1457,7 @@ registerRequest :
     -> RequestSpec
 registerRequest body =
     { method = "POST"
-    , url = baseUrl ++ "/api/auth/register"
+    , url = Api.Url.path [ "api", "auth", "register" ] []
     , body =
         Just
             (Requests.encodeRegisterRequest
@@ -1514,7 +1521,7 @@ password is the commonest way a reader reaches it.
 loginRequest : { email : String, password : String } -> RequestSpec
 loginRequest body =
     { method = "POST"
-    , url = baseUrl ++ "/api/auth/login"
+    , url = Api.Url.path [ "api", "auth", "login" ] []
     , body =
         Just
             (Requests.encodeLoginRequest
@@ -1534,7 +1541,7 @@ throttle from a transport failure and never one address from another.
 forgotPasswordRequest : String -> RequestSpec
 forgotPasswordRequest email =
     { method = "POST"
-    , url = baseUrl ++ "/api/auth/forgot-password"
+    , url = Api.Url.path [ "api", "auth", "forgot-password" ] []
     , body = Just (Encode.object [ ( "email", Encode.string email ) ])
     }
 
@@ -1549,7 +1556,7 @@ confirmed, and one with no account at all.
 resendConfirmationRequest : String -> RequestSpec
 resendConfirmationRequest email =
     { method = "POST"
-    , url = baseUrl ++ "/api/auth/resend-confirmation"
+    , url = Api.Url.path [ "api", "auth", "resend-confirmation" ] []
     , body = Just (Encode.object [ ( "email", Encode.string email ) ])
     }
 
@@ -1879,7 +1886,7 @@ refresh token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg authResponseDecoder
         , timeout = standardTimeout
@@ -1895,7 +1902,7 @@ and the caller falls through to the session-expiry interceptor.
 refreshRequest : RequestSpec
 refreshRequest =
     { method = "POST"
-    , url = baseUrl ++ "/api/auth/refresh"
+    , url = Api.Url.path [ "api", "auth", "refresh" ] []
     , body = Nothing
     }
 
@@ -2048,7 +2055,7 @@ bytes reach is a deployment question, deliberately not asserted here.
 initUploadRequest : String -> RequestSpec
 initUploadRequest contentType =
     { method = "POST"
-    , url = baseUrl ++ "/api/upload/init"
+    , url = Api.Url.path [ "api", "upload", "init" ] []
     , body = Just (Encode.object [ ( "content_type", Encode.string contentType ) ])
     }
 
@@ -2101,7 +2108,7 @@ pending, and enqueues identification work.
 commitUploadRequest : String -> RequestSpec
 commitUploadRequest imageId =
     { method = "POST"
-    , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
+    , url = Api.Url.path [ "api", "upload", imageId, "commit" ] []
     , body = Nothing
     }
 
@@ -2123,7 +2130,7 @@ rejectIdentificationRequest :
     -> RequestSpec
 rejectIdentificationRequest { imageId, rejectedBookIds } =
     { method = "POST"
-    , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/reject-identification"
+    , url = Api.Url.path [ "api", "upload", imageId, "reject-identification" ] []
     , body =
         Just
             (Encode.object
@@ -2347,7 +2354,7 @@ auth: an anonymous reader gets the book without the placements.
 getBookRequest : String -> RequestSpec
 getBookRequest bookId =
     { method = "GET"
-    , url = baseUrl ++ "/api/books/" ++ bookId
+    , url = Api.Url.path [ "api", "books", bookId ] []
     , body = Nothing
     }
 
@@ -2360,7 +2367,7 @@ searchBooksRequest : String -> Bool -> RequestSpec
 searchBooksRequest query deep =
     { method = "GET"
     , url =
-        Url.Builder.crossOrigin baseUrl
+        Api.Url.path
             [ "api", "search" ]
             (Url.Builder.string "q" query
                 :: (if deep then
@@ -2387,7 +2394,7 @@ getBookshelf shelfName token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg bookshelfResponseDecoder
         , timeout = standardTimeout
@@ -2400,7 +2407,7 @@ getBookshelf shelfName token toMsg =
 getBookshelfRequest : String -> RequestSpec
 getBookshelfRequest shelfName =
     { method = "GET"
-    , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
+    , url = Api.Url.path [ "api", "bookshelves", shelfName ] []
     , body = Nothing
     }
 
@@ -2454,7 +2461,7 @@ which is why the caller resolves the response rather than discarding it.
 moveBookRequest : String -> String -> RequestSpec
 moveBookRequest placementId targetBookshelf =
     { method = "PUT"
-    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/move"
+    , url = Api.Url.path [ "api", "placements", placementId, "move" ] []
     , body =
         Just
             (Requests.encodeMoveBookRequest
@@ -2468,7 +2475,7 @@ moveBookRequest placementId targetBookshelf =
 removeBookRequest : String -> RequestSpec
 removeBookRequest placementId =
     { method = "DELETE"
-    , url = baseUrl ++ "/api/placements/" ++ placementId
+    , url = Api.Url.path [ "api", "placements", placementId ] []
     , body = Nothing
     }
 
@@ -2484,7 +2491,7 @@ before pressing Undo.
 restoreBookRequest : String -> RequestSpec
 restoreBookRequest placementId =
     { method = "POST"
-    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/restore"
+    , url = Api.Url.path [ "api", "placements", placementId, "restore" ] []
     , body = Nothing
     }
 
@@ -2619,7 +2626,7 @@ updateProgressRequest :
     -> RequestSpec
 updateProgressRequest placementId body =
     { method = "PUT"
-    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
+    , url = Api.Url.path [ "api", "placements", placementId, "progress" ] []
     , body = Just (encodeProgressBody body)
     }
 
@@ -2657,7 +2664,7 @@ requestExport token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout
@@ -2670,7 +2677,7 @@ requestExport token toMsg =
 requestExportRequest : RequestSpec
 requestExportRequest =
     { method = "POST"
-    , url = baseUrl ++ "/api/gdpr/export"
+    , url = Api.Url.path [ "api", "gdpr", "export" ] []
     , body = Nothing
     }
 
@@ -2695,7 +2702,7 @@ deleteAccount token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout
@@ -2708,7 +2715,7 @@ deleteAccount token toMsg =
 deleteAccountRequest : RequestSpec
 deleteAccountRequest =
     { method = "DELETE"
-    , url = baseUrl ++ "/api/gdpr/account"
+    , url = Api.Url.path [ "api", "gdpr", "account" ] []
     , body = Nothing
     }
 
@@ -2931,7 +2938,7 @@ getAuditLog token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg auditLogResponseDecoder
         , timeout = standardTimeout
@@ -2944,7 +2951,7 @@ getAuditLog token toMsg =
 getAuditLogRequest : RequestSpec
 getAuditLogRequest =
     { method = "GET"
-    , url = baseUrl ++ "/api/settings/audit-log?page=1"
+    , url = Api.Url.path [ "api", "settings", "audit-log" ] [ Url.Builder.string "page" "1" ]
     , body = Nothing
     }
 
@@ -3105,7 +3112,7 @@ getInferences revealRisk token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg personalInferencesDecoder
         , timeout = standardTimeout
@@ -3119,14 +3126,13 @@ getInferencesRequest : Bool -> RequestSpec
 getInferencesRequest revealRisk =
     { method = "GET"
     , url =
-        baseUrl
-            ++ "/api/me/inferences"
-            ++ (if revealRisk then
-                    "?reveal_risk=true"
+        Api.Url.path [ "api", "me", "inferences" ]
+            (if revealRisk then
+                [ Url.Builder.string "reveal_risk" "true" ]
 
-                else
-                    ""
-               )
+             else
+                []
+            )
     , body = Nothing
     }
 
@@ -3203,7 +3209,7 @@ placeBook bookshelfName bookId token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = expectPlace toMsg
         , timeout = standardTimeout
@@ -3216,7 +3222,7 @@ placeBook bookshelfName bookId token toMsg =
 placeBookRequest : String -> String -> RequestSpec
 placeBookRequest bookshelfName bookId =
     { method = "POST"
-    , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/placements"
+    , url = Api.Url.path [ "api", "bookshelves", bookshelfName, "placements" ] []
     , body =
         Just
             (Requests.encodePlaceBookRequest
@@ -3232,7 +3238,7 @@ lowering it is owner-only.
 setBookAgeGateRequest : String -> RequestSpec
 setBookAgeGateRequest bookId =
     { method = "PUT"
-    , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
+    , url = Api.Url.path [ "api", "books", bookId, "age-gate" ] []
     , body = Just (Encode.object [ ( "adults_only", Encode.bool True ) ])
     }
 
@@ -3251,7 +3257,7 @@ getUserPlacements token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg placementsMineDecoder
         , timeout = standardTimeout
@@ -3264,7 +3270,7 @@ getUserPlacements token toMsg =
 getUserPlacementsRequest : RequestSpec
 getUserPlacementsRequest =
     { method = "GET"
-    , url = baseUrl ++ "/api/placements/mine"
+    , url = Api.Url.path [ "api", "placements", "mine" ] []
     , body = Nothing
     }
 
@@ -3437,7 +3443,7 @@ bookshelf.
 confirmBookRequest : { isbn : String, shelfName : String } -> RequestSpec
 confirmBookRequest body =
     { method = "POST"
-    , url = baseUrl ++ "/api/books/confirm"
+    , url = Api.Url.path [ "api", "books", "confirm" ] []
     , body =
         Just
             (Encode.object
@@ -3470,7 +3476,7 @@ getCatalogue params toMsg =
         -- same way, so no session is read. Stated rather than left as an empty
         -- list, so the absence is checkable instead of ambiguous.
         , headers = httpHeaders spec.method (NoCredential Nothing)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg catalogueResponseDecoder
         , timeout = standardTimeout
@@ -3490,7 +3496,7 @@ getCatalogueRequest :
 getCatalogueRequest params =
     { method = "GET"
     , url =
-        Url.Builder.absolute [ "api", "catalogue" ]
+        Api.Url.path [ "api", "catalogue" ]
             (List.filterMap identity
                 [ Just (Url.Builder.string "sort" params.sort)
                 , Just (Url.Builder.int "page" params.page)
@@ -3559,7 +3565,7 @@ the reader to retry something that cannot work.
 getAccountRequest : RequestSpec
 getAccountRequest =
     { method = "GET"
-    , url = baseUrl ++ "/api/auth/me"
+    , url = Api.Url.path [ "api", "auth", "me" ] []
     , body = Nothing
     }
 
@@ -4066,7 +4072,7 @@ already owns, rather than creating a second work for the same title.
 mergeFormatRequest : String -> { isbn : String, formatLabel : String } -> RequestSpec
 mergeFormatRequest bookId body =
     { method = "POST"
-    , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
+    , url = Api.Url.path [ "api", "books", bookId, "merge-format" ] []
     , body =
         Just
             (Requests.encodeMergeFormatRequest
@@ -4271,13 +4277,14 @@ getBlogPosts maybeToken maybeCursor toMsg =
         { method = "GET"
         , headers = httpHeaders "GET" (Optional maybeToken)
         , url =
-            Url.Builder.crossOrigin baseUrl
-                [ "api", "blog", "posts" ]
-                (maybeCursor
-                    |> Maybe.map (Url.Builder.string "after")
-                    |> Maybe.map List.singleton
-                    |> Maybe.withDefault []
-                )
+            Api.Url.toString <|
+                Api.Url.path
+                    [ "api", "blog", "posts" ]
+                    (maybeCursor
+                        |> Maybe.map (Url.Builder.string "after")
+                        |> Maybe.map List.singleton
+                        |> Maybe.withDefault []
+                    )
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg blogPostPageDecoder
         , timeout = standardTimeout
@@ -4692,7 +4699,7 @@ carries the visibility actually stored, which is what the caller adopts.
 updatePlacementVisibilityRequest : String -> String -> RequestSpec
 updatePlacementVisibilityRequest placementId visibility =
     { method = "PUT"
-    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/visibility"
+    , url = Api.Url.path [ "api", "placements", placementId, "visibility" ] []
     , body =
         Just
             (Requests.encodeUpdateShelfVisibilityRequest
@@ -4720,7 +4727,7 @@ a member stays visible.
 updatePlacementFormatsRequest : String -> List String -> RequestSpec
 updatePlacementFormatsRequest placementId formats =
     { method = "PUT"
-    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/formats"
+    , url = Api.Url.path [ "api", "placements", placementId, "formats" ] []
     , body =
         Just
             (Encode.object
@@ -4838,7 +4845,7 @@ move as well.
 movePlacementToShelfRequest : String -> String -> RequestSpec
 movePlacementToShelfRequest placementId shelfId =
     { method = "PUT"
-    , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/shelf"
+    , url = Api.Url.path [ "api", "placements", placementId, "shelf" ] []
     , body = Just (Encode.object [ ( "shelf_id", Encode.string shelfId ) ])
     }
 
@@ -5163,7 +5170,7 @@ one invites two tabs choosing the same.
 createShelfRequest : String -> RequestSpec
 createShelfRequest bookshelfName =
     { method = "POST"
-    , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+    , url = Api.Url.path [ "api", "bookshelves", bookshelfName, "shelves" ] []
     , body = Just (Encode.object [])
     }
 
@@ -5178,7 +5185,7 @@ deleting a row out from under its books would strand them.
 deleteShelfRequest : String -> RequestSpec
 deleteShelfRequest shelfId =
     { method = "DELETE"
-    , url = baseUrl ++ "/api/shelves/" ++ shelfId
+    , url = Api.Url.path [ "api", "shelves", shelfId ] []
     , body = Nothing
     }
 
@@ -5194,7 +5201,7 @@ orders rather than an interleaving neither reader asked for.
 reorderShelvesRequest : String -> List String -> RequestSpec
 reorderShelvesRequest bookshelfName shelfIds =
     { method = "PUT"
-    , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves/reorder"
+    , url = Api.Url.path [ "api", "bookshelves", bookshelfName, "shelves", "reorder" ] []
     , body =
         Just
             (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
@@ -5208,7 +5215,7 @@ backend visibility-filters the placements.
 getProfileShelfRequest : String -> String -> RequestSpec
 getProfileShelfRequest handle bookshelfName =
     { method = "GET"
-    , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
+    , url = Api.Url.path [ "api", "u", handle, "bookshelves", bookshelfName ] []
     , body = Nothing
     }
 
@@ -5241,7 +5248,7 @@ are excluded server-side either way.
 searchUsersRequest : String -> RequestSpec
 searchUsersRequest query =
     { method = "GET"
-    , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
+    , url = Api.Url.path [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
     , body = Nothing
     }
 
@@ -5457,7 +5464,7 @@ request instead of restating it.
 adminLogoutRequest : RequestSpec
 adminLogoutRequest =
     { method = "DELETE"
-    , url = baseUrl ++ "/api/admin/auth/logout"
+    , url = Api.Url.path [ "api", "admin", "auth", "logout" ] []
     , body = Nothing
     }
 
@@ -5730,7 +5737,7 @@ adminFeedbackRequest : { limit : Int, offset : Int } -> RequestSpec
 adminFeedbackRequest window =
     { method = "GET"
     , url =
-        Url.Builder.absolute [ "api", "admin", "feedback" ]
+        Api.Url.path [ "api", "admin", "feedback" ]
             [ Url.Builder.int "limit" window.limit
             , Url.Builder.int "offset" window.offset
             ]
@@ -5758,7 +5765,7 @@ getAdminFeedback token window toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminFeedbackPageDecoder
         , timeout = standardTimeout
@@ -5782,7 +5789,7 @@ sendFeedback body request =
     Http.request
         { method = spec.method
         , headers = authedHeaders spec.method request
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = authedExpect resolveWhatever request
         , timeout = standardTimeout
@@ -5795,7 +5802,7 @@ sendFeedback body request =
 sendFeedbackRequest : { body : String, pageContext : String } -> RequestSpec
 sendFeedbackRequest body =
     { method = "POST"
-    , url = baseUrl ++ "/api/feedback"
+    , url = Api.Url.path [ "api", "feedback" ] []
     , body =
         Just
             (Encode.object
@@ -5930,7 +5937,7 @@ getAdminSources params token toMsg =
     Http.request
         { method = "GET"
         , headers = httpHeaders "GET" (Session token)
-        , url = Url.Builder.absolute [ "api", "admin", "sources" ] queryParams
+        , url = Api.Url.toString (Api.Url.path [ "api", "admin", "sources" ] queryParams)
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminSourcesResponseDecoder
         , timeout = standardTimeout
@@ -6034,7 +6041,7 @@ adminListBooks params token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg adminBooksResponseDecoder
         , timeout = standardTimeout
@@ -6050,7 +6057,7 @@ adminListBooksRequest :
 adminListBooksRequest params =
     { method = "GET"
     , url =
-        Url.Builder.absolute [ "api", "admin", "books" ]
+        Api.Url.path [ "api", "admin", "books" ]
             (List.filterMap identity
                 [ Just (Url.Builder.int "page" params.page)
                 , params.tier |> Maybe.map (Url.Builder.string "tier")
@@ -6078,7 +6085,7 @@ adminSetBookAgeGate bookId ageGated token toMsg =
     Http.request
         { method = spec.method
         , headers = httpHeaders spec.method (Session token)
-        , url = spec.url
+        , url = Api.Url.toString spec.url
         , body = specHttpBody spec
         , expect = Http.expectJson toMsg adminBookEnvelopeDecoder
         , timeout = standardTimeout
@@ -6091,7 +6098,7 @@ adminSetBookAgeGate bookId ageGated token toMsg =
 adminSetBookAgeGateRequest : String -> Bool -> RequestSpec
 adminSetBookAgeGateRequest bookId ageGated =
     { method = "PUT"
-    , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
+    , url = Api.Url.path [ "api", "admin", "books", bookId, "age-gate" ] []
     , body = Just (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
     }
 

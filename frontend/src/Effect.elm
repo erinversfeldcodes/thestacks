@@ -22,6 +22,7 @@ anything HTTP belongs in `Request`.
 -}
 
 import Api
+import Api.Url
 import Http
 import Process
 import Task
@@ -120,7 +121,7 @@ perform effect =
             Http.request
                 { method = plan.spec.method
                 , headers = Api.planHeaders plan.spec.method plan.token plan.proof
-                , url = plan.spec.url
+                , url = Api.Url.toString plan.spec.url
                 , body = Api.specHttpBody plan.spec
                 , expect = expectResponse plan.onResponse
                 , timeout = Api.standardTimeout

@@ -120,16 +120,27 @@ RECORD = re.compile(r"\{(?:[^{}]|\{[^{}]*\})*\}", re.S)
 # begin with `/` and is not empty. All four call sites already comply; the point
 # is that they now comply by rule rather than by luck.
 #
+#   Api.Url.toString …               derived from a SameOriginUrl — see below
 #   baseUrl ++ "/…"                  our own base, then a literal path
 #   "/…"                             a literal relative path
-#   Url.Builder.absolute [ "x", … ]  an absolute path from a literal segment
-#   Url.Builder.crossOrigin baseUrl  our origin named explicitly
-#   spec.url                         a RequestSpec url — checked separately below
+#
+# ⛔ `Api.Url.toString` IS THE ONLY ONE OF THESE THAT IS A PROOF RATHER THAN A
+# RECOGNISED SHAPE. The others say "this text looks like a path"; that one says
+# the value came from `Api.Url.SameOriginUrl`, whose sole constructor cannot
+# build a URL that leaves our origin. A String can leave that type and cannot
+# enter it, so anything `toString` returns was constructed safely — whatever the
+# expression beside it looks like.
+#
+# ⚠️ `Url.Builder.absolute` and `Url.Builder.crossOrigin baseUrl` are GONE from
+# this list, and not because they stopped appearing. `absolute` never encodes
+# path segments, so `absolute [ "/evil.test" ]` yields `//evil.test` and left
+# this gate accepting an expression that escapes; `crossOrigin baseUrl` was
+# same-origin only because `baseUrl` happens to be `""`, which its own name
+# invites someone to change. Both were rewritten to `Api.Url.path`.
 SAME_ORIGIN = [
+    re.compile(r"^\s*Api\.Url\.toString\b"),
     re.compile(r'^\s*baseUrl\s*\+\+\s*"/'),
     re.compile(r'^\s*"/'),
-    re.compile(r'^\s*Url\.Builder\.absolute\s*\[\s*"[^"/][^"]*"'),
-    re.compile(r"^\s*Url\.Builder\.crossOrigin\s+baseUrl\b"),
     re.compile(r"^\s*spec\.url\s*$"),
 ]
 
@@ -145,12 +156,8 @@ SAME_ORIGIN = [
 #
 # ⚠️ So this is the declaration the plan path cannot make for itself, made once
 # over the whole population instead of at each of its call sites.
-SPEC_SAME_ORIGIN = [
-    re.compile(r'^\s*baseUrl\s*\+\+\s*"/'),
-    re.compile(r'^\s*"/'),
-    re.compile(r'^\s*Url\.Builder\.absolute\s*\[\s*"[^"/][^"]*"'),
-    re.compile(r"^\s*Url\.Builder\.crossOrigin\s+baseUrl\b"),
-]
+# SPEC_SAME_ORIGIN was here. It is gone: `RequestSpec.url` is an
+# `Api.Url.SameOriginUrl`, so the compiler makes this statement on every build.
 
 def strip_elm_comments(text):
     """Blank Elm comments, keeping line structure so line numbers stay true.
@@ -303,106 +310,28 @@ if mismatched:
     )
     raise SystemExit(1)
 
-# ── the plan path: every RequestSpec url, since no plan can declare one ──────
+# ── the plan path: RETIRED, because the type now carries it ──────────────────
 #
-# ⛔ A FLOOR OF ITS OWN, for the same reason the record floor exists: if the spec
-# pattern stopped matching, this would report "every spec is same-origin" over a
-# population of zero, which is the same output as a clean run.
-MIN_SPEC_BUILDERS = 30
-
-specs = 0
-spec_violations = []
-
-for match in re.finditer(r"^([a-z][A-Za-z0-9_']*)\s*:[^\n]*RequestSpec\s*$", src, re.M):
-    fname = match.group(1)
-    rest = src[match.end() :]
-    stop = re.search(r"\n(?=[a-z][A-Za-z0-9_']*\s*:)", rest)
-    body = strip_elm_comments(rest[: stop.start()] if stop else rest)
-
-    url_match = re.search(r"url\s*=\s*(.*?)(?=\n\s*,|\n\s*\}|\Z)", body, re.S)
-    if not url_match:
-        continue
-
-    specs += 1
-    flattened = re.sub(r"\s+", " ", url_match.group(1).strip()).strip()
-    if not any(p.match(flattened) for p in SPEC_SAME_ORIGIN):
-        line_no = src[: match.start()].count("\n") + 1
-        spec_violations.append((fname, line_no, flattened[:48]))
-
-# ⛔ The floor, checked BEFORE the verdict. A parser that saw three records and
-# found nothing has not cleared this file.
-if specs < MIN_SPEC_BUILDERS:
-    print(
-        f"FAIL: parsed only {specs} RequestSpec builder(s) in {path}; "
-        f"expected at least {MIN_SPEC_BUILDERS}.",
-        file=sys.stderr,
-    )
-    print(
-        "      `Effect.perform` sends every plan with a hardcoded SameOrigin, so this\n"
-        "      population is the only thing justifying that. A verdict over a corpus this\n"
-        "      small is the parser having drifted, not the source having become safe.",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-
-if spec_violations:
-    print(
-        f"FAIL: {len(spec_violations)} RequestSpec(s) have a URL that is not provably "
-        f"same-origin:",
-        file=sys.stderr,
-    )
-    for fname, line_no, expr in spec_violations:
-        print(f"  {path}:{line_no}  {fname}  url = {expr}", file=sys.stderr)
-    print(
-        "\n⛔ A spec cannot declare a destination. `Effect.RequestPlan` is\n"
-        "`{ spec, token, onResponse }` with no destination field, and `Effect.perform`\n"
-        "sends it with `Api.authHeaders`, which hardcodes `SameOrigin`. So a spec whose\n"
-        "URL leaves our origin would carry the reader's token there, and no declaration\n"
-        "exists anywhere for a reviewer or a gate to question.\n"
-        "\n"
-        "Rewrite the URL to lead with a literal path (`baseUrl ++ \"/…\"`), or give\n"
-        "`RequestPlan` a destination field and make `Effect.perform` honour it.",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-
-if records < floor:
-    print(
-        f"FAIL: parsed only {records} request record(s) in {path}; expected at least {floor}.",
-        file=sys.stderr,
-    )
-    print("      A clean result over a corpus this small is the parser having drifted from", file=sys.stderr)
-    print("      the source, not the source having become safe — which is indistinguishable", file=sys.stderr)
-    print("      from a real pass if the floor is on findings instead of on records.", file=sys.stderr)
-    raise SystemExit(1)
-
-if violations:
-    print(
-        f"FAIL: {len(violations)} request(s) declare SameOrigin with a URL that is not "
-        f"provably same-origin:",
-        file=sys.stderr,
-    )
-    for name, line_no, expr in violations:
-        print(f"  {path}:{line_no}  {name}  url = {expr}", file=sys.stderr)
-    print(
-        "\nThe destination is DECLARED, not derived, so `SameOrigin` here is a claim this\n"
-        "gate cannot check against the URL beside it. Either rewrite the URL into a\n"
-        "recognisable same-origin form (baseUrl ++ …, spec.url, Url.Builder.absolute,\n"
-        "a literal \"/path\"), or declare `CrossOrigin` and carry no credential.",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
+# ⛔ A `MIN_SPEC_BUILDERS` floor and a per-spec URL check used to live here, and
+# both are gone because `RequestSpec.url` is an `Api.Url.SameOriginUrl` rather
+# than a `String`. `Api.Url.path` is its only constructor and cannot produce a
+# URL that leaves our origin — percent-encoding every segment and dropping the
+# empty ones, the second of which is what `Url.Builder.absolute` omits and why
+# building on it would have reproduced the hole.
+#
+# ⚖️ So the question this half asked — "is every spec's URL provably
+# same-origin?" — is no longer a property of a corpus to be counted. It is the
+# field's type, checked by the compiler on every build, with no population floor
+# to drift and no comment-stripping pass to get wrong.
+#
+# ⚠️ WHAT REMAINS BELOW IS NOT REDUNDANT. The record half above covers direct
+# `Http.request` sites, whose `url` is still a plain `String`, and there are
+# about sixty-six of them. They move onto the plan as part of the `Cmd msg`
+# migration; only then does this script have nothing left to say and the whole
+# file go. Deleting it today would lose a guarantee for every one of them.
 
 print(
-    f"OK: {records} request record(s) parsed in {path}; "
-    f"none declares SameOrigin with an unprovable URL."
-)
-# ⚠️ Reported on the GREEN path, not only on failure. The plan-path check has no
-# per-call-site declaration to point at, so if it printed nothing when it passed
-# there would be no way to tell it from a check that never ran — which is the
-# distinction this gate's floors exist to preserve everywhere else.
-print(
-    f"    {specs} RequestSpec builder(s) parsed; every URL leads with a literal path, "
+    f"    RequestSpec urls are type-checked (Api.Url.SameOriginUrl), not parsed here; "
     f"which is what justifies the hardcoded SameOrigin in Effect.perform."
 )
 
@@ -412,9 +341,31 @@ print(
 # `SameOrigin`. Printing the set keeps it from being discovered later as a
 # surprise.
 if unprovable:
-    print(f"    {len(unprovable)} request(s) have a URL this gate cannot prove same-origin:")
+    # ⛔ THIS NOW FAILS, AND UNTIL TODAY IT DID NOT.
+    #
+    # The file opens "A request that attaches a credential must have a PROVABLY
+    # same-origin URL" — and for direct `Http.request` records this list was
+    # printed to stdout and the script exited 0. The one `SystemExit(1)` in this
+    # half was the population floor. So the headline claim was advisory: a fresh
+    # off-origin URL in a credential-bearing request would have been described
+    # in the CI log and passed the gate.
+    #
+    # ⚖️ It can enforce now because the population is clean: every spec URL is
+    # an `Api.Url.SameOriginUrl` by type, and `Api.Url.toString` is accepted as
+    # the proof it is. Enforcing earlier would have failed on fifteen sites that
+    # were in fact safe, which is presumably why it never did.
+    print(
+        f"FAIL: {len(unprovable)} request(s) attach a credential to a URL this "
+        f"gate cannot prove is same-origin:",
+        file=sys.stderr,
+    )
     for name, line_no, expr in unprovable:
-        print(f"      {path}:{line_no}  {name}  url = {expr}")
-    print("    Each must declare CrossOrigin, or be rewritten into a recognisable form,")
-    print("    before it can carry a credential.")
+        print(f"  {path}:{line_no}  {name}  url = {expr}", file=sys.stderr)
+    print(
+        "\n⛔ Build it through `Api.Url.path`, whose result cannot leave our\n"
+        "origin, and hand it over with `Api.Url.toString`. There is no longer a\n"
+        "destination to declare — the type is the declaration.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 PY

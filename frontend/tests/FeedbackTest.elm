@@ -11,6 +11,7 @@ conversation.
 -}
 
 import Api
+import Api.Url
 import Expect
 import Html.Attributes as Attr
 import Http
@@ -24,6 +25,7 @@ import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
+import Url.Builder
 
 
 testId : String -> Selector.Selector
@@ -207,7 +209,7 @@ suite =
                 \_ ->
                     Expect.equal
                         { method = "POST"
-                        , url = "/api/feedback"
+                        , url = Api.Url.path [ "api", "feedback" ] []
                         , body =
                             Just
                                 (Encode.object
@@ -421,14 +423,16 @@ suite =
                     -- model and never the request.
                     Expect.equal
                         { method = "GET"
-                        , url = "/api/admin/feedback?limit=25&offset=50"
+                        , url = Api.Url.path [ "api", "admin", "feedback" ] [ Url.Builder.int "limit" 25, Url.Builder.int "offset" 50 ]
                         , body = Nothing
                         }
                         (Api.adminFeedbackRequest { limit = 25, offset = 50 })
             , test "the first window asks for offset zero rather than omitting it" <|
                 \_ ->
                     Expect.equal "/api/admin/feedback?limit=25&offset=0"
-                        (Api.adminFeedbackRequest { limit = 25, offset = 0 }).url
+                        (Api.Url.toString
+                            (Api.adminFeedbackRequest { limit = 25, offset = 0 }).url
+                        )
             ]
         , describe "the queue response decodes"
             [ test "a populated page carries its entries and the whole-queue total" <|
@@ -488,7 +492,7 @@ suite =
                     Expect.all
                         [ \s -> Expect.equal "POST" s.method
                         , \s ->
-                            Expect.equal False (String.contains "STK-ABCD-1234" s.url)
+                            Expect.equal False (String.contains "STK-ABCD-1234" (Api.Url.toString s.url))
                         , \s ->
                             Expect.equal
                                 (Just

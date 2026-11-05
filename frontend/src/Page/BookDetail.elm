@@ -16,6 +16,7 @@ module Page.BookDetail exposing
     )
 
 import Api
+import Api.Url
 import Browser.Dom
 import Components.AgeGate exposing (ageGate)
 import Components.AuthorCard as AuthorCard
@@ -233,7 +234,7 @@ initWithEffect bookId maybeToken maybePreviousRoute =
 availabilityRequest : String -> Api.RequestSpec
 availabilityRequest bookId =
     { method = "GET"
-    , url = "/api/books/" ++ bookId ++ "/availability"
+    , url = Api.Url.path [ "api", "books", bookId, "availability" ] []
     , body = Nothing
     }
 
@@ -257,7 +258,7 @@ availabilityDecoder =
 pricesRequest : String -> Api.RequestSpec
 pricesRequest bookId =
     { method = "GET"
-    , url = "/api/books/" ++ bookId ++ "/prices"
+    , url = Api.Url.path [ "api", "books", bookId, "prices" ] []
     , body = Nothing
     }
 
