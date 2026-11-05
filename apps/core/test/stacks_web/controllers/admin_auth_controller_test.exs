@@ -249,7 +249,11 @@ defmodule StacksWeb.AdminAuthControllerTest do
 
       assert %{"ok" => true} = json_response(conn, 200)
 
-      assert {:error, :revoked} = SessionContext.get_valid(session.id, @raw_ip)
+      # The row itself, not a lookup: logout must retire THIS session, and
+      # `current_for_user/2` answering `:not_found` afterwards would also be
+      # true if the session had merely stopped being the operator's current one.
+      assert Core.Repo.get!(Stacks.AdminSession, session.id, prefix: "op").revoked_at != nil
+      assert {:error, :not_found} = SessionContext.current_for_user(user.id, @raw_ip)
     end
 
     test "returns 401 without admin token", %{conn: conn} do

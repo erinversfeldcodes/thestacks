@@ -16,12 +16,12 @@ defmodule StacksWeb.Plugs.AdminAuthPipeline do
       cookie, through `SessionCookie` and Guardian — and the admin session is
       then looked up from that user.
 
-      ⚖️ **What is a move and what is new.** Not-revoked, not-expired, matching
-      `boot_id` and matching IP are unchanged; they live in
-      `SessionContext.check_valid/2` and are shared with `get_valid/2` so the
-      rules cannot drift. The only new part is *which* admin session —
-      `current_for_user/2` answers "the most recent still-valid one", because an
-      operator accumulates them over time.
+      ⚖️ **What is a move and what is new.** Not-expired, matching `boot_id` and
+      matching IP are unchanged; they live in `SessionContext.check_valid/2`,
+      which is now the only place any of them is expressed. The new part is
+      *which* admin session, and the answer is that there is only ever one:
+      `create/3` revokes the operator's other live sessions, so
+      `current_for_user/2` has no selection rule to get wrong.
 
       ⚠️ The MFA window is NOT checked here. `StacksWeb.Plugs.RequireMFA` owns
       it and is piped immediately after (`router.ex:97-99`), holding
