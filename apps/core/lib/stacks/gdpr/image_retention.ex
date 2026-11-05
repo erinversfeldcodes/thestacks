@@ -103,6 +103,20 @@ defmodule Stacks.GDPR.ImageRetention do
   # ⚠️ `reject_image/2` already scopes to exactly these two, so the two statuses
   # were handled together everywhere EXCEPT here. That is part of why nobody
   # noticed.
+  # ⚖️ ONE THRESHOLD FOR BOTH, CHOSEN RATHER THAN INHERITED.
+  #
+  # `@stuck_threshold_hours` was sized for "the identification job never ran".
+  # An unredeemed reservation is a shorter story: `init_upload/2` returns
+  # `expires_in: 900`, so a client that means to upload does so within fifteen
+  # minutes, and two hours is already eight times that.
+  #
+  # It is kept the same anyway, and the reason is not convenience. A second
+  # constant would be a second number meaning nearly the same thing — "how long
+  # before we stop expecting this to finish" — and the two would be tuned apart
+  # by whoever next touched one. The cost of sharing it is that an abandoned
+  # reservation survives about 105 minutes longer than it needs to, holding a
+  # row nobody can see and an object that was never written. That is a price
+  # worth paying to keep one number.
   @unfinished_statuses ["pending", "awaiting_upload"]
 
   # ⚠️ The clock for both is `uploaded_at`, which is set at RESERVATION time by
@@ -362,7 +376,18 @@ defmodule Stacks.GDPR.ImageRetention do
     # are opposite problems with opposite fixes.
     by_reason = Enum.frequencies_by(stuck_rows, &reason_for_status(&1.status))
 
-    emit_expiry_events(stuck_ids, %{reason: "stuck"})
+    # ⛔ THE EVENT CARRIES THE ROW'S OWN REASON, NOT THE SWEEP'S NAME.
+    #
+    # This emitted `reason: "stuck"` for every row, which reproduced — in the
+    # immutable log, one layer down — exactly the misdescription this change
+    # exists to end. An abandoned reservation was being recorded as a wedged
+    # job, just as it used to be recorded as an expired image. ⚖️ `event_log`
+    # is the durable record and the one an enquiry reads; splitting the metric
+    # while leaving the log undifferentiated gets the ephemeral half right and
+    # the permanent half wrong.
+    for row <- stuck_rows do
+      emit_expiry_events([row.id], %{reason: reason_for_status(row.status)})
+    end
 
     for {reason, n} <- by_reason do
       :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: n}, %{reason: reason})

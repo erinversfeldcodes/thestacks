@@ -295,36 +295,6 @@ defmodule Stacks.GDPR.ImageRetentionTest do
       assert {:ok, 1} = ImageRetention.cleanup_stuck_images()
     end
 
-    test "the two populations are counted APART, not both as stuck" do
-      # ⛔ A rise in abandoned uploads and a rise in broken ones are opposite
-      # problems with opposite fixes. One number for both hides which is
-      # happening, which is why the reason is part of the measurement rather
-      # than a label added afterwards.
-      old = DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
-      insert(:uploaded_image, status: "pending", uploaded_at: old)
-      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
-      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
-
-      ref = make_ref()
-      parent = self()
-
-      :telemetry.attach_many(
-        "#{inspect(ref)}",
-        [[:stacks, :gdpr, :image, :stuck]],
-        fn _event, measurements, metadata, _ ->
-          send(parent, {:stuck_emit, metadata[:reason], measurements[:count]})
-        end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach("#{inspect(ref)}") end)
-
-      assert {:ok, 3} = ImageRetention.cleanup_stuck_images()
-
-      assert_received {:stuck_emit, "stuck", 1}
-      assert_received {:stuck_emit, "unredeemed", 2}
-    end
-
     test "emits image.expired event for each stuck image deleted" do
       _stuck =
         insert(:uploaded_image,
@@ -658,6 +628,70 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
 
       assert_received {:storage_delete, "uploads/finished-a"}
       refute_received {:storage_delete, _other}
+    end
+  end
+
+  describe "the two unfinished populations are counted apart" do
+    # ⛔ HERE RATHER THAN IN THE ASYNC MODULE, and the move is the finding.
+    #
+    # `:telemetry` handlers are GLOBAL. Attached from an `async: true` file,
+    # this handler fires for every concurrently-running test that sweeps, and
+    # forwards to the process captured at attach time — so a sibling emitting
+    # `{:stuck_emit, "stuck", 1}` would satisfy this assertion while this test's
+    # own sweep did nothing. A test that can pass on another test's event is the
+    # defect this suite exists to catch, in the instrument rather than the
+    # subject.
+    test "the event_log records each row's OWN reason, not the sweep's name" do
+      # ⛔ THE PERMANENT HALF. This sweep emitted `reason: "stuck"` for every
+      # row, which recorded an abandoned reservation as a wedged job — the same
+      # misdescription this change exists to end, moved one layer down into the
+      # immutable log. `event_log` is what an enquiry reads; getting the metric
+      # right and the log wrong fixes the ephemeral half only.
+      old = DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
+
+      assert {:ok, 1} = ImageRetention.cleanup_stuck_images()
+
+      assert [%{"reason" => "unredeemed"}] =
+               Repo.all(
+                 from(e in "event_log",
+                   prefix: "op",
+                   where: e.event_type == "image.expired",
+                   order_by: [desc: e.occurred_at],
+                   limit: 1,
+                   select: e.payload
+                 )
+               )
+    end
+
+    test "a wedged job and an abandoned reservation are not one number" do
+      # ⛔ A rise in abandoned uploads and a rise in broken ones are opposite
+      # problems with opposite fixes. One number for both hides which is
+      # happening, which is why the reason is part of the measurement rather
+      # than a label added afterwards.
+      old = DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+      insert(:uploaded_image, status: "pending", uploaded_at: old)
+      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
+      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
+
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach_many(
+        "#{inspect(ref)}",
+        [[:stacks, :gdpr, :image, :stuck]],
+        fn _event, measurements, metadata, _ ->
+          send(parent, {:stuck_emit, metadata[:reason], measurements[:count]})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("#{inspect(ref)}") end)
+
+      assert {:ok, 3} = ImageRetention.cleanup_stuck_images()
+
+      assert_received {:stuck_emit, "stuck", 1}
+      assert_received {:stuck_emit, "unredeemed", 2}
     end
   end
 
