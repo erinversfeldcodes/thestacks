@@ -643,6 +643,52 @@
           "legendFormat": "{{population}}"
         }
       ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "De-anonymisation insight returning a non-answer (ALARM)",
+      "description": "WHAT: times GET /api/me/inferences could not compute how identifiable a reader is, so the page showed \"could not compute\" instead of a number. WARNING this is the surface whose whole failure character is that nobody becomes suspicious: it reported a non-answer to EVERY reader on every deployed stack for weeks while the test suite was green, because the suite connects as a superuser that bypasses the row-level-security policy that was refusing the query. A green suite says nothing about this number. HOW: rate over stacks_insights_deanonymisation_unavailable_count_total. MEANS: zero is the correct state. WATCH: ANY non-zero value \u2014 readers are being shown a non-answer on the one page whose subject is their own exposure, and the page will not look broken while it happens.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_insights_deanonymisation_unavailable_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "could not compute"
+        }
+      ]
     }
   ]
 }

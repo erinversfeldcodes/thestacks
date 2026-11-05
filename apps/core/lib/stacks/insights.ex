@@ -327,17 +327,61 @@ defmodule Stacks.Insights do
   # and either is a defect in this module rather than a condition to paper
   # over. The remaining `log_and_nil/1` covers only a result shape Postgres
   # should never return, which is the one case where continuing is honest.
+  # ⚖️ DELIBERATELY NOT SCOPED, and this was tested rather than assumed.
+  #
+  # A review found the definer's argument guard inert here — it refuses a
+  # *scoped* caller asking about somebody else, and this call sets no scope, so
+  # the branch never evaluates. Wrapping the call in `Scope.with_user/2` looked
+  # like free defence in depth. It is not, for two measured reasons.
+  #
+  # ⛔ `Stacks.Scope.with_user/2` already RAISES on a mismatch — "cannot
+  # re-scope ... two users in one request means a query is running on behalf of
+  # the wrong one" (`scope.ex:167`). So the scenario the guard defends against
+  # cannot arise through `Scope` at all, and a caller that bypasses `Scope`
+  # bypasses the wrap too. The wrap enforces, a second time, a rule already
+  # enforced one layer up, against a path that reaches neither.
+  #
+  # ⚠️ And it is not free: `with_user/2` opens a transaction, while the
+  # fingerprint above reads `marts.mart_community_read_count` — a mart that is
+  # routinely ABSENT and whose reader rescues and carries on. Inside a
+  # transaction that rescue is not enough: the failed statement poisons it and
+  # every later command dies with `25P02`. Measured — wrapping
+  # `deanonymisation/2` reds eight cases.
+  #
+  # The real containment is this module passing the authenticated reader's id,
+  # and the real remaining gap is that the function does not bound WHAT may be
+  # asked of it, which is tracked separately.
   defp count_others_sharing_all(user_id, book_ids, sample_size) do
     sql = "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)"
 
-    case Repo.query(sql, [user_id, book_ids, sample_size]) do
+    case Scope.with_user(user_id, fn -> Repo.query(sql, [user_id, book_ids, sample_size]) end) do
       {:ok, %{rows: [[count]]}} -> count
       other -> log_and_nil(other)
     end
   end
 
+  # ⛔ REACHABLE, AND THAT IS THE POINT OF MEASURING IT.
+  #
+  # Deleting the function-level `rescue` removed one spelling of the silent
+  # fallback, not the behaviour: `Repo.query/3` RETURNS `{:error, …}` rather
+  # than raising, so a `42501` from the definer still lands here, still answers
+  # `nil`, and the reader still reads "could not compute". That is the exact
+  # symptom this issue existed to end, and a `Logger.warning` does not end it —
+  # "a warning in a log nobody reads" is how the original defect survived weeks.
+  #
+  # ⚖️ So the page still degrades rather than 500s, because the rest of the
+  # payload is fine and taking it down helps nobody. What changes is that the
+  # condition is now COUNTABLE: an operator can alarm on it, which is the
+  # difference between a graceful degradation and a quiet one. Same instrument
+  # as `read_counts_unavailable/1` directly above, for the same reason.
   defp log_and_nil(other) do
-    Logger.warning("Insights.count_others_sharing_all unexpected result: #{inspect(other)}")
+    Logger.error(
+      "Insights.count_others_sharing_all could not answer: #{inspect(other)}. " <>
+        "Every reader sees \"could not compute\" on the de-anonymisation insight until this is fixed."
+    )
+
+    :telemetry.execute([:stacks, :insights, :deanonymisation_unavailable], %{count: 1}, %{})
+
     nil
   end
 

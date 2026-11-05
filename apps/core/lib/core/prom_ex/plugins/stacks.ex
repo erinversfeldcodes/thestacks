@@ -522,6 +522,12 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Images cleaned by the stuck-pending safety net.",
           tags: [:reason]
         ),
+        counter(
+          [:stacks, :insights, :deanonymisation_unavailable, :count, :total],
+          event_name: [:stacks, :insights, :deanonymisation_unavailable],
+          description:
+            "Times the de-anonymisation insight could not answer how identifiable a reader is, so the page showed \"could not compute\". NOT fatal: the rest of the payload renders. But this surface's whole failure character is that nobody becomes suspicious — it reported a non-answer to EVERY reader on every deployed stack for weeks while the suite was green, because the suite connects as a superuser that bypasses the policy that was refusing the query. A green suite says nothing about this number. ANY non-zero value is alert-worthy."
+        ),
         last_value(
           [:stacks, :gdpr, :image, :standing],
           event_name: [:stacks, :gdpr, :image, :standing],

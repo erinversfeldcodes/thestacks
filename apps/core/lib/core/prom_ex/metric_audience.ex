@@ -113,6 +113,7 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_gdpr_image_expired_count_total" => :public,
     "stacks_gdpr_image_orphan_count_total" => :public,
     "stacks_gdpr_image_standing" => :public,
+    "stacks_insights_deanonymisation_unavailable_count_total" => :public,
     "stacks_gdpr_image_stuck_count_total" => :public,
     "stacks_handle_claimed_count_total" => :public,
     "stacks_moderation_classification_count_total" => :public,
