@@ -205,6 +205,7 @@ module Api exposing
     , moveBookRequest
     , movePlacementToShelfRequest
     , moveResponseToResult
+    , needsAdminElevation
     , notificationPreferencesDecoder
     , onboardingStatusDecoder
     , peopleSearchDecoder
@@ -1665,6 +1666,40 @@ isUnauthorized : Http.Error -> Bool
 isUnauthorized err =
     case err of
         Http.BadStatus 401 ->
+            True
+
+        _ ->
+            False
+
+
+{-| True when an admin request was refused for want of a live, MFA-verified
+elevation — the signal an admin page uses to hand the operator back to the gate.
+
+⛔ **Two statuses, because the admin chain refuses in two places.**
+`AdminAuthPipeline` answers **401** when the operator holds no admin session at
+all; `RequireMFA` answers **403 `mfa_required`** when they hold one whose
+verification has lapsed. Only the first was ever matched (`isUnauthorized` is
+401-only), so an operator whose 30-minute window ran out got a generic "Action
+failed. Please try again." on a page that could never succeed again, with no
+way back to the gate but a reload.
+
+⚠️ **Deliberately NOT folded into `isUnauthorized`.** That predicate is used by
+every ordinary page, where a 403 means the age-gate and must stay local — see
+its own docstring. Widening it would send a reader who hit the age-gate to a
+session-expiry path. This one is for `/api/admin/*` callers only.
+
+⚠️ A 403 from an admin route is taken as "needs elevation" without reading the
+body, which also catches a role refusal. That is today's behaviour either way;
+making a non-owner get a 404 rather than the MFA prompt is its own change.
+
+-}
+needsAdminElevation : Http.Error -> Bool
+needsAdminElevation err =
+    case err of
+        Http.BadStatus 401 ->
+            True
+
+        Http.BadStatus 403 ->
             True
 
         _ ->

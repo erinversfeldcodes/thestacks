@@ -120,8 +120,14 @@ driftAdminGate =
     test "drift_2_admin_gate: the MFA challenge is not titled with the surface behind it" <|
         \() ->
             let
+                -- ⚠️ Built from `adminGateAfterEnding`, not `initPage`. The gate
+                -- is no longer produced at boot — elevation is the server's
+                -- answer, so the page renders and swaps to the gate when the
+                -- request is refused. This still asserts the drift it was
+                -- written for: the challenge must not wear the title of the
+                -- surface behind it.
                 title =
-                    pageTitleOf (pageFor ageGatingOff Route.AdminSourceApproval (Just ownerAuth) Nothing)
+                    pageTitleOf (Main.adminGateAfterEnding Nothing Route.AdminSourceApproval)
             in
             Expect.all
                 [ \t -> Expect.equal "Admin Sign-In — The Stacks" t

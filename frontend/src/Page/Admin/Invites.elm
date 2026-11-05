@@ -90,7 +90,7 @@ update msg model maybeToken =
             ( { model | invites = Success invites }, Cmd.none, NoOut )
 
         InvitesReceived (Err err) ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else
@@ -154,7 +154,7 @@ update msg model maybeToken =
             )
 
         CreateCompleted (Err err) ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else
@@ -178,7 +178,7 @@ update msg model maybeToken =
             ( { model | revoking = Nothing }, fetch maybeToken, NoOut )
 
         RevokeCompleted (Err err) ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else

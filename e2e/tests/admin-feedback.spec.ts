@@ -152,6 +152,17 @@ async function reportedTotal(page: Page): Promise<number> {
 }
 
 test.describe("Admin feedback queue", () => {
+  // ⛔ Same reset as `admin-session.spec.ts`, and for the same reason: elevation
+  // now survives a reload, so the gate no longer appears on every load and a
+  // spec that navigates expecting one is asserting the old defect. Without
+  // this, these four cases fail whenever an admin spec ran before them.
+  test.beforeEach(async ({ request }) => {
+    const res = await request.delete("/api/test/admin-sessions", {
+      data: { email: DEV_EMAIL },
+    });
+    expect(res.status(), "could not reset admin elevation").toBe(200);
+  });
+
   test("the queue is not reachable without an admin session", async ({ page, request }) => {
     await signInAsOwner(page, request);
     await page.goto("/admin/feedback");

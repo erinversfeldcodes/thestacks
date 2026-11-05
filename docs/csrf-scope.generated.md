@@ -19,6 +19,7 @@ in-scope DELETE /api/groups/:group_id/members/:user_id
 exempt:partner_auth DELETE /api/partner/events/:id
 in-scope DELETE /api/placements/:id
 in-scope DELETE /api/shelves/:id
+exempt:test_helper DELETE /api/test/admin-sessions
 in-scope DELETE /api/users/:id/block
 in-scope POST /api/admin/auth/login
 in-scope POST /api/admin/auth/mfa/confirm

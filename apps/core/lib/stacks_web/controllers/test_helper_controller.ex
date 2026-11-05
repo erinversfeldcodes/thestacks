@@ -12,6 +12,7 @@ defmodule StacksWeb.TestHelperController do
 
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+  alias Stacks.Admin.SessionContext
   alias Stacks.AgeVerification
   alias Stacks.Blog
   alias Stacks.Books
@@ -109,6 +110,35 @@ defmodule StacksWeb.TestHelperController do
   end
 
   def set_age_verification(conn, _params), do: not_found(conn)
+
+  @doc """
+      DELETE /api/test/admin-sessions  body: {"email"}
+
+      Revokes every live admin session the named operator holds, putting them
+      back to "signed in, not elevated". `200 {"revoked": n}` or `404`.
+
+      ⛔ **Why this exists, and why the E2E suite cannot do without it.** Admin
+      elevation now lives on the server's session and survives a reload — which
+      is the product behaviour — so a spec can no longer assume the sign-in gate
+      appears on every load. Each spec that wants to drive the gate has to start
+      from a known-unelevated state, and the only alternatives were a
+      conditional "pass the gate if it happens to be showing" (a vacuous guard
+      by this repo's own rule) or ordering dependencies between tests.
+
+      ⚖️ **It can only ever reduce access**, which is why it carries no
+      `.test`-domain restriction where its siblings do: those mint or grant
+      something, so they are confined to throwaway accounts. This revokes, so
+      the worst a misuse achieves is making an operator sign in again. It is
+      still behind `STACKS_E2E_TEST_HELPERS` like every route in this scope.
+  """
+  def revoke_admin_sessions(conn, %{"email" => email}) when is_binary(email) do
+    case Accounts.get_user_by_email(email) do
+      %{} = user -> json(conn, %{revoked: SessionContext.revoke_all_for_user(user.id)})
+      _ -> not_found(conn)
+    end
+  end
+
+  def revoke_admin_sessions(conn, _params), do: not_found(conn)
 
   defp apply_verification(user, true),
     do: AgeVerification.record_verification(user, "e2e_test_helper", nil)

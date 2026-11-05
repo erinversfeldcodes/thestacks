@@ -440,6 +440,7 @@ defmodule CoreWeb.Router do
     get "/sent-emails", TestHelperController, :sent_emails
     get "/email-budget", TestHelperController, :email_budget
     put "/age-verification", TestHelperController, :set_age_verification
+    delete "/admin-sessions", TestHelperController, :revoke_admin_sessions
     post "/session", TestHelperController, :mint_session
     post "/book-writing", TestHelperController, :seed_book_writing
     post "/book-description", TestHelperController, :seed_book_description

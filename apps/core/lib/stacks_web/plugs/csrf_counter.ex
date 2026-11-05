@@ -28,12 +28,12 @@ defmodule StacksWeb.Plugs.CsrfCounter do
         * **`partner_auth` routes** (4 state-changing). Server-to-server, Argon2
           key, no cookie — they have no ambient authority to borrow and are not
           CSRF targets. Deliberately outside.
-        * **`/api/test/*` helpers** (4). Gated behind `STACKS_E2E_TEST_HELPERS`
+        * **`/api/test/*` helpers** (5). Gated behind `STACKS_E2E_TEST_HELPERS`
           and not reachable in production.
 
       ⚖️ So a zero here means "no browser request arrived without a proof on a
       route this plug saw". It does NOT mean "every state-changing route is
-      proven". The scope is 83 of 91 state-changing routes, and that number is
+      proven". The scope is 83 of 92 state-changing routes, and that number is
       the thing to quote when reading the counter — a zero over a population you
       have not stated is the shape this project has twice mistaken for coverage.
 

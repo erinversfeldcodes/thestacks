@@ -52,6 +52,20 @@ defmodule Stacks.Admin.SessionContext do
     end)
   end
 
+  @doc """
+      Revoke every live admin session an operator holds, returning how many.
+
+      The same statement `create/3` runs, exposed because an E2E run needs to
+      put the operator back to "not elevated" deterministically — and because
+      revoking is the one operation on this table that can only ever reduce
+      access, so a caller cannot use it to grant anything.
+  """
+  @spec revoke_all_for_user(binary()) :: non_neg_integer()
+  def revoke_all_for_user(user_id) when is_binary(user_id) do
+    {count, _} = retire_live_sessions(user_id)
+    count
+  end
+
   # Everything still usable: unrevoked. Expired and wrong-boot rows are already
   # dead and rewriting them would only churn the table.
   defp retire_live_sessions(user_id) do

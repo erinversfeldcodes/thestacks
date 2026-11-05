@@ -80,7 +80,7 @@ update msg model maybeToken =
                     ( { model | books = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
@@ -151,7 +151,7 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else

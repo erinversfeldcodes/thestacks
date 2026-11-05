@@ -721,7 +721,12 @@ bootPage model maybeAuth =
         model.route
         (originOf model.url)
         maybeAuth
-        (sessionCredentials model)
+        -- ⛔ FROM `maybeAuth`, NOT FROM `model`. The answer about who is asking
+        -- has just arrived and has not been written to the model yet, so
+        -- `sessionCredentials model` here reads the PRE-BOOT value — `Nothing`
+        -- — while the line above already holds the real one. Two sources for
+        -- one fact, one of them stale by construction.
+        (Maybe.map .token maybeAuth)
         model.previousRoute
         Login.Fresh
 
@@ -954,14 +959,6 @@ initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe Api.Credentials -
 initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
     if loginRedirectFor route maybeAuth /= Nothing then
         ( PageLogin (Login.init config.proof arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
-
-    else if isAdminRoute route && adminToken == Nothing then
-        -- ⛔ The gate that makes four surfaces reachable. `/api/admin/*` needs an
-        -- MFA-verified admin-session token, NOT the ordinary Guardian one; the pages were handed
-        -- the latter and every request 401'd, so all four had never loaded for anyone. Rather than
-        -- let a page render and fail, the route resolves to the sign-in gate until a real admin
-        -- token exists — so a page never holds a token it cannot use.
-        ( PageAdminGate route (AdminSession.init config.proof), Cmd.none )
 
     else
         initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival

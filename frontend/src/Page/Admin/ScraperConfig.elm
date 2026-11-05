@@ -58,7 +58,7 @@ update msg model =
                     ( { model | sourceHealth = Success sources }, Cmd.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else

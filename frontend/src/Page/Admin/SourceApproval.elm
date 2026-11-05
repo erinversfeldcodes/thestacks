@@ -79,7 +79,7 @@ update msg model maybeToken =
                     ( { model | sources = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
@@ -156,7 +156,7 @@ handleActionResult model sourceId result =
             ( { model | sources = updatedSources, actionInProgress = Nothing, actionError = Nothing }, Cmd.none, NoOut )
 
         Err err ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else

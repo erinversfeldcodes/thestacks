@@ -40,9 +40,9 @@ defmodule StacksWeb.Plugs.CsrfEnforce do
 
       ## ⛔ What it does NOT protect, stated because a reader will assume otherwise
 
-      It runs on the `:api` pipeline: **83 of 91** state-changing routes. The 4
+      It runs on the `:api` pipeline: **83 of 92** state-changing routes. The 4
       `partner_auth` routes carry an Argon2 key and no cookie — no ambient
-      authority to borrow, so not CSRF targets — and the 4 `/api/test/*` helpers
+      authority to borrow, so not CSRF targets — and the 5 `/api/test/*` helpers
       are unreachable in production. `scripts/check-csrf-scope.sh` holds those
       numbers to the router.
 
