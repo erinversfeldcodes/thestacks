@@ -209,6 +209,34 @@ defmodule Stacks.Insights do
     end)
   end
 
+  # ⚖️ THE RAW COUNT SHIPS, and the alternative was weighed rather than skipped:
+  # send `uniqueness` and the explanation text only, on the principle the public
+  # aggregate page already follows — "counts are rounded to the nearest 10 to
+  # prevent fingerprinting small user bases" (`docs/user-stories.md:282`).
+  #
+  # Withholding it buys nothing here, for three reasons that were measured
+  # rather than assumed.
+  #
+  #   * The number identifies nobody on its own. Getting from
+  #     `others_sharing_all: 1` to a person needs the size of the population
+  #     and which reader it is, and this payload carries neither.
+  #     `op.platform_row_counts()` publishes bookshelves, placements and active
+  #     placements — no user count — so the platform does not supply the first
+  #     of those anywhere else either.
+  #   * `classify/1` preserves the only inference that matters anyway. It maps
+  #     0 to "unique" and 1..5 to "rare", so the 0-versus-non-zero distinction
+  #     — the whole of what a small population leaks — survives the bucket
+  #     exactly. Sending the bucket alone removes no inference.
+  #   * `explanation/2` interpolates the count into the prose, so redacting the
+  #     field and keeping the sentence would be decoration, and dropping the
+  #     sentence too would remove the surface's entire purpose.
+  #
+  # ⚠️ The rounding principle it was weighed against governs a PUBLIC aggregate
+  # about other people. This number is about the subject's own exposure and is
+  # shown only to the subject, and its smallness is precisely what the page
+  # exists to teach. Rounding to the nearest 10 reports "no other reader" and
+  # "four other readers" identically as zero, which misinforms in the direction
+  # that matters.
   defp deanonymisation(user_id, placements) do
     distinct_books = placements |> Enum.map(& &1.book_id) |> Enum.uniq()
 
