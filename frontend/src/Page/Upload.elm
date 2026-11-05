@@ -113,6 +113,7 @@ type alias Model =
     , rejectedBookIds : List String
     , waitedSeconds : Int
     , silentSeconds : Int
+    , retryable : Bool
     }
 
 
@@ -211,6 +212,11 @@ init =
     , rejectedBookIds = []
     , waitedSeconds = 0
     , silentSeconds = 0
+
+    -- ⛔ TRUE for a live upload, because the photograph was just sent and the
+    -- retry can re-read it. Only a RESUMED item can be otherwise, and it says
+    -- so on the wire — see `ResumeInboxItem`.
+    , retryable = True
     }
 
 
@@ -906,6 +912,7 @@ updateWithEffect msg model maybeToken =
                 { init
                     | ageGatingEnabled = model.ageGatingEnabled
                     , uploadState = Success item.imageId
+                    , retryable = item.retryable
                 }
                 maybeToken
 
@@ -1002,7 +1009,7 @@ view model maybeToken inbox =
                 Just _ ->
                     case model.step of
                         Verifying book ->
-                            viewVerifying model.ageGatingEnabled model.existingShelves book
+                            viewVerifying model.retryable model.ageGatingEnabled model.existingShelves book
 
                         ChoosingShelf book ->
                             viewChoosingShelf model book
@@ -1759,8 +1766,8 @@ joinWithAnd labels =
 
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
-viewVerifying : Bool -> List String -> Book -> Html Msg
-viewVerifying ageGatingEnabled existingShelves book =
+viewVerifying : Bool -> Bool -> List String -> Book -> Html Msg
+viewVerifying retryable ageGatingEnabled existingShelves book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
         , viewExistingShelvesNotice existingShelves
@@ -1793,12 +1800,26 @@ viewVerifying ageGatingEnabled existingShelves book =
                 , onClick ConfirmIdentification
                 ]
                 [ text "Yes, that's it" ]
-            , button
-                [ class "btn btn--secondary"
-                , testId "upload-reject-btn"
-                , onClick RejectIdentification
-                ]
-                [ text "No, try again" ]
+            , if retryable then
+                button
+                    [ class "btn btn--secondary"
+                    , testId "upload-reject-btn"
+                    , onClick RejectIdentification
+                    ]
+                    [ text "No, try again" ]
+
+              else
+                -- ⛔ SAID, NOT SILENTLY DROPPED. A button that vanishes with no
+                -- account of itself reads as a bug, and the reader has no way
+                -- to know the photograph is the thing that is gone rather than
+                -- the feature. The server still answers 410 if this is stale
+                -- between load and click; this is so the reader is told first
+                -- rather than after pressing.
+                p
+                    [ class "upload-verify__retry-unavailable"
+                    , testId "upload-retry-unavailable"
+                    ]
+                    [ text "We no longer have the photograph, so it cannot be read again. If this is wrong, take the book off your shelf and try a fresh photo." ]
             ]
         ]
 

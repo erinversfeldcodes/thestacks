@@ -209,7 +209,7 @@ suite =
         , describe "GET /api/uploads/inbox"
             -- Source: `UploadController.inbox/2` → `ProtoJSON.upload_inbox/1`
             -- → upload_inbox_item/1: image_id, kind, book_ids, rejection_reason,
-            -- uploaded_at. `kind` is always a literal set by
+            -- uploaded_at, retryable. `kind` is always a literal set by
             -- `Uploads.list_awaiting_attention/1`.
             [ accepts "an inbox awaiting confirmation decodes"
                 Api.uploadInboxDecoder
@@ -219,11 +219,26 @@ suite =
                    "kind": "awaiting_confirmation",
                    "book_ids": ["44444444-4444-4444-4444-444444444444"],
                    "rejection_reason": null,
-                   "uploaded_at": "2026-10-02T08:00:00.000000Z"}
+                   "uploaded_at": "2026-10-02T08:00:00.000000Z",
+                   "retryable": true}
                 ]}
                 """
             , accepts "a failed item carries its reason"
                 Api.inboxItemDecoder
+                """
+                {"image_id": "33333333-3333-3333-3333-333333333333",
+                 "kind": "failed",
+                 "book_ids": [],
+                 "rejection_reason": "no_isbn_found",
+                 "uploaded_at": "2026-10-02T08:00:00.000000Z",
+                 "retryable": false}
+                """
+            , refuses "an item with no retryable field is refused, not defaulted"
+                Api.inboxItemDecoder
+                -- ⛔ The safe default is `False`, which means a decoder that
+                -- quietly supplied one would HIDE the retry button rather than
+                -- surface the bug — a wire rename would look like a product
+                -- decision. Refusing is what keeps the field honest.
                 """
                 {"image_id": "33333333-3333-3333-3333-333333333333",
                  "kind": "failed",

@@ -7,7 +7,7 @@ defmodule Stacks.GDPR.ImageRetention do
       - `cleanup_expired_images/1` — deletes images past their expires_at deadline (30 days)
       - `cleanup_stuck_images/1` — safety net for images that never finished:
         `pending` (the job wedged) and `awaiting_upload` (the bytes never came),
-        both after #{@stuck_threshold_hours} hours
+        both after `@stuck_threshold_hours`
       - `cleanup_orphan_objects/1` — deletes objects no row points at
 
       ⚠️ The first of those is the only one that separates the two deadlines: a

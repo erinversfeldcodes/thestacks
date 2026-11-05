@@ -929,6 +929,7 @@ type alias InboxItem =
     , kind : InboxKind
     , bookIds : List String
     , rejectionReason : Maybe String
+    , retryable : Bool
     }
 
 
@@ -965,19 +966,22 @@ inboxKindDecoder =
 
 inboxItemDecoder : Decoder InboxItem
 inboxItemDecoder =
-    Decode.map4 InboxItem
+    Decode.map5 InboxItem
         (Decode.field "image_id" Decode.string)
         (Decode.field "kind" inboxKindDecoder)
         (Decode.field "book_ids" (Decode.list Decode.string))
         (Decode.field "rejection_reason" (Decode.nullable Decode.string))
+        (Decode.field "retryable" Decode.bool)
 
 
 {-| `GET /api/uploads/inbox` — every upload this reader has not finished with.
 
-Every field is required, for the same reason `streamEventDecoder`'s are: `StacksWeb.ProtoJSON.upload_inbox_item/1` emits all four on every
-branch, `book_ids` defaulting to `[]` and `rejection_reason` arriving as JSON
-`null`. A `Decode.succeed` fallback here would mean a wire rename could never
-redden a test.
+Every field is required, for the same reason `streamEventDecoder`'s are: `StacksWeb.ProtoJSON.upload_inbox_item/1` emits all five on every
+branch, `book_ids` defaulting to `[]`, `rejection_reason` arriving as JSON
+`null` and `retryable` as a bare boolean. A `Decode.succeed` fallback here would
+mean a wire rename could never redden a test — and `retryable` is the field
+where that would hurt most, because its safe default is `False` and a decoder
+that quietly supplied one would hide the button rather than the bug.
 
 -}
 uploadInboxDecoder : Decoder (List InboxItem)

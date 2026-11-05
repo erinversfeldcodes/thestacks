@@ -394,10 +394,25 @@ defmodule Stacks.Uploads do
           kind: "awaiting_confirmation",
           book_ids: unshelved,
           rejection_reason: nil,
-          uploaded_at: image.uploaded_at
+          uploaded_at: image.uploaded_at,
+          retryable: retryable?(image)
         }
     end
   end
+
+  # ⛔ FROM THE ROW, NOT FROM A DEADLINE. "No, try again" re-reads the original
+  # photograph, and `ImageRetention.cleanup_finished_image_bytes/1` deletes that
+  # once identification has been terminal for the reader's retry window — while
+  # this record survives to its own 30-day expiry. So for most of an item's life
+  # the retry is an action the data cannot support.
+  #
+  # ⚖️ It asks whether the path is still there, which is the SAME fact
+  # `UploadController.reject_identification/2` refuses on. Recomputing "is it
+  # within 24 hours" here would express the retention window a second time, and
+  # the two would drift the first time it changed — so the window is named in
+  # exactly one module and everything else asks the row.
+  defp retryable?(%UploadedImage{storage_path: path}),
+    do: is_binary(path) and path != ""
 
   defp failed_item(%UploadedImage{} = image) do
     %{
@@ -405,6 +420,7 @@ defmodule Stacks.Uploads do
       kind: "failed",
       book_ids: [],
       rejection_reason: image.rejection_reason,
+      retryable: retryable?(image),
       uploaded_at: image.uploaded_at
     }
   end

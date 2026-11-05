@@ -64,6 +64,7 @@ awaitingItem imageId =
     , kind = Api.AwaitingConfirmation
     , bookIds = [ "book-" ++ imageId ]
     , rejectionReason = Nothing
+    , retryable = True
     }
 
 
@@ -73,6 +74,7 @@ failedItem imageId reason =
     , kind = Api.Failed
     , bookIds = []
     , rejectionReason = Just reason
+    , retryable = True
     }
 
 

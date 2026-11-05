@@ -6175,6 +6175,18 @@ h4 {
     color: var(--text-muted);
 }
 
+/* The line that stands where "No, try again" would be once the photograph has
+   been discarded. Deliberately quiet — it explains an absence rather than
+   offering an action, and a reader scanning for buttons should not mistake it
+   for one. */
+.upload-verify__retry-unavailable {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    max-width: 32rem;
+    margin: 0;
+}
+
 .feed-item {
     max-width: 60rem;
     margin: 0 auto;

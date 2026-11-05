@@ -621,7 +621,8 @@ defmodule StacksWeb.ProtoJSON do
       kind: get_field(item, :kind),
       book_ids: get_field(item, :book_ids, []),
       rejection_reason: get_field(item, :rejection_reason),
-      uploaded_at: get_field(item, :uploaded_at)
+      uploaded_at: get_field(item, :uploaded_at),
+      retryable: get_field(item, :retryable, false)
     }
   end
 
