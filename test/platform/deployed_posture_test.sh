@@ -266,7 +266,14 @@ test_case "the_definer_roster_is_one_list_with_a_pinned_size" "a roster edit mus
 # the unexpected-direction list would accept the function as expected AND leave
 # it uncovered by the regression direction.
 assert_contains "$GATE_SRC" "DEFINER_SIGNATURES=(" "there is one roster"
-assert_contains "$GATE_SRC" "EXPECTED_DEFINERS=7" "and its size is pinned"
+# ⚖️ 7 → 8 on 2026-11-05: `op.count_others_sharing_all(uuid,integer)` joined the
+# roster. It had existed for days as `(uuid,uuid[],integer)` WITHOUT being
+# registered, which `definer_set_has_no_unexpected_function` was reporting while
+# this suite's vacuity case failed instead — the signal arrived as "a meta-test
+# about vacuity is broken" rather than "an unregistered definer exists". The
+# `uuid[]` was then dropped as a caller-chosen subject selector, so the roster
+# records the narrowed signature and not the one that shipped.
+assert_contains "$GATE_SRC" "EXPECTED_DEFINERS=8" "and its size is pinned"
 assert_contains "$GATE_SRC" "DEFINER_VALUES" "built once and interpolated into both arms"
 assert_contains "$GATE_SRC" "regprocedure" "keyed on the full signature rather than the name"
 

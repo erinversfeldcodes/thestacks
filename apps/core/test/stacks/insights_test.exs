@@ -232,8 +232,8 @@ defmodule Stacks.InsightsTest do
             Stacks.Scope.with_user(nosy.id, fn ->
               SQL.query!(
                 Repo,
-                "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)",
-                [Ecto.UUID.dump!(subject.id), [], 0]
+                "SELECT * FROM op.count_others_sharing_all($1::uuid, $2::integer)",
+                [Ecto.UUID.dump!(subject.id), 5]
               )
             end)
           end)
@@ -252,8 +252,8 @@ defmodule Stacks.InsightsTest do
           AppRole.as_app_role(fn ->
             SQL.query!(
               Repo,
-              "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)",
-              [nil, [], 0]
+              "SELECT * FROM op.count_others_sharing_all($1::uuid, $2::integer)",
+              [nil, 5]
             )
           end)
         end

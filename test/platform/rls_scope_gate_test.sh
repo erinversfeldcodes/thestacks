@@ -325,7 +325,14 @@ OUT="$(RLS_SCOPE_EXTRA_TEST_DIR="$NEST_FIXTURES/prose" bash "$GATE" 2>&1)"
 RC=$?
 assert_exit_zero "$RC" \
     "neither the commented call syntax nor blocked? (an establisher only by its own comment) may flag"
-assert_contains "$OUT" "50 such functions known" \
+# ⚖️ 50 → 51 on 2026-11-05: `Insights.count_others_sharing_all/2` joined the
+# establisher set. It wraps its query in `Scope.with_user` so the SECURITY
+# DEFINER behind it can refuse a question about somebody else, which is exactly
+# what an establisher is. The pin is what made that growth a decision rather
+# than a drift — it had been red in three consecutive `just ci` runs, reported
+# as "the establisher set is the STRIPPED one", which names the pin's original
+# purpose and not the reason it was failing.
+assert_contains "$OUT" "51 such functions known" \
     "and the establisher set is the STRIPPED one — 52 included two functions matched only in prose"
 
 # ⛔ THE WINDOW IS BOUNDED AT THE ENCLOSING BLOCK, not a flat 14 lines. A fixed

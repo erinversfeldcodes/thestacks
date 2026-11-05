@@ -582,6 +582,7 @@ DATA_CONDITION_ASSERTIONS=(
 # `p.oid::regprocedure::text` carries the arguments.
 DEFINER_SIGNATURES=(
     'blocked_pair(uuid,uuid)'
+    'count_others_sharing_all(uuid,integer)'
     'group_feed_placements(uuid,uuid[],timestamp with time zone,integer)'
     'placement_owner(uuid)'
     'placement_owners_for_edition(uuid)'
@@ -589,7 +590,7 @@ DEFINER_SIGNATURES=(
     'unmerge_placement_counts(uuid,uuid)'
     'wishlist_user_ids(uuid)'
 )
-EXPECTED_DEFINERS=7
+EXPECTED_DEFINERS=8
 
 if [[ "${#DEFINER_SIGNATURES[@]}" -ne "$EXPECTED_DEFINERS" ]]; then
     echo "FAIL deployed-posture: declared $EXPECTED_DEFINERS definer signature(s), listed ${#DEFINER_SIGNATURES[@]}." >&2

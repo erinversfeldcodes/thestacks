@@ -31,7 +31,21 @@ defmodule Core.Repo.Migrations.AssertTheDefinerCanReadWhatItWasWrittenToRead do
 
   use Ecto.Migration
 
-  @signature "op.count_others_sharing_all(uuid, uuid[], integer)"
+  # ⚠️ KEYED ON THE NAME, NOT AN EXACT SIGNATURE, and the difference is what
+  # keeps this migration from becoming a landmine.
+  #
+  # This pinned `op.count_others_sharing_all(uuid, uuid[], integer)` via
+  # `to_regprocedure`. A later migration narrowed that function to
+  # `(uuid, integer)` — deliberately, because the `uuid[]` let the caller choose
+  # which books the definer was asked about. A historical migration asserting
+  # an exact signature fails the moment a successor legitimately changes it, and
+  # it fails by blocking ALL migration with a message about the de-anonymisation
+  # insight, which describes neither the cause nor the fix.
+  #
+  # The claim here was never about the argument list: it is that the function's
+  # OWNER can read the tables the function was written to read. Any overload of
+  # the name answers that, so the lookup takes the name.
+  @function_name "count_others_sharing_all"
   @tables ~w(bookshelves bookshelf_placements)
 
   def up, do: execute(assert_readable())
@@ -47,8 +61,10 @@ defmodule Core.Repo.Migrations.AssertTheDefinerCanReadWhatItWasWrittenToRead do
       owner_role text;
       t text;
     BEGIN
-      SELECT pg_get_userbyid(proowner) INTO owner_role
-        FROM pg_proc WHERE oid = to_regprocedure('#{@signature}');
+      SELECT pg_get_userbyid(p.proowner) INTO owner_role
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'op' AND p.proname = '#{@function_name}'
+       LIMIT 1;
 
       IF owner_role IS NULL THEN
         RAISE EXCEPTION

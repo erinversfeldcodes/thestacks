@@ -250,9 +250,16 @@ defmodule Stacks.Insights do
             "to see how identifiable your combination is."
       }
     else
-      fingerprint = rarest_books(distinct_books)
-      sample_size = length(fingerprint)
-      others = count_others_sharing_all(user_id, fingerprint, sample_size)
+      # ⛔ THE FUNCTION PICKS THE BOOKS NOW, not this module.
+      #
+      # This used to rank the reader's books here and pass the resulting
+      # fingerprint down as a `uuid[]`. The SQL could not check that the array
+      # was the subject's own, and as a SECURITY DEFINER it reads every row —
+      # so "how many others hold ALL of [any set]" was answerable about books
+      # the asker does not own, one probe at a time, with `subject` set to
+      # themselves the whole time. Deriving it inside leaves only the question
+      # this insight exists to answer.
+      {sample_size, others} = count_others_sharing_all(user_id, @fingerprint_size)
 
       %{
         sample_size: sample_size,
@@ -263,100 +270,33 @@ defmodule Stacks.Insights do
     end
   end
 
-  defp rarest_books(distinct_books) do
-    counts = community_read_counts(distinct_books)
-
-    distinct_books
-    |> Enum.sort_by(fn id -> {Map.get(counts, id, 0), id} end)
-    |> Enum.take(@fingerprint_size)
-  end
-
-  defp community_read_counts([]), do: %{}
-
-  # ⚠️ The same confident-zero shape as `Books.community_read_count/1` had, one
-  # module over, and it is kept here on purpose — with the difference stated.
+  # ⛔ `rarest_books/1`, `community_read_counts/1` AND `read_counts_unavailable/1`
+  # WERE HERE, and they went with the channel they served.
   #
-  # There, the caller is a book page rendering ONE number, so "I could not find
-  # out" is a distinct and reportable answer. Here the map feeds a ranking over
-  # many books, where an absent key already means "no count for this book" and
-  # the aggregate degrades rather than lies: a book missing from the map simply
-  # does not get a community-read contribution to its score.
+  # They ranked the reader's books by community read count so this module could
+  # pass the rarest few down as a `uuid[]`. That array was the channel: the SQL
+  # could not verify it belonged to the subject, so the definer answered "how
+  # many others hold ALL of these" for any set at all. The ranking now happens
+  # inside `op.count_others_sharing_all`, where the books can only be the
+  # subject's own.
   #
-  # So an empty map is a legitimate degraded result, NOT a false zero — but the
-  # FAILURE still has to be visible, which it was not. It emits the same
-  # telemetry as its sibling, so one persistent cause shows up once rather than
-  # as two unrelated silences.
-  defp community_read_counts(book_ids) do
-    sql =
-      "SELECT book_id::text, read_count FROM marts.mart_community_read_count WHERE book_id = ANY($1::uuid[])"
+  # ⚖️ Their `community_read_counts` degraded rather than lied — an absent key
+  # simply contributed no count to a book's score — and that behaviour is
+  # preserved by the SQL's `count(DISTINCT …)`, which yields 0 for a book
+  # nobody else holds rather than dropping it from the ranking.
 
-    case Repo.query(sql, [book_ids]) do
-      {:ok, %{rows: rows}} -> Map.new(rows, fn [id, count] -> {id, count} end)
-      {:error, reason} -> read_counts_unavailable(reason)
-    end
-  rescue
-    e -> read_counts_unavailable(e)
-  end
+  defp count_others_sharing_all(user_id, fingerprint_size) do
+    sql = "SELECT sample_size, others FROM op.count_others_sharing_all($1::uuid, $2::integer)"
 
-  defp read_counts_unavailable(reason) do
-    Logger.warning(
-      "Insights.community_read_counts unavailable: #{inspect(reason)}. " <>
-        "Rankings degrade without the community-read signal; a missing mart means the " <>
-        "scheduled dbt refresh has not run."
-    )
+    case Scope.with_user(user_id, fn -> Repo.query(sql, [user_id, fingerprint_size]) end) do
+      {:ok, %{rows: [[sample_size, others]]}} ->
+        {sample_size, others}
 
-    :telemetry.execute([:stacks, :marts, :read_unavailable], %{count: 1}, %{
-      mart: "mart_community_read_count"
-    })
-
-    %{}
-  end
-
-  # ⛔ THROUGH THE DEFINER, AND THE RESCUE IS GONE RATHER THAN KEPT AS A NET.
-  #
-  # The inline query asked `bs.user_id <> $2`, an aggregate over other readers'
-  # rows, which no per-user scope can answer: scoped it returned a confident
-  # ZERO and told every reader they were maximally identifiable; unscoped the
-  # policy refused with 42501 and the rescue below reported "could not compute"
-  # to every reader on every deployed stack since row-level security went on.
-  #
-  # ⚠️ The rescue is DELETED, not retained-and-proven-unreachable. Keeping it
-  # would preserve this surface's whole failure character — that nobody becomes
-  # suspicious. A refusal now propagates: `op.count_others_sharing_all/3`
-  # raises `42501` on a NULL subject or a caller asking about somebody else,
-  # and either is a defect in this module rather than a condition to paper
-  # over. The remaining `log_and_nil/1` covers only a result shape Postgres
-  # should never return, which is the one case where continuing is honest.
-  # ⚖️ DELIBERATELY NOT SCOPED, and this was tested rather than assumed.
-  #
-  # A review found the definer's argument guard inert here — it refuses a
-  # *scoped* caller asking about somebody else, and this call sets no scope, so
-  # the branch never evaluates. Wrapping the call in `Scope.with_user/2` looked
-  # like free defence in depth. It is not, for two measured reasons.
-  #
-  # ⛔ `Stacks.Scope.with_user/2` already RAISES on a mismatch — "cannot
-  # re-scope ... two users in one request means a query is running on behalf of
-  # the wrong one" (`scope.ex:167`). So the scenario the guard defends against
-  # cannot arise through `Scope` at all, and a caller that bypasses `Scope`
-  # bypasses the wrap too. The wrap enforces, a second time, a rule already
-  # enforced one layer up, against a path that reaches neither.
-  #
-  # ⚠️ And it is not free: `with_user/2` opens a transaction, while the
-  # fingerprint above reads `marts.mart_community_read_count` — a mart that is
-  # routinely ABSENT and whose reader rescues and carries on. Inside a
-  # transaction that rescue is not enough: the failed statement poisons it and
-  # every later command dies with `25P02`. Measured — wrapping
-  # `deanonymisation/2` reds eight cases.
-  #
-  # The real containment is this module passing the authenticated reader's id,
-  # and the real remaining gap is that the function does not bound WHAT may be
-  # asked of it, which is tracked separately.
-  defp count_others_sharing_all(user_id, book_ids, sample_size) do
-    sql = "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)"
-
-    case Scope.with_user(user_id, fn -> Repo.query(sql, [user_id, book_ids, sample_size]) end) do
-      {:ok, %{rows: [[count]]}} -> count
-      other -> log_and_nil(other)
+      other ->
+        # ⚠️ The size comes back from the function too, so an unavailable
+        # answer has no size to report either. Reporting the REQUESTED size
+        # beside a nil count would describe a fingerprint that was never built.
+        {nil, log_and_nil(other)}
     end
   end
 
