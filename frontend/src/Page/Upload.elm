@@ -1809,18 +1809,37 @@ viewVerifying retryable ageGatingEnabled existingShelves book =
                     [ text "No, try again" ]
 
               else
-                -- ⛔ SAID, NOT SILENTLY DROPPED. A button that vanishes with no
-                -- account of itself reads as a bug, and the reader has no way
-                -- to know the photograph is the thing that is gone rather than
-                -- the feature. The server still answers 410 if this is stale
-                -- between load and click; this is so the reader is told first
-                -- rather than after pressing.
-                p
-                    [ class "upload-verify__retry-unavailable"
-                    , testId "upload-retry-unavailable"
-                    ]
-                    [ text "We no longer have the photograph, so it cannot be read again. If this is wrong, take the book off your shelf and try a fresh photo." ]
+                text ""
             ]
+
+        -- ⛔ OUTSIDE THE ACTIONS ROW, and the first attempt had it inside.
+        --
+        -- `upload-verify__actions` is a wrapping flex row, so the line sat
+        -- immediately beside "Yes, that's it" and read as that button's helper
+        -- text rather than as an account of a missing one. `flex-basis: 100%`
+        -- did not fix it: the computed style said 100% and the line still did
+        -- not wrap, because `max-width: 32rem` clamps the hypothetical main
+        -- size below the width that would force a new row. A sibling is the
+        -- structure that was wanted; the flex property was an attempt to argue
+        -- the layout out of a shape it should not have had.
+        --
+        -- ⚠️ Found by DRIVING the page. The view tests assert the DOM Elm
+        -- produces, and both the inline placement and the wrong instruction
+        -- below were invisible to them.
+        , if retryable then
+            text ""
+
+          else
+            -- SAID, NOT SILENTLY DROPPED. A control that vanishes with no
+            -- account of itself reads as a bug, and the reader cannot tell that
+            -- the photograph is what is gone rather than the feature. The
+            -- server still answers 410 if this is stale between load and click;
+            -- this is so the reader is told before pressing rather than after.
+            p
+                [ class "upload-verify__retry-unavailable"
+                , testId "upload-retry-unavailable"
+                ]
+                [ text "We no longer have the photograph, so there is nothing left to read a second time. If this is not your book, add a fresh photo rather than confirming this one." ]
         ]
 
 

@@ -113,6 +113,12 @@ message UploadInboxItem {
   // server refuses on. It is deliberately NOT a recomputed deadline: the
   // retention window would then be expressed twice and the two would drift the
   // first time it changed.
+  //
+  // ⚠️ It says "the record still claims a photograph", not "the bytes are
+  // there". A row pointing at an object that has been deleted reports true and
+  // the retry then answers 410 — measured at 2,374 rows in production, not yet
+  // remediated. The client is told first in the ordinary case; the refusal
+  // remains the backstop for the rest.
   bool retryable = 6 [json_name = "retryable"];
 }
 

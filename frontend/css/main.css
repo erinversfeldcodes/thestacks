@@ -6185,6 +6185,13 @@ h4 {
     color: var(--text-muted);
     max-width: 32rem;
     margin: 0;
+
+    /* ⚠️ `flex-basis: 100%` was tried here first and did NOT work: the computed
+       style reported 100% while the line still sat beside the button, because
+       `max-width` clamps the hypothetical main size below the width that would
+       force a wrap. The paragraph is now a sibling of the actions row instead,
+       which is the structure that was wanted all along. */
+    margin-top: var(--space-3);
 }
 
 .feed-item {

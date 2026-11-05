@@ -411,6 +411,20 @@ defmodule Stacks.Uploads do
   # within 24 hours" here would express the retention window a second time, and
   # the two would drift the first time it changed — so the window is named in
   # exactly one module and everything else asks the row.
+  #
+  # ⚠️ THIS IS A CLAIM ABOUT THE ROW, NOT ABOUT THE BYTES, and the difference is
+  # measurable rather than theoretical. A row whose object was deleted from the
+  # bucket while its `storage_path` still points at it reports `true` here, and
+  # the reader is offered a retry that answers 410 — the very thing this field
+  # exists to prevent. Production held **2,374 such rows** when it was last
+  # measured, and they are not yet remediated.
+  #
+  # Confirming existence would mean a storage round trip per inbox item on every
+  # render, which couples a list endpoint to the backend's latency and
+  # availability. So the cheap proxy stands, the 410 remains the backstop, and
+  # the honest statement is that this answers "do we still think we have it".
+  # `ImageRetention.storage_consistency_check/0` is what detects the disagreeing
+  # rows; NULLing their path is what would make this field right about them.
   defp retryable?(%UploadedImage{storage_path: path}),
     do: is_binary(path) and path != ""
 
