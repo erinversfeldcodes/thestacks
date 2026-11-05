@@ -22,11 +22,22 @@ defmodule StacksWeb.UploadController do
 
       Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
 
-      Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
-      bytes directly to `upload_url` (R2), then calls
-      `POST /api/upload/:id/commit` to signal completion. Phoenix never
-      sees the bytes — the POST here is a lightweight DB insert + local
-      SigV4 signing operation (~50ms typical).
+      Returns: `{image_id, upload_url, expires_in}`, then
+      `POST /api/upload/:id/commit` to signal completion.
+
+      ⛔ **`upload_url` IS A PATH ON OUR OWN ORIGIN**, `/api/upload/:id/data` —
+      not a presigned object-storage link, and the client does not use it: it
+      builds that path from `image_id` itself. This said "Client PUTs the image
+      bytes directly to `upload_url` (R2) … Phoenix never sees the bytes — a
+      lightweight DB insert + local SigV4 signing operation", and every clause
+      of that had been false since July. The bytes travel through this app,
+      which is what makes the request same-origin and therefore able to carry
+      CSRF proof; treating the destination as cross-origin sent no header and
+      every upload was refused once enforcement went on.
+
+      ⚠️ The stale version was not harmless. An E2E spec mocked the presigned
+      URL this described, so the client's real PUT went unmocked and most of
+      that suite failed blaming the client for the mock's error.
   """
   @spec init(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def init(conn, params) do

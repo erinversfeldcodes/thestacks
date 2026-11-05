@@ -93,6 +93,7 @@ step() {
 
 gate gen-elm-proto.sh
 gate check-e2e-vacuous-guards.sh
+gate check-e2e-mock-routes.sh
 gate check-prose-assertions.sh
 gate check-orphan-classes.sh
 gate check-session-expiry-coverage.sh
