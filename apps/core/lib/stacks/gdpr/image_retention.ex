@@ -171,7 +171,7 @@ defmodule Stacks.GDPR.ImageRetention do
     # So a storage failure is NOT swallowed here, where `delete_storage_objects/1`
     # swallows it for the sweeps that delete the row anyway. The row is staying,
     # so its path must keep pointing at whatever is actually there.
-    {deleted, failed} = delete_each(rows)
+    {deleted, failed} = delete_storage_objects(rows)
 
     if failed != [] do
       Logger.warning(
@@ -503,30 +503,37 @@ defmodule Stacks.GDPR.ImageRetention do
 
   @doc """
       Deletes the storage object for each row that carries a non-empty
-      `storage_path`. A storage-layer failure is logged and swallowed — it must
-      never block the DB-side removal (a leaked object is recoverable; a surviving
-      DB row that still points a user at their image is the erasure leak).
+      `storage_path`, and **reports which ones actually went**. Returns
+      `{deleted, failed}`, both lists of the rows given.
+
+      ⚖️ A storage failure does NOT block the DB-side removal, and that policy
+      is deliberate: a surviving row still pointing a reader at their image is
+      an erasure leak, while a leaked object is not reachable by anyone.
+
+      ⛔ But "the caller may ignore a failure" and "the caller cannot SEE a
+      failure" are different things, and this used to be the second. It returned
+      a bare `:ok`, so `GDPR.Deletion` reported `length(rows)` as its deletion
+      count — during a storage outage, erasure would report five objects deleted
+      having deleted none, then remove the rows, leaving objects that no row
+      points at. That population is not hypothetical: a production
+      characterisation found 4,234 of them, and the reason it was expensive is
+      precisely that nothing records WHICH objects leaked at the moment they do.
+
+      So the failure is now returned. What the caller does with it is the
+      caller's decision; what it may no longer do is report success for it.
 
       Shared by the retention sweeps AND by `Stacks.GDPR.Deletion.delete_user_data/1`,
-      which calls it while erasing a user so the R2 objects go BEFORE the FK cascade
+      which calls it while erasing a user so the objects go BEFORE the FK cascade
       removes the rows (the rows are the only pointer to the storage keys). Takes a
       list of `%{storage_path: String.t | nil}` maps.
-  """
-  @spec delete_storage_objects([%{optional(any) => any}]) :: :ok
-  def delete_storage_objects(rows) do
-    delete_each(rows)
-    :ok
-  end
 
-  # The same deletions, reporting which ones actually happened. Callers that
-  # delete the row too can ignore the answer (see `delete_storage_objects/1`);
-  # `cleanup_finished_image_bytes/1` keeps the row, so it must not clear a path
-  # whose object is still there.
-  #
-  # A row with no usable `storage_path` counts as deleted: there is nothing to
-  # remove, and reporting it as a failure would make the caller retry forever.
-  @spec delete_each([%{optional(any) => any}]) :: {[map()], [map()]}
-  defp delete_each(rows) do
+      ⚠️ A row with no usable `storage_path` counts as DELETED: there is nothing
+      to remove, and reporting it as a failure would make a caller retry forever.
+      Since `cleanup_finished_image_bytes/1`, a finished row legitimately has a
+      `nil` path, so this is the common case rather than an edge.
+  """
+  @spec delete_storage_objects([%{optional(any) => any}]) :: {[map()], [map()]}
+  def delete_storage_objects(rows) do
     Enum.split_with(rows, fn
       %{storage_path: path} when is_binary(path) and path != "" ->
         case Storage.delete_image(path) do

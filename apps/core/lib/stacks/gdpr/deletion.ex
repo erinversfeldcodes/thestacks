@@ -231,9 +231,28 @@ defmodule Stacks.GDPR.Deletion do
 
       {:ok, rows}
     end)
+    # ⛔ THE COUNT IS WHAT WENT, NOT WHAT WAS ATTEMPTED. This step used to call
+    # `delete_storage_objects/1` for its side effect and report `length(rows)` —
+    # so during a storage outage an erasure reported five objects deleted having
+    # deleted none, and then removed the rows, leaving objects no row points at.
+    #
+    # ⚖️ The policy is unchanged and deliberate: a failure here must NOT abort
+    # the erasure. A surviving row still pointing a reader at their image is the
+    # leak this step exists to prevent, and it is worse than a leaked object.
+    # What changes is that the failure is now VISIBLE, and the keys are written
+    # down at the only moment anything still knows them — after the rows go,
+    # nothing links those objects to this user, or to any user, ever again.
     |> Multi.run(:delete_image_objects, fn _repo, %{uploaded_image_rows: rows} ->
-      ImageRetention.delete_storage_objects(rows)
-      {:ok, length(rows)}
+      {deleted, failed} = ImageRetention.delete_storage_objects(rows)
+
+      if failed != [] do
+        Logger.error(
+          "Deletion: #{length(failed)} image object(s) survived erasure for #{user_id} and are " <>
+            "now unattributable — keys: #{inspect(Enum.map(failed, & &1.storage_path))}"
+        )
+      end
+
+      {:ok, length(deleted)}
     end)
     |> Multi.run(:delete_uploaded_images, fn repo, %{uploaded_image_rows: rows} ->
       ids = Enum.map(rows, & &1.id)

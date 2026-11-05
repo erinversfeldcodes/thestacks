@@ -11,6 +11,7 @@ defmodule Stacks.GDPR.DeletionTest do
   use Core.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
   import Stacks.Factory
 
   alias Core.Repo
@@ -707,6 +708,43 @@ defmodule Stacks.GDPR.DeletionTest do
       refute_received {:storage_delete, _other}
     end
 
+    test "a storage failure is REPORTED, not counted as a deletion" do
+      # ⛔ THE STEP USED TO REPORT `length(rows)` — what it attempted. So during
+      # a storage outage an erasure reported five objects deleted having deleted
+      # none, then removed the rows, leaving objects no row points at. A
+      # production characterisation found 4,234 of those, and the expensive part
+      # was that nothing recorded WHICH objects leaked at the moment they did:
+      # once the rows are gone, nothing links them to this user or to any user.
+      Application.put_env(:core, :storage, Stacks.GDPR.DeletionTest.FailingStorage)
+      user = insert(:user)
+
+      Repo.insert!(%UploadedImage{
+        user_id: user.id,
+        storage_path: "uploads/doomed-erasure",
+        status: "resolved",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      log =
+        capture_log(fn ->
+          assert {:ok, result} = Deletion.delete_user_data(user.id)
+
+          assert result.delete_image_objects == 0,
+                 "the count must be what WENT, not what was attempted"
+        end)
+
+      assert log =~ "survived erasure"
+
+      assert log =~ "uploads/doomed-erasure",
+             "the key must be written down while something still knows it"
+
+      # ⚖️ And the policy is unchanged: the row still goes. A surviving row that
+      # points a reader at their image is the leak this step exists to prevent,
+      # and it is worse than a leaked object.
+      assert Repo.aggregate(from(i in UploadedImage, where: i.user_id == ^user.id), :count) == 0
+    end
+
     test "deletes any outstanding data-export object for the user" do
       user = insert(:user)
       key = "exports/#{user.id}/#{DateTime.to_unix(DateTime.utc_now())}-abc.json"
@@ -968,6 +1006,34 @@ defmodule Stacks.GDPR.DeletionTest do
                "for a dropped column is a sentence nobody will re-read; remove it."
     end
   end
+end
+
+defmodule Stacks.GDPR.DeletionTest.FailingStorage do
+  @moduledoc """
+      Test-local storage backend whose `delete/1` always fails. Proves that an
+      erasure reports what WENT rather than what it attempted, and writes the
+      surviving keys down — the only moment anything still links them to a user.
+  """
+
+  @behaviour Stacks.Storage.StorageBehaviour
+
+  @impl true
+  def put(key, _data, _opts \\ []), do: {:ok, key}
+
+  @impl true
+  def presigned_url(key, _ttl_seconds \\ 900), do: {:ok, key}
+
+  @impl true
+  def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
+
+  @impl true
+  def head(_key), do: {:error, :not_found}
+
+  @impl true
+  def list(_prefix), do: {:ok, []}
+
+  @impl true
+  def delete(_key), do: {:error, :simulated_storage_outage}
 end
 
 defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
