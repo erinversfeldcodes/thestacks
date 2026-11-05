@@ -255,6 +255,76 @@ defmodule Stacks.GDPR.ImageRetentionTest do
       assert {:ok, 0} = ImageRetention.cleanup_stuck_images()
     end
 
+    test "an awaiting_upload reservation whose bytes never came is collected" do
+      # ⛔ THE ONE STATUS THAT MEANS THE BYTES NEVER ARRIVED was the one status
+      # this sweep could not see. `init_upload/2` inserts the row and hands back
+      # an upload URL; if the client never PUTs, nothing collected the row until
+      # its 30-day expiry — where it was then counted as an "expired image",
+      # which is not what happened to it.
+      #
+      # ⚖️ Measured on production: of 15 sampled rows pointing at an object that
+      # does not exist, three were `awaiting_upload` reservations months old.
+      _unredeemed =
+        insert(:uploaded_image,
+          status: "awaiting_upload",
+          uploaded_at: DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+        )
+
+      assert {:ok, 1} = ImageRetention.cleanup_stuck_images()
+    end
+
+    test "a RECENT awaiting_upload reservation is left alone — the reader may still be uploading" do
+      # ⚠️ The anti-vacuity half. Widening a filter must not be achieved by
+      # removing the threshold with it.
+      _recent =
+        insert(:uploaded_image,
+          status: "awaiting_upload",
+          uploaded_at: DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+        )
+
+      assert {:ok, 0} = ImageRetention.cleanup_stuck_images()
+    end
+
+    test "a wedged pending row is STILL collected — the widening did not replace it" do
+      _stuck =
+        insert(:uploaded_image,
+          status: "pending",
+          uploaded_at: DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+        )
+
+      assert {:ok, 1} = ImageRetention.cleanup_stuck_images()
+    end
+
+    test "the two populations are counted APART, not both as stuck" do
+      # ⛔ A rise in abandoned uploads and a rise in broken ones are opposite
+      # problems with opposite fixes. One number for both hides which is
+      # happening, which is why the reason is part of the measurement rather
+      # than a label added afterwards.
+      old = DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+      insert(:uploaded_image, status: "pending", uploaded_at: old)
+      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
+      insert(:uploaded_image, status: "awaiting_upload", uploaded_at: old)
+
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach_many(
+        "#{inspect(ref)}",
+        [[:stacks, :gdpr, :image, :stuck]],
+        fn _event, measurements, metadata, _ ->
+          send(parent, {:stuck_emit, metadata[:reason], measurements[:count]})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("#{inspect(ref)}") end)
+
+      assert {:ok, 3} = ImageRetention.cleanup_stuck_images()
+
+      assert_received {:stuck_emit, "stuck", 1}
+      assert_received {:stuck_emit, "unredeemed", 2}
+    end
+
     test "emits image.expired event for each stuck image deleted" do
       _stuck =
         insert(:uploaded_image,

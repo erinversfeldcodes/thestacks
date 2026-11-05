@@ -5,8 +5,9 @@ defmodule Stacks.GDPR.ImageRetention do
       - `cleanup_finished_image_bytes/1` — deletes the PHOTOGRAPH once identification
         has been terminal for the reader's retry window, keeping the row
       - `cleanup_expired_images/1` — deletes images past their expires_at deadline (30 days)
-      - `cleanup_stuck_images/1` — safety net: cleans up images stuck in pending
-        for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
+      - `cleanup_stuck_images/1` — safety net for images that never finished:
+        `pending` (the job wedged) and `awaiting_upload` (the bytes never came),
+        both after #{@stuck_threshold_hours} hours
       - `cleanup_orphan_objects/1` — deletes objects no row points at
 
       ⚠️ The first of those is the only one that separates the two deadlines: a
@@ -84,6 +85,36 @@ defmodule Stacks.GDPR.ImageRetention do
 
   # Terminal for the pipeline: the answer is in, right or wrong.
   @finished_statuses ["resolved", "rejected"]
+
+  # ⛔ BOTH UNFINISHED STATUSES, and the second one is the point.
+  #
+  # `cleanup_stuck_images/1` filtered `status == "pending"` only — so
+  # `awaiting_upload`, the ONE status that means the bytes never arrived, was
+  # the one status the stuck-image sweep could not see. `init_upload/2` inserts
+  # the row and hands back an upload URL; if the client never PUTs, nothing
+  # collected the row until its 30-day expiry, where it was then counted as an
+  # "expired image" — which is not what happened to it.
+  #
+  # ⚖️ Measured on production while characterising the row-less objects: of 15
+  # sampled rows whose `storage_path` pointed at an object that does not exist,
+  # three were `awaiting_upload` reservations from months earlier. Their objects
+  # were never created at all.
+  #
+  # ⚠️ `reject_image/2` already scopes to exactly these two, so the two statuses
+  # were handled together everywhere EXCEPT here. That is part of why nobody
+  # noticed.
+  @unfinished_statuses ["pending", "awaiting_upload"]
+
+  # ⚠️ The clock for both is `uploaded_at`, which is set at RESERVATION time by
+  # `init_upload/2` — NOT when bytes arrived, despite the name. For an
+  # unredeemed reservation that is exactly the right clock: the question is how
+  # long ago the key was reserved. For a wedged `pending` row it is slightly
+  # conservative, since the row became `pending` at commit, some time after the
+  # reservation — so the sweep fires marginally sooner than "two hours stuck".
+  # Named because the column's name invites the opposite assumption, and the
+  # single-write guard rejected it for that same reason.
+  defp reason_for_status("awaiting_upload"), do: "unredeemed"
+  defp reason_for_status(_pending), do: "stuck"
 
   @doc """
       Deletes up to `:limit` uploaded_images records where `expires_at < now`,
@@ -307,10 +338,10 @@ defmodule Stacks.GDPR.ImageRetention do
 
     stuck_rows =
       UploadedImage
-      |> where([i], i.status == "pending" and i.uploaded_at < ^threshold)
+      |> where([i], i.status in ^@unfinished_statuses and i.uploaded_at < ^threshold)
       |> order_by([i], asc: i.uploaded_at)
       |> limit(^limit)
-      |> select([i], %{id: i.id, storage_path: i.storage_path})
+      |> select([i], %{id: i.id, storage_path: i.storage_path, status: i.status})
       |> Repo.all()
 
     stuck_ids = Enum.map(stuck_rows, & &1.id)
@@ -322,10 +353,21 @@ defmodule Stacks.GDPR.ImageRetention do
       |> where([i], i.id in ^stuck_ids)
       |> Repo.delete_all()
 
+    # ⛔ COUNTED APART, because they are different facts about the system. A
+    # `pending` row is work that STARTED and wedged — the identification job
+    # failed silently or never ran. An `awaiting_upload` row is a reservation
+    # nobody redeemed: the bytes never arrived, so there is no job, nothing
+    # failed, and a reader simply walked away. Reporting both as "stuck" would
+    # make a rise in abandoned uploads look like a rise in broken ones, which
+    # are opposite problems with opposite fixes.
+    by_reason = Enum.frequencies_by(stuck_rows, &reason_for_status(&1.status))
+
     emit_expiry_events(stuck_ids, %{reason: "stuck"})
 
-    :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: count}, %{reason: "stuck"})
-    :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "stuck"})
+    for {reason, n} <- by_reason do
+      :telemetry.execute([:stacks, :gdpr, :image, :stuck], %{count: n}, %{reason: reason})
+      :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: n}, %{reason: reason})
+    end
 
     {:ok, count}
   rescue

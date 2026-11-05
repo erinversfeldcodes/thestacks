@@ -519,7 +519,8 @@ defmodule Core.PromEx.Plugins.Stacks do
           [:stacks, :gdpr, :image, :stuck, :count, :total],
           event_name: [:stacks, :gdpr, :image, :stuck],
           measurement: :count,
-          description: "Images cleaned by the stuck-pending safety net.",
+          description:
+            "Images the never-finished safety net collected, BY :reason — stuck=a `pending` row whose identification job wedged or never ran; unredeemed=an `awaiting_upload` reservation whose bytes never arrived, so there was no job and nothing failed. Counted apart because a rise in abandoned uploads and a rise in broken ones are opposite problems with opposite fixes, and reporting both as \"stuck\" hides which is happening. NOTE `awaiting_upload` was invisible to this sweep until 2026-11-05 and such rows survived to their 30-day expiry, where they were counted as expired images — which is not what happened to them.",
           tags: [:reason]
         ),
         counter(
