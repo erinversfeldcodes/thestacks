@@ -330,9 +330,34 @@ if mismatched:
 # migration; only then does this script have nothing left to say and the whole
 # file go. Deleting it today would lose a guarantee for every one of them.
 
+# ⛔ THE RECORD FLOOR, CHECKED BEFORE THE VERDICT — and it went missing.
+#
+# Retiring the spec half spliced this out with it, so `MIN_REQUEST_RECORDS` was
+# still being parsed and passed in while nothing compared anything to it. The
+# gate's own suite caught it on the case written for exactly this
+# ("a_corpus_below_the_floor_is_refused_even_with_no_violations", got exit 0) —
+# which is what that case is for, and why a gate change has to land with its
+# suite rather than after it.
+if records < floor:
+    print(
+        f"FAIL: parsed only {records} request record(s) in {path}; expected at least {floor}.",
+        file=sys.stderr,
+    )
+    print("      A clean result over a corpus this small is the parser having drifted from", file=sys.stderr)
+    print("      the source, not the source having become safe — which is indistinguishable", file=sys.stderr)
+    print("      from a real pass if the floor is on findings instead of on records.", file=sys.stderr)
+    raise SystemExit(1)
+
 print(
     f"    RequestSpec urls are type-checked (Api.Url.SameOriginUrl), not parsed here; "
     f"which is what justifies the hardcoded SameOrigin in Effect.perform."
+)
+
+# ⚠️ Reported on the GREEN path, not only on failure: a check that prints
+# nothing when it passes cannot be told from one that never ran.
+print(
+    f"OK: {records} request record(s) parsed in {path}; "
+    f"every credential-bearing URL is provably same-origin."
 )
 
 # ⚠️ Reported, not failed. A request with an unprovable URL that declares

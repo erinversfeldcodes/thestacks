@@ -20,6 +20,7 @@ in code by" and check it before relying on it.
 |---|---|---|
 | `scripts/bootstrap-worktree.sh` | `justfile` |  |
 | `scripts/campaign-residue.sh` | `justfile`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/characterise/rowless-upload-objects.py` | _manual: A one-off, READ-ONLY characterisation of the production bucket, kept as the record of how a deletion decision was measured rather than as a gate. It lists objects and compares them against uploaded_images rows; it calls list_objects_v2 and nothing else, so it cannot write or delete. Wiring it into CI would hit a production bucket on every run to re-answer a question that was already answered and acted on. The STANDING protection for the same property is ImageRetention.storage_consistency_check/0, which reports both populations as a metric on every sweep._ | Read-only characterisation of objects under `uploads/` that no database row points at. |
 | `scripts/check-api-only-is-skipped.sh` | `scripts/lint-elixir.sh`, `test/platform/api_only_is_skipped_test.sh` | An api_only field must also be skipped by its message's JSON serializer. |
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
 | `scripts/check-breaking-suppressions-are-spent.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh`, `test/platform/guard_unbypassable_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
@@ -33,6 +34,7 @@ in code by" and check it before relying on it.
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
+| `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-e2e-repeatability.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | A spec that passes must pass again, immediately, against the same stack. |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |

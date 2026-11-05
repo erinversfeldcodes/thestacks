@@ -35,6 +35,16 @@ ALLOWLIST = {
         "the same property is check-credential-origin.sh and "
         "frontend/tests/ApiRequestHeadersTest.elm, both of which do run."
     ),
+    "scripts/characterise/rowless-upload-objects.py": (
+        "A one-off, READ-ONLY characterisation of the production bucket, kept as the "
+        "record of how a deletion decision was measured rather than as a gate. It lists "
+        "objects and compares them against uploaded_images rows; it calls list_objects_v2 "
+        "and nothing else, so it cannot write or delete. Wiring it into CI would hit a "
+        "production bucket on every run to re-answer a question that was already answered "
+        "and acted on. The STANDING protection for the same property is "
+        "ImageRetention.storage_consistency_check/0, which reports both populations as a "
+        "metric on every sweep."
+    ),
 }
 
 SKIP_DIRS = (".venv", "__pycache__")

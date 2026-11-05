@@ -63,7 +63,21 @@ if repoint:
     paths = re.findall(r'^\s*"([^"]+)":', match.group(0), re.M)
     if not paths:
         raise SystemExit("HARNESS: the real ALLOWLIST is empty, so this case proves nothing")
-    body = match.group(0).replace(paths[0], repoint)
+    # ⚠️ KEEP EXACTLY ONE ENTRY, repointed — do not assume there is only one.
+    #
+    # This repointed paths[0] and left the rest. That was invisible while the
+    # real allowlist held a single entry; the moment a second was added, its
+    # path did not exist in the sandbox, the gate reported it stale, and the
+    # case failed for a reason that had nothing to do with the exemption
+    # mechanism it tests. The sandbox needs ONE allowlisted orphan, so the
+    # others are dropped rather than carried in pointing at nothing.
+    entries = re.findall(
+        r'^\s*"[^"]+":\s*\(.*?^\s*\),\n', match.group(0), re.S | re.M
+    )
+    if not entries:
+        raise SystemExit("HARNESS: could not parse any ALLOWLIST entry")
+    first = entries[0].replace(paths[0], repoint)
+    body = "ALLOWLIST = {\n" + first + "}\n"
 else:
     body = "ALLOWLIST = {}\n"
 dst.write_text(text[: match.start()] + body + text[match.end() :], encoding="utf-8")

@@ -6,7 +6,7 @@
 #
 # ⛔ WHY THE GATE EXISTS, because it decides what these cases have to be. The
 # builder's `Destination` is **declared by the caller, not derived from the
-# URL**, so `requestHeaders SameOrigin (Session token)` at an external URL still
+# URL**, so `requestHeaders "GET" (Session token)` at an external URL still
 # attaches the token. The builder's own precedence defends `CrossOrigin` +
 # `Session` — which nobody writes by accident — and leaves `SameOrigin` at a
 # foreign URL, which is the ordinary-looking value a hurried caller reaches for.
@@ -46,9 +46,11 @@ run_on() {
     RC=$?
 }
 
-# A `RequestSpec` builder. Every fixture needs enough of these to clear the
-# gate's SECOND floor — the one over the plan path — or each case below fails on
-# that floor rather than on the thing it asserts.
+# A `RequestSpec` builder. ⚠️ These no longer clear a floor — the gate's spec
+# half was retired when `RequestSpec.url` became an `Api.Url.SameOriginUrl`, so
+# the compiler makes that statement now. They are kept because a fixture without
+# any is unlike the real file, and a parser change that started mis-reading them
+# should still show up here.
 spec() {
     local name="$1" url="$2"
     cat <<EOF
@@ -84,7 +86,7 @@ $name : String -> Cmd msg
 $name arg =
     Http.request
         { method = "$sent"
-        , headers = httpHeaders "$told" SameOrigin (Session token)
+        , headers = httpHeaders "$told" (Session token)
         , url = baseUrl ++ "/api/thing"
         , body = Http.emptyBody
         , expect = Http.expectWhatever Done
@@ -134,7 +136,7 @@ test_case "a_provably_same_origin_corpus_passes" \
     "the green half — a baseline, or every refusal below is satisfied by the fixture"
 run_on "$(spec_filler 32)$(filler 75)"
 assert_exit_zero "$RC" "75 provably same-origin records is a clean run"
-assert_contains "$OUT" "75 request record(s) parsed" "and it reports the population it read"
+assert_contains "$OUT" "request record(s) parsed" "and it reports the population it read"
 
 # ── the planted red: a SameOrigin CLAIM the url does not support ─────────────
 #
@@ -143,19 +145,29 @@ assert_contains "$OUT" "75 request record(s) parsed" "and it reports the populat
 # mistake, not the exotic one.
 test_case "a_SameOrigin_claim_over_an_unprovable_url_is_refused" \
     "declared is not derived, so the claim has to be checked against the URL"
-run_on "$(spec_filler 32)$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
-assert_exit_nonzero "$RC" "the claim is refused"
-assert_contains "$OUT" "declare SameOrigin with a URL that is not" "the refusal names the condition"
+run_on "$(spec_filler 32)$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders \"GET\" (Session token) |> List.map toHeader")"
+assert_exit_nonzero "$RC" "the unprovable url is refused"
+assert_contains "$OUT" "cannot prove is same-origin" "the refusal names the condition"
 assert_contains "$OUT" "uploadToStorage" "and the function, not just a line"
-assert_contains "$OUT" "DECLARED, not derived" "and says why the claim cannot be taken"
+assert_contains "$OUT" "Api.Url.path" "and names the constructor that fixes it"
 
-# ⚠️ The mirror: the SAME unprovable url, declaring CrossOrigin, must PASS. A
-# gate that refused both would make an unprovable URL unusable rather than
-# undeclared, and `putFileToR2` would have no legal form.
-test_case "the_same_unprovable_url_declaring_CrossOrigin_passes" \
-    "an unprovable URL is undeclared, not forbidden"
-run_on "$(spec_filler 32)$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders CrossOrigin NoCredential |> List.map toHeader")"
-assert_exit_zero "$RC" "declaring CrossOrigin is the legal form for an unprovable URL"
+# ⛔ THE MIRROR CASE IS INVERTED, AND THE INVERSION IS THE POINT.
+#
+# This used to assert that the SAME unprovable url PASSES when it declares
+# `CrossOrigin` — "an unprovable URL is undeclared, not forbidden" — because
+# `putFileToR2` needed a legal form for a presigned link. That function no
+# longer exists (the upload PUT was same-origin all along), `Api.Destination` is
+# deleted, and there is no declaration to make. So an unprovable URL is now
+# forbidden rather than merely undeclared, whatever credential it carries.
+#
+# ⚠️ Kept as a case rather than removed, because "there is no escape hatch" is a
+# statement about the gate that something must assert. Deleting the case would
+# leave the hatch's absence untested, and a future `|| exit 0` would restore it
+# silently.
+test_case "an_unprovable_url_has_NO_escape_hatch_any_more" \
+    "there is no declaration that makes an unprovable URL acceptable"
+run_on "$(spec_filler 32)$(filler 75)$(record "uploadToStorage" "presignedUrl" "requestHeaders \"GET\" (NoCredential Nothing) |> List.map toHeader")"
+assert_exit_nonzero "$RC" "an unprovable URL is refused however it is credentialed"
 
 # ── each recognised same-origin form, driven ─────────────────────────────────
 #
@@ -165,15 +177,31 @@ assert_exit_zero "$RC" "declaring CrossOrigin is the legal form for an unprovabl
 # gate would be loudly wrong rather than quietly wrong — but only if something
 # drives the shape.
 test_case "spec_url_is_recognised_as_same_origin" "the plan path builds its url upstream from baseUrl"
-run_on "$(spec_filler 32)$(filler 75)$(record "viaSpec" "spec.url" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaSpec" "spec.url" "requestHeaders \"GET\" (Session token) |> List.map toHeader")"
 assert_exit_zero "$RC" "spec.url is same-origin by construction"
 
-test_case "absolute_path_builder_is_recognised" "an absolute PATH is our origin"
-run_on "$(spec_filler 32)$(filler 75)$(record "viaBuilder" "Url.Builder.absolute [ \"api\", \"thing\" ] []" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
-assert_exit_zero "$RC" "Url.Builder.absolute yields a path, not a host"
+# ⛔ INVERTED: `Url.Builder.absolute` IS NO LONGER A PROOF.
+#
+# This asserted "an absolute PATH is our origin". It is not: `absolute`
+# percent-encodes query keys and values and NEVER path segments, so
+# `absolute [ "/evil.test" ] []` yields `//evil.test` — a protocol-relative URL
+# that leaves the origin. The gate was accepting an escapable expression as
+# same-origin, and this case was pinning that acceptance in place.
+test_case "absolute_path_builder_is_NOT_a_proof" \
+    "Url.Builder.absolute does not encode path segments, so it can escape"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaBuilder" "Url.Builder.absolute [ \"api\", \"thing\" ] []" "requestHeaders \"GET\" (Session token) |> List.map toHeader")"
+assert_exit_nonzero "$RC" "absolute is not accepted as same-origin any more"
+
+# ⚖️ What replaces it: a value that came from `Api.Url.SameOriginUrl`. This is a
+# proof rather than a recognised shape — the type's only constructor cannot
+# build a URL that leaves our origin, and a String cannot enter the type.
+test_case "a_value_from_the_same_origin_type_is_recognised" \
+    "Api.Url.toString carries the type's guarantee to the Http boundary"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaType" "Api.Url.toString (Api.Url.path [ \"api\", \"thing\" ] [])" "requestHeaders \"GET\" (Session token) |> List.map toHeader")"
+assert_exit_zero "$RC" "a SameOriginUrl is same-origin by construction"
 
 test_case "a_literal_relative_path_is_recognised" "a leading slash is our origin"
-run_on "$(spec_filler 32)$(filler 75)$(record "viaLiteral" "\"/api/thing\"" "requestHeaders SameOrigin (Session token) |> List.map toHeader")"
+run_on "$(spec_filler 32)$(filler 75)$(record "viaLiteral" "\"/api/thing\"" "requestHeaders \"GET\" (Session token) |> List.map toHeader")"
 assert_exit_zero "$RC" "a literal \"/path\" is same-origin"
 
 # ── the floor is on RECORDS PARSED, not on findings ─────────────────────────
@@ -259,10 +287,10 @@ putFileToStorage presignedUrl =
     Http.request
         { method = \"PUT\"
 
-        -- A SameOrigin claim here would attach a bearer token to a third-party
-        -- host, which is why this declares CrossOrigin instead.
-        , headers = httpHeaders CrossOrigin NoCredential
-        , url = presignedUrl
+        -- A credential here would be attached to whatever host this URL names,
+        -- which is why the destination has to be provable rather than claimed.
+        , headers = httpHeaders \"PUT\" (NoCredential Nothing)
+        , url = baseUrl ++ \"/api/thing\"
         , body = Http.emptyBody
         , expect = Http.expectWhatever Done
         , timeout = standardTimeout
@@ -270,7 +298,7 @@ putFileToStorage presignedUrl =
         }
 "
 assert_exit_zero "$RC" \
-    "a correctly-declared cross-origin request must not be flagged by its own explanation"
+    "a request must not be flagged by prose that merely mentions the keyword"
 
 # ⚠️ And a block comment too, since Elm has both forms and a line-comment-only
 # strip would leave the other half open.
@@ -281,9 +309,9 @@ putFileToStorage : String -> Cmd msg
 putFileToStorage presignedUrl =
     Http.request
         { method = \"PUT\"
-        {- SameOrigin would be wrong here -}
-        , headers = httpHeaders CrossOrigin NoCredential
-        , url = presignedUrl
+        {- a SameOrigin claim would have been wrong here -}
+        , headers = httpHeaders \"PUT\" (NoCredential Nothing)
+        , url = baseUrl ++ \"/api/thing\"
         , body = Http.emptyBody
         , expect = Http.expectWhatever Done
         , timeout = standardTimeout
@@ -327,45 +355,32 @@ run_on "$(spec_filler 32)$(filler 75)$(record "viaEscape" "Url.Builder.absolute 
 assert_exit_nonzero "$RC" "a leading-slash segment is refused"
 assert_contains "$OUT" "viaEscape" "the refusal names the function"
 
-# ── the plan path, which cannot declare a destination at all ────────────────
+# ── the plan path, now carried by the TYPE and not by this gate ─────────────
 #
-# ⛔ `Effect.RequestPlan` is `{ spec, token, onResponse }` — no destination
-# field — and `Effect.perform` sends every plan through `Api.authHeaders`, which
-# hardcodes `SameOrigin`. So a spec whose URL leaves our origin carries the
-# reader's token there, and NO declaration exists anywhere for this gate's
-# per-call-site check to question. The hardcode is justified only by the whole
-# `RequestSpec` population, which nothing checked until review asked.
-test_case "a_RequestSpec_url_that_leaves_the_origin_is_refused" \
-    "a plan cannot declare a destination, so the population is the declaration"
-run_on "$(spec_filler 32)$(filler 75)$(spec "runawaySpec" "\"https://evil.test/api/x\"")"
-assert_exit_nonzero "$RC" "a spec url off our origin is refused"
-assert_contains "$OUT" "runawaySpec" "the refusal names the builder"
-assert_contains "$OUT" "cannot declare a destination" "and says why no call site could have said so"
-assert_contains "$OUT" "Effect.perform" "and names the function whose hardcode it justifies"
-
-# ⚠️ The spec population needs its OWN floor, for the reason every floor here
-# exists: a pattern that stopped matching would report "every spec is
-# same-origin" over a population of zero.
-test_case "a_spec_population_below_its_floor_is_refused" \
-    "otherwise the plan-path check passes by having found nothing to check"
-run_on "$(spec_filler 2)$(filler 75)"
-assert_exit_nonzero "$RC" "two spec builders is not a checked plan path"
-assert_contains "$OUT" "RequestSpec builder(s)" "the refusal quotes what it read"
-assert_contains "$OUT" "hardcoded SameOrigin" "and names what the population is justifying"
-
-test_case "the_sub_floor_spec_corpus_contained_no_violations" \
-    "so the refusal above is about the population, not about a finding"
-assert_not_contains "$OUT" "leaves our origin" \
-    "nothing in the small spec corpus is a violation — the floor is what refused it"
-
-# ⚠️ And the green path must SAY it checked the plan path. A check with no
-# per-site declaration to point at, printing nothing when it passes, is
-# indistinguishable from a check that never ran.
-test_case "the_green_run_reports_the_plan_path_population" \
-    "a silent success cannot be told from a check that did not run"
-run_on "$(spec_filler 32)$(filler 75)"
-assert_exit_zero "$RC" "the clean corpus passes"
-assert_contains "$OUT" "32 RequestSpec builder(s) parsed" "and reports the plan-path population"
+# ⛔ FOUR CASES WERE HERE AND ALL FOUR ARE GONE, because their subject moved
+# from this script to the compiler. They asserted that a `RequestSpec` whose URL
+# leaves our origin is refused, that the spec population has its own floor, that
+# the sub-floor corpus held no violations, and that a green run reports the
+# plan-path population it read.
+#
+# `RequestSpec.url` is now an `Api.Url.SameOriginUrl`. Its only constructor
+# percent-encodes every path segment and drops the empty ones, so it cannot
+# produce a URL that leaves our origin, and a `String` cannot enter the type at
+# all. The question "is every spec's URL same-origin?" is therefore not a
+# property of a corpus to be counted — it is the field's type, checked on every
+# build, with no population floor to drift and no comment-stripping pass to get
+# wrong.
+#
+# ⚖️ So this is a case of a guard being RETIRED rather than deleted: the
+# guarantee is stronger than it was, and `frontend/tests/Api/UrlTest.elm` holds
+# the escape attempts that prove the constructor keeps it — including the one
+# that caught the first implementation, where an empty leading segment made
+# `//evil.test` because `percentEncode ""` is `""`.
+#
+# ⚠️ What this gate still owns is the RECORD half below: direct `Http.request`
+# sites whose `url` is a plain `String`. There are about sixty-six, they move
+# onto the plan when the `Cmd msg` migration lands, and only then does this file
+# have nothing left to say.
 
 # ── the method sent and the method the builder is told ──────────────────────
 #
