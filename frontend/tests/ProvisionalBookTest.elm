@@ -387,6 +387,42 @@ suite =
                         |> Query.fromHtml
                         |> Query.hasNot
                             [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
+            , test "the retry button is GONE once the photograph has been discarded" <|
+                \_ ->
+                    -- ⛔ The record outlives the photograph by design: the row
+                    -- keeps its 30-day expiry while the image is deleted a day
+                    -- after identification goes terminal. So for most of an
+                    -- item's life "No, try again" is an action the data cannot
+                    -- support, and the reader should learn that before pressing
+                    -- it rather than from a 410 afterwards.
+                    Upload.view
+                        { init_ | step = Verifying identifiedBook, retryable = False }
+                        (Just (TestHelpers.creds "token"))
+                        Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.hasNot
+                            [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-reject-btn") ]
+            , test "and its absence is EXPLAINED, not silent" <|
+                \_ ->
+                    -- ⚠️ A control that vanishes with no account of itself reads
+                    -- as a bug, and the reader cannot tell that the PHOTOGRAPH
+                    -- is gone rather than the feature.
+                    Upload.view
+                        { init_ | step = Verifying identifiedBook, retryable = False }
+                        (Just (TestHelpers.creds "token"))
+                        Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-retry-unavailable") ]
+            , test "a retryable item still offers it — the gate did not remove the button outright" <|
+                \_ ->
+                    Upload.view
+                        { init_ | step = Verifying identifiedBook, retryable = True }
+                        (Just (TestHelpers.creds "token"))
+                        Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-reject-btn") ]
             , test "INFORMS ONLY: both confirm and reject stay on screen and enabled" <|
                 \_ ->
                     Upload.view { init_ | step = Verifying provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
