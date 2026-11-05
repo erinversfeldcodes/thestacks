@@ -80,7 +80,13 @@ SUCCESS_EXIT = re.compile(
 # "fix" the friction by converting this to `>=` — a floor here would let a gate
 # join the population without anyone noticing it had, which is the whole thing
 # this file exists to prevent one level down.
-EXPECTED_GUARDED_SCRIPTS = 22
+# ⚖️ 22 → 23 on 2026-11-05: `check-e2e-mock-routes.sh` gained
+# `MIN_MOCKED_PATHS`. It shipped with a floor on the ROUTE table and none on the
+# mocked corpus, and a probe showed it printing "0 mocked path(s) checked ... all
+# resolve" and exiting 0 — the asymmetry mattered because the mocked corpus is
+# the input that can silently stop matching when the specs change how they spell
+# `page.route`.
+EXPECTED_GUARDED_SCRIPTS = 23
 
 guarded = {}
 violations = []

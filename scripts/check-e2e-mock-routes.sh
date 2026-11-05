@@ -33,8 +33,8 @@ ALLOWED_OFF_ORIGIN='^(https?://|data:|blob:)'
 #       cover's fallback. A path that resolved would defeat the case.
 ALLOWED_DELIBERATELY_ABSENT='^/images/a-cover-that-does-not-exist\.jpg$'
 
-routes=$(mktemp); mocked=$(mktemp)
-trap 'rm -f "$routes" "$mocked"' EXIT
+routes=$(mktemp); mocked=$(mktemp); unres=$(mktemp)
+trap 'rm -f "$routes" "$mocked" "$unres"' EXIT
 
 # The application's real paths, with Phoenix's :params as a wildcard.
 mix_bin=$(command -v mix || true)
@@ -64,14 +64,19 @@ fi
 # not-a-path, and reported "all resolve" with the defect sitting in front of it.
 # The planted-violation run is what exposed that; a guard blind to its own
 # founding case is worse than no guard, because it is cited as cover.
-python3 - <<'PYEOF' > "$mocked"
-import re, glob
+UNRES_FILE="$unres" python3 - <<'PYEOF' > "$mocked"
+import os, re, glob
+
+# A JS regex literal is a legitimate route pattern and not a path, so it is
+# excluded from the unresolved report rather than counted as a hole in the check.
+REGEX_LITERAL = re.compile(r"^/.*/[gimsuy]*$")
 
 ROUTE = re.compile(r'page\.route\(\s*(`[^`]*`|"[^"]*"|\'[^\']*\')')
 CONST = re.compile(r'const\s+(\w+)\s*=\s*(`[^`]*`|"[^"]*"|\'[^\']*\')')
 HOLE = re.compile(r'\$\{([^}]*)\}')
 
 out = set()
+unresolved = []
 for path in sorted(glob.glob("e2e/tests/*.ts")):
     src = open(path).read()
     # One level of same-file constant resolution: enough for the real corpus,
@@ -91,6 +96,21 @@ for path in sorted(glob.glob("e2e/tests/*.ts")):
         pat = re.sub(r"^\*\*", "", pat)
         if pat.startswith("/"):
             out.add(pat)
+        elif not REGEX_LITERAL.match(raw[1:-1]):
+            # ⛔ REPORTED, NOT DROPPED, and this is the gate's own founding
+            # lesson applied to itself. The original drift was written
+            # `page.route(`**${UPLOAD_PUT_PATH}`)`; an extractor that silently
+            # discarded what it could not reduce to a path turned that into
+            # `**`, failed the startswith check, and left NO trace — so the
+            # count read as a clean corpus with the defect in front of it.
+            #
+            # An unresolvable pattern is not itself a violation. It is a hole in
+            # the check, which is worse, because a hole reports success.
+            unresolved.append((path, raw[1:-1]))
+
+with open(os.environ["UNRES_FILE"], "w") as fh:
+    for path, raw in unresolved:
+        fh.write(f"{path}\t{raw}\n")
 
 print("\n".join(sorted(out)))
 PYEOF
@@ -127,8 +147,40 @@ while IFS= read -r m; do
     fi
 done < "$mocked"
 
-n_mocked=$(grep -c . "$mocked")
-n_routes=$(grep -c . "$routes")
+n_mocked=$(grep -c . "$mocked" || true)
+n_routes=$(grep -c . "$routes" || true)
+n_unres=$(grep -c . "$unres" 2>/dev/null || true)
+n_unres=${n_unres:-0}
+
+# A FLOOR ON THE MOCKED CORPUS, which this gate shipped without.
+#
+# The route table above already refuses to be empty, with the comment "the
+# guard would pass vacuously". That reasoning was not applied to the OTHER
+# input, and it is the input that can silently stop matching: a change to how
+# the specs spell `page.route` would leave this printing "0 mocked path(s)
+# checked ... all resolve" and exiting 0. Measured, not supposed.
+#
+# Deliberately well under the real figure so an ordinary spec change does not
+# need to edit it, while still refusing a corpus that has collapsed.
+MIN_MOCKED_PATHS=8
+if [[ $n_mocked -lt $MIN_MOCKED_PATHS ]]; then
+    echo "FAIL: parsed only $n_mocked mocked path(s) from e2e/tests/*.ts; expected at least $MIN_MOCKED_PATHS." >&2
+    echo "      A clean result over a corpus this small is the extractor having drifted from" >&2
+    echo "      how the specs spell page.route, not the mocks having become correct — and the" >&2
+    echo "      two are indistinguishable if nothing floors the population." >&2
+    exit 1
+fi
+
+if [[ $n_unres -gt 0 ]]; then
+    echo "FAIL: $n_unres mocked pattern(s) could not be reduced to a path, so this gate" >&2
+    echo "      cannot say whether they resolve:" >&2
+    sed 's/^/  /' "$unres" >&2
+    echo "" >&2
+    echo "      Give the pattern a literal path, or define its constant in the SAME file." >&2
+    echo "      A constant imported from another module is invisible to this extractor," >&2
+    echo "      and a pattern it cannot read is a hole that would otherwise report success." >&2
+    exit 1
+fi
 
 if [[ $problems -gt 0 ]]; then
     cat >&2 <<MSG

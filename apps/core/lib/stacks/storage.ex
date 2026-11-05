@@ -59,12 +59,27 @@ defmodule Stacks.Storage do
   end
 
   @doc """
-      Generate a presigned PUT URL the client can upload an image to
-      directly. Used by the init/commit upload flow to keep the Phoenix
-      handler pool out of the R2 upload path.
+      Generate a presigned PUT URL the client could upload an image to
+      directly.
 
-      `content_type` hint is propagated to the PUT signature so R2 records
-      the object with the correct MIME type.
+      ⛔ **NOTHING CALLS THIS, AND THE PREVIOUS DOCSTRING ASSERTED OTHERWISE.**
+      It said "Used by the init/commit upload flow to keep the Phoenix handler
+      pool out of the R2 upload path". That stopped being true in July:
+      `Uploads.init_upload/2` returns `/api/upload/:id/data`, a route on our own
+      origin, and the bytes travel through this app — which is what lets the
+      request carry CSRF proof, since a cross-origin PUT sends no header and
+      every upload was refused once enforcement went on.
+
+      ⚠️ A docstring describing a live design for dead code is not a tidiness
+      problem. An E2E mock was written from the sibling claim in
+      `UploadController`, mocked a presigned URL the client never requests, and
+      most of that suite failed blaming the client for the mock's error. This is
+      the same claim in a second place, which is why it is corrected rather than
+      left for the next reader to believe.
+
+      Kept rather than deleted because the backend behaviour it names is real
+      and a direct-to-storage upload may be wanted again; `content_type` is
+      propagated to the signature so the object records the correct MIME type.
   """
   @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
