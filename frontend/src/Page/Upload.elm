@@ -46,6 +46,7 @@ type UploadFailure
     | ServiceUnavailable
     | TookTooLong
     | ConnectionLost
+    | PhotoDiscarded
     | CauseUnknown
 
 
@@ -270,6 +271,13 @@ failureFromHttpError err =
 
         Http.NetworkError ->
             ConnectionLost
+
+        -- 410 is the one status with a meaning this page must not flatten into
+        -- "something went wrong": the photograph was deleted after it had done
+        -- its job, so "No, try again" is no longer a thing that can happen. A
+        -- reader told only that it failed would keep pressing it.
+        Http.BadStatus 410 ->
+            PhotoDiscarded
 
         _ ->
             CauseUnknown
@@ -1413,6 +1421,9 @@ failureCause cause =
         ConnectionLost ->
             "connection-lost"
 
+        PhotoDiscarded ->
+            "photo-discarded"
+
         CauseUnknown ->
             "unknown"
 
@@ -1435,6 +1446,9 @@ failureHeading cause =
         ConnectionLost ->
             "The Library Is Unreachable"
 
+        PhotoDiscarded ->
+            "That Photograph Is Gone"
+
         CauseUnknown ->
             "Something Went Wrong"
 
@@ -1456,6 +1470,9 @@ failureBody cause =
 
         ConnectionLost ->
             "We lost the connection before hearing how your photo went. Check your connection, then try again."
+
+        PhotoDiscarded ->
+            "We keep a photograph only as long as you might want another attempt at it, then delete it — so there is nothing left to read again. If a book here is wrong, take it off your shelf; a fresh photo will do the rest."
 
         CauseUnknown ->
             "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in."

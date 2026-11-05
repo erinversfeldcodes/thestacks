@@ -12,6 +12,7 @@ defmodule Stacks.GDPR.ImageRetentionTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Books.UploadedImage
   alias Stacks.GDPR.ImageRetention
 
   defp event_count(event_type) do
@@ -268,6 +269,92 @@ defmodule Stacks.GDPR.ImageRetentionTest do
       assert event_count("image.expired") == before_count + 1
     end
   end
+
+  describe "cleanup_finished_image_bytes/1 — the photograph goes before the record does" do
+    # ⛔ These pin a retention promise the code claimed and did not keep. The
+    # architecture says a photo "exists solely to extract a book identifier
+    # (ISBN)" and that re-running vision on the original is deliberately not
+    # preserved; the retention job's own docstring said images were "deleted
+    # immediately by IdentifyBookJob on success". Neither was true: every
+    # photograph sat in object storage for the full 30-day ROW ttl.
+
+    defp finished(status, hours_ago, attrs \\ []) do
+      at = DateTime.add(DateTime.utc_now(), -hours_ago * 3600, :second)
+
+      insert(
+        :uploaded_image,
+        Keyword.merge([status: status, uploaded_at: at, updated_at: at], attrs)
+      )
+    end
+
+    test "a resolved photograph past the retry window is deleted, and its ROW SURVIVES" do
+      image = finished("resolved", 25)
+
+      assert {:ok, 1} = ImageRetention.cleanup_finished_image_bytes()
+
+      kept = Repo.get(UploadedImage, image.id)
+
+      # ⚖️ The whole point of the split: the bytes are gone and the record is
+      # not. The reader keeps their inbox entry, their export and erasure
+      # reachability; the photograph of whoever was in the room does not.
+      assert kept != nil
+      assert kept.storage_path == nil
+      assert kept.status == "resolved"
+    end
+
+    test "a rejected photograph is swept too — a wrong answer is still an answer" do
+      image = finished("rejected", 25)
+
+      assert {:ok, 1} = ImageRetention.cleanup_finished_image_bytes()
+
+      assert Repo.get(UploadedImage, image.id).storage_path == nil
+    end
+
+    test "inside the retry window the photograph is kept, because the reader can still reject" do
+      image = finished("resolved", 2)
+
+      assert {:ok, 0} = ImageRetention.cleanup_finished_image_bytes()
+
+      assert Repo.get(UploadedImage, image.id).storage_path != nil
+    end
+
+    test "a pending image is never swept, however old — the pipeline has not finished with it" do
+      image = finished("pending", 400)
+
+      assert {:ok, 0} = ImageRetention.cleanup_finished_image_bytes()
+
+      assert Repo.get(UploadedImage, image.id).storage_path != nil
+    end
+
+    test "a row whose photograph is already gone is not swept again" do
+      finished("resolved", 25, storage_path: nil)
+
+      assert {:ok, 0} = ImageRetention.cleanup_finished_image_bytes()
+    end
+
+    test "records image.bytes_discarded, NOT image.expired — the image is not gone" do
+      finished("resolved", 25)
+
+      before_discarded = event_count("image.bytes_discarded")
+      before_expired = event_count("image.expired")
+
+      assert {:ok, 1} = ImageRetention.cleanup_finished_image_bytes()
+
+      # ⛔ An erasure enquiry reads `image.expired` as "this image is gone".
+      # Emitting it here would make the log say the record had been deleted
+      # while the record is sitting in the table.
+      assert event_count("image.bytes_discarded") == before_discarded + 1
+      assert event_count("image.expired") == before_expired
+    end
+
+    test "the sweep is bounded, and the bound is on the deletes" do
+      for _ <- 1..3, do: finished("resolved", 25)
+
+      assert {:ok, 2} = ImageRetention.cleanup_finished_image_bytes(limit: 2)
+      assert {:ok, 1} = ImageRetention.cleanup_finished_image_bytes(limit: 2)
+      assert {:ok, 0} = ImageRetention.cleanup_finished_image_bytes(limit: 2)
+    end
+  end
 end
 
 defmodule Stacks.GDPR.ImageRetentionTest.RecordingStorage do
@@ -486,6 +573,22 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
       assert_received {:storage_delete, "uploads/stuck-b"}
       refute_received {:storage_delete, _other}
     end
+
+    test "cleanup_finished_image_bytes/1 deletes the object for each finished image" do
+      at = DateTime.add(DateTime.utc_now(), -25 * 3600, :second)
+
+      insert(:uploaded_image,
+        status: "resolved",
+        storage_path: "uploads/finished-a",
+        uploaded_at: at,
+        updated_at: at
+      )
+
+      assert {:ok, 1} = ImageRetention.cleanup_finished_image_bytes()
+
+      assert_received {:storage_delete, "uploads/finished-a"}
+      refute_received {:storage_delete, _other}
+    end
   end
 
   describe "storage failure never blocks DB cleanup" do
@@ -512,6 +615,39 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
       assert log =~ "simulated_storage_outage"
 
       assert Repo.get(UploadedImage, expired.id) == nil
+    end
+
+    test "a failed delete LEAVES storage_path alone, rather than manufacturing a row-less object" do
+      # ⛔ THE ONE CASE WHERE SWALLOWING THE FAILURE WOULD BE WRONG, and it is
+      # the opposite of the two tests either side of it.
+      #
+      # Those sweeps delete the ROW too, so a leaked object is the lesser harm
+      # and the deletion must not be blocked. This sweep KEEPS the row — so if
+      # it cleared `storage_path` after a failed delete, the object would
+      # survive with nothing pointing at it: unreachable by erasure,
+      # unattributable to any reader, and indistinguishable from the population
+      # `cleanup_orphan_objects/1` exists to mop up. It would be manufacturing
+      # the defect on purpose, nightly.
+      at = DateTime.add(DateTime.utc_now(), -25 * 3600, :second)
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          storage_path: "uploads/doomed-finished",
+          uploaded_at: at,
+          updated_at: at
+        )
+
+      log =
+        capture_log(fn ->
+          assert {:ok, 0} = ImageRetention.cleanup_finished_image_bytes()
+        end)
+
+      assert log =~ "failed to delete storage object uploads/doomed-finished"
+      assert log =~ "could not be deleted"
+
+      kept = Repo.get(UploadedImage, image.id)
+      assert kept.storage_path == "uploads/doomed-finished"
     end
 
     test "stuck-image cleanup logs a warning and still deletes the DB record on storage failure" do

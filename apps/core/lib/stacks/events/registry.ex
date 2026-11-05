@@ -105,6 +105,10 @@ defmodule Stacks.Events.Registry do
     "image.rejected",
     "image.resolved",
     "image.expired",
+    # The photograph was deleted while its record remains — a distinct fact from
+    # `image.expired`, which means the whole image is gone. An erasure enquiry
+    # reading the log must be able to tell them apart.
+    "image.bytes_discarded",
     "listing.created",
     "listing.sold",
     "listing.removed",

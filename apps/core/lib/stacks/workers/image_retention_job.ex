@@ -1,10 +1,21 @@
 defmodule Stacks.Workers.ImageRetentionJob do
   @moduledoc """
-      Nightly safety net Oban worker. Cleans up uploaded images that are stuck in
-      `pending` status (i.e. their IdentifyBookJob failed or never ran).
+      Nightly retention worker for uploaded images.
 
-      Images are normally deleted immediately by IdentifyBookJob on success.
-      This job handles edge cases where that didn't happen.
+      ⛔ THE SENTENCE THAT USED TO STAND HERE — "images are normally deleted
+      immediately by IdentifyBookJob on success" — WAS NOT TRUE, and had not
+      been for as long as the module existed. Nothing deleted an image on
+      success; every photograph sat in object storage for the full 30-day row
+      TTL, long after the only thing that ever read it was finished. The
+      architecture document described the same behaviour this docstring claimed
+      ("the image has no further operational or user value" once identification
+      succeeds), so both artefacts described a deletion neither of them
+      performed.
+
+      `ImageRetention.cleanup_finished_image_bytes/1` is that deletion, and it
+      runs FIRST below: every other sweep here is a safety net for a photograph
+      that never reached a terminal state, so the common case should not depend
+      on one.
   """
 
   use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
@@ -15,7 +26,7 @@ defmodule Stacks.Workers.ImageRetentionJob do
 
   @impl true
   def perform(_job) do
-    Logger.info("ImageRetentionJob: cleaning up stuck and expired images")
+    Logger.info("ImageRetentionJob: discarding finished photographs and sweeping records")
 
     # ⚠️ DRAINED IN BATCHES UNDER A DEADLINE, not swept in one pass.
     #
@@ -28,7 +39,11 @@ defmodule Stacks.Workers.ImageRetentionJob do
     # Splitting the budget between the two sweeps keeps a large expired backlog
     # from starving the stuck-image safety net, which is the one that stops
     # `pending` rows accumulating in the first place.
-    with {:ok, stuck_count, stuck_state} <-
+    with {:ok, finished_count, finished_state} <-
+           ImageRetention.drain(&ImageRetention.cleanup_finished_image_bytes/1,
+             budget_ms: 30_000
+           ),
+         {:ok, stuck_count, stuck_state} <-
            ImageRetention.drain(&ImageRetention.cleanup_stuck_images/1, budget_ms: 30_000),
          {:ok, expired_count, expired_state} <-
            ImageRetention.drain(&ImageRetention.cleanup_expired_images/1, budget_ms: 30_000),
@@ -41,7 +56,8 @@ defmodule Stacks.Workers.ImageRetentionJob do
          {:ok, orphan_count, orphan_state} <-
            ImageRetention.drain(&ImageRetention.cleanup_orphan_objects/1, budget_ms: 30_000) do
       Logger.info(
-        "ImageRetentionJob: cleaned up #{stuck_count} stuck (#{stuck_state}) + " <>
+        "ImageRetentionJob: discarded #{finished_count} finished photograph(s) " <>
+          "(#{finished_state}), cleaned up #{stuck_count} stuck (#{stuck_state}) + " <>
           "#{expired_count} expired (#{expired_state}) image records, and " <>
           "#{orphan_count} row-less object(s) (#{orphan_state})"
       )
@@ -51,6 +67,7 @@ defmodule Stacks.Workers.ImageRetentionJob do
       # this job reports `:ok` — the job completing is not the sweep being done,
       # and conflating the two is what let the backlog hide.
       for {label, state} <- [
+            {"finished", finished_state},
             {"stuck", stuck_state},
             {"expired", expired_state},
             {"orphan", orphan_state}

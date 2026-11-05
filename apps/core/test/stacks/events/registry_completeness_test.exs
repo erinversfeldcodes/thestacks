@@ -47,11 +47,19 @@ defmodule Stacks.Events.RegistryCompletenessTest do
       """
     },
     "stacks/gdpr/image_retention.ex" => %{
-      types: ~w(image.expired),
+      types: ~w(image.expired image.bytes_discarded),
       call_path: """
-      Both sweeps build a list of event maps in `emit_expiry_events/2` and pass
-      it to `Events.emit_many/1` in ONE call, so the `event_type` literal sits
-      inside an `Enum.map` rather than in the emit call's argument.
+      Three sweeps build a list of event maps — `emit_expiry_events/2` for the
+      two that delete the record, `emit_discard_events/1` for the one that
+      deletes only the photograph — and pass it to `Events.emit_many/1` in ONE
+      call, so the `event_type` literal sits inside an `Enum.map` rather than in
+      the emit call's argument.
+
+      ⚠️ `image.bytes_discarded` is a SEPARATE type and not `image.expired` with
+      another reason, because the two facts differ in the way event_log exists
+      to record: `image.expired` means the image is gone, while this one means
+      the photograph was deleted and its row is still there. An erasure enquiry
+      reading the log has to be able to tell them apart.
 
       The batch is not a style choice. `emit/1` costs two round-trips per event
       (the event_log insert plus the subscriber enqueue), and measured on a

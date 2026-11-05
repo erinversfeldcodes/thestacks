@@ -512,7 +512,7 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :image, :expired],
           measurement: :count,
           description:
-            "Image bytes removed by the retention machinery, BY :reason (expired=TTL sweep past the 30-day deadline, stuck=safety-net for wedged pending uploads, rowless=objects no uploaded_images row points at). Query split by reason; do not sum with the stuck metric. NOTE rowless is NOT the :orphan metric below — that one alarms on rows past expiry still in the DB, this one counts objects with no row at all.",
+            "Image bytes removed by the retention machinery, BY :reason (finished=the photograph discarded once identification had been terminal for the reader's retry window, ROW KEPT; expired=TTL sweep past the 30-day deadline; stuck=safety-net for wedged pending uploads; rowless=objects no uploaded_images row points at). Query split by reason; do not sum with the stuck metric. NOTE finished removes bytes only — the uploaded_images row survives, so this reason does NOT mean the image is gone. NOTE rowless is NOT the :orphan metric below — that one alarms on rows past expiry still in the DB, this one counts objects with no row at all.",
           tags: [:reason]
         ),
         sum(

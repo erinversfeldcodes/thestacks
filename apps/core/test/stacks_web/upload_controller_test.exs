@@ -662,6 +662,44 @@ defmodule StacksWeb.UploadControllerTest do
       assert %{"status" => "pending"} = json_response(conn, 202)
     end
 
+    test "returns 410 once the photograph has been discarded, rather than a plausible lie",
+         %{conn: conn, user: user} do
+      # ⛔ THE RETRY IS THE ONLY THING THAT STILL READS THE BYTES, and
+      # `cleanup_finished_image_bytes/1` deletes them a day after the answer
+      # lands — while the ROW, and so this button, survive for thirty.
+      #
+      # ⚖️ Without this refusal the retry enqueues anyway: the job cannot
+      # presign a key with nothing behind it, burns three attempts, and the
+      # terminal guarantee writes the row back to `rejected` with
+      # `processing_failed` — telling the reader their photo was unreadable. It
+      # was perfectly readable. We deleted it.
+      author = insert(:author, name: "Gone Author")
+      book = insert(:book, title: "The Gone Book", author: author)
+      insert(:book_edition, book: book, isbn: "9780000000019")
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          user_id: user.id,
+          book_id: book.id,
+          book_ids: [book.id],
+          storage_path: nil
+        )
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"error" => "photograph_discarded"} = json_response(conn, 410)
+
+      # And the row is left exactly as it was — a refused retry must not move
+      # the image out of its terminal state, or the reader loses the answer too.
+      reloaded = Core.Repo.get!(Stacks.Books.UploadedImage, image.id)
+      assert reloaded.status == "resolved"
+      assert reloaded.book_ids == [book.id]
+    end
+
     test "returns 401 without auth token" do
       conn =
         CoreWeb.ConnCase.proven_conn()

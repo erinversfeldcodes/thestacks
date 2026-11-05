@@ -30,6 +30,7 @@ defmodule Stacks.Events.PayloadContract do
     "image.rejected" => %{version: 1, keys: ~w(reason), optional: ~w(isbn)},
     "image.resolved" => %{version: 1, keys: ~w(book_count)},
     "image.expired" => %{version: 1, keys: ~w(), optional: ~w(reason)},
+    "image.bytes_discarded" => %{version: 1, keys: ~w(reason)},
     "placement.created" => %{
       version: 1,
       keys: ~w(book_id bookshelf visibility_tier),

@@ -1261,7 +1261,7 @@ Tracks the lifecycle of user-uploaded book photos. Ecto schema: `Stacks.Books.Up
 | `status` | `ENUM('pending', 'resolved', 'rejected')` | |
 | `rejection_reason` | `TEXT` | `NULL` |
 | `uploaded_at` | `TIMESTAMPTZ` | |
-| `expires_at` | `TIMESTAMPTZ` | When the image data should be cleaned up (30 days from upload) |
+| `expires_at` | `TIMESTAMPTZ` | When the image RECORD should be cleaned up (30 days from upload). The photograph itself goes sooner — see *Image retention* below |
 
 ### `audit_log`
 
@@ -1486,7 +1486,9 @@ Completed purchases (fixed price or accepted offer). **Table exists in DB but is
 
 ### Upload image lifecycle
 
-User-uploaded photos exist solely to extract a book identifier (ISBN). Once identification succeeds or the 30-day TTL expires, the image has no further operational or user value. **We intentionally do not preserve the ability to re-run vision model processing on the original image.** The outcomes of identification — book records, placement decisions, event log entries — are the durable artefacts, not the pixels.
+User-uploaded photos exist solely to extract a book identifier (ISBN). Once identification succeeds — or terminally fails — the image has no further operational or user value. **We intentionally do not preserve the ability to re-run vision model processing on the original image.** The outcomes of identification — book records, placement decisions, event log entries — are the durable artefacts, not the pixels.
+
+**So the photograph and its record have different deadlines, and this paragraph used to describe a deletion the code did not perform.** `ImageRetention.cleanup_finished_image_bytes/1` deletes the stored photograph 24 hours after identification reaches a terminal state, and clears the `storage_path` that pointed at it; the `op.uploaded_images` row survives to its own 30-day `expires_at`, because the reader is still owed their inbox entry, their export and erasure reachability. The 24 hours are not a retention policy in their own right — they are exactly the window in which "No, try again" can still re-read the bytes. Past it, that action is refused with `410 photograph_discarded` rather than enqueueing a retry that would report the photo as unreadable.
 
 **Current implementation:** Image bytes are base64-encoded and stored in Oban job args (in PostgreSQL). The `IdentifyBookJob` worker sends the base64 image directly to the Modal vision service over HMAC-authenticated HTTPS. No external object storage is used for uploads in the current phase.
 
@@ -1560,7 +1562,7 @@ Any row returned by this query is alerted on. The 1-hour grace covers the retent
 
 ### Risks and mitigations
 
-**Third-party persons in background.** A user photographing a bookshelf may capture other people who never consented to being processed by a vision model. This is why images are transient — they are purged within 30 days regardless of outcome, and the event log records only book identifiers (ISBNs, titles), never image content or descriptions of people.
+**Third-party persons in background.** A user photographing a bookshelf may capture other people who never consented to being processed by a vision model. This is why images are transient — the photograph is deleted a day after identification finishes, regardless of outcome, and the event log records only book identifiers (ISBNs, titles), never image content or descriptions of people. ⚠️ Thirty days used to be offered here as the mitigation; for a photograph of a bystander that is a weak one, and it was the record's deadline standing in for the image's.
 
 **Embedded malicious content.** An image may contain rendered text including URLs — on a t-shirt, a poster, or a laptop screen in the background. A sufficiently capable vision model that attempts to interpret all text in an image could extract and act on a URL that leads to malware, a phishing page, or a prompt-injection payload. ⚠️ **This paragraph claimed a mitigation that does not hold, and the correction is the point.** It read: *"Current mitigation: Modal's `/classify` and `/extract` endpoints return only ISBN-shaped strings and book titles; they do not follow URLs or return raw OCR output."* Both halves are wrong. The two endpoints were deleted on 2026-10-15 and `/analyze` is the only one left — but more importantly, **the surviving response DOES return raw OCR text**: `ExtractedBook.raw_text` is a declared proto field ("Raw OCR text from the image region") and `main.py` populates it from the model's output. That was already untrue before the endpoints were deleted.
 
@@ -1574,7 +1576,7 @@ What is actually true today: the service does not **follow** URLs found in an im
 2. **Reduces size.** A cropped and re-encoded spine region is tens of KB, not hundreds. Lower bandwidth and faster Modal cold starts.
 3. **Defends against prompt injection via imagery.** Content like printed text saying "ignore previous instructions" or a background URL containing adversarial content is removed before the model ever sees it.
 
-This pre-processing step is tracked as a future enhancement. Until it is implemented, the risk is accepted and mitigated by Modal's output contract (ISBN-only returns) and the 30-day image TTL.
+This pre-processing step is tracked as a future enhancement. Until it is implemented, the risk is accepted and mitigated by Modal's output contract (ISBN-only returns) and by deleting the photograph a day after identification finishes.
 
 ### Persistent cover images
 
@@ -1584,7 +1586,7 @@ Book cover thumbnails are the only permanently stored images. These are sourced 
 
 ```
 stacks-images/ (Cloudflare R2)
-  ├── uploads/                    # Upload images — 30-day TTL, then purged
+  ├── uploads/                    # Upload photographs — deleted ~24h after identification finishes
   │   └── {image_id}             # Raw upload bytes, no extension (MIME type stored separately)
   ├── covers/                     # Book cover thumbnails — permanent
   │   └── {isbn}-cover.jpg       # Sourced from Open Library or Google Books
@@ -1635,7 +1637,7 @@ Application-level encryption for Tier 3 uses key management via **age** (the enc
 
 | Data | Retention | Rationale |
 |------|-----------|-----------|
-| `uploaded_images` (R2 object) | 30 days | Purged from R2 after identification complete; `image.purged` event emitted |
+| `uploaded_images` (R2 object) | ~24h after identification finishes | Deleted from R2 by `ImageRetention.cleanup_finished_image_bytes/1`; `image.bytes_discarded` event emitted; the row survives to its own 30-day expiry |
 | `uploaded_images` (row + event log) | Indefinite | Metadata row and `image.*` events are permanent — only the bytes are purged |
 | Book covers (R2 object) | Indefinite | Published cover art; sourced from Open Library / Google Books |
 | Scraped reviews (raw HTML) | 7 days | Debugging only |
@@ -4935,7 +4937,7 @@ The system should function with reduced capability when components fail:
 
 ### What's NOT Backed Up (by design)
 
-- Raw uploaded images (GDPR: deleted after 30 days anyway)
+- Raw uploaded images (GDPR: the photograph is deleted a day after identification finishes)
 - Scraped raw HTML (debugging only, 7-day retention)
 - Rate limiter state (rebuilt in-memory on restart)
 - Circuit breaker state (reset on restart)

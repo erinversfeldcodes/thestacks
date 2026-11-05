@@ -2,9 +2,17 @@ defmodule Stacks.GDPR.ImageRetention do
   @moduledoc """
       Handles cleanup of uploaded images.
 
-      - `cleanup_expired_images/0` — deletes images past their expires_at deadline (30 days)
-      - `cleanup_stuck_images/0` — safety net: cleans up images stuck in pending
+      - `cleanup_finished_image_bytes/1` — deletes the PHOTOGRAPH once identification
+        has been terminal for the reader's retry window, keeping the row
+      - `cleanup_expired_images/1` — deletes images past their expires_at deadline (30 days)
+      - `cleanup_stuck_images/1` — safety net: cleans up images stuck in pending
         for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
+      - `cleanup_orphan_objects/1` — deletes objects no row points at
+
+      ⚠️ The first of those is the only one that separates the two deadlines: a
+      photograph is useless the moment identification finishes, while its record
+      is still owed to the reader's inbox, their export and erasure. Everything
+      else here deletes both halves together.
 
       Both functions delete the object from storage (R2/Local/Mock) when a
       `storage_path` is present, then remove the DB record and emit an
@@ -51,6 +59,32 @@ defmodule Stacks.GDPR.ImageRetention do
   # prefix off a single enormous parameter list without capping what is seen.
   @known_chunk 500
 
+  # How long a photograph outlives the answer it produced.
+  #
+  # ⛔ THE BYTES AND THE RECORD HAVE DIFFERENT DEADLINES, and giving them one
+  # deadline was the defect. `docs/technical-architecture.md` already states the
+  # principle the code did not implement: a photo "exists solely to extract a
+  # book identifier (ISBN)", and re-running vision on the original is
+  # *deliberately* not preserved. So the photograph has no value once
+  # identification is terminal — while the ROW keeps attribution, the reader's
+  # inbox entry, the export and erasure reachability for its full 30 days.
+  #
+  # ⚠️ ONE THING still reads the bytes after a terminal status: "No, try again"
+  # (`UploadController.reject_identification/2`), which re-enqueues
+  # `IdentifyBookJob` against the same storage key. So this window is exactly
+  # "how long does a reader get to reject a result", and nothing else. A day
+  # covers a reader who closes the app and comes back the next evening.
+  #
+  # ⚖️ Why this matters more than tidiness: a shelf photograph routinely
+  # captures other people — faces, rooms, a visible address — who consented to
+  # nothing. The architecture offers the purge as the mitigation for that, and
+  # a mitigation that waits 30 days after the image stopped being useful is a
+  # weak one.
+  @retry_window_hours 24
+
+  # Terminal for the pipeline: the answer is in, right or wrong.
+  @finished_statuses ["resolved", "rejected"]
+
   @doc """
       Deletes up to `:limit` uploaded_images records where `expires_at < now`,
       oldest expiry first.
@@ -87,6 +121,77 @@ defmodule Stacks.GDPR.ImageRetention do
     emit_expiry_events(expired_ids, %{})
 
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{reason: "expired"})
+
+    {:ok, count}
+  rescue
+    error -> {:error, error}
+  end
+
+  @doc """
+      Deletes the stored photograph for images whose identification finished
+      more than #{@retry_window_hours} hours ago, and clears the `storage_path`
+      that pointed at it. **The row survives** to its own `expires_at`.
+
+      Returns `{:ok, count}` — rows whose object is now gone. Bounded like its
+      siblings; `drain/1` loops it.
+
+      ⚠️ `updated_at` is the terminal timestamp and needs no column of its own,
+      because nothing moves a finished row except `reject_identification/2` —
+      which moves it back to `pending` and so restarts this clock, correctly:
+      the reader is working with that image again. `mark_resolved/2` writes only
+      `where status == "pending"` and `reject_image/2` only
+      `where status in ("awaiting_upload", "pending")`, so neither can re-fire
+      on a row that is already finished.
+  """
+  @spec cleanup_finished_image_bytes(keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def cleanup_finished_image_bytes(opts \\ []) do
+    limit = Keyword.get(opts, :limit, @batch_size)
+    cutoff = DateTime.add(DateTime.utc_now(), -@retry_window_hours, :hour)
+
+    rows =
+      UploadedImage
+      |> where([i], i.status in ^@finished_statuses)
+      |> where([i], not is_nil(i.storage_path) and i.storage_path != "")
+      |> where([i], i.updated_at < ^cutoff)
+      |> order_by([i], asc: i.updated_at)
+      |> limit(^limit)
+      |> select([i], %{id: i.id, storage_path: i.storage_path})
+      |> Repo.all()
+
+    # ⛔ THE OBJECT GOES FIRST, AND ONLY WHAT ACTUALLY WENT HAS ITS PATH CLEARED.
+    #
+    # ⚖️ Both orderings can fail, and they fail toward different states. Clearing
+    # the path first and then failing to delete leaves an object no row points
+    # at — unreachable by erasure, unattributable, exactly the population the
+    # row-less sweep below exists to mop up, manufactured deliberately. Deleting
+    # first and then failing to clear leaves a row pointing at a gone object:
+    # visible, attributable, and retried by the next run of this sweep. Fail
+    # toward the reachable state.
+    #
+    # So a storage failure is NOT swallowed here, where `delete_storage_objects/1`
+    # swallows it for the sweeps that delete the row anyway. The row is staying,
+    # so its path must keep pointing at whatever is actually there.
+    {deleted, failed} = delete_each(rows)
+
+    if failed != [] do
+      Logger.warning(
+        "ImageRetention: #{length(failed)} finished image object(s) could not be deleted; " <>
+          "their rows keep their storage_path and the next run retries them"
+      )
+    end
+
+    deleted_ids = Enum.map(deleted, & &1.id)
+
+    {count, _} =
+      UploadedImage
+      |> where([i], i.id in ^deleted_ids)
+      |> Repo.update_all(set: [storage_path: nil])
+
+    emit_discard_events(deleted_ids)
+
+    :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{
+      reason: "finished"
+    })
 
     {:ok, count}
   rescue
@@ -320,20 +425,35 @@ defmodule Stacks.GDPR.ImageRetention do
   """
   @spec delete_storage_objects([%{optional(any) => any}]) :: :ok
   def delete_storage_objects(rows) do
-    Enum.each(rows, fn
+    delete_each(rows)
+    :ok
+  end
+
+  # The same deletions, reporting which ones actually happened. Callers that
+  # delete the row too can ignore the answer (see `delete_storage_objects/1`);
+  # `cleanup_finished_image_bytes/1` keeps the row, so it must not clear a path
+  # whose object is still there.
+  #
+  # A row with no usable `storage_path` counts as deleted: there is nothing to
+  # remove, and reporting it as a failure would make the caller retry forever.
+  @spec delete_each([%{optional(any) => any}]) :: {[map()], [map()]}
+  defp delete_each(rows) do
+    Enum.split_with(rows, fn
       %{storage_path: path} when is_binary(path) and path != "" ->
         case Storage.delete_image(path) do
           :ok ->
-            :ok
+            true
 
           {:error, reason} ->
             Logger.warning(
               "ImageRetention: failed to delete storage object #{path}: #{inspect(reason)}"
             )
+
+            false
         end
 
       _ ->
-        :ok
+        true
     end)
   end
 
@@ -354,6 +474,39 @@ defmodule Stacks.GDPR.ImageRetention do
   # rather than once per row — a batch that silently emitted nothing would leave
   # the deletions unrecorded in an immutable log that is supposed to be the
   # record of them.
+  # ⛔ A DISTINCT EVENT TYPE, not `image.expired` with another reason, and the
+  # distinction is the one event_log exists to make. `image.expired` means the
+  # image is gone — row and bytes — which is what an erasure enquiry reads it
+  # as. This one says the photograph was discarded while its record remains. The
+  # telemetry series is still shared, because "how many bytes did we remove
+  # tonight" is genuinely one question; "what happened to this image" is not.
+  defp emit_discard_events([]), do: :ok
+
+  defp emit_discard_events(image_ids) do
+    events =
+      Enum.map(image_ids, fn image_id ->
+        %{
+          event_type: "image.bytes_discarded",
+          aggregate_type: "image",
+          aggregate_id: image_id,
+          payload: %{reason: "finished"}
+        }
+      end)
+
+    case Events.emit_many(events) do
+      {:ok, _count} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "ImageRetention: #{length(image_ids)} image.bytes_discarded event(s) were not " <>
+            "recorded: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
   defp emit_expiry_events([], _payload), do: :ok
 
   defp emit_expiry_events(image_ids, payload) do

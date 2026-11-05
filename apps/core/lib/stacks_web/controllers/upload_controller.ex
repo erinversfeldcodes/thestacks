@@ -169,6 +169,7 @@ defmodule StacksWeb.UploadController do
     rejected_ids = Map.get(params, "rejected_book_ids", [])
 
     with {:ok, image} <- fetch_owned_image(image_id, user.id),
+         :ok <- refuse_if_photograph_discarded(image),
          excluded when excluded != [] <- resolve_excluded_books(rejected_ids) do
       excluded_isbns = resolve_excluded_isbns(rejected_ids)
       remove_placements_for_books(user.id, rejected_ids)
@@ -211,12 +212,33 @@ defmodule StacksWeb.UploadController do
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 
+      {:error, :photograph_discarded} ->
+        conn |> put_status(410) |> json(%{error: "photograph_discarded"})
+
       [] ->
         conn
         |> put_status(422)
         |> json(%{error: "no_resolvable_books"})
     end
   end
+
+  # ⛔ THE RETRY IS THE ONE THING THAT STILL NEEDS THE PHOTOGRAPH, and
+  # `ImageRetention.cleanup_finished_image_bytes/1` deletes it a day after
+  # identification goes terminal. Past that point the bytes are gone while the
+  # row — and the reader's inbox entry — remain for thirty days, so the button
+  # is still reachable long after the thing it acts on is not.
+  #
+  # ⚖️ Refusing with 410 rather than enqueueing anyway. A retry against a
+  # deleted object does not fail cleanly: `IdentifyBookJob` cannot presign a key
+  # with nothing behind it, burns its three attempts, and the terminal guarantee
+  # writes the row back to `rejected` with `processing_failed` — which tells the
+  # reader their photo was unreadable. It was perfectly readable; we deleted it.
+  # An honest refusal the reader can act on beats a plausible lie.
+  defp refuse_if_photograph_discarded(%UploadedImage{storage_path: path})
+       when is_binary(path) and path != "",
+       do: :ok
+
+  defp refuse_if_photograph_discarded(%UploadedImage{}), do: {:error, :photograph_discarded}
 
   defp fetch_owned_image(image_id, user_id) do
     case Ecto.UUID.cast(image_id) do
