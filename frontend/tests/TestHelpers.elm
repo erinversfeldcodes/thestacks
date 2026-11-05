@@ -1141,7 +1141,7 @@ does `Effect.perform` on the production side.
 -}
 authHeaderList : String -> Maybe Api.Credentials -> List SimulatedEffect.Http.Header
 authHeaderList method maybeToken =
-    Api.requestHeaders method Api.SameOrigin (Api.Optional maybeToken)
+    Api.requestHeaders method (Api.Optional maybeToken)
         |> List.map (\( name, value ) -> SimulatedEffect.Http.header name value)
 
 

@@ -273,7 +273,7 @@ renewProgram =
                                 ++ String.join
                                     ","
                                     (List.map Tuple.first
-                                        (Api.requestHeaders "POST" Api.SameOrigin (Api.Session auth.token))
+                                        (Api.requestHeaders "POST" (Api.Session auth.token))
                                     )
                             )
 
