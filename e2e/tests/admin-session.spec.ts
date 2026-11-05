@@ -132,6 +132,59 @@ test.describe("Admin session gate", () => {
     ).toBeVisible({ timeout: 15000 });
   });
 
+  /**
+   * ⛔ THE RELOAD. Elevation is a fact about the session the server holds, not a
+   * credential the page carries — so a full reload inside the MFA window must
+   * land the operator back on the admin surface without a second factor.
+   *
+   * Before, the SPA held an admin token in memory and nothing persisted it, so
+   * every full load cost email + password + TOTP again. That is the defect this
+   * whole change exists to remove, and no unit test can see it: the server-side
+   * mechanism can be perfect while the page still re-gates itself.
+   */
+  test("a reload inside the MFA window does not re-prompt", async ({ page, request }) => {
+    // ⛔ EXPECTED TO FAIL — the defect is real and the client half is unfinished.
+    //
+    // The SERVER keeps the elevation; that is proven in `session_context_test`
+    // and `admin_elevation_test`. The CLIENT re-presents the gate anyway,
+    // because `Main.initPage` decides with `adminToken == Nothing` — "am I
+    // signed in?" — when the question is "has the server elevated me?", which
+    // the page cannot answer without asking.
+    //
+    // ⚠️ And the gate currently appears ONLY because `bootPage` passes
+    // `sessionCredentials model` — the pre-boot model — alongside the freshly
+    // resolved `maybeAuth`. Correct that staleness on its own and the gate
+    // stops appearing at all, so the two defects are cancelling each other.
+    // Measured both ways: with the stale read, every reload re-prompts; with it
+    // fixed, 9 of this file's cases fail because the gate never opens.
+    //
+    // `test.fail()` rather than a deletion or a skip: this goes RED the moment
+    // the client half lands, which is what should happen.
+    test.fail();
+
+    const secret = readOwnerMfaSecret();
+    await signInAsOwner(page, request);
+    await page.goto("/admin/sources");
+    await passTheGate(page, secret);
+    await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });
+
+    await page.reload();
+
+    // ⚠️ PRESENCE FIRST, THEN ABSENCE. `toBeHidden()` is satisfied by an element
+    // that is merely not there yet, so asserting the gate is hidden while the
+    // page is still booting passes instantly and measures nothing — it passed
+    // against a build that re-gated on every reload. Waiting for the surface
+    // first means the absence is asserted against a page that has finished.
+    await expect(
+      page.locator("tbody tr").first(),
+      "the admin surface did not come back after a reload",
+    ).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByTestId("admin-gate"),
+      "a reload re-presented the gate — the elevation the server recorded is not being replayed",
+    ).toBeHidden();
+  });
+
   test("a pending source offers Approve and Reject", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
     await signInAsOwner(page, request);
