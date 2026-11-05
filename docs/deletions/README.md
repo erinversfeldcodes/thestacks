@@ -13,13 +13,25 @@ The *mechanism* for collecting row-less objects lives in the application:
 planted orphans, and invoked nightly by `ImageRetentionJob`. A future cleanup
 should use that, not a one-off script.
 
-| Manifest | What |
-|---|---|
-| `rowless-upload-objects-2026-11-05.manifest.tsv` | 4,234 objects under `uploads/` that no `op.uploaded_images` row pointed at. Columns: key, size, LastModified. |
+⛔ **The manifests themselves do NOT live here, and that is the point of this
+file.** This repository is **public**. A per-object manifest of a production
+bucket — keys, sizes, timestamps — gives the public operational detail and gives
+the audit nothing a controlled store could not hold better. The reasoning
+belongs in the open; the inventory does not.
+
+So each entry below records the counts, the decision and the method, and names
+where the manifest is kept. A manifest is produced by re-running the
+characterisation script, which is read-only and committed.
+
+| Deletion | Objects | Manifest |
+|---|---|---|
+| `rowless-upload-objects-2026-11-05` | 4,234 | held outside the repository; reproducible from `scripts/characterise/rowless-upload-objects.py` against a saved listing |
 
 ## rowless-upload-objects-2026-11-05
 
 **Decided by the platform owner on 2026-11-05: delete as development residue.**
+**4,234 objects deleted, 0 errors.** Verified by re-listing: 4,390 remained, 0 of
+them row-less — exactly the number that had a row.
 
 The evidence is `docs/rowless-upload-objects-2026-11-05.txt`, produced read-only
 by `scripts/characterise/rowless-upload-objects.py`. The decisive measure was
