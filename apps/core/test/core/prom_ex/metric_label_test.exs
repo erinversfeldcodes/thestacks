@@ -90,6 +90,10 @@ defmodule Core.PromEx.MetricLabelTest do
     bucket: "rate-limit bucket name, an atom named in the limiter's config",
     context: "where a token was issued (login vs refresh) — two values",
     direction: "which way a visibility change went — a small closed set",
+    population:
+      "which side of the uploads/ prefix is out of step — exactly two literals " <>
+        "written at the one emit site (`rowless_objects`, `rows_without_object`), " <>
+        "neither derived from data",
     endpoint:
       "vision sidecar path, mapped from a fixed set by a function that RAISES " <>
         "on anything else, so an unmapped value cannot reach a label",

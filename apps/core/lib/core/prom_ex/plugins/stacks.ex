@@ -522,6 +522,14 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Images cleaned by the stuck-pending safety net.",
           tags: [:reason]
         ),
+        last_value(
+          [:stacks, :gdpr, :image, :standing],
+          event_name: [:stacks, :gdpr, :image, :standing],
+          measurement: :count,
+          description:
+            "STANDING population on each side of the uploads/ prefix, BY :population (rowless_objects = objects no uploaded_images row points at; rows_without_object = rows whose storage_path resolves to nothing). A gauge, not a collection counter: the sweep counters next to it emit zero both when they found nothing and when they never ran, which is how 4,234 row-less objects accumulated on production behind a clean dashboard. Either being non-zero is alert-worthy. NOTE a NULL storage_path is excluded from rows_without_object — since the finished-image sweep a row legitimately has no path.",
+          tags: [:population]
+        ),
         sum(
           [:stacks, :gdpr, :image, :orphan, :count, :total],
           event_name: [:stacks, :gdpr, :image, :orphan],

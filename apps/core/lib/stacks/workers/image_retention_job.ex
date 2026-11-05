@@ -87,11 +87,47 @@ defmodule Stacks.Workers.ImageRetentionJob do
         )
       end
 
+      alarm_on_standing_populations()
+
       :ok
     else
       {:error, reason} ->
         Logger.error("ImageRetentionJob: cleanup failed: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # ⛔ READ AFTER THE SWEEPS, so it measures what this run LEFT rather than what
+  # it found. A standing population is the only one of the three image numbers
+  # that answers "is the system correct right now" — the sweep counters report
+  # zero both when they found nothing and when they never ran.
+  #
+  # ⚠️ A storage failure is logged and swallowed. This is a measurement; it must
+  # not fail a job whose deletions already succeeded, and an unreadable bucket
+  # is itself visible as the gauge going stale.
+  defp alarm_on_standing_populations do
+    case ImageRetention.storage_consistency_check() do
+      {:ok, %{rowless_objects: rowless, rows_without_object: missing} = counts} ->
+        if rowless > 0 do
+          Logger.error(
+            "ImageRetentionJob: ALARM — #{rowless} object(s) under uploads/ that no row points at. " <>
+              "They are unreachable by erasure and attributable to nobody."
+          )
+        end
+
+        if missing > 0 do
+          Logger.error(
+            "ImageRetentionJob: ALARM — #{missing} row(s) whose storage_path resolves to nothing. " <>
+              "Any read of them fails; the arithmetic check alone cannot see this direction."
+          )
+        end
+
+        Logger.info("ImageRetentionJob: storage consistency #{inspect(counts)}")
+
+      {:error, reason} ->
+        Logger.warning(
+          "ImageRetentionJob: could not measure storage consistency: #{inspect(reason)}"
+        )
     end
   end
 

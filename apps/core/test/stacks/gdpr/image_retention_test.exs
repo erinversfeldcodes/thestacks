@@ -591,6 +591,71 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
     end
   end
 
+  describe "storage_consistency_check/0 — the standing population, both directions" do
+    test "a row whose storage_path resolves to nothing is counted" do
+      # ⛔ THE DIRECTION THE ARITHMETIC CHECK CANNOT SEE. "Objects must not
+      # exceed rows" is satisfied here — zero objects, one row — while a
+      # reader's record points at an image that does not exist. Measured on
+      # production 2026-11-05: 2,374 rows in exactly this state, none of which
+      # the arithmetic invariant would have reported.
+      insert(:uploaded_image, storage_path: "uploads/gone")
+
+      assert {:ok, counts} = ImageRetention.storage_consistency_check()
+      assert counts.rows_without_object == 1
+      assert counts.rowless_objects == 0
+    end
+
+    test "an object no row points at is counted" do
+      user = insert(:user)
+      {:ok, %{image_id: kept}} = Stacks.Uploads.init_upload(user.id)
+      :ok = Stacks.Uploads.store_upload_bytes(user.id, kept, "a reader's real upload")
+      {:ok, _} = Stacks.Storage.upload_image(Ecto.UUID.generate(), "row-less bytes")
+
+      assert {:ok, counts} = ImageRetention.storage_consistency_check()
+      assert counts.objects == 2
+      assert counts.rowless_objects == 1
+      assert counts.rows_without_object == 0
+    end
+
+    test "both populations at once — the case the arithmetic hides" do
+      # ⛔ THE WHOLE ARGUMENT FOR COUNTING BOTH SIDES. One of each means the
+      # totals are EQUAL, so "objects must not exceed rows" passes cleanly while
+      # two distinct defects stand. On production the difference was 1,860 and
+      # the true populations were 4,234 and 2,374 — neither of them 1,860.
+      insert(:uploaded_image, storage_path: "uploads/gone")
+      {:ok, _} = Stacks.Storage.upload_image(Ecto.UUID.generate(), "row-less bytes")
+
+      assert {:ok, counts} = ImageRetention.storage_consistency_check()
+      assert counts.objects == counts.rows_with_path, "the arithmetic invariant holds here"
+      assert counts.rowless_objects == 1
+      assert counts.rows_without_object == 1
+    end
+
+    test "a row with a NULL storage_path is NOT counted as missing its object" do
+      # ⚠️ The normal state after `cleanup_finished_image_bytes/1`. Counting it
+      # would alarm on every row whose photograph has already been discarded.
+      insert(:uploaded_image, storage_path: nil)
+
+      assert {:ok, counts} = ImageRetention.storage_consistency_check()
+      assert counts.rows_without_object == 0
+    end
+
+    test "the standing count is a gauge, not a collection counter" do
+      # ⛔ The distinction this check exists for: `cleanup_orphan_objects/1`
+      # reports how many it DELETED, so a sweep that never ran reports the same
+      # zero as one that ran and found nothing. A standing population must read
+      # the same however many times it is asked.
+      insert(:uploaded_image, storage_path: "uploads/gone-a")
+      insert(:uploaded_image, storage_path: "uploads/gone-b")
+
+      assert {:ok, first} = ImageRetention.storage_consistency_check()
+      assert {:ok, second} = ImageRetention.storage_consistency_check()
+
+      assert first.rows_without_object == 2
+      assert second.rows_without_object == 2, "a standing population does not drain by being read"
+    end
+  end
+
   describe "storage failure never blocks DB cleanup" do
     setup do
       Application.put_env(:core, :storage, FailingStorage)

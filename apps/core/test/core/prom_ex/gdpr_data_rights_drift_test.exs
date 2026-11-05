@@ -21,6 +21,13 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
     "stacks_gdpr_audit_read_count_total"
   ]
 
+  # ⚠️ STRIPPED FROM PANEL NAMES ONLY, NOT FROM REGISTERED ONES — so a metric
+  # family whose REGISTERED name ends in one of these can never match a panel
+  # that queries it, and the drift test reports it as invisible while the panel
+  # sits right there. Nothing had hit it because counters here end in
+  # `_count_total` (which does not end in `_count`) and `_sum`/`_bucket` are
+  # derived names Prometheus generates rather than ones we register. A gauge
+  # named `..._count` does hit it. Name gauges without the suffix.
   @histogram_suffixes ["_bucket", "_sum", "_count"]
 
   defp dashboard_path,

@@ -597,6 +597,52 @@
           "legendFormat": "orphan"
         }
       ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Uploads out of step with their rows \u2014 BOTH directions (ALARM)",
+      "description": "WHAT: the STANDING population on each side of the uploads/ prefix, as a gauge. rowless_objects = objects in storage that no op.uploaded_images row points at \u2014 unreachable by erasure, attributable to nobody. rows_without_object = rows whose storage_path resolves to nothing \u2014 any read of them fails. WARNING this is NOT the sweep counters beside it. Those report what a run DELETED, so they emit zero both when a sweep found nothing and when it never ran; that is how 4,234 row-less objects accumulated on production (measured 2026-11-05) behind a clean dashboard. This one reports what is standing right now. WARNING both series are needed and the difference between the totals is NOT a substitute: measured on production the populations were 4,234 and 2,374 while the arithmetic difference was 1,860 \u2014 neither number \u2014 and it shrinks toward zero as the two grow in step. HOW: stacks_gdpr_image_standing{population}. MEANS: both at zero is the correct state. WATCH: ANY non-zero value is alert-worthy. A NULL storage_path is excluded from rows_without_object \u2014 since the finished-image sweep a row legitimately has no path and no object, and counting those would alarm on the normal case.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (population) (stacks_gdpr_image_standing{app=\"$app\"})",
+          "legendFormat": "{{population}}"
+        }
+      ]
     }
   ]
 }

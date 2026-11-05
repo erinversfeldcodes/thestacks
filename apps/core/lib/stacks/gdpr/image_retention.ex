@@ -379,6 +379,95 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
+      The STANDING populations on both sides of the `uploads/` prefix, as a
+      gauge rather than a collection counter.
+
+      Returns `%{objects:, rows_with_path:, rowless_objects:, rows_without_object:}`.
+
+      ⛔ **A COLLECTION COUNTER AND A STANDING POPULATION ARE DIFFERENT NUMBERS,
+      and only one of them can alarm.** `cleanup_orphan_objects/1` already emits
+      how many row-less objects it DELETED. A sweep that never runs emits zero —
+      the same zero as a sweep that ran and found nothing. That is the wrong
+      zero, and it is exactly how this population reached 4,234 objects on
+      production while every counter on the dashboard read fine.
+
+      ⚖️ **It reports BOTH directions, and the second one is the point.** The
+      issue this closes asked only for "objects must not exceed rows". Measured
+      on production 2026-11-05, that invariant would have been **blind to the
+      larger defect**: 4,234 objects had no row, and 2,374 rows pointed at an
+      object that no longer existed. An arithmetic check on the two totals sees
+      the difference, 1,860 — which is neither number, and which shrinks toward
+      zero as the two populations grow in step. So both are counted and both
+      alarm.
+
+      ⚠️ A NULL `storage_path` is NOT a row without an object. Since
+      `cleanup_finished_image_bytes/1`, a finished row legitimately has no path
+      and no object, and counting those here would alarm on the normal case.
+      Only rows that still claim a path are measured.
+
+      ⚠️ Like `cleanup_orphan_objects/1`, this reads the whole prefix listing
+      into memory — see the note there. It is a nightly check, not a request
+      path.
+  """
+  @spec storage_consistency_check() :: {:ok, map()} | {:error, term()}
+  def storage_consistency_check do
+    case Stacks.Storage.list_objects(@upload_prefix) do
+      {:ok, keys} ->
+        # One pass over the keys gives both answers: whatever matched is the
+        # overlap, and each side's total minus the overlap is its own orphans.
+        # Counted DISTINCT so a path duplicated across rows cannot inflate the
+        # overlap and hide an orphan on either side.
+        matched =
+          keys
+          |> Enum.chunk_every(@known_chunk)
+          |> Enum.map(&count_known/1)
+          |> Enum.sum()
+
+        rows_with_path =
+          UploadedImage
+          |> where([i], not is_nil(i.storage_path) and i.storage_path != "")
+          |> Repo.aggregate(:count)
+
+        result = %{
+          objects: length(keys),
+          rows_with_path: rows_with_path,
+          rowless_objects: length(keys) - matched,
+          rows_without_object: rows_with_path - matched
+        }
+
+        emit_standing(result)
+        {:ok, result}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
+  end
+
+  # ⛔ Its own event, NOT `[:stacks, :gdpr, :image, :orphan]` and NOT `:expired`
+  # with a reason. `:orphan` means a ROW past expiry still in the DB and is
+  # already alarm-wired; `:expired` counts bytes REMOVED. This is neither — it
+  # is how many are standing right now, which is the only one of the three that
+  # can be read as "is the system currently correct?".
+  defp emit_standing(%{rowless_objects: rowless, rows_without_object: missing}) do
+    :telemetry.execute([:stacks, :gdpr, :image, :standing], %{count: rowless}, %{
+      population: "rowless_objects"
+    })
+
+    :telemetry.execute([:stacks, :gdpr, :image, :standing], %{count: missing}, %{
+      population: "rows_without_object"
+    })
+  end
+
+  defp count_known(keys) do
+    UploadedImage
+    |> where([i], i.storage_path in ^keys)
+    |> select([i], count(i.storage_path, :distinct))
+    |> Repo.one()
+  end
+
+  @doc """
       Returns image IDs that should have been purged but weren't.
 
       Finds images with `image.submitted`, `image.resolved`, or `image.rejected`
