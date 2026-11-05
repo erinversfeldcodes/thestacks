@@ -222,17 +222,24 @@ defmodule Stacks.InsightsTest do
       subject = insert(:user)
       nosy = insert(:user)
 
-      assert_raise Postgrex.Error, fn ->
-        AppRole.as_app_role(fn ->
-          Stacks.Scope.with_user(nosy.id, fn ->
-            SQL.query!(
-              Repo,
-              "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)",
-              [Ecto.UUID.dump!(subject.id), [], 0]
-            )
+      # ⛔ The code is asserted, not merely that SOMETHING raised. `Postgrex.Error`
+      # alone is satisfied by `42883 undefined_function` — so this case passed
+      # against a definer that had been deleted outright, which is the one
+      # mutation it most needs to catch.
+      error =
+        assert_raise Postgrex.Error, fn ->
+          AppRole.as_app_role(fn ->
+            Stacks.Scope.with_user(nosy.id, fn ->
+              SQL.query!(
+                Repo,
+                "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)",
+                [Ecto.UUID.dump!(subject.id), [], 0]
+              )
+            end)
           end)
-        end)
-      end
+        end
+
+      assert error.postgres.code == :insufficient_privilege
     end
 
     test "the definer refuses a NULL subject rather than counting the reader against themselves" do
@@ -240,15 +247,18 @@ defmodule Stacks.InsightsTest do
       # count as other people's — a confident number, wrong in the alarming
       # direction. That is the failure this function exists to end, one argument
       # lower down.
-      assert_raise Postgrex.Error, fn ->
-        AppRole.as_app_role(fn ->
-          SQL.query!(
-            Repo,
-            "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)",
-            [nil, [], 0]
-          )
-        end)
-      end
+      error =
+        assert_raise Postgrex.Error, fn ->
+          AppRole.as_app_role(fn ->
+            SQL.query!(
+              Repo,
+              "SELECT op.count_others_sharing_all($1::uuid, $2::uuid[], $3::integer)",
+              [nil, [], 0]
+            )
+          end)
+        end
+
+      assert error.postgres.code == :insufficient_privilege
     end
 
     test "fewer than 2 shelved books → graceful insufficient_data shape" do
