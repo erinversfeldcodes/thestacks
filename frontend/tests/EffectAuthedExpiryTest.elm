@@ -53,6 +53,12 @@ suite =
             , aPlanSuccessReachesTheResponseHandler
             , aPlanTransportFailureReachesTheResponseHandler
             ]
+        , describe "which 401, read from what the server said"
+            [ aRefusedSessionReachesTheExpiryMsg
+            , aDifferentlyTokened401ReachesTheExpiryMsg
+            , anUnreadable401ReachesTheResponseHandler
+            , aProxyErrorPage401ReachesTheResponseHandler
+            ]
         , describe "the public constructor carries no such obligation"
             [ aPublicPlan401ReachesTheResponseHandler
             ]
@@ -153,17 +159,28 @@ render outcome =
             "the response handler, with " ++ what
 
 
-{-| A response with a status, on the endpoint the plan addresses.
+{-| A response with a status, on the endpoint the plan addresses. The body is a
+readable reason token, because that is what every 401 this app can receive
+carries — see `Api.refusalToken`.
 -}
 responseWith : Int -> Http.Response String
 responseWith statusCode =
+    responseWithBody statusCode "{\"error\":\"session_expired\"}"
+
+
+{-| The same, with the 401's body chosen by the caller: the classification is
+made from the server's reason token, so the body is part of the input and not
+scenery.
+-}
+responseWithBody : Int -> String -> Http.Response String
+responseWithBody statusCode body =
     Http.BadStatus_
         { url = "/api/auth/me"
         , statusCode = statusCode
         , statusText = "Error"
         , headers = Dict.empty
         }
-        "{\"error\":\"nope\"}"
+        body
 
 
 start : ProgramTest.ProgramDefinition () Outcome Outcome (SimulatedEffect Outcome) -> Http.Response String -> ProgramTest Outcome Outcome (SimulatedEffect Outcome)
@@ -234,6 +251,60 @@ aPlanTransportFailureReachesTheResponseHandler =
         \() ->
             start authedProgram Http.NetworkError_
                 |> expectOutcome (Answered "network error")
+
+
+{-| ⛔ The 401 the reason token exists to name: a session was presented and the
+server refused it. Driven as a response through the real interpreter rather than
+asserted on a pure function, because the claim is about the PLAN — the thing a
+page builds — and not only about the classifier it reaches.
+-}
+aRefusedSessionReachesTheExpiryMsg : Test
+aRefusedSessionReachesTheExpiryMsg =
+    test "authed_plan_session_expired_routes_to_the_expiry_msg" <|
+        \() ->
+            start authedProgram (responseWithBody 401 "{\"error\":\"session_expired\"}")
+                |> expectOutcome Expired
+
+
+{-| ⚠️ A refusal the server names with some other token — `unauthorized` from
+the admin pipeline, `invalid_token` for a refused bearer — on a request that
+carried a credential by construction. Still the credential not being accepted,
+so still the expiry path: a client-side match on one literal is not what decides
+this, which is what keeps the mixed-transport case working from the client's
+side.
+-}
+aDifferentlyTokened401ReachesTheExpiryMsg : Test
+aDifferentlyTokened401ReachesTheExpiryMsg =
+    test "authed_plan_invalid_token_routes_to_the_expiry_msg: a readable refusal is a refusal" <|
+        \() ->
+            start authedProgram (responseWithBody 401 "{\"error\":\"invalid_token\"}")
+                |> expectOutcome Expired
+
+
+{-| ⛔ THE CASE THE STATUS CODE COULD NOT TELL APART. A 401 whose body carries no
+reason we can read is not evidence about the session: every 401 this app can
+receive carries a token, so an unreadable one did not come from the application.
+It goes to the endpoint's own handler — whose failure state is a retry — rather
+than signing the reader out with no explanation, which is the defect the reason
+token exists to prevent, pointing the other way.
+-}
+anUnreadable401ReachesTheResponseHandler : Test
+anUnreadable401ReachesTheResponseHandler =
+    test "authed_plan_unreadable_401_stays_with_the_handler: not knowing is not an expiry" <|
+        \() ->
+            start authedProgram (responseWithBody 401 "")
+                |> expectOutcome (Answered "status 401")
+
+
+{-| The concrete shape of it: a gateway that answered instead of us.
+-}
+aProxyErrorPage401ReachesTheResponseHandler : Test
+aProxyErrorPage401ReachesTheResponseHandler =
+    test "authed_plan_proxy_401_stays_with_the_handler: a gateway's page is not our answer" <|
+        \() ->
+            start authedProgram
+                (responseWithBody 401 "<html><body><h1>401 Authorization Required</h1></body></html>")
+                |> expectOutcome (Answered "status 401")
 
 
 {-| ⛔ The distinction requirement, as a test. `Effect.public` answers an

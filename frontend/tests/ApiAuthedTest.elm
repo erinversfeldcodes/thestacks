@@ -6,6 +6,14 @@ a credential is claimed before the endpoint's own resolver sees it.
 policy is testable without a harness: 401-with-credential → the
 session-expiry msg; everything else → the endpoint's own handler,
 untouched.
+
+⚠️ THE 401 BODIES HERE CARRY THE SERVER'S REASON TOKEN, and that is a
+correction rather than decoration. These cases used to send `""` and `"{}"` —
+bodies no 401 from this server produces — because the decision was made from
+the status code alone. It is now made from the token the server puts in the
+body, so a fixture without one is not a 401 this app can receive; it is the
+unreadable case, which `RefusalTokenTest` covers separately and deliberately.
+
 -}
 
 import Api
@@ -80,15 +88,30 @@ suite =
         [ describe "the 401 is claimed before the endpoint resolver runs"
             [ test "expired_401_never_reaches_the_result_handler" <|
                 \() ->
-                    whatever (badStatus 401 "")
+                    whatever (badStatus 401 "{\"error\":\"session_expired\"}")
                         |> Expect.equal Expired
             , test "expired_401_on_a_json_endpoint" <|
                 \() ->
-                    Api.interpretAuthed Api.resolveProfile authedOutcome (badStatus 401 "{}")
+                    Api.interpretAuthed Api.resolveProfile
+                        authedOutcome
+                        (badStatus 401 "{\"error\":\"session_expired\"}")
                         |> Expect.equal Expired
             , test "expired_401_is_claimed_even_when_the_body_would_decode" <|
                 \() ->
-                    profile (badStatus 401 "{\"errors\":{\"email\":[\"is invalid\"]}}")
+                    profile (badStatus 401 "{\"error\":\"session_expired\",\"errors\":{\"email\":[\"is invalid\"]}}")
+                        |> Expect.equal Expired
+            , -- ⚠️ A refused credential the server names with some OTHER token is
+              -- still a refused credential. `AdminAuthPipeline` answers
+              -- `unauthorized`, Guardian answers `invalid_token` for a refused
+              -- bearer, and on a request that definitely carried a credential
+              -- both mean the same thing as an expiry.
+              test "unauthenticated_401_is_also_claimed" <|
+                \() ->
+                    whatever (badStatus 401 "{\"error\":\"unauthenticated\"}")
+                        |> Expect.equal Expired
+            , test "invalid_token_401_is_also_claimed" <|
+                \() ->
+                    whatever (badStatus 401 "{\"error\":\"invalid_token\"}")
                         |> Expect.equal Expired
             ]
         , describe "everything else still reaches the endpoint's own resolver"

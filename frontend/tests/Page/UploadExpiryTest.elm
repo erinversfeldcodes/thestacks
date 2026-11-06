@@ -79,6 +79,16 @@ rejectEndpoint =
     "/api/upload/img-1/reject-identification"
 
 
+{-| A refusal with the body the server actually sends.
+
+⚠️ The reason token matters and this fixture used to omit it. `AuthErrorHandler`
+answers `{"error": "session_expired"}` when a session was presented and refused,
+and the 401's classification is made from that token rather than from the status
+code — because the session cookie is `HttpOnly`, so only the server can say
+whether one was sent. An empty body is not a 401 this app can receive; it is the
+"we could not read the answer" case, which `RefusalTokenTest` covers.
+
+-}
 responseWith : Int -> Http.Response String
 responseWith statusCode =
     Http.BadStatus_
@@ -87,7 +97,7 @@ responseWith statusCode =
         , statusText = "Error"
         , headers = Dict.empty
         }
-        ""
+        "{\"error\":\"session_expired\"}"
 
 
 rejectThen : Int -> ProgramTest.ProgramTest TestHelpers.UploadTestModel Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)

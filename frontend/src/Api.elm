@@ -63,6 +63,7 @@ module Api exposing
     , PublicProfile
     , PublicProfileSummary
     , PublicationState(..)
+    , Refusal(..)
     , RegisterError(..)
     , RemovalOutcome(..)
     , RemovalRequest
@@ -230,6 +231,7 @@ module Api exposing
     , refresh
     , refreshRequest
     , refusalFrom
+    , refusalToken
     , registerErrorsDecoder
     , registerRequest
     , registrationResponseDecoder
@@ -1838,13 +1840,69 @@ expiry — `POST /api/auth/login` with the wrong password is the standing exampl
 — and sending those to the expiry interceptor would sign out a visitor who was
 never signed in. A public plan's 401 stays with the handler that asked for it.
 
+⛔ **THE STATUS CODE IS NOT THE SIGNAL; THE SERVER'S REASON TOKEN IS.** This
+read `metadata.statusCode == 401` and nothing else, which re-made a decision the
+server had deliberately been changed to make for us — see `refusalToken`, which
+is now the one place either request path reads it.
+
+⚖️ **What the three reasons mean HERE, which is not what they mean at boot.**
+The question at boot is "is this browser signed in?", so a first-time visitor is
+one of the answers. The question here is narrower and the type answers half of
+it already: an `Authed` always carries a credential, so this response is the
+server refusing one we definitely sent.
+
+  - `SessionWasRefused` — a session was presented and refused. The session is
+    over.
+  - `AnotherReason` — the server named something else (`unauthorized`,
+    `invalid_token`, `token_expired`). On a request that carried a credential,
+    that is still the credential not being accepted, so the session is over.
+    ⚠️ This is also what keeps the MIXED-TRANSPORT case working from the other
+    side: should the server ever stop reporting a refused cookie sent alongside
+    a bearer as `session_expired` — as an earlier version of
+    `AuthErrorHandler` did, by keying on Guardian's type rather than on the
+    rejection — the reader still reaches the expiry path rather than a page
+    error, because a client-side match on one literal is not what decides it.
+  - `ReasonUnreadable` — the answer did not come from the application (every
+    401 the SPA can receive carries a readable token; `refusalToken` records the
+    measurement). So it is NOT evidence about the session, and signing the
+    reader out on it is the defect this reason token exists to prevent, wearing
+    the opposite face: an unexplained sign-out, mid-journey, on a proxy blip.
+    It goes to the endpoint's own handler, whose failure state is a retry — the
+    same answer the boot screen gives for not knowing, in the terms a page has.
+
+⚠️ **NOT a third msg on the plan's record, and the reasoning rather than the
+default.** `onExpired` earns its field twice over: the mistake it prevents is
+FORGETTING a case whose consequence is destructive, and the caller holds
+information the seam does not — where to send the reader, which draft to park on
+the way. A third field has neither property. Every caller would fill it with the
+failure handler it already passes as `onResponse`, so it would be ceremony at
+every authenticated call site that adds no decision, and a field everyone fills
+identically is a field someone eventually fills wrongly. Falling through to
+`onResponse` IS "render your ordinary failure", said once, here, where the
+reasoning can be read.
+
+⚠️ **The residual, named rather than implied.** A page whose own result handler
+re-tests the status with `isUnauthorized` will still re-classify an unreadable
+401 as an expiry, so this is correct at the seam and not yet end-to-end for
+those pages. Five of the pages building authenticated plans still do that; they
+are the population of the sweep that removes those re-tests, and the two changes
+meet in the same handlers.
+
 -}
 interceptExpiry : msg -> (Http.Response String -> msg) -> Http.Response String -> msg
 interceptExpiry onExpired onResponse response =
     case response of
-        Http.BadStatus_ metadata _ ->
+        Http.BadStatus_ metadata body ->
             if metadata.statusCode == 401 then
-                onExpired
+                case refusalToken body of
+                    SessionWasRefused ->
+                        onExpired
+
+                    AnotherReason ->
+                        onExpired
+
+                    ReasonUnreadable ->
+                        onResponse response
 
             else
                 onResponse response
@@ -3780,37 +3838,91 @@ identityOutcome response =
             IdentityUnavailable Unreadable
 
 
-{-| Which kind of 401 this is.
+{-| What the server said when it refused a request with a 401.
 
-⛔ AN UNREADABLE 401 BODY IS NEITHER, and the first version of this function
-chose between two wrong answers. It read an unparseable body as `NoSession` —
-the quiet option — on the grounds that defaulting to `SessionRefused` would
-raise "we closed your session" at a reader who never had one.
+⛔ **THE ONLY PLACE THAT READS THE REASON TOKEN.** There are two request paths
+that have to know what a 401 means — boot's `refusalFrom` and every
+authenticated request's `interceptExpiry` — and they used to answer it from
+different signals: one read this token, the other read the status code alone.
+The second re-made a decision that had already been settled, and settled
+precisely because the client CANNOT make it from a status code: the session
+cookie is `HttpOnly`, so the page cannot see whether the browser sent one. Only
+the server knows, and it says so here. A second matcher on the literal beside
+this one would reproduce that split one level down, so both callers come through
+this function.
 
-⚖️ Both were wrong because the question had a third answer. A 401 whose body
-we cannot read is not evidence about the session at all: a proxy's HTML error
-page, or an error shape that changed under us, means we never reached the
-application. Reading it as `NoSession` silently restores the very regression
-this reason token exists to fix — the reader is signed out with no explanation
-and nothing reports it. Reading it as `SessionRefused` tells a first-time
-visitor something false.
+⚠️ **The token is not simply "`session_expired` or not", even server-side.**
+`AuthErrorHandler` answers `session_expired` whenever a session cookie was
+presented and refused — including alongside a bearer, which is the
+mixed-transport case the cookie rollout exists to support, and which an earlier
+version got wrong by matching on Guardian's type instead of the rejection. But
+`AdminAuthPipeline` answers `unauthorized`, `AuthController` answers
+`invalid_credentials`, and Guardian's own types (`invalid_token`,
+`token_expired`) reach the wire for a refused bearer. All of those are
+`AnotherReason`: a reason we can read, naming something that is not an expired
+session.
 
-So it says what is true: we asked, and we could not read the answer. The boot
-screen offers a retry, which is the one response that fits not knowing.
+⚖️ **Three values, not two, and the third is the finding rather than padding.**
+The first version of the boot reader chose between two wrong answers. It read an
+unparseable body as "no session" — the quiet option — on the grounds that
+defaulting to "refused" would raise "we closed your session" at a reader who
+never had one. Both were wrong because the question has a third answer: a 401
+whose body we cannot read is not evidence about the session at all. A proxy's
+HTML error page, a gateway error rendered as 401, or an error shape that changed
+under us all mean we never reached the application. MEASURED across the server:
+every 401 an SPA request can receive carries `{"error": "<token>"}` —
+`AuthErrorHandler`, `AdminAuthPipeline`, `AuthController`, `AdminAuthController`
+and `PartnerAuthPlug` all answer JSON; the one empty-bodied 401 (`MetricsAuth`)
+guards `/internal/*`, which the SPA never calls. So `ReasonUnreadable` means the
+answer did not come from us.
+
+-}
+type Refusal
+    = SessionWasRefused
+    | AnotherReason
+    | ReasonUnreadable
+
+
+{-| Read a 401's body into the reason the server gave for it.
+-}
+refusalToken : String -> Refusal
+refusalToken body =
+    case Decode.decodeString (Decode.field "error" Decode.string) body of
+        Ok "session_expired" ->
+            SessionWasRefused
+
+        Ok _ ->
+            AnotherReason
+
+        Err _ ->
+            ReasonUnreadable
+
+
+{-| Which kind of 401 this is, in the terms BOOT needs: the question there is
+"is this browser signed in?", and a first-time visitor is one of the answers.
+
+So `AnotherReason` is `NoSession` — the server named something that is not an
+expired session, and at boot that means there was nobody here. Nothing is said
+to the reader, because an unexplained sign-out and a deliberate arrival must not
+look the same.
+
+`ReasonUnreadable` says what is true: we asked, and could not read the answer.
+The boot screen offers a retry, which is the one response that fits not knowing.
+
+⚠️ Mid-journey the same token means something different, because the question
+is different — see `interceptExpiry`.
 
 -}
 refusalFrom : String -> IdentityOutcome
 refusalFrom body =
-    case Decode.decodeString (Decode.field "error" Decode.string) body of
-        Ok "session_expired" ->
+    case refusalToken body of
+        SessionWasRefused ->
             SessionRefused
 
-        Ok _ ->
-            -- A reason token we DO understand the shape of, naming something
-            -- else: the server is telling us there is no session.
+        AnotherReason ->
             NoSession
 
-        Err _ ->
+        ReasonUnreadable ->
             IdentityUnavailable Unreadable
 
 
