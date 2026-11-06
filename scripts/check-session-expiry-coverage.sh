@@ -347,8 +347,8 @@ if mode == "--list":
 # and a `--list` that refused to list would send them to read this script
 # instead of the picture it can print. The parser floor above is the exception:
 # a listing built by a drifted parser is not evidence of anything.
-# ⛔ A COUNT FLOOR ON THE POPULATION, not an emptiness check — this is the hole
-# RL-407 names and the reason the figure below is a sum.
+# ⛔ A COUNT FLOOR ON THE POPULATION, not an emptiness check — and the reason
+# the figure below is a sum.
 #
 # MEASURED, on the line that used to stand here: `if not authed_endpoints`
 # refuses only at ZERO. A change taking 72 matching sites down to ONE passed
