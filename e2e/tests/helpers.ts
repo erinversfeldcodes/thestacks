@@ -236,9 +236,8 @@ export async function registerViaApi(
   request: APIRequestContext,
   opts: { email: string; password: string; displayName?: string },
 ) {
-  const adminToken = await ownerAdminToken(request);
+  await elevateOwnerAdmin(request);
   const created = await request.post("/api/admin/invites", {
-    headers: { Authorization: `Bearer ${adminToken}` },
     data: { note: "registerViaApi" },
   });
   expect(created.status(), "registerViaApi invite mint").toBe(201);
@@ -914,7 +913,62 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
  * with a fresh TOTP from the run's shared factor (enrolled once by
  * auth.setup.ts — never re-enrol here,).
  */
-export async function ownerAdminToken(request: APIRequestContext): Promise<string> {
+// ⛔ ONE ELEVATION PER CONTEXT, memoised — repeating it FAILS, and the failure
+// is a 401 that looks like bad credentials.
+//
+// MEASURED: calling this per admin write (`invite-gate`'s `adminAuth` runs on
+// every `mintInvite`) turned 13 failures into 6, all of them `admin MFA verify
+// -> 401`. Two independent reasons, either sufficient:
+//
+//   * a TOTP code is single-use, and two elevations inside one 30-second step
+//     present the same code, so the second is a replay and is refused;
+//   * `SessionContext.create/3` revokes the operator's OTHER live sessions, so
+//     a second admin login invalidates the `session_id` the first one is still
+//     holding — `invalid_session`, also a 401.
+//
+// ⚖️ A `WeakSet` keyed on the context, rather than a module flag, because
+// elevation is a fact about the session THAT context holds: two contexts in one
+// file must each elevate, and neither should be told the other already did.
+// A `WeakSet` also lets the context be collected without this leaking it.
+const elevatedContexts = new WeakSet<APIRequestContext>();
+
+export async function elevateOwnerAdmin(
+  request: APIRequestContext,
+): Promise<void> {
+  if (elevatedContexts.has(request)) {
+    return;
+  }
+
+  // ⛔ ELEVATION IS A FACT ABOUT THE SESSION THE SERVER HOLDS, so there is no
+  // token to collect and nothing to put in an `Authorization` header. This
+  // replaces `ownerAdminToken`, which returned
+  // `(await verify.json()).token` — a field `verify_mfa` NO LONGER SENDS. Its
+  // moduledoc is explicit: "NO TOKEN IN THE RESPONSE", because
+  // `mark_mfa_verified/1` records the elevation server-side and
+  // `AdminAuthPipeline` now reads the ordinary session cookie instead of a
+  // second Guardian token from the header.
+  //
+  // ⛔ THE FAILURE THAT CAUSED WAS NOT LOCAL TO THIS FUNCTION. Reading a
+  // missing field yields `undefined`, so callers sent the literal header
+  // `Authorization: Bearer undefined` and got a **401 thirteen tests
+  // downstream**, under messages about invites — in `invite-gate` (×4),
+  // `register` (×6), `confirm-email` (×2) and `login` (×1). Every one of those
+  // looked like a broken signup funnel. The funnel was fine.
+  //
+  // ⚖️ The lesson is the `expect` on the BODY below, not the sequence above:
+  // the old helper asserted `verify.status() === 200` and then read a field it
+  // never checked existed. A 200 was a true statement about the request and
+  // said nothing about the shape of the reply, so a contract change that
+  // removed a field produced `undefined` rather than a failure. Assert the
+  // thing you are about to use.
+  //
+  // The ordinary session must be established FIRST — the admin chain starts
+  // from it, and this context never loads a page, so nothing else would set it.
+  const session = await request.post("/api/auth/login", {
+    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
+  });
+  expect(session.status(), "owner session login").toBe(200);
+
   const login = await request.post("/api/admin/auth/login", {
     data: { email: DEV_EMAIL, password: DEV_PASSWORD },
   });
@@ -925,7 +979,13 @@ export async function ownerAdminToken(request: APIRequestContext): Promise<strin
     data: { session_id, totp_code: await freshTotp(readOwnerMfaSecret()) },
   });
   expect(verify.status(), "admin MFA verify").toBe(200);
-  return (await verify.json()).token as string;
+  expect(
+    (await verify.json()).verified,
+    "verify_mfa must confirm the elevation in its body — a 200 alone is a " +
+      "statement about the request, not about what came back",
+  ).toBe(true);
+
+  elevatedContexts.add(request);
 }
 
 /** Persist the run's single owner TOTP secret for the parallel phase to read. */

@@ -35,7 +35,7 @@
  */
 import { test, expect } from "./fixtures";
 import { type APIRequestContext } from "@playwright/test";
-import { mintSession, ownerAdminToken } from "./helpers";
+import { mintSession, elevateOwnerAdmin } from "./helpers";
 
 /**
  * Stable, widely-held Penguin/Vintage paperback ISBNs Open Library resolves.
@@ -155,7 +155,10 @@ test.describe("un-merge correction round trip", () => {
       target.id,
     );
 
-    const adminAuth = { Authorization: `Bearer ${await ownerAdminToken(request)}` };
+    await elevateOwnerAdmin(request);
+    // Elevated on the session; no header to carry. Kept as an empty object so the
+    // `headers:` sites below read unchanged rather than being deleted one by one.
+    const adminAuth = {};
     const argument = { edition_id: editionId, title: `Split of ${target.title} (e2e)` };
 
     const dry = await request.post("/api/admin/data_corrections/unmerge_edition/target", {

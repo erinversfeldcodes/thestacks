@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
 import {
   hasSessionCookie,
-  ownerAdminToken,
+  elevateOwnerAdmin,
   suiteEmail,
   uniqueEmail,
 } from "./helpers";
@@ -19,9 +19,8 @@ import {
 
 /** Mint a fresh single-use invitation via the owner's admin API. */
 async function mintInvite(request: APIRequestContext): Promise<string> {
-  const token = await ownerAdminToken(request);
+  await elevateOwnerAdmin(request);
   const created = await request.post("/api/admin/invites", {
-    headers: { Authorization: `Bearer ${token}` },
     data: { note: "register.spec journey" },
   });
   expect(created.status(), "invite create").toBe(201);

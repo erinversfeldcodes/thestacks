@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { APIRequestContext } from "@playwright/test";
-import { ownerAdminToken, uniqueEmail } from "./helpers";
+import { elevateOwnerAdmin, uniqueEmail } from "./helpers";
 
 /**
  * The closed-beta gate itself, driven against the real stack with
@@ -9,8 +9,11 @@ import { ownerAdminToken, uniqueEmail } from "./helpers";
  * refusal, the code lifecycle, revocation, and single use.
  */
 
+// Elevation lives on the session the server holds, so there is no header to
+// build — this context's cookie jar carries it once elevated.
 async function adminAuth(request: APIRequestContext) {
-  return { Authorization: `Bearer ${await ownerAdminToken(request)}` };
+  await elevateOwnerAdmin(request);
+  return {};
 }
 
 async function mintInvite(
