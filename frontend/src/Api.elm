@@ -1884,9 +1884,11 @@ reasoning can be read.
 ⚠️ **The residual, named rather than implied.** A page whose own result handler
 re-tests the status with `isUnauthorized` will still re-classify an unreadable
 401 as an expiry, so this is correct at the seam and not yet end-to-end for
-those pages. Five of the pages building authenticated plans still do that; they
-are the population of the sweep that removes those re-tests, and the two changes
-meet in the same handlers.
+those pages. MEASURED: five pages build authenticated plans AND still call
+`isUnauthorized` themselves — `Page.Upload`, `Page.BookDetail`,
+`Page.Bookshelf`, `Page.Bookshelf.ReadingPile` and `Page.Settings.Profile`, 21
+such calls across 28 plans. They are the population of the sweep that removes
+those re-tests, and the two changes meet in the same handlers.
 
 -}
 interceptExpiry : msg -> (Http.Response String -> msg) -> Http.Response String -> msg
