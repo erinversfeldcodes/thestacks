@@ -1932,21 +1932,35 @@ refreshRequest =
 
 
 {-| DELETE /api/auth/logout — invalidate the current session server-side
-(revokes the token via guardian\_db, A2). The method MUST be DELETE
+(revokes the token via guardian\_db). The method MUST be DELETE
 to match the router; a POST silently 404s the SPA catch-all, leaving the token
 valid until its TTL — caught by the logout E2E (auth.spec.ts).
+
+⛔ **AN `Authed` RATHER THAN A TOKEN AND A CALLBACK, SO THE ANSWER CANNOT BE
+THROWN AWAY.** The caller used to pass `always FocusResult` — a function that
+discards the result on success and failure alike — and navigated to `/login` in
+the same `Cmd.batch`. A reader whose logout never landed (offline, a 500, a
+machine that had scaled to zero) therefore saw a signed-out interface while the
+session cookie stayed valid for the rest of its lifetime, and the next request
+from that browser was authenticated again. The session cookie is `HttpOnly`, so
+there is no client-side way to compensate: confirming the server did it is the
+only mechanism there is.
+
+⚖️ A 401 here is the one failure that still ends the session — the credential
+this request carried is already gone, so there is nothing left to revoke — which
+is why `onExpired` is the right destination for it rather than a retry prompt.
+Every other failure means the session is still open and the reader has to be
+told so.
+
 -}
-logout :
-    Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-logout token toMsg =
+logout : Authed Http.Error () msg -> Cmd msg
+logout request =
     Http.request
         { method = "DELETE"
-        , headers = httpHeaders "DELETE" (Session token)
+        , headers = authedHeaders "DELETE" request
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
+        , expect = authedExpect resolveWhatever request
         , timeout = standardTimeout
         , tracker = Nothing
         }
