@@ -41,7 +41,29 @@ run_gate() {
 test_case "the_real_tree_has_no_bypassable_guard" "every declared count sits above its exits"
 run_gate
 assert_exit_zero "$RC" "the gate passes over the tree as it stands"
-assert_contains "$OUT" "22 of 22" "and states the population it enumerated"
+
+# ⛔ DERIVED FROM THE GATE'S OWN CONSTANT, not hardcoded — and the reason is a
+# defect this assertion just caused. It read `"22 of 22"` while the gate had been
+# bumped to 23 the same day (a new guard joined the population), so `just ci`
+# failed on a stale expectation rather than on anything wrong with the tree.
+# `just verify` runs no platform shell suite, so nothing caught it earlier.
+#
+# ⚖️ The duplication was not protecting anything. What this case asserts is that
+# the gate STATES the population it enumerated — that an operator reading the OK
+# line learns the figure — not that the figure is any particular number. The
+# number is owned by the gate; every population change would otherwise break this
+# test for a reason unrelated to what it checks.
+#
+# ⚠️ This is NOT the general rule. A test that derives its expectation from its
+# subject usually cannot catch the subject being wrong, and most of this suite
+# deliberately hardcodes. The distinction here is that the gate's count is
+# verified against reality BY THE GATE — it refuses when the enumerated
+# population and the declared constant disagree, which is the whole point of it —
+# so the number arriving here is already checked. What is unchecked, and what this
+# line covers, is whether it is REPORTED.
+EXPECTED_POPULATION="$(grep -oE '^EXPECTED_GUARDED_SCRIPTS = [0-9]+' "$GATE" | grep -oE '[0-9]+')"
+assert_contains "$OUT" "$EXPECTED_POPULATION of $EXPECTED_POPULATION" \
+    "and states the population it enumerated (the gate declares $EXPECTED_POPULATION)"
 assert_contains "$OUT" "enumerated from" "naming its enumeration source"
 
 # ⚠️ The gate is in its OWN corpus, which is deliberate: a gate policing
