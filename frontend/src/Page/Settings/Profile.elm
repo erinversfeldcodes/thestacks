@@ -173,7 +173,9 @@ initWithEffect maybeToken user =
             ( { seeded | account = Loading }
             , Effect.authed Api.getAccountRequest
                 token
-                (Api.resolveJson Api.accountDecoder >> AccountReceived)
+                { onExpired = SessionExpiryDetected
+                , onResponse = Api.resolveJson Api.accountDecoder >> AccountReceived
+                }
             )
 
         Nothing ->

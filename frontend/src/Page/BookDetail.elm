@@ -156,6 +156,8 @@ type Msg
     | FocusWrapToLast
     | FocusOn String
     | FocusWrapNoOp
+    | SessionGone
+    | SessionGoneMidSave
 
 
 init : String -> Maybe Api.Credentials -> Maybe Route -> ( Model, Cmd Msg )
@@ -284,7 +286,9 @@ fetchShelfRows maybePlacement bookshelfName maybeToken =
             else
                 Effect.authed (Api.getBookshelfRequest bookshelfName)
                     token
-                    (Api.resolveJson bookshelfResponseDecoder >> ShelfRowsLoaded)
+                    { onExpired = SessionGone
+                    , onResponse = Api.resolveJson bookshelfResponseDecoder >> ShelfRowsLoaded
+                    }
 
         _ ->
             Effect.none
@@ -620,7 +624,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | bookshelfMoverOpen = False, moveState = Loading }
                     , Effect.authed (Api.moveBookRequest placement.id model.selectedBookshelf)
                         token
-                        (Api.moveResponseToResult >> MoveCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.moveResponseToResult >> MoveCompleted
+                        }
                     , NoOut
                     )
 
@@ -666,7 +672,11 @@ updateWithEffect msg model maybeToken =
                     ( { model | bookshelfMoverOpen = False, moveState = Loading }
                     , Effect.authed (Api.placeBookRequest model.selectedBookshelf book.id)
                         token
-                        (Api.placeResponseToResult >> PlaceCompleted model.selectedBookshelf)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.placeResponseToResult
+                                >> PlaceCompleted model.selectedBookshelf
+                        }
                     , NoOut
                     )
 
@@ -710,7 +720,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | removeModalOpen = False, removeState = Loading }
                     , Effect.authed (Api.removeBookRequest placement.id)
                         token
-                        (Api.resolveWhatever >> RemoveCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> RemoveCompleted
+                        }
                     , NoOut
                     )
 
@@ -741,7 +753,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | removingPlacementId = Just placementId }
                     , Effect.authed (Api.removeBookRequest placementId)
                         token
-                        (Api.resolveWhatever >> PlacementRemoved placementId)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> PlacementRemoved placementId
+                        }
                     , NoOut
                     )
 
@@ -853,7 +867,9 @@ updateWithEffect msg model maybeToken =
                         ( { model | shelfMoveState = Loading }
                         , Effect.authed (Api.movePlacementToShelfRequest placement.id model.selectedShelfId)
                             token
-                            (Api.shelfMoveResponseToResult >> ShelfMoveCompleted)
+                            { onExpired = SessionGone
+                            , onResponse = Api.shelfMoveResponseToResult >> ShelfMoveCompleted
+                            }
                         , NoOut
                         )
 
@@ -908,7 +924,10 @@ updateWithEffect msg model maybeToken =
                                 (List.map formatToString newFormats)
                             )
                             token
-                            (Api.resolveJson Api.placementFormatsDecoder >> FormatsUpdated)
+                            { onExpired = SessionGone
+                            , onResponse =
+                                Api.resolveJson Api.placementFormatsDecoder >> FormatsUpdated
+                            }
                         , NoOut
                         )
 
@@ -962,7 +981,11 @@ updateWithEffect msg model maybeToken =
                         , Effect.authed
                             (Api.updatePlacementVisibilityRequest placement.id (Visibility.toString vis))
                             token
-                            (Api.resolveJson Api.storedVisibilityDecoder >> PlacementVisibilityUpdated)
+                            { onExpired = SessionGone
+                            , onResponse =
+                                Api.resolveJson Api.storedVisibilityDecoder
+                                    >> PlacementVisibilityUpdated
+                            }
                         , NoOut
                         )
 
@@ -1027,7 +1050,10 @@ updateWithEffect msg model maybeToken =
                                             }
                                         )
                                         token
-                                        (Api.progressResponseToResult >> ProgressSaved)
+                                        { onExpired = SessionGoneMidSave
+                                        , onResponse =
+                                            Api.progressResponseToResult >> ProgressSaved
+                                        }
                                     , NoOut
                                     )
 
@@ -1141,7 +1167,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | finishedReadPrompt = False, selectedBookshelf = "library", moveState = Loading }
                     , Effect.authed (Api.moveBookRequest placement.id "library")
                         token
-                        (Api.moveResponseToResult >> MoveCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.moveResponseToResult >> MoveCompleted
+                        }
                     , NoOut
                     )
 
@@ -1162,6 +1190,39 @@ updateWithEffect msg model maybeToken =
 
         FocusWrapNoOp ->
             ( model, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401,
+            -- except the progress save below. Nothing local to repair: the page
+            -- keeps what it was showing while `Main` decides whether the reader
+            -- is bounced to the login or kept here on a token another tab
+            -- renewed.
+            ( model, Effect.none, SessionExpired )
+
+        SessionGoneMidSave ->
+            -- ⛔ The progress save needs its OWN expiry branch, and the reason
+            -- is the same one its result handler carries: `Card.update
+            -- SaveClicked` has already set `saving = True`, and `SessionExpired`
+            -- does not guarantee a redirect — the deferred expiry net may adopt
+            -- a token another tab refreshed and leave the reader on this page,
+            -- which is exactly when a stuck "Saving…" becomes permanent.
+            --
+            -- ⚠️ `Page.Bookshelf.ReadingPile` has the matching branch, not a
+            -- different one. The two hosts share a card and have diverged four
+            -- times; `tests/ProgressSaveContract.elm` drives this case through
+            -- both, because checking the sibling by hand cannot find a defect
+            -- they share.
+            --
+            -- The error carries the status the plan claimed, so the reader is
+            -- told what they would have been told had the 401 arrived through
+            -- `ProgressSaved`.
+            ( { model
+                | progressCard = Maybe.map Card.stopSaving model.progressCard
+                , progressSaveState = Failure (Api.ProgressRequestFailed (Http.BadStatus 401))
+              }
+            , Effect.none
+            , SessionExpired
+            )
 
 
 focusProgressBadge : Card.Model -> Effect Msg

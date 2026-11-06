@@ -187,6 +187,7 @@ module Api exposing
     , inboxItemDecoder
     , inboxKindDecoder
     , initUploadRequest
+    , interceptExpiry
     , interpretAuthed
     , inviteErrorDecoder
     , inviteStatusDecoder
@@ -1817,16 +1818,39 @@ interpretAuthed :
     -> Http.Response String
     -> msg
 interpretAuthed resolve (Authed request) response =
+    interceptExpiry request.onExpired (resolve >> request.onResult) response
+
+
+{-| What a 401 means on a request that definitely carried a credential, as one
+function: the session is gone, so it becomes the expiry msg and the endpoint's
+own handler never sees it.
+
+⛔ ONE function because there are now TWO request paths — `Api.Authed` and
+`Effect.authed`'s plan — and a status code that means "your session ended" on
+one of them must not mean "something went wrong" on the other. Both route
+through here, so there is a single decision to read, test and change rather than
+two that agree only until someone edits one of them.
+
+⚠️ `Effect.public` deliberately does NOT route through here, and that is the
+distinction between the two plan constructors rather than an omission. An
+endpoint that answers an anonymous reader can 401 for a reason that is not
+expiry — `POST /api/auth/login` with the wrong password is the standing example
+— and sending those to the expiry interceptor would sign out a visitor who was
+never signed in. A public plan's 401 stays with the handler that asked for it.
+
+-}
+interceptExpiry : msg -> (Http.Response String -> msg) -> Http.Response String -> msg
+interceptExpiry onExpired onResponse response =
     case response of
         Http.BadStatus_ metadata _ ->
             if metadata.statusCode == 401 then
-                request.onExpired
+                onExpired
 
             else
-                request.onResult (resolve response)
+                onResponse response
 
         _ ->
-            request.onResult (resolve response)
+            onResponse response
 
 
 {-| Resolver for an authenticated endpoint whose 2xx body is ignored — the

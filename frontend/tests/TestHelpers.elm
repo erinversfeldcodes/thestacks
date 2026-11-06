@@ -2,6 +2,7 @@ module TestHelpers exposing
     ( AdminChromeTestModel
     , BookDetailTestModel
     , ReadingPileTestModel
+    , UploadTestModel
     , adminChromeProgram
     , authedRequestFromSpec
     , bookDetailOverlayProgramWithOut
@@ -45,6 +46,7 @@ module TestHelpers exposing
     , testBook
     , testPlacement
     , uploadProgram
+    , uploadProgramFrom
     , uploadProgramWithInbox
     )
 
@@ -1228,6 +1230,49 @@ uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
                 in
                 ( newModel, simulateEffect effect )
         , view = \model -> Upload.view model maybeToken inbox
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Harness model for an Upload program test that needs the page's `OutMsg`.
+
+`uploadProgram`'s update wrapper discards `Upload.update`'s third tuple element,
+which is how a probe replacing `RefreshInbox` with `NoOut` once reddened
+nothing. Recording the most recent `OutMsg` makes the signal the page sends
+`Main` — a session it has decided is over, a stream to open — observable to a
+test that drives the page through its own UI and its own requests.
+
+-}
+type alias UploadTestModel =
+    { page : Upload.Model
+    , lastOut : Upload.OutMsg
+    }
+
+
+{-| An Upload harness started from a GIVEN model, recording each `OutMsg`.
+
+⚠️ Seeded rather than driven from `Upload.init`, because the states worth
+driving here sit behind a file picker and a live progress stream that no
+simulated runtime can produce. The page's own `updateWithEffect` and its own
+requests still do all the work from that point on — only the starting state is
+a fixture.
+
+-}
+uploadProgramFrom :
+    Upload.Model
+    -> Maybe Api.Credentials
+    -> ProgramDefinition () UploadTestModel Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgramFrom startModel maybeToken =
+    ProgramTest.createElement
+        { init = \() -> ( { page = startModel, lastOut = Upload.NoOut }, SimulatedEffect.Cmd.none )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, effect, out ) =
+                        Upload.updateWithEffect msg model.page maybeToken
+                in
+                ( { page = newPage, lastOut = out }, simulateEffect effect )
+        , view = \model -> Upload.view model.page maybeToken Types.RemoteData.NotAsked
         }
         |> ProgramTest.withSimulatedEffects identity
 

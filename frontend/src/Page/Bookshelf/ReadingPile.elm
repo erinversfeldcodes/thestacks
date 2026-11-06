@@ -58,6 +58,8 @@ type Msg
     | ProgressSaved String (Result Api.ProgressError Api.Progress)
     | RecordReadRequested String
     | RecordReadDone String (Result Api.MoveError ())
+    | SessionGone
+    | SessionGoneMidSave String
     | FinishedPromptDismissed
     | FocusReturned
 
@@ -71,10 +73,12 @@ fetchPile maybeToken =
         Just token ->
             Effect.authed (Api.getBookshelfRequest "reading_pile")
                 token
-                (Api.resolveJson bookshelfResponseDecoder
-                    >> Result.map .shelves
-                    >> BooksLoaded
-                )
+                { onExpired = SessionGone
+                , onResponse =
+                    Api.resolveJson bookshelfResponseDecoder
+                        >> Result.map .shelves
+                        >> BooksLoaded
+                }
 
         Nothing ->
             Effect.none
@@ -221,7 +225,11 @@ updateWithEffect msg model =
                                 ( { model | cards = updatedCards, saveState = Loading }
                                 , Effect.authed spec
                                     token
-                                    (Api.progressResponseToResult >> ProgressSaved c.placement.id)
+                                    { onExpired = SessionGoneMidSave c.placement.id
+                                    , onResponse =
+                                        Api.progressResponseToResult
+                                            >> ProgressSaved c.placement.id
+                                    }
                                 , NoOut
                                 )
 
@@ -340,7 +348,9 @@ updateWithEffect msg model =
                     ( model
                     , Effect.authed (Api.moveBookRequest placementId "library")
                         token
-                        (Api.moveResponseToResult >> RecordReadDone placementId)
+                        { onExpired = SessionGone
+                        , onResponse = Api.moveResponseToResult >> RecordReadDone placementId
+                        }
                     , NoOut
                     )
 
@@ -368,6 +378,33 @@ updateWithEffect msg model =
 
                 Err Api.ReadingPileFull ->
                     ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated read on this page sends a 401. Nothing
+            -- local to repair: no save was in flight, and the pile stays as it
+            -- was while `Main` decides whether another tab has already renewed
+            -- the session.
+            ( model, Effect.none, SessionExpired )
+
+        SessionGoneMidSave placementId ->
+            -- ⛔ The save path needs its OWN expiry branch, because a save that
+            -- dies on an expired session leaves a card claiming "Saving…" with
+            -- Save disabled. `SessionExpired` does not guarantee a redirect —
+            -- the deferred expiry net may adopt a token another tab refreshed
+            -- and keep the reader right here — so the card has to be settled
+            -- and the failure has to be on screen.
+            --
+            -- The error carries the status the plan claimed, so the save
+            -- reports what it would have reported had the 401 arrived through
+            -- `ProgressSaved`: this branch changes who notices the 401, not
+            -- what the reader is told.
+            ( { model
+                | cards = clearSaving placementId model.cards
+                , saveState = Failure (Api.ProgressRequestFailed (Http.BadStatus 401))
+              }
+            , Effect.none
+            , SessionExpired
+            )
 
         FinishedPromptDismissed ->
             ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )

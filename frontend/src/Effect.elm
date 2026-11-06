@@ -17,6 +17,12 @@ picker, a focus task, navigation. The harness has never simulated those and
 still does not; but a request smuggled inside one is invisible to it, so
 anything HTTP belongs in `Request`.
 
+There are two ways to make a request, and the difference between them is what a
+401 means. `authed` carries a credential the endpoint requires, so a 401 is the
+session ending and the constructor will not build without a msg for it.
+`public` carries one only if the viewer happens to have it, so a 401 is the
+server's answer and belongs to the handler that asked.
+
 @docs Effect, RequestPlan, authed, batch, none, perform, public, sleepThen
 
 -}
@@ -69,18 +75,72 @@ batch =
     Batch
 
 
-{-| A request carrying the reader's credentials.
+{-| A request carrying the reader's credentials, and the handler for the one
+failure every such request can suffer: the session is gone.
+
+⛔ THE RECORD IS THE GATE, and it is the same gate `Api.authed` holds. With a
+bare token and a single callback, a 401 was just another `Err` and noticing it
+was opt-in — which is how three settings forms came to render "something went
+wrong" against a dead session. `onExpired` cannot be omitted, defaulted or
+inferred, so a call site that ignores expiry does not compile.
+
+⚠️ Not a `Maybe`, deliberately. The mistake this prevents is FORGETTING, and an
+optional field is forgettable twice over: once by the hurried caller who passes
+`Nothing`, and once by the reviewer for whom `Nothing` looks like a decision.
+
+⚖️ Use `public` instead when the endpoint answers an anonymous reader. There a
+401 is the server's answer to the request, not the end of a session, and the
+handler that asked the question is the one that must hear it — see
+`Api.interceptExpiry`, which both authenticated paths share and no public one
+reaches.
+
+⚠️ `scripts/check-session-expiry-coverage.sh` reads THIS FUNCTION'S NAME to
+decide which pages send an authenticated request, so call it here rather than
+wrapping it in a per-page helper — the same note `Api.authedHeaders` carries,
+for the same reason. A page whose plans are built through a local alias drops
+out of that gate's population without anything reporting it.
+
 -}
-authed : Api.RequestSpec -> Api.Credentials -> (Http.Response String -> msg) -> Effect msg
-authed spec token onResponse =
+authed :
+    Api.RequestSpec
+    -> Api.Credentials
+    -> { onExpired : msg, onResponse : Http.Response String -> msg }
+    -> Effect msg
+authed spec token handlers =
     -- ⚠️ No plan-level proof needed: a signed-in reader's proof travels inside
     -- their credentials. `Api.planHeaders` resolves which source to use.
-    Request { spec = spec, token = Just token, proof = Nothing, onResponse = onResponse }
+    --
+    -- ⛔ The 401 is resolved HERE, into the plan's single response mapping,
+    -- rather than being carried as a second field for each runtime to branch on.
+    -- `Effect.perform` and `TestHelpers.simulateEffect` are two interpreters of
+    -- the same plan, and this module exists because two interpreters deciding
+    -- the same thing separately is how a request's dispatch drifted while both
+    -- sides stayed green. The expiry decision is not given the chance.
+    Request
+        { spec = spec
+        , token = Just token
+        , proof = Nothing
+        , onResponse = Api.interceptExpiry handlers.onExpired handlers.onResponse
+        }
 
 
 {-| A request sent without credentials, or with them only if the viewer happens
 to have them — the optional-auth endpoints, where the server answers an
 anonymous reader too.
+
+⛔ NO EXPIRY OBLIGATION HERE, and that is the difference between this and
+`authed` rather than an oversight. A 401 from an endpoint that serves anonymous
+readers does not mean a session ended: `POST /api/auth/login` is performed
+without a session by definition, and its 401 is "wrong password" — copy the
+reader needs to see on the form they are standing in front of. Routing it to the
+session-expiry interceptor would bounce a visitor who was never signed in.
+
+⚠️ So a 401 on a public plan reaches `onResponse` like any other status, and the
+page handling it decides what it means. If a request MUST carry a credential,
+that is `authed`'s job and the obligation comes with it; reaching for `public`
+with a token in hand to avoid naming an expiry msg moves an endpoint down the
+ladder, not sideways.
+
 -}
 public : Api.RequestSpec -> Maybe Api.Credentials -> Maybe String -> (Http.Response String -> msg) -> Effect msg
 public spec maybeToken proof onResponse =

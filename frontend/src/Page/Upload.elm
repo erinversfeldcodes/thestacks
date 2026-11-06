@@ -175,6 +175,7 @@ type Msg
     | ConfirmPlacement
     | PlacementCompleted (Result Api.PlaceError Placement)
     | AgeGateSet (Result Http.Error ())
+    | SessionGone
     | ConfirmCompleted (Result Api.ConfirmError Api.ConfirmResponse)
     | GotSameWorkBook (Result Http.Error BookDetailResponse)
     | GoToShelf String
@@ -426,7 +427,11 @@ updateWithEffect msg model maybeToken =
                       }
                     , Effect.authed (Api.initUploadRequest (File.mime file))
                         token
-                        (Api.resolveJson Api.decodeUploadInit >> UploadInitialised file token)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.decodeUploadInit
+                                >> UploadInitialised file token
+                        }
                     , NoOut
                     )
 
@@ -452,7 +457,9 @@ updateWithEffect msg model maybeToken =
             ( model
             , Effect.authed (Api.commitUploadRequest imageId)
                 token
-                (Api.resolveJson Api.commitUploadDecoder >> UploadAccepted)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveJson Api.commitUploadDecoder >> UploadAccepted
+                }
             , NoOut
             )
 
@@ -661,7 +668,9 @@ updateWithEffect msg model maybeToken =
                                 { isbn = model.manualIsbn, shelfName = model.selectedShelf }
                             )
                             token
-                            (Api.confirmResponseToResult >> ConfirmCompleted)
+                            { onExpired = SessionGone
+                            , onResponse = Api.confirmResponseToResult >> ConfirmCompleted
+                            }
                         , NoOut
                         )
 
@@ -694,7 +703,11 @@ updateWithEffect msg model maybeToken =
                 Just token ->
                     Effect.authed (Api.getBookRequest workId)
                         token
-                        (Api.resolveJson Api.bookDetailResponseDecoder >> GotSameWorkBook)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.bookDetailResponseDecoder
+                                >> GotSameWorkBook
+                        }
 
                 Nothing ->
                     Effect.none
@@ -734,7 +747,11 @@ updateWithEffect msg model maybeToken =
                             { isbn = model.mergeIsbn, formatLabel = model.mergeFormatLabel }
                         )
                         token
-                        (Api.resolveJson Api.mergeFormatResponseDecoder >> MergeFormatCompleted)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.mergeFormatResponseDecoder
+                                >> MergeFormatCompleted
+                        }
                     , NoOut
                     )
 
@@ -806,7 +823,9 @@ updateWithEffect msg model maybeToken =
                             { imageId = imageId, rejectedBookIds = newRejected }
                         )
                         token
-                        (Api.resolveWhatever >> RejectIdentificationCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> RejectIdentificationCompleted
+                        }
                     , streamFor imageId
                     )
 
@@ -835,7 +854,9 @@ updateWithEffect msg model maybeToken =
                             if model.ageGatingEnabled && model.markAdultsOnly then
                                 [ Effect.authed (Api.setBookAgeGateRequest book.id)
                                     token
-                                    (Api.resolveWhatever >> AgeGateSet)
+                                    { onExpired = SessionGone
+                                    , onResponse = Api.resolveWhatever >> AgeGateSet
+                                    }
                                 ]
 
                             else
@@ -845,7 +866,9 @@ updateWithEffect msg model maybeToken =
                     , Effect.batch
                         (Effect.authed (Api.placeBookRequest model.selectedShelf book.id)
                             token
-                            (Api.placeResponseToResult >> PlacementCompleted)
+                            { onExpired = SessionGone
+                            , onResponse = Api.placeResponseToResult >> PlacementCompleted
+                            }
                             :: ageGateEffect
                         )
                     , NoOut
@@ -853,6 +876,20 @@ updateWithEffect msg model maybeToken =
 
                 _ ->
                     ( model, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401.
+            --
+            -- ⚠️ FOUR of this page's nine authenticated requests did not route
+            -- their 401 at all before the plan demanded a msg for it: a commit,
+            -- a book read, a rejected identification and the adults-only mark
+            -- each turned an expired session into "we couldn't do that" copy on
+            -- a page that could not have done it. They all arrive here now.
+            --
+            -- The model is left alone. An upload mid-flight has a stream and a
+            -- poll behind it, and tearing those down locally would be wrong if
+            -- the deferred expiry net adopts a token another tab renewed.
+            ( model, Effect.none, SessionExpired )
 
         AgeGateSet result ->
             case result of
@@ -970,7 +1007,9 @@ bookReadEffect token response =
             (\( bookId, toMsg ) ->
                 Effect.authed (Api.getBookRequest bookId)
                     token
-                    (Api.resolveJson Api.bookDetailResponseDecoder >> toMsg)
+                    { onExpired = SessionGone
+                    , onResponse = Api.resolveJson Api.bookDetailResponseDecoder >> toMsg
+                    }
             )
             (resolvedBookReads response)
         )

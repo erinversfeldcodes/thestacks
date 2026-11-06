@@ -108,6 +108,33 @@ OPTIONAL = re.compile(
     re.M,
 )
 
+# ⛔ THE SECOND KEY, and the reason the first one alone had stopped describing
+# the codebase. `Api.elm`'s mandatorily-authenticated endpoints are one of TWO
+# ways this app sends an authenticated request; the other is a request PLAN,
+# `Effect.authed spec token { onExpired = …, onResponse = … }`, built at the
+# call site instead of inside `Api`. A plan-based endpoint matched nothing
+# above, so `Page.BookDetail`'s ten authenticated requests and
+# `Page.Bookshelf.ReadingPile`'s three were invisible here — two pages wholly
+# outside a gate that reported "all 26 pages route their 401".
+#
+# ⚠️ So the population is a SUM, and endpoints migrating from `Api.Authed` onto
+# the plan move between the two keys rather than leaving the count. A gate that
+# read only the first key would have watched 72 walk down to 0 while printing
+# success over whatever was left.
+#
+# ⛔ MATCHED BY THE CONSTRUCTOR'S NAME, like `authedHeaders` above, and for the
+# same reason: a name is greppable per call site. The obligation could have been
+# expressed as a flag on the existing constructor — and a `Bool` would have
+# blinded this gate completely, because `True` and `False` carry no searchable
+# identity and the first site passing a variable would drop out of the
+# population with nothing reporting it. `Effect.authed` and `Effect.public` are
+# separate named functions, so every site declares which it is in text.
+#
+# ⚠️ Keep the authenticated plan constructor named `Effect.authed`. Renaming it,
+# or wrapping it in a per-page helper, empties this key silently — the same note
+# `Api.authedHeaders` carries in its own docstring.
+MANDATORY_PLAN = re.compile(r"\bEffect\.authed\b")
+
 api_text = read(API)
 definitions = top_level_definitions(api_text)
 authed_endpoints = set()
@@ -143,11 +170,23 @@ if len(definitions) < MIN_PARSED_DEFINITIONS:
     print("      become safe — and the findings-based floor below cannot tell them apart.", file=sys.stderr)
     sys.exit(1)
 
-if not authed_endpoints:
-    print("FAIL: found no mandatorily-authenticated endpoints in " + API + ".")
-    print("That cannot be right, so the parser has drifted from the source rather than")
-    print("the source having become safe. Fix this script before trusting a green run.")
+# ⚠️ NOT a floor on this key alone any more, and the change is deliberate: a
+# completed migration onto request plans empties `Api.elm` of mandatory
+# endpoints legitimately, and a gate that refused that would be refusing the
+# thing it exists to make safe. The count floor on the SUM below is what catches
+# the parser drifting, on either key.
+plan_sites = []
+for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
+    plan_sites.extend((path, hit.start()) for hit in MANDATORY_PLAN.finditer(read(path)))
+
+if not authed_endpoints and not plan_sites:
+    print("FAIL: found no authenticated requests at all — none in " + API + " and no")
+    print("authenticated plans in any page. That cannot be right, so the parser has")
+    print("drifted from the source rather than the source having become safe. Fix this")
+    print("script before trusting a green run.")
     sys.exit(1)
+
+authenticated_requests = len(authed_endpoints) + len(plan_sites)
 
 def declaring_type(text):
     """The union type declaring `SessionExpired`, as (name, whole declaration)."""
@@ -161,8 +200,18 @@ def module_header(text):
     return text.split("\n\n", 1)[0]
 
 def routes_to_session_expired(text, constructor):
-    """Does a `<constructor> ->` case branch produce `SessionExpired`?"""
-    for match in re.finditer(r"^(\s+)" + re.escape(constructor) + r"\s*->\s*$", text, re.M):
+    """Does a `<constructor> ->` case branch produce `SessionExpired`?
+
+    ⚠️ The constructor may CARRY something. An expiry msg often has to say which
+    card to settle or which request died — `SessionGoneMidSave placementId` —
+    and an expiry branch that takes an argument is still an expiry branch. A
+    pattern insisting on a bare constructor forced every expiry handler to be
+    nullary, which is a constraint on the page's design rather than on its
+    behaviour, and pages worked around it by handling the 401 somewhere this
+    gate could not see.
+    """
+    args = r"(?:\s+[A-Za-z_][A-Za-z0-9_']*)*"
+    for match in re.finditer(r"^(\s+)" + re.escape(constructor) + args + r"\s*->\s*$", text, re.M):
         rest = text[match.end():]
         branch = []
         for line in rest.split("\n"):
@@ -178,6 +227,13 @@ findings, in_scope = [], []
 for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
     text = read(path)
     calls = sorted(name for name in authed_endpoints if re.search(r"\bApi\." + name + r"\b", text))
+    plans = len(MANDATORY_PLAN.findall(text))
+    if plans:
+        # Named in the page's own terms, because a plan's endpoint is not always
+        # greppable at the call site — `Effect.authed spec token …` passes a
+        # spec a line above. What makes the page in scope is that it sends an
+        # authenticated request at all.
+        calls = calls + [str(plans) + " authenticated plan(s)"]
     if not calls:
         continue
 
@@ -236,9 +292,9 @@ for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
             (
                 path,
                 calls,
-                "hands `Api.authed` an `onExpired` the page does not route to "
-                "`SessionExpired`: " + ", ".join(unrouted) + ". The 401 is detected and "
-                "then dropped.",
+                "hands an authenticated request an `onExpired` the page does not route "
+                "to `SessionExpired`: " + ", ".join(unrouted) + ". The 401 is detected "
+                "and then dropped.",
             )
         )
         continue
@@ -249,6 +305,8 @@ stale = sorted(set(EXEMPT) - {path for path, _, _ in in_scope})
 
 if mode == "--list":
     print("Mandatorily-authenticated Api endpoints: " + str(len(authed_endpoints)))
+    print("Authenticated request plans in pages: " + str(len(plan_sites)))
+    print("Authenticated requests in all: " + str(authenticated_requests))
     print("Pages in scope: " + str(len(in_scope)))
     print("")
     for path, calls, verdict in in_scope:
@@ -260,12 +318,94 @@ if mode == "--list":
         print("      " + reason)
     sys.exit(0)
 
+# ⚠️ BOTH FLOORS SIT BELOW `--list` DELIBERATELY. A floor that fires is the
+# moment someone needs the listing most — "which page left the population?" —
+# and a `--list` that refused to list would send them to read this script
+# instead of the picture it can print. The parser floor above is the exception:
+# a listing built by a drifted parser is not evidence of anything.
+# ⛔ A COUNT FLOOR ON THE POPULATION, not an emptiness check — this is the hole
+# RL-407 names and the reason the figure below is a sum.
+#
+# MEASURED, on the line that used to stand here: `if not authed_endpoints`
+# refuses only at ZERO. A change taking 72 matching sites down to ONE passed
+# green, classified one endpoint and printed "1 such endpoints in Api.elm" as
+# though that were the population. A floor at zero is satisfied by almost-total
+# loss, and the printed number was the only tell.
+#
+# ⚠️ So this number is a RATCHET, and it is meant to be edited by hand when the
+# codebase really does have fewer authenticated requests — a deleted feature, a
+# consolidated endpoint. Lowering it is a one-line change that says so in the
+# diff, which is the whole point: the alternative is a count that drifts down
+# quietly while the verdict stays "OK".
+#
+# ⚖️ The sum is what is floored, not either key. An endpoint moving from
+# `Api.Authed` onto a request plan leaves one key and joins the other, so a
+# migration holds this number while rearranging what it is made of.
+MIN_AUTHENTICATED_REQUESTS = 100
+
+if authenticated_requests < MIN_AUTHENTICATED_REQUESTS:
+    print(
+        f"FAIL: found {authenticated_requests} authenticated request(s) "
+        f"({len(authed_endpoints)} endpoint(s) in " + API + f", {len(plan_sites)} "
+        "authenticated plan(s) in pages);",
+        file=sys.stderr,
+    )
+    print(
+        f"      expected at least {MIN_AUTHENTICATED_REQUESTS}. Every verdict below is a",
+        file=sys.stderr,
+    )
+    print(
+        "      claim about THIS population, so a population that shrank without anyone",
+        file=sys.stderr,
+    )
+    print(
+        "      saying so makes the verdict narrower than it reads. Either a key stopped",
+        file=sys.stderr,
+    )
+    print(
+        "      matching the source — check `headers = authedHeaders` and `Effect.authed`",
+        file=sys.stderr,
+    )
+    print(
+        "      are still spelled that way — or the requests really are gone, in which",
+        file=sys.stderr,
+    )
+    print(
+        "      case lower MIN_AUTHENTICATED_REQUESTS in this script and say why.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# ⛔ THE SECOND FLOOR, on the dimension the verdict line actually reports.
+#
+# ⚠️ The population floor above cannot catch this one. An endpoint can stay in
+# `Api.elm`, keep matching, keep being counted — and stop being CALLED by a
+# page. The sum holds, and the printed claim ("all N pages route their 401")
+# quietly covers fewer pages. Flooring the pages in scope is what makes a page
+# leaving the gate's view read as a change to look at.
+MIN_PAGES_IN_SCOPE = 29
+
+if len(in_scope) < MIN_PAGES_IN_SCOPE:
+    print("")
+    print(
+        "FAIL: only "
+        + str(len(in_scope))
+        + " page(s) are in scope; expected at least "
+        + str(MIN_PAGES_IN_SCOPE)
+        + "."
+    )
+    print("A page drops out of scope when it stops making an authenticated request — or")
+    print("when it still makes one by a spelling neither key recognises, which looks")
+    print("exactly the same from here. Check the page you changed, then lower")
+    print("MIN_PAGES_IN_SCOPE in this script if the page really did stop.")
+    sys.exit(1)
+
 for path, reason in sorted(EXEMPT.items()):
     print("note: " + path + " is exempt — " + reason)
 
 if stale:
     print("")
-    print("FAIL: stale exemption(s). These files no longer make an authed Api call, or no")
+    print("FAIL: stale exemption(s). These files no longer make an authed request, or no")
     print("longer exist. An exemption that protects nothing is a claim nobody is checking:")
     for path in stale:
         print("  - " + path)
@@ -276,7 +416,7 @@ if findings:
     print(
         "FAIL: "
         + str(len(findings))
-        + " page(s) make a mandatorily-authenticated Api call and drop the 401."
+        + " page(s) make a mandatorily-authenticated request and drop the 401."
     )
     print("A 401 there means the session is gone. Whatever the page shows instead — ")
     print('"please try again", "refresh to retry" — is telling the reader to do something')
@@ -294,9 +434,13 @@ if findings:
 print(
     "OK: all "
     + str(len(in_scope) - len(EXEMPT))
-    + " pages making mandatorily-authenticated Api calls route their 401 "
+    + " pages making mandatorily-authenticated requests route their 401 "
     + "("
+    + str(authenticated_requests)
+    + " such requests: "
     + str(len(authed_endpoints))
-    + " such endpoints in Api.elm)."
+    + " endpoints in Api.elm + "
+    + str(len(plan_sites))
+    + " authenticated plans in pages)."
 )
 PY

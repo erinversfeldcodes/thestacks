@@ -281,7 +281,11 @@ fetchShelves config maybeToken =
         OwnShelf token bookshelfName ->
             Effect.authed (Api.getBookshelfRequest bookshelfName)
                 token
-                (Api.resolveJson bookshelfResponseDecoder >> ShelvesLoaded (requestKey config))
+                { onExpired = SessionGone
+                , onResponse =
+                    Api.resolveJson bookshelfResponseDecoder
+                        >> ShelvesLoaded (requestKey config)
+                }
 
         NoShelvesRequest ->
             Effect.none
@@ -302,6 +306,7 @@ type Msg
     | ToastExpired
     | SpineNavKey String GridNav.Key
     | SpineFocusAttempted
+    | SessionGone
 
 
 init : Config -> Maybe Api.Credentials -> String -> ( Model, Cmd Msg )
@@ -490,7 +495,9 @@ updateWithEffect msg model =
                     ( { model | undoToast = ToastRestoring removal }
                     , Effect.authed (Api.restoreBookRequest removal.placementId)
                         token
-                        (Api.resolveWhatever >> UndoCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> UndoCompleted
+                        }
                     , NoOut
                     )
 
@@ -542,6 +549,13 @@ updateWithEffect msg model =
 
         SpineFocusAttempted ->
             ( model, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401. The
+            -- shelf is left exactly as it was: `Main` decides whether the
+            -- reader is bounced to the login or kept here on a token another
+            -- tab renewed, and a half-cleared shelf would be wrong either way.
+            ( model, Effect.none, SessionExpired )
 
 
 {-| The packed rows as `GridNav` reasons about them: the SAME grouping the
@@ -601,7 +615,9 @@ handleOrganiser subMsg model =
             ( { model | organiserBusy = True }
             , Effect.authed (Api.createShelfRequest model.config.apiName)
                 token
-                (Api.resolveWhatever >> ShelfMutated)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> ShelfMutated
+                }
             , NoOut
             )
 
@@ -609,7 +625,9 @@ handleOrganiser subMsg model =
             ( { model | organiserBusy = True }
             , Effect.authed (Api.deleteShelfRequest id)
                 token
-                (Api.resolveWhatever >> ShelfMutated)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> ShelfMutated
+                }
             , NoOut
             )
 
@@ -651,7 +669,9 @@ persistOrder reordered token model =
     , Effect.authed
         (Api.reorderShelvesRequest model.config.apiName (ShelfOrganiser.orderedIds reordered))
         token
-        (Api.resolveWhatever >> ShelfMutated)
+        { onExpired = SessionGone
+        , onResponse = Api.resolveWhatever >> ShelfMutated
+        }
     , NoOut
     )
 
