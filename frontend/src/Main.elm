@@ -1521,6 +1521,12 @@ forceSessionExpiry draftSaved model =
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
+
+        -- ⚠️ The session is gone by another route, so any sign-out still being
+        -- waited on or complained about is answered. Leaving it would carry
+        -- "signing you out…" or "you are still signed in" onto the login page,
+        -- where both are false.
+        , signOut = NotSigningOut
       }
     , Nav.pushUrl model.key (Route.toPath Login)
     )
@@ -1543,6 +1549,7 @@ handleAccountDeleted model =
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
+        , signOut = NotSigningOut
       }
     , Cmd.batch
         [ clearListingDraft ()
