@@ -135,6 +135,30 @@ OPTIONAL = re.compile(
 # `Api.authedHeaders` carries in its own docstring.
 MANDATORY_PLAN = re.compile(r"\bEffect\.authed\b")
 
+BLOCK_COMMENT = re.compile(r"\{-.*?-\}", re.S)
+LINE_COMMENT = re.compile(r"^[ \t]*--.*$", re.M)
+
+def code_only(text):
+    """The module with its comments removed.
+
+    ⛔ BECAUSE THIS KEY IS A NAME, AND PROSE CAN SAY A NAME. `Effect.authed`'s
+    own docstring names itself, and `Api.elm`'s `interceptExpiry` names it too —
+    so counting the literal across a corpus that included either file would
+    classify a doc comment as a call site, and the population figure would go
+    up when somebody wrote a sentence. This repository has the matching defect
+    on record in the other direction: an absence assertion that matched the
+    prose explaining why the pattern was banned.
+
+    ⚠️ Only whole-line `--` comments are stripped, not trailing ones. A `--`
+    inside a string literal is the hazard, and a line whose first characters are
+    `--` cannot be one in formatted Elm.
+    """
+    return LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", text))
+
+def plans_in(text):
+    """How many authenticated request plans a module builds."""
+    return len(MANDATORY_PLAN.findall(code_only(text)))
+
 api_text = read(API)
 definitions = top_level_definitions(api_text)
 authed_endpoints = set()
@@ -177,7 +201,7 @@ if len(definitions) < MIN_PARSED_DEFINITIONS:
 # the parser drifting, on either key.
 plan_sites = []
 for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
-    plan_sites.extend((path, hit.start()) for hit in MANDATORY_PLAN.finditer(read(path)))
+    plan_sites.extend([path] * plans_in(read(path)))
 
 if not authed_endpoints and not plan_sites:
     print("FAIL: found no authenticated requests at all — none in " + API + " and no")
@@ -227,7 +251,7 @@ findings, in_scope = [], []
 for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
     text = read(path)
     calls = sorted(name for name in authed_endpoints if re.search(r"\bApi\." + name + r"\b", text))
-    plans = len(MANDATORY_PLAN.findall(text))
+    plans = plans_in(text)
     if plans:
         # Named in the page's own terms, because a plan's endpoint is not always
         # greppable at the call site — `Effect.authed spec token …` passes a
