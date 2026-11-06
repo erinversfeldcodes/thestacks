@@ -179,4 +179,168 @@ RC=$?
 assert_exit_nonzero "$RC" "an unreachable floor refuses over the real Api.elm"
 assert_contains "$OUT" "parsed only" "and says how many definitions it read"
 
+# ── the page floor and the verdict are about the same population ────────────
+#
+# ⛔ They were one page apart. The floor counted every page in scope, the
+# success line counted the non-exempt ones, and nothing on a passing run
+# printed the larger figure — so the SAME number, 28, was the healthy state in
+# the verdict ("all 28 pages … route their 401") and the refused state in the
+# floor ("only 28 page(s) are in scope; expected at least 29").
+#
+# ⚠️ MEASURED, and worse than illegible: because exempting a page keeps it in
+# scope, adding one exemption passed the old floor green while the verdict's
+# population fell from 28 to 27. A count drifting down under a green run is the
+# exact failure that floor's own comment says it exists to prevent.
+#
+# ⚖️ Asserted as "the floor compares the expression the verdict prints" rather
+# than against a literal, because the population legitimately grows. A literal
+# here would go stale the next time a page starts making an authed request —
+# this suite's sibling gate has already had that defect, where a hardcoded
+# population figure outlived the constant it was copied from.
+test_case "the_page_floor_counts_the_figure_the_verdict_prints" \
+    "a floor and a verdict about populations one apart cannot be reconciled"
+if python3 - "$GATE" <<'SAMEPOP'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+
+floor = re.search(r"if len\((\w+)\) < (MIN_[A-Z_]*PAGES[A-Z_]*):", src)
+if floor is None:
+    print("HARNESS: no page floor of the form `if len(X) < MIN_..PAGES..:` found.")
+    print("         Either the floor is gone or it was rewritten; this case cannot")
+    print("         tell which, so it fails rather than passing over nothing.")
+    raise SystemExit(2)
+
+verdict = re.search(r'"OK: all "\s*\+\s*str\(', src)
+if verdict is None:
+    print("HARNESS: could not find the success line's population expression.")
+    print("         The verdict was reworded or removed; this case cannot tell which,")
+    print("         so it fails rather than passing over nothing.")
+    raise SystemExit(2)
+
+# ⚠️ The printed expression is read by balancing parentheses rather than by a
+# pattern for `len(x)`, so an arithmetic that diverges from the floor —
+# `len(in_scope) - len(EXEMPT)`, which is what the verdict used to print — is
+# reported as the mismatch it is instead of as an extraction failure.
+depth, printed = 1, []
+for char in src[verdict.end():]:
+    if char == "(":
+        depth += 1
+    elif char == ")":
+        depth -= 1
+        if depth == 0:
+            break
+    printed.append(char)
+printed = " ".join("".join(printed).split())
+
+counted, constant = floor.group(1), floor.group(2)
+
+if printed != f"len({counted})":
+    print(f"the floor compares len({counted}) against {constant},")
+    print(f"but the success line prints {printed}.")
+    print("Two populations, one of them never printed on a passing run: the figure in")
+    print("the verdict and the figure in the refusal cannot be reconciled by a reader,")
+    print("and the same number means healthy in one and broken in the other.")
+    raise SystemExit(1)
+
+print(f"OK: floor and verdict both speak about len({counted}).")
+SAMEPOP
+then
+    _record_pass "the floor compares the same expression the success line prints"
+else
+    rc=$?
+    if [[ $rc -eq 2 ]]; then
+        _record_fail "HARNESS: the floor or the verdict could not be located — see above"
+    else
+        _record_fail "the floor and the verdict count different populations — see above"
+    fi
+fi
+assert_contains "$GATE_SRC" "non-exempt page(s)" \
+    "and the refusal says what it counted, not just \"in scope\""
+
+test_case "the_page_floor_actually_fires" \
+    "a declared floor that never refuses is decoration"
+cp "$GATE" "$SANDBOX/pages.sh"
+python3 - "$SANDBOX/pages.sh" <<'RAISE'
+import pathlib
+import re
+import sys
+
+p = pathlib.Path(sys.argv[1])
+s = p.read_text(encoding="utf-8")
+p.write_text(re.sub(r"(MIN_[A-Z_]*PAGES[A-Z_]* = )\d+", r"\g<1>999999", s))
+RAISE
+PAGES_OUT="$(cd "$REPO_ROOT" && bash "$SANDBOX/pages.sh" 2>&1)"
+PAGES_RC=$?
+assert_exit_nonzero "$PAGES_RC" "an unreachable page floor refuses over the real pages"
+assert_contains "$PAGES_OUT" "non-exempt page(s)" "and names the population it counted"
+
+# ── one run reports every class of failure it found ─────────────────────────
+#
+# ⛔ The stale-exemption refusal used to `sys.exit(1)` before the routing
+# findings were printed, and that ordering hid the defect it is most likely to
+# accompany: an exemption goes stale when the page it named was renamed or
+# stopped matching, which is precisely when a previously-exempt page lands back
+# in scope unchecked. MEASURED on the gate as it stood: with the exemption
+# pointed at a path that makes no authed request, the run printed the stale note
+# and exited, giving no verdict at all on the real `Page/Admin/Session.elm` —
+# which by then was in scope and dropping its 401.
+#
+# ⚖️ Fail-fast is right where the first failure makes later verdicts
+# meaningless — the parsed-definitions floor above is that, since a drifted
+# parser poisons every classification. A stale exemption poisons nothing.
+# ⚠️ RUN TWICE, because a single run cannot tell the defect from a change in the
+# exemption list. Dropping the exemption altogether establishes that the
+# formerly-exempt page IS a finding; misnaming it establishes that the same
+# finding survives alongside the stale note. Without the first run, an exemption
+# that later points at a page which routes its 401 properly would make this case
+# fail and blame the gate for short-circuiting something that was never there.
+test_case "a_stale_exemption_does_not_hide_a_dropped_401" \
+    "the class most likely to accompany a finding must not short-circuit it"
+cp "$GATE" "$SANDBOX/unexempt.sh"
+cp "$GATE" "$SANDBOX/both.sh"
+python3 - "$SANDBOX/unexempt.sh" <<'DROP'
+import pathlib
+import re
+import sys
+
+p = pathlib.Path(sys.argv[1])
+s = p.read_text(encoding="utf-8")
+p.write_text(re.sub(r"^EXEMPT = \{.*?^\}$", "EXEMPT = {}", s, count=1, flags=re.S | re.M))
+DROP
+ALONE_OUT="$(cd "$REPO_ROOT" && bash "$SANDBOX/unexempt.sh" 2>&1)"
+
+if python3 - "$SANDBOX/both.sh" <<'MISNAME'
+import pathlib
+import re
+import sys
+
+p = pathlib.Path(sys.argv[1])
+s = p.read_text(encoding="utf-8")
+# Misname the first exempted path, as a rename would. The file it named is then
+# unexempt and in scope, so this one edit produces both failure classes.
+m = re.search(r'"(frontend/src/Page/[A-Za-z0-9_/]+)\.elm":', s)
+if m is None:
+    print("HARNESS: the gate exempts nothing, so this case cannot plant a stale")
+    print("         exemption. It proves nothing and fails rather than skipping.")
+    raise SystemExit(2)
+p.write_text(s.replace(m.group(0), f'"{m.group(1)}Renamed.elm":', 1), encoding="utf-8")
+print("planted a rename of " + m.group(1) + ".elm")
+MISNAME
+then
+    BOTH_OUT="$(cd "$REPO_ROOT" && bash "$SANDBOX/both.sh" 2>&1)"
+    BOTH_RC=$?
+    assert_exit_nonzero "$BOTH_RC" "a stale exemption still refuses"
+    assert_contains "$BOTH_OUT" "stale exemption" "and says so"
+    if [[ "$ALONE_OUT" != *"drop the 401"* ]]; then
+        _record_fail "HARNESS: with the exemption dropped the gate reports no finding, so the exempted page routes its 401 and this plant stages only one failure class. Point it at a page that drops one."
+    else
+        assert_contains "$BOTH_OUT" "drop the 401" \
+            "and the same run still reports the page that drops its 401"
+    fi
+else
+    _record_fail "HARNESS: could not plant a stale exemption — see above"
+fi
+
 summarise

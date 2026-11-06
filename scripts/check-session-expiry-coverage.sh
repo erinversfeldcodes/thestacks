@@ -327,11 +327,26 @@ for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
 
 stale = sorted(set(EXEMPT) - {path for path, _, _ in in_scope})
 
+# ⛔ THE POPULATION EVERY MESSAGE BELOW IS ABOUT: the pages this gate actually
+# checked. An exempt page IS in scope — it makes an authenticated request —
+# and is deliberately not checked, so it belongs in the listing and in the
+# exemption notes, and not in the figure the verdict or the floor quotes.
+#
+# ⚠️ Counted from the entries rather than as `len(in_scope) - len(EXEMPT)`,
+# because those two sets can disagree: a stale exemption is in `EXEMPT` and in
+# no entry, and subtracting it would quietly shrink a figure a floor is
+# compared against. Counting what is there cannot drift that way.
+checked = [path for path, _, _ in in_scope if path not in EXEMPT]
+
 if mode == "--list":
     print("Mandatorily-authenticated Api endpoints: " + str(len(authed_endpoints)))
     print("Authenticated request plans in pages: " + str(len(plan_sites)))
     print("Authenticated requests in all: " + str(authenticated_requests))
     print("Pages in scope: " + str(len(in_scope)))
+    # ⚠️ Printed next to the line above because these two figures differ by the
+    # exemptions, and the reader reconciling a floor against a verdict needs to
+    # see both to know which one they are holding.
+    print("Pages checked (in scope, not exempt): " + str(len(checked)))
     print("")
     for path, calls, verdict in in_scope:
         print("  [" + verdict + "] " + path)
@@ -405,27 +420,70 @@ if authenticated_requests < MIN_AUTHENTICATED_REQUESTS:
 # ⚠️ The population floor above cannot catch this one. An endpoint can stay in
 # `Api.elm`, keep matching, keep being counted — and stop being CALLED by a
 # page. The sum holds, and the printed claim ("all N pages route their 401")
-# quietly covers fewer pages. Flooring the pages in scope is what makes a page
-# leaving the gate's view read as a change to look at.
-MIN_PAGES_IN_SCOPE = 29
+# quietly covers fewer pages. Flooring the pages this gate checks is what makes
+# a page leaving its view read as a change to look at.
+#
+# ⚠️ FLOORED ON THE FIGURE THE VERDICT PRINTS, which it was not. This constant
+# counted every page in scope, exemptions included, while the success line
+# quoted the checked pages — one fewer. So the same number was the good state in
+# one message ("all 28 pages … route their 401") and the bad state in the other
+# ("only 28 page(s) are in scope; expected at least 29"), and nothing printed on
+# a passing run said which population either figure meant.
+#
+# ⚖️ The unreduced count was floored so that an exempt page falling out of the
+# corpus would red this floor rather than ONLY trip the stale-exemption check
+# below. MEASURED: that check is a refusal, not a warning — point the exemption
+# at a path that makes no authed request and the gate exits 1 naming it. So the
+# case this ambiguity was bought for was already fatal.
+#
+# ⛔ AND IT COST MORE THAN LEGIBILITY. MEASURED on the unreduced form: because an
+# exempt page stays IN SCOPE, adding one exemption left the floor satisfied — 29
+# in scope against a floor of 29 — while the verdict's own population fell from
+# 28 to 27 and the run stayed green. That is precisely the count drifting down
+# under an "OK" that this floor was added to prevent, reachable by one hand-added
+# exemption. Flooring the checked pages reds it.
+MIN_PAGES_CHECKED = 28
 
-if len(in_scope) < MIN_PAGES_IN_SCOPE:
+if len(checked) < MIN_PAGES_CHECKED:
     print("")
     print(
         "FAIL: only "
-        + str(len(in_scope))
-        + " page(s) are in scope; expected at least "
-        + str(MIN_PAGES_IN_SCOPE)
+        + str(len(checked))
+        + " non-exempt page(s) make a mandatorily-authenticated request; expected at"
+        + " least "
+        + str(MIN_PAGES_CHECKED)
         + "."
+    )
+    print(
+        "(" + str(len(in_scope)) + " page(s) in scope, "
+        + str(len(in_scope) - len(checked))
+        + " of them exempt and therefore not counted here; `--list` names them.)"
     )
     print("A page drops out of scope when it stops making an authenticated request — or")
     print("when it still makes one by a spelling neither key recognises, which looks")
     print("exactly the same from here. Check the page you changed, then lower")
-    print("MIN_PAGES_IN_SCOPE in this script if the page really did stop.")
+    print("MIN_PAGES_CHECKED in this script if the page really did stop.")
     sys.exit(1)
 
 for path, reason in sorted(EXEMPT.items()):
     print("note: " + path + " is exempt — " + reason)
+
+# ⛔ BOTH CLASSES ARE REPORTED, THEN THE GATE EXITS ONCE. This block used to
+# `sys.exit(1)` on a stale exemption before the findings below were printed, and
+# that ordering hid the very defect it is most likely to accompany: an exemption
+# going stale usually means the page it named stopped matching or was renamed,
+# which puts a previously-exempt page back in scope UNCHECKED. MEASURED: with
+# the exemption pointed at a path that makes no authed request, the gate printed
+# the stale note and exited without giving any verdict on the real page, which
+# was by then in scope and dropping its 401.
+#
+# ⚖️ Fail-fast is right when the first failure makes the later verdicts
+# meaningless — the parsed-definitions floor above is exactly that, since a
+# drifted parser poisons every classification after it. A stale exemption does
+# not: it says one entry in `EXEMPT` matched nothing, and leaves every page's
+# verdict as sound as it was. So there is nothing to protect the reader from by
+# withholding them, and one run should say everything that is wrong.
+exit_code = 0
 
 if stale:
     print("")
@@ -433,7 +491,7 @@ if stale:
     print("longer exist. An exemption that protects nothing is a claim nobody is checking:")
     for path in stale:
         print("  - " + path)
-    sys.exit(1)
+    exit_code = 1
 
 if findings:
     print("")
@@ -453,12 +511,15 @@ if findings:
     print("")
     print("See frontend/src/Api.elm's `Authed` docs, and `Page/Settings/Password.elm` for")
     print("the smallest complete example.")
-    sys.exit(1)
+    exit_code = 1
+
+if exit_code:
+    sys.exit(exit_code)
 
 print(
     "OK: all "
-    + str(len(in_scope) - len(EXEMPT))
-    + " pages making mandatorily-authenticated requests route their 401 "
+    + str(len(checked))
+    + " non-exempt pages making mandatorily-authenticated requests route their 401 "
     + "("
     + str(authenticated_requests)
     + " such requests: "
