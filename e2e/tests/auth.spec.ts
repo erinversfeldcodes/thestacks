@@ -149,7 +149,23 @@ test.describe("Logout", () => {
     ).toBe(true);
 
     await page.getByTestId("user-menu").click();
+
+    // ⛔ AWAIT THE REQUEST, NOT THE NAVIGATION. Sign-out dispatches
+    // `Cmd.batch [ logoutCmd, clearListingDraft (), Nav.pushUrl … ]`, so the URL
+    // changes LOCALLY and immediately while `DELETE /api/auth/logout` is still in
+    // flight. `waitForURL` is therefore satisfied before the server has cleared
+    // the cookie, and the assertion below read a cookie the response was about to
+    // remove — failing consistently rather than flakily, because the local
+    // navigation always wins the race. Measured on a deployed stack: the server
+    // answers `204` and sends
+    //   set-cookie: stacks_session=…; max-age=0; expires=Thu, 01 Jan 1970 …
+    // which is correct, so this was never an application defect.
+    const loggedOut = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/auth/logout") && r.request().method() === "DELETE"
+    );
     await page.getByRole("button", { name: "Sign Out" }).click();
+    await loggedOut;
 
     await page.waitForURL("**/login");
 
