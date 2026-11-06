@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
 import {
   hasSessionCookie,
-  elevateOwnerAdmin,
+  authenticateOwner,
   suiteEmail,
   uniqueEmail,
 } from "./helpers";
@@ -19,7 +19,7 @@ import {
 
 /** Mint a fresh single-use invitation via the owner's admin API. */
 async function mintInvite(request: APIRequestContext): Promise<string> {
-  await elevateOwnerAdmin(request);
+  await authenticateOwner(request);
   const created = await request.post("/api/admin/invites", {
     data: { note: "register.spec journey" },
   });

@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { APIRequestContext } from "@playwright/test";
-import { elevateOwnerAdmin, uniqueEmail } from "./helpers";
+import { authenticateOwner, uniqueEmail } from "./helpers";
 
 /**
  * The closed-beta gate itself, driven against the real stack with
@@ -9,10 +9,11 @@ import { elevateOwnerAdmin, uniqueEmail } from "./helpers";
  * refusal, the code lifecycle, revocation, and single use.
  */
 
-// Elevation lives on the session the server holds, so there is no header to
-// build — this context's cookie jar carries it once elevated.
+// No header to build: the operator is elevated once in `auth.setup.ts`, and this
+// context only needs the owner's ordinary session cookie. See
+// `authenticateOwner` for why elevating per worker breaks the run.
 async function adminAuth(request: APIRequestContext) {
-  await elevateOwnerAdmin(request);
+  await authenticateOwner(request);
   return {};
 }
 

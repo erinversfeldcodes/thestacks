@@ -9,6 +9,7 @@ import {
   saveOwnerMfaSecret,
   suiteAuthFile,
   suiteEmail,
+  elevateOwnerAdmin,
 } from "./helpers";
 
 export const OWNER_AUTH_FILE = path.join(__dirname, "../.auth/owner.json");
@@ -89,6 +90,46 @@ setup("authenticate as owner", async ({ request, page }) => {
  */
 setup("enrol the owner's admin MFA factor", async ({ request }) => {
   saveOwnerMfaSecret(await enrolOwnerMfa(request));
+});
+
+/**
+ * Elevate the operator ONCE, here, for the whole run.
+ *
+ * ⛔ ELEVATION IS A PROPERTY OF THE OPERATOR, NOT OF THE WORKER, and that is why
+ * this belongs in setup rather than in a per-call helper.
+ * `Admin.SessionContext.current_for_user/2` looks the admin session up FROM THE
+ * USER — newest non-revoked row for that `user_id` — so a worker making an admin
+ * write needs only an ordinary owner session cookie plus the existence of one
+ * live elevated admin session anywhere.
+ *
+ * ⛔ And elevating per worker actively BREAKS: `create/3` runs
+ * `retire_live_sessions(user.id)` before inserting, revoking every other live
+ * admin session the operator holds. Measured against a deployed stack — four
+ * workers each elevating produced `admin MFA verify -> 401` (`invalid_session`,
+ * the previous worker's `session_id` revoked out from under it), and a shared
+ * TOTP step compounds it because a code is single-use. Same suite at
+ * `--workers=1`: 33 passed, 0 failed. The server is right; `create/3`'s own
+ * moduledoc states the intent — "an operator working from two machines at once is
+ * bounced from the first — accepted, because this platform has one operator".
+ *
+ * ⚠️ TWO WAYS THIS CAN LAPSE MID-RUN, and both surface as a 401 that reads like
+ * bad credentials rather than like a lapsed window:
+ *   - `RequireMFA` allows 30 minutes from `mfa_verified_at`. A long retrying run
+ *     can cross it.
+ *   - `check_valid/2` matches `boot_id` and IP. Preview machines auto-stop, so a
+ *     restart mid-run invalidates elevation for every worker at once.
+ * `assertOwnerElevated` exists to say which of those happened instead of letting
+ * the failure surface as "invite create".
+ *
+ * ⚠️ LOAD-BEARING: `admin-session.spec.ts` and `admin-feedback.spec.ts`
+ * deliberately RESET elevation mid-run (via the `STACKS_E2E_TEST_HELPERS` helper
+ * that calls `revoke_all_for_user`). They only stay compatible with this because
+ * they run in serial projects that `dependencies` order AFTER the parallel pool.
+ * Moving either back into the parallel pool would destroy elevation under the
+ * specs that now rely on it being established here.
+ */
+setup("elevate the operator once for the whole run", async ({ request }) => {
+  await elevateOwnerAdmin(request);
 });
 
 /**

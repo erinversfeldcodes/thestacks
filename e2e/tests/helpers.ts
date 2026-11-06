@@ -236,7 +236,7 @@ export async function registerViaApi(
   request: APIRequestContext,
   opts: { email: string; password: string; displayName?: string },
 ) {
-  await elevateOwnerAdmin(request);
+  await authenticateOwner(request);
   const created = await request.post("/api/admin/invites", {
     data: { note: "registerViaApi" },
   });
@@ -930,6 +930,52 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
 // elevation is a fact about the session THAT context holds: two contexts in one
 // file must each elevate, and neither should be told the other already did.
 // A `WeakSet` also lets the context be collected without this leaking it.
+const ownerAuthedContexts = new WeakSet<APIRequestContext>();
+
+/**
+ * Give this context the owner's ordinary session, and prove the operator is
+ * still elevated.
+ *
+ * ⛔ THIS DOES NOT ELEVATE. Elevation happens ONCE, in `auth.setup.ts`, because
+ * it is a property of the operator rather than of the worker:
+ * `Admin.SessionContext.current_for_user/2` finds the newest non-revoked admin
+ * session for the USER, so an admin write needs only an owner session cookie plus
+ * one live elevated session existing anywhere. Elevating here instead revokes
+ * every other worker's session (`create/3` retires live sessions first), which is
+ * what produced `admin MFA verify -> 401` at four workers and 0 failures at one.
+ *
+ * ⚠️ The probe below exists because elevation can lapse for reasons that have
+ * nothing to do with the test: the MFA window is 30 minutes from
+ * `mfa_verified_at`, and `check_valid/2` also matches `boot_id` and IP — so a
+ * preview machine auto-stopping mid-run kills it for everyone at once. Without
+ * this, that surfaces as `invite create -> 401` and reads like a credentials bug
+ * in whichever spec happened to run next.
+ */
+export async function authenticateOwner(
+  request: APIRequestContext,
+): Promise<void> {
+  if (ownerAuthedContexts.has(request)) {
+    return;
+  }
+
+  const session = await request.post("/api/auth/login", {
+    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
+  });
+  expect(session.status(), "owner session login").toBe(200);
+
+  const elevated = await request.get("/api/admin/invites");
+  expect(
+    elevated.status(),
+    "the operator is not elevated. auth.setup.ts elevates once per run; this " +
+      "is a LAPSE, not a credentials problem. Either the 30-minute MFA window " +
+      "expired (a long or retrying run), or the stack restarted and changed its " +
+      "boot_id (preview machines auto-stop) — both invalidate the admin session " +
+      "for every worker simultaneously",
+  ).toBe(200);
+
+  ownerAuthedContexts.add(request);
+}
+
 const elevatedContexts = new WeakSet<APIRequestContext>();
 
 export async function elevateOwnerAdmin(

@@ -35,7 +35,7 @@
  */
 import { test, expect } from "./fixtures";
 import { type APIRequestContext } from "@playwright/test";
-import { mintSession, elevateOwnerAdmin } from "./helpers";
+import { mintSession, authenticateOwner } from "./helpers";
 
 /**
  * Stable, widely-held Penguin/Vintage paperback ISBNs Open Library resolves.
@@ -155,7 +155,7 @@ test.describe("un-merge correction round trip", () => {
       target.id,
     );
 
-    await elevateOwnerAdmin(request);
+    await authenticateOwner(request);
     // Elevated on the session; no header to carry. Kept as an empty object so the
     // `headers:` sites below read unchanged rather than being deleted one by one.
     const adminAuth = {};
