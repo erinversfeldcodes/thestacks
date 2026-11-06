@@ -8,6 +8,9 @@ port module Main exposing
     , Msg(..)
     , NavMenu(..)
     , Page(..)
+    , SignOut(..)
+    , SignOutAnswer(..)
+    , SignOutFailure(..)
     , adminGateAfterEnding
     , applyPendingUndo
     , authResolved
@@ -29,12 +32,15 @@ port module Main exposing
     , resetPasswordDestination
     , settleArrival
     , shouldShowOnboarding
+    , signOutAnswer
+    , signOutHandlers
     , toggleNavMenu
     , viewArrivalDoor
     , viewConnectivity
     , viewFooter
     , viewNav
     , viewNotFound
+    , viewSignOut
     )
 
 import Animation.Transition as Transition exposing (transitionClass)
@@ -309,6 +315,90 @@ connectivityFromOnline isOnline =
         Offline
 
 
+{-| How far a deliberate sign-out has got.
+
+⛔ **`SigningOut` IS NOT SIGNED OUT, and that distinction is the whole reason
+this type exists.** Sign-out used to be dispatched as
+`Cmd.batch [ Api.logout …, clearListingDraft (), Nav.pushUrl … Login ]` with the
+response discarded by `always FocusResult`. The navigation is local and
+immediate, so the reader arrived on `/login` — an interface whose entire claim is
+"you are signed out" — before the server had been asked, and regardless of what
+it answered. A reader whose logout failed kept a live `stacks_session` cookie for
+the rest of its lifetime while being shown a signed-out app, and the next request
+from that browser was authenticated again.
+
+⚠️ The cookie is `HttpOnly`, so there is nothing the page can do about it
+afterwards. The server's `delete_session_cookie/1` is the only mechanism, which
+makes "did the server actually do it?" the only question worth asking — and a
+state that can hold the answer "no" the only way to ask it.
+
+-}
+type SignOut
+    = NotSigningOut
+    | SigningOut
+    | SignOutStalled SignOutFailure
+
+
+{-| Why a sign-out did not happen, in the two shapes the reader needs told apart:
+the library answered and refused, or it was never reached at all. Both leave the
+session open; they differ in what the reader should try.
+-}
+type SignOutFailure
+    = ServerRefused
+    | DidNotArrive
+
+
+{-| What the server's answer to a sign-out means for the session.
+
+⚖️ Named rather than returned as a `Bool` or a `Maybe`, because the two answers
+are about the SESSION and not about the request: one of them licenses the app to
+render itself signed out and the other forbids it.
+
+-}
+type SignOutAnswer
+    = SessionEnded
+    | SessionStillOpen SignOutFailure
+
+
+{-| Read one sign-out response into what it means for the session.
+
+⛔ Only a 2xx ends the session here. A 401 ends it too, but it never reaches
+this function: `Api.logout` takes an `Authed`, so the expiry msg claims the 401
+before the result handler sees it — the credential it carried is already gone, so
+there is nothing left to revoke.
+
+⚖️ Pure, and exposed, because it is the decision the defect was made of. The
+`update` branch that applies it cannot be tested — `Main` is a
+`Browser.application` with ports, so no test can build a `Model` — and a
+decision that only exists inside an untestable `update` is a decision nobody is
+checking.
+
+-}
+signOutAnswer : Result Http.Error () -> SignOutAnswer
+signOutAnswer result =
+    case result of
+        Ok () ->
+            SessionEnded
+
+        Err (Http.BadStatus _) ->
+            SessionStillOpen ServerRefused
+
+        Err (Http.BadBody _) ->
+            SessionStillOpen ServerRefused
+
+        Err Http.Timeout ->
+            SessionStillOpen DidNotArrive
+
+        Err Http.NetworkError ->
+            SessionStillOpen DidNotArrive
+
+        Err (Http.BadUrl _) ->
+            -- The request was never sent, so the session is untouched. Grouped
+            -- with the transport failures because that is what the reader is
+            -- being told: it did not arrive.
+            SessionStillOpen DidNotArrive
+
+
 {-| The whole refetch decision, pure: refetch exactly when the
 connectivity change is the offline→online TRANSITION (not a repeated `online`
 event, not going offline) and the routed page lost its content to the network.
@@ -488,6 +578,12 @@ type alias Model =
     , config : AppConfig
     , connectivity : Connectivity
     , uploadInbox : RemoteData Http.Error (List Api.InboxItem)
+
+    -- ⚠️ Separate from `auth`, deliberately. A sign-out in flight is a reader
+    -- who is STILL SIGNED IN and has asked not to be; folding it into
+    -- `AuthState` would make the app render one of the signed-out states
+    -- before the server had confirmed anything, which is the defect.
+    , signOut : SignOut
     }
 
 
@@ -608,6 +704,7 @@ init flags url key =
       , config = config
       , connectivity = Online
       , uploadInbox = NotAsked
+      , signOut = NotSigningOut
       }
     , resolveIdentity csrf
     )
@@ -1424,6 +1521,12 @@ forceSessionExpiry draftSaved model =
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
+
+        -- ⚠️ The session is gone by another route, so any sign-out still being
+        -- waited on or complained about is answered. Leaving it would carry
+        -- "signing you out…" or "you are still signed in" onto the login page,
+        -- where both are false.
+        , signOut = NotSigningOut
       }
     , Nav.pushUrl model.key (Route.toPath Login)
     )
@@ -1446,6 +1549,81 @@ handleAccountDeleted model =
         , userMenu = UserMenu.init
         , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
+        , signOut = NotSigningOut
+      }
+    , Cmd.batch
+        [ clearListingDraft ()
+        , Nav.pushUrl model.key (Route.toPath Login)
+        ]
+    )
+
+
+{-| Ask the server to end this session, and wait for the answer.
+
+⛔ **NOTHING ABOUT THE READER'S SESSION CHANGES HERE.** `auth` is untouched, the
+listing draft is left where it is, and there is no `Nav.pushUrl`: arriving at
+`/login` is the claim "you are signed out" and this function has not earned it
+yet. All it does is say the request is in flight, which is what the banner reads
+to give the reader immediate feedback without making a claim about the session.
+
+⚠️ `clearListingDraft` is deliberately NOT fired here either. The draft carries
+the reader's own prose, and wiping it on the way out of a sign-out that then
+fails would destroy their work AND leave them signed in.
+
+-}
+beginSignOut : Model -> ( Model, Cmd Msg )
+beginSignOut model =
+    case ( model.signOut, currentAuth model.auth ) of
+        ( SigningOut, _ ) ->
+            -- Already asking. A second DELETE would answer a second time and
+            -- the later answer would overwrite the first.
+            ( model, Cmd.none )
+
+        ( _, Just auth ) ->
+            ( { model | signOut = SigningOut }
+            , Api.logout (Api.authed auth.token signOutHandlers)
+            )
+
+        ( _, Nothing ) ->
+            -- No session to end: the interface and the server already agree, so
+            -- there is nothing to confirm. Sending an unauthenticated DELETE
+            -- would 401 and arrive back here anyway.
+            confirmSignOut model
+
+
+{-| The two destinations a sign-out response can have, named so a test can drive
+a real `Http.Response` through the record production uses rather than restating
+which msg each status ought to produce.
+
+⛔ `onExpired` is not optional — `Api.authed`'s record is the gate — which is how
+`always FocusResult`, the function this replaced, stopped compiling.
+
+-}
+signOutHandlers : { onExpired : Msg, onResult : Result Http.Error () -> Msg }
+signOutHandlers =
+    { onExpired = SessionAlreadyGone
+    , onResult = SignOutAnswered
+    }
+
+
+{-| The sign-out, once the server has confirmed there is no session left.
+
+This is the ONLY path in a deliberate sign-out that clears `auth`, wipes the
+listing draft and navigates to `/login` — so the interface cannot claim a
+sign-out the server did not perform. `Login.Fresh` rather than an expiry notice:
+the reader asked for this and it worked, so there is nothing to explain.
+
+-}
+confirmSignOut : Model -> ( Model, Cmd Msg )
+confirmSignOut model =
+    ( { model
+        | auth = Anonymous
+        , signOut = NotSigningOut
+        , userMenu = UserMenu.init
+        , openNavMenu = Nothing
+        , bookDetailOverlay = Nothing
+        , page = PageLogin (Login.init model.config.proof Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
+        , arrival = Login.Fresh
       }
     , Cmd.batch
         [ clearListingDraft ()
@@ -1725,6 +1903,9 @@ type Msg
     | AgeGatingConfigReceived Bool
     | InviteOnlyConfigReceived Bool
     | ConnectivityChanged Bool
+    | SignOutAnswered (Result Http.Error ())
+    | SessionAlreadyGone
+    | RetrySignOut
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -2882,27 +3063,7 @@ update msg model =
                     )
 
                 UserMenu.SignOut ->
-                    let
-                        logoutCmd =
-                            case currentAuth model.auth of
-                                Just auth ->
-                                    Api.logout auth.token (always FocusResult)
-
-                                Nothing ->
-                                    Cmd.none
-                    in
-                    ( { model
-                        | userMenu = newUserMenu
-                        , auth = Anonymous
-                        , page = PageLogin (Login.init model.config.proof Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
-                        , arrival = Login.Fresh
-                      }
-                    , Cmd.batch
-                        [ logoutCmd
-                        , clearListingDraft ()
-                        , Nav.pushUrl model.key (Route.toPath Login)
-                        ]
-                    )
+                    beginSignOut { model | userMenu = newUserMenu, openNavMenu = Nothing }
 
         ToggleNavMenu menu ->
             ( { model
@@ -3005,6 +3166,26 @@ update msg model =
 
         FocusResult ->
             ( model, Cmd.none )
+
+        SignOutAnswered result ->
+            case signOutAnswer result of
+                SessionEnded ->
+                    confirmSignOut model
+
+                SessionStillOpen failure ->
+                    -- ⛔ The reader stays signed in, on the page they were on.
+                    -- Navigating to `/login` from here is exactly the defect:
+                    -- the session is still live server-side, so a signed-out
+                    -- interface would be a false claim about it.
+                    ( { model | signOut = SignOutStalled failure }, Cmd.none )
+
+        SessionAlreadyGone ->
+            -- A 401 on the logout request. The credential it carried is already
+            -- gone, so there is nothing left to revoke and nothing to retry.
+            confirmSignOut model
+
+        RetrySignOut ->
+            beginSignOut model
 
         GotPlacementCheck result ->
             case result of
@@ -3421,6 +3602,7 @@ view model =
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
             , viewConnectivity model.connectivity
+            , viewSignOut model.signOut
             , viewNav model.route model.auth model.openNavMenu model.userMenu model.uploadInbox
             , main_
                 [ id "main-content"
@@ -4363,6 +4545,76 @@ viewConnectivity connectivity =
                 [ p [ class "connectivity-banner__text" ]
                     [ text "You are offline. The Stacks can’t reach the library right now — anything already on screen stays put, and this will clear as soon as you reconnect." ]
                 ]
+
+
+{-| What a sign-out is doing, said out loud.
+
+⛔ **THE FAILURE COPY NAMES THE SESSION, not the request.** "Something went
+wrong" would be true and useless: what the reader needs to know is that they are
+STILL SIGNED IN on this device, which is the opposite of what they just asked
+for and the opposite of what the old interface showed them.
+
+⚠️ And it says that closing the browser will not help, because that is what a
+reader assumes and it is false here. The session cookie carries a `max-age`
+taken from the token's own lifetime — it is deliberately persistent so a session
+survives a browser restart — so quitting the browser leaves the session exactly
+as live as it was. The only two things that end it are a sign-out that reaches
+the server and the token expiring on its own.
+
+⚖️ In the app shell beside the offline banner rather than inside the account
+menu, which is where the button is. A dropdown is dismissed by clicking
+anywhere, and a warning about a live session that a stray click silences is a
+warning that was not really given.
+
+-}
+viewSignOut : SignOut -> Html Msg
+viewSignOut signOut =
+    case signOut of
+        NotSigningOut ->
+            text ""
+
+        SigningOut ->
+            div
+                [ class "sign-out-notice sign-out-notice--waiting"
+                , testId "sign-out-waiting"
+                , attribute "role" "status"
+                , attribute "aria-live" "polite"
+                ]
+                [ p [ class "sign-out-notice__text" ]
+                    [ text "Signing you out…" ]
+                ]
+
+        SignOutStalled failure ->
+            div
+                [ class "sign-out-notice sign-out-notice--stalled"
+                , testId "sign-out-stalled"
+                , attribute "role" "alert"
+                ]
+                [ p [ class "sign-out-notice__text" ]
+                    [ text (signOutFailureText failure) ]
+                , p [ class "sign-out-notice__hint" ]
+                    [ text "Closing this tab or quitting your browser will not end it — the session lasts until a sign-out reaches us, or until it expires on its own." ]
+                , button
+                    [ class "sign-out-notice__retry"
+                    , testId "sign-out-retry"
+                    , Html.Events.onClick RetrySignOut
+                    ]
+                    [ text "Try signing out again" ]
+                ]
+
+
+{-| What to tell the reader about a sign-out that did not happen. Both sentences
+lead with the state of their session, because that is the part that is not what
+they asked for.
+-}
+signOutFailureText : SignOutFailure -> String
+signOutFailureText failure =
+    case failure of
+        ServerRefused ->
+            "You are still signed in on this device: the library answered, but would not end your session."
+
+        DidNotArrive ->
+            "You are still signed in on this device: the request to sign you out never reached the library. Check your connection."
 
 
 {-| The whole app while it is finding out who is looking at it.

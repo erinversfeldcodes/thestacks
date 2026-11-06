@@ -150,16 +150,23 @@ test.describe("Logout", () => {
 
     await page.getByTestId("user-menu").click();
 
-    // ⛔ AWAIT THE REQUEST, NOT THE NAVIGATION. Sign-out dispatches
+    // ⛔ AWAIT THE REQUEST, NOT THE NAVIGATION, and the reason has changed since
+    // this was written. Sign-out used to dispatch
     // `Cmd.batch [ logoutCmd, clearListingDraft (), Nav.pushUrl … ]`, so the URL
-    // changes LOCALLY and immediately while `DELETE /api/auth/logout` is still in
-    // flight. `waitForURL` is therefore satisfied before the server has cleared
-    // the cookie, and the assertion below read a cookie the response was about to
+    // changed LOCALLY and immediately while `DELETE /api/auth/logout` was still
+    // in flight; `waitForURL` was satisfied before the server had cleared the
+    // cookie, and the assertion below read a cookie the response was about to
     // remove — failing consistently rather than flakily, because the local
-    // navigation always wins the race. Measured on a deployed stack: the server
+    // navigation always won the race. Measured on a deployed stack: the server
     // answers `204` and sends
     //   set-cookie: stacks_session=…; max-age=0; expires=Thu, 01 Jan 1970 …
-    // which is correct, so this was never an application defect.
+    // which is correct, so this was never a server defect.
+    //
+    // ⚖️ The app now waits for that response itself — a sign-out the server did
+    // not confirm leaves the reader signed in and says so — so the navigation no
+    // longer races this. Awaiting the response stays anyway: it is what makes the
+    // cookie assertion below an assertion about a COMPLETED sign-out rather than
+    // about whichever of two async events happened to land first.
     const loggedOut = page.waitForResponse(
       (r) =>
         r.url().includes("/api/auth/logout") && r.request().method() === "DELETE"

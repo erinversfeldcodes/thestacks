@@ -203,6 +203,73 @@ h4 {
     text-align: center;
 }
 
+/* What a sign-out is doing, in the app shell beside the offline banner.
+
+   Styled as a strip rather than a toast on purpose: a reader whose sign-out
+   stalled is still signed in, and a notice that slides away on a timer is a
+   notice that stops saying so while it is still true. */
+.sign-out-notice {
+    position: relative;
+    z-index: 200;
+    padding: var(--space-3) var(--space-5);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    text-align: center;
+}
+
+.sign-out-notice--waiting {
+    background-color: var(--shelf-bg);
+    border-bottom: 1px solid var(--border);
+}
+
+.sign-out-notice--stalled {
+    background-color: var(--warning);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+    box-shadow: var(--shadow-sm);
+}
+
+.sign-out-notice__text {
+    max-width: 44rem;
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    line-height: 1.45;
+    color: var(--text);
+}
+
+.sign-out-notice--stalled .sign-out-notice__text {
+    color: var(--warning-text);
+    font-weight: 700;
+}
+
+.sign-out-notice__hint {
+    max-width: 44rem;
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    line-height: 1.45;
+    color: var(--warning-text);
+}
+
+.sign-out-notice__retry {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--warning-text);
+    background-color: transparent;
+    border: 1px solid var(--warning-text);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+}
+
+.sign-out-notice__retry:hover,
+.sign-out-notice__retry:focus-visible {
+    background-color: var(--warning-text);
+    color: var(--warning);
+}
+
 /* The whole app while it is finding out who is looking at it. Centred in the
    viewport rather than in the main column, because there is no nav, no footer
    and no page to be above the fold of. */
