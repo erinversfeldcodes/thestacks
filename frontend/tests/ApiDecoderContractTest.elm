@@ -489,7 +489,24 @@ suite =
             -- They are each referenced from an `expect` or a resolver, never
             -- from another decoder — which is exactly the shape that makes a
             -- decoder invisible to a reachability check done carelessly.
-            [ accepts "GET /api/blog/posts/:id/syndication — the export payload"
+            [ accepts "POST /api/admin/auth/mfa/setup — the enrolment payload"
+                -- Source: `AdminAuthController.mfa_setup/2`
+                -- (`apps/core/lib/stacks_web/controllers/admin_auth_controller.ex:112`)
+                -- sends `%{provisioning_uri: uri, recovery_codes: codes}` from
+                -- `Stacks.MFA.begin_enrollment/1`, whose spec types both as
+                -- non-null: `String.t()` and `[String.t()]`.
+                --
+                -- ⚠️ `secret` is in the MFA module's return and NOT in the JSON —
+                -- the controller destructures only two of the three keys. A
+                -- fixture written from the Elixin function rather than from the
+                -- response would have invented a field the client never sees.
+                --
+                -- ⛔ Like the syndication export below, this decoder was an inline
+                -- `Decode.map2` inside an `Http.expectJson` until the request
+                -- became a plan, so this contract had never been checked.
+                Api.adminMfaEnrolmentDecoder
+                """{"provisioning_uri": "otpauth://totp/The%20Stacks:owner@example.com?secret=ABCDEFGHIJKLMNOP&issuer=The%20Stacks", "recovery_codes": ["aaaa-bbbb", "cccc-dddd"]}"""
+            , accepts "GET /api/blog/posts/:id/syndication — the export payload"
                 -- Source: `Stacks.Blog.Syndication.export/2`
                 -- (`apps/core/lib/stacks/blog/syndication.ex:149`) returns
                 -- `%{format:, canonical_url:, body:}`, served straight through by

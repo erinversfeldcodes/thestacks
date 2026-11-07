@@ -24,10 +24,12 @@ and `/api/admin/*` is reached with the ordinary session cookie.
 -}
 
 import Api exposing (AdminAuthError(..), AdminMfaEnrolment)
+import Effect
 import Html exposing (Html, button, div, form, h1, h2, input, label, li, ol, p, span, text)
 import Html.Attributes exposing (attribute, autocomplete, class, disabled, for, id, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Url
 import Util.TestId exposing (testId)
 
@@ -59,6 +61,7 @@ type alias Model =
 
 type Msg
     = SetEmail String
+    | EnrolmentSessionGone
     | SetPassword String
     | SetCode String
     | SubmitCredentials
@@ -137,6 +140,28 @@ enrolmentSecret enrolment =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model ownerToken =
     case msg of
+        -- ⚠️ THE ONE EXPIRY THIS PAGE CAN HAVE, and it is not the one the page is
+        -- about. Signing in and verifying a code are `public` plans: a 401 there
+        -- IS the answer, which is why this page is exempt from
+        -- `check-session-expiry-coverage.sh`. But MFA enrolment is done by an
+        -- owner who is already signed in to The Stacks, so its two requests are
+        -- `authed` and a 401 on them means that reader's session died — a
+        -- different thing from "those credentials are wrong".
+        --
+        -- ⚖️ Shown rather than routed out, because this page's `OutMsg` is
+        -- `NoOut | Elevated`: it has no expiry outcome to report and inventing
+        -- one would make `Main` bounce an operator off the admin gate onto the
+        -- reader login, which is the exact behaviour the exemption exists to
+        -- prevent.
+        EnrolmentSessionGone ->
+            ( { model
+                | busy = False
+                , error = Just "Your session ended. Sign in to The Stacks again, then return here."
+              }
+            , Cmd.none
+            , NoOut
+            )
+
         SetEmail value ->
             ( { model | email = value }, Cmd.none, NoOut )
 
@@ -152,7 +177,20 @@ update msg model ownerToken =
 
             else
                 ( { model | busy = True, error = Nothing }
-                , Api.adminLogin model.proof { email = model.email, password = model.password } LoggedIn
+                , Effect.perform
+                    (Effect.public
+                        (Api.adminLoginRequest
+                            { email = model.email, password = model.password }
+                        )
+                        Nothing
+                        model.proof
+                        (Api.resolveAdminJson
+                            (Decode.map Api.AdminSession
+                                (Decode.field "session_id" Decode.string)
+                            )
+                            >> LoggedIn
+                        )
+                    )
                 , NoOut
                 )
 
@@ -180,9 +218,15 @@ update msg model ownerToken =
 
                     else
                         ( { model | busy = True, error = Nothing }
-                        , Api.adminVerifyMfa model.proof
-                            { sessionId = sessionId, code = String.trim model.code }
-                            Verified
+                        , Effect.perform
+                            (Effect.public
+                                (Api.adminVerifyMfaRequest
+                                    { sessionId = sessionId, code = String.trim model.code }
+                                )
+                                Nothing
+                                model.proof
+                                (Api.resolveAdminJson (Decode.succeed ()) >> Verified)
+                            )
                         , NoOut
                         )
 
@@ -222,12 +266,19 @@ update msg model ownerToken =
                     case enrolmentSecret enrolment of
                         Just secret ->
                             ( { model | busy = True, error = Nothing }
-                            , Api.adminMfaConfirm token
-                                { code = String.trim model.code
-                                , secret = secret
-                                , recoveryCodes = enrolment.recoveryCodes
-                                }
-                                EnrolmentConfirmed
+                            , Effect.perform
+                                (Effect.authed
+                                    (Api.adminMfaConfirmRequest
+                                        { code = String.trim model.code
+                                        , secret = secret
+                                        , recoveryCodes = enrolment.recoveryCodes
+                                        }
+                                    )
+                                    token
+                                    { onExpired = EnrolmentSessionGone
+                                    , onResponse = Api.resolveWhatever >> EnrolmentConfirmed
+                                    }
+                                )
                             , NoOut
                             )
 
@@ -270,7 +321,16 @@ startEnrolmentIfPossible :
 startEnrolmentIfPossible ownerToken ( model, cmd, out ) =
     case ownerToken of
         Just token ->
-            ( { model | busy = True }, Api.adminMfaSetup token EnrolmentStarted, out )
+            ( { model | busy = True }
+            , Effect.perform
+                (Effect.authed Api.adminMfaSetupRequest
+                    token
+                    { onExpired = EnrolmentSessionGone
+                    , onResponse = Api.resolveJson Api.adminMfaEnrolmentDecoder >> EnrolmentStarted
+                    }
+                )
+            , out
+            )
 
         Nothing ->
             ( { model

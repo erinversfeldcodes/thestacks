@@ -94,15 +94,16 @@ module Api exposing
     , adminInviteDecoder
     , adminInvitesRequest
     , adminListBooksRequest
-    , adminLogin
+    , adminLoginRequest
     , adminLogoutRequest
-    , adminMfaConfirm
-    , adminMfaSetup
+    , adminMfaConfirmRequest
+    , adminMfaEnrolmentDecoder
+    , adminMfaSetupRequest
     , adminSetBookAgeGateRequest
     , adminSourceDecoder
     , adminSourcesRequest
     , adminSourcesResponseDecoder
-    , adminVerifyMfa
+    , adminVerifyMfaRequest
     , approveSourceRequest
     , associationVerdictRequest
     , auditLogResponseDecoder
@@ -237,6 +238,7 @@ module Api exposing
     , requestListingRemovalRequest
     , resendConfirmationRequest
     , resetPasswordRequest
+    , resolveAdminJson
     , resolveAuthResponse
     , resolveJson
     , resolveNoContent
@@ -4992,74 +4994,45 @@ type AdminAuthError
     | AdminAuthTransport Http.Error
 
 
-{-| POST /api/admin/auth/login — step 1. Returns an UNVERIFIED session id, not a usable token.
+{-| `POST /api/admin/auth/login` — an operator signing in, as data.
+
+⚠️ NO CREDENTIAL, declared: there is no session yet. The CSRF proof goes to
+`Effect.public`, which is what this endpoint checks.
+
 -}
-adminLogin :
-    Maybe String
-    -> { email : String, password : String }
-    -> (Result AdminAuthError AdminSession -> msg)
-    -> Cmd msg
-adminLogin proof body toMsg =
-    Http.request
-        { method = "POST"
-
-        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
-        -- it IS the pre-authentication step —
-        -- so it carries no session and is not a CSRF target: there is no ambient
-        -- authority for a cross-site request to borrow. Stated rather than left as
-        -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" (NoCredential proof)
-        , url = baseUrl ++ "/api/admin/auth/login"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "email", Encode.string body.email )
-                    , ( "password", Encode.string body.password )
-                    ]
-                )
-        , expect =
-            expectAdminJson toMsg
-                (Decode.map AdminSession (Decode.field "session_id" Decode.string))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+adminLoginRequest : { email : String, password : String } -> RequestSpec
+adminLoginRequest body =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "admin", "auth", "login" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "email", Encode.string body.email )
+                , ( "password", Encode.string body.password )
+                ]
+            )
+    }
 
 
-{-| POST /api/admin/auth/verify\_mfa — step 2. Returns the admin token.
+{-| `POST /api/admin/auth/verify_mfa` — the second factor, as data.
+
+⚠️ NO CREDENTIAL, declared, for the same reason as the login: the session this
+is completing does not exist until it succeeds. `session_id` in the body is what
+ties the two halves together.
+
 -}
-adminVerifyMfa :
-    Maybe String
-    -> { sessionId : String, code : String }
-    -> (Result AdminAuthError () -> msg)
-    -> Cmd msg
-adminVerifyMfa proof body toMsg =
-    Http.request
-        { method = "POST"
-
-        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
-        -- it is the pre-authentication MFA step —
-        -- so it carries no session and is not a CSRF target: there is no ambient
-        -- authority for a cross-site request to borrow. Stated rather than left as
-        -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" (NoCredential proof)
-        , url = baseUrl ++ "/api/admin/auth/verify_mfa"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "session_id", Encode.string body.sessionId )
-                    , ( "totp_code", Encode.string body.code )
-                    ]
-                )
-
-        -- ⛔ NO TOKEN TO DECODE. The server records the elevation on the admin
-        -- session itself and `AdminAuthPipeline` finds it from the authenticated
-        -- reader, so success is a fact rather than a credential. This used to
-        -- decode a second Guardian token the app then held in memory, where a
-        -- reload lost it and re-prompted for a code the server had accepted.
-        , expect = expectAdminJson toMsg (Decode.succeed ())
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+adminVerifyMfaRequest : { sessionId : String, code : String } -> RequestSpec
+adminVerifyMfaRequest body =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "admin", "auth", "verify_mfa" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "session_id", Encode.string body.sessionId )
+                , ( "totp_code", Encode.string body.code )
+                ]
+            )
+    }
 
 
 {-| DELETE /api/admin/auth/logout — revoke THIS admin session server-side.
@@ -5091,87 +5064,74 @@ type alias AdminMfaEnrolment =
     }
 
 
-{-| POST /api/admin/auth/mfa/setup — takes the ORDINARY owner token (no admin session exists yet).
--}
-adminMfaSetup : Credentials -> (Result Http.Error AdminMfaEnrolment -> msg) -> Cmd msg
-adminMfaSetup ownerToken toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session ownerToken)
-        , url = baseUrl ++ "/api/admin/auth/mfa/setup"
-        , body = Http.jsonBody (Encode.object [])
-        , expect =
-            Http.expectJson toMsg
-                (Decode.map2 AdminMfaEnrolment
-                    (Decode.field "provisioning_uri" Decode.string)
-                    (Decode.field "recovery_codes" (Decode.list Decode.string))
-                )
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `POST /api/admin/auth/mfa/setup` — starting enrolment, as data.
 
-
-{-| POST /api/admin/auth/mfa/confirm — completes enrolment.
-
-Pass `secret` **exactly as it appears in the provisioning URI** — the `secret=` parameter, base32,
-unmodified.
-
-⚠️ It used to demand base64 of the raw bytes, which no client could produce: `adminMfaSetup` returns
-only the URI, and the secret inside it is base32. Getting it wrong returned `422 invalid_code`,
-reading as clock skew rather than an encoding mismatch. The endpoint was changed to accept what its
-own setup call publishes (2026-07-29) rather than have every client base32-decode and re-encode.
-**Do not "fix" this by implementing base32 in Elm** — the contract is correct now.
+⚠️ The empty object is deliberate, as it was in the builder: the endpoint
+expects a JSON body and an absent one is a 400.
 
 -}
-adminMfaConfirm :
-    Credentials
-    -> { code : String, secret : String, recoveryCodes : List String }
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-adminMfaConfirm ownerToken body toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session ownerToken)
-        , url = baseUrl ++ "/api/admin/auth/mfa/confirm"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "totp_code", Encode.string body.code )
-                    , ( "secret", Encode.string body.secret )
-                    , ( "recovery_codes", Encode.list Encode.string body.recoveryCodes )
-                    ]
-                )
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+adminMfaSetupRequest : RequestSpec
+adminMfaSetupRequest =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "admin", "auth", "mfa", "setup" ] []
+    , body = Just (Encode.object [])
+    }
 
 
-{-| Maps the endpoint's `{"error": "..."}` bodies onto `AdminAuthError`, so each failure keeps the
-remedy the operator needs. An unrecognised shape stays transport-level rather than being guessed at.
+{-| The enrolment payload's decoder, exposed so a plan's caller can resolve it.
 -}
-expectAdminJson : (Result AdminAuthError a -> msg) -> Decode.Decoder a -> Http.Expect msg
-expectAdminJson toMsg decoder =
-    Http.expectStringResponse toMsg
-        (\response ->
-            case response of
-                Http.GoodStatus_ _ body ->
-                    Decode.decodeString decoder body
-                        |> Result.mapError (Http.BadBody << Decode.errorToString)
-                        |> Result.mapError AdminAuthTransport
+adminMfaEnrolmentDecoder : Decoder AdminMfaEnrolment
+adminMfaEnrolmentDecoder =
+    Decode.map2 AdminMfaEnrolment
+        (Decode.field "provisioning_uri" Decode.string)
+        (Decode.field "recovery_codes" (Decode.list Decode.string))
 
-                Http.BadStatus_ _ body ->
-                    Err (adminErrorFromBody body)
 
-                Http.BadUrl_ url ->
-                    Err (AdminAuthTransport (Http.BadUrl url))
+{-| `POST /api/admin/auth/mfa/confirm` — finishing enrolment, as data.
+-}
+adminMfaConfirmRequest : { code : String, secret : String, recoveryCodes : List String } -> RequestSpec
+adminMfaConfirmRequest body =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "admin", "auth", "mfa", "confirm" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "totp_code", Encode.string body.code )
+                , ( "secret", Encode.string body.secret )
+                , ( "recovery_codes", Encode.list Encode.string body.recoveryCodes )
+                ]
+            )
+    }
 
-                Http.Timeout_ ->
-                    Err (AdminAuthTransport Http.Timeout)
 
-                Http.NetworkError_ ->
-                    Err (AdminAuthTransport Http.NetworkError)
-        )
+{-| What the admin auth endpoints said, as a resolver.
+
+⛔ A NAMED FUNCTION, extracted from the lambda inside the old `expectAdminJson`.
+`Effect.public` takes `onResponse : Http.Response String -> msg`, so a resolver
+sealed inside an `Http.Expect` could not be reused — and this one classifies
+`invalid_credentials`, `mfa_required` and the rest, which the sign-in gate words
+differently and must not re-derive.
+
+-}
+resolveAdminJson : Decoder a -> Http.Response String -> Result AdminAuthError a
+resolveAdminJson decoder response =
+    case response of
+        Http.GoodStatus_ _ body ->
+            Decode.decodeString decoder body
+                |> Result.mapError (Http.BadBody << Decode.errorToString)
+                |> Result.mapError AdminAuthTransport
+
+        Http.BadStatus_ _ body ->
+            Err (adminErrorFromBody body)
+
+        Http.BadUrl_ url ->
+            Err (AdminAuthTransport (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (AdminAuthTransport Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (AdminAuthTransport Http.NetworkError)
 
 
 adminErrorFromBody : String -> AdminAuthError
