@@ -14,6 +14,7 @@ defmodule StacksWeb.UserSettingsController do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
+  alias StacksWeb.SessionTeardown
 
   @doc """
       PUT /api/settings/profile — update display_name, website_url, and optionally
@@ -92,8 +93,35 @@ defmodule StacksWeb.UserSettingsController do
 
     case Accounts.change_password(user, current, new_pw) do
       {:ok, _} ->
+        # ⛔ THE CALLER IS SIGNED OUT TOO, and the cookie goes with the session.
+        # `revoke_all_user_sessions/1` already killed every session including this
+        # one; answering `{ok: true}` with no `Set-Cookie` left the reader holding
+        # a credential that no longer worked. They were told "saved", and their
+        # next request — any request — came back 401 and bounced them to sign-in
+        # with nothing connecting it to the password change they had just made.
+        #
+        # ⚖️ Signing out is the DECISION, not merely the tidy-up. The alternative
+        # was to re-issue a session so the caller stays in while other devices are
+        # revoked, which is friendlier and is what many sites do. It was rejected:
+        # a password change that does not end the session performing it leaves a
+        # reader signed in on a machine they may have borrowed, which is the
+        # situation people change their password BECAUSE of.
+        # ⛔ BOTH, and they are not the same revocation. `revoke_all_user_sessions/1`
+        # ends EVERY session the user has, on every device — that is the
+        # "log out everywhere" a password change means. `end_session/1` revokes the
+        # presented token and its family and CLEARS THIS BROWSER'S COOKIE, which
+        # the first cannot do because it has no `conn`.
+        #
+        # ⚠️ Dropping the first and keeping the second narrows "everywhere" to
+        # "this device" silently: the caller's own token stops working either way,
+        # so a test that only re-presents the caller's token cannot tell them
+        # apart. `a token minted for another device also stops working` below is
+        # the one that can.
         Accounts.revoke_all_user_sessions(user.id)
-        json(conn, %{ok: true})
+
+        conn
+        |> SessionTeardown.end_session()
+        |> json(%{ok: true})
 
       {:error, :invalid_password} ->
         conn |> put_status(422) |> json(%{error: "invalid_current_password"})

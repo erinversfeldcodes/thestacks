@@ -10,6 +10,7 @@ defmodule StacksWeb.UserSettingsControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias StacksWeb.Plugs.SessionCookie
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -214,6 +215,112 @@ defmodule StacksWeb.UserSettingsControllerTest do
         })
 
       assert %{"ok" => true} = json_response(conn, 200)
+    end
+
+    # ⛔ THE CALLER IS SIGNED OUT, COOKIE INCLUDED. `revoke_all_user_sessions/1`
+    # always killed every session including this one, but the 200 carried no
+    # `Set-Cookie`, so the reader was told "saved" while holding a credential that
+    # no longer worked — and their next request bounced them to sign-in with
+    # nothing connecting it to the password change.
+    #
+    # ⚖️ Signing out is the decision, not the tidy-up: a password change that does
+    # not end the session performing it leaves a reader signed in on a machine
+    # they may have borrowed, which is the situation people change their password
+    # BECAUSE of.
+    test "the 200 clears the session cookie", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/password", %{
+          current_password: "password123",
+          new_password: "newpassword456"
+        })
+
+      assert %{"ok" => true} = json_response(conn, 200)
+
+      cookie_name = SessionCookie.cookie_name()
+      assert %{^cookie_name => cleared} = conn.resp_cookies
+
+      # ⚠️ A Plug deletion carries NO `:value` key — only `max_age: 0` and an
+      # epoch `universal_time`. Asserting the shape Plug produces, not the
+      # serialised header, which would couple this to Plug's formatting.
+      refute Map.has_key?(cleared, :value)
+      assert cleared.max_age == 0
+      assert cleared.http_only
+      assert cleared.secure
+    end
+
+    test "the presented token no longer authenticates", %{conn: conn} do
+      user = insert(:user, email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      # ⛔ ANTI-VACUITY: the token must WORK first, or the assertion below passes
+      # against one that was never valid.
+      pre =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert json_response(pre, 200)
+
+      change =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> put("/api/settings/password", %{
+          current_password: "password123",
+          new_password: "newpassword456"
+        })
+
+      assert %{"ok" => true} = json_response(change, 200)
+
+      post =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert json_response(post, 401)
+    end
+
+    # ⛔ THE CASE THAT CATCHES A NARROWED "EVERYWHERE". Two tokens are minted for
+    # the same user — one stands for another device. The change is made with the
+    # FIRST, and the SECOND must stop working too.
+    #
+    # ⚠️ Written because a probe showed the gap: removing
+    # `Accounts.revoke_all_user_sessions/1` and keeping only the per-connection
+    # teardown left every existing case green, since they all re-present the
+    # CALLER's token — which the teardown revokes anyway. "Everywhere" had quietly
+    # become "this device" and nothing said so.
+    test "a token minted for another device also stops working", %{conn: conn} do
+      user = insert(:user, email_confirmed: true)
+      {:ok, this_device, _} = Guardian.encode_and_sign(user)
+      {:ok, other_device, _} = Guardian.encode_and_sign(user)
+
+      other_before =
+        conn
+        |> put_req_header("authorization", "Bearer #{other_device}")
+        |> get("/api/auth/me")
+
+      assert json_response(other_before, 200),
+             "the other device's token must work before the change, or this proves nothing"
+
+      change =
+        conn
+        |> put_req_header("authorization", "Bearer #{this_device}")
+        |> put("/api/settings/password", %{
+          current_password: "password123",
+          new_password: "newpassword456"
+        })
+
+      assert %{"ok" => true} = json_response(change, 200)
+
+      other_after =
+        conn
+        |> put_req_header("authorization", "Bearer #{other_device}")
+        |> get("/api/auth/me")
+
+      assert json_response(other_after, 401)
     end
 
     test "returns 422 on wrong current_password", %{conn: conn} do
