@@ -34,7 +34,6 @@ SUITES=(
     "$HERE/wave_status_stack_guard_test.sh"
     "$HERE/campaign_residue_ledger_test.sh"
     "$HERE/rls_scope_gate_test.sh"
-    "$HERE/credential_origin_gate_test.sh"
     "$HERE/session_expiry_forms_test.sh"
     "$HERE/one_credential_derivation_test.sh"
     # The client-side half of the CSRF invariant. Its route-side twin is
@@ -101,6 +100,27 @@ done
 if [[ -n "$UNLISTED" ]]; then
     printf '# UNLISTED SUITES (present in test/platform, absent from run_all.sh):%s\n' "$UNLISTED"
     printf '# Add them to SUITES, or delete them. A suite nothing runs is not a test.\n'
+    exit 1
+fi
+
+# ⛔ AND THE MIRROR OF IT: an entry with no file. The check above catches a file
+# that joined no list; this catches a list that outlived its file, which is what
+# happens when a suite is deleted and SUITES is not.
+#
+# ⚠️ MEASURED 2026-11-07: deleting `credential_origin_gate_test.sh` left its
+# entry here, and the symptom was a runner that printed
+# `bash: …/credential_origin_gate_test.sh: No such file or directory`, emitted NO
+# `# passed:` line for it, and then summed the remaining suites to
+# "1697 passed, 0 failed" before announcing that one had FAILED. Both halves were
+# true and the pair was unreadable: nothing in the per-suite output said which.
+MISSING=""
+for s in "${SUITES[@]}"; do
+    [[ -f "$s" ]] || MISSING="${MISSING} $(basename "$s")"
+done
+if [[ -n "$MISSING" ]]; then
+    printf '# MISSING SUITES (listed in run_all.sh, absent from disk):%s\n' "$MISSING"
+    printf '# Remove them from SUITES. A listed suite that is not there exits non-zero\n'
+    printf '# with no assertions, so the run fails while every suite reports 0 failed.\n'
     exit 1
 fi
 
