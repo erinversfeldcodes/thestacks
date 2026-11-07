@@ -88,8 +88,26 @@ setup("authenticate as owner", async ({ request, page }) => {
  * to catch. Doing it here, before the parallel phase any project runs in, makes
  * the factor immutable for the rest of the run; the specs only read it.
  */
-setup("enrol the owner's admin MFA factor", async ({ request }) => {
+setup("enrol the owner's admin MFA factor and elevate once for the whole run", async ({
+  request,
+}) => {
+  // ⛔ ONE STEP, BECAUSE THE SECOND HALF READS WHAT THE FIRST HALF WRITES.
+  // These were two `setup()` calls, and `fullyParallel: true` ran them against
+  // each other: `elevateOwnerAdmin` calls `readOwnerMfaSecret()`, which is the
+  // file `saveOwnerMfaSecret` has just written — or has not written yet.
+  //
+  // ⚠️ MEASURED 2026-11-07 on a local stack: `admin login` failed in 77ms while
+  // the enrolment step passed in 88ms, i.e. elevation reached the server first
+  // and verified against a secret that was about to be replaced. Nothing in
+  // Playwright ordered them, and nothing would have: setup steps in one file are
+  // peers.
+  //
+  // ⚖️ Merged rather than ordered with `dependencies`, because the dependency is
+  // not between two concerns that happen to share a fixture — elevation has no
+  // meaning without the factor it verifies against. Two steps invited the race;
+  // one step cannot have it.
   saveOwnerMfaSecret(await enrolOwnerMfa(request));
+  await elevateOwnerAdmin(request);
 });
 
 /**
@@ -128,9 +146,7 @@ setup("enrol the owner's admin MFA factor", async ({ request }) => {
  * Moving either back into the parallel pool would destroy elevation under the
  * specs that now rely on it being established here.
  */
-setup("elevate the operator once for the whole run", async ({ request }) => {
-  await elevateOwnerAdmin(request);
-});
+
 
 /**
  * Authenticate all per-suite E2E users in one setup step.
