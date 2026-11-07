@@ -15,6 +15,7 @@ to the listing detail page.
 -}
 
 import Api
+import Effect exposing (Effect)
 import Html exposing (Html, a, div, h1, h3, img, p, span, text)
 import Html.Attributes exposing (class, href, src)
 import Http
@@ -35,8 +36,26 @@ type Msg
 
 init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as data so a harness can answer it.
+
+⚖️ `public` with an OPTIONAL credential: the browse grid is readable by anyone,
+and a session only changes what appears in it.
+
+-}
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
     ( { listings = Loading }
-    , Api.getListings maybeToken ListingsReceived
+    , Effect.public Api.getListingsRequest
+        maybeToken
+        Nothing
+        (Api.resolveJson Types.Listing.listingsResponseDecoder >> ListingsReceived)
     )
 
 

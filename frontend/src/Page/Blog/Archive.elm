@@ -9,6 +9,7 @@ module Page.Blog.Archive exposing
 
 import Api
 import Components.VisibilityBadge as VisibilityBadge
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h2, li, p, span, text, ul)
 import Html.Attributes exposing (class, disabled, href)
 import Html.Events exposing (onClick)
@@ -40,18 +41,56 @@ type Msg
 
 init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as data so a harness can answer it.
+-}
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
     ( { posts = Loading
       , isAuthenticated = maybeToken /= Nothing
       , token = maybeToken
       , nextCursor = Nothing
       , loadingMore = False
       }
-    , Api.getBlogPosts maybeToken Nothing PostsLoaded
+    , postsEffect maybeToken Nothing
     )
+
+
+{-| The one place this page describes its request, used by the first page and by
+each "load more" after it.
+
+⚖️ `public` with an OPTIONAL credential — an anonymous reader gets the archive
+too. So the seam does not claim a 401 here, and this page makes no claim about
+one either: it has no session to lose.
+
+-}
+postsEffect : Maybe Api.Credentials -> Maybe String -> Effect Msg
+postsEffect maybeToken maybeCursor =
+    Effect.public (Api.getBlogPostsRequest maybeCursor)
+        maybeToken
+        Nothing
+        (Api.resolveJson Api.blogPostPageDecoder >> PostsLoaded)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    let
+        ( newModel, effect ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect )
+
+
+{-| `update`, with its effects as data.
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg )
+updateWithEffect msg model =
     case msg of
         PostsLoaded result ->
             case result of
@@ -72,7 +111,7 @@ update msg model =
                         , nextCursor = page.nextCursor
                         , loadingMore = False
                       }
-                    , Cmd.none
+                    , Effect.none
                     )
 
                 Err err ->
@@ -80,21 +119,21 @@ update msg model =
                     case model.posts of
                         Success existing ->
                             ( { model | posts = Success existing, loadingMore = False }
-                            , Cmd.none
+                            , Effect.none
                             )
 
                         _ ->
-                            ( { model | posts = Failure err, loadingMore = False }, Cmd.none )
+                            ( { model | posts = Failure err, loadingMore = False }, Effect.none )
 
         LoadMore ->
             case model.nextCursor of
                 Just cursor ->
                     ( { model | loadingMore = True }
-                    , Api.getBlogPosts model.token (Just cursor) PostsLoaded
+                    , postsEffect model.token (Just cursor)
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Effect.none )
 
 
 view : Model -> Html Msg

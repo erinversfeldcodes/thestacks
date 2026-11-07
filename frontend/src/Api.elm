@@ -150,7 +150,7 @@ module Api exposing
     , getAuditLogRequest
     , getAuthorEventsRequest
     , getBlogPost
-    , getBlogPosts
+    , getBlogPostsRequest
     , getBookRequest
     , getBookshelfRequest
     , getCatalogue
@@ -162,7 +162,7 @@ module Api exposing
     , getImport
     , getImportRows
     , getInferencesRequest
-    , getListings
+    , getListingsRequest
     , getMyListings
     , getMyPlacements
     , getNotifications
@@ -242,7 +242,7 @@ module Api exposing
     , requestExport
     , requestExportRequest
     , requestHeaders
-    , requestListingRemoval
+    , requestListingRemovalRequest
     , resendConfirmationRequest
     , resetPassword
     , resolveAuthResponse
@@ -1606,44 +1606,28 @@ type RemovalOutcome
     | PendingReview
 
 
-{-| POST /api/opt-out — ask for a business listing to be removed.
+{-| `POST /api/listings/removal` — a business owner asking to be delisted, as data.
 
-Unauthenticated by design (: "does not require account creation"). The contact
-address is how the request is verified: a matching domain is applied at once, anything
-else is queued for review.
-
-404 means no listing matches the URL, 422 means the address was not a valid email.
+⛔ NO CREDENTIAL, DECLARED — and the declaration is the point, as it was in the
+builder this replaces. The asker is not a reader: they have no session, so there
+is no ambient authority for a cross-site request to borrow and this is not a CSRF
+target. `Effect.public` takes the proof token instead, which is what this
+endpoint actually authenticates against.
 
 -}
-requestListingRemoval :
-    Maybe String
-    -> { url : String, email : String, reason : String }
-    -> (Result Http.Error RemovalOutcome -> msg)
-    -> Cmd msg
-requestListingRemoval proof body toMsg =
-    Http.request
-        { method = "POST"
-
-        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
-        -- it is an opt-out request from someone
-        -- who is not a reader —
-        -- so it carries no session and is not a CSRF target: there is no ambient
-        -- authority for a cross-site request to borrow. Stated rather than left as
-        -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" (NoCredential proof)
-        , url = baseUrl ++ "/api/opt-out"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "url", Encode.string body.url )
-                    , ( "email", Encode.string body.email )
-                    , ( "reason", Encode.string body.reason )
-                    ]
-                )
-        , expect = Http.expectJson toMsg removalOutcomeDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+requestListingRemovalRequest : { url : String, email : String, reason : String } -> RequestSpec
+requestListingRemovalRequest body =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "listings", "removal" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "url", Encode.string body.url )
+                , ( "email", Encode.string body.email )
+                , ( "reason", Encode.string body.reason )
+                ]
+            )
+    }
 
 
 removalOutcomeDecoder : Decoder RemovalOutcome
@@ -4179,22 +4163,18 @@ type alias ListingParams =
     }
 
 
-{-| GET /api/listings — fetch active marketplace listings.
+{-| `GET /api/listings` — the marketplace's active listings, as data.
+
+⚖️ `public` with an OPTIONAL credential, for the same reason as the archive: the
+browse grid is readable by anyone, and a session only changes what is in it.
+
 -}
-getListings :
-    Maybe Credentials
-    -> (Result Http.Error ListingsResponse -> msg)
-    -> Cmd msg
-getListings maybeToken toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Optional maybeToken)
-        , url = baseUrl ++ "/api/listings"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg listingsResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+getListingsRequest : RequestSpec
+getListingsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "listings" ] []
+    , body = Nothing
+    }
 
 
 {-| GET /api/listings/mine — fetch the current user's listings.
@@ -4345,35 +4325,27 @@ blogPostPageDecoder =
         (Decode.maybe (Decode.field "next_cursor" Decode.string))
 
 
-{-| GET /api/blog/posts — one page of the discovery feed, newest first.
+{-| `GET /api/blog/posts` — the public blog archive, as data.
 
-Pass the previous page's `nextCursor` to continue. The cursor is opaque: echo
-back what the server sent and never construct one.
+⚖️ `public` with an OPTIONAL credential: a signed-in reader may see posts an
+anonymous one may not, but an anonymous request is answered rather than refused.
+`maybeCursor` carries the keyset page, so the archive extends instead of
+reloading.
 
 -}
-getBlogPosts :
-    Maybe Credentials
-    -> Maybe String
-    -> (Result Http.Error BlogPostPage -> msg)
-    -> Cmd msg
-getBlogPosts maybeToken maybeCursor toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Optional maybeToken)
-        , url =
-            Api.Url.toString <|
-                Api.Url.path
-                    [ "api", "blog", "posts" ]
-                    (maybeCursor
-                        |> Maybe.map (Url.Builder.string "after")
-                        |> Maybe.map List.singleton
-                        |> Maybe.withDefault []
-                    )
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg blogPostPageDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+getBlogPostsRequest : Maybe String -> RequestSpec
+getBlogPostsRequest maybeCursor =
+    { method = "GET"
+    , url =
+        Api.Url.path
+            [ "api", "blog", "posts" ]
+            (maybeCursor
+                |> Maybe.map (Url.Builder.string "after")
+                |> Maybe.map List.singleton
+                |> Maybe.withDefault []
+            )
+    , body = Nothing
+    }
 
 
 {-| GET /api/blog/posts/:id — fetch a single blog post.
