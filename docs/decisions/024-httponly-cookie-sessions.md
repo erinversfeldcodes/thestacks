@@ -220,12 +220,20 @@ origin than the API, this decision needs revisiting — it is recorded as an
 assumption rather than left implicit.
 
 ✅ **The assumption was VERIFIED before the change landed, not asserted.**
-`Api.baseUrl` is the empty string, so every request the SPA builds is a relative
+`Api.baseUrl` was the empty string, so every request the SPA built was a relative
 URL and therefore same-origin by construction; `scripts/check-credential-origin.sh`
-reports *"83 request record(s) parsed in frontend/src/Api.elm; none declares
+reported *"83 request record(s) parsed in frontend/src/Api.elm; none declares
 SameOrigin with an unprovable URL"*, and as of 2026-10-28 **no request in
-`Api.elm` is cross-origin at all** — the one that claimed to be was the upload
+`Api.elm` was cross-origin at all** — the one that claimed to be was the upload
 byte `PUT`, and it had been same-origin since July while declaring otherwise.
+
+⚖️ **UPDATED 2026-11-07: that script is gone, and so is `Api.baseUrl`.** Every
+request in the client is now a `RequestSpec` whose `url` is an
+`Api.Url.SameOriginUrl`, built only by `Api.Url.path`, which percent-encodes each
+segment and drops empty ones. So the property the script parsed for is checked by
+the compiler on every build rather than re-derived by a parser that had to be kept
+in step with the source. The gate's own retirement condition — nothing left in
+`Api.elm` with a `String` url — is what was reached.
 ⚠️ So `withCredentials` is deliberately NOT set: setting it would have no effect
 today and would quietly make a future cross-origin deployment appear to work
 while the server lacked the CORS credentials to complete it.

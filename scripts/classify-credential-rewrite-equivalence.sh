@@ -14,9 +14,14 @@
 # construction. Anything outside the table is a failure, not a shrug.
 #
 # ⚠️ ITS CORPUS IS THREE FIXED COMMITS, so it is evidence rather than a gate and
-# nothing invokes it in CI. The standing protection for this property is
-# `check-credential-origin.sh` and `frontend/tests/ApiRequestHeadersTest.elm`,
-# which do run. This answers a question that can only be asked once.
+# nothing invokes it in CI. This answers a question that can only be asked once.
+#
+# ⚖️ UPDATED 2026-11-07: the standing protection USED to be
+# `check-credential-origin.sh` plus `frontend/tests/ApiRequestHeadersTest.elm`.
+# The first is deleted — every request in the client is now a `RequestSpec` whose
+# `url` is an `Api.Url.SameOriginUrl`, so the origin property is the compiler's
+# rather than a parser's. The header half is still covered by that test, which
+# does run.
 #
 # ⚠️ IT HAS BEEN SEEN RED. On its first real run it refused the `ListingDetail`
 # site, whose rewrite writes out `httpHeaders`' body at a call site outside

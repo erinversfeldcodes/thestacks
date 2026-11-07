@@ -31,9 +31,12 @@ ALLOWLIST = {
         "Evidence over three fixed commits, not a gate. It classifies every credential "
         "rewrite in the one-builder migration against a table of equivalences; its corpus "
         "is historical and the question it answers can only be asked once, so wiring it "
-        "into CI would re-run a settled measurement forever. The STANDING protection for "
-        "the same property is check-credential-origin.sh and "
-        "frontend/tests/ApiRequestHeadersTest.elm, both of which do run."
+        "into CI would re-run a settled measurement forever. ⚠️ The standing protection "
+        "for the same property WAS check-credential-origin.sh, which is now deleted: "
+        "every request in the client is a RequestSpec whose url is an "
+        "Api.Url.SameOriginUrl, so the property that script parsed for is checked by the "
+        "compiler on every build. frontend/tests/ApiRequestHeadersTest.elm still runs and "
+        "covers the header half."
     ),
     "scripts/characterise/rowless-upload-objects.py": (
         "A one-off, READ-ONLY characterisation of the production bucket, kept as the "

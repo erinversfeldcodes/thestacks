@@ -97,7 +97,6 @@ gate check-e2e-mock-routes.sh
 gate check-prose-assertions.sh
 gate check-orphan-classes.sh
 gate check-session-expiry-coverage.sh
-gate check-credential-origin.sh
 gate check-one-credential-derivation.sh
 gate check-no-stored-session.sh
 gate check-component-dispatch.sh

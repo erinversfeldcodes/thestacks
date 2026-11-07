@@ -26,7 +26,6 @@ in code by" and check it before relying on it.
 | `scripts/check-breaking-suppressions-are-spent.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh`, `test/platform/guard_unbypassable_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
 | `scripts/check-cli-stub-provenance.sh` | `scripts/lint-elixir.sh`, `test/platform/cli_stub_provenance_test.sh` | A stubbed CLI must say which real tool output it was copied from, and when. |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
-| `scripts/check-credential-origin.sh` | `scripts/lint-elm.sh`, `test/platform/credential_origin_gate_test.sh` | A request that attaches a credential must have a PROVABLY same-origin URL. |
 | `scripts/check-csrf-clients.sh` | `scripts/lint-elixir.sh`, `test/platform/csrf_clients_gate_test.sh` | Every non-browser client that writes to our own API carries the CSRF proof. |
 | `scripts/check-csrf-scope.sh` | `scripts/lint-elixir.sh` | The CSRF counter's declared scope must match the router's actual population. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
@@ -70,7 +69,7 @@ in code by" and check it before relying on it.
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/check-workflow-health.sh` | `.github/workflows/workflow-health.yml`, `test/platform/workflow_health_test.sh` | A workflow nobody's pull request depends on can stay red indefinitely. |
 | `scripts/ci.sh` | `e2e/tests/rate-limit.spec.ts`, `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` … |  |
-| `scripts/classify-credential-rewrite-equivalence.sh` | _manual: Evidence over three fixed commits, not a gate. It classifies every credential rewrite in the one-builder migration against a table of equivalences; its corpus is historical and the question it answers can only be asked once, so wiring it into CI would re-run a settled measurement forever. The STANDING protection for the same property is check-credential-origin.sh and frontend/tests/ApiRequestHeadersTest.elm, both of which do run._ | Every credential rewrite in the one-builder migration, classified against a |
+| `scripts/classify-credential-rewrite-equivalence.sh` | _manual: Evidence over three fixed commits, not a gate. It classifies every credential rewrite in the one-builder migration against a table of equivalences; its corpus is historical and the question it answers can only be asked once, so wiring it into CI would re-run a settled measurement forever. ⚠️ The standing protection for the same property WAS check-credential-origin.sh, which is now deleted: every request in the client is a RequestSpec whose url is an Api.Url.SameOriginUrl, so the property that script parsed for is checked by the compiler on every build. frontend/tests/ApiRequestHeadersTest.elm still runs and covers the header half._ | Every credential rewrite in the one-builder migration, classified against a |
 | `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/dashboard-render-gate.sh` | `.github/workflows/ci.yml`, `justfile` |  |
@@ -107,7 +106,7 @@ in code by" and check it before relying on it.
 | `scripts/lib/squawk-rules.sh` | `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/squawk_worktree_selection_test.sh` | Single source of truth for which squawk rules this repo suppresses. |
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/csrf_clients_gate_test.sh` … |  |
-| `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/credential_origin_gate_test.sh` … |  |
+| `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/one_credential_derivation_test.sh` |  |
 | `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/lint_migrations_test.sh`, `test/platform/migration_gate_syntax_test.sh` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
 | `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` … |  |
 | `scripts/lint-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |

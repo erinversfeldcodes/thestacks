@@ -108,7 +108,6 @@ module Api exposing
     , approveSourceRequest
     , associationVerdictRequest
     , auditLogResponseDecoder
-    , authHeaders
     , authResponseDecoder
     , authed
     , authorEventDecoder
@@ -4873,11 +4872,6 @@ searchUsersRequest query =
 peopleSearchDecoder : Decoder (List PublicProfileSummary)
 peopleSearchDecoder =
     Decode.field "users" (Decode.list publicProfileSummaryDecoder)
-
-
-authHeaders : String -> Maybe Credentials -> List Http.Header
-authHeaders method maybeToken =
-    httpHeaders method (Optional maybeToken)
 
 
 {-| Headers for a plan: the credential if there is one, and the proof from

@@ -86,7 +86,16 @@ SUCCESS_EXIT = re.compile(
 # resolve" and exiting 0 — the asymmetry mattered because the mocked corpus is
 # the input that can silently stop matching when the specs change how they spell
 # `page.route`.
-EXPECTED_GUARDED_SCRIPTS = 23
+#
+# ⚖️ 23 → 22 on 2026-11-07: `check-credential-origin.sh` was DELETED, taking its
+# `MIN_REQUEST_SURFACE` with it. Its subject is empty — every request in the
+# client is a `RequestSpec` whose `url` is an `Api.Url.SameOriginUrl`, so the
+# property it parsed for is checked by the compiler on every build. ⛔ This is
+# the direction the comment above calls "good, update the count in the same
+# change", and it is the only honest reason to lower this number: a guard that
+# went away because its question stopped being askable, not one that was
+# removed because it was inconvenient.
+EXPECTED_GUARDED_SCRIPTS = 22
 
 guarded = {}
 violations = []
