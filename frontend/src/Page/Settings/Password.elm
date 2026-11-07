@@ -9,6 +9,7 @@ module Page.Settings.Password exposing
 
 import Api
 import Components.SaveButton as SaveButton
+import Effect
 import Html exposing (Html, div, h1, h2, input, label, p, text)
 import Html.Attributes exposing (class, placeholder, type_, value)
 import Html.Events exposing (onInput)
@@ -97,13 +98,16 @@ update msg model maybeToken =
                     case maybeToken of
                         Just token ->
                             ( { model | saving = Loading }
-                            , Api.updatePassword
-                                { currentPassword = model.currentPassword
-                                , newPassword = model.newPassword
-                                }
-                                (Api.authed token
+                            , Effect.perform
+                                (Effect.authed
+                                    (Api.updatePasswordRequest
+                                        { currentPassword = model.currentPassword
+                                        , newPassword = model.newPassword
+                                        }
+                                    )
+                                    token
                                     { onExpired = SessionExpiryDetected
-                                    , onResult = SaveCompleted
+                                    , onResponse = Api.resolveWhatever >> SaveCompleted
                                     }
                                 )
                             , NoOut

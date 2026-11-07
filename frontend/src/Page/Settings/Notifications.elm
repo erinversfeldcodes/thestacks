@@ -8,6 +8,7 @@ module Page.Settings.Notifications exposing
     )
 
 import Api exposing (NotificationPreferences)
+import Effect
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
@@ -60,10 +61,12 @@ init maybeToken =
     case maybeToken of
         Just token ->
             ( { prefs = Loading, saving = NotAsked }
-            , Api.getNotifications
-                (Api.authed token
+            , Effect.perform
+                (Effect.authed Api.notificationsRequest
+                    token
                     { onExpired = SessionExpiryDetected
-                    , onResult = Loaded
+                    , onResponse =
+                        Api.resolveJson Api.notificationPreferencesDecoder >> Loaded
                     }
                 )
             )
@@ -129,10 +132,11 @@ savePreferences : NotificationPreferences -> Maybe Api.Credentials -> Cmd Msg
 savePreferences prefs maybeToken =
     case maybeToken of
         Just token ->
-            Api.updateNotifications prefs
-                (Api.authed token
+            Effect.perform
+                (Effect.authed (Api.updateNotificationsRequest prefs)
+                    token
                     { onExpired = SessionExpiryDetected
-                    , onResult = SaveCompleted
+                    , onResponse = Api.resolveWhatever >> SaveCompleted
                     }
                 )
 

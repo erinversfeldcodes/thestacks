@@ -378,11 +378,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | savingLocation = Loading }
-                    , Api.updateLocation
-                        { countryCode = model.countryCode, city = model.city }
-                        (Api.authed token
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.updateLocationRequest
+                                { countryCode = model.countryCode, city = model.city }
+                            )
+                            token
                             { onExpired = SessionExpiryDetected
-                            , onResult = SaveLocationCompleted
+                            , onResponse = Api.resolveWhatever >> SaveLocationCompleted
                             }
                         )
                     , NoOut

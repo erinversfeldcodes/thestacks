@@ -163,7 +163,6 @@ module Api exposing
     , getListingsRequest
     , getMyListings
     , getMyPlacements
-    , getNotifications
     , getOnboardingStatus
     , getPostComments
     , getPrivacySettings
@@ -201,6 +200,7 @@ module Api exposing
     , needsAdminElevation
     , needsAdminElevationOf
     , notificationPreferencesDecoder
+    , notificationsRequest
     , onboardingStatusDecoder
     , peopleSearchDecoder
     , personalInferencesDecoder
@@ -252,8 +252,8 @@ module Api exposing
     , restoreBookRequest
     , retryAfterSeconds
     , revokeAdminInviteRequest
-    , saveConsent
-    , saveWritingAssistantConsent
+    , saveConsentRequest
+    , saveWritingAssistantConsentRequest
     , searchBooksRequest
     , searchResponseDecoder
     , searchUsersRequest
@@ -275,9 +275,9 @@ module Api exposing
     , transparencyMetricsDecoder
     , unblockUser
     , updateBlogPost
-    , updateLocation
-    , updateNotifications
-    , updatePassword
+    , updateLocationRequest
+    , updateNotificationsRequest
+    , updatePasswordRequest
     , updatePlacementFormatsRequest
     , updatePlacementVisibilityRequest
     , updateProfile
@@ -2777,51 +2777,36 @@ deleteAccountRequest =
     }
 
 
-{-| POST /api/gdpr/consent — save the user's analytics consent preference.
+{-| `POST /api/gdpr/consent` — recording an analytics consent decision, as data.
 -}
-saveConsent :
-    Bool
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-saveConsent consent token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/gdpr/consent"
-        , body = Http.jsonBody (Requests.encodeConsentRequest { consent = consent })
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+saveConsentRequest : Bool -> RequestSpec
+saveConsentRequest consent =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "gdpr", "consent" ] []
+    , body = Just (Requests.encodeConsentRequest { consent = consent })
+    }
 
 
-{-| POST /api/gdpr/consent — save the user's writing-assistant consent
-preference. Sends `type: "writing_assistant"` so the backend targets the
-`consent_writing_assistant` flag. Revoking triggers a server-side
-purge of the user's writing-assistant data.
+{-| `POST /api/gdpr/consent` — recording the writing-assistant consent decision, as data.
+
+⚠️ Same endpoint as `saveConsentRequest`, distinguished only by the `type`
+field. Kept as two specs rather than one parameterised by the type string,
+because the consent `type` must be whitelisted server-side and a free `String`
+parameter here would invite a value that is not.
+
 -}
-saveWritingAssistantConsent :
-    Bool
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-saveWritingAssistantConsent consent token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/gdpr/consent"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "consent", Encode.bool consent )
-                    , ( "type", Encode.string "writing_assistant" )
-                    ]
-                )
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+saveWritingAssistantConsentRequest : Bool -> RequestSpec
+saveWritingAssistantConsentRequest consent =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "gdpr", "consent" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "consent", Encode.bool consent )
+                , ( "type", Encode.string "writing_assistant" )
+                ]
+            )
+    }
 
 
 {-| Response from GET /api/catalogue — paginated book list.
@@ -4011,52 +3996,36 @@ resolveProfile response =
             Ok (Result.withDefault emptyProfileSaved (Decode.decodeString profileSavedDecoder bodyText))
 
 
-{-| PUT /api/settings/location — update the user's location.
+{-| `PUT /api/settings/location` — setting the reader's locality, as data.
 -}
-updateLocation :
-    { countryCode : String, city : String }
-    -> Authed Http.Error () msg
-    -> Cmd msg
-updateLocation body request =
-    Http.request
-        { method = "PUT"
-        , headers = authedHeaders "PUT" request
-        , url = "/api/settings/location"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateLocationRequest
-                    { countryCode = body.countryCode
-                    , city = body.city
-                    }
-                )
-        , expect = authedExpect resolveWhatever request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updateLocationRequest : { countryCode : String, city : String } -> RequestSpec
+updateLocationRequest body =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "settings", "location" ] []
+    , body =
+        Just
+            (Requests.encodeUpdateLocationRequest
+                { countryCode = body.countryCode
+                , city = body.city
+                }
+            )
+    }
 
 
-{-| PUT /api/settings/password — change the user's password.
+{-| `PUT /api/settings/password` — changing a password, as data.
 -}
-updatePassword :
-    { currentPassword : String, newPassword : String }
-    -> Authed Http.Error () msg
-    -> Cmd msg
-updatePassword body request =
-    Http.request
-        { method = "PUT"
-        , headers = authedHeaders "PUT" request
-        , url = baseUrl ++ "/api/settings/password"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdatePasswordRequest
-                    { currentPassword = body.currentPassword
-                    , newPassword = body.newPassword
-                    }
-                )
-        , expect = authedExpect resolveWhatever request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updatePasswordRequest : { currentPassword : String, newPassword : String } -> RequestSpec
+updatePasswordRequest body =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "settings", "password" ] []
+    , body =
+        Just
+            (Requests.encodeUpdatePasswordRequest
+                { currentPassword = body.currentPassword
+                , newPassword = body.newPassword
+                }
+            )
+    }
 
 
 {-| Notification preference flags.
@@ -4069,24 +4038,14 @@ type alias NotificationPreferences =
     }
 
 
-{-| GET /api/settings/notifications — the current user's stored notification
-preferences, so the settings screen hydrates from saved values instead of
-hardcoded defaults. The endpoint always returns all four booleans (never null),
-so a strict field decoder is safe.
+{-| `GET /api/settings/notifications` — the reader's notification choices, as data.
 -}
-getNotifications :
-    Authed Http.Error NotificationPreferences msg
-    -> Cmd msg
-getNotifications request =
-    Http.request
-        { method = "GET"
-        , headers = authedHeaders "GET" request
-        , url = baseUrl ++ "/api/settings/notifications"
-        , body = Http.emptyBody
-        , expect = authedExpect (resolveJson notificationPreferencesDecoder) request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+notificationsRequest : RequestSpec
+notificationsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "settings", "notifications" ] []
+    , body = Nothing
+    }
 
 
 {-| Decode the four notification flags. Label↔field mapping mirrors
@@ -4103,30 +4062,29 @@ notificationPreferencesDecoder =
         (Decode.field "notify_event_matches" Decode.bool)
 
 
-{-| PUT /api/settings/notifications — update notification preferences.
+{-| `PUT /api/settings/notifications` — saving the reader's notification choices, as data.
+
+⚠️ The field names do not line up, and that is pre-existing: the model's
+`priceDrops`/`newReviews`/`authorUpdates`/`eventAlerts` map onto the wire's
+`notify_wishlist_availability`/`notify_marketplace`/`notify_group_invitations`/
+`notify_event_matches`. The mapping moved here unchanged; renaming either side is
+its own change.
+
 -}
-updateNotifications :
-    NotificationPreferences
-    -> Authed Http.Error () msg
-    -> Cmd msg
-updateNotifications prefs request =
-    Http.request
-        { method = "PUT"
-        , headers = authedHeaders "PUT" request
-        , url = baseUrl ++ "/api/settings/notifications"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateNotificationsRequest
-                    { notifyWishlistAvailability = prefs.priceDrops
-                    , notifyMarketplace = prefs.newReviews
-                    , notifyGroupInvitations = prefs.authorUpdates
-                    , notifyEventMatches = prefs.eventAlerts
-                    }
-                )
-        , expect = authedExpect resolveWhatever request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updateNotificationsRequest : NotificationPreferences -> RequestSpec
+updateNotificationsRequest prefs =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "settings", "notifications" ] []
+    , body =
+        Just
+            (Requests.encodeUpdateNotificationsRequest
+                { notifyWishlistAvailability = prefs.priceDrops
+                , notifyMarketplace = prefs.newReviews
+                , notifyGroupInvitations = prefs.authorUpdates
+                , notifyEventMatches = prefs.eventAlerts
+                }
+            )
+    }
 
 
 {-| Response from POST /api/books/:id/merge-format — the new edition.

@@ -11,6 +11,7 @@ module Page.Settings.Consent exposing
 
 import Api
 import Components.SaveButton as SaveButton
+import Effect
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled)
 import Html.Events exposing (onClick)
@@ -44,6 +45,7 @@ type alias Model =
 
 type Msg
     = ToggleAnalytics
+    | SessionExpiryDetected
     | ToggleWritingAssistant
     | SaveConsent
     | SaveCompleted (Result Http.Error ())
@@ -105,6 +107,14 @@ init consent =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        -- ⛔ NEW WITH THE PLAN, and it is an obligation the old call could not
+        -- state. `Api.saveConsent` took a bare `toMsg`, so a 401 arrived as an
+        -- ordinary failure and the page showed "could not save" beside a toggle
+        -- that would never save again. `Effect.authed` requires `onExpired`, so
+        -- asking this endpoint now means saying what an ended session does.
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         ToggleAnalytics ->
             ( { model | analyticsConsent = not model.analyticsConsent, saving = NotAsked }
             , Cmd.none
@@ -122,9 +132,14 @@ update msg model maybeToken =
                         | writingAssistantConsent = newValue
                         , writingAssistantSaving = Loading
                       }
-                    , Api.saveWritingAssistantConsent newValue
-                        token
-                        (SaveWritingAssistantCompleted newValue)
+                    , Effect.perform
+                        (Effect.authed (Api.saveWritingAssistantConsentRequest newValue)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveWhatever >> SaveWritingAssistantCompleted newValue
+                            }
+                        )
                     , NoOut
                     )
 
@@ -135,7 +150,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | saving = Loading }
-                    , Api.saveConsent model.analyticsConsent token SaveCompleted
+                    , Effect.perform
+                        (Effect.authed (Api.saveConsentRequest model.analyticsConsent)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> SaveCompleted
+                            }
+                        )
                     , NoOut
                     )
 
