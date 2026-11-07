@@ -428,7 +428,13 @@ defmodule Core.PromEx.MetricLabelTest do
   # The number of `Audit.log(` call sites in apps/core/lib. Declared so that a
   # NEW one fails loudly and has to be classified, rather than being silently
   # missed by a literal scan that cannot parse nested call arguments.
-  @audit_call_sites 16
+  #
+  # ⚖️ 16 → 17 on 2026-11-07: `Stacks.Release.recover_operator_access/1` logs
+  # `operator.access_recovered` when an operator clears their own stale session
+  # state. Its action is a string literal, so the sibling scan sees it and it
+  # needed only to join `Audit.telemetry_actions/0` — which is exactly the
+  # sequence the failure message prescribes, and both halves fired in order.
+  @audit_call_sites 17
 
   # The call sites whose action is not a string literal: {file, attribute,
   # the literal it resolves to}. Each is invisible to the literal scan, so each

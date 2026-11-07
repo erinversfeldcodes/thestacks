@@ -43,6 +43,7 @@ defmodule Stacks.Audit do
     admin.account_restored admin.call admin.login admin.mfa_verified
     data.correction.applied
     invite.issued invite.revoked
+    operator.access_recovered
     placement.created placement.moved placement.removed
     placement.reread placement.restored
     system.rollback
