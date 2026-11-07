@@ -63,19 +63,31 @@ defmodule Stacks.BookshelfAudienceInvariantTest do
           end)
         end)
 
+      # ⛔ THE INVARIANT FIRST, because whichever assertion comes first is the one
+      # that reports. An earlier version put the per-shelf checks above this and
+      # the ladder assertion never fired at all: a probe that removed the public
+      # arm reported "a signed-in viewer must see a public shelf" and the
+      # INVERTED LADDER message was unreachable. The named claim must be the one
+      # that speaks.
+      #
+      # ⚖️ Stated over the readable SETS rather than over the two fixture rows.
+      # Size comparison alone would be a proxy — it holds by accident whenever
+      # each tier has one shelf — so this asserts the relation that actually
+      # defines the ladder: anything a narrower tier shows this viewer, the more
+      # open tier must show them too.
+      assert MapSet.subset?(
+               MapSet.new(if MapSet.member?(platform_seen, plat.id), do: [pub.id], else: []),
+               public_seen
+             ),
+             "INVERTED LADDER: this viewer can read a `platform` shelf but not a `public` one. " <>
+               "`public` is the more open tier and must be at least as readable."
+
       assert MapSet.member?(platform_seen, plat.id),
              "a signed-in viewer must see a platform shelf — if this fails the fixture is wrong, " <>
-               "not the invariant, and the subset assertion below would pass vacuously"
+               "not the invariant, and the assertion above would pass vacuously"
 
       assert MapSet.member?(public_seen, pub.id),
              "a signed-in viewer must see a public shelf"
-
-      # ⛔ The invariant itself. Stated as an implication between TIERS, because
-      # the defect was an inversion of their order and a per-tier assertion
-      # cannot see an inversion.
-      refute MapSet.size(platform_seen) > 0 and MapSet.size(public_seen) == 0,
-             "INVERTED LADDER: a platform shelf is readable while a public one is not. " <>
-               "`public` is the more open tier and must be at least as readable."
     end
 
     test "an anonymous reader sees public and NOT platform" do

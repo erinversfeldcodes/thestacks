@@ -94,13 +94,20 @@ defmodule Stacks.AuditRefusalIsLoudTest do
       # cases above and look like a working guarantee.
       user = insert(:user)
 
-      result =
+      # ⛔ ASSERT THE SHAPE IT RETURNS, not one it cannot. An earlier version here
+      # was `refute match?({:error, _}, result)` — and `list_for_user/2` returns a
+      # four-tuple and RAISES on failure, so it can never produce `{:error, _}`.
+      # The case written to close the "everything raises" degenerate asserted a
+      # shape the function does not have, and therefore closed nothing.
+      {entries, total, page, per_page} =
         AppRole.as_app_role(fn ->
           Audit.list_for_user(user.id)
         end)
 
-      refute match?({:error, _}, result),
-             "a granted read must succeed; got #{inspect(result)}"
+      assert is_list(entries)
+      assert is_integer(total) and total >= 0
+      assert page == 1
+      assert is_integer(per_page) and per_page > 0
     end
   end
 end
