@@ -3674,7 +3674,12 @@ view model =
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
             , viewConnectivity model.connectivity
             , viewSignOut model.signOut
-            , viewNav model.route model.auth model.openNavMenu model.userMenu model.uploadInbox
+            , viewNav model.route
+                model.auth
+                model.openNavMenu
+                model.userMenu
+                model.uploadInbox
+                (signOutStalled model.signOut)
             , main_
                 [ id "main-content"
                 , tabindex -1
@@ -3975,8 +3980,15 @@ reachable while the answer is outstanding, so the header does not jump when it
 arrives; the only thing it waits for is the invitation to sign in.
 
 -}
-viewNav : Route -> AuthState -> Maybe NavMenu -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
-viewNav route authState openNavMenu userMenu inbox =
+viewNav :
+    Route
+    -> AuthState
+    -> Maybe NavMenu
+    -> UserMenu.Model
+    -> RemoteData Http.Error (List Api.InboxItem)
+    -> Bool
+    -> Html Msg
+viewNav route authState openNavMenu userMenu inbox sessionStillLive =
     let
         visitorItems : List (Html Msg)
         visitorItems =
@@ -4064,7 +4076,11 @@ viewNav route authState openNavMenu userMenu inbox =
                                 )
                             ]
                             [ Html.map UserMenuMsg
-                                (UserMenu.view auth.user settingsLinks userMenu)
+                                (UserMenu.view auth.user
+                                    settingsLinks
+                                    sessionStillLive
+                                    userMenu
+                                )
                             ]
                         ]
                 )
@@ -4672,6 +4688,27 @@ viewSignOut signOut =
                     ]
                     [ text "Try signing out again" ]
                 ]
+
+
+{-| Whether the reader's session is still live despite their asking it not to be.
+
+⛔ A PREDICATE OVER THE STATE, not a second copy of it. The chrome needs to know
+only the one bit; giving `UserMenu` the whole `SignOut` type would hand it the
+failure variants it has no view for, and a component that can see a state it
+cannot render is a component someone will later make render it badly.
+
+-}
+signOutStalled : SignOut -> Bool
+signOutStalled signOut =
+    case signOut of
+        SignOutStalled _ ->
+            True
+
+        SigningOut ->
+            False
+
+        NotSigningOut ->
+            False
 
 
 {-| What to tell the reader about a sign-out that did not happen. Both sentences

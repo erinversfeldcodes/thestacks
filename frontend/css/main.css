@@ -48,6 +48,26 @@
     --success: #4a7c59;
     --warning: #b8860b;
     --warning-text: #6b4310;
+
+    /* ⛔ THE BANNER PAIR, named at last. `.connectivity-banner` had been carrying
+       these two as bare literals since it was written, and the stalled sign-out
+       banner — needing the same thing — reached for `--warning` + `--warning-text`
+       instead, which had never been used as a surface pair: every prior use of
+       `--warning` is a border, an icon colour or a 12% tint. That pairing measures
+       **2.65:1**, against the 4.5:1 AA requires.
+
+       ⚖️ `--warning-text` is NOT re-pointed. It is correct as a foreground on the
+       app's dark background and is used that way elsewhere; the fault was asking
+       it to be a foreground on `--warning`.
+
+       ⚠️ Named for the SHAPE (a full-width banner above the content) rather than
+       for "warning", because the two banners it serves mean different things — one
+       reports a connectivity condition that resolves itself, the other a session
+       that did not close. One idiom, one vetted pair.
+
+       Measured: 8.89:1, which clears AA and AAA for body text. */
+    --banner-surface: #4a3320;
+    --banner-on-surface: #f0dfae;
 }
 
 .shelf-library {
@@ -187,7 +207,7 @@ h4 {
 .connectivity-banner {
     position: relative;
     z-index: 200;
-    background-color: #4a3320;
+    background-color: var(--banner-surface);
     border-bottom: 1px solid rgba(212, 175, 55, 0.45);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
     padding: 0.75rem 1.5rem;
@@ -199,7 +219,7 @@ h4 {
     font-family: var(--font-body);
     font-size: var(--size-sm);
     line-height: 1.45;
-    color: #f0dfae;
+    color: var(--banner-on-surface);
     text-align: center;
 }
 
@@ -209,7 +229,17 @@ h4 {
    stalled is still signed in, and a notice that slides away on a timer is a
    notice that stops saying so while it is still true. */
 .sign-out-notice {
-    position: relative;
+    /* ⛔ STICKY, NOT RELATIVE, and the distinction is the defect. A stalled
+       sign-out does not resolve itself — it persists until a later sign-out
+       reaches the server or the session's own max_age expires — so a reader who
+       scrolled, or who navigated inside the SPA, lost the only indication their
+       session was never closed.
+
+       ⚠️ `.connectivity-banner` above is `relative` and that is right for it: it
+       describes a condition that resolves when connectivity returns. Copying its
+       positioning along with its colours would have carried the bug. */
+    position: sticky;
+    top: 0;
     z-index: 200;
     padding: var(--space-3) var(--space-5);
     display: flex;
@@ -225,8 +255,8 @@ h4 {
 }
 
 .sign-out-notice--stalled {
-    background-color: var(--warning);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+    background-color: var(--banner-surface);
+    border-bottom: 1px solid rgba(212, 175, 55, 0.45);
     box-shadow: var(--shadow-sm);
 }
 
@@ -240,25 +270,32 @@ h4 {
 }
 
 .sign-out-notice--stalled .sign-out-notice__text {
-    color: var(--warning-text);
+    color: var(--banner-on-surface);
     font-weight: 700;
 }
 
+/* ⚖️ THE HINT IS NO LONGER THE SMALLEST THING HERE. It carries the sentence doing
+   the most work — that closing the browser will not end the session, which is
+   true because the cookie's max_age comes from the token's TTL precisely so a
+   session survives a restart. It was 12px/400 while the bold 14px line carried
+   the less consequential half ("check your connection"). Same size and weight as
+   its sibling now; the two read as one statement. */
 .sign-out-notice__hint {
     max-width: 44rem;
     margin: 0;
     font-family: var(--font-body);
-    font-size: var(--size-xs);
+    font-size: var(--size-sm);
     line-height: 1.45;
-    color: var(--warning-text);
+    font-weight: 700;
+    color: var(--banner-on-surface);
 }
 
 .sign-out-notice__retry {
     font-family: var(--font-body);
     font-size: var(--size-sm);
-    color: var(--warning-text);
+    color: var(--banner-on-surface);
     background-color: transparent;
-    border: 1px solid var(--warning-text);
+    border: 1px solid var(--banner-on-surface);
     border-radius: var(--radius-sm);
     padding: var(--space-2) var(--space-4);
     cursor: pointer;
@@ -6454,6 +6491,56 @@ h4 {
     font-family: var(--font-body);
     font-size: var(--size-sm);
     color: var(--text);
+}
+
+/* ⛔ AFTER the base rule above, not before it. A modifier is `.a.b--m` at (0,2,0)
+   against the base's (0,1,0), so it wins on specificity — but a hover or
+   pseudo-class on the base would be (0,2,0) too, and at equal specificity the
+   LATER rule wins. Placing the modifier earlier is how seven of them silently
+   lost their state on hover once before. */
+.user-menu__trigger--session-live {
+    color: var(--banner-on-surface);
+}
+
+/* The dot beside the name. `aria-hidden`, because its meaning travels in the
+   visually-hidden sentence next to it — a coloured dot announces nothing. */
+.user-menu__session-marker {
+    margin-left: var(--space-2);
+    color: var(--warning);
+    font-size: var(--size-sm);
+    line-height: 1;
+}
+
+/* The notice at the top of the open menu. Not a link and not a button: it is a
+   statement, and giving it the affordance of the items below it would invite a
+   click that does nothing. */
+.user-menu__session-notice {
+    padding: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border);
+    background-color: var(--banner-surface);
+    color: var(--banner-on-surface);
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    line-height: 1.4;
+    max-width: 18rem;
+}
+
+/* ⛔ A UTILITY THIS STYLESHEET DID NOT HAVE, which is why the marker needed it.
+   Text that must be announced but not seen — `display: none` and
+   `visibility: hidden` both remove it from the accessibility tree, so neither
+   works for this. The clip-rect pattern keeps it in the tree while taking it out
+   of the layout. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 /* The members list. The row is a line per person: name on the left, the owner's

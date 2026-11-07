@@ -8,7 +8,7 @@ module Components.UserMenu exposing
     , view
     )
 
-import Html exposing (Html, button, div, li, text, ul)
+import Html exposing (Html, button, div, li, span, text, ul)
 import Html.Attributes exposing (attribute, class, style)
 import Html.Events exposing (onClick)
 import Types.User exposing (User)
@@ -66,30 +66,69 @@ update msg model =
             ( { model | open = False }, SignOut )
 
 
-view : User -> List SettingsLink -> Model -> Html Msg
-view user links model =
+{-| The account menu, which also carries whether a sign-out is still unconfirmed.
+
+⛔ `sessionStillLive` IS THE SECOND HALF OF THE STALLED-SIGN-OUT FIX, and the
+more important half. The banner that reports it is `position: sticky` now, so it
+survives scrolling — but this is where a reader looks for anything about their
+account, and it survives SPA navigation by construction because the chrome is
+not re-rendered per route.
+
+⚖️ Both, not one: the banner is what a reader sees without looking, and the menu
+is what they find when they go looking. A banner alone is missable; a menu entry
+alone would never be seen by someone who does not already suspect a problem.
+
+-}
+view : User -> List SettingsLink -> Bool -> Model -> Html Msg
+view user links sessionStillLive model =
     div
         [ class "user-menu"
         , attribute "aria-label" "User menu"
         ]
         [ button
-            [ class "user-menu__trigger app-nav__link app-nav__user"
+            [ class
+                (if sessionStillLive then
+                    "user-menu__trigger user-menu__trigger--session-live app-nav__link app-nav__user"
+
+                 else
+                    "user-menu__trigger app-nav__link app-nav__user"
+                )
             , testId "user-menu"
             , onClick Toggle
             , attribute "aria-expanded" (boolToString model.open)
             , attribute "aria-haspopup" "true"
             ]
-            [ text user.displayName ]
+            [ text user.displayName
+            , if sessionStillLive then
+                -- ⚠️ The marker is not a bare dot. A coloured dot alone says
+                -- "something" and is invisible to a screen reader; this carries
+                -- its meaning in text that is visually hidden but announced.
+                span
+                    [ class "user-menu__session-marker"
+                    , testId "user-menu-session-marker"
+                    , attribute "aria-hidden" "true"
+                    ]
+                    [ text "•" ]
+
+              else
+                text ""
+            , if sessionStillLive then
+                span [ class "visually-hidden" ]
+                    [ text " — still signed in on this device" ]
+
+              else
+                text ""
+            ]
         , if model.open then
-            viewDropdown links
+            viewDropdown links sessionStillLive
 
           else
             text ""
         ]
 
 
-viewDropdown : List SettingsLink -> Html Msg
-viewDropdown links =
+viewDropdown : List SettingsLink -> Bool -> Html Msg
+viewDropdown links sessionStillLive =
     div []
         [ -- Invisible full-screen backdrop to catch clicks outside the dropdown
           div
@@ -108,7 +147,8 @@ viewDropdown links =
             , testId "user-menu-dropdown"
             , style "z-index" "1000"
             ]
-            (List.map viewSettingsLink links
+            (sessionNotice sessionStillLive
+                ++ List.map viewSettingsLink links
                 ++ [ li []
                         [ button
                             [ class "app-nav__dropdown-link app-nav__logout"
@@ -119,6 +159,29 @@ viewDropdown links =
                    ]
             )
         ]
+
+
+{-| The unconfirmed-sign-out notice, at the TOP of the menu.
+
+⚖️ First rather than next to "Sign Out", though that is where it is acted on. A
+reader who opens this menu after a failed sign-out is looking for the state of
+their account, and the thing they need to know should not be below the links they
+were not looking for.
+
+⛔ It states what is true rather than what went wrong. "Your last sign-out did
+not reach us" is a fact about the request; "you are still signed in on this
+device" is the fact about the reader, and it is the one that matters.
+
+-}
+sessionNotice : Bool -> List (Html Msg)
+sessionNotice sessionStillLive =
+    if sessionStillLive then
+        [ li [ class "user-menu__session-notice", testId "user-menu-session-notice" ]
+            [ text "Still signed in on this device — your last sign-out did not reach us." ]
+        ]
+
+    else
+        []
 
 
 viewSettingsLink : SettingsLink -> Html Msg

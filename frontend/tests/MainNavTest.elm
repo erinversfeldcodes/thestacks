@@ -82,7 +82,7 @@ failedItem imageId reason =
 -}
 navWithInbox : Types.RemoteData.RemoteData Http.Error (List Api.InboxItem) -> Query.Single Main.Msg
 navWithInbox inbox =
-    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init inbox
+    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init inbox False
         |> Query.fromHtml
 
 
@@ -90,7 +90,7 @@ navWithInbox inbox =
 -}
 navClosed : Query.Single Main.Msg
 navClosed =
-    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
         |> Query.fromHtml
 
 
@@ -98,7 +98,7 @@ navClosed =
 -}
 navOpen : NavMenu -> Query.Single Main.Msg
 navOpen menu =
-    Main.viewNav Library (Main.Authenticated readerAuth) (Just menu) UserMenu.init Types.RemoteData.NotAsked
+    Main.viewNav Library (Main.Authenticated readerAuth) (Just menu) UserMenu.init Types.RemoteData.NotAsked False
         |> Query.fromHtml
 
 
@@ -107,7 +107,7 @@ owner alone, so its tests cannot reuse the reader helpers.
 -}
 ownerNav : Route -> Maybe NavMenu -> Query.Single Main.Msg
 ownerNav route menu =
-    Main.viewNav route (Main.Authenticated ownerAuth) menu UserMenu.init Types.RemoteData.NotAsked
+    Main.viewNav route (Main.Authenticated ownerAuth) menu UserMenu.init Types.RemoteData.NotAsked False
         |> Query.fromHtml
 
 
@@ -122,12 +122,12 @@ suite =
               -- the opposite of the truth until the round-trip lands.
               test "withholds the Sign In link — it is not known that they are signed out" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.text "Sign In" ]
             , test "withholds the signed-in chrome too — it is not known that they are signed in" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.hasNot [ Selector.text "Bookshelves" ]
@@ -138,7 +138,7 @@ suite =
               -- still there, so the header does not jump when the answer lands.
               test "still offers everything a visitor can reach" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "Catalogue" ]
@@ -150,29 +150,29 @@ suite =
               -- nothing at all.
               test "a RESOLVED signed-out boot does offer the Sign In link" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             , test "a RESOLVED signed-in boot does offer the bookshelves" <|
                 \() ->
-                    Main.viewNav Catalogue (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Bookshelves" ]
             , test "a boot whose check FAILED is resolved, and says so rather than spinning" <|
                 \() ->
-                    Main.viewNav Catalogue (Main.Unresolved Api.Unreachable) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue (Main.Unresolved Api.Unreachable) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             ]
         , describe "viewNav Anonymous (unauthenticated)"
             [ test "shows the Sign In link" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             , test "shows Catalogue and Marketplace" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "Catalogue" ]
@@ -180,7 +180,7 @@ suite =
                             ]
             , test "shows a single About entry linking to /about" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "About" ]
@@ -189,7 +189,7 @@ suite =
                             ]
             , test "does not show authenticated-only bookshelves" <|
                 \() ->
-                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.hasNot [ Selector.text "Antilibrary" ]
@@ -222,7 +222,7 @@ suite =
                         |> Query.has [ Selector.class "app-nav__item--active" ]
             , test "owner sees the Admin disclosure" <|
                 \() ->
-                    Main.viewNav Library (Main.Authenticated ownerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Library (Main.Authenticated ownerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Admin" ]
             , test "non-owner does not see the Admin disclosure" <|
@@ -343,13 +343,13 @@ suite =
         , describe "active-route highlight on child routes"
             [ test "a book-detail keeps the Bookshelves item active" <|
                 \() ->
-                    Main.viewNav (BookDetail "b1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav (BookDetail "b1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "app-nav__item--active" ]
                         |> Query.has [ Selector.text "Bookshelves" ]
             , test "a marketplace listing detail keeps Marketplace active" <|
                 \() ->
-                    Main.viewNav (MarketplaceDetail "l1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav (MarketplaceDetail "l1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "app-nav__item--active" ]
                         |> Query.has [ Selector.text "Marketplace" ]
