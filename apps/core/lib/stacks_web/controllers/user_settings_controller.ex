@@ -106,21 +106,18 @@ defmodule StacksWeb.UserSettingsController do
         # a password change that does not end the session performing it leaves a
         # reader signed in on a machine they may have borrowed, which is the
         # situation people change their password BECAUSE of.
-        # ⛔ BOTH, and they are not the same revocation. `revoke_all_user_sessions/1`
-        # ends EVERY session the user has, on every device — that is the
-        # "log out everywhere" a password change means. `end_session/1` revokes the
-        # presented token and its family and CLEARS THIS BROWSER'S COOKIE, which
-        # the first cannot do because it has no `conn`.
+        # ⛔ `:everywhere`, and the scope is the point rather than a flag. A
+        # password change ends EVERY session the reader has, on every device,
+        # and clears this browser's cookie so they are not left holding a
+        # credential that no longer works.
         #
-        # ⚠️ Dropping the first and keeping the second narrows "everywhere" to
-        # "this device" silently: the caller's own token stops working either way,
-        # so a test that only re-presents the caller's token cannot tell them
-        # apart. `a token minted for another device also stops working` below is
-        # the one that can.
-        Accounts.revoke_all_user_sessions(user.id)
-
+        # ⚠️ This was two calls — `revoke_all_user_sessions/1` and a scopeless
+        # teardown — until a probe showed that dropping the first left every
+        # test green: they all re-present the CALLER's token, which the teardown
+        # revokes either way, so "everywhere" could narrow to "this device"
+        # invisibly. The scope argument makes that unforgettable.
         conn
-        |> SessionTeardown.end_session()
+        |> SessionTeardown.end_session(:everywhere)
         |> json(%{ok: true})
 
       {:error, :invalid_password} ->

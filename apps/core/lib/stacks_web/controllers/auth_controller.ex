@@ -157,7 +157,7 @@ defmodule StacksWeb.AuthController do
     # this. One function, two callers, so the next path cannot end a session
     # halfway by copying only the part it noticed.
     conn
-    |> SessionTeardown.end_session()
+    |> SessionTeardown.end_session(:this_device)
     |> send_resp(204, "")
   end
 

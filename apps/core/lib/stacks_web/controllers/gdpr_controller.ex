@@ -49,7 +49,7 @@ defmodule StacksWeb.GDPRController do
     # if any row survives. This closes the window before that runs, and clears
     # the reader's cookie so they are not left holding one that looks live.
     conn
-    |> SessionTeardown.end_session()
+    |> SessionTeardown.end_session(:everywhere)
     |> put_status(202)
     |> json(%{status: "accepted", message: "Account deletion has been queued."})
   end

@@ -323,6 +323,33 @@ defmodule StacksWeb.UserSettingsControllerTest do
       assert json_response(other_after, 401)
     end
 
+    # ⛔ THE SCOPE IS ASSERTED PER CALLER, because the two scopes differ only in
+    # what happens to OTHER devices and every test that re-presents the caller's
+    # own token is blind to the difference. Signing out must NOT end other
+    # sessions; changing a password must.
+    test "signing out leaves another device signed in — the scopes are not the same", %{
+      conn: conn
+    } do
+      user = insert(:user, email_confirmed: true)
+      {:ok, this_device, _} = Guardian.encode_and_sign(user)
+      {:ok, other_device, _} = Guardian.encode_and_sign(user)
+
+      logout =
+        conn
+        |> put_req_header("authorization", "Bearer #{this_device}")
+        |> delete("/api/auth/logout")
+
+      assert response(logout, 204)
+
+      other_after =
+        conn
+        |> put_req_header("authorization", "Bearer #{other_device}")
+        |> get("/api/auth/me")
+
+      assert json_response(other_after, 200),
+             "sign-out is :this_device — another device must still be signed in"
+    end
+
     test "returns 422 on wrong current_password", %{conn: conn} do
       user = insert(:user)
 

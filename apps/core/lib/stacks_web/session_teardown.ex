@@ -47,15 +47,38 @@ defmodule StacksWeb.SessionTeardown do
       path there is a second net underneath: `:revoke_sessions` will fail the
       whole job if the row survives.
   """
-  @spec end_session(Plug.Conn.t()) :: Plug.Conn.t()
-  def end_session(conn) do
+  @type scope :: :this_device | :everywhere
+
+  @spec end_session(Plug.Conn.t(), scope()) :: Plug.Conn.t()
+  def end_session(conn, scope) when scope in [:this_device, :everywhere] do
     token = Guardian.Plug.current_token(conn)
     claims = Guardian.Plug.current_claims(conn) || %{}
 
     revoke_presented_token(token)
     revoke_family(claims)
+    revoke_other_devices(scope, conn)
 
     SessionCookie.delete_session_cookie(conn)
+  end
+
+  # ⛔ THE SCOPE IS AN ARGUMENT BECAUSE FORGETTING IT IS SILENT. The password
+  # change must end EVERY session; sign-out must end only this one. Both revoke
+  # the caller's own token, so a test that re-presents the caller's credential
+  # cannot tell them apart — which is exactly how `revoke_all_user_sessions/1`
+  # was once dropped from the password path with every test still green.
+  #
+  # ⚖️ A parameter rather than two functions: the difference is one clause, and
+  # two functions differing by one line is how the second one drifts. As a value
+  # it is also something a test can assert per caller.
+  defp revoke_other_devices(:this_device, _conn), do: :ok
+
+  defp revoke_other_devices(:everywhere, conn) do
+    case Guardian.Plug.current_resource(conn) do
+      %{id: user_id} -> Accounts.revoke_all_user_sessions(user_id)
+      _ -> :ok
+    end
+
+    :ok
   end
 
   defp revoke_presented_token(nil), do: :ok
