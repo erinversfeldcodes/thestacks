@@ -58,13 +58,32 @@ fly ssh console -a <app>
 
 # Base64(JSON), so the reason text crosses the rpc boundary with no shell or
 # Elixir injection surface.
+#
+# ⛔ `tr -d '\n'` IS LOAD-BEARING. `base64` wraps at 76 columns and this payload
+# is longer than that, so without it the argument arrives containing a newline.
+# The task now tolerates one, but older builds raise `ArgumentError` here.
 PAYLOAD=$(printf '%s' \
-  '{"email":"you@example.com","actor":"your-name","reason":"cookie transport refused after deploy"}' \
-  | base64)
+  '{"email":"you@example.com","actor":"your-name","reason":"cookie transport refused after deploy","confirm":"yes-recover-this-operator"}' \
+  | base64 | tr -d '\n')
 
-STACKS_OPERATOR_RECOVERY=1 /app/bin/core rpc \
-  "Stacks.Release.recover_operator_access(\"$PAYLOAD\")"
+/app/bin/core rpc "Stacks.Release.recover_operator_access(\"$PAYLOAD\")"
 ```
+
+⛔ **THE CONFIRMATION IS A FIELD IN THE PAYLOAD, NOT AN ENVIRONMENT VARIABLE —
+AND THIS CORRECTS AN EARLIER VERSION OF THIS RUNBOOK THAT COULD NOT WORK.**
+
+This page used to say `STACKS_OPERATOR_RECOVERY=1 /app/bin/core rpc …`. That can
+never succeed: `rpc` evaluates inside the **already-running node**, which does
+not see the invoking shell's environment. Measured on a deployed stack
+2026-11-07 — with the variable set, `printenv` in the shell read `1` while
+`System.get_env("STACKS_OPERATOR_RECOVERY")` evaluated inside the node read
+**nil**. The task refused every time, on the one path standing between an
+operator and a permanent lockout.
+
+⚖️ `"confirm":"yes-recover-this-operator"` does the job the variable was meant to
+do — nobody types it by accident, so a stray `rpc` in a script or a workflow
+cannot fire it — and it crosses the boundary by construction, because it travels
+inside the argument.
 
 ⚠️ **`rpc`, never `eval`.** `eval` starts a second BEAM, which OOMs a 512 MB
 machine and reports nothing useful — roughly eleven seconds and an `EOF`.
@@ -84,7 +103,7 @@ On refusal, one of:
 
 | Message | Meaning |
 |---|---|
-| `refusing to recover operator access: set STACKS_OPERATOR_RECOVERY=1 …` | the guard; you omitted the env or spelled it something other than `1` |
+| `refusing to recover operator access: add "confirm":"yes-recover-this-operator" …` | the guard; the payload carried no confirmation, or a different one. ⚠️ Setting an environment variable will NOT help — see above. |
 | `OPERATOR_RECOVERY_ERROR no user with email=…` | the address does not resolve — check for a typo before assuming the account is gone |
 | `operator recovery aborted: actor is required` | the audit row cannot be written without naming who acted |
 
@@ -102,8 +121,9 @@ second implementation.
 
 ## Why the guard is weaker than the seeding guard
 
-`Stacks.Release.seed_live/0` is gated on `STACKS_E2E_TEST_HELPERS`, an env the
-preview stack is **deployed** with and production never carries — because seeding
+⚠️ **And why it is not an env var at all.** `Stacks.Release.seed_live/0` is gated
+on `STACKS_E2E_TEST_HELPERS`, an env the preview stack is **deployed** with and
+production never carries — because seeding
 production is never correct, so the gate should be impossible to satisfy there.
 
 ⛔ That pattern would make this task useless. Recovering an operator **is**

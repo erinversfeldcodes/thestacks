@@ -439,13 +439,23 @@ defmodule Stacks.Release do
       attractive target than the lockout it fixes, and the operator can sign in
       normally once the stale state is gone.
 
-      ⚠️ **Prod-guarded by `STACKS_OPERATOR_RECOVERY`, which is NOT a deployed
-      env.** The pattern `seed_live/0` uses — a flag the node is deployed with —
-      is wrong here: this task must work on production, which is the only place
-      the lockout matters, so a guard that production never carries would make it
-      useless exactly when it is needed. Instead the operator sets it on the
-      invocation itself, which is possible because `fly ssh console` runs a shell:
-      `STACKS_OPERATOR_RECOVERY=1 /app/bin/core rpc '...'`.
+      ⚠️ **Guarded by a confirmation IN THE PAYLOAD, not by an environment
+      variable.** The pattern `seed_live/0` uses — a flag the node is deployed
+      with — is wrong here: this task must work on production, which is the only
+      place the lockout matters, so a guard production never carries would make
+      it useless exactly when it is needed.
+
+      ⛔ An env var set on the invocation does not work either, and this is
+      measured rather than assumed. The documented transport is `rpc` — chosen
+      because `eval` starts a second BEAM and OOMs a 512 MB machine — and `rpc`
+      evaluates inside the **already-running node**, which never sees the
+      invoking shell's environment. On a deployed stack, 2026-11-07, with
+      `STACKS_OPERATOR_RECOVERY=1` on the invocation: `printenv` in that shell
+      read `1`, and `System.get_env/1` inside the node read **nil**. The guard
+      refused every time.
+
+      ⚖️ So the confirmation travels inside the argument, where the boundary
+      cannot strip it: `"confirm":"yes-recover-this-operator"`.
 
       ⚖️ So the guard is deliberately weaker than `seed_live/0`'s, and the reason
       is that the two are protecting against different things. Seeding production
@@ -457,17 +467,51 @@ defmodule Stacks.Release do
       boundary with no shell or Elixir injection surface. Decoded:
       `%{"email" =>, "actor" =>, "reason" =>}`.
   """
+  @recovery_confirmation "yes-recover-this-operator"
+
   @spec recover_operator_access(binary()) :: :ok
   def recover_operator_access(params_b64) when is_binary(params_b64) do
-    unless System.get_env("STACKS_OPERATOR_RECOVERY") == "1" do
-      raise "refusing to recover operator access: set STACKS_OPERATOR_RECOVERY=1 on " <>
-              "the invocation to confirm this is deliberate"
-    end
-
-    params = params_b64 |> Base.decode64!() |> Jason.decode!()
+    # ⛔ `ignore: :whitespace`, AND IT IS NOT TIDINESS — THE RUNBOOK'S OWN
+    # EXAMPLE PAYLOAD FAILS WITHOUT IT. `base64` wraps at 76 columns by default,
+    # and the documented payload (`{"email":…,"actor":…,"reason":…}`) encodes to
+    # **two lines**. A bare `Base.decode64!/1` rejects the newline, so an
+    # operator following the runbook verbatim got an ArgumentError instead of
+    # their account back. ⚖️ A recovery tool should be liberal in what it
+    # accepts: the person running it is locked out at the time.
+    params = params_b64 |> Base.decode64!(ignore: :whitespace) |> Jason.decode!()
     email = params |> Map.get("email", "") |> to_string() |> String.trim()
     actor = params |> Map.get("actor", "") |> to_string() |> String.trim()
     reason = params |> Map.get("reason", "") |> to_string() |> String.trim()
+
+    # ⛔ THE GUARD IS A FIELD IN THE PAYLOAD, NOT AN ENVIRONMENT VARIABLE, AND
+    # THE REASON IS MEASURED RATHER THAN STYLISTIC.
+    #
+    # This was `System.get_env("STACKS_OPERATOR_RECOVERY") == "1"`, set on the
+    # invocation. But the documented transport is `rpc` — deliberately, because
+    # `eval` starts a second BEAM and OOMs a 512 MB machine — and **`rpc`
+    # evaluates inside the ALREADY-RUNNING node**, which never saw that
+    # variable. PROVEN on a deployed stack: with the variable set,
+    # `printenv` in the invoking shell read `1` while
+    # `System.get_env(...)` inside the node read **`nil`**.
+    #
+    # ⛔ So the guard could never be satisfied by the documented procedure, and
+    # the recovery path — the one thing standing between an operator and a
+    # permanent lockout — refused every single time. A guard that cannot be
+    # satisfied is not a strong guard; it is a broken feature.
+    #
+    # ⚖️ A payload field achieves exactly what the env var was for. The
+    # docstring's requirement is that it "cannot fire from a stray `rpc` in a
+    # script or a workflow, but can always be satisfied by someone who means
+    # to, standing at a shell" — and a confirmation nobody types by accident
+    # does that, while crossing the rpc boundary by construction because it
+    # travels inside the argument.
+    if Map.get(params, "confirm") != @recovery_confirmation do
+      raise "refusing to recover operator access: add " <>
+              ~s("confirm":"#{@recovery_confirmation}") <>
+              " to the payload to confirm this is deliberate.\n" <>
+              "(An environment variable cannot be used here: `rpc` runs inside the " <>
+              "already-running node, which does not see the invocation's environment.)"
+    end
 
     if email == "", do: raise("operator recovery aborted: email is required")
     if actor == "", do: raise("operator recovery aborted: actor is required")
@@ -507,7 +551,7 @@ defmodule Stacks.Release do
   """
   @spec gdpr_erase_user(binary()) :: :ok
   def gdpr_erase_user(params_b64) when is_binary(params_b64) do
-    params = params_b64 |> Base.decode64!() |> Jason.decode!()
+    params = params_b64 |> Base.decode64!(ignore: :whitespace) |> Jason.decode!()
     user_id = params |> Map.get("user_id", "") |> to_string() |> String.trim()
     reason = params |> Map.get("reason", "") |> to_string() |> String.trim()
     confirm = params |> Map.get("confirm", "") |> to_string() |> String.trim()
@@ -557,7 +601,7 @@ defmodule Stacks.Release do
   """
   @spec gdpr_lookup_user(binary()) :: :ok
   def gdpr_lookup_user(params_b64) when is_binary(params_b64) do
-    params = params_b64 |> Base.decode64!() |> Jason.decode!()
+    params = params_b64 |> Base.decode64!(ignore: :whitespace) |> Jason.decode!()
     query = params |> Map.get("query", "") |> to_string() |> String.trim()
 
     if query == "" do
