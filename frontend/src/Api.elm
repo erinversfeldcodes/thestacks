@@ -147,7 +147,6 @@ module Api exposing
     , getAdminFeedback
     , getAdminInvites
     , getAdminSources
-    , getAuditLog
     , getAuditLogRequest
     , getAuthorEventsRequest
     , getBlogPost
@@ -3022,29 +3021,13 @@ auditLogResponseDecoder =
         (Decode.field "per_page" Decode.int)
 
 
-{-| GET /api/settings/audit-log — fetch the current user's audit history.
--}
-getAuditLog :
-    Credentials
-    -> (Result Http.Error AuditLogResponse -> msg)
-    -> Cmd msg
-getAuditLog token toMsg =
-    let
-        spec =
-            getAuditLogRequest
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg auditLogResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| GET /api/settings/audit-log — the current reader's own audit history, as data.
 
+⛔ There is no `Cmd`-returning companion any more. `Page.Settings.AuditLog` sends
+this through `Effect.authed`, which makes saying what an expired session means a
+condition of asking at all — the obligation the old wrapper left to a
+`isUnauthorized` re-test in the page's result handler.
 
-{-| The data of `getAuditLog`'s request — see `RequestSpec`.
 -}
 getAuditLogRequest : RequestSpec
 getAuditLogRequest =

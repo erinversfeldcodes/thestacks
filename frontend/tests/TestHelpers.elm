@@ -1,9 +1,11 @@
 module TestHelpers exposing
     ( AdminChromeTestModel
+    , AuditLogTestModel
     , BookDetailTestModel
     , ReadingPileTestModel
     , UploadTestModel
     , adminChromeProgram
+    , auditLogProgram
     , authedRequestFromSpec
     , bookDetailOverlayProgramWithOut
     , bookDetailProgram
@@ -71,6 +73,7 @@ import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Login as Login
 import Page.Search as Search
+import Page.Settings.AuditLog as AuditLog
 import Page.Upload as Upload
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
@@ -1243,6 +1246,45 @@ nothing. Recording the most recent `OutMsg` makes the signal the page sends
 test that drives the page through its own UI and its own requests.
 
 -}
+type alias AuditLogTestModel =
+    { page : AuditLog.Model
+    , lastOut : AuditLog.OutMsg
+    }
+
+
+{-| Harness for the audit-log page.
+
+⛔ This could not have been written before the page's request moved onto the
+plan. `init` returned a `Cmd`, which `elm-program-test` cannot inspect or
+answer — so there was no way to hand this page an HTTP response at all, and the
+one branch worth testing (what a 401 means to a reader asking for their own
+audit history) was unreachable from a test.
+
+-}
+auditLogProgram :
+    Maybe Api.Credentials
+    -> ProgramDefinition () AuditLogTestModel AuditLog.Msg (SimulatedEffect AuditLog.Msg)
+auditLogProgram maybeToken =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, effect ) =
+                        AuditLog.initWithEffect maybeToken
+                in
+                ( { page = model, lastOut = AuditLog.NoOut }, simulateEffect effect )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _, out ) =
+                        AuditLog.update msg model.page
+                in
+                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+        , view = \model -> AuditLog.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
 type alias UploadTestModel =
     { page : Upload.Model
     , lastOut : Upload.OutMsg
