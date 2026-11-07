@@ -15,6 +15,7 @@ stated.
 -}
 
 import Api exposing (Behaviour, Deanonymisation, InterestProfile, PersonalInferences, RiskInference, SubjectCount)
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, h1, h2, li, p, span, strong, text, ul)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
@@ -36,6 +37,7 @@ type Msg
     = InferencesReceived (Result Http.Error PersonalInferences)
     | RevealRiskRequested
     | RiskRevealReceived (Result Http.Error PersonalInferences)
+    | SessionExpiryDetected
 
 
 type OutMsg
@@ -45,6 +47,23 @@ type OutMsg
 
 init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as DATA.
+
+⛔ Both of this page's requests go to the same endpoint with different arguments
+— the second is the reader asking to be shown the risk inference they were
+spared by default. Carrying them as plans is what lets a test answer each one
+separately; as `Cmd`s they were indistinguishable to a harness.
+
+-}
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
     case maybeToken of
         Just token ->
             ( { token = Just token
@@ -52,7 +71,7 @@ init maybeToken =
               , riskLoading = False
               , riskError = False
               }
-            , Api.getInferences False token InferencesReceived
+            , inferencesEffect False token InferencesReceived
             )
 
         Nothing ->
@@ -61,50 +80,81 @@ init maybeToken =
               , riskLoading = False
               , riskError = False
               }
-            , Cmd.none
+            , Effect.none
             )
+
+
+{-| The one place this page describes its request, used by both call sites.
+
+⚠️ `onExpired` is mandatory on `Effect.authed`, so neither caller can ask without
+saying what an ended session means. That obligation replaced an
+`Api.isUnauthorized` re-test duplicated in TWO result handlers, which is the
+shape that lets one of them drift from the other.
+
+-}
+inferencesEffect :
+    Bool
+    -> Api.Credentials
+    -> (Result Http.Error Api.PersonalInferences -> Msg)
+    -> Effect Msg
+inferencesEffect revealRisk token toMsg =
+    Effect.authed (Api.getInferencesRequest revealRisk)
+        token
+        { onExpired = SessionExpiryDetected
+        , onResponse = Api.resolveJson Api.personalInferencesDecoder >> toMsg
+        }
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effects as data.
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Effect.none, SessionExpired )
+
         InferencesReceived result ->
             case result of
                 Ok payload ->
-                    ( { model | data = Success payload }, Cmd.none, NoOut )
+                    ( { model | data = Success payload }, Effect.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
-
-                    else
-                        ( { model | data = Failure err }, Cmd.none, NoOut )
+                    -- ⛔ No `isUnauthorized` re-test: the plan claims the 401 first
+                    -- and routes it to `SessionExpiryDetected`, so a branch here
+                    -- would be unreachable.
+                    ( { model | data = Failure err }, Effect.none, NoOut )
 
         RevealRiskRequested ->
             case model.token of
                 Just token ->
                     ( { model | riskLoading = True, riskError = False }
-                    , Api.getInferences True token RiskRevealReceived
+                    , inferencesEffect True token RiskRevealReceived
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.none, NoOut )
 
         RiskRevealReceived result ->
             case result of
                 Ok payload ->
                     ( { model | data = Success payload, riskLoading = False, riskError = False }
-                    , Cmd.none
+                    , Effect.none
                     , NoOut
                     )
 
                 Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
-
-                    else
-                        ( { model | riskLoading = False, riskError = True }, Cmd.none, NoOut )
+                    -- ⛔ Same as above: the expiry is already claimed by the plan.
+                    ( { model | riskLoading = False, riskError = True }, Effect.none, NoOut )
 
 
 view : Model -> Html Msg

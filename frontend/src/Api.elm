@@ -162,7 +162,6 @@ module Api exposing
     , getIdentity
     , getImport
     , getImportRows
-    , getInferences
     , getInferencesRequest
     , getListings
     , getMyListings
@@ -3176,32 +3175,16 @@ personalInferencesDecoder =
         (Decode.field "generated_at" Decode.string)
 
 
-{-| GET /api/me/inferences — fetch the current user's own ephemeral inference
-profile. When `revealRisk` is `True`, appends `?reveal_risk=true` so the
-response includes the labelled risk-inference illustrations.
--}
-getInferences :
-    Bool
-    -> Credentials
-    -> (Result Http.Error PersonalInferences -> msg)
-    -> Cmd msg
-getInferences revealRisk token toMsg =
-    let
-        spec =
-            getInferencesRequest revealRisk
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg personalInferencesDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| GET /api/me/inferences — the reader's own ephemeral inference profile, as data.
 
+When `revealRisk` is `True` this appends `?reveal_risk=true`, so the response
+includes the labelled risk-inference illustrations the page withholds by default.
 
-{-| The data of `getInferences`'s request — see `RequestSpec`.
+⛔ There is no `Cmd`-returning companion any more. `Page.Insights` sends this
+through `Effect.authed` from both of its call sites, which makes naming the
+expired-session msg a condition of asking — an obligation that used to be an
+`Api.isUnauthorized` re-test duplicated in two result handlers.
+
 -}
 getInferencesRequest : Bool -> RequestSpec
 getInferencesRequest revealRisk =
