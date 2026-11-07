@@ -17,6 +17,7 @@ defmodule StacksWeb.AuthController do
   alias Stacks.Email
   alias StacksWeb.Plugs.SessionCookie
   alias StacksWeb.ProtoJSON
+  alias StacksWeb.SessionTeardown
 
   @doc "POST /api/auth/register — create a new user account and send confirmation email."
   def register(conn, params) do
@@ -151,31 +152,12 @@ defmodule StacksWeb.AuthController do
 
   @doc "DELETE /api/auth/logout — revoke the current JWT."
   def logout(conn, _params) do
-    token = Guardian.Plug.current_token(conn)
-    claims = Guardian.Plug.current_claims(conn) || %{}
-
-    # Revoke server-side (deletes the guardian_tokens row). We still return 204
-    # even if revocation fails — the client should consider itself logged out —
-    # but a failure means the token stays valid until its ttl expires, so it must
-    # be logged for investigation rather than silently discarded.
-    case Guardian.revoke(token) do
-      {:ok, _claims} ->
-        :ok
-
-      error ->
-        Logger.warning("Guardian.revoke failed on logout: #{inspect(error)}")
-    end
-
-    case claims do
-      %{"family_id" => family_id} when is_binary(family_id) ->
-        Accounts.revoke_token_family(family_id)
-
-      _ ->
-        :ok
-    end
-
+    # ⚖️ The sequence moved to `StacksWeb.SessionTeardown` because a SECOND path
+    # ends a session — the account-deletion request — and it was doing none of
+    # this. One function, two callers, so the next path cannot end a session
+    # halfway by copying only the part it noticed.
     conn
-    |> SessionCookie.delete_session_cookie()
+    |> SessionTeardown.end_session()
     |> send_resp(204, "")
   end
 
