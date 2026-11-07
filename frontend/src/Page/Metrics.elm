@@ -2,6 +2,7 @@ module Page.Metrics exposing
     ( Model
     , Msg(..)
     , init
+    , initWithEffect
     , update
     , view
     )
@@ -21,6 +22,7 @@ section is `unavailable` (Prometheus unconfigured) or the whole fetch fails.
 -}
 
 import Api exposing (LiveSignals(..), TransparencyEntry, TransparencyMetrics)
+import Effect exposing (Effect)
 import Html exposing (Html, a, details, div, h1, h2, h3, p, section, span, summary, text)
 import Html.Attributes exposing (class, href, rel, target)
 import Http
@@ -35,8 +37,28 @@ type alias Model =
 
 init : ( Model, Cmd Msg )
 init =
+    let
+        ( model, effect ) =
+            initWithEffect
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as data so a harness can answer it.
+
+⚖️ `Effect.public`, not `authed` — and the distinction is the whole reason the
+two constructors exist. This endpoint serves an anonymous reader by design, so a
+401 from it would not mean a session ended and must not be routed to the expiry
+path. There is no `onExpired` to give, and none is asked for.
+
+-}
+initWithEffect : ( Model, Effect Msg )
+initWithEffect =
     ( { metrics = Loading }
-    , Api.getTransparencyMetrics MetricsReceived
+    , Effect.public Api.getTransparencyMetricsRequest
+        Nothing
+        Nothing
+        (Api.resolveJson Api.transparencyMetricsDecoder >> MetricsReceived)
     )
 
 

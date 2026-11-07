@@ -173,7 +173,7 @@ module Api exposing
     , getProfileShelfRequest
     , getRemovalRequests
     , getSourceHealth
-    , getTransparencyMetrics
+    , getTransparencyMetricsRequest
     , getUploadInbox
     , getUserPlacements
     , getUserPlacementsRequest
@@ -2096,23 +2096,12 @@ transparencyMetricsDecoder =
 payload. No auth header: the endpoint is public and returns only curated,
 anonymised aggregates.
 -}
-getTransparencyMetrics :
-    (Result Http.Error TransparencyMetrics -> msg)
-    -> Cmd msg
-getTransparencyMetrics toMsg =
-    Http.request
-        { method = "GET"
-
-        -- ⚠️ NO CREDENTIAL, DECLARED. Public transparency metrics: no session
-        -- is read and none is required. Stated rather than left as an empty
-        -- list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "GET" (NoCredential Nothing)
-        , url = baseUrl ++ "/api/transparency/metrics"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg transparencyMetricsDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+getTransparencyMetricsRequest : RequestSpec
+getTransparencyMetricsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "transparency", "metrics" ] []
+    , body = Nothing
+    }
 
 
 {-| Init-step response from `POST /api/upload/init`.
