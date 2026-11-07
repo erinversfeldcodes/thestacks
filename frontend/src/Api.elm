@@ -1647,7 +1647,7 @@ type RemovalOutcome
     | PendingReview
 
 
-{-| `POST /api/listings/removal` — a business owner asking to be delisted, as data.
+{-| `POST /api/opt-out` — a business owner asking to be delisted, as data.
 
 ⛔ NO CREDENTIAL, DECLARED — and the declaration is the point, as it was in the
 builder this replaces. The asker is not a reader: they have no session, so there
@@ -1659,7 +1659,7 @@ endpoint actually authenticates against.
 requestListingRemovalRequest : { url : String, email : String, reason : String } -> RequestSpec
 requestListingRemovalRequest body =
     { method = "POST"
-    , url = Api.Url.path [ "api", "listings", "removal" ] []
+    , url = Api.Url.path [ "api", "opt-out" ] []
     , body =
         JsonBody
             (Encode.object
