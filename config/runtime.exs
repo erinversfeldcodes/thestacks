@@ -253,7 +253,27 @@ if config_env() == :prod do
       ],
       secret_key_base: secret_key_base
 
-    config :core, upload_dir: "/tmp/uploads"
+    # ⛔ `upload_dir` IS NOT SET HERE, AND THAT IS THE WHOLE POINT.
+    #
+    # This line used to read `config :core, upload_dir: "/tmp/uploads"`, which
+    # ran on every released server and threw away the directory
+    # `Stacks.Storage.Selection` had just derived from `UPLOAD_DIR`, ~190 lines
+    # above. MEASURED on a preview, 2026-11-07: `deploy-stack.sh` declared
+    # `UPLOAD_DIR=/app/uploads`, the selector accepted it, and the booting node
+    # announced `upload_dir: /tmp/uploads`.
+    #
+    # ⚠️ That is the exact failure the selector exists to prevent, reinstated
+    # one screen later by a literal. The selector refuses to boot a deployed
+    # build whose local backend names no durable location — and then this line
+    # silently redirected the bytes to a path that is NOT a volume (`df` reports
+    # `/tmp` and `/app` both on the container's overlay root), so an operator who
+    # attached a volume and declared it correctly would still have lost every
+    # upload on the next machine replacement, with a successful boot and a
+    # satisfied guard either side of the loss.
+    #
+    # ⚖️ The directory now has exactly one source: whatever the reader of
+    # `UPLOAD_DIR` decided, honoured by the selector. A released server that
+    # names no durable location does not start.
 
     if System.get_env("EMAIL_PROVIDER") == "resend" do
       config :core, Stacks.Email.Mailer,

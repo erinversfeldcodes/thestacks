@@ -123,42 +123,93 @@ defmodule Stacks.Storage.SelectionTest do
     end
   end
 
-  describe "the selector is actually CALLED" do
-    # ⛔ THE CASE THAT WAS MISSING, AND ITS ABSENCE IS WHY EVERY CASE ABOVE PASSED
-    # WHILE THE SELECTOR DECIDED NOTHING. `choose/2` was tested thoroughly and
-    # invoked by no production code: `config/config.exs` set `:storage` at COMPILE
-    # time and `config/runtime.exs` was a single `import Config`. So R2 "had never
-    # been selected in any deployed environment" — not because it was configured
-    # wrongly, but because nothing selected anything.
+  describe "the selector's decision reaches a released server" do
+    # ⛔ THE FILE THIS READS IS THE POINT, AND I READ THE WRONG ONE FIRST.
+    # This project is an umbrella (`apps_path: "apps"` in the root `mix.exs`), so
+    # the runtime config a release evaluates is the ROOT `config/runtime.exs`.
+    # `apps/core/config/runtime.exs` is not loaded in an umbrella build, which is
+    # why it is a bare `import Config`.
     #
-    # ⚠️ A unit test cannot run `runtime.exs`, so this asserts the WIRING exists by
-    # reading the file. That is weaker than executing it, and it is the strongest
-    # thing available at this layer; the executing proof is a deployed boot, where
-    # the node either names its backend or refuses to start.
-    test "runtime.exs asks the selector, rather than leaving the compile-time default" do
-      runtime = File.read!("config/runtime.exs")
+    # ⚠️ An earlier version of this test read `"config/runtime.exs"` relative to
+    # the test's working directory — `apps/core` — and so asserted facts about a
+    # file no deployed node ever evaluates. It passed. The path is resolved from
+    # `__DIR__` now, and the existence assertion below fails loudly rather than
+    # silently reading a decoy.
+    @runtime_config Path.expand("../../../../../config/runtime.exs", __DIR__)
 
+    setup do
+      assert File.exists?(@runtime_config),
+             "expected the umbrella's root runtime config at #{@runtime_config}; " <>
+               "if it moved, update this path — these assertions are worthless " <>
+               "against any other file"
+
+      source = File.read!(@runtime_config)
+
+      {:ok, runtime: source, code: strip_comments(source)}
+    end
+
+    # ⛔ AN ABSENCE ASSERTION MUST NOT READ THE PROSE THAT EXPLAINS THE ABSENCE.
+    # The comment above this block quotes the banned line verbatim, so a scan of
+    # the raw source matches its own documentation and fails forever — which is
+    # exactly what happened on the first run of the test below. This is a
+    # recurring shape in this repository, not a one-off slip.
+    #
+    # ⚠️ Full-line comments and whitespace-preceded trailing comments only, and
+    # `\#{` is left alone so string interpolation is never mistaken for a comment.
+    defp strip_comments(source) do
+      source
+      |> String.split("\n")
+      |> Enum.map_join("\n", fn line ->
+        if Regex.match?(~r/^\s*#/, line) do
+          ""
+        else
+          Regex.replace(~r/\s#(?!\{).*$/, line, "")
+        end
+      end)
+    end
+
+    test "it is asked, rather than the backend being a compile-time default", %{runtime: runtime} do
       assert runtime =~ "Stacks.Storage.Selection.choose",
-             "config/runtime.exs does not call the selector, so :storage keeps whatever " <>
-               "config.exs set at compile time and no deployed node ever chooses"
+             "the release's runtime config must ask the selector; otherwise :storage keeps " <>
+               "whatever was set at compile time and no deployed node ever chooses"
 
       assert runtime =~ "config_env() == :prod",
-             "the selector must be told whether this is a deployed build — it is the " <>
-               "argument that decides whether a missing declaration is a default or a refusal"
+             "the selector must be told whether this is a deployed build — that argument is " <>
+               "what decides whether a missing declaration is a default or a refusal"
 
-      # ⛔ The refusal must be a raise, not a fallback. A fallback here is the
-      # original defect: uploads on a container filesystem that does not survive a
-      # restart, with a missing secret looking exactly like a working stack.
       assert runtime =~ ~r/\{:error, [a-z_]+\} ->(.|\n)*raise/,
              "an unanswerable storage declaration must stop the boot, not fall back"
     end
 
-    test "the test environment is exempt, or every suite would bypass the mock roster" do
-      runtime = File.read!("config/runtime.exs")
+    # ⛔ THE REGRESSION THIS CLOSES, MEASURED RATHER THAN IMAGINED. A line inside
+    # the released-server branch read `config :core, upload_dir: "/tmp/uploads"`
+    # and ran ~190 lines AFTER the selector, discarding the directory the selector
+    # had derived from `UPLOAD_DIR`. On a preview the declaration was
+    # `/app/uploads` and the booting node announced `/tmp/uploads`.
+    #
+    # ⚖️ Asserted as "nothing sets it to a literal", not "the file does not say
+    # /tmp/uploads": the defect is a hardcoded destination overriding a declared
+    # one, and it would be the same defect at any other path.
+    test "nothing overrides the directory the selector derived", %{runtime: runtime, code: code} do
+      # ⛔ ANTI-VACUITY FOR THE STRIPPER ITSELF, both directions. If it removed
+      # nothing the scan reads prose again; if it removed everything the scan
+      # passes against an empty string. Either way the assertion below would be
+      # worthless, and worthless in a way that looks green.
+      assert String.length(code) < String.length(runtime),
+             "the comment stripper removed nothing — the scan below is reading prose"
 
-      assert runtime =~ "config_env() != :test",
-             "runtime config is applied AFTER config/test.exs, so without this guard " <>
-               ":storage would be overwritten and Stacks.Storage.Mock silently bypassed"
+      assert code =~ "Stacks.Storage.Selection.choose",
+             "the comment stripper ate the code it was meant to preserve"
+
+      literal_assignments =
+        Regex.scan(~r/config\s+:core,\s*upload_dir:\s*"([^"]+)"/, code)
+
+      assert literal_assignments == [],
+             "the upload directory is being set to a hardcoded path " <>
+               "(#{inspect(Enum.map(literal_assignments, &List.last/1))}), which overrides " <>
+               "whatever UPLOAD_DIR declared. The selector refuses to boot a deployed build " <>
+               "that names no durable location — a literal here throws that guarantee away " <>
+               "and sends the bytes somewhere nobody promised to keep."
     end
   end
 end
