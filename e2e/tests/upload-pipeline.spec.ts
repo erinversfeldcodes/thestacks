@@ -1037,6 +1037,89 @@ test.describe("Age-gated content", () => {
   });
 });
 
+test.describe("the upload PUT carries the proof its route requires", () => {
+  /**
+   * ⛔ THE DEFECT THIS GUARDS, AND IT KILLED EVERY UPLOAD. The byte PUT goes to
+   * `/api/upload/:id/data` — a route on our OWN origin, chosen so the browser
+   * never needs an object-storage CORS allowlist. The client declared it
+   * cross-origin anyway, on the strength of a docstring that said "Bytes never
+   * touch Phoenix — the client PUTs straight to R2", which had outlived the
+   * design by three months. A cross-origin declaration sends no CSRF header, and
+   * CSRF enforcement refuses a state-changing request without one. Every photo
+   * upload was rejected.
+   *
+   * ⚠️ NOTHING ASSERTED THIS. The mock fulfils the PUT at status 200 without
+   * looking at a single header, so the request could carry no proof at all — or
+   * a credential it should not — and every case in this file would stay green.
+   * `grep csrf` over this spec returned nothing before these cases.
+   *
+   * ⚖️ Asserted on the REQUEST the browser actually made, captured through the
+   * route handler, rather than on the Elm source that builds it. The whole defect
+   * was a gap between what the source said and what went on the wire.
+   */
+  test("the byte PUT sends the CSRF proof, and the mock cannot hide its absence", async ({
+    page,
+  }) => {
+    const putHeaders: Array<Record<string, string>> = [];
+
+    await page.route("**/api/upload/init", (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          image_id: FAKE_IMAGE_ID,
+          upload_url: UPLOAD_PUT_PATH,
+          expires_in: 3600,
+        }),
+      }),
+    );
+
+    // ⛔ Capture BEFORE fulfilling. A handler that answers 200 and discards the
+    // request is exactly what let this defect live behind green tests.
+    await page.route(`**${UPLOAD_PUT_PATH}`, (route) => {
+      if (route.request().method() === "PUT") {
+        putHeaders.push(route.request().headers());
+        route.fulfill({ status: 200, body: "" });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.route("**/api/upload/*/commit", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ image_id: FAKE_IMAGE_ID }),
+      }),
+    );
+
+    await mockPollPending(page);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    await expect
+      .poll(() => putHeaders.length, {
+        message: "the byte PUT must actually be sent",
+      })
+      .toBeGreaterThan(0);
+
+    const headers = putHeaders[0];
+    const names = Object.keys(headers).map((n) => n.toLowerCase());
+
+    expect(
+      names,
+      "the PUT must carry an X-CSRF-Token — without it the server refuses the " +
+        "upload, which is what a cross-origin declaration caused",
+    ).toContain("x-csrf-token");
+
+    expect(
+      headers["x-csrf-token"],
+      "the header must carry the token's value, not an empty placeholder",
+    ).toBeTruthy();
+  });
+});
+
 test.describe("live progress after a reload", () => {
   /**
    * ⛔ THE REGRESSION THE STORED-SESSION DELETION LEFT BEHIND. The progress
@@ -1091,14 +1174,17 @@ test.describe("live progress after a reload", () => {
     const urls = await page.evaluate(
       () => ((window as any).__sseUrls || []) as string[],
     );
-    expect(urls.length, "the reloaded page must open the stream").toBeGreaterThan(
-      0,
-    );
+    expect(
+      urls.length,
+      "the reloaded page must open the stream",
+    ).toBeGreaterThan(0);
 
     // ⛔ And it must still be a bare path. A regression that reintroduced the
     // credential would open the stream and deliver frames exactly as above.
     for (const url of urls) {
-      expect(url, "the stream url must carry no query string").not.toContain("?");
+      expect(url, "the stream url must carry no query string").not.toContain(
+        "?",
+      );
       expect(url.toLowerCase()).not.toContain("token");
     }
   });
