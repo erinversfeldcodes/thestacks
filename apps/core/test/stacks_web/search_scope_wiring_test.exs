@@ -50,11 +50,19 @@ defmodule StacksWeb.SearchScopeWiringTest do
           |> json_response(200)
         end)
 
-      # ⛔ ANTI-VACUITY. A 200 carrying nothing would pass while proving the
-      # opposite of the point: the labels are produced INSIDE the scoped block,
-      # so an empty result is indistinguishable from a controller that never ran
-      # the lookup at all.
-      assert is_map(body)
+      # ⛔ ANTI-VACUITY, asserted on the response SHAPE rather than its contents.
+      # A 200 carrying `%{}` would otherwise pass while proving the opposite of
+      # the point: the labels are produced INSIDE the scoped block, so an empty
+      # body is indistinguishable from a controller that never ran the lookup.
+      #
+      # ⚖️ Shape, not hits, is the line that avoids coupling to search ranking:
+      # echoing the query proves the search path executed, and the two lists
+      # prove it assembled a result — neither says WHICH books matched, which is
+      # the part that would make this test brittle for no gain.
+      assert body["query"] == book.title
+      assert is_integer(body["count"])
+      assert is_list(body["platform_hits"])
+      assert is_list(body["collection"])
     end
 
     test "an anonymous search succeeds too, so the fix did not trade one caller for the other" do
@@ -70,7 +78,9 @@ defmodule StacksWeb.SearchScopeWiringTest do
           |> json_response(200)
         end)
 
-      assert is_map(body)
+      assert body["query"] == book.title
+      assert is_integer(body["count"])
+      assert is_list(body["platform_hits"])
     end
   end
 end
