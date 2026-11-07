@@ -10,6 +10,7 @@ module Api exposing
     , AdminSession
     , AdminSource
     , AdminSourcesResponse
+    , AssociationVerdict(..)
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
@@ -103,6 +104,7 @@ module Api exposing
     , adminSourcesResponseDecoder
     , adminVerifyMfa
     , approveSourceRequest
+    , associationVerdictRequest
     , auditLogResponseDecoder
     , authHeaders
     , authResponseDecoder
@@ -116,20 +118,20 @@ module Api exposing
     , blockedUsersRequest
     , blockedUsersResponseDecoder
     , blogPostPageDecoder
+    , blogPostRequest
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
     , checkInviteRequest
     , commitUploadDecoder
     , commitUploadRequest
     , completeOnboardingStepRequest
-    , confirmAssociation
     , confirmBookRequest
     , confirmResponseDecoder
     , confirmResponseToResult
     , cookieSession
     , createAdminInviteRequest
-    , createBlogPost
-    , createComment
+    , createBlogPostRequest
+    , createCommentRequest
     , createGoodreadsImport
     , createGroupRequest
     , createListingRequest
@@ -137,9 +139,8 @@ module Api exposing
     , credentials
     , decodeUploadInit
     , deleteAccountRequest
-    , deleteComment
+    , deleteCommentRequest
     , deleteShelfRequest
-    , dismissAssociation
     , encodeProfileBody
     , fetchSyndicationExport
     , foldProgress
@@ -147,24 +148,22 @@ module Api exposing
     , getAccountRequest
     , getAuditLogRequest
     , getAuthorEventsRequest
-    , getBlogPost
     , getBlogPostsRequest
     , getBookRequest
     , getBookshelfRequest
     , getCatalogueRequest
-    , getGroup
-    , getGroupFeed
-    , getGroupMembers
     , getIdentity
     , getInferencesRequest
     , getListingsRequest
-    , getPostComments
     , getProfileRequest
     , getProfileShelfRequest
     , getTransparencyMetricsRequest
     , getUploadInbox
     , getUserPlacementsRequest
+    , groupFeedRequest
     , groupMemberDecoder
+    , groupMembersRequest
+    , groupRequest
     , identityDecoder
     , importRefusal
     , importRequest
@@ -178,10 +177,10 @@ module Api exposing
     , invitationAnswerRequest
     , inviteErrorDecoder
     , inviteStatusDecoder
-    , inviteToGroup
+    , inviteToGroupRequest
     , isNotFound
     , isUnauthorized
-    , leaveGroup
+    , leaveGroupRequest
     , libraryImportDecoder
     , listSyndications
     , listingTransitionRequest
@@ -208,6 +207,7 @@ module Api exposing
     , placementShelfDecoder
     , placementsMineDecoder
     , planHeaders
+    , postCommentsRequest
     , privacySettingsDecoder
     , privacySettingsRequest
     , profileSavedDecoder
@@ -216,7 +216,7 @@ module Api exposing
     , progressResponseToResult
     , publicProfileDecoder
     , publicProfileSummaryDecoder
-    , publishBlogPost
+    , publishBlogPostRequest
     , putUploadBytes
     , recordSyndication
     , refresh
@@ -233,7 +233,7 @@ module Api exposing
     , removalRequestDecoder
     , removalRequestsRequest
     , removeBookRequest
-    , removeGroupMember
+    , removeGroupMemberRequest
     , reorderShelvesRequest
     , requestExportRequest
     , requestHeaders
@@ -269,7 +269,7 @@ module Api exposing
     , streamEventDecoder
     , syndicationDecoder
     , transparencyMetricsDecoder
-    , updateBlogPost
+    , updateBlogPostRequest
     , updateLocationRequest
     , updateNotificationsRequest
     , updatePasswordRequest
@@ -303,10 +303,8 @@ import Stacks.Api.V1.BookshelfResponses as ProtoBookshelfResp
 import Stacks.Api.V1.Requests as Requests
 import Stacks.Api.V1.SourceResponses as ProtoSourceResp
 import Stacks.Common.V1.Placement as ProtoPlacement
-import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDecoder, blogPostSummaryDecoder, commentDecoder)
+import Types.BlogPost exposing (BlogPostSummary, blogPostSummaryDecoder)
 import Types.Book exposing (Book, Edition, bookDecoder)
-import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
-import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
 import Types.Placement exposing (Placement, ReadingStatus, bookPlacementDecoder, parseReadingStatus, placementRefDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Url.Builder
@@ -4126,76 +4124,48 @@ getBlogPostsRequest maybeCursor =
     }
 
 
-{-| GET /api/blog/posts/:id — fetch a single blog post.
+{-| `GET /api/blog/posts/:id` — one blog post, as data.
 -}
-getBlogPost :
-    String
-    -> Maybe Credentials
-    -> (Result Http.Error BlogPost -> msg)
-    -> Cmd msg
-getBlogPost postId maybeToken toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Optional maybeToken)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "post" blogPostDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+blogPostRequest : String -> RequestSpec
+blogPostRequest postId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "blog", "posts", postId ] []
+    , body = Nothing
+    }
 
 
-{-| POST /api/blog/posts — create a new blog post. Returns the new post ID.
+{-| `POST /api/blog/posts` — writing a new post, as data.
 -}
-createBlogPost :
-    { title : String, body : String, visibility : String }
-    -> Credentials
-    -> (Result Http.Error String -> msg)
-    -> Cmd msg
-createBlogPost postData token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/blog/posts"
-        , body =
-            Http.jsonBody
-                (Requests.encodeCreateBlogPostRequest
-                    { title = postData.title
-                    , body = postData.body
-                    , visibility = postData.visibility
-                    }
-                )
-        , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+createBlogPostRequest : { title : String, body : String, visibility : String } -> RequestSpec
+createBlogPostRequest postData =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "blog", "posts" ] []
+    , body =
+        Just
+            (Requests.encodeCreateBlogPostRequest
+                { title = postData.title
+                , body = postData.body
+                , visibility = postData.visibility
+                }
+            )
+    }
 
 
-{-| PUT /api/blog/posts/:id — update an existing blog post. Returns the post ID.
+{-| `PUT /api/blog/posts/:id` — revising a post, as data.
 -}
-updateBlogPost :
-    String
-    -> { title : String, body : String, visibility : String }
-    -> Credentials
-    -> (Result Http.Error String -> msg)
-    -> Cmd msg
-updateBlogPost postId postData token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateBlogPostRequest
-                    { title = postData.title
-                    , body = postData.body
-                    , visibility = postData.visibility
-                    }
-                )
-        , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updateBlogPostRequest : String -> { title : String, body : String, visibility : String } -> RequestSpec
+updateBlogPostRequest postId postData =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "blog", "posts", postId ] []
+    , body =
+        Just
+            (Requests.encodeUpdateBlogPostRequest
+                { title = postData.title
+                , body = postData.body
+                , visibility = postData.visibility
+                }
+            )
+    }
 
 
 {-| The paste-ready copy of a post for Substack's editor.
@@ -4345,135 +4315,93 @@ setPostSyndicated token postId syndicated toMsg =
         }
 
 
-{-| POST /api/blog/posts/:id/publish — publish a blog post.
+{-| `POST /api/blog/posts/:id/publish` — making a post visible, as data.
 -}
-publishBlogPost :
-    String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-publishBlogPost postId token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/publish"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+publishBlogPostRequest : String -> RequestSpec
+publishBlogPostRequest postId =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "blog", "posts", postId, "publish" ] []
+    , body = Nothing
+    }
 
 
-{-| PUT /api/blog/posts/:post\_id/associations/:id/confirm — confirm a book association.
+{-| `PUT /api/blog/posts/:post/associations/:id/:verdict` — the author's answer
+to a suggested book association, as data.
+
+⚖️ ONE spec where there were two, differing only in the final segment.
+
 -}
-confirmAssociation :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-confirmAssociation postId associationId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/confirm"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+associationVerdictRequest : String -> String -> AssociationVerdict -> RequestSpec
+associationVerdictRequest postId associationId verdict =
+    { method = "PUT"
+    , url =
+        Api.Url.path
+            [ "api", "blog", "posts", postId, "associations", associationId, associationVerdictSegment verdict ]
+            []
+    , body = Nothing
+    }
 
 
-{-| PUT /api/blog/posts/:post\_id/associations/:id/dismiss — dismiss a book association.
+{-| What the author decided about a suggested association.
 -}
-dismissAssociation :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-dismissAssociation postId associationId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/dismiss"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+type AssociationVerdict
+    = ConfirmAssociation
+    | DismissAssociation
 
 
-{-| GET /api/posts/:post\_id/comments — fetch comments for a post.
+associationVerdictSegment : AssociationVerdict -> String
+associationVerdictSegment verdict =
+    case verdict of
+        ConfirmAssociation ->
+            "confirm"
+
+        DismissAssociation ->
+            "dismiss"
+
+
+{-| `GET /api/posts/:id/comments` — a post's comment thread, as data.
 -}
-getPostComments :
-    String
-    -> Maybe Credentials
-    -> (Result Http.Error (List Comment) -> msg)
-    -> Cmd msg
-getPostComments postId maybeToken toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Optional maybeToken)
-        , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "comments" (Decode.list commentDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+postCommentsRequest : String -> RequestSpec
+postCommentsRequest postId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "posts", postId, "comments" ] []
+    , body = Nothing
+    }
 
 
-{-| POST /api/posts/:post\_id/comments — create a comment or reply.
+{-| `POST /api/posts/:id/comments` — writing a comment, as data.
+
+⚠️ `parent_id` is ABSENT rather than null for a top-level comment, which is
+how the builder did it and is deliberate: an absent key and a null mean
+different things to the server, and a null here would read as "reply to
+nothing".
+
 -}
-createComment :
-    String
-    -> String
-    -> Maybe String
-    -> Credentials
-    -> (Result Http.Error Comment -> msg)
-    -> Cmd msg
-createComment postId body maybeParentId token toMsg =
-    let
-        parentField =
-            case maybeParentId of
-                Just pid ->
-                    [ ( "parent_id", Encode.string pid ) ]
-
-                Nothing ->
-                    []
-    in
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    ([ ( "body", Encode.string body ) ] ++ parentField)
+createCommentRequest : String -> String -> Maybe String -> RequestSpec
+createCommentRequest postId body maybeParentId =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "posts", postId, "comments" ] []
+    , body =
+        Just
+            (Encode.object
+                ([ ( "body", Encode.string body ) ]
+                    ++ (maybeParentId
+                            |> Maybe.map (\pid -> [ ( "parent_id", Encode.string pid ) ])
+                            |> Maybe.withDefault []
+                       )
                 )
-        , expect = Http.expectJson toMsg (Decode.field "comment" commentDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+            )
+    }
 
 
-{-| DELETE /api/comments/:id — delete a comment.
+{-| `DELETE /api/comments/:id` — removing a comment, as data.
 -}
-deleteComment :
-    String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-deleteComment commentId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = httpHeaders "DELETE" (Session token)
-        , url = baseUrl ++ "/api/comments/" ++ commentId
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+deleteCommentRequest : String -> RequestSpec
+deleteCommentRequest commentId =
+    { method = "DELETE"
+    , url = Api.Url.path [ "api", "comments", commentId ] []
+    , body = Nothing
+    }
 
 
 {-| `PUT /api/settings/profile_visibility` — who may see this reader's profile, as data.
@@ -5882,83 +5810,47 @@ createGroupRequest name =
     }
 
 
-getGroup :
-    String
-    -> Credentials
-    -> (Result Http.Error Group -> msg)
-    -> Cmd msg
-getGroup groupId token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `GET /api/groups/:id` — one reading group, as data.
+-}
+groupRequest : String -> RequestSpec
+groupRequest groupId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "groups", groupId ] []
+    , body = Nothing
+    }
 
 
-getGroupFeed :
-    String
-    -> Credentials
-    -> Maybe String
-    -> (Result Http.Error FeedResponse -> msg)
-    -> Cmd msg
-getGroupFeed groupId token maybeCursor toMsg =
-    let
-        -- ⚠️ Only the QUERY is let-bound. The url below leads with a literal
-        -- path, which is what makes it same-origin by CONSTRUCTION rather than
-        -- by inspection: once a url starts with `"/api/…"`, nothing appended
-        -- later can change its origin.
-        --
-        -- ⛔ It used to bind the whole path and write `url = baseUrl ++ path`.
-        -- That reads as same-origin and is not provably so — `baseUrl` is `""`,
-        -- so `baseUrl ++ path` IS `path`, and a variable there could hold any
-        -- absolute URL. `check-credential-origin.sh` accepted it because its
-        -- rule was "leads with `baseUrl`", which guaranteed nothing; the rule is
-        -- now "leads with `baseUrl ++ "/…"`", and this was the one site in the
-        -- module that relied on the weaker version.
-        query =
-            case maybeCursor of
-                Nothing ->
-                    ""
+{-| `GET /api/groups/:id/feed` — one group's feed page, as data.
 
-                Just cursor ->
-                    "?before=" ++ cursor
-    in
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/feed" ++ query
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg feedResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+⚖️ The cursor is a real query PARAMETER now. The builder this replaces
+assembled `"?before=" ++ cursor` by hand into the url string — and its own
+comment records that this was _the one site in the module_ relying on the
+weaker same-origin rule. As a spec the question does not arise: the url is an
+`Api.Url.SameOriginUrl` and the cursor is an encoded parameter.
+
+-}
+groupFeedRequest : String -> Maybe String -> RequestSpec
+groupFeedRequest groupId maybeCursor =
+    { method = "GET"
+    , url =
+        Api.Url.path [ "api", "groups", groupId, "feed" ]
+            (maybeCursor
+                |> Maybe.map (Url.Builder.string "before")
+                |> Maybe.map List.singleton
+                |> Maybe.withDefault []
+            )
+    , body = Nothing
+    }
 
 
-inviteToGroup :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error GroupInvitation -> msg)
-    -> Cmd msg
-inviteToGroup groupId identifier token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "identifier", Encode.string identifier )
-                    ]
-                )
-        , expect = Http.expectJson toMsg (Decode.field "invitation" groupInvitationDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `POST /api/groups/:id/invitations` — inviting someone to a group, as data.
+-}
+inviteToGroupRequest : String -> String -> RequestSpec
+inviteToGroupRequest groupId identifier =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "groups", groupId, "invitations" ] []
+    , body = Just (Encode.object [ ( "identifier", Encode.string identifier ) ])
+    }
 
 
 {-| `POST /api/groups/:group/invitations/:id/:answer` — answering a group
@@ -6017,61 +5909,34 @@ groupMemberDecoder =
         (Decode.field "display_name" Decode.string)
 
 
-{-| `GET /api/groups/:id/members` — who is in the group.
+{-| `GET /api/groups/:id/members` — who is in a group, as data.
 -}
-getGroupMembers :
-    String
-    -> Credentials
-    -> (Result Http.Error (List GroupMember) -> msg)
-    -> Cmd msg
-getGroupMembers groupId token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "members" (Decode.list groupMemberDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+groupMembersRequest : String -> RequestSpec
+groupMembersRequest groupId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "groups", groupId, "members" ] []
+    , body = Nothing
+    }
 
 
-{-| `DELETE /api/groups/:id/members/:user_id` — the owner removes someone.
+{-| `DELETE /api/groups/:id/members/:user` — removing someone from a group, as data.
 
-The endpoint shipped with groups and had no client, so a group owner could not
-remove a member from the app at all; only leaving was wired.
+⚠️ BOTH ids are percent-encoded, where the old builder concatenated them.
 
 -}
-removeGroupMember :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-removeGroupMember groupId memberUserId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = httpHeaders "DELETE" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/members/" ++ memberUserId
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+removeGroupMemberRequest : String -> String -> RequestSpec
+removeGroupMemberRequest groupId memberUserId =
+    { method = "DELETE"
+    , url = Api.Url.path [ "api", "groups", groupId, "members", memberUserId ] []
+    , body = Nothing
+    }
 
 
-leaveGroup :
-    String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-leaveGroup groupId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = httpHeaders "DELETE" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/leave"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `DELETE /api/groups/:id/leave` — leaving a group, as data.
+-}
+leaveGroupRequest : String -> RequestSpec
+leaveGroupRequest groupId =
+    { method = "DELETE"
+    , url = Api.Url.path [ "api", "groups", groupId, "leave" ] []
+    , body = Nothing
+    }

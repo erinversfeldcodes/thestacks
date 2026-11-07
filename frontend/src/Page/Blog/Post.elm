@@ -11,10 +11,12 @@ import Api
 import Components.BlockUserModal as BlockModal
 import Components.BookAssociations as BookAssociations
 import Components.Syndication as Syndication
+import Effect
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
 import Html.Attributes exposing (class, disabled, href, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route(..))
 import Types.BlogPost exposing (BlogPost, Comment, commentAuthorId, commentBody, commentCreatedAt, commentId, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
@@ -37,6 +39,7 @@ type alias Model =
 
 type Msg
     = PostLoaded (Result Http.Error BlogPost)
+    | SessionExpiryDetected
     | ConfirmAssociation String
     | DismissAssociation String
     | AssociationActionCompleted (Result Http.Error ())
@@ -76,8 +79,21 @@ init postId maybeToken currentUserId origin =
       , syndication = Nothing
       }
     , Cmd.batch
-        [ Api.getBlogPost postId maybeToken PostLoaded
-        , Api.getPostComments postId maybeToken CommentsLoaded
+        [ Effect.perform
+            (Effect.public (Api.blogPostRequest postId)
+                maybeToken
+                Nothing
+                (Api.resolveJson (Decode.field "post" Types.BlogPost.blogPostDecoder) >> PostLoaded)
+            )
+        , Effect.perform
+            (Effect.public (Api.postCommentsRequest postId)
+                maybeToken
+                Nothing
+                (Api.resolveJson
+                    (Decode.field "comments" (Decode.list Types.BlogPost.commentDecoder))
+                    >> CommentsLoaded
+                )
+            )
         ]
     )
 
@@ -85,6 +101,9 @@ init postId maybeToken currentUserId origin =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         PostLoaded result ->
             case result of
                 Ok post ->
@@ -117,7 +136,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionResult = Loading }
-                    , Api.confirmAssociation model.postId associationId token AssociationActionCompleted
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.associationVerdictRequest model.postId associationId Api.ConfirmAssociation)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> AssociationActionCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -128,7 +154,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionResult = Loading }
-                    , Api.dismissAssociation model.postId associationId token AssociationActionCompleted
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.associationVerdictRequest model.postId associationId Api.DismissAssociation)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> AssociationActionCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -139,7 +172,15 @@ update msg model maybeToken =
             case result of
                 Ok _ ->
                     ( { model | actionResult = Success () }
-                    , Api.getBlogPost model.postId maybeToken PostLoaded
+                    , Effect.perform
+                        (Effect.public (Api.blogPostRequest model.postId)
+                            maybeToken
+                            Nothing
+                            (Api.resolveJson
+                                (Decode.field "post" Types.BlogPost.blogPostDecoder)
+                                >> PostLoaded
+                            )
+                        )
                     , NoOut
                     )
 
@@ -184,7 +225,17 @@ update msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         ( { model | commentSubmitting = True }
-                        , Api.createComment model.postId model.commentDraft Nothing token CommentSubmitted
+                        , Effect.perform
+                            (Effect.authed
+                                (Api.createCommentRequest model.postId model.commentDraft Nothing)
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse =
+                                    Api.resolveJson
+                                        (Decode.field "comment" Types.BlogPost.commentDecoder)
+                                        >> CommentSubmitted
+                                }
+                            )
                         , NoOut
                         )
 
@@ -201,7 +252,17 @@ update msg model maybeToken =
                         case maybeToken of
                             Just token ->
                                 ( { model | commentSubmitting = True }
-                                , Api.createComment model.postId draft.body (Just parentId) token CommentSubmitted
+                                , Effect.perform
+                                    (Effect.authed
+                                        (Api.createCommentRequest model.postId draft.body (Just parentId))
+                                        token
+                                        { onExpired = SessionExpiryDetected
+                                        , onResponse =
+                                            Api.resolveJson
+                                                (Decode.field "comment" Types.BlogPost.commentDecoder)
+                                                >> CommentSubmitted
+                                        }
+                                    )
                                 , NoOut
                                 )
 
@@ -215,7 +276,15 @@ update msg model maybeToken =
             case result of
                 Ok _ ->
                     ( { model | commentSubmitting = False, commentDraft = "", replyDraft = Nothing }
-                    , Api.getPostComments model.postId maybeToken CommentsLoaded
+                    , Effect.perform
+                        (Effect.public (Api.postCommentsRequest model.postId)
+                            maybeToken
+                            Nothing
+                            (Api.resolveJson
+                                (Decode.field "comments" (Decode.list Types.BlogPost.commentDecoder))
+                                >> CommentsLoaded
+                            )
+                        )
                     , NoOut
                     )
 
@@ -229,7 +298,16 @@ update msg model maybeToken =
         DeleteComment commentId ->
             case maybeToken of
                 Just token ->
-                    ( model, Api.deleteComment commentId token CommentDeleted, NoOut )
+                    ( model
+                    , Effect.perform
+                        (Effect.authed (Api.deleteCommentRequest commentId)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> CommentDeleted
+                            }
+                        )
+                    , NoOut
+                    )
 
                 Nothing ->
                     ( model, Cmd.none, NoOut )
@@ -237,7 +315,18 @@ update msg model maybeToken =
         CommentDeleted result ->
             case result of
                 Ok _ ->
-                    ( model, Api.getPostComments model.postId maybeToken CommentsLoaded, NoOut )
+                    ( model
+                    , Effect.perform
+                        (Effect.public (Api.postCommentsRequest model.postId)
+                            maybeToken
+                            Nothing
+                            (Api.resolveJson
+                                (Decode.field "comments" (Decode.list Types.BlogPost.commentDecoder))
+                                >> CommentsLoaded
+                            )
+                        )
+                    , NoOut
+                    )
 
                 Err err ->
                     if Api.isUnauthorized err then
@@ -264,7 +353,15 @@ update msg model maybeToken =
                             ( { model | blockModal = Just newBlockModal }
                             , Cmd.batch
                                 [ Cmd.map BlockModalMsg subCmd
-                                , Api.getBlogPost model.postId maybeToken PostLoaded
+                                , Effect.perform
+                                    (Effect.public (Api.blogPostRequest model.postId)
+                                        maybeToken
+                                        Nothing
+                                        (Api.resolveJson
+                                            (Decode.field "post" Types.BlogPost.blogPostDecoder)
+                                            >> PostLoaded
+                                        )
+                                    )
                                 ]
                             , NoOut
                             )

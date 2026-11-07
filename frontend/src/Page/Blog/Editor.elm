@@ -10,10 +10,12 @@ module Page.Blog.Editor exposing
 
 import Api
 import Components.SaveButton as SaveButton
+import Effect
 import Html exposing (Html, div, h1, label, option, p, select, text, textarea)
 import Html.Attributes exposing (class, placeholder, rows, selected, value)
 import Html.Events exposing (onInput)
 import Http
+import Json.Decode as Decode
 import Types.BlogPost exposing (BlogPost, Visibility(..), visibilityToString)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -36,6 +38,7 @@ type alias Model =
 
 type Msg
     = SetTitle String
+    | SessionExpiryDetected
     | SetBody String
     | SetVisibility String
     | SaveDraft
@@ -66,7 +69,15 @@ init mode maybeToken =
         cmd =
             case mode of
                 Edit postId ->
-                    Api.getBlogPost postId maybeToken PostLoaded
+                    Effect.perform
+                        (Effect.public (Api.blogPostRequest postId)
+                            maybeToken
+                            Nothing
+                            (Api.resolveJson
+                                (Decode.field "post" Types.BlogPost.blogPostDecoder)
+                                >> PostLoaded
+                            )
+                        )
 
                 New ->
                     Cmd.none
@@ -84,6 +95,9 @@ init mode maybeToken =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         SetTitle val ->
             ( { model | title = val, saving = NotAsked }, Cmd.none, NoOut )
 
@@ -121,10 +135,28 @@ update msg model maybeToken =
                         cmd =
                             case model.mode of
                                 New ->
-                                    Api.createBlogPost postData token SaveCompleted
+                                    Effect.perform
+                                        (Effect.authed (Api.createBlogPostRequest postData)
+                                            token
+                                            { onExpired = SessionExpiryDetected
+                                            , onResponse =
+                                                Api.resolveJson
+                                                    (Decode.at [ "post", "id" ] Decode.string)
+                                                    >> SaveCompleted
+                                            }
+                                        )
 
                                 Edit postId ->
-                                    Api.updateBlogPost postId postData token SaveCompleted
+                                    Effect.perform
+                                        (Effect.authed (Api.updateBlogPostRequest postId postData)
+                                            token
+                                            { onExpired = SessionExpiryDetected
+                                            , onResponse =
+                                                Api.resolveJson
+                                                    (Decode.at [ "post", "id" ] Decode.string)
+                                                    >> SaveCompleted
+                                            }
+                                        )
                     in
                     ( { model | saving = Loading }, cmd, NoOut )
 
@@ -144,13 +176,29 @@ update msg model maybeToken =
                     case model.mode of
                         Edit postId ->
                             ( { model | publishing = Loading, saving = Loading }
-                            , Api.updateBlogPost postId postData token SaveCompleted
+                            , Effect.perform
+                                (Effect.authed (Api.updateBlogPostRequest postId postData)
+                                    token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResponse =
+                                        Api.resolveJson (Decode.at [ "post", "id" ] Decode.string)
+                                            >> SaveCompleted
+                                    }
+                                )
                             , NoOut
                             )
 
                         New ->
                             ( { model | publishing = Loading, saving = Loading }
-                            , Api.createBlogPost postData token SaveCompleted
+                            , Effect.perform
+                                (Effect.authed (Api.createBlogPostRequest postData)
+                                    token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResponse =
+                                        Api.resolveJson (Decode.at [ "post", "id" ] Decode.string)
+                                            >> SaveCompleted
+                                    }
+                                )
                             , NoOut
                             )
 
@@ -181,7 +229,14 @@ update msg model maybeToken =
                             if model.publishing == Loading then
                                 case maybeToken of
                                     Just token ->
-                                        Api.publishBlogPost postId token PublishCompleted
+                                        Effect.perform
+                                            (Effect.authed (Api.publishBlogPostRequest postId)
+                                                token
+                                                { onExpired = SessionExpiryDetected
+                                                , onResponse =
+                                                    Api.resolveWhatever >> PublishCompleted
+                                                }
+                                            )
 
                                     Nothing ->
                                         Cmd.none
