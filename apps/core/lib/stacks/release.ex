@@ -14,6 +14,7 @@ defmodule Stacks.Release do
   alias Ecto.Adapters.SQL
   alias Stacks.Accounts
   alias Stacks.Accounts.User
+  alias Stacks.Audit
   alias Stacks.Costs.PlatformCost
   alias Stacks.GDPR.Deletion
   alias Stacks.Workers.AuditRetentionJob
@@ -420,6 +421,81 @@ defmodule Stacks.Release do
       raise "refusing to seed: STACKS_E2E_TEST_HELPERS is not \"1\", " <>
               "so this node is not a preview stack. Seeding here would write " <>
               "dev fixtures into whatever database this node is pointed at."
+    end
+  end
+
+  @doc """
+      Restores a platform operator's own access when session transport fails.
+
+      ⛔ **MOVING THE SESSION FROM A BEARER TOKEN TO AN `HttpOnly` COOKIE CAN LOCK
+      THE OWNER OUT OF PRODUCTION**, and until now nothing could undo it. A cookie
+      that is refused looks exactly like being signed out: there is no token to
+      inspect and no header to retry with. The only operator tasks were the GDPR
+      erase and lookup, neither of which touches sessions.
+
+      Revokes every live session family for the operator and deletes their
+      `guardian_tokens` rows, so the next sign-in starts clean. It does NOT mint a
+      session: a task that handed out a credential over `rpc` would be a far more
+      attractive target than the lockout it fixes, and the operator can sign in
+      normally once the stale state is gone.
+
+      ⚠️ **Prod-guarded by `STACKS_OPERATOR_RECOVERY`, which is NOT a deployed
+      env.** The pattern `seed_live/0` uses — a flag the node is deployed with —
+      is wrong here: this task must work on production, which is the only place
+      the lockout matters, so a guard that production never carries would make it
+      useless exactly when it is needed. Instead the operator sets it on the
+      invocation itself, which is possible because `fly ssh console` runs a shell:
+      `STACKS_OPERATOR_RECOVERY=1 /app/bin/core rpc '...'`.
+
+      ⚖️ So the guard is deliberately weaker than `seed_live/0`'s, and the reason
+      is that the two are protecting against different things. Seeding production
+      is never correct, so its gate should be impossible to satisfy there.
+      Recovering an operator IS correct on production; the gate exists so it
+      cannot happen by accident or by a stray `rpc` in a script.
+
+      Argument is Base64(JSON) like the GDPR tasks, so free text crosses the rpc
+      boundary with no shell or Elixir injection surface. Decoded:
+      `%{"email" =>, "actor" =>, "reason" =>}`.
+  """
+  @spec recover_operator_access(binary()) :: :ok
+  def recover_operator_access(params_b64) when is_binary(params_b64) do
+    unless System.get_env("STACKS_OPERATOR_RECOVERY") == "1" do
+      raise "refusing to recover operator access: set STACKS_OPERATOR_RECOVERY=1 on " <>
+              "the invocation to confirm this is deliberate"
+    end
+
+    params = params_b64 |> Base.decode64!() |> Jason.decode!()
+    email = params |> Map.get("email", "") |> to_string() |> String.trim()
+    actor = params |> Map.get("actor", "") |> to_string() |> String.trim()
+    reason = params |> Map.get("reason", "") |> to_string() |> String.trim()
+
+    if email == "", do: raise("operator recovery aborted: email is required")
+    if actor == "", do: raise("operator recovery aborted: actor is required")
+    if reason == "", do: raise("operator recovery aborted: reason is required")
+
+    case Accounts.get_user_by_email(email) do
+      nil ->
+        # ⚠️ Says the email rather than hiding it. This is an operator task run by
+        # someone holding shell access; the enumeration concern that shapes the
+        # public auth endpoints does not apply, and a silent no-op here would
+        # leave an operator unsure whether the task worked.
+        IO.puts("OPERATOR_RECOVERY_ERROR no user with email=#{email}")
+        raise "operator recovery aborted: no user with that email"
+
+      user ->
+        :ok = Accounts.revoke_all_user_sessions(user.id)
+
+        # ⛔ The audit row names the ACTOR, not the subject, and both are recorded.
+        # A row saying only "this account's sessions were revoked" cannot answer
+        # the question an auditor actually asks, which is who did it.
+        Audit.log(user.id, "operator.access_recovered",
+          resource_type: "user",
+          resource_id: user.id,
+          metadata: %{"actor" => actor, "reason" => reason}
+        )
+
+        IO.puts("OPERATOR_RECOVERY_OK user_id=#{user.id} email=#{email} actor=#{actor}")
+        :ok
     end
   end
 
