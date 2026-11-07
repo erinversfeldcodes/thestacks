@@ -26,6 +26,7 @@ defmodule Stacks.Release do
   alias Stacks.Workers.ImageRetentionJob
   alias Stacks.Workers.LibraryImportRowRetentionJob
   alias Stacks.Workers.RefreshCostsJob
+  alias StacksWeb.Plugs.E2ETestHelper
 
   @app :core
 
@@ -390,12 +391,36 @@ defmodule Stacks.Release do
   @doc """
       Seeds dev/preview fixtures INSIDE the running node — invoke via
       `bin/core rpc`, never `eval` (a second BEAM OOMs the 512MB preview VM).
-      Prod-guarded by `STACKS_E2E_TEST_HELPERS`; assumes app + repos already
-      started.
+      Assumes app + repos already started.
+
+      ⛔ **PROD-GUARDED BY `STACKS_E2E_TEST_HELPERS`, WHICH IT PREVIOUSLY ONLY
+      CLAIMED TO BE.** This docstring said "Prod-guarded by
+      `STACKS_E2E_TEST_HELPERS`" while the body called `run_seeds/0` directly,
+      with no guard of any kind. Anyone able to reach `bin/core rpc` on a
+      production machine could run the whole dev-fixture seed against the
+      production database.
+
+      ⚠️ The guard went missing in the `eval` → `rpc` change, and the reason is
+      worth keeping: `seed/0` is gated on `ALLOW_SEEDS`, which is read inside the
+      process the release task starts, and that gate cannot survive `rpc` —
+      `rpc` runs in the ALREADY-RUNNING node, whose environment the operator
+      cannot set per invocation. So the replacement had to be an env the node is
+      deployed with, which `STACKS_E2E_TEST_HELPERS` is: `scripts/deploy-stack.sh`
+      sets it on the preview branch only, and production never carries it.
+
+      ⚖️ "It is only called from the preview branch of the deploy script" is not a
+      guard. It is true today, it is invisible at the call site, and it is exactly
+      the argument that let the missing gate look fine.
   """
   @spec seed_live() :: term()
   def seed_live do
-    run_seeds()
+    if E2ETestHelper.enabled?() do
+      run_seeds()
+    else
+      raise "refusing to seed: STACKS_E2E_TEST_HELPERS is not \"1\", " <>
+              "so this node is not a preview stack. Seeding here would write " <>
+              "dev fixtures into whatever database this node is pointed at."
+    end
   end
 
   @doc """
