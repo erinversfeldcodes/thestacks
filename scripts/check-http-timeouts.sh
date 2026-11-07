@@ -105,6 +105,59 @@ if mode == "--list":
     print("bounded requests: " + str(len(sites)))
     sys.exit(0)
 
+# ⛔ THE PLAN INTERPRETER'S TIMEOUT IS DECIDED BY `Api.specTimeout`, AND NO TEST
+# CAN REACH HALF OF IT. Every request now goes through `Effect.perform`, which
+# asks `Api.specTimeout plan.spec`; that function returns `uploadTimeout` for the
+# two file-carrying bodies and `standardTimeout` otherwise.
+#
+# ⚠️ `elm/file`'s `File` is opaque with only a decoder — `type File = File`, no
+# constructor — so an Elm unit test cannot build one, and the `FileBody` and
+# `MultipartFile` branches are unreachable from `elm-test`. MEASURED: cutting
+# `FileBody` to `standardTimeout` left 2270 tests green.
+#
+# That matters because the branch exists to fix a real regression: the upload PUT
+# carried `uploadTimeout` (120s) and the plan interpreter hardcoded
+# `standardTimeout` (15s), which would have cut large uploads to an eighth of
+# their time on a slow connection. A fix no test can see is one refactor from
+# being undone, so the shape is checked HERE instead.
+api_src = ""
+for path in glob.glob("frontend/src/Api.elm"):
+    with open(path, encoding="utf-8") as handle:
+        api_src = blank_comments(handle.read())
+
+spec_timeout = re.search(
+    r"^specTimeout\s*:.*?\n(.*?)(?=\n\n\n|\nspecHttpBody)", api_src, re.S | re.M
+)
+
+if not spec_timeout:
+    print("FAIL: Api.specTimeout not found, so its file-body branches went unchecked.")
+    print("If it was renamed or inlined, update this check in the same change — the")
+    print("branches it guards are unreachable from elm-test and have no other cover.")
+    sys.exit(1)
+
+body = spec_timeout.group(1)
+for constructor in ("FileBody", "MultipartFile"):
+    clause = re.search(
+        r"^\s*" + constructor + r"[^\n]*->\s*\n\s*([A-Za-z_][A-Za-z0-9_.]*)", body, re.M
+    )
+    if not clause:
+        print("FAIL: Api.specTimeout has no " + constructor + " branch.")
+        print("A file-carrying request would fall through to the standard 15s timeout,")
+        print("which is the regression this branch exists to prevent.")
+        sys.exit(1)
+    if clause.group(1) != "uploadTimeout":
+        print(
+            "FAIL: Api.specTimeout returns "
+            + clause.group(1)
+            + " for "
+            + constructor
+            + ", not uploadTimeout."
+        )
+        print("A request carrying a file needs the long timeout BECAUSE it carries a file.")
+        print("elm-test cannot catch this: `File` has no constructor, so the branch is")
+        print("unreachable from a unit test and stays green when it is wrong.")
+        sys.exit(1)
+
 if findings:
     print("FAIL: " + str(len(findings)) + " unbounded HTTP request(s) under frontend/src/.")
     print("A request that can hang forever makes its page's `Failure` branch unreachable: the")
