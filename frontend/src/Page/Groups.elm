@@ -1,10 +1,12 @@
 module Page.Groups exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 import Api
+import Effect
 import Html exposing (Html, button, div, form, h1, h2, input, p, text)
 import Html.Attributes exposing (class, disabled, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Navigation.Route exposing (Route(..))
 import Types.Group exposing (Group, GroupInvitation)
 import Types.RemoteData exposing (RemoteData(..))
@@ -28,6 +30,7 @@ type alias Model =
 
 type Msg
     = NameChanged String
+    | SessionExpiryDetected
     | SubmitCreate
     | GroupCreated (Result Http.Error Group)
     | AcceptInvitation String String
@@ -61,6 +64,9 @@ init userId token =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         NameChanged name ->
             let
                 oldForm =
@@ -84,7 +90,15 @@ update msg model =
 
             else
                 ( { model | createForm = { oldForm | submitting = True, error = Nothing } }
-                , Api.createGroup oldForm.name model.token GroupCreated
+                , Effect.perform
+                    (Effect.authed (Api.createGroupRequest oldForm.name)
+                        model.token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson (Decode.field "group" Types.Group.groupDecoder)
+                                >> GroupCreated
+                        }
+                    )
                 , NoOut
                 )
 
@@ -107,13 +121,25 @@ update msg model =
 
         AcceptInvitation groupId invId ->
             ( model
-            , Api.acceptInvitation groupId invId model.token (InvitationAccepted invId)
+            , Effect.perform
+                (Effect.authed (Api.invitationAnswerRequest groupId invId Api.AcceptInvitation)
+                    model.token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveWhatever >> InvitationAccepted invId
+                    }
+                )
             , NoOut
             )
 
         DeclineInvitation groupId invId ->
             ( model
-            , Api.declineInvitation groupId invId model.token (InvitationDeclined invId)
+            , Effect.perform
+                (Effect.authed (Api.invitationAnswerRequest groupId invId Api.DeclineInvitation)
+                    model.token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveWhatever >> InvitationDeclined invId
+                    }
+                )
             , NoOut
             )
 

@@ -39,6 +39,7 @@ module Api exposing
     , InboxItem
     , InboxKind(..)
     , InterestProfile
+    , InvitationAnswer(..)
     , InviteStatus
     , LibraryImport
     , ListingParams
@@ -81,7 +82,6 @@ module Api exposing
     , TransparencyEntry
     , TransparencyMetrics
     , UploadInit
-    , acceptInvitation
     , accountDecoder
     , activateListing
     , adminBookDecoder
@@ -128,12 +128,11 @@ module Api exposing
     , createBlogPost
     , createComment
     , createGoodreadsImport
-    , createGroup
+    , createGroupRequest
     , createListing
     , createShelfRequest
     , credentials
     , deactivateListing
-    , declineInvitation
     , decodeUploadInit
     , deleteAccount
     , deleteAccountRequest
@@ -151,7 +150,6 @@ module Api exposing
     , getBlogPostsRequest
     , getBookRequest
     , getBookshelfRequest
-    , getCatalogue
     , getCatalogueRequest
     , getGroup
     , getGroupFeed
@@ -170,7 +168,6 @@ module Api exposing
     , getProfileShelfRequest
     , getTransparencyMetricsRequest
     , getUploadInbox
-    , getUserPlacements
     , getUserPlacementsRequest
     , groupMemberDecoder
     , identityDecoder
@@ -181,6 +178,7 @@ module Api exposing
     , initUploadRequest
     , interceptExpiry
     , interpretAuthed
+    , invitationAnswerRequest
     , inviteErrorDecoder
     , inviteStatusDecoder
     , inviteToGroup
@@ -204,7 +202,6 @@ module Api exposing
     , onboardingStatusDecoder
     , peopleSearchDecoder
     , personalInferencesDecoder
-    , placeBook
     , placeBookRequest
     , placeResponseToResult
     , placementFormatsDecoder
@@ -3198,35 +3195,6 @@ placeResponseToResult response =
                     Err (PlaceHttpError (Http.BadBody (Decode.errorToString err)))
 
 
-expectPlace : (Result PlaceError Placement -> msg) -> Http.Expect msg
-expectPlace toMsg =
-    Http.expectStringResponse toMsg placeResponseToResult
-
-
-{-| POST /api/bookshelves/:name/placements — place a book on a bookshelf.
--}
-placeBook :
-    String
-    -> String
-    -> Credentials
-    -> (Result PlaceError Placement -> msg)
-    -> Cmd msg
-placeBook bookshelfName bookId token toMsg =
-    let
-        spec =
-            placeBookRequest bookshelfName bookId
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = expectPlace toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
 {-| The data of `placeBook`'s request — see `RequestSpec`.
 -}
 placeBookRequest : String -> String -> RequestSpec
@@ -3251,28 +3219,6 @@ setBookAgeGateRequest bookId =
     , url = Api.Url.path [ "api", "books", bookId, "age-gate" ] []
     , body = Just (Encode.object [ ( "adults_only", Encode.bool True ) ])
     }
-
-
-{-| GET /api/placements/mine — fetch summary of user's active placements.
--}
-getUserPlacements :
-    Credentials
-    -> (Result Http.Error (List PlacementSummary) -> msg)
-    -> Cmd msg
-getUserPlacements token toMsg =
-    let
-        spec =
-            getUserPlacementsRequest
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg placementsMineDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
 
 
 {-| The data of `getUserPlacements`'s request — see `RequestSpec`.
@@ -3462,36 +3408,6 @@ confirmBookRequest body =
                 ]
             )
     }
-
-
-{-| GET /api/catalogue — fetch paginated book catalogue.
--}
-getCatalogue :
-    { search : Maybe String
-    , subject : Maybe String
-    , sort : String
-    , page : Int
-    }
-    -> (Result Http.Error CatalogueResponse -> msg)
-    -> Cmd msg
-getCatalogue params toMsg =
-    let
-        spec =
-            getCatalogueRequest params
-    in
-    Http.request
-        { method = spec.method
-
-        -- ⚠️ NO CREDENTIAL, DECLARED. The public catalogue answers everyone the
-        -- same way, so no session is read. Stated rather than left as an empty
-        -- list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders spec.method (NoCredential Nothing)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg catalogueResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
 
 
 {-| The data of `getCatalogue`'s request — see `RequestSpec`.
@@ -6116,27 +6032,25 @@ completeOnboardingStep step token toMsg =
         }
 
 
-createGroup :
-    String
-    -> Credentials
-    -> (Result Http.Error Group -> msg)
-    -> Cmd msg
-createGroup name token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/groups"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "name", Encode.string name )
-                    , ( "type", Encode.string "close_friends" )
-                    ]
-                )
-        , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `POST /api/groups` — starting a reading group, as data.
+
+⚠️ `type` is fixed to `close_friends`, as it was in the builder. The endpoint
+accepts others; this client only ever creates that one, so the literal stays
+here rather than becoming a parameter nothing would vary.
+
+-}
+createGroupRequest : String -> RequestSpec
+createGroupRequest name =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "groups" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "name", Encode.string name )
+                , ( "type", Encode.string "close_friends" )
+                ]
+            )
+    }
 
 
 getGroup :
@@ -6218,40 +6132,43 @@ inviteToGroup groupId identifier token toMsg =
         }
 
 
-acceptInvitation :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-acceptInvitation groupId invitationId token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/accept"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `POST /api/groups/:group/invitations/:id/:answer` — answering a group
+invitation, as data.
+
+⚖️ ONE spec where there were two, which differed only in the final path
+segment. The answer is an argument now, and a TYPE rather than a string, so a
+typo in it does not compile instead of 404ing at runtime.
+
+⚠️ Both ids are percent-encoded by `Api.Url.path`, where the old builders
+concatenated them.
+
+-}
+invitationAnswerRequest : String -> String -> InvitationAnswer -> RequestSpec
+invitationAnswerRequest groupId invitationId answer =
+    { method = "POST"
+    , url =
+        Api.Url.path
+            [ "api", "groups", groupId, "invitations", invitationId, invitationAnswerSegment answer ]
+            []
+    , body = Nothing
+    }
 
 
-declineInvitation :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-declineInvitation groupId invitationId token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| Which way a reader answered a group invitation.
+-}
+type InvitationAnswer
+    = AcceptInvitation
+    | DeclineInvitation
+
+
+invitationAnswerSegment : InvitationAnswer -> String
+invitationAnswerSegment answer =
+    case answer of
+        AcceptInvitation ->
+            "accept"
+
+        DeclineInvitation ->
+            "decline"
 
 
 {-| A member of a reading group, as the members endpoint returns them.

@@ -20,6 +20,7 @@ can be added via an inline shelf picker.
 -}
 
 import Api exposing (CatalogueResponse, PlacementSummary)
+import Effect
 import Html exposing (Html, a, button, div, h1, h3, img, input, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, href, placeholder, selected, src, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -57,6 +58,7 @@ type alias Model =
 
 type Msg
     = CatalogueReceived (Result Http.Error CatalogueResponse)
+    | SessionExpiryDetected
     | SearchChanged String
     | ClearSearch
     | SubjectSelected String
@@ -98,7 +100,16 @@ init maybeToken =
         ( initialPlacements, placementsCmd ) =
             case maybeToken of
                 Just token ->
-                    ( Loading, Api.getUserPlacements token UserPlacementsLoaded )
+                    ( Loading
+                    , Effect.perform
+                        (Effect.authed Api.getUserPlacementsRequest
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson Api.placementsMineDecoder >> UserPlacementsLoaded
+                            }
+                        )
+                    )
 
                 Nothing ->
                     ( Success [], Cmd.none )
@@ -111,6 +122,9 @@ init maybeToken =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         CatalogueReceived result ->
             case result of
                 Ok response ->
@@ -233,7 +247,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | shelfPickerBookId = Nothing, placeBookState = Loading }
-                    , Api.placeBook shelfName bookId token (PlaceBookCompleted shelfName bookId)
+                    , Effect.perform
+                        (Effect.authed (Api.placeBookRequest shelfName bookId)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.placeResponseToResult >> PlaceBookCompleted shelfName bookId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -270,7 +291,12 @@ update msg model maybeToken =
 
 fetchCatalogue : Model -> Cmd Msg
 fetchCatalogue model =
-    Api.getCatalogue (catalogueParams model) CatalogueReceived
+    Effect.perform
+        (Effect.public (Api.getCatalogueRequest (catalogueParams model))
+            Nothing
+            Nothing
+            (Api.resolveJson Api.catalogueResponseDecoder >> CatalogueReceived)
+        )
 
 
 {-| The catalogue page this model asks for, as request data — search, subject,
