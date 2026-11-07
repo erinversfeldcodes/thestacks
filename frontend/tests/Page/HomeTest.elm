@@ -143,13 +143,33 @@ suite =
 
                         _ ->
                             Expect.fail "expected Collection/NoOut with the flattened placements"
-            , test "an unauthorised preview error signals SessionExpired" <|
+            , -- ⛔ REWRITTEN WITH THE MIGRATION, and the rewrite is the point. This
+              -- used to feed `PreviewLoaded (Err (BadStatus 401))` straight to
+              -- `update` and assert `SessionExpired`, which tested the page's OWN
+              -- `Api.isUnauthorized` re-test. That re-test is gone: the request is
+              -- an `Effect.authed` plan now, and the plan claims the 401 before any
+              -- handler sees it. Feeding the old message by hand asserts a path
+              -- that no longer exists, so the test would have been green about
+              -- nothing — or, as here, red about the right change.
+              --
+              -- ⚖️ The equivalent claim at the new seam is that the page's expiry
+              -- msg reaches `Main`, which is what `onExpired` was given to carry.
+              test "the page's expiry msg is what signals SessionExpired" <|
                 \() ->
                     let
                         ( _, _, out ) =
-                            Home.update (PreviewLoaded (Err (Http.BadStatus 401))) (collectionLoading ())
+                            Home.update SessionExpiryDetected (collectionLoading ())
                     in
                     Expect.equal SessionExpired out
+            , -- ⚠️ ANTI-VACUITY for the branch above: a non-401 failure must still
+              -- be shown to the reader as a failure rather than signing them out.
+              test "an ordinary failure is not an expiry" <|
+                \() ->
+                    let
+                        ( _, _, out ) =
+                            Home.update (PreviewLoaded (Err (Http.BadStatus 500))) (collectionLoading ())
+                    in
+                    Expect.equal NoOut out
             ]
         ]
 

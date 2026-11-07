@@ -152,7 +152,6 @@ module Api exposing
     , getBlogPost
     , getBlogPosts
     , getBookRequest
-    , getBookshelf
     , getBookshelfRequest
     , getCatalogue
     , getCatalogueRequest
@@ -2475,27 +2474,6 @@ searchBooksRequest query deep =
             )
     , body = Nothing
     }
-
-
-getBookshelf :
-    String
-    -> Credentials
-    -> (Result Http.Error BookshelfResponse -> msg)
-    -> Cmd msg
-getBookshelf shelfName token toMsg =
-    let
-        spec =
-            getBookshelfRequest shelfName
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg bookshelfResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
 
 
 {-| The data of `getBookshelf`'s request — see `RequestSpec`.
