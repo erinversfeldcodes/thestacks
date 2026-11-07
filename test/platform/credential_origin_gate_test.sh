@@ -217,8 +217,10 @@ assert_exit_zero "$RC" "a literal \"/path\" is same-origin"
 test_case "a_corpus_below_the_floor_is_refused_even_with_no_violations" \
     "a floor on findings is satisfied by almost-total parser loss"
 run_on "$(spec_filler 32)$(filler 3)"
-assert_exit_nonzero "$RC" "three records is not a cleared file, whatever the findings say"
-assert_contains "$OUT" "parsed only 3 request record(s)" "the refusal quotes what it read"
+assert_exit_nonzero "$RC" "a surface of 35 is not a cleared file, whatever the findings say"
+assert_contains "$OUT" "request surface of only 35" "the refusal quotes the surface it measured"
+assert_contains "$OUT" "32 RequestSpec(s) + 3 Http.request record(s)" \
+    "and shows both halves, so a drift in either is attributable"
 assert_contains "$OUT" "parser having drifted" "and names the cause it cannot distinguish otherwise"
 
 # ⚠️ And the discriminating half: the refusal must be about the COUNT, not about
@@ -228,6 +230,49 @@ test_case "the_sub_floor_corpus_contains_no_violations" \
     "so the refusal above is about the population, not about a finding"
 assert_not_contains "$OUT" "declare SameOrigin with a URL that is not" \
     "nothing in the small corpus is a violation — the floor is what refused it"
+
+# ── the floor counts the SURFACE, so migrating a request does not shrink it ──
+#
+# ⛔ THE CASE THE FLOOR CHANGE EXISTS FOR, and the one a record-count floor fails.
+# The migration moves a request from an `Http.request` record to a `RequestSpec`.
+# Under a floor on records, every such move lowered the population and the floor
+# had to be lowered with it — which is a ratchet that only loosens.
+#
+# Here the same request is present in BOTH forms, as it is mid-migration: a
+# `fooRequest : RequestSpec` and a `foo` wrapper that sends it. The surface must
+# count that as ONE, so that deleting the wrapper leaves the total unchanged.
+#
+# ⚠️ THE ASSERTION IS THAT IT PASSES, and the direction matters. A corpus of ONE
+# record is far below any record floor, so a refusal here would be satisfied by
+# either design and would prove nothing. Only the cleared run distinguishes them:
+# this file is safe because 101 specs are type-checked, and a floor counting
+# `Http.request` records cannot see that.
+test_case "a_record_with_a_spec_sibling_counts_once_toward_the_surface" \
+    "ONE record and 101 specs is a cleared file — a record-count floor refuses it"
+run_on "$(spec_filler 100)
+fooRequest : RequestSpec
+fooRequest =
+    { method = \"GET\"
+    , url = Api.Url.path [ \"api\", \"foo\" ] []
+    , body = Nothing
+    }
+
+
+foo : Credentials -> (Result Http.Error () -> msg) -> Cmd msg
+foo token toMsg =
+    Http.request
+        { method = \"GET\"
+        , headers = httpHeaders \"GET\" (Session token)
+        , url = baseUrl ++ \"/api/foo\"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+"
+assert_exit_zero "$RC" "101 specs clears the floor, and the duplicated record neither helps nor hurts"
+assert_contains "$OUT" "0 unmigrated record(s)" \
+    "the wrapper counts as duplication, not surface"
 
 # ── an adapter record is not a request ──────────────────────────────────────
 #

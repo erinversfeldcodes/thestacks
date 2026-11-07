@@ -192,7 +192,7 @@ suite =
                     let
                         ( model, _ ) =
                             updateQueue
-                                (Queue.DecisionCompleted "req-truth" (Err (Http.BadStatus 409)))
+                                (Queue.DecisionCompleted "req-truth" (Err (Api.RequestFailed (Http.BadStatus 409))))
                                 (loaded [ request "truth" ])
                     in
                     Expect.equal (Just "That request has already been decided — the queue below is up to date.")
@@ -206,7 +206,7 @@ suite =
                     let
                         ( model, _ ) =
                             updateQueue
-                                (Queue.DecisionCompleted "req-truth" (Err (Http.BadStatus 409)))
+                                (Queue.DecisionCompleted "req-truth" (Err (Api.RequestFailed (Http.BadStatus 409))))
                                 (loaded [ request "truth" ])
                     in
                     Expect.equal (Success [ request "truth" ]) model.requests

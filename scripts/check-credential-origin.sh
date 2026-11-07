@@ -78,9 +78,9 @@ fi
 # This floors on how many request records the parser SAW. "I found no
 # violations" and "I could not look" are the same output otherwise, and that
 # distinction is the one five sweeps in this campaign failed on.
-MIN_REQUEST_RECORDS=70
+MIN_REQUEST_SURFACE=100
 
-python3 - "$API" "$MIN_REQUEST_RECORDS" <<'PY'
+python3 - "$API" "$MIN_REQUEST_SURFACE" <<'PY'
 import re
 import sys
 
@@ -203,6 +203,7 @@ def strip_elm_comments(text):
 
 
 records = 0
+record_names = []
 violations = []
 unprovable = []
 
@@ -236,6 +237,8 @@ for match in RECORD.finditer(src):
 
     provable = any(p.match(flattened) for p in SAME_ORIGIN)
     declares_same_origin = re.search(r"\bSameOrigin\b", body) is not None
+
+    record_names.append(name)
 
     if not provable:
         unprovable.append((name, line_no, flattened[:48]))
@@ -338,11 +341,40 @@ if mismatched:
 # ("a_corpus_below_the_floor_is_refused_even_with_no_violations", got exit 0) —
 # which is what that case is for, and why a gate change has to land with its
 # suite rather than after it.
-if records < floor:
+# ⛔ THE FLOOR IS ON THE API SURFACE, NOT ON `Http.request` RECORDS — and the
+# difference is what keeps it a floor while the migration runs.
+#
+# Every request in this file is in one of two forms: an `Http.request` record
+# (checked above, because its `url` is a `String`) or a `RequestSpec` (not
+# checked here, because its `url` is an `Api.Url.SameOriginUrl` and the compiler
+# does it). The migration moves requests from the first form to the second, so a
+# floor counting only records declines by design — from 70-odd toward zero — and
+# a floor that must be lowered every time it fires is not a floor at all.
+#
+# ⚖️ What IS invariant is the surface: a spec, plus every record that has no spec
+# sibling yet. Deleting a wrapper either converts a record into a spec (−1 record,
+# +1 spec) or removes a record whose spec already existed (−1 record, −1
+# duplicate). Both leave this total unchanged.
+#
+# ⚠️ MEASURED 2026-11-07, mid-migration: 61 records, 50 specs, 6 records still
+# duplicating a spec — a surface of 105. The floor sits below that at 100, the
+# same headroom `check-session-expiry-coverage.sh` carries.
+#
+# ⛔ This gate still dies when `records` reaches 0: at that point nothing in this
+# file has a `String` url and there is nothing here to check. That is the
+# retirement described above, and this floor does not postpone it.
+spec_names = set(re.findall(r"^([a-z][A-Za-z0-9_]*)\s*:[^\n]*\bRequestSpec\b", src, re.M))
+specs = len(spec_names)
+records_without_spec = sum(1 for n in record_names if f"{n}Request" not in spec_names)
+surface = specs + records_without_spec
+
+if surface < floor:
     print(
-        f"FAIL: parsed only {records} request record(s) in {path}; expected at least {floor}.",
+        f"FAIL: parsed a request surface of only {surface} in {path}; expected at least {floor}.",
         file=sys.stderr,
     )
+    print(f"      ({specs} RequestSpec(s) + {records_without_spec} Http.request record(s) with no spec sibling;", file=sys.stderr)
+    print(f"       {records} record(s) parsed in all.)", file=sys.stderr)
     print("      A clean result over a corpus this small is the parser having drifted from", file=sys.stderr)
     print("      the source, not the source having become safe — which is indistinguishable", file=sys.stderr)
     print("      from a real pass if the floor is on findings instead of on records.", file=sys.stderr)
@@ -356,7 +388,8 @@ print(
 # ⚠️ Reported on the GREEN path, not only on failure: a check that prints
 # nothing when it passes cannot be told from one that never ran.
 print(
-    f"OK: {records} request record(s) parsed in {path}; "
+    f"OK: {records} request record(s) parsed in {path} "
+    f"(surface {surface} = {specs} spec(s) + {records_without_spec} unmigrated record(s)); "
     f"every credential-bearing URL is provably same-origin."
 )
 

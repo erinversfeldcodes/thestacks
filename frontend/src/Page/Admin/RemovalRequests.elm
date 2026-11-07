@@ -17,10 +17,12 @@ server holds, not a second token this page carries.
 -}
 
 import Api exposing (RemovalRequest)
+import Effect
 import Html exposing (Html, a, button, div, h1, li, p, span, text, ul)
 import Html.Attributes exposing (class, disabled, href, rel, target)
 import Html.Events exposing (onClick)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -35,11 +37,12 @@ type alias Model =
 
 type Msg
     = RequestsReceived (Result Http.Error (List RemovalRequest))
+    | SessionExpiryDetected
     | RemoveClicked String
     | RemoveConfirmed String
     | RemoveCancelled
     | KeepClicked String
-    | DecisionCompleted String (Result Http.Error ())
+    | DecisionCompleted String (Result Api.RequestError ())
 
 
 type OutMsg
@@ -58,7 +61,15 @@ fetch : Maybe Api.Credentials -> Cmd Msg
 fetch maybeToken =
     case maybeToken of
         Just token ->
-            Api.getRemovalRequests token RequestsReceived
+            Effect.perform
+                (Effect.authed Api.removalRequestsRequest
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson (Decode.field "requests" (Decode.list Api.removalRequestDecoder))
+                            >> RequestsReceived
+                    }
+                )
 
         Nothing ->
             Cmd.none
@@ -67,6 +78,9 @@ fetch maybeToken =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         RequestsReceived (Ok requests) ->
             ( { model | requests = Success requests }, Cmd.none, NoOut )
 
@@ -84,10 +98,10 @@ update msg model maybeToken =
             ( { model | confirming = Nothing }, Cmd.none, NoOut )
 
         RemoveConfirmed id ->
-            decide model maybeToken id Api.honourRemovalRequest
+            decide model maybeToken id Api.HonourRemoval
 
         KeepClicked id ->
-            decide model maybeToken id Api.declineRemovalRequest
+            decide model maybeToken id Api.DeclineRemoval
 
         DecisionCompleted id (Ok ()) ->
             ( { model
@@ -101,7 +115,7 @@ update msg model maybeToken =
             )
 
         DecisionCompleted _ (Err err) ->
-            if Api.needsAdminElevation err then
+            if Api.needsAdminElevationOf err then
                 ( model, Cmd.none, SessionExpired )
 
             else
@@ -115,17 +129,26 @@ update msg model maybeToken =
                 )
 
 
-decide :
-    Model
-    -> Maybe Api.Credentials
-    -> String
-    -> (String -> Api.Credentials -> (Result Http.Error () -> Msg) -> Cmd Msg)
-    -> ( Model, Cmd Msg, OutMsg )
-decide model maybeToken id call =
+{-| The owner answering one delisting request.
+
+⚖️ Takes an `Api.RemovalDecision` where it used to take the request FUNCTION
+itself. The two decisions differed only in a path segment, so passing a
+higher-order call was a way to choose between two wrappers that no longer exist;
+the decision is now an argument to one spec, which is what it always was.
+
+-}
+decide : Model -> Maybe Api.Credentials -> String -> Api.RemovalDecision -> ( Model, Cmd Msg, OutMsg )
+decide model maybeToken id decision =
     case maybeToken of
         Just token ->
             ( { model | deciding = Just id, confirming = Nothing, error = Nothing }
-            , call id token (DecisionCompleted id)
+            , Effect.perform
+                (Effect.authed (Api.removalDecisionRequest id decision)
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveNoContent >> DecisionCompleted id
+                    }
+                )
             , NoOut
             )
 
@@ -146,16 +169,24 @@ removeById id requests =
 {-| Server errors in the reviewer's terms. The 409 is the interesting one: it means the
 request was already decided, not that it never existed.
 -}
-decisionError : Http.Error -> String
+decisionError : Api.RequestError -> String
 decisionError err =
     case err of
-        Http.BadStatus 409 ->
+        -- ⚖️ A RATE LIMIT NOW HAS ITS OWN SENTENCE, where it used to fall into
+        -- "please try again" alongside a 500. The decision request became a plan,
+        -- so `Api.resolveNoContent` classifies a 429 instead of flattening it to
+        -- a status — and "try again" is the one instruction that is wrong here,
+        -- because trying again immediately is what produced it.
+        Api.RateLimited _ ->
+            "Too many decisions too quickly. Wait a moment, then try again."
+
+        Api.RequestFailed (Http.BadStatus 409) ->
             "That request has already been decided — the queue below is up to date."
 
-        Http.BadStatus 404 ->
+        Api.RequestFailed (Http.BadStatus 404) ->
             "That request no longer exists."
 
-        _ ->
+        Api.RequestFailed _ ->
             "Could not record that decision. Please try again."
 
 

@@ -65,6 +65,7 @@ module Api exposing
     , PublicationState(..)
     , Refusal(..)
     , RegisterError(..)
+    , RemovalDecision(..)
     , RemovalOutcome(..)
     , RemovalRequest
     , RequestError(..)
@@ -83,23 +84,24 @@ module Api exposing
     , acceptInvitation
     , accountDecoder
     , activateListing
+    , adminBookDecoder
     , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
     , adminFeedbackPageDecoder
     , adminFeedbackRequest
     , adminInviteDecoder
-    , adminListBooks
+    , adminInvitesRequest
     , adminListBooksRequest
     , adminLogin
     , adminLogoutRequest
     , adminMfaConfirm
     , adminMfaSetup
-    , adminSetBookAgeGate
     , adminSetBookAgeGateRequest
     , adminSourceDecoder
+    , adminSourcesRequest
     , adminSourcesResponseDecoder
     , adminVerifyMfa
-    , approveSource
+    , approveSourceRequest
     , auditLogResponseDecoder
     , authHeaders
     , authResponseDecoder
@@ -122,7 +124,7 @@ module Api exposing
     , confirmResponseDecoder
     , confirmResponseToResult
     , cookieSession
-    , createAdminInvite
+    , createAdminInviteRequest
     , createBlogPost
     , createComment
     , createGoodreadsImport
@@ -132,7 +134,6 @@ module Api exposing
     , credentials
     , deactivateListing
     , declineInvitation
-    , declineRemovalRequest
     , decodeUploadInit
     , deleteAccount
     , deleteAccountRequest
@@ -144,8 +145,6 @@ module Api exposing
     , foldProgress
     , forgotPasswordRequest
     , getAccountRequest
-    , getAdminInvites
-    , getAdminSources
     , getAuditLogRequest
     , getAuthorEventsRequest
     , getBlogPost
@@ -170,13 +169,11 @@ module Api exposing
     , getPrivacySettings
     , getProfileRequest
     , getProfileShelfRequest
-    , getRemovalRequests
     , getTransparencyMetricsRequest
     , getUploadInbox
     , getUserPlacements
     , getUserPlacementsRequest
     , groupMemberDecoder
-    , honourRemovalRequest
     , identityDecoder
     , importRefusal
     , importRowDecoder
@@ -202,6 +199,7 @@ module Api exposing
     , movePlacementToShelfRequest
     , moveResponseToResult
     , needsAdminElevation
+    , needsAdminElevationOf
     , notificationPreferencesDecoder
     , onboardingStatusDecoder
     , peopleSearchDecoder
@@ -231,9 +229,11 @@ module Api exposing
     , registerRequest
     , registrationResponseDecoder
     , rejectIdentificationRequest
-    , rejectSource
+    , rejectSourceRequest
+    , removalDecisionRequest
     , removalOutcomeDecoder
     , removalRequestDecoder
+    , removalRequestsRequest
     , removeBookRequest
     , removeGroupMember
     , reorderShelvesRequest
@@ -251,7 +251,7 @@ module Api exposing
     , resolveWhatever
     , restoreBookRequest
     , retryAfterSeconds
-    , revokeAdminInvite
+    , revokeAdminInviteRequest
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooksRequest
@@ -1680,6 +1680,31 @@ needsAdminElevation err =
 
         _ ->
             False
+
+
+{-| `needsAdminElevation`, for a request that was resolved rather than built.
+
+⚖️ A sibling rather than a widening, because the two error types answer different
+questions. `RequestError` distinguishes a rate limit from everything else, and a
+**429 is emphatically not an elevation problem** — telling an operator to
+re-authenticate because the server asked them to slow down would send them
+through MFA to no effect.
+
+⛔ Exists because the admin pages' requests became plans. `Api.resolveNoContent`
+yields `Result RequestError ()`, so the pages that answer a 403 by sending the
+operator back to the gate can no longer hand their error to the `Http.Error`
+predicate. Unwrapping at each call site was the alternative; one named predicate
+beside its twin is the same thing said once.
+
+-}
+needsAdminElevationOf : RequestError -> Bool
+needsAdminElevationOf err =
+    case err of
+        RateLimited _ ->
+            False
+
+        RequestFailed httpError ->
+            needsAdminElevation httpError
 
 
 {-| True when an `Http.Error` is a 404 — the signal a resource is gone or hidden
@@ -5676,20 +5701,14 @@ removalRequestDecoder =
         (Decode.maybe (Decode.field "requested_at" Decode.string))
 
 
-{-| GET /api/admin/removal-requests — the pending queue, oldest first.
+{-| `GET /api/admin/removal-requests` — the delisting queue, as data.
 -}
-getRemovalRequests : Credentials -> (Result Http.Error (List RemovalRequest) -> msg) -> Cmd msg
-getRemovalRequests token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/admin/removal-requests"
-        , body = Http.emptyBody
-        , expect =
-            Http.expectJson toMsg (Decode.field "requests" (Decode.list removalRequestDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+removalRequestsRequest : RequestSpec
+removalRequestsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "admin", "removal-requests" ] []
+    , body = Nothing
+    }
 
 
 {-| An invitation as the owner's list sees it: `codePrefix` only —
@@ -5812,53 +5831,36 @@ sendFeedbackRequest body =
     }
 
 
-{-| GET /api/admin/invites — every invitation, newest first.
+{-| `GET /api/admin/invites` — the invite list, as data.
 -}
-getAdminInvites : Credentials -> (Result Http.Error (List AdminInvite) -> msg) -> Cmd msg
-getAdminInvites token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/admin/invites"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "invites" (Decode.list adminInviteDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+adminInvitesRequest : RequestSpec
+adminInvitesRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "admin", "invites" ] []
+    , body = Nothing
+    }
 
 
-{-| POST /api/admin/invites — write an invitation. The `code` in this response
-is the ONLY time the full code exists in the clear.
+{-| `POST /api/admin/invites` — minting an invite, as data.
 -}
-createAdminInvite :
-    Credentials
-    -> { note : String, invitedEmail : String, maxUses : Int, expiresInDays : Maybe Int }
-    -> (Result Http.Error ( AdminInvite, String ) -> msg)
-    -> Cmd msg
-createAdminInvite token body toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/admin/invites"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    (List.filterMap identity
-                        [ blankAsAbsent "note" body.note
-                        , blankAsAbsent "invited_email" body.invitedEmail
-                        , Just ( "max_uses", Encode.int body.maxUses )
-                        , Maybe.map (\days -> ( "expires_in_days", Encode.int days )) body.expiresInDays
-                        ]
-                    )
+createAdminInviteRequest :
+    { note : String, invitedEmail : String, maxUses : Int, expiresInDays : Maybe Int }
+    -> RequestSpec
+createAdminInviteRequest body =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "admin", "invites" ] []
+    , body =
+        Just
+            (Encode.object
+                (List.filterMap identity
+                    [ blankAsAbsent "note" body.note
+                    , blankAsAbsent "invited_email" body.invitedEmail
+                    , Just ( "max_uses", Encode.int body.maxUses )
+                    , Maybe.map (\days -> ( "expires_in_days", Encode.int days )) body.expiresInDays
+                    ]
                 )
-        , expect =
-            Http.expectJson toMsg
-                (Decode.field "invite"
-                    (Decode.map2 Tuple.pair adminInviteDecoder (Decode.field "code" Decode.string))
-                )
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+            )
+    }
 
 
 blankAsAbsent : String -> String -> Maybe ( String, Encode.Value )
@@ -5870,116 +5872,105 @@ blankAsAbsent key value =
         Just ( key, Encode.string (String.trim value) )
 
 
-{-| DELETE /api/admin/invites/:id — revoke. A timestamp, never a row delete.
--}
-revokeAdminInvite : Credentials -> String -> (Result Http.Error () -> msg) -> Cmd msg
-revokeAdminInvite token id toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = httpHeaders "DELETE" (Session token)
-        , url = baseUrl ++ "/api/admin/invites/" ++ id
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `DELETE /api/admin/invites/:id` — revoking an invite, as data.
 
-
-{-| PUT /api/admin/removal-requests/:id/honour — **take the listing down.**
-
-⚠️ **Not `approveSource`.** `approveSource` _publishes_ a listing; this unpublishes one. Two
-actions that sound alike, act on the same row, and do opposite things — so both the endpoint
-and this function are named for what happens to the _listing_, not for the reviewer's verdict
-on the request. Read the name twice before wiring a button to it.
+⚠️ The id is percent-encoded by `Api.Url.path`, where the old builder
+concatenated it into the URL.
 
 -}
-honourRemovalRequest : String -> Credentials -> (Result Http.Error () -> msg) -> Cmd msg
-honourRemovalRequest requestId token toMsg =
-    removalDecision requestId "honour" token toMsg
+revokeAdminInviteRequest : String -> RequestSpec
+revokeAdminInviteRequest id =
+    { method = "DELETE"
+    , url = Api.Url.path [ "api", "admin", "invites", id ] []
+    , body = Nothing
+    }
 
 
-{-| PUT /api/admin/removal-requests/:id/decline — the listing stays up.
+{-| `PUT /api/admin/removal-requests/:id/:decision` — the owner's answer to a
+delisting request, as data.
+
+⚖️ ONE spec where there were three functions. `honour` and `decline` differed
+only in a path segment, so they were two wrappers delegating to a shared
+`removalDecision` builder — three declarations to say one thing. As data the
+decision is an argument, which is what it always was.
+
+⚠️ The id is percent-encoded by `Api.Url.path`, where the old builder
+concatenated it into the URL.
+
 -}
-declineRemovalRequest : String -> Credentials -> (Result Http.Error () -> msg) -> Cmd msg
-declineRemovalRequest requestId token toMsg =
-    removalDecision requestId "decline" token toMsg
+removalDecisionRequest : String -> RemovalDecision -> RequestSpec
+removalDecisionRequest requestId decision =
+    { method = "PUT"
+    , url =
+        Api.Url.path
+            [ "api", "admin", "removal-requests", requestId, removalDecisionSegment decision ]
+            []
+    , body = Nothing
+    }
 
 
-removalDecision : String -> String -> Credentials -> (Result Http.Error () -> msg) -> Cmd msg
-removalDecision requestId action token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/admin/removal-requests/" ++ requestId ++ "/" ++ action
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| Which way the owner answered a delisting request.
 
+⛔ A TYPE rather than a `String`, because the old pair put the path segment at
+the call site as a bare literal. A typo there was a 404 at runtime; here it does
+not compile.
 
-{-| GET /api/admin/sources — fetch paginated admin sources, optionally filtered by status.
 -}
-getAdminSources :
-    { status : Maybe String, page : Int }
-    -> Credentials
-    -> (Result Http.Error AdminSourcesResponse -> msg)
-    -> Cmd msg
-getAdminSources params token toMsg =
-    let
-        queryParams =
-            [ Just (Url.Builder.int "page" params.page)
-            , params.status |> Maybe.map (Url.Builder.string "status")
-            ]
+type RemovalDecision
+    = HonourRemoval
+    | DeclineRemoval
+
+
+removalDecisionSegment : RemovalDecision -> String
+removalDecisionSegment decision =
+    case decision of
+        HonourRemoval ->
+            "honour"
+
+        DeclineRemoval ->
+            "decline"
+
+
+{-| `GET /api/admin/sources` — the source queue, as data.
+-}
+adminSourcesRequest : { status : Maybe String, page : Int } -> RequestSpec
+adminSourcesRequest params =
+    { method = "GET"
+    , url =
+        Api.Url.path [ "api", "admin", "sources" ]
+            ([ Just (Url.Builder.int "page" params.page)
+             , params.status |> Maybe.map (Url.Builder.string "status")
+             ]
                 |> List.filterMap identity
-    in
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = Api.Url.toString (Api.Url.path [ "api", "admin", "sources" ] queryParams)
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg adminSourcesResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+            )
+    , body = Nothing
+    }
 
 
-{-| PUT /api/admin/sources/:id/approve — approve a pending source.
+{-| `PUT /api/admin/sources/:id/approve` — approving a pending source, as data.
+
+⚠️ The id is percent-encoded, where the old builder concatenated it.
+
 -}
-approveSource :
-    String
-    -> Credentials
-    -> (Result Http.Error AdminSource -> msg)
-    -> Cmd msg
-approveSource sourceId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/approve"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+approveSourceRequest : String -> RequestSpec
+approveSourceRequest sourceId =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "admin", "sources", sourceId, "approve" ] []
+    , body = Nothing
+    }
 
 
-{-| PUT /api/admin/sources/:id/reject — reject a pending source.
+{-| `PUT /api/admin/sources/:id/reject` — rejecting a pending source, as data.
+
+⚠️ The id is percent-encoded, where the old builder concatenated it.
+
 -}
-rejectSource :
-    String
-    -> Credentials
-    -> (Result Http.Error AdminSource -> msg)
-    -> Cmd msg
-rejectSource sourceId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+rejectSourceRequest : String -> RequestSpec
+rejectSourceRequest sourceId =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "admin", "sources", sourceId, "reject" ] []
+    , body = Nothing
+    }
 
 
 {-| A book as returned by the owner moderation API.
@@ -6024,30 +6015,6 @@ adminBooksResponseDecoder =
         (Decode.oneOf [ Decode.field "per_page" Decode.int, Decode.succeed 50 ])
 
 
-{-| GET /api/admin/books — fetch paginated books for moderation, optionally
-filtered by tier (`public` | `age_gated`) and/or a title search.
--}
-adminListBooks :
-    { tier : Maybe String, search : Maybe String, page : Int }
-    -> Credentials
-    -> (Result Http.Error AdminBooksResponse -> msg)
-    -> Cmd msg
-adminListBooks params token toMsg =
-    let
-        spec =
-            adminListBooksRequest params
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg adminBooksResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
 {-| The data of `adminListBooks`'s request — see `RequestSpec`.
 -}
 adminListBooksRequest :
@@ -6065,31 +6032,6 @@ adminListBooksRequest params =
             )
     , body = Nothing
     }
-
-
-{-| PUT /api/admin/books/:id/age-gate — owner sets a book's age gate in either
-direction. Body `{"age_gated": Bool}`. Returns the updated book.
--}
-adminSetBookAgeGate :
-    String
-    -> Bool
-    -> Credentials
-    -> (Result Http.Error AdminBook -> msg)
-    -> Cmd msg
-adminSetBookAgeGate bookId ageGated token toMsg =
-    let
-        spec =
-            adminSetBookAgeGateRequest bookId ageGated
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg adminBookEnvelopeDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
 
 
 {-| The data of `adminSetBookAgeGate`'s request — see `RequestSpec`.

@@ -19,10 +19,12 @@ the server for it again, and this page must not pretend otherwise.
 -}
 
 import Api exposing (AdminInvite)
+import Effect
 import Html exposing (Html, button, code, div, h1, h2, input, label, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -42,6 +44,7 @@ type alias Model =
 
 type Msg
     = InvitesReceived (Result Http.Error (List AdminInvite))
+    | SessionExpiryDetected
     | NoteChanged String
     | InvitedEmailChanged String
     | MaxUsesChanged String
@@ -49,7 +52,7 @@ type Msg
     | CreateClicked
     | CreateCompleted (Result Http.Error ( AdminInvite, String ))
     | RevokeClicked String
-    | RevokeCompleted (Result Http.Error ())
+    | RevokeCompleted (Result Api.RequestError ())
 
 
 type OutMsg
@@ -77,7 +80,15 @@ fetch : Maybe Api.Credentials -> Cmd Msg
 fetch maybeToken =
     case maybeToken of
         Just token ->
-            Api.getAdminInvites token InvitesReceived
+            Effect.perform
+                (Effect.authed Api.adminInvitesRequest
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson (Decode.field "invites" (Decode.list Api.adminInviteDecoder))
+                            >> InvitesReceived
+                    }
+                )
 
         Nothing ->
             Cmd.none
@@ -86,6 +97,9 @@ fetch maybeToken =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         InvitesReceived (Ok invites) ->
             ( { model | invites = Success invites }, Cmd.none, NoOut )
 
@@ -125,13 +139,28 @@ update msg model maybeToken =
             case ( maybeToken, fieldErrors model ) of
                 ( Just token, [] ) ->
                     ( { model | creating = True, error = Nothing }
-                    , Api.createAdminInvite token
-                        { note = model.note
-                        , invitedEmail = model.invitedEmail
-                        , maxUses = model.maxUses |> String.toInt |> Maybe.withDefault 1
-                        , expiresInDays = String.toInt model.expiresInDays
-                        }
-                        CreateCompleted
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.createAdminInviteRequest
+                                { note = model.note
+                                , invitedEmail = model.invitedEmail
+                                , maxUses = model.maxUses |> String.toInt |> Maybe.withDefault 1
+                                , expiresInDays = String.toInt model.expiresInDays
+                                }
+                            )
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "invite"
+                                        (Decode.map2 Tuple.pair
+                                            Api.adminInviteDecoder
+                                            (Decode.field "code" Decode.string)
+                                        )
+                                    )
+                                    >> CreateCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -167,7 +196,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | revoking = Just inviteId, error = Nothing }
-                    , Api.revokeAdminInvite token inviteId RevokeCompleted
+                    , Effect.perform
+                        (Effect.authed (Api.revokeAdminInviteRequest inviteId)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveNoContent >> RevokeCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -178,7 +213,7 @@ update msg model maybeToken =
             ( { model | revoking = Nothing }, fetch maybeToken, NoOut )
 
         RevokeCompleted (Err err) ->
-            if Api.needsAdminElevation err then
+            if Api.needsAdminElevationOf err then
                 ( model, Cmd.none, SessionExpired )
 
             else
