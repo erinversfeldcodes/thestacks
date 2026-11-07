@@ -122,4 +122,43 @@ defmodule Stacks.Storage.SelectionTest do
       assert message =~ "R2_BUCKET_NAME"
     end
   end
+
+  describe "the selector is actually CALLED" do
+    # ⛔ THE CASE THAT WAS MISSING, AND ITS ABSENCE IS WHY EVERY CASE ABOVE PASSED
+    # WHILE THE SELECTOR DECIDED NOTHING. `choose/2` was tested thoroughly and
+    # invoked by no production code: `config/config.exs` set `:storage` at COMPILE
+    # time and `config/runtime.exs` was a single `import Config`. So R2 "had never
+    # been selected in any deployed environment" — not because it was configured
+    # wrongly, but because nothing selected anything.
+    #
+    # ⚠️ A unit test cannot run `runtime.exs`, so this asserts the WIRING exists by
+    # reading the file. That is weaker than executing it, and it is the strongest
+    # thing available at this layer; the executing proof is a deployed boot, where
+    # the node either names its backend or refuses to start.
+    test "runtime.exs asks the selector, rather than leaving the compile-time default" do
+      runtime = File.read!("config/runtime.exs")
+
+      assert runtime =~ "Stacks.Storage.Selection.choose",
+             "config/runtime.exs does not call the selector, so :storage keeps whatever " <>
+               "config.exs set at compile time and no deployed node ever chooses"
+
+      assert runtime =~ "config_env() == :prod",
+             "the selector must be told whether this is a deployed build — it is the " <>
+               "argument that decides whether a missing declaration is a default or a refusal"
+
+      # ⛔ The refusal must be a raise, not a fallback. A fallback here is the
+      # original defect: uploads on a container filesystem that does not survive a
+      # restart, with a missing secret looking exactly like a working stack.
+      assert runtime =~ ~r/\{:error, [a-z_]+\} ->(.|\n)*raise/,
+             "an unanswerable storage declaration must stop the boot, not fall back"
+    end
+
+    test "the test environment is exempt, or every suite would bypass the mock roster" do
+      runtime = File.read!("config/runtime.exs")
+
+      assert runtime =~ "config_env() != :test",
+             "runtime config is applied AFTER config/test.exs, so without this guard " <>
+               ":storage would be overwritten and Stacks.Storage.Mock silently bypassed"
+    end
+  end
 end
