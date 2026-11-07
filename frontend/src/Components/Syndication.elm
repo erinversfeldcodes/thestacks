@@ -22,10 +22,12 @@ not greyed: a greyed button invites a click that will never work.
 -}
 
 import Api exposing (Syndication, SyndicationExport)
+import Effect
 import Html exposing (Html, a, button, div, h2, input, label, p, span, text, textarea)
 import Html.Attributes exposing (checked, class, href, readonly, rel, type_, value)
 import Html.Events exposing (onCheck, onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -85,7 +87,16 @@ init postId origin syndicated maybeToken =
     ( initialModel postId origin syndicated
     , case maybeToken of
         Just token ->
-            Api.listSyndications token postId GotSyndications
+            Effect.perform
+                (Effect.authed (Api.syndicationsRequest postId)
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson
+                            (Decode.field "syndications" (Decode.list Api.syndicationDecoder))
+                            >> GotSyndications
+                    }
+                )
 
         Nothing ->
             Cmd.none
@@ -110,6 +121,7 @@ initialModel postId origin syndicated =
 
 type Msg
     = ClickedCopyCanonical
+    | SessionExpiryDetected
     | ClickedCopyFeedUrl String
     | ClickedCopyExport String
     | GotExport String (Result Http.Error SyndicationExport)
@@ -143,6 +155,9 @@ feedUrl model handle =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, AuthLost )
+
         ClickedCopyCanonical ->
             requestCopy model Canonical (canonicalUrl model)
 
@@ -153,7 +168,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | exportState = Loading }
-                    , Api.fetchSyndicationExport token model.postId format (GotExport format)
+                    , Effect.perform
+                        (Effect.authed (Api.syndicationExportRequest model.postId format)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson Api.syndicationExportDecoder >> GotExport format
+                            }
+                        )
                     , NoOut
                     )
 
@@ -208,12 +230,20 @@ update msg model maybeToken =
             case ( maybeToken, latestSyndication model ) of
                 ( Just token, Just syndication ) ->
                     ( { model | savingUrl = True }
-                    , Api.updateSyndicationUrl
-                        token
-                        model.postId
-                        syndication.id
-                        model.syndicatedUrlInput
-                        UrlSaved
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.updateSyndicationUrlRequest model.postId
+                                syndication.id
+                                model.syndicatedUrlInput
+                            )
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "syndication" Api.syndicationDecoder)
+                                    >> UrlSaved
+                            }
+                        )
                     , NoOut
                     )
 
@@ -237,7 +267,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | includeInFeed = include }
-                    , Api.setPostSyndicated token model.postId include ToggleSaved
+                    , Effect.perform
+                        (Effect.authed (Api.setPostSyndicatedRequest model.postId include)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.at [ "post", "syndicated" ] Decode.bool)
+                                    >> ToggleSaved
+                            }
+                        )
                     , NoOut
                     )
 
@@ -296,7 +334,18 @@ recordIfExport pending maybeToken ( model, cmd, out ) =
     case ( pending.target, maybeToken ) of
         ( Export _, Just token ) ->
             ( model
-            , Cmd.batch [ cmd, Api.recordSyndication token model.postId "export" SyndicationRecorded ]
+            , Cmd.batch
+                [ cmd
+                , Effect.perform
+                    (Effect.authed (Api.recordSyndicationRequest model.postId "export")
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson (Decode.field "syndication" Api.syndicationDecoder)
+                                >> SyndicationRecorded
+                        }
+                    )
+                ]
             , out
             )
 

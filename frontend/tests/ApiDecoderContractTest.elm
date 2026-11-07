@@ -489,7 +489,25 @@ suite =
             -- They are each referenced from an `expect` or a resolver, never
             -- from another decoder — which is exactly the shape that makes a
             -- decoder invisible to a reachability check done carelessly.
-            [ accepts "POST /api/auth/register — the success body"
+            [ accepts "GET /api/blog/posts/:id/syndication — the export payload"
+                -- Source: `Stacks.Blog.Syndication.export/2`
+                -- (`apps/core/lib/stacks/blog/syndication.ex:149`) returns
+                -- `%{format:, canonical_url:, body:}`, served straight through by
+                -- `BlogController.syndication/2`. All three are always present and
+                -- never null: `format` is the validated query parameter,
+                -- `canonical_url` comes from `canonical_url(post)`, and `body` is
+                -- `String.trim(body)`.
+                --
+                -- ⛔ THIS DECODER WAS INVISIBLE TO THIS SUITE UNTIL IT HAD A NAME.
+                -- It lived as an inline `Decode.map3` inside the old
+                -- `fetchSyndicationExport`'s `Http.expectJson`, so the coverage
+                -- gate could not see it and the server contract behind this
+                -- surface went unchecked. Extracting it for the request plan is
+                -- what surfaced that — the migration found a gap rather than
+                -- making one.
+                Api.syndicationExportDecoder
+                """{"format": "markdown", "canonical_url": "https://thestacks.test/blog/a-post", "body": "*Originally published on [The Stacks](https://thestacks.test/blog/a-post).*"}"""
+            , accepts "POST /api/auth/register — the success body"
                 -- Source: `AuthController.register/2` → `{message:
                 -- "confirmation_email_sent"}`. The decoder throws the value
                 -- away; what it asserts is that a 201 body has the shape at all.

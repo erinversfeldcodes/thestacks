@@ -142,7 +142,6 @@ module Api exposing
     , deleteCommentRequest
     , deleteShelfRequest
     , encodeProfileBody
-    , fetchSyndicationExport
     , foldProgress
     , forgotPasswordRequest
     , getAccountRequest
@@ -182,7 +181,6 @@ module Api exposing
     , isUnauthorized
     , leaveGroupRequest
     , libraryImportDecoder
-    , listSyndications
     , listingTransitionRequest
     , loginRequest
     , logout
@@ -218,7 +216,7 @@ module Api exposing
     , publicProfileSummaryDecoder
     , publishBlogPostRequest
     , putUploadBytes
-    , recordSyndication
+    , recordSyndicationRequest
     , refresh
     , refreshRequest
     , refusalFrom
@@ -256,7 +254,7 @@ module Api exposing
     , searchUsersRequest
     , sendFeedbackRequest
     , setBookAgeGateRequest
-    , setPostSyndicated
+    , setPostSyndicatedRequest
     , shelfMoveErrorMessage
     , shelfMoveResponseToResult
     , shelfVisibilitySettingDecoder
@@ -268,6 +266,9 @@ module Api exposing
     , storedVisibilityDecoder
     , streamEventDecoder
     , syndicationDecoder
+    , syndicationExportDecoder
+    , syndicationExportRequest
+    , syndicationsRequest
     , transparencyMetricsDecoder
     , updateBlogPostRequest
     , updateLocationRequest
@@ -279,7 +280,7 @@ module Api exposing
     , updateProfileVisibilityRequest
     , updateProgressRequest
     , updateShelfVisibilityRequest
-    , updateSyndicationUrl
+    , updateSyndicationUrlRequest
     , uploadInboxDecoder
     , uploadTimeout
     , withBearer
@@ -4201,118 +4202,72 @@ syndicationDecoder =
         (Decode.field "created_at" Decode.string)
 
 
-{-| `GET /api/blog/posts/:id/syndication?format=html|markdown`.
--}
-fetchSyndicationExport :
-    Credentials
-    -> String
-    -> String
-    -> (Result Http.Error SyndicationExport -> msg)
-    -> Cmd msg
-fetchSyndicationExport token postId format toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndication?format=" ++ format
-        , body = Http.emptyBody
-        , expect =
-            Http.expectJson toMsg
-                (Decode.map3 SyndicationExport
-                    (Decode.field "format" Decode.string)
-                    (Decode.field "canonical_url" Decode.string)
-                    (Decode.field "body" Decode.string)
-                )
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `GET /api/blog/posts/:id/syndication` — a post rendered for another
+platform's editor, as data.
 
-
-{-| `GET /api/blog/posts/:id/syndications` — what has already been syndicated.
-
-Without this the panel could only ever show what happened in the current session:
-a recorded backlink survived in the database and was invisible after a reload, and
-the field to enter one vanished with it.
+⚖️ `format` is a real query PARAMETER now, where the builder appended
+`"?format=" ++ format` to the path by hand.
 
 -}
-listSyndications :
-    Credentials
-    -> String
-    -> (Result Http.Error (List Syndication) -> msg)
-    -> Cmd msg
-listSyndications token postId toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
-        , body = Http.emptyBody
-        , expect =
-            Http.expectJson toMsg (Decode.field "syndications" (Decode.list syndicationDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+syndicationExportRequest : String -> String -> RequestSpec
+syndicationExportRequest postId format =
+    { method = "GET"
+    , url =
+        Api.Url.path [ "api", "blog", "posts", postId, "syndication" ]
+            [ Url.Builder.string "format" format ]
+    , body = Nothing
+    }
 
 
-{-| `POST /api/blog/posts/:id/syndications` — record that a copy went out.
+{-| The export payload's decoder, exposed so a plan's caller can resolve it.
 -}
-recordSyndication :
-    Credentials
-    -> String
-    -> String
-    -> (Result Http.Error Syndication -> msg)
-    -> Cmd msg
-recordSyndication token postId method toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
-        , body = Http.jsonBody (Encode.object [ ( "method", Encode.string method ) ])
-        , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+syndicationExportDecoder : Decoder SyndicationExport
+syndicationExportDecoder =
+    Decode.map3 SyndicationExport
+        (Decode.field "format" Decode.string)
+        (Decode.field "canonical_url" Decode.string)
+        (Decode.field "body" Decode.string)
 
 
-{-| `PUT /api/blog/posts/:id/syndications/:sid` — paste the live Substack URL
-back in, closing the POSSE loop.
+{-| `GET /api/blog/posts/:id/syndications` — where a post has been cross-posted, as data.
 -}
-updateSyndicationUrl :
-    Credentials
-    -> String
-    -> String
-    -> String
-    -> (Result Http.Error Syndication -> msg)
-    -> Cmd msg
-updateSyndicationUrl token postId sid url toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications/" ++ sid
-        , body = Http.jsonBody (Encode.object [ ( "syndicated_url", Encode.string url ) ])
-        , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+syndicationsRequest : String -> RequestSpec
+syndicationsRequest postId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "blog", "posts", postId, "syndications" ] []
+    , body = Nothing
+    }
 
 
-{-| `PUT /api/blog/posts/:id` with ONLY `syndicated` — the per-post feed
-tickbox. Partial on purpose: title/body/visibility stay untouched.
+{-| `POST /api/blog/posts/:id/syndications` — noting a cross-post, as data.
 -}
-setPostSyndicated :
-    Credentials
-    -> String
-    -> Bool
-    -> (Result Http.Error Bool -> msg)
-    -> Cmd msg
-setPostSyndicated token postId syndicated toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/blog/posts/" ++ postId
-        , body = Http.jsonBody (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
-        , expect = Http.expectJson toMsg (Decode.at [ "post", "syndicated" ] Decode.bool)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+recordSyndicationRequest : String -> String -> RequestSpec
+recordSyndicationRequest postId method =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "blog", "posts", postId, "syndications" ] []
+    , body = Just (Encode.object [ ( "method", Encode.string method ) ])
+    }
+
+
+{-| `PUT /api/blog/posts/:post/syndications/:id` — recording where a cross-post
+landed, as data.
+-}
+updateSyndicationUrlRequest : String -> String -> String -> RequestSpec
+updateSyndicationUrlRequest postId sid url =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "blog", "posts", postId, "syndications", sid ] []
+    , body = Just (Encode.object [ ( "syndicated_url", Encode.string url ) ])
+    }
+
+
+{-| `PUT /api/blog/posts/:id` — flipping a post's syndicated flag, as data.
+-}
+setPostSyndicatedRequest : String -> Bool -> RequestSpec
+setPostSyndicatedRequest postId syndicated =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "blog", "posts", postId ] []
+    , body = Just (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
+    }
 
 
 {-| `POST /api/blog/posts/:id/publish` — making a post visible, as data.
