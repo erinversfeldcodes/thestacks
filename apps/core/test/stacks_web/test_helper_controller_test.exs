@@ -32,6 +32,92 @@ defmodule StacksWeb.TestHelperControllerTest do
     :ok
   end
 
+  describe "EVERY gated helper route refuses with the flag off" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    # ⛔ THE WHOLE SET, NOT ONE ROUTE. The gate was covered by the
+    # `confirmation-token` cases below and nothing else, so seven of the eight
+    # routes behind `StacksWeb.Plugs.E2ETestHelper` had no test that they are
+    # gated at all. A change that loosened the pipeline for one of them — or a
+    # route added to the scope without the plug — would have left this file green.
+    #
+    # ⚠️ The list is derived from `router.ex`'s `/api/test` scope and must move
+    # with it. The count assertion below is what makes that true rather than
+    # hoped: a route added to the scope and not to this list fails here, which is
+    # the only way a per-route table stays honest.
+    @gated_routes [
+      {:get, "/api/test/confirmation-token"},
+      {:get, "/api/test/sent-emails"},
+      {:get, "/api/test/email-budget"},
+      {:put, "/api/test/age-verification"},
+      {:delete, "/api/test/admin-sessions"},
+      {:post, "/api/test/session"},
+      {:post, "/api/test/book-writing"},
+      {:post, "/api/test/book-description"}
+    ]
+
+    test "the route list matches the router's gated scope" do
+      router = File.read!("lib/core_web/router.ex")
+
+      # ⚠️ BOUNDED TO THE SCOPE BLOCK. Splitting on the plug name and reading to
+      # the end of the file swept in the `/api` catch-all below it and reported a
+      # divergence that was the scraper's, not the router's. The block ends at
+      # the first line that is exactly two spaces and `end`.
+      scope =
+        router
+        |> String.split(~s(scope "/api/test", StacksWeb do))
+        |> Enum.at(1)
+        |> String.split(~r/^  end$/m)
+        |> List.first()
+
+      assert scope =~ "StacksWeb.Plugs.E2ETestHelper",
+             "the /api/test scope no longer pipes through the gate"
+
+      declared =
+        Regex.scan(~r/^\s*(get|post|put|delete)\s+"([^"]+)"/m, scope)
+        |> Enum.map(fn [_, verb, path] -> {String.to_atom(verb), "/api/test" <> path} end)
+
+      # ⛔ Compared as SETS and counted, so a route added to the scope without
+      # being added here is a failure rather than a silent omission.
+      assert Enum.sort(declared) == Enum.sort(@gated_routes),
+             "the router's gated scope and this suite's list have diverged: " <>
+               "router has #{inspect(Enum.sort(declared) -- Enum.sort(@gated_routes))}, " <>
+               "suite has #{inspect(Enum.sort(@gated_routes) -- Enum.sort(declared))}"
+
+      assert length(@gated_routes) == 8
+    end
+
+    for {verb, path} <- [
+          {:get, "/api/test/confirmation-token"},
+          {:get, "/api/test/sent-emails"},
+          {:get, "/api/test/email-budget"},
+          {:put, "/api/test/age-verification"},
+          {:delete, "/api/test/admin-sessions"},
+          {:post, "/api/test/session"},
+          {:post, "/api/test/book-writing"},
+          {:post, "/api/test/book-description"}
+        ] do
+      test "#{verb} #{path} is 404 with the flag absent", %{conn: conn} do
+        conn = dispatch(conn, @endpoint, unquote(verb), unquote(path), %{})
+        assert conn.status == 404
+      end
+
+      # ⚠️ `"true"` specifically: it is what the neighbouring `ALLOW_SEEDS` gate
+      # accepts, so an operator who knows that one would reasonably try it here.
+      # The plug accepts only `"1"`.
+      test "#{verb} #{path} is 404 with the flag set to something other than \"1\"", %{
+        conn: conn
+      } do
+        System.put_env(@flag, "true")
+        conn = dispatch(conn, @endpoint, unquote(verb), unquote(path), %{})
+        assert conn.status == 404
+      end
+    end
+  end
+
   describe "GET /api/test/confirmation-token with the flag OFF (production posture)" do
     setup do
       System.delete_env(@flag)
