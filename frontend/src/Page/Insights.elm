@@ -152,7 +152,7 @@ updateWithEffect msg model =
                     , NoOut
                     )
 
-                Err err ->
+                Err _ ->
                     -- ⛔ Same as above: the expiry is already claimed by the plan.
                     ( { model | riskLoading = False, riskError = True }, Effect.none, NoOut )
 
