@@ -171,6 +171,15 @@ async function injectEventSourceMock(
 
       constructor(url: string) {
         this.url = url;
+        // ⛔ EVERY url this page opens, recorded on the window — and the RESET is
+        // what makes it useful. A reload builds a fresh `window`, so this array
+        // starts empty again; anything in it afterwards was opened by the
+        // reloaded page, which is exactly the claim "a reader who reloaded still
+        // gets live progress" needs. `addInitScript` re-runs on every
+        // navigation, so the mock is in place before Elm boots either time.
+        const seen = ((window as any).__sseUrls =
+          (window as any).__sseUrls || []);
+        seen.push(url);
         const config = (window as any).__mockSSEConfig;
         if (!config) return;
 
@@ -1025,6 +1034,73 @@ test.describe("Age-gated content", () => {
     await expect(
       page.getByRole("button", { name: "Add another" }),
     ).toBeVisible();
+  });
+});
+
+test.describe("live progress after a reload", () => {
+  /**
+   * ⛔ THE REGRESSION THE STORED-SESSION DELETION LEFT BEHIND. The progress
+   * stream used to carry a bearer token in its QUERY STRING, because
+   * `EventSource` cannot set an `Authorization` header — a live credential in
+   * request logs, in `Referer` and in browser history. Its no-bearer branch
+   * answered `NoOut`, and once the SPA stopped storing a session that was EVERY
+   * reader who had not just signed in: reload the upload page and you got no
+   * live progress at all.
+   *
+   * The stream takes no credential now and relies on the session cookie, which a
+   * same-origin `EventSource` sends like any other request. ⚠️ So the claim worth
+   * testing is not that the url is clean — a grep shows that, and a stream which
+   * opened and delivered nothing would satisfy it — but that **a reloaded page
+   * still receives frames**.
+   *
+   * ⚖️ RELOAD FIRST, THEN UPLOAD, which is the order the requirement states and
+   * is the case the defect was in. (Reloading MID-upload is a different claim —
+   * resuming an in-flight identification — which nothing specifies and which the
+   * page does not do: it returns to the drop zone and the upload appears in the
+   * inbox instead.)
+   */
+  test("a reader who reloaded can upload and still receives progress frames", async ({
+    page,
+  }) => {
+    await mockUploadAccept(page);
+    await mockPollResolved(page);
+    await mockGetBook(page);
+
+    await page.goto("/upload");
+
+    // ⛔ The reload is the precondition, not the subject. After it the Elm model
+    // is rebuilt from nothing and the only credential in the browser is the
+    // HttpOnly cookie — the exact state the deleted stored session used to hide.
+    await page.reload();
+    await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
+
+    await triggerFileUpload(page);
+
+    // Frames arrived: the stream opened AND delivered, which is the half a
+    // url-only assertion cannot see.
+    //
+    // ⚠️ `mockPollResolved` resolves ONE book, which renders "We think this is…"
+    // and the title. This first asserted `"Books Identified!"` — the MULTI-book
+    // heading — and failed against a page that had identified the book perfectly
+    // well. The assertion was wrong, not the product.
+    await expect(page.getByText("We think this is")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText("The Name of the Rose")).toBeVisible();
+
+    const urls = await page.evaluate(
+      () => ((window as any).__sseUrls || []) as string[],
+    );
+    expect(urls.length, "the reloaded page must open the stream").toBeGreaterThan(
+      0,
+    );
+
+    // ⛔ And it must still be a bare path. A regression that reintroduced the
+    // credential would open the stream and deliver frames exactly as above.
+    for (const url of urls) {
+      expect(url, "the stream url must carry no query string").not.toContain("?");
+      expect(url.toLowerCase()).not.toContain("token");
+    }
   });
 });
 
