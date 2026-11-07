@@ -25,10 +25,10 @@ exactly the small dishonesty a feedback form is supposed to be the cure for.
 -}
 
 import Api
+import Effect
 import Html exposing (Html, button, div, h1, label, p, text, textarea)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, value)
 import Html.Events exposing (onClick, onInput)
-import Http
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -44,14 +44,14 @@ maxLength =
 type alias Model =
     { message : String
     , pageContext : String
-    , sending : RemoteData Http.Error ()
+    , sending : RemoteData Api.RequestError ()
     }
 
 
 type Msg
     = MessageChanged String
     | SendClicked
-    | SendCompleted (Result Http.Error ())
+    | SendCompleted (Result Api.RequestError ())
     | SessionExpiryDetected
 
 
@@ -93,13 +93,16 @@ update msg model maybeToken =
             case ( isSendable model, maybeToken ) of
                 ( True, Just token ) ->
                     ( { model | sending = Loading }
-                    , Api.sendFeedback
-                        { body = String.trim model.message
-                        , pageContext = model.pageContext
-                        }
-                        (Api.authed token
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.sendFeedbackRequest
+                                { body = String.trim model.message
+                                , pageContext = model.pageContext
+                                }
+                            )
+                            token
                             { onExpired = SessionExpiryDetected
-                            , onResult = SendCompleted
+                            , onResponse = Api.resolveNoContent >> SendCompleted
                             }
                         )
                     , NoOut
@@ -171,14 +174,20 @@ viewLengthWarning model =
 {-| Every branch says something true. `NotAsked` says nothing at all, which is
 also true, and is why the acknowledgement cannot be mistaken for a default.
 -}
-viewOutcome : RemoteData Http.Error () -> Html Msg
+viewOutcome : RemoteData Api.RequestError () -> Html Msg
 viewOutcome sending =
     case sending of
         Success () ->
             p [ class "feedback__outcome feedback__outcome--sent", testId "feedback-sent" ]
                 [ text "Read and filed. Thank you — if it's a bug, it's now on a list with a person looking at it." ]
 
-        Failure (Http.BadStatus 429) ->
+        -- ⚠️ `RateLimited`, not `BadStatus 429`, since the request became a plan:
+        -- `Api.resolveNoContent` classifies a 429 and parses its `Retry-After`,
+        -- where the old builder flattened both into a bare status. The message
+        -- below is unchanged — telling the reader HOW LONG to wait is now
+        -- possible from the payload this branch discards, and is a separate
+        -- change from moving the request.
+        Failure (Api.RateLimited _) ->
             p [ class "feedback__outcome feedback__outcome--failed", testId "feedback-failed" ]
                 [ text "You've sent a few already — thank you, genuinely. Try again in a little while; your message is still here." ]
 

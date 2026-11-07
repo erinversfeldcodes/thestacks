@@ -9,6 +9,7 @@ module Page.ResetPassword exposing
     )
 
 import Api
+import Effect
 import Html exposing (Html, a, button, div, h1, input, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled, for, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -29,7 +30,7 @@ type alias Model =
     , token : String
     , password : String
     , confirmPassword : String
-    , submitting : RemoteData Http.Error ()
+    , submitting : RemoteData Api.RequestError ()
     }
 
 
@@ -37,7 +38,7 @@ type Msg
     = SetPassword String
     | SetConfirmPassword String
     | Submit
-    | Completed (Result Http.Error ())
+    | Completed (Result Api.RequestError ())
     | AdvanceToSignIn
 
 
@@ -120,9 +121,15 @@ update msg model =
 
                 ( _, Nothing ) ->
                     ( { model | submitting = Loading }
-                    , Api.resetPassword model.proof
-                        { token = model.token, password = model.password }
-                        Completed
+                    , Effect.perform
+                        (Effect.public
+                            (Api.resetPasswordRequest
+                                { token = model.token, password = model.password }
+                            )
+                            Nothing
+                            model.proof
+                            (Api.resolveNoContent >> Completed)
+                        )
                     , NoOut
                     )
 
@@ -158,7 +165,7 @@ request was about to consume. Only `Failure` resets; `Loading` and
 `Success` are immune to keystrokes.
 
 -}
-clearStaleError : RemoteData Http.Error () -> RemoteData Http.Error ()
+clearStaleError : RemoteData Api.RequestError () -> RemoteData Api.RequestError ()
 clearStaleError submitting =
     case submitting of
         Failure _ ->
@@ -257,11 +264,11 @@ viewForm model =
                 button [ class "login-card__submit", onClick Submit, testId "reset-submit" ]
                     [ text "Reset password" ]
         , case model.submitting of
-            Failure (Http.BadStatus 400) ->
+            Failure (Api.RequestFailed (Http.BadStatus 400)) ->
                 p [ class "login-card__error", testId "reset-error" ]
                     [ text "This reset link is invalid or has expired. Request a new one." ]
 
-            Failure (Http.BadStatus 422) ->
+            Failure (Api.RequestFailed (Http.BadStatus 422)) ->
                 p [ class "login-card__error", testId "reset-error" ]
                     [ text PasswordRule.tooShort ]
 

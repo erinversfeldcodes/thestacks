@@ -13,6 +13,7 @@ that renders nothing at all.
 
 -}
 
+import Api
 import Expect
 import Http
 import Page.Login as Login
@@ -58,7 +59,7 @@ resetRejected =
         |> step (ResetPassword.SetPassword "long-enough-password")
         |> step (ResetPassword.SetConfirmPassword "long-enough-password")
         |> step ResetPassword.Submit
-        |> step (ResetPassword.Completed (Err (Http.BadStatus 422)))
+        |> step (ResetPassword.Completed (Err (Api.RequestFailed (Http.BadStatus 422))))
 
 
 settingsWithShortPassword : SettingsPassword.Model

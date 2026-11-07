@@ -15,6 +15,7 @@ No edit functionality - just a monitoring view.
 -}
 
 import Api exposing (SourceHealth)
+import Effect
 import Html exposing (Html, div, h1, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class)
 import Http
@@ -28,6 +29,7 @@ type alias Model =
 
 type Msg
     = SourceHealthReceived (Result Http.Error (List SourceHealth))
+    | SessionExpiryDetected
 
 
 type OutMsg
@@ -43,7 +45,15 @@ init maybeToken =
     in
     case maybeToken of
         Just token ->
-            ( model, Api.getSourceHealth token SourceHealthReceived )
+            ( model
+            , Effect.perform
+                (Effect.authed Api.sourceHealthRequest
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveJson Api.sourceHealthListDecoder >> SourceHealthReceived
+                    }
+                )
+            )
 
         Nothing ->
             ( { sourceHealth = NotAsked }, Cmd.none )
@@ -52,12 +62,21 @@ init maybeToken =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         SourceHealthReceived result ->
             case result of
                 Ok sources ->
                     ( { model | sourceHealth = Success sources }, Cmd.none, NoOut )
 
                 Err err ->
+                    -- ⚠️ KEPT, and it is NOT the residue an authed page sheds.
+                    -- `needsAdminElevation` matches 401 OR 403; the plan now claims
+                    -- the 401, so what still arrives here is the 403 — an operator
+                    -- whose 30-minute elevation window ran out. Routing that to the
+                    -- gate is this branch's whole job, and no plan can do it: a 403
+                    -- is not an ended session.
                     if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 

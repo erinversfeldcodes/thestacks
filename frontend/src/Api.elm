@@ -144,7 +144,6 @@ module Api exposing
     , foldProgress
     , forgotPasswordRequest
     , getAccountRequest
-    , getAdminFeedback
     , getAdminInvites
     , getAdminSources
     , getAuditLogRequest
@@ -172,7 +171,6 @@ module Api exposing
     , getProfileRequest
     , getProfileShelfRequest
     , getRemovalRequests
-    , getSourceHealth
     , getTransparencyMetricsRequest
     , getUploadInbox
     , getUserPlacements
@@ -244,7 +242,7 @@ module Api exposing
     , requestHeaders
     , requestListingRemovalRequest
     , resendConfirmationRequest
-    , resetPassword
+    , resetPasswordRequest
     , resolveAuthResponse
     , resolveJson
     , resolveNoContent
@@ -259,7 +257,6 @@ module Api exposing
     , searchBooksRequest
     , searchResponseDecoder
     , searchUsersRequest
-    , sendFeedback
     , sendFeedbackRequest
     , setBookAgeGateRequest
     , setPostSyndicated
@@ -269,6 +266,7 @@ module Api exposing
     , soldListing
     , sourceHealthDecoder
     , sourceHealthListDecoder
+    , sourceHealthRequest
     , specHttpBody
     , standardTimeout
     , storedVisibilityDecoder
@@ -1560,37 +1558,25 @@ resendConfirmationRequest email =
     }
 
 
-{-| Set a new password using the signed token from a reset email. 400 =
-invalid/expired token, 422 = password validation failed.
--}
-resetPassword :
-    Maybe String
-    -> { token : String, password : String }
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-resetPassword proof body toMsg =
-    Http.request
-        { method = "POST"
+{-| `POST /api/auth/reset-password` — completing a password reset, as data.
 
-        -- ⚠️ NO CREDENTIAL, DECLARED. This endpoint is unauthenticated:
-        -- it carries a password-reset
-        -- capability token in the BODY —
-        -- so it carries no session and is not a CSRF target: there is no ambient
-        -- authority for a cross-site request to borrow. Stated rather than left as
-        -- an empty list, so the absence is checkable instead of ambiguous.
-        , headers = httpHeaders "POST" (NoCredential proof)
-        , url = baseUrl ++ "/api/auth/reset-password"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "token", Encode.string body.token )
-                    , ( "password", Encode.string body.password )
-                    ]
-                )
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+⛔ NO CREDENTIAL, DECLARED, as in the builder this replaces: the reset token in
+the body IS the authentication, and the asker has no session to carry. The proof
+goes to `Effect.public`, which is what this endpoint checks.
+
+-}
+resetPasswordRequest : { token : String, password : String } -> RequestSpec
+resetPasswordRequest body =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "auth", "reset-password" ] []
+    , body =
+        Just
+            (Encode.object
+                [ ( "token", Encode.string body.token )
+                , ( "password", Encode.string body.password )
+                ]
+            )
+    }
 
 
 {-| The outcome of a listing-removal request.
@@ -5810,58 +5796,6 @@ adminFeedbackRequest window =
     }
 
 
-{-| GET /api/admin/feedback — one page of the owner's queue, newest first.
-
-The window is explicit because the queue is read a page at a time and this is
-the only interface that can read it at all: an unwindowed request takes the
-server's default and leaves everything past it with no way to be asked for.
-
--}
-getAdminFeedback :
-    Credentials
-    -> { limit : Int, offset : Int }
-    -> (Result Http.Error AdminFeedbackPage -> msg)
-    -> Cmd msg
-getAdminFeedback token window toMsg =
-    let
-        spec =
-            adminFeedbackRequest window
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg adminFeedbackPageDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| POST /api/feedback — send the reader's message.
-
-The 201 carries no body back, deliberately, so this resolves to `()`: there is
-nothing to render but the acknowledgement, and re-displaying what they just
-typed would be the server telling them what they already know.
-
--}
-sendFeedback : { body : String, pageContext : String } -> Authed Http.Error () msg -> Cmd msg
-sendFeedback body request =
-    let
-        spec =
-            sendFeedbackRequest body
-    in
-    Http.request
-        { method = spec.method
-        , headers = authedHeaders spec.method request
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = authedExpect resolveWhatever request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
 {-| The data of `sendFeedback`'s request — see `RequestSpec`.
 -}
 sendFeedbackRequest : { body : String, pageContext : String } -> RequestSpec
@@ -6210,22 +6144,14 @@ sourceHealthListDecoder =
     Decode.field "data" (Decode.list sourceHealthDecoder)
 
 
-{-| GET /api/admin/source-health — fetch per-source health status.
+{-| `GET /api/admin/source-health` — scraper source health, as data.
 -}
-getSourceHealth :
-    Credentials
-    -> (Result Http.Error (List SourceHealth) -> msg)
-    -> Cmd msg
-getSourceHealth token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/admin/source-health"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg sourceHealthListDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+sourceHealthRequest : RequestSpec
+sourceHealthRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "admin", "source-health" ] []
+    , body = Nothing
+    }
 
 
 {-| Onboarding status response from GET /api/onboarding/status.

@@ -25,6 +25,7 @@ cannot tell a full page from a truncated queue.
 -}
 
 import Api exposing (AdminFeedbackEntry, AdminFeedbackPage)
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, h1, li, p, span, text, ul)
 import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
@@ -54,6 +55,7 @@ type alias Model =
 
 type Msg
     = EntriesReceived (Result Http.Error AdminFeedbackPage)
+    | SessionExpiryDetected
     | ClickedOlder
     | ClickedNewer
 
@@ -66,20 +68,22 @@ type OutMsg
 init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { page = Loading, offset = 0 }
-    , fetch maybeToken 0
+    , Effect.perform (fetch maybeToken 0)
     )
 
 
-fetch : Maybe Api.Credentials -> Int -> Cmd Msg
+fetch : Maybe Api.Credentials -> Int -> Effect Msg
 fetch maybeToken offset =
     case maybeToken of
         Just token ->
-            Api.getAdminFeedback token
-                { limit = pageSize, offset = offset }
-                EntriesReceived
+            Effect.authed (Api.adminFeedbackRequest { limit = pageSize, offset = offset })
+                token
+                { onExpired = SessionExpiryDetected
+                , onResponse = Api.resolveJson Api.adminFeedbackPageDecoder >> EntriesReceived
+                }
 
         Nothing ->
-            Cmd.none
+            Effect.none
 
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
@@ -88,7 +92,16 @@ update msg model maybeToken =
         EntriesReceived (Ok page) ->
             ( { model | page = Success page }, Cmd.none, NoOut )
 
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         EntriesReceived (Err err) ->
+            -- ⚠️ KEPT, and it is NOT the residue an authed page sheds.
+            -- `needsAdminElevation` matches 401 OR 403; the plan now claims
+            -- the 401, so what still arrives here is the 403 — an operator
+            -- whose 30-minute elevation window ran out. Routing that to the
+            -- gate is this branch's whole job, and no plan can do it: a 403
+            -- is not an ended session.
             if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
@@ -107,7 +120,7 @@ update msg model maybeToken =
                         model.offset + shownCount model
                 in
                 ( { model | offset = offset, page = Loading }
-                , fetch maybeToken offset
+                , Effect.perform (fetch maybeToken offset)
                 , NoOut
                 )
 
@@ -121,7 +134,7 @@ update msg model maybeToken =
                         max 0 (model.offset - pageSize)
                 in
                 ( { model | offset = offset, page = Loading }
-                , fetch maybeToken offset
+                , Effect.perform (fetch maybeToken offset)
                 , NoOut
                 )
 

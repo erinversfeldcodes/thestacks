@@ -158,7 +158,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err Http.NetworkError))
+                            update (Feedback.SendCompleted (Err (Api.RequestFailed Http.NetworkError)))
                                 (written "Something broke.")
                     in
                     render model
@@ -170,7 +170,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err (Http.BadStatus 429)))
+                            update (Feedback.SendCompleted (Err (Api.RateLimited Nothing)))
                                 (written "My third report today.")
                     in
                     render model
@@ -181,7 +181,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err Http.NetworkError))
+                            update (Feedback.SendCompleted (Err (Api.RequestFailed Http.NetworkError)))
                                 (written "An hour of careful notes.")
                     in
                     Expect.equal "An hour of careful notes." model.message
@@ -189,7 +189,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err (Http.BadStatus 429)))
+                            update (Feedback.SendCompleted (Err (Api.RateLimited Nothing)))
                                 (written "An hour of careful notes.")
                     in
                     Expect.equal "An hour of careful notes." model.message
@@ -197,7 +197,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err Http.NetworkError))
+                            update (Feedback.SendCompleted (Err (Api.RequestFailed Http.NetworkError)))
                                 (written "An hour of careful notes.")
                     in
                     render model
@@ -277,12 +277,30 @@ suite =
                                 (queueAt 0 Loading)
                     in
                     Expect.equal (Success { entries = [ entry "one" ], total = 1 }) model.page
-            , test "a lapsed admin session bubbles out rather than rendering an error" <|
+            , -- ⛔ REWRITTEN WITH THE MIGRATION, and split in two, because the one
+              -- status this used to send now arrives by a different door. The
+              -- request is an `Effect.authed` plan, so a 401 is claimed by the
+              -- plan and delivered as `SessionExpiryDetected`; feeding
+              -- `EntriesReceived (Err (BadStatus 401))` by hand asserts a path a
+              -- real 401 can no longer take.
+              test "a lapsed admin session bubbles out rather than rendering an error" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            adminUpdate AdminQueue.SessionExpiryDetected (queueAt 0 Loading)
+                    in
+                    Expect.equal AdminQueue.SessionExpired out
+            , -- ⚠️ THE OTHER HALF, and the reason the page's own status test
+              -- survives the migration. `needsAdminElevation` matches 401 OR 403;
+              -- the plan took the 401, so what still reaches this handler is the
+              -- 403 — an operator whose elevation window ran out. No plan can
+              -- route that, because a 403 is not an ended session.
+              test "an expired elevation window also bubbles out, by the handler's own reading" <|
                 \_ ->
                     let
                         ( _, _, out ) =
                             adminUpdate
-                                (AdminQueue.EntriesReceived (Err (Http.BadStatus 401)))
+                                (AdminQueue.EntriesReceived (Err (Http.BadStatus 403)))
                                 (queueAt 0 Loading)
                     in
                     Expect.equal AdminQueue.SessionExpired out

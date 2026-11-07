@@ -1,5 +1,6 @@
 module Page.ResetPasswordTest exposing (suite)
 
+import Api
 import Expect
 import Html.Attributes
 import Http
@@ -84,9 +85,9 @@ suite =
                 \_ ->
                     validModel
                         |> update Submit
-                        |> update (Completed (Err (Http.BadStatus 400)))
+                        |> update (Completed (Err (Api.RequestFailed (Http.BadStatus 400))))
                         |> .submitting
-                        |> Expect.equal (Failure (Http.BadStatus 400))
+                        |> Expect.equal (Failure (Api.RequestFailed (Http.BadStatus 400)))
             ]
         , describe "a success cannot be taken back"
             [ test "typing in the password field does not undo a success" <|
@@ -104,7 +105,7 @@ suite =
             , test "a late failure response cannot overwrite a success" <|
                 \_ ->
                     succeeded
-                        |> update (Completed (Err (Http.BadStatus 400)))
+                        |> update (Completed (Err (Api.RequestFailed (Http.BadStatus 400))))
                         |> .submitting
                         |> Expect.equal (Success ())
             , test "the success view survives a keystroke — the reader still sees the confirmation" <|
@@ -126,7 +127,7 @@ suite =
                 \_ ->
                     validModel
                         |> update Submit
-                        |> update (Completed (Err (Http.BadStatus 400)))
+                        |> update (Completed (Err (Api.RequestFailed (Http.BadStatus 400))))
                         |> update (SetPassword "another-try")
                         |> .submitting
                         |> Expect.equal NotAsked
@@ -166,7 +167,7 @@ suite =
                     , outMsgOf (SetConfirmPassword "x") validModel
                     , outMsgOf Submit validModel
                     , outMsgOf (Completed (Ok ())) validModel
-                    , outMsgOf (Completed (Err Http.NetworkError)) validModel
+                    , outMsgOf (Completed (Err (Api.RequestFailed Http.NetworkError))) validModel
                     ]
                         |> Expect.equalLists [ NoOut, NoOut, NoOut, NoOut, NoOut ]
             , test "THE WIRE — Main sends AdvanceToLogin to the sign-in page" <|
