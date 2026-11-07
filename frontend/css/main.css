@@ -6493,17 +6493,48 @@ h4 {
     color: var(--text);
 }
 
+/* ⛔ `appearance: none`, AND IT FIXES A DEFECT THAT PREDATES THIS BANNER.
+   `.user-menu__trigger` is a <button> and nothing ever reset its UA chrome, so
+   it rendered with a light-grey `#efefef` background and an `outset` border —
+   alone among the nav buttons; `Bookshelves`, `Marketplace` and `Profile` are
+   all transparent. Its own text sat on that at **1.15:1**, on every page a
+   signed-in reader sees.
+
+   ⚠️ MEASURED LIVE 2026-11-07, not read off this file, and the file is exactly
+   why it was missed: nothing here mentions a background, so the stylesheet reads
+   as correct. `background: none` alone does NOT clear it — a button keeps its UA
+   background until `appearance` is cleared too.
+
+   After: the nav's own `rgb(61, 43, 31)` shows through and the trigger's text
+   measures **10.15:1**. */
+.user-menu__trigger {
+    -webkit-appearance: none;
+    appearance: none;
+    background-color: transparent;
+    border: 0;
+    cursor: pointer;
+}
+
 /* ⛔ AFTER the base rule above, not before it. A modifier is `.a.b--m` at (0,2,0)
    against the base's (0,1,0), so it wins on specificity — but a hover or
    pseudo-class on the base would be (0,2,0) too, and at equal specificity the
    LATER rule wins. Placing the modifier earlier is how seven of them silently
-   lost their state on hover once before. */
+   lost their state on hover once before.
+
+   ⚖️ NO COLOUR CHANGE HERE, deliberately. The first version set
+   `color: var(--banner-on-surface)` — which is the same value `--text` already
+   resolves to on this element, so it was a no-op that LOOKED like a state. The
+   state is carried by the marker dot beside the name and by the notice inside
+   the menu; this class exists so a test can assert the trigger knows. */
 .user-menu__trigger--session-live {
-    color: var(--banner-on-surface);
+    font-weight: 600;
 }
 
 /* The dot beside the name. `aria-hidden`, because its meaning travels in the
    visually-hidden sentence next to it — a coloured dot announces nothing. */
+/* ⚠️ `--warning` measures 4.13:1 against the nav's `rgb(61, 43, 31)`, which clears
+   the 3:1 that non-text needs. It measured 2.83 before the rule above cleared the
+   trigger's UA background — the dot had not changed; what it sat on had. */
 .user-menu__session-marker {
     margin-left: var(--space-2);
     color: var(--warning);
