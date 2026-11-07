@@ -96,24 +96,32 @@ update msg model =
 -}
 updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model =
-    case ( msg, model ) of
-        ( SessionExpiryDetected, _ ) ->
+    -- ⚠️ DISPATCHES ON THE MSG FIRST, then on the model, rather than on the pair.
+    -- A `case ( msg, model ) of` reads more naturally here and was how this page
+    -- was written — but `check-session-expiry-coverage.sh` matches an expiry
+    -- branch as `^\s+Constructor ->$`, so `( SessionExpiryDetected, _ ) ->` is
+    -- invisible to it and the page reports as dropping its 401. The gate is right
+    -- that the routing must be greppable per-msg; this shape makes it so.
+    case msg of
+        SessionExpiryDetected ->
             ( model, Effect.none, SessionExpired )
 
-        ( PreviewLoaded result, Collection data ) ->
-            case result of
-                Ok shelves ->
-                    ( Collection { data | preview = Success (List.concatMap .placements shelves) }
-                    , Effect.none
-                    , NoOut
-                    )
+        PreviewLoaded result ->
+            case model of
+                Collection data ->
+                    case result of
+                        Ok shelves ->
+                            ( Collection { data | preview = Success (List.concatMap .placements shelves) }
+                            , Effect.none
+                            , NoOut
+                            )
 
-                Err err ->
-                    -- ⛔ The plan claims the 401 first, so no re-test here.
-                    ( Collection { data | preview = Failure err }, Effect.none, NoOut )
+                        Err err ->
+                            -- ⛔ The plan claims the 401 first, so no re-test here.
+                            ( Collection { data | preview = Failure err }, Effect.none, NoOut )
 
-        ( PreviewLoaded _, Landing ) ->
-            ( model, Effect.none, NoOut )
+                Landing ->
+                    ( model, Effect.none, NoOut )
 
 
 {-| How many preview spines the glimpse shows. A glimpse, not the whole shelf —
