@@ -151,19 +151,19 @@ module Api exposing
     , getBookRequest
     , getBookshelfRequest
     , getCatalogueRequest
-    , getIdentity
     , getInferencesRequest
     , getListingsRequest
     , getProfileRequest
     , getProfileShelfRequest
     , getTransparencyMetricsRequest
-    , getUploadInbox
     , getUserPlacementsRequest
     , groupFeedRequest
     , groupMemberDecoder
     , groupMembersRequest
     , groupRequest
     , identityDecoder
+    , identityOutcome
+    , identityRequest
     , importRefusal
     , importRequest
     , importRowDecoder
@@ -183,7 +183,7 @@ module Api exposing
     , libraryImportDecoder
     , listingTransitionRequest
     , loginRequest
-    , logout
+    , logoutRequest
     , mergeFormatRequest
     , mergeFormatResponseDecoder
     , moveBookRequest
@@ -217,7 +217,6 @@ module Api exposing
     , publishBlogPostRequest
     , putUploadBytes
     , recordSyndicationRequest
-    , refresh
     , refreshRequest
     , refusalFrom
     , refusalToken
@@ -282,6 +281,7 @@ module Api exposing
     , updateShelfVisibilityRequest
     , updateSyndicationUrlRequest
     , uploadInboxDecoder
+    , uploadInboxRequest
     , uploadTimeout
     , withBearer
     )
@@ -982,17 +982,14 @@ uploadInboxDecoder =
     Decode.field "items" (Decode.list inboxItemDecoder)
 
 
-getUploadInbox : Credentials -> (Result Http.Error (List InboxItem) -> msg) -> Cmd msg
-getUploadInbox token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/uploads/inbox"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg uploadInboxDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+{-| `GET /api/uploads/inbox` — what is waiting for this reader, as data.
+-}
+uploadInboxRequest : RequestSpec
+uploadInboxRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "uploads", "inbox" ] []
+    , body = Nothing
+    }
 
 
 {-| One bookstore event for an author, scraped from the shop's own page.
@@ -1929,32 +1926,6 @@ resolveBody decode response =
             decode bodyText |> Result.mapError Http.BadBody
 
 
-{-| POST /api/auth/refresh — exchange the current (still-valid) access token for
-a fresh one before it expires. The 200
-body is byte-identical to login's, so we reuse `authResponseDecoder`. A 401/error
-here means the session is no longer renewable and the caller falls through to the
-session-expiry interceptor.
--}
-refresh :
-    Credentials
-    -> (Result Http.Error AuthResponse -> msg)
-    -> Cmd msg
-refresh token toMsg =
-    let
-        spec =
-            refreshRequest
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectJson toMsg authResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
 {-| `POST /api/auth/refresh` — exchange a still-valid access token for a fresh
 one before it expires. The 200 body is byte-identical to login's, so
 `authResponseDecoder` reads it; a 401 means the session is no longer renewable
@@ -1968,39 +1939,19 @@ refreshRequest =
     }
 
 
-{-| DELETE /api/auth/logout — invalidate the current session server-side
-(revokes the token via guardian\_db). The method MUST be DELETE
-to match the router; a POST silently 404s the SPA catch-all, leaving the token
-valid until its TTL — caught by the logout E2E (auth.spec.ts).
+{-| `DELETE /api/auth/logout` — ending the session, as data.
 
-⛔ **AN `Authed` RATHER THAN A TOKEN AND A CALLBACK, SO THE ANSWER CANNOT BE
-THROWN AWAY.** The caller used to pass `always FocusResult` — a function that
-discards the result on success and failure alike — and navigated to `/login` in
-the same `Cmd.batch`. A reader whose logout never landed (offline, a 500, a
-machine that had scaled to zero) therefore saw a signed-out interface while the
-session cookie stayed valid for the rest of its lifetime, and the next request
-from that browser was authenticated again. The session cookie is `HttpOnly`, so
-there is no client-side way to compensate: confirming the server did it is the
-only mechanism there is.
-
-⚖️ A 401 here is the one failure that still ends the session — the credential
-this request carried is already gone, so there is nothing left to revoke — which
-is why `onExpired` is the right destination for it rather than a retry prompt.
-Every other failure means the session is still open and the reader has to be
-told so.
+⚖️ Authenticated, so the plan takes an `onExpired` — and the sensible answer
+is the same thing logging out does. A 401 means the session this request wanted
+to end had already ended, which is the outcome the caller was asking for.
 
 -}
-logout : Authed Http.Error () msg -> Cmd msg
-logout request =
-    Http.request
-        { method = "DELETE"
-        , headers = authedHeaders "DELETE" request
-        , url = baseUrl ++ "/api/auth/logout"
-        , body = Http.emptyBody
-        , expect = authedExpect resolveWhatever request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+logoutRequest : RequestSpec
+logoutRequest =
+    { method = "DELETE"
+    , url = Api.Url.path [ "api", "auth", "logout" ] []
+    , body = Nothing
+    }
 
 
 {-| A single curated transparency signal, carrying the teaching metadata the
@@ -3487,40 +3438,23 @@ identityDecoder =
         )
 
 
-{-| GET /api/auth/me — ask the server who this browser is.
+{-| `GET /api/auth/me` — who the session belongs to, as data.
 
-⛔ The credential is `cookieSession`: at boot the SPA holds no bearer and must
-not pretend to. The session cookie travels on its own because the request is
-same-origin, which is the whole reason this request can answer at all — and the
-proof rides along so the answer is a 401 for a reader with no session rather
-than a 403 for a request that could not say where it came from.
+⛔ THIS ONE HAS NO `onExpired` TO GIVE, and it is the reason `Effect.public`
+exists alongside `authed`. A 401 here is the ANSWER, not a failure: it is the
+server saying this session is not one. `Api.identityOutcome` classifies every
+response shape into an outcome, which is why its resolver cannot fail
+(`Err Never`). Routing a 401 to an expiry interceptor would make the boot
+question unanswerable — the interceptor would fire before anyone learned there
+was no session to begin with.
 
 -}
-getIdentity : Credentials -> (IdentityOutcome -> msg) -> Cmd msg
-getIdentity token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/auth/me"
-        , body = Http.emptyBody
-        , expect =
-            -- `expectStringResponse` insists on a `Result`, and this reader
-            -- cannot fail: every response shape is already an outcome. The
-            -- error type is `Never`, so the impossible branch is written as
-            -- such rather than as a default nobody would notice being taken.
-            Http.expectStringResponse
-                (\result ->
-                    case result of
-                        Ok outcome ->
-                            toMsg outcome
-
-                        Err impossible ->
-                            never impossible
-                )
-                (identityOutcome >> Ok)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+identityRequest : RequestSpec
+identityRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "auth", "me" ] []
+    , body = Nothing
+    }
 
 
 {-| What asking who you are can tell you — four answers, not a `Result`.

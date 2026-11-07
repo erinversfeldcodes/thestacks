@@ -721,7 +721,12 @@ request could not establish where it came from.
 -}
 resolveIdentity : Maybe String -> Cmd Msg
 resolveIdentity csrf =
-    Api.getIdentity (Api.cookieSession csrf) GotBootIdentity
+    Effect.perform
+        (Effect.public Api.identityRequest
+            (Just (Api.cookieSession csrf))
+            Nothing
+            (Api.identityOutcome >> GotBootIdentity)
+        )
 
 
 {-| The session an identity plus this browsing context amount to.
@@ -850,7 +855,13 @@ bootCommandsFor auth =
                 }
             )
         , scheduleRenewal
-        , Api.getUploadInbox auth.token GotUploadInbox
+        , Effect.perform
+            (Effect.authed Api.uploadInboxRequest
+                auth.token
+                { onExpired = SessionDidExpire
+                , onResponse = Api.resolveJson Api.uploadInboxDecoder >> GotUploadInbox
+                }
+            )
         ]
 
 
@@ -864,7 +875,13 @@ fetchUploadInbox : Maybe Auth -> Cmd Msg
 fetchUploadInbox maybeAuth =
     case maybeAuth of
         Just auth ->
-            Api.getUploadInbox auth.token GotUploadInbox
+            Effect.perform
+                (Effect.authed Api.uploadInboxRequest
+                    auth.token
+                    { onExpired = SessionDidExpire
+                    , onResponse = Api.resolveJson Api.uploadInboxDecoder >> GotUploadInbox
+                    }
+                )
 
         Nothing ->
             Cmd.none
@@ -1593,7 +1610,13 @@ beginSignOut model =
 
         ( _, Just auth ) ->
             ( { model | signOut = SigningOut }
-            , Api.logout (Api.authed auth.token signOutHandlers)
+            , Effect.perform
+                (Effect.authed Api.logoutRequest
+                    auth.token
+                    { onExpired = SessionAlreadyGone
+                    , onResponse = Api.resolveWhatever >> SignOutAnswered
+                    }
+                )
             )
 
         ( _, Nothing ) ->
@@ -3252,7 +3275,14 @@ update msg model =
         TabVisibilityChanged visibility ->
             case ( visibility, currentAuth model.auth ) of
                 ( Browser.Events.Visible, Just _ ) ->
-                    ( model, Api.getIdentity (Api.cookieSession model.csrf) RevalidatedIdentity )
+                    ( model
+                    , Effect.perform
+                        (Effect.public Api.identityRequest
+                            (Just (Api.cookieSession model.csrf))
+                            Nothing
+                            (Api.identityOutcome >> RevalidatedIdentity)
+                        )
+                    )
 
                 -- A tab with no session has nothing to revalidate: asking would
                 -- be a request per tab switch for every visitor, and a
@@ -3290,7 +3320,16 @@ update msg model =
         RenewToken ->
             case currentAuth model.auth of
                 Just auth ->
-                    ( model, Api.refresh auth.token TokenRefreshed )
+                    ( model
+                    , Effect.perform
+                        (Effect.authed Api.refreshRequest
+                            auth.token
+                            { onExpired = SessionDidExpire
+                            , onResponse =
+                                Api.resolveJson Api.authResponseDecoder >> TokenRefreshed
+                            }
+                        )
+                    )
 
                 Nothing ->
                     ( model, Cmd.none )

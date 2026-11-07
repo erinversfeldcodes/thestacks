@@ -409,7 +409,7 @@ update msg model maybeToken =
                             , NoOut
                             )
 
-                        Syndication.AuthLost ->
+                        Syndication.SessionExpired ->
                             ( baseModel, Cmd.none, SessionExpired )
 
                 Nothing ->

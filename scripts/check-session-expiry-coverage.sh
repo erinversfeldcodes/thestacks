@@ -13,9 +13,35 @@ import sys
 mode = sys.argv[1]
 
 API = "frontend/src/Api.elm"
-PAGE_GLOB = "frontend/src/Page/**/*.elm"
+# ⛔ PAGES **AND COMPONENTS**, because a component makes the same request a page
+# does and answers a 401 the same way — and `Page/**` alone could not see that.
+#
+# ⚠️ MEASURED 2026-11-07: `Components/{Syndication,BlockUserModal,OnboardingOverlay}`
+# make authenticated requests. While those requests were `Api.elm` endpoints the
+# endpoint half counted them, so the population looked complete; moving them onto
+# plans dropped them out of BOTH halves at once and the sum fell from 105 to 96
+# with nothing in the components having changed meaning. A population defined by
+# directory rather than by behaviour is what let that happen quietly.
+#
+# ⚖️ `Main.elm` is deliberately NOT here. It is the interceptor's own home: it has
+# no `OutMsg` to route a 401 out to, because it is what every page routes out TO.
+# Its expiry msg reaches `handleSessionExpiry` directly, and a rule written as
+# "routes to `SessionExpired`" cannot express that. Counting it would make this
+# gate assert something about `Main` that it has no way to check.
+PAGE_GLOB = [
+    "frontend/src/Page/**/*.elm",
+    "frontend/src/Components/**/*.elm",
+]
 
 EXEMPT = {
+    "frontend/src/Components/AdminChrome.elm": (
+        "The admin sign-OUT control, where a 401 is the outcome being asked for rather "
+        "than a failure: it means the token this request wanted to revoke was already "
+        "revoked. So it routes `onExpired` to its own `SessionEnded`, which is what "
+        "`Main` acts on, and a rule demanding `SessionExpired` would be asking it to "
+        "report success as an error. Same shape as the sign-in gate below, at the other "
+        "end of the session."
+    ),
     "frontend/src/Page/Admin/Session.elm": (
         "The admin sign-in gate itself. Its 401s ARE the sign-in failing, and it renders "
         "them inline because 'you cannot sign in' is the page's entire subject. Routing "
@@ -200,7 +226,7 @@ if len(definitions) < MIN_PARSED_DEFINITIONS:
 # thing it exists to make safe. The count floor on the SUM below is what catches
 # the parser drifting, on either key.
 plan_sites = []
-for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
+for path in sorted(p for g in PAGE_GLOB for p in glob.glob(g, recursive=True)):
     plan_sites.extend([path] * plans_in(read(path)))
 
 if not authed_endpoints and not plan_sites:
@@ -248,7 +274,7 @@ def routes_to_session_expired(text, constructor):
 
 findings, in_scope = [], []
 
-for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
+for path in sorted(p for g in PAGE_GLOB for p in glob.glob(g, recursive=True)):
     text = read(path)
     calls = sorted(name for name in authed_endpoints if re.search(r"\bApi\." + name + r"\b", text))
     plans = plans_in(text)

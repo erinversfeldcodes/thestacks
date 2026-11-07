@@ -139,7 +139,7 @@ type OutMsg
     = NoOut
     | RequestCopy String
     | SyndicatedChanged Bool
-    | AuthLost
+    | SessionExpired
 
 
 canonicalUrl : Model -> String
@@ -156,7 +156,7 @@ update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SessionExpiryDetected ->
-            ( model, Cmd.none, AuthLost )
+            ( model, Cmd.none, SessionExpired )
 
         ClickedCopyCanonical ->
             requestCopy model Canonical (canonicalUrl model)
@@ -180,7 +180,7 @@ update msg model maybeToken =
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, AuthLost )
+                    ( model, Cmd.none, SessionExpired )
 
         GotExport format (Ok export) ->
             ( { model
@@ -280,7 +280,7 @@ update msg model maybeToken =
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, AuthLost )
+                    ( model, Cmd.none, SessionExpired )
 
         ToggleSaved (Ok syndicated) ->
             ( { model | includeInFeed = syndicated }, Cmd.none, SyndicatedChanged syndicated )
