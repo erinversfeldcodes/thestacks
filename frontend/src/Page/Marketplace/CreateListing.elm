@@ -20,6 +20,7 @@ Activate button.
 -}
 
 import Api
+import Effect
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text, textarea)
 import Html.Attributes exposing (class, disabled, for, id, name, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -48,6 +49,7 @@ type alias Model =
 
 type Msg
     = PlacementsReceived (Result Http.Error (List Placement))
+    | SessionExpiryDetected
     | BookSelected String
     | ConditionSelected String
     | PricingModeSelected String
@@ -91,7 +93,20 @@ init maybeToken =
         ( placementsState, cmd ) =
             case maybeToken of
                 Just token ->
-                    ( Loading, Api.getMyPlacements token PlacementsReceived )
+                    ( Loading
+                    , Effect.perform
+                        (Effect.authed Api.myPlacementsRequest
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "placements"
+                                        (Decode.list Types.Placement.placementSummaryDecoder)
+                                    )
+                                    >> PlacementsReceived
+                            }
+                        )
+                    )
 
                 Nothing ->
                     ( NotAsked, Cmd.none )
@@ -114,6 +129,9 @@ init maybeToken =
 update : Msg -> Model -> Maybe Api.Credentials -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken maybeUserId =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         PlacementsReceived result ->
             case result of
                 Ok placements ->
@@ -168,7 +186,15 @@ update msg model maybeToken maybeUserId =
                             }
                     in
                     ( { model | submitState = Loading }
-                    , Api.createListing params token ListingCreated
+                    , Effect.perform
+                        (Effect.authed (Api.createListingRequest params)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingCreated
+                            }
+                        )
                     , NoOut
                     )
 
@@ -197,7 +223,16 @@ update msg model maybeToken maybeUserId =
             case maybeToken of
                 Just token ->
                     ( { model | submitState = Loading }
-                    , Api.activateListing listingId token ListingActivated
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.listingTransitionRequest listingId Api.ActivateListing)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingActivated
+                            }
+                        )
                     , NoOut
                     )
 

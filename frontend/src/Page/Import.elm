@@ -25,12 +25,14 @@ The page's honesty rules:
 -}
 
 import Api exposing (ImportError(..), ImportRow, LibraryImport)
+import Effect
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, button, div, h1, h2, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -61,6 +63,7 @@ init =
 
 type Msg
     = PickFile
+    | SessionExpiryDetected
     | FileChosen File
     | GotCreated (Result ImportError LibraryImport)
     | PollTick
@@ -76,6 +79,9 @@ type OutMsg
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         PickFile ->
             ( model, Select.file [ "text/csv" ] FileChosen, NoOut )
 
@@ -108,7 +114,18 @@ update msg model maybeToken =
         PollTick ->
             case ( model.phase, maybeToken ) of
                 ( Watching libraryImport, Just token ) ->
-                    ( model, Api.getImport token libraryImport.id GotImport, NoOut )
+                    ( model
+                    , Effect.perform
+                        (Effect.authed (Api.importRequest libraryImport.id)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "import" Api.libraryImportDecoder)
+                                    >> GotImport
+                            }
+                        )
+                    , NoOut
+                    )
 
                 _ ->
                     ( model, Cmd.none, NoOut )
@@ -118,7 +135,16 @@ update msg model maybeToken =
                 ( { model | phase = Done libraryImport Loading }
                 , case maybeToken of
                     Just token ->
-                        Api.getImportRows token libraryImport.id GotRows
+                        Effect.perform
+                            (Effect.authed (Api.importRowsRequest libraryImport.id)
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse =
+                                    Api.resolveJson
+                                        (Decode.field "rows" (Decode.list Api.importRowDecoder))
+                                        >> GotRows
+                                }
+                            )
 
                     Nothing ->
                         Cmd.none

@@ -54,6 +54,7 @@ import Components.OnboardingOverlay as OnboardingOverlay
 import Components.Syndication as Syndication
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
+import Effect
 import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, span, text, ul)
 import Html.Attributes exposing (attribute, class, href, id, style, tabindex)
 import Html.Events
@@ -836,7 +837,18 @@ bootCommandsFor : Auth -> Cmd Msg
 bootCommandsFor auth =
     Cmd.batch
         [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
-        , Api.getMyPlacements auth.token GotPlacementCheck
+        , Effect.perform
+            (Effect.authed Api.myPlacementsRequest
+                auth.token
+                { onExpired = SessionDidExpire
+                , onResponse =
+                    Api.resolveJson
+                        (Decode.field "placements"
+                            (Decode.list Types.Placement.placementSummaryDecoder)
+                        )
+                        >> GotPlacementCheck
+                }
+            )
         , scheduleRenewal
         , Api.getUploadInbox auth.token GotUploadInbox
         ]
@@ -1783,7 +1795,18 @@ loginEffectCmd : Nav.Key -> Maybe Route -> Auth -> LoginEffect -> Cmd Msg
 loginEffectCmd key redirect auth effect =
     case effect of
         FetchPlacements ->
-            Api.getMyPlacements auth.token GotPlacementCheck
+            Effect.perform
+                (Effect.authed Api.myPlacementsRequest
+                    auth.token
+                    { onExpired = SessionDidExpire
+                    , onResponse =
+                        Api.resolveJson
+                            (Decode.field "placements"
+                                (Decode.list Types.Placement.placementSummaryDecoder)
+                            )
+                            >> GotPlacementCheck
+                    }
+                )
 
         InitOnboarding ->
             Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
@@ -1893,6 +1916,12 @@ type Msg
     | OnboardingStatusReceived Bool
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
+      -- ⛔ MAIN'S OWN EXPIRY MSG, which it did not need while its requests were
+      -- `Cmd`s. Every page routes a 401 out to Main as a `SessionExpired`
+      -- OutMsg; Main's own requests had nobody to route to, so they inferred an
+      -- ended session from a failed renewal instead. `Effect.authed` requires
+      -- `onExpired`, so Main now names the same outcome the pages name.
+    | SessionDidExpire
     | GotUploadInbox (Result Http.Error (List Api.InboxItem))
     | GotBootIdentity Api.IdentityOutcome
     | TabVisibilityChanged Browser.Events.Visibility
@@ -3186,6 +3215,9 @@ update msg model =
 
         RetrySignOut ->
             beginSignOut model
+
+        SessionDidExpire ->
+            handleSessionExpiry model
 
         GotPlacementCheck result ->
             case result of

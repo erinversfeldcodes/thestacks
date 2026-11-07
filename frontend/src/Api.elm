@@ -43,6 +43,7 @@ module Api exposing
     , InviteStatus
     , LibraryImport
     , ListingParams
+    , ListingTransition(..)
     , LiveSignals(..)
     , MergeFormatResponse
     , MoveError(..)
@@ -83,7 +84,6 @@ module Api exposing
     , TransparencyMetrics
     , UploadInit
     , accountDecoder
-    , activateListing
     , adminBookDecoder
     , adminBookEnvelopeDecoder
     , adminBooksResponseDecoder
@@ -129,10 +129,9 @@ module Api exposing
     , createComment
     , createGoodreadsImport
     , createGroupRequest
-    , createListing
+    , createListingRequest
     , createShelfRequest
     , credentials
-    , deactivateListing
     , decodeUploadInit
     , deleteAccount
     , deleteAccountRequest
@@ -155,12 +154,8 @@ module Api exposing
     , getGroupFeed
     , getGroupMembers
     , getIdentity
-    , getImport
-    , getImportRows
     , getInferencesRequest
     , getListingsRequest
-    , getMyListings
-    , getMyPlacements
     , getOnboardingStatus
     , getPostComments
     , getPrivacySettings
@@ -172,7 +167,9 @@ module Api exposing
     , groupMemberDecoder
     , identityDecoder
     , importRefusal
+    , importRequest
     , importRowDecoder
+    , importRowsRequest
     , inboxItemDecoder
     , inboxKindDecoder
     , initUploadRequest
@@ -188,6 +185,7 @@ module Api exposing
     , libraryImportDecoder
     , listBlockedUsers
     , listSyndications
+    , listingTransitionRequest
     , loginRequest
     , logout
     , mergeFormatRequest
@@ -195,6 +193,8 @@ module Api exposing
     , moveBookRequest
     , movePlacementToShelfRequest
     , moveResponseToResult
+    , myListingsRequest
+    , myPlacementsRequest
     , needsAdminElevation
     , needsAdminElevationOf
     , notificationPreferencesDecoder
@@ -260,7 +260,6 @@ module Api exposing
     , shelfMoveErrorMessage
     , shelfMoveResponseToResult
     , shelfVisibilitySettingDecoder
-    , soldListing
     , sourceHealthDecoder
     , sourceHealthListDecoder
     , sourceHealthRequest
@@ -309,8 +308,7 @@ import Types.BlogPost exposing (BlogPost, BlogPostSummary, Comment, blogPostDeco
 import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.FeedItem exposing (FeedResponse, feedResponseDecoder)
 import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitationDecoder)
-import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
-import Types.Placement exposing (Placement, ReadingStatus, bookPlacementDecoder, parseReadingStatus, placementRefDecoder, placementSummaryDecoder)
+import Types.Placement exposing (Placement, ReadingStatus, bookPlacementDecoder, parseReadingStatus, placementRefDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Url.Builder
 
@@ -1234,34 +1232,27 @@ importRefusal body =
             ImportUploadIncomplete
 
 
-{-| `GET /api/imports/:id` — polled while the job runs.
+{-| `GET /api/imports/:id` — one import's progress, as data.
+
+⚠️ The id is percent-encoded, where the old builder concatenated it.
+
 -}
-getImport : Credentials -> String -> (Result Http.Error LibraryImport -> msg) -> Cmd msg
-getImport token importId toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/imports/" ++ importId
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "import" libraryImportDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+importRequest : String -> RequestSpec
+importRequest importId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "imports", importId ] []
+    , body = Nothing
+    }
 
 
-{-| `GET /api/imports/:id/rows` — the per-row report.
+{-| `GET /api/imports/:id/rows` — one import's per-row outcomes, as data.
 -}
-getImportRows : Credentials -> String -> (Result Http.Error (List ImportRow) -> msg) -> Cmd msg
-getImportRows token importId toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/imports/" ++ importId ++ "/rows"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "rows" (Decode.list importRowDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+importRowsRequest : String -> RequestSpec
+importRowsRequest importId =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "imports", importId, "rows" ] []
+    , body = Nothing
+    }
 
 
 {-| A request failure that may carry the server-named wait. Exists
@@ -4062,129 +4053,87 @@ getListingsRequest =
     }
 
 
-{-| GET /api/listings/mine — fetch the current user's listings.
+{-| `GET /api/listings/mine` — the reader's own marketplace listings, as data.
 -}
-getMyListings :
-    Credentials
-    -> (Result Http.Error ListingsResponse -> msg)
-    -> Cmd msg
-getMyListings token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/listings/mine"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg listingsResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+myListingsRequest : RequestSpec
+myListingsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "listings", "mine" ] []
+    , body = Nothing
+    }
 
 
-{-| POST /api/listings — create a new listing.
+{-| `POST /api/listings` — offering a book for sale, as data.
 -}
-createListing :
-    ListingParams
-    -> Credentials
-    -> (Result Http.Error Listing -> msg)
-    -> Cmd msg
-createListing params token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/listings"
-        , body =
-            Http.jsonBody
-                (Requests.encodeCreateListingRequest
-                    { -- Backend Marketplace.create_listing reads book_id; the
-                      placementId = ""
-                    , bookId = params.bookId
-                    , condition = params.condition
-                    , pricingMode = params.pricingMode
-                    , priceZar = params.priceZar
-                    , contactInfo = params.contactInfo
-                    , description = params.description
-                    }
-                )
-        , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+createListingRequest : ListingParams -> RequestSpec
+createListingRequest params =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "listings" ] []
+    , body =
+        Just
+            (Requests.encodeCreateListingRequest
+                { -- Backend Marketplace.create_listing reads book_id; the
+                  placementId = ""
+                , bookId = params.bookId
+                , condition = params.condition
+                , pricingMode = params.pricingMode
+                , priceZar = params.priceZar
+                , contactInfo = params.contactInfo
+                , description = params.description
+                }
+            )
+    }
 
 
-{-| PUT /api/listings/:id/activate — activate a draft listing.
+{-| `PUT /api/listings/:id/:transition` — moving a listing's state, as data.
+
+⚖️ ONE spec where there were THREE — `activate`, `deactivate`, `sold` —
+differing only in the final path segment. The transition is an argument now, and
+a type, so an unknown one does not compile rather than 404ing.
+
+⚠️ The id is percent-encoded, where the old builders concatenated it.
+
 -}
-activateListing :
-    String
-    -> Credentials
-    -> (Result Http.Error Listing -> msg)
-    -> Cmd msg
-activateListing listingId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/activate"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+listingTransitionRequest : String -> ListingTransition -> RequestSpec
+listingTransitionRequest listingId transition =
+    { method = "PUT"
+    , url =
+        Api.Url.path
+            [ "api", "listings", listingId, listingTransitionSegment transition ]
+            []
+    , body = Nothing
+    }
 
 
-{-| PUT /api/listings/:id/deactivate — deactivate an active listing.
+{-| What the seller did to a listing.
 -}
-deactivateListing :
-    String
-    -> Credentials
-    -> (Result Http.Error Listing -> msg)
-    -> Cmd msg
-deactivateListing listingId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/deactivate"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+type ListingTransition
+    = ActivateListing
+    | DeactivateListing
+    | MarkListingSold
 
 
-{-| PUT /api/listings/:id/sold — mark a listing as sold.
+listingTransitionSegment : ListingTransition -> String
+listingTransitionSegment transition =
+    case transition of
+        ActivateListing ->
+            "activate"
+
+        DeactivateListing ->
+            "deactivate"
+
+        MarkListingSold ->
+            "sold"
+
+
+{-| `GET /api/placements/mine` — the reader's own placements, as data.
 -}
-soldListing :
-    String
-    -> Credentials
-    -> (Result Http.Error Listing -> msg)
-    -> Cmd msg
-soldListing listingId token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/sold"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
-{-| GET /api/placements/mine — fetch the current user's placements with book data.
-Used by the create listing form to select which book to list.
--}
-getMyPlacements :
-    Credentials
-    -> (Result Http.Error (List Placement) -> msg)
-    -> Cmd msg
-getMyPlacements token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/placements/mine"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+myPlacementsRequest : RequestSpec
+myPlacementsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "placements", "mine" ] []
+    , body = Nothing
+    }
 
 
 {-| One page of the cross-author discovery feed.
