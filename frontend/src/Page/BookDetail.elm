@@ -237,7 +237,7 @@ availabilityRequest : String -> Api.RequestSpec
 availabilityRequest bookId =
     { method = "GET"
     , url = Api.Url.path [ "api", "books", bookId, "availability" ] []
-    , body = Nothing
+    , body = Api.NoBody
     }
 
 
@@ -261,7 +261,7 @@ pricesRequest : String -> Api.RequestSpec
 pricesRequest bookId =
     { method = "GET"
     , url = Api.Url.path [ "api", "books", bookId, "prices" ] []
-    , body = Nothing
+    , body = Api.NoBody
     }
 
 

@@ -314,18 +314,21 @@ update msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         ( { model | savingProfile = Loading, currentPasswordError = Nothing }
-                        , Api.updateProfile
-                            { displayName = model.displayName
-                            , email = model.email
-                            , websiteUrl = model.websiteUrl
-                            , handle = model.handle
-                            , currentPassword = model.currentPassword
-                            , emailChanged = emailChanged model
-                            , handleChanged = handleChanged model
-                            }
-                            (Api.authed token
+                        , Effect.perform
+                            (Effect.authed
+                                (Api.updateProfileRequest
+                                    { displayName = model.displayName
+                                    , email = model.email
+                                    , websiteUrl = model.websiteUrl
+                                    , handle = model.handle
+                                    , currentPassword = model.currentPassword
+                                    , emailChanged = emailChanged model
+                                    , handleChanged = handleChanged model
+                                    }
+                                )
+                                token
                                 { onExpired = SessionExpiryDetected
-                                , onResult = SaveProfileCompleted
+                                , onResponse = Api.resolveProfile >> SaveProfileCompleted
                                 }
                             )
                         , NoOut

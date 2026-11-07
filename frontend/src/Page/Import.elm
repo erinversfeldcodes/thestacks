@@ -89,7 +89,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | phase = Uploading }
-                    , Api.createGoodreadsImport token file GotCreated
+                    , Effect.perform
+                        (Effect.authed (Api.goodreadsImportRequest file)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveImport >> GotCreated
+                            }
+                        )
                     , NoOut
                     )
 

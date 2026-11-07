@@ -1120,10 +1120,21 @@ requestFromSpec spec maybeToken expect =
         , url = Api.Url.toString spec.url
         , body =
             case spec.body of
-                Just value ->
+                Api.JsonBody value ->
                     SimulatedEffect.Http.jsonBody value
 
-                Nothing ->
+                -- ⚠️ A FILE BECOMES AN EMPTY BODY IN THE HARNESS, deliberately, and
+                -- the limit is worth stating. `elm-program-test`'s simulated HTTP
+                -- has no file body, so a test can see that a file-bodied request
+                -- WAS MADE and to where, but cannot assert the bytes. Two requests
+                -- are affected: the Goodreads import and the photograph upload.
+                Api.FileBody _ ->
+                    SimulatedEffect.Http.emptyBody
+
+                Api.MultipartFile _ _ ->
+                    SimulatedEffect.Http.emptyBody
+
+                Api.NoBody ->
                     SimulatedEffect.Http.emptyBody
         , expect = expect
         , timeout = Nothing

@@ -446,7 +446,16 @@ updateWithEffect msg model maybeToken =
             -- A file body cannot be described as an `Api.RequestSpec` (JSON only),
             -- so this one request stays opaque to the simulated runtime.
             ( model
-            , Effect.Custom (Api.putUploadBytes init_.imageId file token (UploadBytesSent init_.imageId token))
+            , -- ⛔ WAS `Effect.Custom`, which `Effect`'s own docs forbid for this:
+              -- "a request smuggled inside one is invisible to it". The bytes
+              -- could not be a plan until `RequestSpec.body` could hold a file,
+              -- so this was the one request in the app hiding inside the escape
+              -- hatch meant for effects that contain no request at all.
+              Effect.authed (Api.putUploadBytesRequest init_.imageId file)
+                token
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> UploadBytesSent init_.imageId token
+                }
             , NoOut
             )
 

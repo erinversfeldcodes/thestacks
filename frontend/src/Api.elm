@@ -72,6 +72,7 @@ module Api exposing
     , RemovalDecision(..)
     , RemovalOutcome(..)
     , RemovalRequest
+    , RequestBody(..)
     , RequestError(..)
     , RequestSpec
     , RiskInference
@@ -133,7 +134,6 @@ module Api exposing
     , createAdminInviteRequest
     , createBlogPostRequest
     , createCommentRequest
-    , createGoodreadsImport
     , createGroupRequest
     , createListingRequest
     , createShelfRequest
@@ -158,6 +158,7 @@ module Api exposing
     , getProfileShelfRequest
     , getTransparencyMetricsRequest
     , getUserPlacementsRequest
+    , goodreadsImportRequest
     , groupFeedRequest
     , groupMemberDecoder
     , groupMembersRequest
@@ -216,7 +217,7 @@ module Api exposing
     , publicProfileDecoder
     , publicProfileSummaryDecoder
     , publishBlogPostRequest
-    , putUploadBytes
+    , putUploadBytesRequest
     , recordSyndicationRequest
     , refreshRequest
     , refusalFrom
@@ -240,6 +241,7 @@ module Api exposing
     , resetPasswordRequest
     , resolveAdminJson
     , resolveAuthResponse
+    , resolveImport
     , resolveJson
     , resolveNoContent
     , resolveProfile
@@ -263,6 +265,7 @@ module Api exposing
     , sourceHealthListDecoder
     , sourceHealthRequest
     , specHttpBody
+    , specTimeout
     , standardTimeout
     , storedVisibilityDecoder
     , streamEventDecoder
@@ -277,7 +280,7 @@ module Api exposing
     , updatePasswordRequest
     , updatePlacementFormatsRequest
     , updatePlacementVisibilityRequest
-    , updateProfile
+    , updateProfileRequest
     , updateProfileVisibilityRequest
     , updateProgressRequest
     , updateShelfVisibilityRequest
@@ -311,11 +314,6 @@ import Types.Book exposing (Book, Edition, bookDecoder)
 import Types.Placement exposing (Placement, ReadingStatus, bookPlacementDecoder, parseReadingStatus, placementRefDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Url.Builder
-
-
-baseUrl : String
-baseUrl =
-    ""
 
 
 {-| WHICH credential a request carries, named rather than implied.
@@ -717,25 +715,85 @@ type alias RequestSpec =
     -- reaches another origin" is a fact about this field's type rather than a
     -- property a script re-derives by parsing every builder.
     , url : Api.Url.SameOriginUrl
-    , body : Maybe Encode.Value
+
+    -- ⛔ A `RequestBody`, NOT A `Maybe Encode.Value`. Two requests in this module
+    -- send a FILE — a Goodreads export and the photograph behind an upload — and
+    -- an `Encode.Value` cannot express either, so they were the only two that
+    -- could not become plans at all. That left the `Cmd msg` ratchet permanently
+    -- at 2 and kept `check-credential-origin.sh` alive to guard their two urls.
+    --
+    -- ⚖️ A closed sum, never a raw `Http.Body`: the point of a spec is that it is
+    -- DESCRIBABLE, and `Effect.perform`'s hardcoded `SameOrigin` rests on that as
+    -- much as on the url's type. An `Http.Body` field would readmit the arbitrary
+    -- request this type exists to prevent.
+    , body : RequestBody
     }
 
 
-{-| Send a `RequestSpec` to an authenticated endpoint.
+{-| What a request carries, in the three shapes this client actually sends.
 
-The production twin of the program-test harness's `authedRequestFromSpec`. A page
-that decides WHICH request a Msg fires — as data, in a function its tests can
-call — dispatches the answer through this, so the decision and the sending are
-not two descriptions that can disagree.
+⚠️ `NoBody` rather than an empty JSON object: an absent body and `{}` are
+different to a server, and at least one endpoint here rejects the former.
 
 -}
+type RequestBody
+    = NoBody
+    | JsonBody Encode.Value
+    | FileBody File
+      -- ⛔ A SEPARATE CASE FROM `FileBody`, and collapsing the two would break a
+      -- working endpoint. The Goodreads import sends
+      -- `Http.multipartBody [ Http.filePart "file" file ]`; the photograph
+      -- upload sends `Http.fileBody file`. Those are different bytes on the
+      -- wire, and the servers answering them parse different things — "it is a
+      -- file either way" is exactly the reasoning that would have silently
+      -- changed one of them during this migration.
+    | MultipartFile String File
+
+
+{-| How long this request may hang, decided by what it carries.
+
+⛔ A RULE, NOT A PER-SPEC FIELD, and the reason is that a field would have been
+forgotten. `Api.putUploadBytes` set `uploadTimeout` (120s) where every other
+request used `standardTimeout` (15s); `Effect.perform` hardcoded the latter, so
+moving that upload onto a plan would have silently cut its timeout to an eighth
+and broken large files on slow connections — a regression no type would catch
+and no test here was watching for.
+
+⚖️ Keyed on the BODY because that is what the difference is actually about: a
+request carrying a file needs longer because it is carrying a file, not because
+somebody remembered to annotate it. A new file-bodied spec inherits the right
+timeout without being told.
+
+-}
+specTimeout : RequestSpec -> Maybe Float
+specTimeout spec =
+    case spec.body of
+        FileBody _ ->
+            uploadTimeout
+
+        MultipartFile _ _ ->
+            uploadTimeout
+
+        JsonBody _ ->
+            standardTimeout
+
+        NoBody ->
+            standardTimeout
+
+
 specHttpBody : RequestSpec -> Http.Body
 specHttpBody spec =
     case spec.body of
-        Just value ->
+        JsonBody value ->
             Http.jsonBody value
 
-        Nothing ->
+        FileBody file ->
+            Http.fileBody file
+
+        MultipartFile partName file ->
+            Http.multipartBody [ Http.filePart partName file ]
+
+        NoBody ->
             Http.emptyBody
 
 
@@ -990,7 +1048,7 @@ uploadInboxRequest : RequestSpec
 uploadInboxRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "uploads", "inbox" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -1026,7 +1084,7 @@ getAuthorEventsRequest : String -> RequestSpec
 getAuthorEventsRequest authorId =
     { method = "GET"
     , url = Api.Url.path [ "api", "authors", authorId, "events" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -1146,55 +1204,68 @@ importRowDecoder =
         (Decode.field "reason" (Decode.nullable Decode.string))
 
 
-{-| `POST /api/imports/goodreads` — the export CSV as a multipart `file`.
-The parse happens synchronously server-side, so a refusal (wrong file, one
-already running, too large) arrives on THIS response, not minutes later.
+{-| `POST /api/imports/goodreads` — handing over a Goodreads export, as data.
+
+⛔ ONE OF THE TWO REQUESTS THAT COULD NOT BE A PLAN AT ALL. Its body is a file,
+and `RequestSpec.body` was `Maybe Encode.Value` — so this and the photograph
+upload were the whole reason the `Cmd msg` ratchet could not reach zero, and the
+reason `check-credential-origin.sh` had to stay alive to guard their two urls.
+
+⚠️ `MultipartFile "file"`, preserving the envelope exactly: this endpoint is
+answered by a multipart parser keyed on the part name, so sending the same bytes
+as a raw body would 400. The upload's spec uses `FileBody` because ITS endpoint
+reads a raw body. Two cases, because the wire really differs.
+
 -}
-createGoodreadsImport : Credentials -> File -> (Result ImportError LibraryImport -> msg) -> Cmd msg
-createGoodreadsImport token file toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/imports/goodreads"
-        , body = Http.multipartBody [ Http.filePart "file" file ]
-        , expect = expectImport toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+goodreadsImportRequest : File -> RequestSpec
+goodreadsImportRequest file =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "imports", "goodreads" ] []
+    , body = MultipartFile "file" file
+    }
 
 
-expectImport : (Result ImportError LibraryImport -> msg) -> Http.Expect msg
-expectImport toMsg =
-    Http.expectStringResponse toMsg <|
-        \response ->
-            case response of
-                Http.GoodStatus_ _ body ->
-                    Decode.decodeString (Decode.field "import" libraryImportDecoder) body
-                        |> Result.mapError
-                            (\err -> ImportRequestFailed (Http.BadBody (Decode.errorToString err)))
+{-| What the import endpoint said, as a resolver.
 
-                Http.BadStatus_ metadata body ->
-                    case metadata.statusCode of
-                        409 ->
-                            Err ImportInProgress
+⛔ A NAMED FUNCTION, extracted from the lambda inside the old `expectImport`,
+because `Effect.authed` takes `onResponse : Http.Response String -> msg` and a
+resolver sealed in an `Http.Expect` cannot be reused by a plan. The
+classification it carries is the point — 409 is "one is already running", 413
+is "too big", and 422 splits four ways through `importRefusal` — and a caller
+re-deriving any of that from a bare status would lose the copy that tells a
+reader what to do next.
 
-                        413 ->
-                            Err ImportFileTooLarge
+-}
+resolveImport : Http.Response String -> Result ImportError LibraryImport
+resolveImport response =
+    case response of
+        Http.GoodStatus_ _ body ->
+            Decode.decodeString (Decode.field "import" libraryImportDecoder) body
+                |> Result.mapError
+                    (\err -> ImportRequestFailed (Http.BadBody (Decode.errorToString err)))
 
-                        422 ->
-                            Err (importRefusal body)
+        Http.BadStatus_ metadata body ->
+            case metadata.statusCode of
+                409 ->
+                    Err ImportInProgress
 
-                        status ->
-                            Err (ImportRequestFailed (Http.BadStatus status))
+                413 ->
+                    Err ImportFileTooLarge
 
-                Http.BadUrl_ url ->
-                    Err (ImportRequestFailed (Http.BadUrl url))
+                422 ->
+                    Err (importRefusal body)
 
-                Http.Timeout_ ->
-                    Err (ImportRequestFailed Http.Timeout)
+                status ->
+                    Err (ImportRequestFailed (Http.BadStatus status))
 
-                Http.NetworkError_ ->
-                    Err (ImportRequestFailed Http.NetworkError)
+        Http.BadUrl_ url ->
+            Err (ImportRequestFailed (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (ImportRequestFailed Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (ImportRequestFailed Http.NetworkError)
 
 
 {-| Which of the four 422s came back.
@@ -1238,7 +1309,7 @@ importRequest : String -> RequestSpec
 importRequest importId =
     { method = "GET"
     , url = Api.Url.path [ "api", "imports", importId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -1248,7 +1319,7 @@ importRowsRequest : String -> RequestSpec
 importRowsRequest importId =
     { method = "GET"
     , url = Api.Url.path [ "api", "imports", importId, "rows" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -1426,7 +1497,7 @@ checkInviteRequest : String -> RequestSpec
 checkInviteRequest code =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "invite", "check" ] []
-    , body = Just (Encode.object [ ( "code", Encode.string code ) ])
+    , body = JsonBody (Encode.object [ ( "code", Encode.string code ) ])
     }
 
 
@@ -1441,7 +1512,7 @@ registerRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "register" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeRegisterRequest
                 { email = body.email
                 , password = body.password
@@ -1505,7 +1576,7 @@ loginRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "login" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeLoginRequest
                 { email = body.email
                 , password = body.password
@@ -1524,7 +1595,7 @@ forgotPasswordRequest : String -> RequestSpec
 forgotPasswordRequest email =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "forgot-password" ] []
-    , body = Just (Encode.object [ ( "email", Encode.string email ) ])
+    , body = JsonBody (Encode.object [ ( "email", Encode.string email ) ])
     }
 
 
@@ -1539,7 +1610,7 @@ resendConfirmationRequest : String -> RequestSpec
 resendConfirmationRequest email =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "resend-confirmation" ] []
-    , body = Just (Encode.object [ ( "email", Encode.string email ) ])
+    , body = JsonBody (Encode.object [ ( "email", Encode.string email ) ])
     }
 
 
@@ -1555,7 +1626,7 @@ resetPasswordRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "reset-password" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "token", Encode.string body.token )
                 , ( "password", Encode.string body.password )
@@ -1591,7 +1662,7 @@ requestListingRemovalRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "listings", "removal" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "url", Encode.string body.url )
                 , ( "email", Encode.string body.email )
@@ -1739,51 +1810,6 @@ authed token handlers =
         , onExpired = handlers.onExpired
         , onResult = handlers.onResult
         }
-
-
-{-| The `Authorization` header for an authenticated request. Unconditional by
-construction — an `Authed` always holds a token — which is what makes a 401 from
-one of these requests unambiguous.
-
-`scripts/check-session-expiry-coverage.sh` reads this function's name to decide
-which `Api` endpoints are mandatorily authenticated, so keep the header
-construction here rather than inlining it at a call site.
-
--}
-authedHeaders : String -> Authed err ok msg -> List Http.Header
-authedHeaders method (Authed request) =
-    httpHeaders method (Session request.token)
-
-
-{-| The `Http.Expect` for an authenticated request: a 401 is diverted to
-`onExpired` before the endpoint's own resolver ever sees the response.
-
-Built on `expectStringResponse` rather than `expectJson`/`expectWhatever`
-because those two collapse every non-2xx into an opaque `BadStatus` after the
-fact — by then the status is a number in an error value that a caller may
-ignore. Here the branch happens before the caller is handed anything.
-
--}
-authedExpect :
-    (Http.Response String -> Result err ok)
-    -> Authed err ok msg
-    -> Http.Expect msg
-authedExpect resolve request =
-    Http.expectStringResponse unwrapNever
-        (\response -> Ok (interpretAuthed resolve request response))
-
-
-{-| `Http.expectStringResponse` insists on a `Result`; `interpretAuthed` already
-produces the final message, so the error side is uninhabited.
--}
-unwrapNever : Result Never a -> a
-unwrapNever result =
-    case result of
-        Ok value ->
-            value
-
-        Err impossible ->
-            never impossible
 
 
 {-| The whole 401 decision, as a pure function of the response — so it can be
@@ -1937,7 +1963,7 @@ refreshRequest : RequestSpec
 refreshRequest =
     { method = "POST"
     , url = Api.Url.path [ "api", "auth", "refresh" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -1952,7 +1978,7 @@ logoutRequest : RequestSpec
 logoutRequest =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "auth", "logout" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2033,7 +2059,7 @@ getTransparencyMetricsRequest : RequestSpec
 getTransparencyMetricsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "transparency", "metrics" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2073,49 +2099,28 @@ initUploadRequest : String -> RequestSpec
 initUploadRequest contentType =
     { method = "POST"
     , url = Api.Url.path [ "api", "upload", "init" ] []
-    , body = Just (Encode.object [ ( "content_type", Encode.string contentType ) ])
+    , body = JsonBody (Encode.object [ ( "content_type", Encode.string contentType ) ])
     }
 
 
-{-| PUT the file bytes to our own upload route. Sends the raw File body; Elm's
-Http uses XHR under the hood, so the JS-side compression monkey-patch in
-`apps/core/assets/js/app.js` intercepts this automatically.
+{-| `PUT /api/upload/:id/data` — the photograph's bytes, as data.
 
-The one request on `uploadTimeout` rather than `standardTimeout`: it is the only
-one carrying a file body, so its elapsed time is bytes moving rather than a
-server thinking. See `uploadTimeout`.
+⛔ THE SECOND OF THE TWO REQUESTS THAT COULD NOT BE A PLAN, and the one that
+carried a hidden regression with it: it used `uploadTimeout` (120s) where the
+plan interpreter hardcoded `standardTimeout` (15s). `Api.specTimeout` now derives
+the timeout from the body, so this keeps its two minutes.
 
-⛔ **IT TAKES AN `imageId`, NOT A URL, AND THAT IS THE WHOLE POINT.** It used to
-take the `upload_url` the server returned and declare the destination
-`CrossOrigin`, on the belief that the URL was a presigned object-storage link.
-It had not been one since July — the server returns a path on our own origin —
-so the request was same-origin, state-changing, and sent no headers at all,
-because `CrossOrigin` yields `[]` by construction. Once CSRF enforcement went
-on, every photo upload was refused `absent_header`. Measured on a deployed
-stack: `403` without the proof, `200` with it.
-
-⚖️ Building the path here is what makes the destination checkable. A URL handed
-over at runtime cannot be related to a `SameOrigin` claim by the compiler or by
-`check-credential-origin.sh`; a literal prefix can, and the prefix is a path, so
-the result is on our origin whatever the `imageId` contains.
+⚠️ `FileBody`, not `MultipartFile`: this endpoint reads a RAW body, where the
+Goodreads import is answered by a multipart parser. The two are not
+interchangeable.
 
 -}
-putUploadBytes :
-    String
-    -> File
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-putUploadBytes imageId file creds toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session creds)
-        , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/data"
-        , body = Http.fileBody file
-        , expect = Http.expectWhatever toMsg
-        , timeout = uploadTimeout
-        , tracker = Nothing
-        }
+putUploadBytesRequest : String -> File -> RequestSpec
+putUploadBytesRequest imageId file =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "upload", imageId, "data" ] []
+    , body = FileBody file
+    }
 
 
 {-| `POST /api/upload/:id/commit` — tells the backend the client's direct PUT
@@ -2126,7 +2131,7 @@ commitUploadRequest : String -> RequestSpec
 commitUploadRequest imageId =
     { method = "POST"
     , url = Api.Url.path [ "api", "upload", imageId, "commit" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2149,7 +2154,7 @@ rejectIdentificationRequest { imageId, rejectedBookIds } =
     { method = "POST"
     , url = Api.Url.path [ "api", "upload", imageId, "reject-identification" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
             )
@@ -2372,7 +2377,7 @@ getBookRequest : String -> RequestSpec
 getBookRequest bookId =
     { method = "GET"
     , url = Api.Url.path [ "api", "books", bookId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2394,7 +2399,7 @@ searchBooksRequest query deep =
                         []
                    )
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2404,7 +2409,7 @@ getBookshelfRequest : String -> RequestSpec
 getBookshelfRequest shelfName =
     { method = "GET"
     , url = Api.Url.path [ "api", "bookshelves", shelfName ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2459,7 +2464,7 @@ moveBookRequest placementId targetBookshelf =
     { method = "PUT"
     , url = Api.Url.path [ "api", "placements", placementId, "move" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeMoveBookRequest
                 { bookshelf = targetBookshelf }
             )
@@ -2472,7 +2477,7 @@ removeBookRequest : String -> RequestSpec
 removeBookRequest placementId =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "placements", placementId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2488,7 +2493,7 @@ restoreBookRequest : String -> RequestSpec
 restoreBookRequest placementId =
     { method = "POST"
     , url = Api.Url.path [ "api", "placements", placementId, "restore" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2623,7 +2628,7 @@ updateProgressRequest :
 updateProgressRequest placementId body =
     { method = "PUT"
     , url = Api.Url.path [ "api", "placements", placementId, "progress" ] []
-    , body = Just (encodeProgressBody body)
+    , body = JsonBody (encodeProgressBody body)
     }
 
 
@@ -2647,7 +2652,7 @@ requestExportRequest : RequestSpec
 requestExportRequest =
     { method = "POST"
     , url = Api.Url.path [ "api", "gdpr", "export" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2657,7 +2662,7 @@ deleteAccountRequest : RequestSpec
 deleteAccountRequest =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "gdpr", "account" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -2667,7 +2672,7 @@ saveConsentRequest : Bool -> RequestSpec
 saveConsentRequest consent =
     { method = "POST"
     , url = Api.Url.path [ "api", "gdpr", "consent" ] []
-    , body = Just (Requests.encodeConsentRequest { consent = consent })
+    , body = JsonBody (Requests.encodeConsentRequest { consent = consent })
     }
 
 
@@ -2684,7 +2689,7 @@ saveWritingAssistantConsentRequest consent =
     { method = "POST"
     , url = Api.Url.path [ "api", "gdpr", "consent" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "consent", Encode.bool consent )
                 , ( "type", Encode.string "writing_assistant" )
@@ -2862,7 +2867,7 @@ getAuditLogRequest : RequestSpec
 getAuditLogRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "settings", "audit-log" ] [ Url.Builder.string "page" "1" ]
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3027,7 +3032,7 @@ getInferencesRequest revealRisk =
              else
                 []
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3089,7 +3094,7 @@ placeBookRequest bookshelfName bookId =
     { method = "POST"
     , url = Api.Url.path [ "api", "bookshelves", bookshelfName, "placements" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodePlaceBookRequest
                 { bookId = bookId }
             )
@@ -3104,7 +3109,7 @@ setBookAgeGateRequest : String -> RequestSpec
 setBookAgeGateRequest bookId =
     { method = "PUT"
     , url = Api.Url.path [ "api", "books", bookId, "age-gate" ] []
-    , body = Just (Encode.object [ ( "adults_only", Encode.bool True ) ])
+    , body = JsonBody (Encode.object [ ( "adults_only", Encode.bool True ) ])
     }
 
 
@@ -3114,7 +3119,7 @@ getUserPlacementsRequest : RequestSpec
 getUserPlacementsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "placements", "mine" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3288,7 +3293,7 @@ confirmBookRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "books", "confirm" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "isbn", Encode.string body.isbn )
                 , ( "shelf_name", Encode.string body.shelfName )
@@ -3317,7 +3322,7 @@ getCatalogueRequest params =
                 , params.subject |> Maybe.map (Url.Builder.string "subject")
                 ]
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3379,7 +3384,7 @@ getAccountRequest : RequestSpec
 getAccountRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "auth", "me" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3455,7 +3460,7 @@ identityRequest : RequestSpec
 identityRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "auth", "me" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3654,14 +3659,15 @@ type alias ProfileSaved =
     }
 
 
-{-| PUT /api/settings/profile — update display name, email, website URL, and handle.
+{-| `PUT /api/settings/profile` — a profile edit, as data.
 
-`emailChanged` decides whether the email/current-password pair is sent at all
-(see `encodeProfileBody`): an ordinary profile edit omits both so the server
-treats it as a profile-only update rather than an email change.
+⛔ THE LAST `Http.request` IN THIS MODULE. With it gone, nothing here builds a
+request with a `String` url, which is the condition
+`check-credential-origin.sh` names for its own retirement: every url is an
+`Api.Url.SameOriginUrl` and the compiler checks what that script was parsing for.
 
 -}
-updateProfile :
+updateProfileRequest :
     { displayName : String
     , email : String
     , websiteUrl : String
@@ -3670,18 +3676,12 @@ updateProfile :
     , emailChanged : Bool
     , handleChanged : Bool
     }
-    -> Authed ProfileError ProfileSaved msg
-    -> Cmd msg
-updateProfile body request =
-    Http.request
-        { method = "PUT"
-        , headers = authedHeaders "PUT" request
-        , url = baseUrl ++ "/api/settings/profile"
-        , body = Http.jsonBody (encodeProfileBody body)
-        , expect = authedExpect resolveProfile request
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+    -> RequestSpec
+updateProfileRequest body =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "settings", "profile" ] []
+    , body = JsonBody (encodeProfileBody body)
+    }
 
 
 {-| Body for `PUT /api/settings/profile`. Unchanged keys are OMITTED, not
@@ -3789,7 +3789,7 @@ updateLocationRequest body =
     { method = "PUT"
     , url = Api.Url.path [ "api", "settings", "location" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeUpdateLocationRequest
                 { countryCode = body.countryCode
                 , city = body.city
@@ -3805,7 +3805,7 @@ updatePasswordRequest body =
     { method = "PUT"
     , url = Api.Url.path [ "api", "settings", "password" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeUpdatePasswordRequest
                 { currentPassword = body.currentPassword
                 , newPassword = body.newPassword
@@ -3830,7 +3830,7 @@ notificationsRequest : RequestSpec
 notificationsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "settings", "notifications" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3862,7 +3862,7 @@ updateNotificationsRequest prefs =
     { method = "PUT"
     , url = Api.Url.path [ "api", "settings", "notifications" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeUpdateNotificationsRequest
                 { notifyWishlistAvailability = prefs.priceDrops
                 , notifyMarketplace = prefs.newReviews
@@ -3897,7 +3897,7 @@ mergeFormatRequest bookId body =
     { method = "POST"
     , url = Api.Url.path [ "api", "books", bookId, "merge-format" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeMergeFormatRequest
                 { isbn = body.isbn
                 , formatLabel = body.formatLabel
@@ -3928,7 +3928,7 @@ getListingsRequest : RequestSpec
 getListingsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "listings" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3938,7 +3938,7 @@ myListingsRequest : RequestSpec
 myListingsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "listings", "mine" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -3949,7 +3949,7 @@ createListingRequest params =
     { method = "POST"
     , url = Api.Url.path [ "api", "listings" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeCreateListingRequest
                 { -- Backend Marketplace.create_listing reads book_id; the
                   placementId = ""
@@ -3980,7 +3980,7 @@ listingTransitionRequest listingId transition =
         Api.Url.path
             [ "api", "listings", listingId, listingTransitionSegment transition ]
             []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4011,7 +4011,7 @@ myPlacementsRequest : RequestSpec
 myPlacementsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "placements", "mine" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4057,7 +4057,7 @@ getBlogPostsRequest maybeCursor =
                 |> Maybe.map List.singleton
                 |> Maybe.withDefault []
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4067,7 +4067,7 @@ blogPostRequest : String -> RequestSpec
 blogPostRequest postId =
     { method = "GET"
     , url = Api.Url.path [ "api", "blog", "posts", postId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4078,7 +4078,7 @@ createBlogPostRequest postData =
     { method = "POST"
     , url = Api.Url.path [ "api", "blog", "posts" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeCreateBlogPostRequest
                 { title = postData.title
                 , body = postData.body
@@ -4095,7 +4095,7 @@ updateBlogPostRequest postId postData =
     { method = "PUT"
     , url = Api.Url.path [ "api", "blog", "posts", postId ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeUpdateBlogPostRequest
                 { title = postData.title
                 , body = postData.body
@@ -4151,7 +4151,7 @@ syndicationExportRequest postId format =
     , url =
         Api.Url.path [ "api", "blog", "posts", postId, "syndication" ]
             [ Url.Builder.string "format" format ]
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4171,7 +4171,7 @@ syndicationsRequest : String -> RequestSpec
 syndicationsRequest postId =
     { method = "GET"
     , url = Api.Url.path [ "api", "blog", "posts", postId, "syndications" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4181,7 +4181,7 @@ recordSyndicationRequest : String -> String -> RequestSpec
 recordSyndicationRequest postId method =
     { method = "POST"
     , url = Api.Url.path [ "api", "blog", "posts", postId, "syndications" ] []
-    , body = Just (Encode.object [ ( "method", Encode.string method ) ])
+    , body = JsonBody (Encode.object [ ( "method", Encode.string method ) ])
     }
 
 
@@ -4192,7 +4192,7 @@ updateSyndicationUrlRequest : String -> String -> String -> RequestSpec
 updateSyndicationUrlRequest postId sid url =
     { method = "PUT"
     , url = Api.Url.path [ "api", "blog", "posts", postId, "syndications", sid ] []
-    , body = Just (Encode.object [ ( "syndicated_url", Encode.string url ) ])
+    , body = JsonBody (Encode.object [ ( "syndicated_url", Encode.string url ) ])
     }
 
 
@@ -4202,7 +4202,7 @@ setPostSyndicatedRequest : String -> Bool -> RequestSpec
 setPostSyndicatedRequest postId syndicated =
     { method = "PUT"
     , url = Api.Url.path [ "api", "blog", "posts", postId ] []
-    , body = Just (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
+    , body = JsonBody (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
     }
 
 
@@ -4212,7 +4212,7 @@ publishBlogPostRequest : String -> RequestSpec
 publishBlogPostRequest postId =
     { method = "POST"
     , url = Api.Url.path [ "api", "blog", "posts", postId, "publish" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4229,7 +4229,7 @@ associationVerdictRequest postId associationId verdict =
         Api.Url.path
             [ "api", "blog", "posts", postId, "associations", associationId, associationVerdictSegment verdict ]
             []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4256,7 +4256,7 @@ postCommentsRequest : String -> RequestSpec
 postCommentsRequest postId =
     { method = "GET"
     , url = Api.Url.path [ "api", "posts", postId, "comments" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4273,7 +4273,7 @@ createCommentRequest postId body maybeParentId =
     { method = "POST"
     , url = Api.Url.path [ "api", "posts", postId, "comments" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 ([ ( "body", Encode.string body ) ]
                     ++ (maybeParentId
@@ -4291,7 +4291,7 @@ deleteCommentRequest : String -> RequestSpec
 deleteCommentRequest commentId =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "comments", commentId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4301,7 +4301,7 @@ updateProfileVisibilityRequest : String -> RequestSpec
 updateProfileVisibilityRequest visibility =
     { method = "PUT"
     , url = Api.Url.path [ "api", "settings", "profile_visibility" ] []
-    , body = Just (Requests.encodeUpdateProfileVisibilityRequest { profileVisibility = visibility })
+    , body = JsonBody (Requests.encodeUpdateProfileVisibilityRequest { profileVisibility = visibility })
     }
 
 
@@ -4311,7 +4311,7 @@ updateShelfVisibilityRequest : String -> String -> RequestSpec
 updateShelfVisibilityRequest shelfName visibility =
     { method = "PUT"
     , url = Api.Url.path [ "api", "bookshelves", shelfName, "visibility" ] []
-    , body = Just (Requests.encodeUpdateShelfVisibilityRequest { visibility = visibility })
+    , body = JsonBody (Requests.encodeUpdateShelfVisibilityRequest { visibility = visibility })
     }
 
 
@@ -4327,7 +4327,7 @@ updatePlacementVisibilityRequest placementId visibility =
     { method = "PUT"
     , url = Api.Url.path [ "api", "placements", placementId, "visibility" ] []
     , body =
-        Just
+        JsonBody
             (Requests.encodeUpdateShelfVisibilityRequest
                 { visibility = visibility }
             )
@@ -4355,7 +4355,7 @@ updatePlacementFormatsRequest placementId formats =
     { method = "PUT"
     , url = Api.Url.path [ "api", "placements", placementId, "formats" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "formats", Encode.list Encode.string formats ) ]
             )
@@ -4472,7 +4472,7 @@ movePlacementToShelfRequest : String -> String -> RequestSpec
 movePlacementToShelfRequest placementId shelfId =
     { method = "PUT"
     , url = Api.Url.path [ "api", "placements", placementId, "shelf" ] []
-    , body = Just (Encode.object [ ( "shelf_id", Encode.string shelfId ) ])
+    , body = JsonBody (Encode.object [ ( "shelf_id", Encode.string shelfId ) ])
     }
 
 
@@ -4578,7 +4578,7 @@ blockRequest : String -> BlockAction -> RequestSpec
 blockRequest targetUserId action =
     { method = blockActionMethod action
     , url = Api.Url.path [ "api", "users", targetUserId, "block" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4610,7 +4610,7 @@ blockedUsersRequest : Int -> RequestSpec
 blockedUsersRequest page =
     { method = "GET"
     , url = Api.Url.path [ "api", "settings", "blocked-users" ] [ Url.Builder.int "page" page ]
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4656,7 +4656,7 @@ privacySettingsRequest : RequestSpec
 privacySettingsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "settings", "privacy" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4771,7 +4771,7 @@ getProfileRequest : String -> RequestSpec
 getProfileRequest handle =
     { method = "GET"
     , url = Api.Url.path [ "api", "u", handle ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4786,7 +4786,7 @@ createShelfRequest : String -> RequestSpec
 createShelfRequest bookshelfName =
     { method = "POST"
     , url = Api.Url.path [ "api", "bookshelves", bookshelfName, "shelves" ] []
-    , body = Just (Encode.object [])
+    , body = JsonBody (Encode.object [])
     }
 
 
@@ -4801,7 +4801,7 @@ deleteShelfRequest : String -> RequestSpec
 deleteShelfRequest shelfId =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "shelves", shelfId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4818,7 +4818,7 @@ reorderShelvesRequest bookshelfName shelfIds =
     { method = "PUT"
     , url = Api.Url.path [ "api", "bookshelves", bookshelfName, "shelves", "reorder" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
     }
 
@@ -4831,7 +4831,7 @@ getProfileShelfRequest : String -> String -> RequestSpec
 getProfileShelfRequest handle bookshelfName =
     { method = "GET"
     , url = Api.Url.path [ "api", "u", handle, "bookshelves", bookshelfName ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -4864,7 +4864,7 @@ searchUsersRequest : String -> RequestSpec
 searchUsersRequest query =
     { method = "GET"
     , url = Api.Url.path [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5005,7 +5005,7 @@ adminLoginRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "admin", "auth", "login" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "email", Encode.string body.email )
                 , ( "password", Encode.string body.password )
@@ -5026,7 +5026,7 @@ adminVerifyMfaRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "admin", "auth", "verify_mfa" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "session_id", Encode.string body.sessionId )
                 , ( "totp_code", Encode.string body.code )
@@ -5051,7 +5051,7 @@ adminLogoutRequest : RequestSpec
 adminLogoutRequest =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "admin", "auth", "logout" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5074,7 +5074,7 @@ adminMfaSetupRequest : RequestSpec
 adminMfaSetupRequest =
     { method = "POST"
     , url = Api.Url.path [ "api", "admin", "auth", "mfa", "setup" ] []
-    , body = Just (Encode.object [])
+    , body = JsonBody (Encode.object [])
     }
 
 
@@ -5094,7 +5094,7 @@ adminMfaConfirmRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "admin", "auth", "mfa", "confirm" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "totp_code", Encode.string body.code )
                 , ( "secret", Encode.string body.secret )
@@ -5204,7 +5204,7 @@ removalRequestsRequest : RequestSpec
 removalRequestsRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "admin", "removal-requests" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5308,7 +5308,7 @@ adminFeedbackRequest window =
             [ Url.Builder.int "limit" window.limit
             , Url.Builder.int "offset" window.offset
             ]
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5319,7 +5319,7 @@ sendFeedbackRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "feedback" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "body", Encode.string body.body )
                 , ( "page_context", Encode.string body.pageContext )
@@ -5334,7 +5334,7 @@ adminInvitesRequest : RequestSpec
 adminInvitesRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "admin", "invites" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5347,7 +5347,7 @@ createAdminInviteRequest body =
     { method = "POST"
     , url = Api.Url.path [ "api", "admin", "invites" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 (List.filterMap identity
                     [ blankAsAbsent "note" body.note
@@ -5379,7 +5379,7 @@ revokeAdminInviteRequest : String -> RequestSpec
 revokeAdminInviteRequest id =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "admin", "invites", id ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5402,7 +5402,7 @@ removalDecisionRequest requestId decision =
         Api.Url.path
             [ "api", "admin", "removal-requests", requestId, removalDecisionSegment decision ]
             []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5440,7 +5440,7 @@ adminSourcesRequest params =
              ]
                 |> List.filterMap identity
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5453,7 +5453,7 @@ approveSourceRequest : String -> RequestSpec
 approveSourceRequest sourceId =
     { method = "PUT"
     , url = Api.Url.path [ "api", "admin", "sources", sourceId, "approve" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5466,7 +5466,7 @@ rejectSourceRequest : String -> RequestSpec
 rejectSourceRequest sourceId =
     { method = "PUT"
     , url = Api.Url.path [ "api", "admin", "sources", sourceId, "reject" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5527,7 +5527,7 @@ adminListBooksRequest params =
                 , params.search |> Maybe.map (Url.Builder.string "search")
                 ]
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5537,7 +5537,7 @@ adminSetBookAgeGateRequest : String -> Bool -> RequestSpec
 adminSetBookAgeGateRequest bookId ageGated =
     { method = "PUT"
     , url = Api.Url.path [ "api", "admin", "books", bookId, "age-gate" ] []
-    , body = Just (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
+    , body = JsonBody (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
     }
 
 
@@ -5589,7 +5589,7 @@ sourceHealthRequest : RequestSpec
 sourceHealthRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "admin", "source-health" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5624,7 +5624,7 @@ onboardingStatusRequest : RequestSpec
 onboardingStatusRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "onboarding", "status" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5634,7 +5634,7 @@ completeOnboardingStepRequest : String -> RequestSpec
 completeOnboardingStepRequest step =
     { method = "POST"
     , url = Api.Url.path [ "api", "onboarding", "step", step ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5650,7 +5650,7 @@ createGroupRequest name =
     { method = "POST"
     , url = Api.Url.path [ "api", "groups" ] []
     , body =
-        Just
+        JsonBody
             (Encode.object
                 [ ( "name", Encode.string name )
                 , ( "type", Encode.string "close_friends" )
@@ -5665,7 +5665,7 @@ groupRequest : String -> RequestSpec
 groupRequest groupId =
     { method = "GET"
     , url = Api.Url.path [ "api", "groups", groupId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5688,7 +5688,7 @@ groupFeedRequest groupId maybeCursor =
                 |> Maybe.map List.singleton
                 |> Maybe.withDefault []
             )
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5698,7 +5698,7 @@ inviteToGroupRequest : String -> String -> RequestSpec
 inviteToGroupRequest groupId identifier =
     { method = "POST"
     , url = Api.Url.path [ "api", "groups", groupId, "invitations" ] []
-    , body = Just (Encode.object [ ( "identifier", Encode.string identifier ) ])
+    , body = JsonBody (Encode.object [ ( "identifier", Encode.string identifier ) ])
     }
 
 
@@ -5720,7 +5720,7 @@ invitationAnswerRequest groupId invitationId answer =
         Api.Url.path
             [ "api", "groups", groupId, "invitations", invitationId, invitationAnswerSegment answer ]
             []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5764,7 +5764,7 @@ groupMembersRequest : String -> RequestSpec
 groupMembersRequest groupId =
     { method = "GET"
     , url = Api.Url.path [ "api", "groups", groupId, "members" ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5777,7 +5777,7 @@ removeGroupMemberRequest : String -> String -> RequestSpec
 removeGroupMemberRequest groupId memberUserId =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "groups", groupId, "members", memberUserId ] []
-    , body = Nothing
+    , body = NoBody
     }
 
 
@@ -5787,5 +5787,5 @@ leaveGroupRequest : String -> RequestSpec
 leaveGroupRequest groupId =
     { method = "DELETE"
     , url = Api.Url.path [ "api", "groups", groupId, "leave" ] []
-    , body = Nothing
+    , body = NoBody
     }

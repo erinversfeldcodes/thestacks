@@ -81,7 +81,7 @@ spacesRequest : Api.RequestSpec
 spacesRequest =
     { method = "GET"
     , url = Api.Url.path [ "api", "third-spaces" ] []
-    , body = Nothing
+    , body = Api.NoBody
     }
 
 

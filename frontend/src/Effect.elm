@@ -184,7 +184,7 @@ perform effect =
                 , url = Api.Url.toString plan.spec.url
                 , body = Api.specHttpBody plan.spec
                 , expect = expectResponse plan.onResponse
-                , timeout = Api.standardTimeout
+                , timeout = Api.specTimeout plan.spec
                 , tracker = Nothing
                 }
 

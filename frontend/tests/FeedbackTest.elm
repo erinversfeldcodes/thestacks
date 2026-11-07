@@ -211,7 +211,7 @@ suite =
                         { method = "POST"
                         , url = Api.Url.path [ "api", "feedback" ] []
                         , body =
-                            Just
+                            Api.JsonBody
                                 (Encode.object
                                     [ ( "body", Encode.string "The spines overlap." )
                                     , ( "page_context", Encode.string "/u/:handle" )
@@ -442,7 +442,7 @@ suite =
                     Expect.equal
                         { method = "GET"
                         , url = Api.Url.path [ "api", "admin", "feedback" ] [ Url.Builder.int "limit" 25, Url.Builder.int "offset" 50 ]
-                        , body = Nothing
+                        , body = Api.NoBody
                         }
                         (Api.adminFeedbackRequest { limit = 25, offset = 50 })
             , test "the first window asks for offset zero rather than omitting it" <|
@@ -513,7 +513,7 @@ suite =
                             Expect.equal False (String.contains "STK-ABCD-1234" (Api.Url.toString s.url))
                         , \s ->
                             Expect.equal
-                                (Just
+                                (Api.JsonBody
                                     (Encode.object
                                         [ ( "code", Encode.string "STK-ABCD-1234" ) ]
                                     )
