@@ -17,6 +17,7 @@ module Api exposing
     , AuthorEvent
     , Behaviour
     , BisacCount
+    , BlockAction(..)
     , BlockError(..)
     , BlockedUser
     , BlockedUsersResponse
@@ -109,8 +110,10 @@ module Api exposing
     , authorEventDecoder
     , authorEventsDecoder
     , awaitingConfirmationCount
-    , blockUser
+    , blockRequest
+    , blockResponseToResult
     , blockedUserDecoder
+    , blockedUsersRequest
     , blockedUsersResponseDecoder
     , blogPostPageDecoder
     , bookDetailResponseDecoder
@@ -118,7 +121,7 @@ module Api exposing
     , checkInviteRequest
     , commitUploadDecoder
     , commitUploadRequest
-    , completeOnboardingStep
+    , completeOnboardingStepRequest
     , confirmAssociation
     , confirmBookRequest
     , confirmResponseDecoder
@@ -133,7 +136,6 @@ module Api exposing
     , createShelfRequest
     , credentials
     , decodeUploadInit
-    , deleteAccount
     , deleteAccountRequest
     , deleteComment
     , deleteShelfRequest
@@ -156,9 +158,7 @@ module Api exposing
     , getIdentity
     , getInferencesRequest
     , getListingsRequest
-    , getOnboardingStatus
     , getPostComments
-    , getPrivacySettings
     , getProfileRequest
     , getProfileShelfRequest
     , getTransparencyMetricsRequest
@@ -183,7 +183,6 @@ module Api exposing
     , isUnauthorized
     , leaveGroup
     , libraryImportDecoder
-    , listBlockedUsers
     , listSyndications
     , listingTransitionRequest
     , loginRequest
@@ -200,6 +199,7 @@ module Api exposing
     , notificationPreferencesDecoder
     , notificationsRequest
     , onboardingStatusDecoder
+    , onboardingStatusRequest
     , peopleSearchDecoder
     , personalInferencesDecoder
     , placeBookRequest
@@ -209,6 +209,7 @@ module Api exposing
     , placementsMineDecoder
     , planHeaders
     , privacySettingsDecoder
+    , privacySettingsRequest
     , profileSavedDecoder
     , progressDecoder
     , progressErrorMessage
@@ -234,7 +235,6 @@ module Api exposing
     , removeBookRequest
     , removeGroupMember
     , reorderShelvesRequest
-    , requestExport
     , requestExportRequest
     , requestHeaders
     , requestListingRemovalRequest
@@ -269,7 +269,6 @@ module Api exposing
     , streamEventDecoder
     , syndicationDecoder
     , transparencyMetricsDecoder
-    , unblockUser
     , updateBlogPost
     , updateLocationRequest
     , updateNotificationsRequest
@@ -277,9 +276,9 @@ module Api exposing
     , updatePlacementFormatsRequest
     , updatePlacementVisibilityRequest
     , updateProfile
-    , updateProfileVisibility
+    , updateProfileVisibilityRequest
     , updateProgressRequest
-    , updateShelfVisibility
+    , updateShelfVisibilityRequest
     , updateSyndicationUrl
     , uploadInboxDecoder
     , uploadTimeout
@@ -2690,33 +2689,6 @@ encodeProgressBody body =
         )
 
 
-{-| POST /api/gdpr/export — queue an export of the user's personal data.
-
-The backend responds 202 Accepted and processes the export asynchronously, so
-the client only needs to confirm the request was queued; the response body is
-not consumed.
-
--}
-requestExport :
-    Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-requestExport token toMsg =
-    let
-        spec =
-            requestExportRequest
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
-
-
 {-| The data of `requestExport`'s request — see `RequestSpec`.
 -}
 requestExportRequest : RequestSpec
@@ -2725,34 +2697,6 @@ requestExportRequest =
     , url = Api.Url.path [ "api", "gdpr", "export" ] []
     , body = Nothing
     }
-
-
-{-| DELETE /api/gdpr/account — queue erasure of the user's account and personal
-data.
-
-The backend responds 202 Accepted and processes the deletion asynchronously, so
-the client only needs to confirm the request was queued; the response body is
-not consumed. On success the caller is logged out.
-
--}
-deleteAccount :
-    Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-deleteAccount token toMsg =
-    let
-        spec =
-            deleteAccountRequest
-    in
-    Http.request
-        { method = spec.method
-        , headers = httpHeaders spec.method (Session token)
-        , url = Api.Url.toString spec.url
-        , body = specHttpBody spec
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
 
 
 {-| The data of `deleteAccount`'s request — see `RequestSpec`.
@@ -4532,51 +4476,24 @@ deleteComment commentId token toMsg =
         }
 
 
-{-| PUT /api/settings/profile\_visibility — update profile visibility.
+{-| `PUT /api/settings/profile_visibility` — who may see this reader's profile, as data.
 -}
-updateProfileVisibility :
-    String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-updateProfileVisibility visibility token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/settings/profile_visibility"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateProfileVisibilityRequest
-                    { profileVisibility = visibility }
-                )
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updateProfileVisibilityRequest : String -> RequestSpec
+updateProfileVisibilityRequest visibility =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "settings", "profile_visibility" ] []
+    , body = Just (Requests.encodeUpdateProfileVisibilityRequest { profileVisibility = visibility })
+    }
 
 
-{-| PUT /api/bookshelves/:id/visibility — update shelf visibility.
+{-| `PUT /api/bookshelves/:name/visibility` — who may see one bookshelf, as data.
 -}
-updateShelfVisibility :
-    String
-    -> String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-updateShelfVisibility shelfName visibility token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/bookshelves/" ++ shelfName ++ "/visibility"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateShelfVisibilityRequest
-                    { visibility = visibility }
-                )
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+updateShelfVisibilityRequest : String -> String -> RequestSpec
+updateShelfVisibilityRequest shelfName visibility =
+    { method = "PUT"
+    , url = Api.Url.path [ "api", "bookshelves", shelfName, "visibility" ] []
+    , body = Just (Requests.encodeUpdateShelfVisibilityRequest { visibility = visibility })
+    }
 
 
 {-| `PUT /api/placements/:id/visibility`.
@@ -4790,103 +4707,92 @@ blockedUsersResponseDecoder =
         (Decode.field "page" Decode.int)
 
 
-{-| `Http.expectWhatever` would collapse the backend's `{"error":...}` body
-into an opaque `BadStatus`, losing the difference between `already_blocked`,
-`cannot_block_self`, and `not_found`. This custom expect keeps that reason so
-the UI can explain what actually happened.
+{-| What the server said about a block attempt, as a resolver.
+
+⛔ A NAMED FUNCTION, extracted from the lambda inside the old `expectBlock`.
+`Effect.authed` takes `onResponse : Http.Response String -> msg`, so a resolver
+buried in an `Http.Expect` could not be reused by a plan — and this one carries
+real meaning that must not be re-derived: `already_blocked`, `cannot_block_self`
+and `not_found` are distinct outcomes the modal words differently.
+
 -}
-expectBlock : (Result BlockError () -> msg) -> Http.Expect msg
-expectBlock toMsg =
-    Http.expectStringResponse toMsg <|
-        \response ->
-            case response of
-                Http.BadUrl_ url ->
-                    Err (BlockRequestFailed (Http.BadUrl url))
+blockResponseToResult : Http.Response String -> Result BlockError ()
+blockResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (BlockRequestFailed (Http.BadUrl url))
 
-                Http.Timeout_ ->
-                    Err (BlockRequestFailed Http.Timeout)
+        Http.Timeout_ ->
+            Err (BlockRequestFailed Http.Timeout)
 
-                Http.NetworkError_ ->
-                    Err (BlockRequestFailed Http.NetworkError)
+        Http.NetworkError_ ->
+            Err (BlockRequestFailed Http.NetworkError)
 
-                Http.BadStatus_ metadata bodyText ->
-                    case Decode.decodeString (Decode.field "error" Decode.string) bodyText of
-                        Ok "already_blocked" ->
-                            Err AlreadyBlocked
+        Http.BadStatus_ metadata bodyText ->
+            case Decode.decodeString (Decode.field "error" Decode.string) bodyText of
+                Ok "already_blocked" ->
+                    Err AlreadyBlocked
 
-                        Ok "cannot_block_self" ->
-                            Err CannotBlockSelf
+                Ok "cannot_block_self" ->
+                    Err CannotBlockSelf
 
-                        Ok "not_found" ->
-                            Err NotFound
+                Ok "not_found" ->
+                    Err NotFound
 
-                        _ ->
-                            Err (BlockRequestFailed (Http.BadStatus metadata.statusCode))
+                _ ->
+                    Err (BlockRequestFailed (Http.BadStatus metadata.statusCode))
 
-                Http.GoodStatus_ _ _ ->
-                    Ok ()
+        Http.GoodStatus_ _ _ ->
+            Ok ()
 
 
-{-| POST /api/users/:id/block — block another reader. On success the backend
-returns `{"blocked": true}`; the resolved-visibility layer then hides that
-reader's content bidirectionally on the next fetch.
+{-| `POST|DELETE /api/users/:id/block` — blocking or unblocking a reader, as data.
+
+⚖️ ONE spec and one url for both, which is what the old pair obscured: they
+differed ONLY in the HTTP method, and having two builders invited them to drift
+on the path. The method is the decision here.
+
+⚠️ The target id is percent-encoded, where the old builders concatenated it.
+
 -}
-blockUser :
-    String
-    -> Credentials
-    -> (Result BlockError () -> msg)
-    -> Cmd msg
-blockUser targetUserId token toMsg =
-    Http.request
-        { method = "POST"
-        , headers = httpHeaders "POST" (Session token)
-        , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
-        , body = Http.emptyBody
-        , expect = expectBlock toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+blockRequest : String -> BlockAction -> RequestSpec
+blockRequest targetUserId action =
+    { method = blockActionMethod action
+    , url = Api.Url.path [ "api", "users", targetUserId, "block" ] []
+    , body = Nothing
+    }
 
 
-{-| DELETE /api/users/:id/block — unblock a reader. Returns `{"blocked": false}`
-on success, 404 `not_found` when no block existed.
+{-| Whether the reader is blocking someone or letting them back.
 -}
-unblockUser :
-    String
-    -> Credentials
-    -> (Result Http.Error () -> msg)
-    -> Cmd msg
-unblockUser targetUserId token toMsg =
-    Http.request
-        { method = "DELETE"
-        , headers = httpHeaders "DELETE" (Session token)
-        , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
-        , body = Http.emptyBody
-        , expect = Http.expectWhatever toMsg
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+type BlockAction
+    = Block
+    | Unblock
 
 
-{-| GET /api/settings/blocked-users — the current reader's blocked list, one
-page (20 readers) at a time. `page` is 1-based; the response echoes back the
-page and total so the caller can offer a "Load more" affordance.
+blockActionMethod : BlockAction -> String
+blockActionMethod action =
+    case action of
+        Block ->
+            "POST"
+
+        Unblock ->
+            "DELETE"
+
+
+{-| `GET /api/settings/blocked-users` — who this reader has blocked, as data.
+
+⚠️ The page number is a query PARAMETER now, where the old builder appended
+`?page=` to the path by hand. `Api.Url.path` encodes it, so a page value could
+not escape the query string even if it stopped being an `Int`.
+
 -}
-listBlockedUsers :
-    Credentials
-    -> Int
-    -> (Result Http.Error BlockedUsersResponse -> msg)
-    -> Cmd msg
-listBlockedUsers token page toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg blockedUsersResponseDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+blockedUsersRequest : Int -> RequestSpec
+blockedUsersRequest page =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "settings", "blocked-users" ] [ Url.Builder.int "page" page ]
+    , body = Nothing
+    }
 
 
 {-| A single shelf's saved visibility as returned by `GET /api/settings/privacy`.
@@ -4925,23 +4831,14 @@ privacySettingsDecoder =
         (Decode.field "consent_writing_assistant" Decode.bool)
 
 
-{-| GET /api/settings/privacy — the current user's saved profile visibility and
-per-shelf visibility overrides, used to seed the privacy settings screen.
+{-| `GET /api/settings/privacy` — the reader's privacy choices, as data.
 -}
-getPrivacySettings :
-    Credentials
-    -> (Result Http.Error PrivacySettings -> msg)
-    -> Cmd msg
-getPrivacySettings token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/settings/privacy"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg privacySettingsDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+privacySettingsRequest : RequestSpec
+privacySettingsRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "settings", "privacy" ] []
+    , body = Nothing
+    }
 
 
 {-| A user's public profile as seen by a viewer: redacted identity fields plus
@@ -5944,41 +5841,24 @@ onboardingStatusDecoder =
         )
 
 
-{-| GET /api/onboarding/status — fetch current step completion state.
+{-| `GET /api/onboarding/status` — where the reader is in onboarding, as data.
 -}
-getOnboardingStatus :
-    Credentials
-    -> (Result Http.Error OnboardingStatus -> msg)
-    -> Cmd msg
-getOnboardingStatus token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = httpHeaders "GET" (Session token)
-        , url = baseUrl ++ "/api/onboarding/status"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg onboardingStatusDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+onboardingStatusRequest : RequestSpec
+onboardingStatusRequest =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "onboarding", "status" ] []
+    , body = Nothing
+    }
 
 
-{-| PUT /api/onboarding/step/:step — mark a step as complete. Returns updated status.
+{-| `POST /api/onboarding/step/:step` — marking an onboarding step done, as data.
 -}
-completeOnboardingStep :
-    String
-    -> Credentials
-    -> (Result Http.Error OnboardingStatus -> msg)
-    -> Cmd msg
-completeOnboardingStep step token toMsg =
-    Http.request
-        { method = "PUT"
-        , headers = httpHeaders "PUT" (Session token)
-        , url = baseUrl ++ "/api/onboarding/step/" ++ step
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg onboardingStatusDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+completeOnboardingStepRequest : String -> RequestSpec
+completeOnboardingStepRequest step =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "onboarding", "step", step ] []
+    , body = Nothing
+    }
 
 
 {-| `POST /api/groups` — starting a reading group, as data.

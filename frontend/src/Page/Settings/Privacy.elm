@@ -10,6 +10,7 @@ module Page.Settings.Privacy exposing
 
 import Api
 import Components.SaveButton as SaveButton
+import Effect
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -58,6 +59,7 @@ type alias ShelfVisibility =
 
 type Msg
     = SetProfileVisibility String
+    | SessionExpiryDetected
     | SetShelfVisibility String String
     | SaveProfileVisibility
     | SaveProfileVisibilityCompleted (Result Http.Error ())
@@ -178,8 +180,20 @@ initWithToken maybeToken consentSeed =
         Just token ->
             ( { seeded | blockedUsers = Loading, settings = Loading }
             , Cmd.batch
-                [ Api.getPrivacySettings token GotPrivacySettings
-                , Api.listBlockedUsers token 1 GotBlockedUsers
+                [ Effect.perform
+                    (Effect.authed Api.privacySettingsRequest
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveJson Api.privacySettingsDecoder >> GotPrivacySettings
+                        }
+                    )
+                , Effect.perform
+                    (Effect.authed (Api.blockedUsersRequest 1)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveJson Api.blockedUsersResponseDecoder >> GotBlockedUsers
+                        }
+                    )
                 ]
             )
 
@@ -190,6 +204,9 @@ initWithToken maybeToken consentSeed =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         SetProfileVisibility val ->
             ( { model | profileVisibility = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
@@ -212,7 +229,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | savingProfile = Loading }
-                    , Api.updateProfileVisibility model.profileVisibility token SaveProfileVisibilityCompleted
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.updateProfileVisibilityRequest model.profileVisibility)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> SaveProfileVisibilityCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -243,7 +267,13 @@ update msg model maybeToken =
                                 |> Maybe.withDefault "platform"
                     in
                     ( { model | savingShelf = Loading }
-                    , Api.updateShelfVisibility shelfName vis token SaveShelfVisibilityCompleted
+                    , Effect.perform
+                        (Effect.authed (Api.updateShelfVisibilityRequest shelfName vis)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> SaveShelfVisibilityCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -266,7 +296,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | exporting = Loading }
-                    , Api.requestExport token GotExportResponse
+                    , Effect.perform
+                        (Effect.authed Api.requestExportRequest
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> GotExportResponse
+                            }
+                        )
                     , NoOut
                     )
 
@@ -310,7 +346,13 @@ update msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         ( { model | deleting = Loading }
-                        , Api.deleteAccount token GotDeleteResponse
+                        , Effect.perform
+                            (Effect.authed Api.deleteAccountRequest
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse = Api.resolveWhatever >> GotDeleteResponse
+                                }
+                            )
                         , NoOut
                         )
 
@@ -402,7 +444,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | loadingMore = True }
-                    , Api.listBlockedUsers token (model.blockedPage + 1) GotBlockedUsers
+                    , Effect.perform
+                        (Effect.authed (Api.blockedUsersRequest (model.blockedPage + 1))
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveJson Api.blockedUsersResponseDecoder >> GotBlockedUsers
+                            }
+                        )
                     , NoOut
                     )
 
@@ -413,7 +461,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | unblocking = Just userId, unblockError = False }
-                    , Api.unblockUser userId token (GotUnblockResponse userId)
+                    , Effect.perform
+                        (Effect.authed (Api.blockRequest userId Api.Unblock)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> GotUnblockResponse userId
+                            }
+                        )
                     , NoOut
                     )
 

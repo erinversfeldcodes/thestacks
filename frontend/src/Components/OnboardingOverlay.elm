@@ -27,6 +27,7 @@ Completion persists server-side, so a reload does not re-run the flow.
 
 import Api exposing (OnboardingStatus)
 import Browser.Dom
+import Effect
 import Html exposing (Html, button, div, h2, p, span, text)
 import Html.Attributes exposing (attribute, class, id, tabindex)
 import Html.Events exposing (onClick, preventDefaultOn)
@@ -88,6 +89,7 @@ type OutMsg
 
 type Msg
     = StatusLoaded (Result Http.Error OnboardingStatus)
+    | SessionExpiryDetected
     | StepCompleted
     | NextStep
     | SkipOnboarding
@@ -142,7 +144,13 @@ a token is available.
 -}
 initCmd : Api.Credentials -> Cmd Msg
 initCmd token =
-    Api.getOnboardingStatus token StatusLoaded
+    Effect.perform
+        (Effect.authed Api.onboardingStatusRequest
+            token
+            { onExpired = SessionExpiryDetected
+            , onResponse = Api.resolveJson Api.onboardingStatusDecoder >> StatusLoaded
+            }
+        )
 
 
 {-| Whether the overlay wants to render. `Main` combines this with its own
@@ -200,6 +208,9 @@ isLastIndex model =
 update : Maybe Api.Credentials -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update token msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         StatusLoaded (Ok status) ->
             if status.completed then
                 ( { model | visible = False }, Cmd.none, NoOut )
@@ -333,7 +344,13 @@ recordCurrentStep : Maybe Api.Credentials -> Model -> Cmd Msg
 recordCurrentStep maybeToken model =
     case ( maybeToken, Maybe.andThen backendStepName (currentStep model) ) of
         ( Just token, Just name ) ->
-            Api.completeOnboardingStep name token (\_ -> StepCompleted)
+            Effect.perform
+                (Effect.authed (Api.completeOnboardingStepRequest name)
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = \_ -> StepCompleted
+                    }
+                )
 
         _ ->
             Cmd.none

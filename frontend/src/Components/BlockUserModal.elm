@@ -20,6 +20,7 @@ Model-Update-View, `RemoteData` for the request, no ports.
 
 import Api exposing (BlockError(..))
 import Browser.Dom
+import Effect
 import Html exposing (Html, button, div, p, text)
 import Html.Attributes exposing (attribute, class, disabled, id, style)
 import Html.Events exposing (onClick)
@@ -55,6 +56,7 @@ init target =
 
 type Msg
     = MenuToggled
+    | SessionExpiryDetected
     | MenuClosed
     | EscapePressed
     | BlockRequested
@@ -96,6 +98,9 @@ isBlocking status =
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         MenuToggled ->
             ( { model | menuOpen = not model.menuOpen }, Cmd.none, NoOut )
 
@@ -140,7 +145,13 @@ update msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         ( { model | status = Loading }
-                        , Api.blockUser model.target.userId token BlockCompleted
+                        , Effect.perform
+                            (Effect.authed (Api.blockRequest model.target.userId Api.Block)
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse = Api.blockResponseToResult >> BlockCompleted
+                                }
+                            )
                         , NoOut
                         )
 
