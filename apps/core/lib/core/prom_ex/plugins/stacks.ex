@@ -119,7 +119,7 @@ defmodule Core.PromEx.Plugins.Stacks do
           [:stacks, :auth, :session_transport, :count, :total],
           event_name: [:stacks, :auth, :session_transport],
           description:
-            "Authenticated requests by the transport that carried the session (cookie/bearer). Counts only requests that authenticated: an unauthenticated request offers a transport too, and counting those would let the bearer series read zero on a stream of failures. The bearer path is deleted when its series holds at zero for a release.",
+            "Authenticated requests by the transport that carried the session: cookie, bearer, or untagged. Counts only requests that authenticated — an unauthenticated request offers a transport too, and counting those would let the bearer series read zero on a stream of failures. `bearer` is now a POSITIVE detection of an Authorization header, not a default: it previously caught every request the cookie plug did not tag, so a deployed reading of 187 could not distinguish a bearer token from some other route to authentication. `untagged` is that residue, and should be zero — a non-zero value means something authenticates by a path nobody has described. The bearer path is deleted when its series holds at zero for a release, which a stack that scales to zero cannot show.",
           tags: [:transport]
         ),
         counter(

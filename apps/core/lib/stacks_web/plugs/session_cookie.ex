@@ -350,12 +350,52 @@ defmodule StacksWeb.Plugs.SessionCookie do
   # read zero while the bearer path was the only thing working.
   defp count_transport(conn) do
     if Guardian.Plug.current_resource(conn) do
-      transport = Map.get(conn.private, :stacks_session_transport, :bearer)
-      :telemetry.execute(@transport_event, %{count: 1}, %{transport: transport})
+      :telemetry.execute(@transport_event, %{count: 1}, %{transport: transport_of(conn)})
       count_samesite_support(conn)
     end
 
     conn
+  end
+
+  # ⛔ THREE BUCKETS, BECAUSE `:bearer` USED TO BE THE DEFAULT RATHER THAN A
+  # DETECTION — AND A ROLLOUT TURNS ON THIS NUMBER.
+  #
+  # This was `Map.get(conn.private, :stacks_session_transport, :bearer)`. Only
+  # `:cookie` is ever put on the conn (by `verify_cookie/3` on success), so
+  # EVERY authenticated request the cookie plug did not tag was attributed to
+  # the bearer path — whether or not it carried an `Authorization` header at
+  # all. MEASURED on a deployed run: `bearer` read 187, and that number could
+  # not distinguish "187 requests presented a bearer token" from "187 requests
+  # authenticated some other way".
+  #
+  # ⚠️ The direction was the safe one — it can only OVER-report bearer usage,
+  # so it blocked a deletion rather than licensing an unsafe one. But a counter
+  # whose job is to say when a code path is dead cannot answer with a bucket
+  # that means "something else happened", so no reading of it could ever have
+  # ended the rollout.
+  #
+  # ⚖️ Re-deriving at response time is sound HERE, and only here, which is why
+  # the moduledoc's warning against it does not apply. That warning is about the
+  # COOKIE: asking "is a cookie present?" at send time answers a different
+  # question from "did the cookie authenticate this request", and a stale cookie
+  # alongside a live header would be miscounted. This branch is reached only
+  # when the cookie did NOT authenticate — so the header is the one remaining
+  # candidate, and its presence is decisive rather than circumstantial.
+  #
+  # `:untagged` is the honest name for what is left: authenticated, no cookie
+  # tag, no header. It should be zero; if it is not, something authenticates by
+  # a route nobody has described, and that is worth seeing rather than filing
+  # silently under `bearer`.
+  defp transport_of(conn) do
+    case Map.get(conn.private, :stacks_session_transport) do
+      nil ->
+        if conn |> get_req_header("authorization") |> Enum.any?(),
+          do: :bearer,
+          else: :untagged
+
+      tagged ->
+        tagged
+    end
   end
 
   # ⛔ WHETHER THIS CLIENT ENFORCES `SameSite`, counted on the same population as

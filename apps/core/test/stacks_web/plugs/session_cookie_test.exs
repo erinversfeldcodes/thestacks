@@ -115,6 +115,34 @@ defmodule StacksWeb.Plugs.SessionCookieTest do
 
       assert_receive {:transport, %{count: 1}, %{transport: :bearer}}
     end
+
+    # ⛔ THE CASE THAT MAKES THE ONE ABOVE MEAN SOMETHING. `:bearer` used to be
+    # the DEFAULT — `Map.get(conn.private, :stacks_session_transport, :bearer)` —
+    # so the assertion above passed whether or not anything detected the header.
+    # Every authenticated request the cookie plug did not tag was filed under
+    # `bearer`, and a deployed run read 187 with no way to tell "187 presented a
+    # bearer token" from "187 authenticated some other way".
+    #
+    # ⚠️ This matters because the rollout DELETES the bearer path when that
+    # series holds at zero. A bucket meaning "something else happened" can never
+    # reach zero on behalf of the thing it names, so the reading could not end
+    # the rollout in either direction.
+    test "a request with NEITHER transport is :untagged, not silently :bearer", %{conn: conn} do
+      # Authenticated without a cookie and without an Authorization header —
+      # the shape a route outside the documented pipelines would produce.
+      conn
+      |> Guardian.Plug.put_current_token("a-token-from-nowhere")
+      |> Guardian.Plug.put_current_resource(%Stacks.Accounts.User{id: Ecto.UUID.generate()})
+      |> SessionCookie.call(SessionCookie.init([]))
+      |> Plug.Conn.send_resp(200, "")
+
+      assert_receive {:transport, %{count: 1}, %{transport: :untagged}},
+                     200,
+                     "an authenticated request carrying no cookie tag and no Authorization " <>
+                       "header must be visible as untagged, not attributed to the bearer path"
+
+      refute_receive {:transport, _, %{transport: :bearer}}
+    end
   end
 
   # ———————————————————— revocation, ON THE COOKIE PATH ————————————————————
