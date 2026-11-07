@@ -735,6 +735,23 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
       assert counts.rows_without_object == 1
     end
 
+    test "two rows sharing one object that exists report NO missing object" do
+      id = Ecto.UUID.generate()
+      {:ok, _} = Stacks.Storage.upload_image(id, "one real upload")
+      path = "uploads/#{id}"
+      insert(:uploaded_image, storage_path: path)
+      insert(:uploaded_image, storage_path: path)
+
+      assert {:ok, counts} = ImageRetention.storage_consistency_check()
+      assert counts.objects == 1
+
+      assert counts.rowless_objects == 0,
+             "the object HAS rows pointing at it"
+
+      assert counts.rows_without_object == 0,
+             "both rows point at an object that EXISTS; got #{counts.rows_without_object}"
+    end
+
     test "a row with a NULL storage_path is NOT counted as missing its object" do
       # ⚠️ The normal state after `cleanup_finished_image_bytes/1`. Counting it
       # would alarm on every row whose photograph has already been discarded.

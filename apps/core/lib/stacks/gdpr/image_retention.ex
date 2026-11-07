@@ -484,11 +484,29 @@ defmodule Stacks.GDPR.ImageRetention do
         # overlap, and each side's total minus the overlap is its own orphans.
         # Counted DISTINCT so a path duplicated across rows cannot inflate the
         # overlap and hide an orphan on either side.
+        # ⛔ TWO MATCH COUNTS, NOT ONE, AND CONFLATING THEM FALSELY ALARMED.
+        # The two questions need different units. "How many objects have no
+        # row?" subtracts matched *paths* from the object list. "How many rows
+        # point at nothing?" subtracts matched *rows* from the row total — and
+        # a single `count(:distinct)` used for both made the second over-report
+        # by one for every extra row sharing a path.
+        #
+        # ⚠️ MEASURED: two rows pointing at ONE object that exists reported
+        # `rows_without_object: 1`. Both rows resolved fine; the answer is 0.
+        # `op.uploaded_images` has no unique index on `storage_path`, so this is
+        # reachable rather than theoretical, and it alarms in the direction that
+        # teaches people to distrust the gauge.
+        #
+        # ⚖️ Summing per chunk stays valid for both: the chunks partition the
+        # key list, so a path falls in exactly one chunk and each row is counted
+        # under exactly one chunk's `in ^keys`.
         matched =
           keys
           |> Enum.chunk_every(@known_chunk)
           |> Enum.map(&count_known/1)
-          |> Enum.sum()
+          |> Enum.reduce(%{paths: 0, rows: 0}, fn chunk, acc ->
+            %{paths: acc.paths + chunk.paths, rows: acc.rows + chunk.rows}
+          end)
 
         rows_with_path =
           UploadedImage
@@ -498,8 +516,8 @@ defmodule Stacks.GDPR.ImageRetention do
         result = %{
           objects: length(keys),
           rows_with_path: rows_with_path,
-          rowless_objects: length(keys) - matched,
-          rows_without_object: rows_with_path - matched
+          rowless_objects: length(keys) - matched.paths,
+          rows_without_object: rows_with_path - matched.rows
         }
 
         emit_standing(result)
@@ -527,10 +545,16 @@ defmodule Stacks.GDPR.ImageRetention do
     })
   end
 
+  # Both units in one pass, because the caller needs both and they disagree
+  # exactly when a path is shared: `paths` answers "which objects are claimed",
+  # `rows` answers "which records resolve".
   defp count_known(keys) do
     UploadedImage
     |> where([i], i.storage_path in ^keys)
-    |> select([i], count(i.storage_path, :distinct))
+    |> select([i], %{
+      paths: count(i.storage_path, :distinct),
+      rows: count(i.storage_path)
+    })
     |> Repo.one()
   end
 
