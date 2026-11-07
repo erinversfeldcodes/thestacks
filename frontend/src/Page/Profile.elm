@@ -1,4 +1,4 @@
-module Page.Profile exposing (Model, Msg(..), OutMsg(..), init, update, view, viewShelvesFor)
+module Page.Profile exposing (Model, Msg(..), OutMsg(..), init, initWithEffect, update, view, viewShelvesFor)
 
 {-| A user's public profile hub at `/u/:handle`. Fetches the
 visibility-filtered profile for the current viewer and renders the reader's
@@ -8,6 +8,7 @@ ghost and an absent user are indistinguishable, by design.
 -}
 
 import Api exposing (ProfileShelfSummary, PublicProfile)
+import Effect exposing (Effect)
 import Html exposing (Html, a, div, h1, h2, header, li, p, section, span, text, ul)
 import Html.Attributes exposing (attribute, class, href, title, type_)
 import Http
@@ -36,8 +37,29 @@ resolves what THIS viewer may see), or `Nothing` for an anonymous viewer.
 -}
 init : Maybe Api.Credentials -> String -> ( Model, Cmd Msg )
 init maybeToken handle =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken handle
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as data so a harness can answer it.
+
+⚖️ `Effect.public` with an OPTIONAL credential: the server answers an anonymous
+viewer too, and resolves what each viewer may see. So the seam does not claim the
+401 — and the handler below keeps its own reading of one, which on this endpoint
+is correct, because an anonymous request is answered rather than refused and a
+401 can therefore only mean a credential was sent and rejected.
+
+-}
+initWithEffect : Maybe Api.Credentials -> String -> ( Model, Effect Msg )
+initWithEffect maybeToken handle =
     ( { handle = handle, token = maybeToken, profile = Loading }
-    , Api.getProfile maybeToken handle GotProfile
+    , Effect.public (Api.getProfileRequest handle)
+        maybeToken
+        Nothing
+        (Api.resolveJson Api.publicProfileDecoder >> GotProfile)
     )
 
 
@@ -48,6 +70,11 @@ update msg model =
             ( { model | profile = Success profile }, Cmd.none, NoOut )
 
         GotProfile (Err err) ->
+            -- ⚠️ KEPT DELIBERATELY, and it is NOT the residue the authed pages
+            -- shed. This is a `public` plan, so the seam leaves a 401 to the
+            -- caller by design — and here the caller's reading is right: an
+            -- anonymous request to a public profile is answered 200 or 404,
+            -- never 401, so a 401 means a credential was sent and refused.
             if Api.isUnauthorized err then
                 ( model, Cmd.none, SessionExpired )
 

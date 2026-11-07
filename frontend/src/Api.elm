@@ -169,7 +169,7 @@ module Api exposing
     , getOnboardingStatus
     , getPostComments
     , getPrivacySettings
-    , getProfile
+    , getProfileRequest
     , getProfileShelfRequest
     , getRemovalRequests
     , getSourceHealth
@@ -317,7 +317,6 @@ import Types.Group exposing (Group, GroupInvitation, groupDecoder, groupInvitati
 import Types.Listing exposing (Listing, ListingsResponse, listingDecoder, listingsResponseDecoder)
 import Types.Placement exposing (Placement, ReadingStatus, bookPlacementDecoder, parseReadingStatus, placementRefDecoder, placementSummaryDecoder)
 import Types.ProtoHelpers exposing (emptyToNothing)
-import Types.Shelf exposing (BookshelfResponse, bookshelfResponseDecoder)
 import Url.Builder
 
 
@@ -5229,20 +5228,29 @@ optionalBool field =
             )
 
 
-{-| GET /api/u/:handle. Optional auth — pass the viewer's token when signed in so
-the server resolves what THIS viewer may see; `Nothing` for an anonymous viewer.
+{-| `GET /api/u/:handle` — a reader's public profile, as data.
+
+⚖️ **A PUBLIC plan with an OPTIONAL credential, which is not the same as an
+unauthenticated one.** The server resolves what THIS viewer may see, so a
+signed-in viewer sees more than an anonymous one — but an anonymous request is
+answered rather than refused. That is `Effect.public`'s case exactly.
+
+⚠️ So a 401 here is NOT routed to the expiry interceptor by the seam, and the
+page keeps its own reading of one. On this endpoint that reading is right: an
+anonymous request is answered 200 or 404, never 401, so a 401 can only mean a
+credential was sent and refused. `Page.Profile` is therefore one of the places
+where an `isUnauthorized` re-test is correct rather than residue.
+
+⬛ The handle is percent-encoded by `Api.Url.path`, where the old builder
+concatenated it into the URL unescaped.
+
 -}
-getProfile : Maybe Credentials -> String -> (Result Http.Error PublicProfile -> msg) -> Cmd msg
-getProfile maybeToken handle toMsg =
-    Http.request
-        { method = "GET"
-        , headers = authHeaders "GET" maybeToken
-        , url = baseUrl ++ "/api/u/" ++ handle
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg publicProfileDecoder
-        , timeout = standardTimeout
-        , tracker = Nothing
-        }
+getProfileRequest : String -> RequestSpec
+getProfileRequest handle =
+    { method = "GET"
+    , url = Api.Url.path [ "api", "u", handle ] []
+    , body = Nothing
+    }
 
 
 {-| `POST /api/bookshelves/:name/shelves` — add a shelf row to the bottom of a

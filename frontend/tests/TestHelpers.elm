@@ -2,6 +2,8 @@ module TestHelpers exposing
     ( AdminChromeTestModel
     , AuditLogTestModel
     , BookDetailTestModel
+    , MetricsTestModel
+    , ProfileTestModel
     , ReadingPileTestModel
     , UploadTestModel
     , adminChromeProgram
@@ -16,8 +18,10 @@ module TestHelpers exposing
     , libraryProgram
     , loginProgram
     , loginProgramFrom
+    , metricsProgram
     , namedPlacement
     , placementWithPages
+    , profileProgram
     , profileShelfProgram
     , readingPileProgram
     , searchProgram
@@ -72,6 +76,8 @@ import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Login as Login
+import Page.Metrics as Metrics
+import Page.Profile as Profile
 import Page.Search as Search
 import Page.Settings.AuditLog as AuditLog
 import Page.Upload as Upload
@@ -1246,6 +1252,78 @@ nothing. Recording the most recent `OutMsg` makes the signal the page sends
 test that drives the page through its own UI and its own requests.
 
 -}
+type alias MetricsTestModel =
+    { page : Metrics.Model }
+
+
+{-| Harness for the public transparency page.
+
+⚖️ `Page.Metrics` has no `OutMsg` and no credential — it is the clearest example
+of a `public` plan, and the harness exists to prove the request is reachable and
+answerable rather than to watch for an expiry there is none of.
+
+-}
+metricsProgram : ProgramDefinition () MetricsTestModel Metrics.Msg (SimulatedEffect Metrics.Msg)
+metricsProgram =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, effect ) =
+                        Metrics.initWithEffect
+                in
+                ( { page = model }, simulateEffect effect )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _ ) =
+                        Metrics.update msg model.page
+                in
+                ( { page = newPage }, SimulatedEffect.Cmd.none )
+        , view = \model -> Metrics.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+type alias ProfileTestModel =
+    { page : Profile.Model
+    , lastOut : Profile.OutMsg
+    }
+
+
+{-| Harness for a reader's public profile.
+
+⛔ The interesting case here is NOT the one the authed pages have. This is a
+`public` plan with an OPTIONAL credential, so the seam leaves a 401 to the page —
+and the page's own reading of one is correct, because an anonymous request to a
+public profile is answered rather than refused.
+
+-}
+profileProgram :
+    Maybe Api.Credentials
+    -> String
+    -> ProgramDefinition () ProfileTestModel Profile.Msg (SimulatedEffect Profile.Msg)
+profileProgram maybeToken handle =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, effect ) =
+                        Profile.initWithEffect maybeToken handle
+                in
+                ( { page = model, lastOut = Profile.NoOut }, simulateEffect effect )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _, out ) =
+                        Profile.update msg model.page
+                in
+                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+        , view = \model -> Profile.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
 type alias AuditLogTestModel =
     { page : AuditLog.Model
     , lastOut : AuditLog.OutMsg
