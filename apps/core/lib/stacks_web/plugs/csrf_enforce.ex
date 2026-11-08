@@ -67,6 +67,51 @@ defmodule StacksWeb.Plugs.CsrfEnforce do
   def init(opts), do: opts
 
   def call(conn, _opts) do
+    if exempt_scope?(conn.path_info) do
+      conn
+    else
+      enforce(conn)
+    end
+  end
+
+  # ⛔ THE EXEMPTION IS IMPLEMENTED HERE, AND UNTIL 2026-11-08 IT WAS ONLY EVER
+  # DESCRIBED. Four artefacts said these routes were "deliberately outside" CSRF
+  # enforcement — this module's own moduledoc, `CsrfCounter`'s, the
+  # `EXPECTED_PARTNER=4` in `scripts/check-csrf-scope.sh`, and the generated
+  # scope document — and no code carried it out. MEASURED: a partner write with
+  # an Argon2 key and no cookie answered `403 {"error":"csrf_check_failed",
+  # "reason":"absent_header"}`, so all four state-changing partner routes were
+  # dead.
+  #
+  # ⚠️ A pipeline flag cannot express this: `:api` runs this plug BEFORE
+  # `:partner_auth`, so anything that pipeline sets arrives too late to be seen.
+  # The scope is therefore matched on the path, which is known when the plug
+  # runs.
+  #
+  # ⛔ AND IT IS KEYED ON THE PATH, NOT ON THE REQUEST'S OWN SHAPE. "No cookie
+  # and an Authorization header" would be the tempting rule and it is the wrong
+  # one: it lets anything that omits a cookie opt itself out of CSRF, which is a
+  # property the caller controls. A path prefix is a property of the route, and
+  # `check-csrf-scope.sh` already asserts exactly how many routes sit under each
+  # of these — so the list below cannot drift without that gate noticing.
+  @exempt_scopes [
+    # Server-to-server, authenticated by an Argon2 API key. No browser, no
+    # cookie jar, no ambient authority for a cross-site page to borrow — which
+    # is what CSRF protects against — so the proof is meaningless here.
+    ["api", "partner"],
+    # Gated behind `STACKS_E2E_TEST_HELPERS`, which production never carries.
+    # Playwright usually holds a cookie jar, but `mintSession` called before any
+    # page load does not, and that is a legitimate use.
+    ["api", "test"]
+  ]
+
+  defp exempt_scope?(path_info) do
+    Enum.any?(@exempt_scopes, fn scope ->
+      Enum.take(path_info, length(scope)) == scope
+    end)
+  end
+
+  defp enforce(conn) do
     case CsrfCounter.outcome(conn) do
       outcome when outcome in [:safe, :proven] ->
         conn

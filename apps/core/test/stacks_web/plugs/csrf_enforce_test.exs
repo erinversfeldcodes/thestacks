@@ -155,6 +155,49 @@ defmodule StacksWeb.Plugs.CsrfEnforceTest do
     # earlier in the file could turn red, and which stayed green when the two
     # plugs sat in different pipelines with their textual order intact. It was
     # wrong in both directions and is replaced rather than repaired.
+    # ⛔ THE EXEMPTION, DRIVEN THROUGH THE REAL ROUTER WITH A BARE CONN. Four
+    # artefacts said the partner routes were "deliberately outside" CSRF
+    # enforcement — this plug's moduledoc, `CsrfCounter`'s, `EXPECTED_PARTNER=4`
+    # in the scope gate, and the generated scope document — while no code
+    # carried it out, and every one of the four state-changing partner routes
+    # answered 403.
+    #
+    # ⚠️ THE WHOLE SUITE WAS BLIND TO IT: `CoreWeb.ConnCase`'s `proven_conn/0`
+    # attaches a `stacks_csrf` cookie AND a matching header to every test conn,
+    # so the partner tests inherited a browser-shaped proof a real partner can
+    # never have — 13 of them passing against a route that was dead in
+    # production. Hence `build_conn()` here, deliberately bare.
+    test "a partner write is not refused by CSRF — it has no cookie jar to borrow" do
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Plug.Conn.put_req_header("authorization", "Bearer some-partner-key")
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> post("/api/partner/events", %{"kind" => "reading_group"})
+
+      refute conn.status == 403 and json_response(conn, 403)["error"] == "csrf_check_failed",
+             "a server-to-server partner holds an Argon2 key and no cookie jar, so CSRF " <>
+               "enforcement must not be what answers it"
+
+      # ⚖️ And it must reach authentication rather than stopping earlier for a
+      # different reason: a bad key is a 401, which is the partner pipeline
+      # speaking. Asserting only "not 403" would pass if the route 404'd.
+      assert conn.status == 401,
+             "expected the partner auth pipeline to answer an unknown key, got " <>
+               Integer.to_string(conn.status)
+    end
+
+    # ⛔ ANTI-VACUITY FOR THE EXEMPTION: it must be narrow. A path that merely
+    # begins with the same letters is NOT the partner scope, and an exemption
+    # matched loosely would silently disable CSRF on neighbouring routes.
+    test "the exemption does not leak to routes outside the partner scope" do
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> post("/api/auth/login", %{email: "nobody@example.test", password: "wrong"})
+
+      assert json_response(conn, 403)["error"] == "csrf_check_failed",
+             "an ordinary browser-facing write must still be refused without a proof"
+    end
+
     test "an unproven write is refused BY THE PIPELINE, and counted before it is" do
       ref = :telemetry_test.attach_event_handlers(self(), [CsrfCounter.event()])
       on_exit(fn -> :telemetry.detach(ref) end)
