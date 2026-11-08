@@ -5,6 +5,7 @@ module Components.BlockUserModal exposing
     , Target
     , init
     , update
+    , updateWithEffect
     , view
     )
 
@@ -20,7 +21,7 @@ Model-Update-View, `RemoteData` for the request, no ports.
 
 import Api exposing (BlockError(..))
 import Browser.Dom
-import Effect
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, p, text)
 import Html.Attributes exposing (attribute, class, disabled, id, style)
 import Html.Events exposing (onClick)
@@ -97,70 +98,77 @@ isBlocking status =
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
         MenuToggled ->
-            ( { model | menuOpen = not model.menuOpen }, Cmd.none, NoOut )
+            ( { model | menuOpen = not model.menuOpen }, Effect.None, NoOut )
 
         MenuClosed ->
-            ( { model | menuOpen = False }, focusTrigger model, NoOut )
+            ( { model | menuOpen = False }, Effect.Custom (focusTrigger model), NoOut )
 
         EscapePressed ->
             if model.confirming then
                 if isBlocking model.status then
-                    ( model, Cmd.none, Dismissed )
+                    ( model, Effect.None, Dismissed )
 
                 else
-                    ( { model | confirming = False, status = NotAsked }, focusTrigger model, Dismissed )
+                    ( { model | confirming = False, status = NotAsked }, Effect.Custom (focusTrigger model), Dismissed )
 
             else if model.menuOpen then
-                ( { model | menuOpen = False }, focusTrigger model, Dismissed )
+                ( { model | menuOpen = False }, Effect.Custom (focusTrigger model), Dismissed )
 
             else
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
         FocusResult ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.None, NoOut )
 
         BlockRequested ->
             ( { model | menuOpen = False, confirming = True, status = NotAsked }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
         BlockDismissed ->
             if isBlocking model.status then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
             else
-                ( { model | confirming = False, status = NotAsked }, Cmd.none, NoOut )
+                ( { model | confirming = False, status = NotAsked }, Effect.None, NoOut )
 
         BlockConfirmed ->
             if isBlocking model.status then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
             else
                 case maybeToken of
                     Just token ->
                         ( { model | status = Loading }
-                        , Effect.perform
-                            (Effect.authed (Api.blockRequest model.target.userId Api.Block)
-                                token
-                                { onExpired = SessionExpiryDetected
-                                , onResponse = Api.blockResponseToResult >> BlockCompleted
-                                }
-                            )
+                        , Effect.authed (Api.blockRequest model.target.userId Api.Block)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.blockResponseToResult >> BlockCompleted
+                            }
                         , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.None, NoOut )
 
         BlockCompleted (Ok ()) ->
             ( { model | status = Success (), confirming = False, menuOpen = False }
-            , Cmd.none
+            , Effect.None
             , UserBlocked
             )
 
@@ -168,13 +176,13 @@ update msg model maybeToken =
             case err of
                 BlockRequestFailed httpErr ->
                     if Api.isUnauthorized httpErr then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | status = Failure err }, Cmd.none, NoOut )
+                        ( { model | status = Failure err }, Effect.None, NoOut )
 
                 _ ->
-                    ( { model | status = Failure err }, Cmd.none, NoOut )
+                    ( { model | status = Failure err }, Effect.None, NoOut )
 
 
 {-| Return DOM focus to the ⋯ trigger, discarding the (ignorable) result.

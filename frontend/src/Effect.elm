@@ -1,4 +1,7 @@
-module Effect exposing (Effect(..), RequestPlan, authed, batch, none, perform, public, sleepThen)
+module Effect exposing
+    ( Effect(..), RequestPlan, authed, batch, none, perform, public, sleepThen
+    , map
+    )
 
 {-| What an `update` asks the runtime to do, described as data instead of as an
 opaque `Cmd`.
@@ -162,6 +165,44 @@ fires.
 sleepThen : Float -> msg -> Effect msg
 sleepThen =
     Sleep
+
+
+{-| Re-label a child's effects as the parent's.
+
+⛔ **THIS IS WHAT LETS THE SEAM REACH A PAGE THAT DELEGATES.** A page holding a
+child component wraps the child's `Cmd` with `Cmd.map`, which works — and which,
+once the page returns `Effect`, would force the child's effects into `Custom`.
+⚠️ That is the worst available outcome: `Custom` is for effects with **no
+request in them**, so burying a child's request there hides it from the harness
+while looking like progress. `Custom (Cmd.map …)` is the shape to refuse.
+
+⚖️ Mapping preserves the plan AS DATA all the way up, so a parent's
+`ProgramTest` can read a request its child built — the module's opening claim,
+applied one level down.
+
+-}
+map : (a -> b) -> Effect a -> Effect b
+map f effect =
+    case effect of
+        None ->
+            None
+
+        Batch effects ->
+            Batch (List.map (map f) effects)
+
+        Request plan ->
+            Request
+                { spec = plan.spec
+                , token = plan.token
+                , proof = plan.proof
+                , onResponse = plan.onResponse >> f
+                }
+
+        Sleep ms msg ->
+            Sleep ms (f msg)
+
+        Custom cmd ->
+            Custom (Cmd.map f cmd)
 
 
 {-| Run an effect for real. `TestHelpers.simulateEffect` is the other
