@@ -1,7 +1,7 @@
 module Page.Groups exposing (Model, Msg(..), OutMsg(..), init, update, view)
 
 import Api
-import Effect
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, form, h1, h2, input, p, text)
 import Html.Attributes exposing (class, disabled, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
@@ -63,9 +63,18 @@ init userId token =
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
         NameChanged name ->
             let
@@ -75,7 +84,7 @@ update msg model =
                 newForm =
                     { oldForm | name = name }
             in
-            ( { model | createForm = newForm }, Cmd.none, NoOut )
+            ( { model | createForm = newForm }, Effect.None, NoOut )
 
         SubmitCreate ->
             let
@@ -84,30 +93,28 @@ update msg model =
             in
             if String.isEmpty (String.trim oldForm.name) then
                 ( { model | createForm = { oldForm | error = Just "Name is required" } }
-                , Cmd.none
+                , Effect.None
                 , NoOut
                 )
 
             else
                 ( { model | createForm = { oldForm | submitting = True, error = Nothing } }
-                , Effect.perform
-                    (Effect.authed (Api.createGroupRequest oldForm.name)
-                        model.token
-                        { onExpired = SessionExpiryDetected
-                        , onResponse =
-                            Api.resolveJson (Decode.field "group" Types.Group.groupDecoder)
-                                >> GroupCreated
-                        }
-                    )
+                , Effect.authed (Api.createGroupRequest oldForm.name)
+                    model.token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson (Decode.field "group" Types.Group.groupDecoder)
+                            >> GroupCreated
+                    }
                 , NoOut
                 )
 
         GroupCreated (Ok group) ->
-            ( model, Cmd.none, NavigateTo (GroupDetail group.id) )
+            ( model, Effect.None, NavigateTo (GroupDetail group.id) )
 
         GroupCreated (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.None, SessionExpired )
 
             else
                 let
@@ -115,31 +122,27 @@ update msg model =
                         model.createForm
                 in
                 ( { model | createForm = { oldForm | error = Just "Could not create group. Please try again.", submitting = False } }
-                , Cmd.none
+                , Effect.None
                 , NoOut
                 )
 
         AcceptInvitation groupId invId ->
             ( model
-            , Effect.perform
-                (Effect.authed (Api.invitationAnswerRequest groupId invId Api.AcceptInvitation)
-                    model.token
-                    { onExpired = SessionExpiryDetected
-                    , onResponse = Api.resolveWhatever >> InvitationAccepted invId
-                    }
-                )
+            , Effect.authed (Api.invitationAnswerRequest groupId invId Api.AcceptInvitation)
+                model.token
+                { onExpired = SessionExpiryDetected
+                , onResponse = Api.resolveWhatever >> InvitationAccepted invId
+                }
             , NoOut
             )
 
         DeclineInvitation groupId invId ->
             ( model
-            , Effect.perform
-                (Effect.authed (Api.invitationAnswerRequest groupId invId Api.DeclineInvitation)
-                    model.token
-                    { onExpired = SessionExpiryDetected
-                    , onResponse = Api.resolveWhatever >> InvitationDeclined invId
-                    }
-                )
+            , Effect.authed (Api.invitationAnswerRequest groupId invId Api.DeclineInvitation)
+                model.token
+                { onExpired = SessionExpiryDetected
+                , onResponse = Api.resolveWhatever >> InvitationDeclined invId
+                }
             , NoOut
             )
 
@@ -149,16 +152,16 @@ update msg model =
                     Types.RemoteData.map (List.filter (\inv -> inv.id /= invId))
             in
             ( { model | pendingInvitations = filterInv model.pendingInvitations }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
         InvitationAccepted _ (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.None, SessionExpired )
 
             else
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
         InvitationDeclined invId (Ok ()) ->
             let
@@ -166,16 +169,16 @@ update msg model =
                     Types.RemoteData.map (List.filter (\inv -> inv.id /= invId))
             in
             ( { model | pendingInvitations = filterInv model.pendingInvitations }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
         InvitationDeclined _ (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.None, SessionExpired )
 
             else
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
 
 view : Model -> Html Msg

@@ -4,6 +4,7 @@ module Page.Catalogue exposing
     , OutMsg(..)
     , catalogueRequest
     , init
+    , initWithEffect
     , update
     , view
     )
@@ -20,14 +21,12 @@ can be added via an inline shelf picker.
 -}
 
 import Api exposing (CatalogueResponse, PlacementSummary)
-import Effect
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h3, img, input, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, href, placeholder, selected, src, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route
-import Process
-import Task
 import Types.Book exposing (Book, authorName, bookCoverImageUrl)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
@@ -82,6 +81,15 @@ type OutMsg
 init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
+        ( newModel, effect ) =
+            initWithEffect maybeToken
+    in
+    ( newModel, Effect.perform effect )
+
+
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
+    let
         model =
             { books = Loading
             , search = ""
@@ -101,29 +109,36 @@ init maybeToken =
             case maybeToken of
                 Just token ->
                     ( Loading
-                    , Effect.perform
-                        (Effect.authed Api.getUserPlacementsRequest
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse =
-                                Api.resolveJson Api.placementsMineDecoder >> UserPlacementsLoaded
-                            }
-                        )
+                    , Effect.authed Api.getUserPlacementsRequest
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson Api.placementsMineDecoder >> UserPlacementsLoaded
+                        }
                     )
 
                 Nothing ->
-                    ( Success [], Cmd.none )
+                    ( Success [], Effect.None )
     in
     ( model
-    , Cmd.batch [ fetchCatalogue model, placementsCmd ]
+    , Effect.Batch [ fetchCatalogue model, placementsCmd ]
     )
 
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
         CatalogueReceived result ->
             case result of
@@ -142,24 +157,24 @@ update msg model maybeToken =
                         | books = Success response
                         , availableSubjects = merged
                       }
-                    , Cmd.none
+                    , Effect.None
                     , NoOut
                     )
 
                 Err err ->
-                    ( { model | books = Failure err }, Cmd.none, NoOut )
+                    ( { model | books = Failure err }, Effect.None, NoOut )
 
         UserPlacementsLoaded result ->
             case result of
                 Ok placements ->
-                    ( { model | userPlacements = Success placements }, Cmd.none, NoOut )
+                    ( { model | userPlacements = Success placements }, Effect.None, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | userPlacements = Success [] }, Cmd.none, NoOut )
+                        ( { model | userPlacements = Success [] }, Effect.None, NoOut )
 
         SearchChanged query ->
             let
@@ -167,8 +182,10 @@ update msg model maybeToken =
                     model.debounceCount + 1
 
                 debounceCmd =
-                    Task.perform (\_ -> DebounceExpired newCount)
-                        (Process.sleep 300)
+                    -- ⚖️ `sleepThen`, not `Custom`: a delay is already one of
+                    -- the shapes `Effect` describes, so it stays data rather
+                    -- than becoming an opaque Cmd the harness cannot read.
+                    Effect.sleepThen 300 (DebounceExpired newCount)
             in
             ( { model
                 | search = query
@@ -195,7 +212,7 @@ update msg model maybeToken =
                 ( newModel, fetchCatalogue newModel, NoOut )
 
             else
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
         SubjectSelected subject ->
             let
@@ -235,31 +252,29 @@ update msg model maybeToken =
             ( newModel, fetchCatalogue newModel, NoOut )
 
         CollectionFilterChanged filter ->
-            ( { model | collectionFilter = filter }, Cmd.none, NoOut )
+            ( { model | collectionFilter = filter }, Effect.None, NoOut )
 
         OpenShelfPicker bookId ->
-            ( { model | shelfPickerBookId = Just bookId }, Cmd.none, NoOut )
+            ( { model | shelfPickerBookId = Just bookId }, Effect.None, NoOut )
 
         CloseShelfPicker ->
-            ( { model | shelfPickerBookId = Nothing }, Cmd.none, NoOut )
+            ( { model | shelfPickerBookId = Nothing }, Effect.None, NoOut )
 
         PlaceOnShelf shelfName bookId ->
             case maybeToken of
                 Just token ->
                     ( { model | shelfPickerBookId = Nothing, placeBookState = Loading }
-                    , Effect.perform
-                        (Effect.authed (Api.placeBookRequest shelfName bookId)
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse =
-                                Api.placeResponseToResult >> PlaceBookCompleted shelfName bookId
-                            }
-                        )
+                    , Effect.authed (Api.placeBookRequest shelfName bookId)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.placeResponseToResult >> PlaceBookCompleted shelfName bookId
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         PlaceBookCompleted shelfName bookId result ->
             case result of
@@ -276,27 +291,25 @@ update msg model maybeToken =
                                 _ ->
                                     Success [ newSummary ]
                     in
-                    ( { model | placeBookState = NotAsked, userPlacements = updatedPlacements }, Cmd.none, NoOut )
+                    ( { model | placeBookState = NotAsked, userPlacements = updatedPlacements }, Effect.None, NoOut )
 
                 Err Api.PlaceReadingPileFull ->
-                    ( { model | placeBookState = Failure Api.PlaceReadingPileFull }, Cmd.none, NoOut )
+                    ( { model | placeBookState = Failure Api.PlaceReadingPileFull }, Effect.None, NoOut )
 
                 Err (Api.PlaceHttpError err) ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | placeBookState = Failure (Api.PlaceHttpError err) }, Cmd.none, NoOut )
+                        ( { model | placeBookState = Failure (Api.PlaceHttpError err) }, Effect.None, NoOut )
 
 
-fetchCatalogue : Model -> Cmd Msg
+fetchCatalogue : Model -> Effect Msg
 fetchCatalogue model =
-    Effect.perform
-        (Effect.public (Api.getCatalogueRequest (catalogueParams model))
-            Nothing
-            Nothing
-            (Api.resolveJson Api.catalogueResponseDecoder >> CatalogueReceived)
-        )
+    Effect.public (Api.getCatalogueRequest (catalogueParams model))
+        Nothing
+        Nothing
+        (Api.resolveJson Api.catalogueResponseDecoder >> CatalogueReceived)
 
 
 {-| The catalogue page this model asks for, as request data — search, subject,

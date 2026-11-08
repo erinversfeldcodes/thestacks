@@ -10,8 +10,12 @@
 # opaque as the raw `Http.request` it replaced, and no `ProgramTest` can assert
 # what the page sends.
 #
-# ⚠️ MEASURED when this gate was written: 17 of 42 plan-building modules exposed
-# a seam and 25 did not, holding 83 `Effect.perform` sites between them — and the
+# ⚠️ MEASURED when this gate was written, and the first measurement was WRONG
+# in a way worth recording: counting a `*WithEffect` that merely EXISTS said 17
+# of 42 modules were covered. Counting only those that EXPORT it — the property
+# that decides whether a harness can reach the plan — says **11 of 42**, with 31
+# seamless holding 93 `Effect.perform` sites. A seam the module keeps to itself
+# is unreachable, so the looser count credited progress no test could use. And the
 # three modules that gained the most plans in the migration were the top three
 # without a seam. The migration was 40% of an architecture, and nothing in the
 # code said so.
@@ -26,7 +30,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 # ⛔ RATCHET. Lower this as modules gain their seam; never raise it. Raising it
 # is how a temporary exception becomes the convention.
-MAX_SEAMLESS=22
+MAX_SEAMLESS=26
 
 mode="${1:-}"
 
@@ -61,7 +65,19 @@ for path in sorted(
     if not performs:
         continue
 
-    if re.search(r"^\s*(updateWithEffect|initWithEffect)\s*:", code, re.M):
+    # ⛔ EXPORTED, not merely defined. A `*WithEffect` the module keeps to
+    # itself is unreachable by `TestHelpers.simulateEffect`, so counting it
+    # would credit progress a test cannot use — and elm-review refuses an
+    # export with no consumer, which means an exported seam is one some test
+    # actually drives. The two rules together make this count mean "a harness
+    # can read this module's plans", which is the claim.
+    # ⚠️ Read to the first `import`, not to the first `)` — an exposing list
+    # containing `Msg(..)` closes a paren of its own and a lazy match stops
+    # there, reporting every module as unexported.
+    header = re.split(r"^import ", code, maxsplit=1, flags=re.M)[0]
+    exposing = re.search(r"\bexposing\b((?:.|\n)*)", header)
+    exported = exposing.group(1) if exposing else ""
+    if re.search(r"\b(updateWithEffect|initWithEffect)\b", exported):
         seamed.append(path)
     else:
         seamless.append((performs, path))

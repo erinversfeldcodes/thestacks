@@ -4,6 +4,7 @@ module Page.Feedback exposing
     , OutMsg(..)
     , init
     , update
+    , updateWithEffect
     , view
     )
 
@@ -25,7 +26,7 @@ exactly the small dishonesty a feedback form is supposed to be the cure for.
 -}
 
 import Api
-import Effect
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, h1, label, p, text, textarea)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, value)
 import Html.Events exposing (onClick, onInput)
@@ -85,42 +86,49 @@ isSendable model =
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         MessageChanged value ->
-            ( { model | message = value, sending = NotAsked }, Cmd.none, NoOut )
+            ( { model | message = value, sending = NotAsked }, Effect.None, NoOut )
 
         SendClicked ->
             case ( isSendable model, maybeToken ) of
                 ( True, Just token ) ->
                     ( { model | sending = Loading }
-                    , Effect.perform
-                        (Effect.authed
-                            (Api.sendFeedbackRequest
-                                { body = String.trim model.message
-                                , pageContext = model.pageContext
-                                }
-                            )
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse = Api.resolveNoContent >> SendCompleted
+                    , Effect.authed
+                        (Api.sendFeedbackRequest
+                            { body = String.trim model.message
+                            , pageContext = model.pageContext
                             }
                         )
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveNoContent >> SendCompleted
+                        }
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         SendCompleted (Ok ()) ->
-            ( { model | message = "", sending = Success () }, Cmd.none, NoOut )
+            ( { model | message = "", sending = Success () }, Effect.None, NoOut )
 
         -- The draft survives. See the module comment: a lost network is not a
         -- reason to throw away what someone took the trouble to write.
         SendCompleted (Err err) ->
-            ( { model | sending = Failure err }, Cmd.none, NoOut )
+            ( { model | sending = Failure err }, Effect.None, NoOut )
 
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
 
 view : Model -> Html Msg

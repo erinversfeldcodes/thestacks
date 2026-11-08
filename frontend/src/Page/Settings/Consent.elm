@@ -11,7 +11,7 @@ module Page.Settings.Consent exposing
 
 import Api
 import Components.SaveButton as SaveButton
-import Effect
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled)
 import Html.Events exposing (onClick)
@@ -106,6 +106,15 @@ init consent =
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         -- ⛔ NEW WITH THE PLAN, and it is an obligation the old call could not
         -- state. `Api.saveConsent` took a bare `toMsg`, so a 401 arrived as an
@@ -113,11 +122,11 @@ update msg model maybeToken =
         -- that would never save again. `Effect.authed` requires `onExpired`, so
         -- asking this endpoint now means saying what an ended session does.
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
         ToggleAnalytics ->
             ( { model | analyticsConsent = not model.analyticsConsent, saving = NotAsked }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
@@ -132,41 +141,37 @@ update msg model maybeToken =
                         | writingAssistantConsent = newValue
                         , writingAssistantSaving = Loading
                       }
-                    , Effect.perform
-                        (Effect.authed (Api.saveWritingAssistantConsentRequest newValue)
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse =
-                                Api.resolveWhatever >> SaveWritingAssistantCompleted newValue
-                            }
-                        )
+                    , Effect.authed (Api.saveWritingAssistantConsentRequest newValue)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveWhatever >> SaveWritingAssistantCompleted newValue
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( { model | writingAssistantConsent = newValue }, Cmd.none, NoOut )
+                    ( { model | writingAssistantConsent = newValue }, Effect.None, NoOut )
 
         SaveConsent ->
             case maybeToken of
                 Just token ->
                     ( { model | saving = Loading }
-                    , Effect.perform
-                        (Effect.authed (Api.saveConsentRequest model.analyticsConsent)
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse = Api.resolveWhatever >> SaveCompleted
-                            }
-                        )
+                    , Effect.authed (Api.saveConsentRequest model.analyticsConsent)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveWhatever >> SaveCompleted
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         SaveWritingAssistantCompleted attempted result ->
             case result of
                 Ok _ ->
-                    ( { model | writingAssistantSaving = Success () }, Cmd.none, NoOut )
+                    ( { model | writingAssistantSaving = Success () }, Effect.None, NoOut )
 
                 Err err ->
                     let
@@ -193,7 +198,7 @@ update msg model maybeToken =
                         -- rendered, and `writingAssistantSaving` stayed `Loading`
                         -- forever. A session-expiry hand-off is not a reason to
                         -- leave a consent control lying about what is stored.
-                        ( restored, Cmd.none, SessionExpired )
+                        ( restored, Effect.None, SessionExpired )
 
                     else
                         -- ⛔ The optimistic flip is REVERTED. The toggle moved
@@ -206,12 +211,12 @@ update msg model maybeToken =
                         --
                         -- The error beside the toggle says the save failed; the
                         -- toggle itself goes back to what is actually stored.
-                        ( restored, Cmd.none, NoOut )
+                        ( restored, Effect.None, NoOut )
 
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | saving = Success () }, Cmd.none, NoOut )
+                    ( { model | saving = Success () }, Effect.None, NoOut )
 
                 Err err ->
                     let
@@ -230,10 +235,10 @@ update msg model maybeToken =
                             { model | saving = Failure err }
                     in
                     if Api.isUnauthorized err then
-                        ( settled, Cmd.none, SessionExpired )
+                        ( settled, Effect.None, SessionExpired )
 
                     else
-                        ( settled, Cmd.none, NoOut )
+                        ( settled, Effect.None, NoOut )
 
 
 {-| The standalone-page wrapper. Since TR-4 the consent controls live as a

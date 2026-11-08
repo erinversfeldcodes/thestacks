@@ -25,7 +25,7 @@ The page's honesty rules:
 -}
 
 import Api exposing (ImportError(..), ImportRow, LibraryImport)
-import Effect
+import Effect exposing (Effect)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, button, div, h1, h2, p, span, table, tbody, td, text, th, thead, tr)
@@ -78,110 +78,113 @@ type OutMsg
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
         PickFile ->
-            ( model, Select.file [ "text/csv" ] FileChosen, NoOut )
+            ( model, Effect.Custom (Select.file [ "text/csv" ] FileChosen), NoOut )
 
         FileChosen file ->
             case maybeToken of
                 Just token ->
                     ( { model | phase = Uploading }
-                    , Effect.perform
-                        (Effect.authed (Api.goodreadsImportRequest file)
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse = Api.resolveImport >> GotCreated
-                            }
-                        )
+                    , Effect.authed (Api.goodreadsImportRequest file)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveImport >> GotCreated
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, SessionExpired )
+                    ( model, Effect.None, SessionExpired )
 
         GotCreated (Ok libraryImport) ->
-            ( { model | phase = Watching libraryImport }, Cmd.none, NoOut )
+            ( { model | phase = Watching libraryImport }, Effect.None, NoOut )
 
         GotCreated (Err importError) ->
             case importError of
                 ImportRequestFailed err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | phase = Choosing (Just importError) }, Cmd.none, NoOut )
+                        ( { model | phase = Choosing (Just importError) }, Effect.None, NoOut )
 
                 _ ->
-                    ( { model | phase = Choosing (Just importError) }, Cmd.none, NoOut )
+                    ( { model | phase = Choosing (Just importError) }, Effect.None, NoOut )
 
         PollTick ->
             case ( model.phase, maybeToken ) of
                 ( Watching libraryImport, Just token ) ->
                     ( model
-                    , Effect.perform
-                        (Effect.authed (Api.importRequest libraryImport.id)
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse =
-                                Api.resolveJson (Decode.field "import" Api.libraryImportDecoder)
-                                    >> GotImport
-                            }
-                        )
+                    , Effect.authed (Api.importRequest libraryImport.id)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson (Decode.field "import" Api.libraryImportDecoder)
+                                >> GotImport
+                        }
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         GotImport (Ok libraryImport) ->
             if terminal libraryImport then
                 ( { model | phase = Done libraryImport Loading }
                 , case maybeToken of
                     Just token ->
-                        Effect.perform
-                            (Effect.authed (Api.importRowsRequest libraryImport.id)
-                                token
-                                { onExpired = SessionExpiryDetected
-                                , onResponse =
-                                    Api.resolveJson
-                                        (Decode.field "rows" (Decode.list Api.importRowDecoder))
-                                        >> GotRows
-                                }
-                            )
+                        Effect.authed (Api.importRowsRequest libraryImport.id)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "rows" (Decode.list Api.importRowDecoder))
+                                    >> GotRows
+                            }
 
                     Nothing ->
-                        Cmd.none
+                        Effect.None
                 , NoOut
                 )
 
             else
-                ( { model | phase = Watching libraryImport }, Cmd.none, NoOut )
+                ( { model | phase = Watching libraryImport }, Effect.None, NoOut )
 
         GotImport (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.None, SessionExpired )
 
             else
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
         GotRows (Ok rows) ->
             case model.phase of
                 Done libraryImport _ ->
-                    ( { model | phase = Done libraryImport (Success rows) }, Cmd.none, NoOut )
+                    ( { model | phase = Done libraryImport (Success rows) }, Effect.None, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         GotRows (Err err) ->
             case model.phase of
                 Done libraryImport _ ->
-                    ( { model | phase = Done libraryImport (Failure err) }, Cmd.none, NoOut )
+                    ( { model | phase = Done libraryImport (Failure err) }, Effect.None, NoOut )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
 
 terminal : LibraryImport -> Bool
