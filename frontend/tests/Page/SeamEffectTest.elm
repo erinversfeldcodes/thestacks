@@ -21,9 +21,11 @@ import Effect
 import Expect
 import Page.Catalogue as Catalogue
 import Page.Feedback as Feedback
+import Page.Settings.Profile as Profile
 import Test exposing (Test, describe, test)
 import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
+import Types.User exposing (User)
 
 
 {-| Every request a plan tree holds, walking `Batch`.
@@ -60,6 +62,22 @@ sendingFeedback maybeToken =
     effect
 
 
+{-| A reader whose account the settings page is editing.
+-}
+aReader : User
+aReader =
+    { id = "user-1"
+    , email = "reader@example.com"
+    , displayName = "A Reader"
+    , handle = "a_reader"
+    , role = "user"
+    , countryCode = Nothing
+    , city = Nothing
+    , consentAnalytics = False
+    , consentWritingAssistant = False
+    }
+
+
 suite : Test
 suite =
     describe "two more modules, read as data"
@@ -79,6 +97,30 @@ suite =
                     sendingFeedback Nothing
                         |> plansIn
                         |> Expect.equal []
+            ]
+        , describe "Page.Settings.Profile"
+            -- ⛔ This module was HALF converted, and the gate's first version
+            -- credited it as done: it exported `initWithEffect` while `update`
+            -- still performed two plans of its own. A name check cannot tell
+            -- that from the finished state, which is why the gate now asks
+            -- whether every perform sits in a thin wrapper.
+            [ test "saving a profile sends one write, through the seam" <|
+                \() ->
+                    let
+                        ( model, _ ) =
+                            Profile.initWithEffect
+                                (Just (TestHelpers.creds "tok"))
+                                aReader
+
+                        ( _, effect, _ ) =
+                            Profile.updateWithEffect
+                                Profile.SaveProfile
+                                model
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    plansIn effect
+                        |> List.map .method
+                        |> Expect.equal [ "PUT" ]
             ]
         , describe "Page.Catalogue"
             [ test "opening the catalogue asks for it" <|

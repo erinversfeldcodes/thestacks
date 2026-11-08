@@ -6,6 +6,7 @@ module Page.Settings.Profile exposing
     , initWithToken
     , seedFromSession
     , update
+    , updateWithEffect
     , view
     )
 
@@ -281,32 +282,41 @@ handleChanged model =
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         SetDisplayName val ->
-            ( { model | displayName = val, savingProfile = NotAsked, touched = Set.insert "displayName" model.touched }, Cmd.none, NoOut )
+            ( { model | displayName = val, savingProfile = NotAsked, touched = Set.insert "displayName" model.touched }, Effect.None, NoOut )
 
         SetHandle val ->
-            ( { model | handle = val, savingProfile = NotAsked, touched = Set.insert "handle" model.touched }, Cmd.none, NoOut )
+            ( { model | handle = val, savingProfile = NotAsked, touched = Set.insert "handle" model.touched }, Effect.None, NoOut )
 
         SetEmail val ->
-            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked, touched = Set.insert "email" model.touched }, Cmd.none, NoOut )
+            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked, touched = Set.insert "email" model.touched }, Effect.None, NoOut )
 
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked, touched = Set.insert "currentPassword" model.touched }, Cmd.none, NoOut )
+            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked, touched = Set.insert "currentPassword" model.touched }, Effect.None, NoOut )
 
         SetWebsiteUrl val ->
-            ( { model | websiteUrl = val, savingProfile = NotAsked, touched = Set.insert "websiteUrl" model.touched }, Cmd.none, NoOut )
+            ( { model | websiteUrl = val, savingProfile = NotAsked, touched = Set.insert "websiteUrl" model.touched }, Effect.None, NoOut )
 
         SetCountryCode val ->
-            ( { model | countryCode = val, savingLocation = NotAsked, touched = Set.insert "countryCode" model.touched }, Cmd.none, NoOut )
+            ( { model | countryCode = val, savingLocation = NotAsked, touched = Set.insert "countryCode" model.touched }, Effect.None, NoOut )
 
         SetCity val ->
-            ( { model | city = val, savingLocation = NotAsked, touched = Set.insert "city" model.touched }, Cmd.none, NoOut )
+            ( { model | city = val, savingLocation = NotAsked, touched = Set.insert "city" model.touched }, Effect.None, NoOut )
 
         SaveProfile ->
             if emailChanged model && String.isEmpty (String.trim model.currentPassword) then
                 ( { model | currentPasswordError = Just "Please enter your current password to change your email." }
-                , Cmd.none
+                , Effect.None
                 , NoOut
                 )
 
@@ -314,28 +324,26 @@ update msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         ( { model | savingProfile = Loading, currentPasswordError = Nothing }
-                        , Effect.perform
-                            (Effect.authed
-                                (Api.updateProfileRequest
-                                    { displayName = model.displayName
-                                    , email = model.email
-                                    , websiteUrl = model.websiteUrl
-                                    , handle = model.handle
-                                    , currentPassword = model.currentPassword
-                                    , emailChanged = emailChanged model
-                                    , handleChanged = handleChanged model
-                                    }
-                                )
-                                token
-                                { onExpired = SessionExpiryDetected
-                                , onResponse = Api.resolveProfile >> SaveProfileCompleted
+                        , Effect.authed
+                            (Api.updateProfileRequest
+                                { displayName = model.displayName
+                                , email = model.email
+                                , websiteUrl = model.websiteUrl
+                                , handle = model.handle
+                                , currentPassword = model.currentPassword
+                                , emailChanged = emailChanged model
+                                , handleChanged = handleChanged model
                                 }
                             )
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveProfile >> SaveProfileCompleted
+                            }
                         , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.None, NoOut )
 
         SaveProfileCompleted result ->
             case result of
@@ -369,54 +377,52 @@ update msg model maybeToken =
                         , handle = settledHandle
                         , initialHandle = settledHandle
                       }
-                    , Cmd.none
+                    , Effect.None
                     , IdentityChanged
                         { displayName = model.displayName, handle = settledHandle }
                     )
 
                 Err err ->
-                    ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
+                    ( { model | savingProfile = Failure err }, Effect.None, NoOut )
 
         SaveLocation ->
             case maybeToken of
                 Just token ->
                     ( { model | savingLocation = Loading }
-                    , Effect.perform
-                        (Effect.authed
-                            (Api.updateLocationRequest
-                                { countryCode = model.countryCode, city = model.city }
-                            )
-                            token
-                            { onExpired = SessionExpiryDetected
-                            , onResponse = Api.resolveWhatever >> SaveLocationCompleted
-                            }
+                    , Effect.authed
+                        (Api.updateLocationRequest
+                            { countryCode = model.countryCode, city = model.city }
                         )
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveWhatever >> SaveLocationCompleted
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         SaveLocationCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | savingLocation = Success () }, Cmd.none, NoOut )
+                    ( { model | savingLocation = Success () }, Effect.None, NoOut )
 
                 Err err ->
-                    ( { model | savingLocation = Failure err }, Cmd.none, NoOut )
+                    ( { model | savingLocation = Failure err }, Effect.None, NoOut )
 
         AccountReceived (Ok account) ->
-            ( hydrate account { model | account = Success () }, Cmd.none, NoOut )
+            ( hydrate account { model | account = Success () }, Effect.None, NoOut )
 
         AccountReceived (Err err) ->
             if Api.isUnauthorized err then
-                ( model, Cmd.none, SessionExpired )
+                ( model, Effect.None, SessionExpired )
 
             else
-                ( { model | account = Failure err }, Cmd.none, NoOut )
+                ( { model | account = Failure err }, Effect.None, NoOut )
 
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
 
 view : Model -> Html Msg

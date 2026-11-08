@@ -36,7 +36,7 @@ in code by" and check it before relying on it.
 | `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-e2e-repeatability.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | A spec that passes must pass again, immediately, against the same stack. |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
-| `scripts/check-effect-seam.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-effect-seam.sh` | `scripts/lint-elm.sh`, `test/platform/effect_seam_gate_test.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh`, `test/platform/error_token_spelling_test.sh` | Two spellings of one error token is a client that matches on one of them. |
 | `scripts/check-guard-is-unbypassable.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-elixir.sh`, `test/platform/guard_unbypassable_test.sh` | A declared-count guard must not sit below a path that exits successfully. |
