@@ -1611,12 +1611,7 @@ beginSignOut model =
         ( _, Just auth ) ->
             ( { model | signOut = SigningOut }
             , Effect.perform
-                (Effect.authed Api.logoutRequest
-                    auth.token
-                    { onExpired = SessionAlreadyGone
-                    , onResponse = Api.resolveWhatever >> SignOutAnswered
-                    }
-                )
+                (Effect.authed Api.logoutRequest auth.token signOutHandlers)
             )
 
         ( _, Nothing ) ->
@@ -1630,14 +1625,24 @@ beginSignOut model =
 a real `Http.Response` through the record production uses rather than restating
 which msg each status ought to produce.
 
-⛔ `onExpired` is not optional — `Api.authed`'s record is the gate — which is how
+⛔ **THE BINDING IS THE POINT, AND IT WAS BRIEFLY LOST.** When sign-out moved
+onto `Effect.authed`, the record was inlined at the call site and this one kept
+the old `Api.authed` shape — so it had no production caller, and the four cases
+in `SignOutTest` that drive it were asserting the behaviour of a **copy**.
+Changing `onExpired` or `onResponse` at the call site would have left all four
+green. That is precisely the drift `Effect` exists to abolish ("the two
+decisions then each pass their own tests while disagreeing with each other"),
+reappearing one module up.
+
+⚖️ So the record is shaped for `Effect.authed` now and passed to it by name.
+`onExpired` is still not optional — the plan's record is the gate — which is how
 `always FocusResult`, the function this replaced, stopped compiling.
 
 -}
-signOutHandlers : { onExpired : Msg, onResult : Result Http.Error () -> Msg }
+signOutHandlers : { onExpired : Msg, onResponse : Http.Response String -> Msg }
 signOutHandlers =
     { onExpired = SessionAlreadyGone
-    , onResult = SignOutAnswered
+    , onResponse = Api.resolveWhatever >> SignOutAnswered
     }
 
 

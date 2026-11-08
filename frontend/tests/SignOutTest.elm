@@ -31,6 +31,7 @@ itself; everything it dispatches on is here.
 
 import Api
 import Dict
+import Effect
 import Expect
 import Html.Attributes as Attr
 import Http
@@ -130,13 +131,31 @@ anUnreadableLogoutLeavesTheSessionOpen =
 -- THE RESPONSE, DRIVEN THROUGH PRODUCTION'S OWN HANDLERS
 
 
-{-| One sign-out response, read exactly as `Api.logout` reads it: the resolver is
-`Api.resolveWhatever` and the handlers are the record `Main` hands `Api.authed`.
+{-| One sign-out response, read exactly as production reads it: through the
+very record `Main` hands `Effect.authed`, so the resolver is whatever that
+record says rather than whatever this file remembers.
+
+⛔ **THIS USED TO DRIVE A COPY.** When sign-out moved onto a plan, the call site
+inlined its handlers and `Main.signOutHandlers` kept the old `Api.authed` shape
+— leaving it with no production caller while the four cases below went on
+asserting it. Changing the real `onExpired` or `onResponse` left every one of
+them green. The record is bound to the call site again, and this file builds the
+plan the same way production does — so it reaches `Api.resolveWhatever` only
+through that record, and the expiry interception `Effect.authed` wraps around
+it. ⚠️ Reading `signOutHandlers.onResponse` directly is NOT equivalent and was
+tried first: it skips `Api.interceptExpiry`, so a 401 arrives as
+`SignOutAnswered (Err (BadStatus 401))` instead of `SessionAlreadyGone`. The
+routing lives in the interpreter, not the record.
+
 -}
 answered : Http.Response String -> Main.Msg
-answered =
-    Api.interpretAuthed Api.resolveWhatever
-        (Api.authed (TestHelpers.creds "tok") Main.signOutHandlers)
+answered response =
+    case Effect.authed Api.logoutRequest (TestHelpers.creds "tok") Main.signOutHandlers of
+        Effect.Request plan ->
+            plan.onResponse response
+
+        _ ->
+            Main.SignOutAnswered (Err (Http.BadBody "sign-out did not build a request plan"))
 
 
 metadata : Int -> Http.Metadata
