@@ -218,12 +218,28 @@ the migration that creates the role rather than reading this as a clean bill.")
 # ⚠️ No test can catch this either, for the same reason as the assertion above:
 # the test role is a superuser, so it can call anything whatever the grants say.
 # The grant list is only a fact about a real database.
+# ⛔ WIDENED FROM `op` TO `op` + `audit` ON 2026-11-08, BECAUSE A DEFINER ONE
+# SCHEMA OVER WAS OPEN TO PUBLIC AND THIS GATE COULD NOT SEE IT.
+#
+# `audit.scrub_for_erasure(uuid)` was created without a PUBLIC revoke, so its
+# ACL read `{=X/postgres,...}` and `has_function_privilege('stacks_dbt', …,
+# 'EXECUTE')` was **true** — the read-only-posture role could reach the only
+# write path into an append-only forensic and GDPR record. MEASURED by the
+# database reviewer: this assertion returned **0** as written and **1** the
+# moment the schema filter included `audit`.
+#
+# ⚖️ The gate's own rationale below already covered the case exactly ("A NULL
+# proacl is the Postgres default and counts: it is the absence of a REVOKE, not
+# a decision") — it was simply pointed at one schema. A posture assertion scoped
+# to the schema where the problem was first noticed will keep missing the next
+# one; `audit` holds the records that matter most if they are quietly editable.
 ASSERTIONS+=("definer_function_executable_by_public
-SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'op' AND p.prosecdef AND (p.proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0))
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('op', 'audit') AND p.prosecdef AND (p.proacl IS NULL OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee = 0))
 0
-A SECURITY DEFINER function in schema op is executable by PUBLIC, which means
-every role that can connect can perform the unscoped cross-user read that
-function wraps — including the runtime role, for functions it was never granted.
+A SECURITY DEFINER function in schema op or audit is executable by PUBLIC, which
+means every role that can connect can perform the unscoped cross-user read — or,
+in audit, the scrub — that function wraps, including the runtime role for
+functions it was never granted.
 A NULL proacl is the Postgres default and counts: it is the absence of a REVOKE,
 not a decision. REVOKE ALL ... FROM PUBLIC and grant by name.")
 
