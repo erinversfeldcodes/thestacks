@@ -95,7 +95,7 @@ SUCCESS_EXIT = re.compile(
 # change", and it is the only honest reason to lower this number: a guard that
 # went away because its question stopped being askable, not one that was
 # removed because it was inconvenient.
-EXPECTED_GUARDED_SCRIPTS = 22
+EXPECTED_GUARDED_SCRIPTS = 23
 
 guarded = {}
 violations = []

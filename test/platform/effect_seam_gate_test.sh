@@ -40,7 +40,12 @@ chmod +x "$WORK/gate.sh"
 # way, and the one case expecting a GREEN run passed — which is exactly the
 # pattern that makes this kind of harness bug look like a real finding.
 run_gate() { (cd "$WORK" && bash gate.sh 2>&1) || true; }
-gate_says() { printf '%s' "$GATE_OUT" | grep -qE "$1"; }
+# ⛔ NO PIPE, and that is the second time this one bit. Piping into `grep -q`
+# under `pipefail` lets the early-exiting consumer kill the producer with
+# SIGPIPE, so the pipeline reports 141 and the test goes the WRONG WAY on a
+# match — the same shape as the bug this helper was written to fix. A bash
+# regex match reads the captured output directly and has no producer to kill.
+gate_says() { [[ "$GATE_OUT" =~ $1 ]]; }
 restore() { rm -rf "$WORK/frontend/src"; cp -R "$REPO_ROOT/frontend/src" "$WORK/frontend/src"; }
 
 test_case "gate_exists" "the script is present and parses"
