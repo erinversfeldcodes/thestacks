@@ -226,7 +226,7 @@ if len(definitions) < MIN_PARSED_DEFINITIONS:
 # thing it exists to make safe. The count floor on the SUM below is what catches
 # the parser drifting, on either key.
 plan_sites = []
-for path in sorted(p for g in PAGE_GLOB for p in glob.glob(g, recursive=True)):
+for path in sorted({p for g in PAGE_GLOB for p in glob.glob(g, recursive=True)}):
     plan_sites.extend([path] * plans_in(read(path)))
 
 if not authed_endpoints and not plan_sites:
@@ -274,7 +274,7 @@ def routes_to_session_expired(text, constructor):
 
 findings, in_scope = [], []
 
-for path in sorted(p for g in PAGE_GLOB for p in glob.glob(g, recursive=True)):
+for path in sorted({p for g in PAGE_GLOB for p in glob.glob(g, recursive=True)}):
     text = read(path)
     calls = sorted(name for name in authed_endpoints if re.search(r"\bApi\." + name + r"\b", text))
     plans = plans_in(text)
@@ -406,7 +406,17 @@ if mode == "--list":
 # ⚖️ The sum is what is floored, not either key. An endpoint moving from
 # `Api.Authed` onto a request plan leaves one key and joins the other, so a
 # migration holds this number while rearranging what it is made of.
-MIN_AUTHENTICATED_REQUESTS = 100
+# ⛔ RATCHETED 100 → 105 ON 2026-11-08, IN THE CHANGE THAT GREW THE POPULATION.
+# Adding `Components/**` took the population from 97/28 to 105/31 and the floors
+# were left where they were — 5 requests and 3 pages of fresh slack, which is
+# exactly enough to absorb the largest file the widening was made to include.
+#
+# ⚠️ MEASURED by the platform reviewer: wrapping `Effect.authed` in a per-page
+# helper inside `Components/Syndication.elm` (5 plans) left 100 against a floor
+# of 100 and 30 against a floor of 28 — green. Only when ALL THREE components
+# drop out does the floor notice. ⚖️ A floor that is not raised with its
+# population is not a ratchet, it is a grace period.
+MIN_AUTHENTICATED_REQUESTS = 105
 
 if authenticated_requests < MIN_AUTHENTICATED_REQUESTS:
     print(
@@ -468,7 +478,9 @@ if authenticated_requests < MIN_AUTHENTICATED_REQUESTS:
 # 28 to 27 and the run stayed green. That is precisely the count drifting down
 # under an "OK" that this floor was added to prevent, reachable by one hand-added
 # exemption. Flooring the checked pages reds it.
-MIN_PAGES_CHECKED = 28
+# ⛔ RATCHETED 28 → 31 for the same reason and in the same change. See the note
+# on MIN_AUTHENTICATED_REQUESTS above.
+MIN_PAGES_CHECKED = 31
 
 if len(checked) < MIN_PAGES_CHECKED:
     print("")
