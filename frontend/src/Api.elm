@@ -205,6 +205,7 @@ module Api exposing
     , placementFormatsDecoder
     , placementShelfDecoder
     , placementsMineDecoder
+    , planHeaderPairs
     , planHeaders
     , postCommentsRequest
     , privacySettingsDecoder
@@ -639,30 +640,6 @@ safeMethod method =
     List.member (String.toUpper method) [ "GET", "HEAD", "OPTIONS" ]
 
 
-{-| Headers for a request whose proof does NOT come from a session credential.
-
-⛔ **WHY THIS EXISTS, and it is a design error of mine that only a drive found.**
-The proof began life as a field of `Credentials`, which exists only when there is
-a bearer token. A logged-OUT visitor therefore had no proof — and
-`POST /api/auth/login` is a state-changing request. Driven against the deployed
-preview, the SPA's real login POST sent `content-type` and nothing else.
-
-⚖️ The type error underneath: a credential is a property of the **session**, a
-double-submit proof is a property of the **document**. Nesting the second inside
-the first makes it unreachable exactly when there is no session, which is the
-one case that matters for login fixation.
-
-⚠️ 2208 unit tests passed throughout, because every one of them constructs a
-`Credentials` in order to ask its question. The case with no credential at all is
-the case no test thought to build.
-
--}
-proofHeaders : String -> Maybe String -> List Http.Header
-proofHeaders method maybeProof =
-    csrfHeader method maybeProof
-        |> List.map (\( name, value ) -> Http.header name value)
-
-
 {-| The token a credential carries, if any.
 
 ⚠️ This is NOT the place to decide whether to send it — that is the destination's
@@ -683,20 +660,6 @@ tokenFor credential =
 
         NoCredential _ ->
             Nothing
-
-
-{-| `requestHeaders` converted to `elm/http`'s own header type.
-
-⚠️ The conversion is one line and lives here so each call site is a declaration
-rather than a declaration plus plumbing. The DATA form stays the shared thing —
-`Http.Header` and `SimulatedEffect.Http.Header` are different opaque types, so
-the program-test harness converts the same list into its own.
-
--}
-httpHeaders : String -> Credential -> List Http.Header
-httpHeaders method credential =
-    requestHeaders method credential
-        |> List.map (\( name, value ) -> Http.header name value)
 
 
 {-| A request's data — method, url, JSON body — apart from the
@@ -4895,12 +4858,32 @@ rather than two different ones on consecutive requests.
 -}
 planHeaders : String -> Maybe Credentials -> Maybe String -> List Http.Header
 planHeaders method maybeToken planProof =
+    planHeaderPairs method maybeToken planProof
+        |> List.map (\( name, value ) -> Http.header name value)
+
+
+{-| The same derivation as `planHeaders`, as data.
+
+⛔ **THIS EXISTS SO THERE IS ONE RULE, NOT TWO.** `Http.Header` is opaque, so a
+test harness cannot read what `planHeaders` produced — and the harness therefore
+had its own header rule, which silently dropped the plan's proof. MEASURED: for
+the nine sessionless writes, production sent `X-CSRF-Token` and the simulated
+interpreter sent `[]`, while the parity test drove only `GET`, where
+`csrfHeader` returns `[]` for every method and the gap is unobservable.
+
+⚖️ `planHeaders` is now a `List.map` over this, so the two interpreters cannot
+disagree about headers without disagreeing about this function — which is the
+same argument `httpHeaders` and `proofHeaders` already make one level down.
+
+-}
+planHeaderPairs : String -> Maybe Credentials -> Maybe String -> List ( String, String )
+planHeaderPairs method maybeToken planProof =
     case maybeToken of
         Just creds ->
-            httpHeaders method (Optional (Just creds))
+            requestHeaders method (Optional (Just creds))
 
         Nothing ->
-            proofHeaders method planProof
+            csrfHeader method planProof
 
 
 {-| A source as returned by the admin sources API.

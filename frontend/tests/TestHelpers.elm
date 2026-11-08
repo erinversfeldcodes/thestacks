@@ -18,6 +18,7 @@ module TestHelpers exposing
     , libraryProgram
     , loginProgram
     , loginProgramFrom
+    , loginProgramWith
     , metricsProgram
     , namedPlacement
     , placementWithPages
@@ -1061,7 +1062,7 @@ authedRequestFromSpec :
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
 authedRequestFromSpec spec token expect =
-    requestFromSpec spec (Just token) expect
+    requestFromSpec spec (Just token) Nothing expect
 
 
 {-| Run a page's `Effect` in the simulated runtime — the twin of
@@ -1085,6 +1086,7 @@ simulateEffect effect =
         Effect.Request plan ->
             requestFromSpec plan.spec
                 plan.token
+                plan.proof
                 (SimulatedEffect.Http.expectStringResponse
                     (\result ->
                         case result of
@@ -1111,12 +1113,13 @@ header appears only when the viewer has a token, which is what
 requestFromSpec :
     Api.RequestSpec
     -> Maybe Api.Credentials
+    -> Maybe String
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
-requestFromSpec spec maybeToken expect =
+requestFromSpec spec maybeToken maybeProof expect =
     SimulatedEffect.Http.request
         { method = spec.method
-        , headers = authHeaderList spec.method maybeToken
+        , headers = authHeaderList spec.method maybeToken maybeProof
         , url = Api.Url.toString spec.url
         , body =
             case spec.body of
@@ -1157,14 +1160,24 @@ which is why the shared thing is header **data**: `Api.requestHeaders` returns
 `List ( String, String )` and each runtime wraps it in its own type. That is the
 whole reason the builder returns pairs instead of `Http.Header`.
 
-⚠️ `Optional`, not `Session`, because a plan's token is a `Maybe` — the
-optional-auth endpoints send the header only when the viewer has one, and so
-does `Effect.perform` on the production side.
+⛔ **DERIVED BY `Api.planHeaders`, THE SAME FUNCTION PRODUCTION CALLS**, rather
+than by a second rule that happens to agree. This used to be
+`Api.requestHeaders method (Api.Optional maybeToken)` and it silently dropped
+`plan.proof` — so for the nine sessionless writes (`Page/Login`,
+`Page/Admin/Session`, `Page/ResetPassword`, `Page/ListingRemoval`) production
+sent `X-CSRF-Token` and the harness sent `[]`.
+
+⚠️ That is exactly the drift `Effect` exists to abolish — "two interpreters
+deciding the same thing separately" — living inside the abstraction built to
+prevent it, on the very header this work added. And the parity test written to
+catch it could not: it drives only `GET`, and `csrfHeader` returns `[]` for
+every safe method, so the dropped field was unobservable by construction in the
+one place parity was asserted.
 
 -}
-authHeaderList : String -> Maybe Api.Credentials -> List SimulatedEffect.Http.Header
-authHeaderList method maybeToken =
-    Api.requestHeaders method (Api.Optional maybeToken)
+authHeaderList : String -> Maybe Api.Credentials -> Maybe String -> List SimulatedEffect.Http.Header
+authHeaderList method maybeToken maybeProof =
+    Api.planHeaderPairs method maybeToken maybeProof
         |> List.map (\( name, value ) -> SimulatedEffect.Http.header name value)
 
 
@@ -1589,8 +1602,24 @@ starts it, from the arrival.
 -}
 loginProgramFrom : Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgramFrom arrival =
+    loginProgramWith Nothing arrival
+
+
+{-| The login card for a reader whose page HAS handed it a CSRF proof.
+
+⛔ **THE SHAPE NO HARNESS COULD BUILD UNTIL NOW**, and the gap it left was real:
+every login program started from `Login.init Nothing`, so no `ProgramTest` in
+the suite ever drove a request with `token = Nothing, proof = Just _` — the
+exact shape of the nine sessionless writes. The simulated interpreter was
+dropping `plan.proof` and nothing could see it.
+
+⚖️ `loginProgram` is this with `Nothing`, so the ordinary cases are unchanged.
+
+-}
+loginProgramWith : Maybe String -> Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
+loginProgramWith proof arrival =
     ProgramTest.createElement
-        { init = \() -> ( Login.init Nothing arrival, SimulatedEffect.Cmd.none )
+        { init = \() -> ( Login.init proof arrival, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let

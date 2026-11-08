@@ -39,16 +39,18 @@ remained in perfect agreement with each other.
 
 import Api
 import Expect
+import Page.Login as Login
 import Page.Search as Search
 import ProgramTest
 import Test exposing (Test, describe, test)
-import TestHelpers exposing (searchProgram)
+import TestHelpers exposing (loginProgramWith, searchProgram)
 
 
 suite : Test
 suite =
     describe "the harness and production derive one request's headers from one builder"
         [ authedRequestCarriesTheBuildersHeaders
+        , proofCarryingWriteCarriesTheBuildersHeaders
         , anonymousRequestCarriesTheBuildersHeaders
         , theBuilderIsReachedWithTheSameArgumentsBothRuntimesUse
         ]
@@ -80,6 +82,43 @@ authedRequestCarriesTheBuildersHeaders =
                         Expect.equal
                             (Api.requestHeaders "GET" (Api.Optional (Just token)))
                             request.headers
+                    )
+
+
+{-| ⛔ AN UNSAFE METHOD, BECAUSE THE TWO CASES ABOVE CANNOT SEE THE PROOF.
+
+Both drive `GET /api/search`, and `Api.csrfHeader` returns `[]` for every safe
+method — so the CSRF proof is unobservable by construction in exactly the place
+parity is asserted. MEASURED: the simulated interpreter dropped `plan.proof`
+entirely, so for all nine sessionless writes production sent `X-CSRF-Token`
+while the harness sent nothing, and all three parity cases stayed green.
+
+⚖️ A login POST is the smallest journey that carries a proof and no token — the
+`token = Nothing, proof = Just _` shape the dropped field belonged to.
+
+-}
+proofCarryingWriteCarriesTheBuildersHeaders : Test
+proofCarryingWriteCarriesTheBuildersHeaders =
+    test "effect_header_parity_proof: a sessionless write emits the proof the builder returns" <|
+        \() ->
+            ProgramTest.start () (loginProgramWith (Just "the-proof") Login.Fresh)
+                |> ProgramTest.fillIn "email" "Email" "reader@stacks.dev"
+                |> ProgramTest.fillIn "password" "Password" "a-password"
+                |> ProgramTest.clickButton "Enter the Stacks"
+                |> ProgramTest.expectHttpRequest "POST"
+                    "/api/auth/login"
+                    (\request ->
+                        -- ⚖️ `Content-Type` comes from the body, not from the
+                        -- header builder, so it is excluded rather than added
+                        -- to the expectation: the claim is about what
+                        -- `planHeaderPairs` decides, and the GET cases above
+                        -- compare exactly because a GET carries no body.
+                        Expect.equal
+                            (Api.planHeaderPairs "POST" Nothing (Just "the-proof"))
+                            (List.filter
+                                (\( name, _ ) -> name /= "Content-Type")
+                                request.headers
+                            )
                     )
 
 
