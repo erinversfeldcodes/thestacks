@@ -186,6 +186,31 @@ defmodule StacksWeb.Plugs.CsrfEnforceTest do
                Integer.to_string(conn.status)
     end
 
+    # ⛔ THE SINGULAR/PLURAL CASE, AND IT IS THE ONE THAT MATTERS.
+    #
+    # `POST /api/partners/register` is PUBLIC, unauthenticated and
+    # state-changing — a browser-reachable write that must keep its CSRF
+    # protection. Its path_info is ["api", "partners", "register"], one letter
+    # away from the exempt ["api", "partner"].
+    #
+    # ⚠️ The exemption is a SEGMENT-WISE match —
+    # `Enum.take(path_info, length(scope)) == scope` — so "partners" ≠ "partner"
+    # and this route stays enforced. A `String.starts_with?(request_path,
+    # "/api/partner")` version would have exempted it and turned the partner fix
+    # into a new CSRF hole on a public write. The case below drives
+    # `/api/auth/login`, which shares no prefix at all, so it catches a widening
+    # but would stay green against a string-prefix match. This one would not.
+    test "a neighbouring route one letter away is still enforced" do
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> post("/api/partners/register", %{"name" => "A Bookshop"})
+
+      assert json_response(conn, 403)["error"] == "csrf_check_failed",
+             "/api/partners/register is public, unauthenticated and state-changing — " <>
+               "it must not inherit the partner scope's exemption"
+    end
+
     # ⛔ ANTI-VACUITY FOR THE EXEMPTION: it must be narrow. A path that merely
     # begins with the same letters is NOT the partner scope, and an exemption
     # matched loosely would silently disable CSRF on neighbouring routes.
