@@ -491,6 +491,93 @@ jobs:
       - run: scripts/lint-python.sh
       - run: scripts/test-python.sh
 
+  eval-vision-barcode:
+    # ⛔ THE ONLY TIER THAT CAN RUN ON EVERY PR, AND UNTIL NOW THE EVAL RAN
+    # NOWHERE A PR COULD SEE IT.
+    #
+    # `mix eval.vision` lived only inside `deploy-stack.sh`, so a change to the
+    # cascade, the corpus or the scoring reached review with nothing having
+    # scored it. The barcode tier is `pyzbar` on the CPU — no GPU, no Modal, no
+    # deployed service — so it is the one stratum a runner can actually
+    # execute, and `--stratum clean_barcode` is what makes that selectable.
+    #
+    # ⚠️ This does NOT replace the deploy-time eval. It scores one tier against
+    # a locally started service; the VLM tiers still need a real deployment and
+    # still gate there. A green run here means the barcode path survived this
+    # change, not that the model is fine.
+    needs: [changes, versions]
+    if: needs.changes.outputs.elixir == 'true' || needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+          cache: pip
+      # The barcode decoder is a system library, not a wheel — without it
+      # `pyzbar` imports and then finds nothing in every image, which would
+      # score as the model failing rather than the runner being incomplete.
+      - run: sudo apt-get update && sudo apt-get install -y libzbar0
+      - working-directory: apps/vision
+        run: pip install --require-hashes -r requirements.lock
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-
+      - run: mix deps.get
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          github_token: ${{ github.token }}
+      # ⚠️ The gitignored Ecto schemas are the difference between the eval
+      # scoring the model and dying at compile with
+      # "Stacks.Accounts.User.__struct__/1 is undefined" — which the gate then
+      # mis-reported as a model regression.
+      - name: Generate proto artifacts
+        run: |
+          scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language python
+      - name: Start the vision service on the CPU
+        working-directory: apps/vision
+        run: |
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/vision.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              echo "vision service up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the vision service never became healthy"
+          cat /tmp/vision.log
+          exit 1
+      - name: Score the barcode tier
+        env:
+          VISION_SERVICE_URL: http://127.0.0.1:8000
+          # ⛔ Turns the task's "no service, skipping" into a failure. Without
+          # it a runner that failed to start the service reports a green eval,
+          # which is the house failure mode this whole issue is about.
+          EVAL_VISION_REQUIRED: "1"
+          EVAL_VISION_RESULT_PATH: ${{ github.workspace }}/vision-barcode-run.json
+        run: mix eval.vision --stratum clean_barcode
+      - name: Keep the run, including a failing one
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vision-barcode-run
+          path: vision-barcode-run.json
+          if-no-files-found: warn
+      - name: Vision service log
+        if: failure()
+        run: cat /tmp/vision.log
+
   lint-proto:
     needs: changes
     if: needs.changes.outputs.proto == 'true'

@@ -37,7 +37,7 @@ defmodule Mix.Tasks.Eval.Vision do
 
   alias Stacks.AI.Client
 
-  @switches [record: :boolean, corpus: :string]
+  @switches [record: :boolean, corpus: :string, stratum: :string]
   @baseline_path "priv/eval/vision_baseline.json"
   @call_attempts 3
   @retry_pause_ms 30_000
@@ -47,7 +47,12 @@ defmodule Mix.Tasks.Eval.Vision do
     Mix.Task.run("app.start")
     {cli, _, _} = OptionParser.parse(argv, strict: @switches)
 
-    corpus = load_corpus(Keyword.get(cli, :corpus))
+    corpus =
+      cli
+      |> Keyword.get(:corpus)
+      |> load_corpus()
+      |> only_stratum(Keyword.get(cli, :stratum))
+
     point_client_at_configured_service()
 
     if skip?() do
@@ -56,6 +61,33 @@ defmodule Mix.Tasks.Eval.Vision do
       results = Enum.map(corpus, &score_image/1)
       report(results)
       gate(results, Keyword.get(cli, :record, false))
+    end
+  end
+
+  @doc false
+  # ⛔ A STRATUM FILTER, AND IT REFUSES AN EMPTY SELECTION. `--stratum
+  # clean_barcode` runs only the tier that needs no GPU, which is what makes an
+  # every-PR run conceivable at all — the VLM tiers need a deployed service.
+  #
+  # ⚠️ A misspelled stratum selects nothing, and a run over nothing would score
+  # 0/0 and report no regression — a gate passing because it tested nothing,
+  # which is the shape this whole issue exists to remove. So an empty selection
+  # raises rather than scoring.
+  def only_stratum(corpus, nil), do: corpus
+
+  def only_stratum(corpus, name) do
+    wanted = String.to_atom(name)
+
+    case Enum.filter(corpus, &(&1.stratum == wanted)) do
+      [] ->
+        Mix.raise(
+          "eval.vision: no corpus item has stratum #{inspect(wanted)}. " <>
+            "Known strata: #{corpus |> Enum.map(& &1.stratum) |> Enum.uniq() |> inspect()}. " <>
+            "A run over an empty selection would score 0/0 and report no regression."
+        )
+
+      filtered ->
+        filtered
     end
   end
 

@@ -304,4 +304,95 @@ defmodule Mix.Tasks.Eval.VisionTest do
       assert [{:negative, %{passed: 0, scored: 0, unscored: 2}}] = Vision.per_stratum(results)
     end
   end
+
+  describe "the corpus manifest" do
+    # ⛔ THE FIELDS THAT CANNOT BE DERIVED FROM THE IMAGE. `provenance` is the
+    # evidence that the no-user-images rule was kept — the one rule in this
+    # corpus that is absolute — and `notes` is why the item is in the set at
+    # all. An item nobody can justify is an item nobody will dare delete when it
+    # becomes wrong.
+    #
+    # ⚠️ Guarded here rather than trusted, because the failure mode is adding a
+    # fixture in a hurry: the corpus still scores, the gate still passes, and
+    # the provenance of one image is simply absent. By the time anyone asks, the
+    # person who took it may not remember.
+    @corpus_fields [:name, :path, :stratum, :expect_book, :expect_rejection, :provenance, :notes]
+
+    setup do
+      path = Path.join(Application.app_dir(:core), "priv/eval/vision_corpus.exs")
+      {corpus, _} = Code.eval_file(path)
+      {:ok, corpus: corpus}
+    end
+
+    test "every item carries the corpus plan's section-3 fields", %{corpus: corpus} do
+      # ⬛ ANTI-VACUITY: an empty corpus would satisfy every `Enum.each` below.
+      assert length(corpus) >= 6,
+             "the corpus shrank — six fixtures is already the minimum this set has"
+
+      for item <- corpus, field <- @corpus_fields do
+        assert Map.has_key?(item, field),
+               "#{inspect(Map.get(item, :name, item))} is missing #{inspect(field)}"
+      end
+    end
+
+    test "provenance records who took the photograph and when", %{corpus: corpus} do
+      for item <- corpus do
+        assert %{photographer: who, captured: when_, source: source} = item.provenance
+        assert is_binary(who) and who != ""
+        assert is_binary(when_) and when_ != ""
+
+        assert source in [:owned, :synthetic],
+               "#{item.name} claims source #{inspect(source)} — the corpus rule is owned " <>
+                 "or synthetic photographs only, never a reader's image"
+      end
+    end
+
+    # ⚖️ `expect_rejection` is a first-class expected outcome, not the absence
+    # of one — so it must AGREE with `expect_book` rather than drift from it. A
+    # negative fixture that says `expect_book: false, expect_rejection: false`
+    # is a label contradicting itself, and the score would be whichever the
+    # harness happened to read.
+    test "expect_rejection agrees with expect_book", %{corpus: corpus} do
+      for item <- corpus do
+        assert item.expect_rejection == not item.expect_book,
+               "#{item.name}: expect_book=#{item.expect_book} but " <>
+                 "expect_rejection=#{item.expect_rejection} — the two labels disagree"
+      end
+    end
+  end
+
+  describe "running one stratum" do
+    setup do
+      path = Path.join(Application.app_dir(:core), "priv/eval/vision_corpus.exs")
+      {corpus, _} = Code.eval_file(path)
+      {:ok, corpus: corpus}
+    end
+
+    test "selects only that stratum", %{corpus: corpus} do
+      filtered = Vision.only_stratum(corpus, "clean_barcode")
+
+      assert filtered != []
+      assert Enum.all?(filtered, &(&1.stratum == :clean_barcode))
+      assert length(filtered) < length(corpus), "the filter selected everything"
+    end
+
+    test "no filter means the whole corpus", %{corpus: corpus} do
+      assert Vision.only_stratum(corpus, nil) == corpus
+    end
+
+    # ⛔ THE CASE THAT STOPS A TYPO BECOMING A PASSING GATE. A misspelled
+    # stratum selects nothing; a run over nothing scores 0/0 and reports no
+    # regression — a gate passing because it tested nothing, which is the exact
+    # shape of the "no baseline exits 0" defect one argument along.
+    test "a stratum nobody has refuses rather than scoring nothing", %{corpus: corpus} do
+      error = assert_raise Mix.Error, fn -> Vision.only_stratum(corpus, "clean_barcodes") end
+
+      assert error.message =~ "no corpus item has stratum",
+             "a misspelled stratum must refuse; got: #{error.message}"
+
+      assert error.message =~ "clean_barcode",
+             "the refusal should name the strata that DO exist, or the next person " <>
+               "guesses twice"
+    end
+  end
 end

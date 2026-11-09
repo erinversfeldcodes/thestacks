@@ -298,7 +298,13 @@ check-route-clients *ARGS:
 #   just eval-vision <url>            # score against the baseline
 #   just eval-vision <url> --record   # pin today's score as the new baseline
 eval-vision URL="" *ARGS:
-    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" mix eval.vision {{ARGS}}
+    # ⛔ Through `just run`, never bare. A non-interactive shell gets neither
+    # direnv nor nix on PATH, so a bare `mix` silently falls back to a SYSTEM
+    # Elixir — and compiling `_build` with one toolchain then loading those
+    # beams under the pinned one corrupts it (`corrupt atom table` on core
+    # modules). This recipe is the one place a reader would copy the
+    # invocation from.
+    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" just run mix eval.vision {{ARGS}}
 
 # Lint changed migrations with squawk
 squawk:
