@@ -223,4 +223,85 @@ defmodule Mix.Tasks.Eval.VisionTest do
              "a run with nothing unscored must reach a baseline verdict, not refuse one"
     end
   end
+
+  describe "what a run leaves behind" do
+    setup do
+      path = Path.join(System.tmp_dir!(), "eval-run-#{System.unique_integer([:positive])}.json")
+      System.put_env("EVAL_VISION_RESULT_PATH", path)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_RESULT_PATH")
+        File.rm(path)
+      end)
+
+      {:ok, path: path}
+    end
+
+    # ⛔ WRITTEN EVEN WHEN THE GATE REFUSES, which is the whole point. Every
+    # verdict branch can raise, so an artefact written after the decision would
+    # exist only for runs that passed — and the runs worth reading later are the
+    # ones that did not.
+    test "a failing run still records what happened", %{path: path} do
+      results = [
+        %{ok: true, name: "a", stratum: :clean_barcode, detail: ""},
+        %{ok: false, name: "b", stratum: :hostile_orientation, detail: "is_book=false"}
+      ]
+
+      assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      assert File.exists?(path),
+             "the run raised and left no record — a gate that records only its successes " <>
+               "has no history"
+
+      recorded = path |> File.read!() |> Jason.decode!()
+      assert recorded["passed"] == 1
+      assert recorded["total"] == 2
+      assert length(recorded["cases"]) == 2
+    end
+
+    test "and carries the per-stratum breakdown", %{path: path} do
+      results = [
+        %{ok: true, name: "a", stratum: :clean_barcode, detail: ""},
+        %{ok: false, name: "b", stratum: :clean_barcode, detail: ""},
+        %{ok: true, name: "c", stratum: :negative, detail: ""}
+      ]
+
+      assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      recorded = path |> File.read!() |> Jason.decode!()
+
+      assert recorded["per_stratum"]["clean_barcode"] == %{
+               "passed" => 1,
+               "scored" => 2,
+               "unscored" => 0
+             }
+
+      assert recorded["per_stratum"]["negative"]["passed"] == 1
+    end
+  end
+
+  describe "scores by stratum" do
+    # ⚠️ `scored` EXCLUDES the unscored, so a stratum whose fixtures all went
+    # missing reads 0/0 beside its unscored count — not 0/3, which would be
+    # indistinguishable from a model getting every one wrong. That is the same
+    # misattribution the unscored class exists to prevent, one aggregation up.
+    test "an unscored case is not counted as a failure in its stratum" do
+      results = [
+        %{ok: true, name: "a", stratum: :clean_barcode, detail: ""},
+        %{ok: false, name: "b", stratum: :clean_barcode, unscored: true, detail: ""}
+      ]
+
+      assert [{:clean_barcode, counts}] = Vision.per_stratum(results)
+      assert counts == %{passed: 1, scored: 1, unscored: 1}
+    end
+
+    test "a stratum whose fixtures all vanished reads 0/0, not 0/n" do
+      results = [
+        %{ok: false, name: "a", stratum: :negative, unscored: true, detail: ""},
+        %{ok: false, name: "b", stratum: :negative, unscored: true, detail: ""}
+      ]
+
+      assert [{:negative, %{passed: 0, scored: 0, unscored: 2}}] = Vision.per_stratum(results)
+    end
+  end
 end

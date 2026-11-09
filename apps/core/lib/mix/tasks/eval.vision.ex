@@ -206,9 +206,55 @@ defmodule Mix.Tasks.Eval.Vision do
     Mix.shell().info("\nvision eval — #{length(results)} image(s)\n")
 
     Enum.each(results, fn r ->
-      mark = if r.ok, do: "ok  ", else: "FAIL"
+      mark =
+        cond do
+          Map.get(r, :unscored, false) -> "----"
+          r.ok -> "ok  "
+          true -> "FAIL"
+        end
+
       Mix.shell().info("  #{mark} #{String.pad_trailing(r.name, 18)} #{r.detail}")
     end)
+
+    Mix.shell().info("\nby stratum:")
+
+    Enum.each(per_stratum(results), fn {stratum, counts} ->
+      Mix.shell().info(
+        "  #{String.pad_trailing(to_string(stratum), 20)} " <>
+          "#{counts.passed}/#{counts.scored}" <>
+          if(counts.unscored > 0, do: "  (#{counts.unscored} unscored)", else: "")
+      )
+    end)
+  end
+
+  @doc false
+  # ⛔ REPORTED, NOT GATED, AND THE DIFFERENCE IS THE CORPUS SIZE. Six fixtures
+  # cannot carry a per-stratum THRESHOLD — one image changing its mind moves a
+  # stratum's score by a third, which reads as rigour and behaves as noise. But
+  # a whole-corpus number hides WHERE a regression landed, and "the barcode tier
+  # got worse while the VLM tier got better" is the single most useful sentence
+  # this harness can produce for the redesign.
+  #
+  # ⚖️ So the breakdown is printed and recorded now, and becomes gateable when
+  # the corpus reaches the size the corpus plan specifies.
+  #
+  # ⚠️ `scored` excludes the unscored, so a stratum whose fixtures all went
+  # missing reads `0/0` with its unscored count beside it — not `0/3`, which
+  # would be indistinguishable from a model that got every one wrong.
+  def per_stratum(results) do
+    results
+    |> Enum.group_by(&Map.get(&1, :stratum, :unknown))
+    |> Enum.map(fn {stratum, rows} ->
+      unscored = Enum.count(rows, &Map.get(&1, :unscored, false))
+
+      {stratum,
+       %{
+         passed: Enum.count(rows, & &1.ok),
+         scored: length(rows) - unscored,
+         unscored: unscored
+       }}
+    end)
+    |> Enum.sort_by(&elem(&1, 0))
   end
 
   @doc false
@@ -235,6 +281,13 @@ defmodule Mix.Tasks.Eval.Vision do
 
     baseline_file = Path.join(Application.app_dir(:core), @baseline_path)
     identity = model_identity()
+
+    # ⛔ WRITTEN BEFORE THE VERDICT, deliberately. Every branch below can
+    # `Mix.raise`, and an artefact written after the decision would exist only
+    # for runs that passed — so the runs most worth looking at later, the ones
+    # that failed, would leave nothing behind. A gate that records only its
+    # successes is a gate with no history.
+    write_run_artefact(results, passed, total, unscored, identity)
     baseline = read_baseline(baseline_file, identity)
 
     cond do
@@ -333,6 +386,46 @@ defmodule Mix.Tasks.Eval.Vision do
         pretty: true
       )
     )
+  end
+
+  # ⚖️ The path is overridable so CI can collect it as a build artefact and a
+  # test can write somewhere disposable; it defaults beside the baseline, which
+  # is where someone looking for "what happened last run" would think to look.
+  defp write_run_artefact(results, passed, total, unscored, identity) do
+    file =
+      System.get_env("EVAL_VISION_RESULT_PATH") ||
+        Path.join(Application.app_dir(:core), "priv/eval/vision_last_run.json")
+
+    payload = %{
+      model: identity.model,
+      modal_app: identity.modal_app,
+      passed: passed,
+      total: total,
+      unscored: unscored,
+      ran_at: DateTime.utc_now(),
+      per_stratum:
+        Map.new(per_stratum(results), fn {stratum, counts} -> {to_string(stratum), counts} end),
+      cases:
+        Enum.map(results, fn r ->
+          %{
+            name: r.name,
+            stratum: Map.get(r, :stratum, :unknown),
+            ok: r.ok,
+            unscored: Map.get(r, :unscored, false),
+            detail: r.detail
+          }
+        end)
+    }
+
+    File.mkdir_p!(Path.dirname(file))
+    File.write!(file, Jason.encode!(payload, pretty: true))
+    Mix.shell().info("\nrun recorded to #{file}")
+  rescue
+    # ⚠️ A record that cannot be written must not take the gate down with it.
+    # The verdict is the task's job; the artefact is for whoever reads it later.
+    error ->
+      Mix.shell().info("could not write the run artefact: #{inspect(error)}")
+      :ok
   end
 
   @doc false

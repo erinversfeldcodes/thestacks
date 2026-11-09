@@ -73,11 +73,25 @@ defmodule Stacks.AI.Structured do
             items: %{
               type: "object",
               additionalProperties: false,
-              required: ["book_id"],
+              # ⛔ EVERY KEY IS REQUIRED, AND THE OPTIONAL ONES ARE NULLABLE
+              # INSTEAD. This said `required: ["book_id"]`, which reads more
+              # honestly — a missing confidence is still a usable answer — and
+              # may be invalid: OpenAI's structured-output rules state that with
+              # `strict: true` ALL fields must be listed as required, with
+              # optionality expressed as a null union. Together's reference is
+              # SILENT on the point; it says only "Only a subset of JSON Schema
+              # is supported when `strict` is `true`".
+              #
+              # ⚠️ So the stricter reading is the one that cannot be wrong: a
+              # schema valid under both interpretations is accepted by both. The
+              # cost is a model that answers `"confidence": null`, which
+              # `normalise/1` already handles — it defaults a missing or null
+              # confidence to 0.0 and keeps the association.
+              required: ["book_id", "confidence", "reasoning"],
               properties: %{
                 book_id: %{type: "string"},
-                confidence: %{type: "number", minimum: 0.0, maximum: 1.0},
-                reasoning: %{type: "string"}
+                confidence: %{type: ["number", "null"], minimum: 0.0, maximum: 1.0},
+                reasoning: %{type: ["string", "null"]}
               }
             }
           }

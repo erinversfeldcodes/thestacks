@@ -137,3 +137,9 @@ notes/
 # Written fresh by every deploy; never committed, because a stale ceiling read
 # as this run's would be the same defect wearing the opposite sign.
 .e2e-handoff.env
+
+# ⚠️ The eval harness writes its last run here on EVERY invocation, including
+# failing ones (a gate that records only its successes has no history). It is a
+# per-run artefact, not a checked-in fact — unlike vision_baseline.json beside
+# it, which IS committed because a baseline is the thing being compared against.
+apps/core/priv/eval/vision_last_run.json

@@ -146,6 +146,16 @@ defmodule Stacks.AI.StructuredTest do
       assert {:ok, [%{book_id: "keep"}]} = Structured.decode(raw)
     end
 
+    # ⚖️ NULL, not merely absent. `association_schema/0` lists every key as
+    # required with the optional ones nullable — the shape that is valid under
+    # the strictest documented reading of strict mode — so a model obeying it
+    # sends `null` rather than omitting the key, and both must land the same.
+    test "a null confidence is handled like a missing one" do
+      raw = ~s([{"book_id": "keep", "confidence": null, "reasoning": null}])
+
+      assert {:ok, [%{book_id: "keep", confidence: 0.0, reasoning: ""}]} = Structured.decode(raw)
+    end
+
     test "a missing confidence does not discard the association" do
       raw = ~s([{"book_id": "keep", "reasoning": "named in the second paragraph"}])
 
