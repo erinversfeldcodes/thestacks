@@ -159,4 +159,68 @@ defmodule Mix.Tasks.Eval.VisionTest do
       assert Vision.gate(results, true) != :error
     end
   end
+
+  describe "the three outcomes it can reach" do
+    # ⛔ ONLY ONE OF THE THREE IS EVIDENCE ABOUT THE MODEL. A wrong answer is;
+    # a call that never completed is not; and a fixture the harness could not
+    # read is a fact about the CORPUS. Collapsing the last two into "miss" is
+    # how a moved file or a cold service gets reported as a model regression —
+    # which this task did once, and the retry comment records.
+    test "a wrong answer is scored, and counts against the baseline" do
+      results = [%{ok: false, name: "a", detail: "is_book=false"}]
+
+      refute Enum.any?(results, & &1.ok)
+      refute Enum.any?(results, &Map.get(&1, :unscored, false))
+    end
+
+    # ⚠️ Drives `gate/2` rather than asserting a map shape: the claim is that an
+    # unscored case STOPS the gate, not merely that it carries a flag.
+    test "an unscored case refuses the verdict instead of failing it" do
+      results = [
+        %{ok: true, name: "a", detail: ""},
+        %{ok: false, name: "b", unscored: true, detail: "call failed"}
+      ]
+
+      error = assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      assert error.message =~ "INCOMPLETE",
+             "an unscored case must neither prove a regression nor clear the gate; got: " <>
+               error.message
+
+      refute error.message =~ "REGRESSION",
+             "a case that could not be scored must not be reported as the model getting " <>
+               "something wrong — that is the misattribution this class exists to prevent"
+    end
+
+    # ⛔ THE CORPUS'S OWN DECAY, which used to read as the model regressing. A
+    # fixture that was moved, renamed or never committed scored `ok: false` with
+    # no `unscored` flag — so a missing file counted against the baseline and
+    # the next person would have gone looking at the model.
+    test "a fixture the harness cannot read is unscored, not a miss" do
+      scored =
+        Vision.score_image(%{
+          path: "no/such/fixture-#{System.unique_integer([:positive])}.jpg",
+          name: "missing",
+          expect_book: true,
+          expect_isbn: nil
+        })
+
+      assert scored.unscored,
+             "an unreadable fixture is a fact about the corpus, not an answer from the " <>
+               "model — scoring it as a miss makes corpus decay look like regression"
+
+      assert scored.detail =~ "the corpus, not the model"
+    end
+
+    # ⚖️ ANTI-VACUITY: without this, a `gate/2` that raised INCOMPLETE on
+    # everything would pass the case above.
+    test "a fully scored run reaches a verdict" do
+      results = [%{ok: true, name: "a", detail: ""}]
+
+      error = assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      refute error.message =~ "INCOMPLETE",
+             "a run with nothing unscored must reach a baseline verdict, not refuse one"
+    end
+  end
 end

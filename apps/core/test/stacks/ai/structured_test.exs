@@ -80,6 +80,22 @@ defmodule Stacks.AI.StructuredTest do
       assert {:ok, []} = Structured.decode(Responses.fenced_empty())
     end
 
+    # ⛔ THE SHAPE THE SCHEMA ACTUALLY ASKS FOR. `association_schema/0` wraps the
+    # array in an object, because an array root is undocumented on this
+    # provider — so a model that OBEYS the schema sends this, and refusing it
+    # would make the schema's own success look like a parse failure.
+    test "the wrapped object the schema asks for decodes" do
+      raw = ~s({"associations": [{"book_id": "abc", "confidence": 0.7, "reasoning": "named"}]})
+
+      assert {:ok, [%{book_id: "abc", confidence: 0.7}]} = Structured.decode(raw)
+    end
+
+    test "and wrapped inside a fence, which is both at once" do
+      raw = "```json\n{\"associations\": [{\"book_id\": \"x\"}]}\n```"
+
+      assert {:ok, [%{book_id: "x"}]} = Structured.decode(raw)
+    end
+
     # ⬛ ANTI-VACUITY FOR THE FENCE HANDLING: unfenced JSON must still work. If
     # `strip_fence/1` were written to require a fence, every case above would
     # pass while the decoder broke on the response the schema is meant to
@@ -105,10 +121,20 @@ defmodule Stacks.AI.StructuredTest do
     # means the model understood the format and not the task. Collapsing it into
     # `:unparseable` would hide which is happening, and the two want different
     # fixes — a prompt change versus a parsing change.
+    # ⚠️ STILL unexpected_shape, even though it has an "associations" key — the
+    # value is not a list, so there is nothing to read. The wrapped-object case
+    # above accepts the shape; this one makes sure acceptance is about the LIST
+    # and not about the key's presence.
     test "valid JSON of the wrong shape is unexpected_shape, not unparseable" do
       raw = Responses.object_not_array()
 
       assert {:error, {:unexpected_shape, ^raw}} = Structured.decode(raw)
+    end
+
+    test "an associations key holding something other than a list is refused" do
+      raw = ~s({"associations": "none that I could find"})
+
+      assert {:error, {:unexpected_shape, _}} = Structured.decode(raw)
     end
 
     # ⚠️ One bad row must not cost the good ones. The old behaviour was

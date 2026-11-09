@@ -51,15 +51,35 @@ defmodule Stacks.AI.Structured do
       name: "book_associations",
       strict: true,
       schema: %{
-        type: "array",
-        items: %{
-          type: "object",
-          additionalProperties: false,
-          required: ["book_id"],
-          properties: %{
-            book_id: %{type: "string"},
-            confidence: %{type: "number", minimum: 0.0, maximum: 1.0},
-            reasoning: %{type: "string"}
+        # ⛔ AN OBJECT AT THE ROOT, WRAPPING THE ARRAY, AND THE REASON IS A
+        # DOCUMENTED LIMIT RATHER THAN A PREFERENCE.
+        #
+        # Together's API reference defines `json_schema` without stating a root
+        # restriction, but every example it gives uses an object; OpenAI's
+        # equivalent states the root "must be an object". An array root is
+        # therefore somewhere between unsupported and undocumented, which is not
+        # a difference worth betting the boundary on.
+        #
+        # ⚖️ `decode/2` accepts BOTH this wrapped shape and the bare array the
+        # model sends when nothing constrains it, so the two can never disagree
+        # about which is correct — and a provider that ignores the schema
+        # entirely still lands somewhere the decoder understands.
+        type: "object",
+        additionalProperties: false,
+        required: ["associations"],
+        properties: %{
+          associations: %{
+            type: "array",
+            items: %{
+              type: "object",
+              additionalProperties: false,
+              required: ["book_id"],
+              properties: %{
+                book_id: %{type: "string"},
+                confidence: %{type: "number", minimum: 0.0, maximum: 1.0},
+                reasoning: %{type: "string"}
+              }
+            }
           }
         }
       }
@@ -77,6 +97,15 @@ defmodule Stacks.AI.Structured do
   def decode(raw, _opts \\ []) when is_binary(raw) do
     case raw |> strip_fence() |> Jason.decode() do
       {:ok, items} when is_list(items) ->
+        {:ok, Enum.flat_map(items, &normalise/1)}
+
+      # ⚖️ THE SHAPE THE SCHEMA ASKS FOR. `association_schema/0` wraps the array
+      # in an object because an array root is undocumented on this provider —
+      # so a model that OBEYS the schema sends `{"associations": [...]}` while
+      # one that ignores it sends the bare array. Both are the same answer, and
+      # refusing one of them would make the schema's own success look like a
+      # parse failure.
+      {:ok, %{"associations" => items}} when is_list(items) ->
         {:ok, Enum.flat_map(items, &normalise/1)}
 
       # ⚠️ A DIFFERENT FAILURE FROM UNPARSEABLE, and worth its own name. Valid

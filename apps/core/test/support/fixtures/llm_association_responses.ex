@@ -97,10 +97,20 @@ defmodule Stacks.Test.Fixtures.LlmAssociationResponses do
   @spec truncated_at_500() :: String.t()
   def truncated_at_500, do: String.slice(fenced_three(), 0, 500)
 
-  @doc "Valid JSON that is not a list: the model answered the wrong question."
+  @doc """
+      Valid JSON that is neither a list nor the wrapped shape: the model
+      understood the format and not the task.
+
+      ⚠️ This used to be `{"associations": [], "note": …}`, which stopped being
+      a wrong shape the moment `association_schema/0` began asking for exactly
+      that wrapper — a fixture that quietly became correct while still being
+      cited as incorrect. The test caught it; it is replaced rather than
+      patched, because the thing it illustrates is prose where a list was asked
+      for.
+  """
   @spec object_not_array() :: String.t()
   def object_not_array do
-    ~s({"associations": [], "note": "No books from the catalogue are discussed."})
+    ~s({"result": "No books from the catalogue are discussed in this post."})
   end
 
   @doc "All three well-formed responses, for a test that wants the set."

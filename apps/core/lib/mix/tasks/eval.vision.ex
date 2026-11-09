@@ -96,12 +96,27 @@ defmodule Mix.Tasks.Eval.Vision do
     corpus
   end
 
-  defp score_image(%{path: path} = item) do
+  @doc false
+  # ⚠️ Public for the unreadable branch specifically, which returns BEFORE any
+  # service call and so is the one outcome of the three that can be asserted
+  # without a network. The other two need a live service and are covered at
+  # `gate/2`, where the decision they feed actually lives.
+  def score_image(%{path: path} = item) do
     full = Path.join(root(), path)
 
     case File.read(full) do
+      # ⛔ UNSCORED, NOT A MISS. A fixture the harness cannot read is a fact
+      # about the CORPUS — it was moved, renamed, or never committed — and
+      # scoring it as a wrong answer makes the corpus's own decay look like the
+      # model regressing. The three outcomes this task can reach are "wrong
+      # answer", "could not ask" and "could not read the question", and only the
+      # first is evidence about the model.
       {:error, reason} ->
-        Map.merge(item, %{ok: false, detail: "unreadable (#{inspect(reason)})"})
+        Map.merge(item, %{
+          ok: false,
+          unscored: true,
+          detail: "unreadable fixture (#{inspect(reason)}) — the corpus, not the model"
+        })
 
       {:ok, bytes} ->
         b64 = Base.encode64(bytes)
