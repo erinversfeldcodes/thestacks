@@ -169,4 +169,92 @@ suite =
                         )
                         |> Query.has [ Selector.text "Piranesi" ]
             ]
+        , describe "what the decoder requires, and the one thing it does not"
+            [ -- ⛔ THE GUARD PROTECTING THIS ISSUE'S OWN DEFECT WAS UNTESTED.
+              -- A reviewer deleted `Decode.succeed []` from the `associations`
+              -- arm and the suite still passed 2298/0 — so the decoder written
+              -- to stop an absent key becoming an empty list had reproduced
+              -- that tolerance one level up, with nothing able to tell.
+              --
+              -- ⚖️ The four keys the server always sends are now REQUIRED, and
+              -- these cases are what makes each decision fail if reversed. Each
+              -- had a specific lie waiting behind its default.
+              test "an absent associations key is a decode failure, not an empty list" <|
+                \_ ->
+                    expectDecodeFailure
+                        """
+                        { "post": { "id": "p", "user_id": "u", "title": "T", "body": "B"
+                                  , "visibility": "owner", "created_at": "", "updated_at": ""
+                                  , "published_at": "", "syndicated": true } }
+                        """
+
+            -- ⚠️ `status` defaulting to `Pending` made every association read
+            -- as pending for the owner and VANISH for anyone else, because the
+            -- component filters a non-owner's view to `Confirmed` only.
+            , test "an association without a status is a decode failure" <|
+                \_ ->
+                    expectDecodeFailure (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "book_title", "\"T\"" ), ( "confidence", "0.9" ) ])
+
+            -- ⚠️ `confidence` defaulting to `0.0` rendered "0%" with a
+            -- low-confidence badge — a number the model never gave.
+            , test "an association without a confidence is a decode failure" <|
+                \_ ->
+                    expectDecodeFailure (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "book_title", "\"T\"" ), ( "status", "\"confirmed\"" ) ])
+            , test "an association without a book_title is a decode failure" <|
+                \_ ->
+                    expectDecodeFailure (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "confidence", "0.9" ), ( "status", "\"confirmed\"" ) ])
+
+            -- ⬛ AND THE ONE GENUINE EXCEPTION. The controller DELETES
+            -- `reasoning` for a non-owner rather than blanking it, so its
+            -- absence is a real server state. This is the only fallback left,
+            -- and it is tested rather than assumed.
+            , test "an association without a reasoning still decodes, for a non-owner" <|
+                \_ ->
+                    let
+                        json =
+                            envelope
+                                [ ( "id", "\"a\"" )
+                                , ( "book_id", "\"b\"" )
+                                , ( "book_title", "\"Piranesi\"" )
+                                , ( "confidence", "0.9" )
+                                , ( "status", "\"confirmed\"" )
+                                ]
+                    in
+                    case Decode.decodeString BlogPost.blogPostShowDecoder json of
+                        Ok post ->
+                            Expect.equal [ "" ] (List.map .reasoning post.associations)
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            ]
         ]
+
+
+{-| A show response carrying one association built from the given fields.
+-}
+envelope : List ( String, String ) -> String
+envelope fields =
+    let
+        assoc =
+            fields
+                |> List.map (\( k, v ) -> "\"" ++ k ++ "\": " ++ v)
+                |> String.join ", "
+    in
+    """
+    { "post": { "id": "p", "user_id": "u", "title": "T", "body": "B"
+              , "visibility": "owner", "created_at": "", "updated_at": ""
+              , "published_at": "", "syndicated": true }
+    , "associations": [ {""" ++ assoc ++ """} ]
+    }
+    """
+
+
+expectDecodeFailure : String -> Expect.Expectation
+expectDecodeFailure json =
+    case Decode.decodeString BlogPost.blogPostShowDecoder json of
+        Ok _ ->
+            Expect.fail
+                "the decoder accepted a payload the server cannot produce — a default for a key that is always sent buys nothing and costs silence"
+
+        Err _ ->
+            Expect.pass

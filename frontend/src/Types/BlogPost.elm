@@ -299,11 +299,23 @@ blogPostShowDecoder =
     Decode.map2
         (\post associations -> { post | associations = associations })
         (Decode.field "post" blogPostDecoder)
-        (Decode.oneOf
-            [ Decode.field "associations" (Decode.list associationDecoder)
-            , Decode.succeed []
-            ]
-        )
+        -- ⛔ REQUIRED, NOT DEFAULTED, AND THAT IS THE WHOLE POINT OF THIS
+        -- DECODER EXISTING.
+        --
+        -- It was `oneOf [ field, succeed [] ]`, which is the exact mechanism of
+        -- the defect this decoder was written to fix: the generated proto
+        -- decoder's `D.oneOf [ …, D.succeed [] ]` turned an absent key into an
+        -- empty list, silently, and the component rendered nothing on every
+        -- load. Reproducing that tolerance one level up meant a reviewer could
+        -- DELETE the guard and the suite still passed 2298/0.
+        --
+        -- ⚖️ `GET /api/blog/posts/:id` always emits `associations` (possibly
+        -- `[]`) — `blog_controller.ex` sends it unconditionally, and all three
+        -- call sites of this decoder hit that one endpoint. So an absent key is
+        -- not a shape the server can produce, and tolerating it only buys
+        -- silence if a producer change ever does. Failing loudly is what makes
+        -- such a change visible.
+        (Decode.field "associations" (Decode.list associationDecoder))
 
 
 {-| An association as the envelope sends it.
@@ -318,12 +330,23 @@ associationDecoder =
     Decode.map6 BookAssociation
         (Decode.field "id" Decode.string)
         (Decode.field "book_id" Decode.string)
-        (Decode.oneOf [ Decode.field "book_title" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf [ Decode.field "confidence" Decode.float, Decode.succeed 0.0 ])
+        -- ⚖️ `book_title`, `confidence` and `status` are REQUIRED, because the
+        -- only producer always sends them: `proto_json.ex`'s
+        -- `blog_association/2` merges `book_title` and `status`
+        -- unconditionally, and `confidence` is `null: false` on the column and
+        -- always serialized. A default for a key the server cannot omit buys
+        -- nothing and costs silence — and each of these three had a specific
+        -- lie waiting: `status` defaulting to `Pending` makes every
+        -- association read as pending for the owner and **vanish** for anyone
+        -- else, and `confidence` defaulting to `0.0` renders "0%" with a
+        -- low-confidence badge.
+        (Decode.field "book_title" Decode.string)
+        (Decode.field "confidence" Decode.float)
+        -- ⬛ `reasoning` IS the exception, and the only honest fallback here:
+        -- the controller DELETES the key for a non-owner rather than blanking
+        -- it, so its absence is a real server state and carries meaning.
         (Decode.oneOf [ Decode.field "reasoning" Decode.string, Decode.succeed "" ])
-        (Decode.map statusFromString
-            (Decode.oneOf [ Decode.field "status" Decode.string, Decode.succeed "" ])
-        )
+        (Decode.map statusFromString (Decode.field "status" Decode.string))
 
 
 statusFromString : String -> AssociationStatus
