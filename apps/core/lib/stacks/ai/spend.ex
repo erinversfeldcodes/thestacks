@@ -3,7 +3,7 @@ defmodule Stacks.AI.Spend do
       What an AI provider has cost us this period, as a durable fact.
 
       ⛔ THIS EXISTS BECAUSE THE BUDGET USED TO RESET WHENEVER THE MACHINE
-      IDLED. `Stacks.AI.BudgetTracker` holds its totals in GenServer state and
+      IDLED. `Stacks.AI.Budget` holds its totals in GenServer state and
       references `Repo` nowhere — so on a node that scales to zero, the ceiling
       was restored by going quiet, the restore was invisible, and the only way
       to exceed a daily cap was to stay busy enough to keep the node alive.

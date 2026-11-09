@@ -2,7 +2,7 @@ defmodule Stacks.AI.SpendTest do
   @moduledoc """
       That the budget survives the thing that used to reset it.
 
-      ⛔ THE DEFECT THIS REPLACES: `BudgetTracker` keeps its totals in GenServer
+      ⛔ THE DEFECT THIS REPLACES: `Budget` keeps its totals in GenServer
       state and touches no database, so on a node that scales to zero the
       ceiling was restored by idling. Every case here is about a total that is
       still there after the process that recorded it is gone.

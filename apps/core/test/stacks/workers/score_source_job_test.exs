@@ -101,7 +101,7 @@ defmodule Stacks.Workers.ScoreSourceJobTest do
     end
 
     # ⛔ THE DEFECT: THIS PATH SPENT MONEY AND WAS METERED NOWHERE.
-    # `BudgetTracker` had exactly one caller — `Stacks.AI.Client` passing
+    # `Budget` had exactly one caller — `Stacks.AI.Client` passing
     # `:modal` — so every Together completion ran with no ceiling and left no
     # record of what it had cost.
     test "a completion is recorded against the together budget" do

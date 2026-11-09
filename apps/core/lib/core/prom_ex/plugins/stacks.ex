@@ -236,11 +236,11 @@ defmodule Core.PromEx.Plugins.Stacks do
         # money-metering gap permanent — deleting a declaration is not the same
         # decision as deciding not to measure something.
         sum(
-          [:stacks, :budget, :cost_recorded, :amount_cents],
+          [:stacks, :budget, :cost_recorded, :amount_micro_cents],
           event_name: [:stacks, :budget, :cost_recorded],
-          measurement: :amount_cents,
+          measurement: :amount_micro_cents,
           description:
-            "AI API spend recorded, in cents — the running total the budget guard compares against its daily and monthly limits.",
+            "AI API spend recorded, in MICRO-CENTS (1 cent = 100,000) — the running total the budget guard compares against its daily and monthly limits. Micro-cents because one LLM call costs a fraction of a cent, so a cents-shaped series would round every call to zero; the money panel divides by 10,000,000 for dollars. ⚠️ The cost-page series beside this one IS in cents — the two money metrics differ in unit as well as in writer semantics.",
           tags: [:provider]
         ),
         # ⚠️ `last_value`, and fed from the LEDGER rather than from the event

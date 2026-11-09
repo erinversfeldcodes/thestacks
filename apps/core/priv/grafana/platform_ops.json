@@ -878,7 +878,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "AI spend against budget, and refusals",
-      "description": "WHAT: AI API spend the budget guard is accumulating, and the calls it has refused. HOW: spend is increase(stacks_budget_cost_recorded_amount_cents[1h]) by provider, divided by 100 — the series is CENTS under a currencyUSD axis, and an operator reading a money panel wants money over the window, not money-per-second. Refusals are rate(stacks_budget_limit_exceeded_count_total[5m]) by provider and type (daily/monthly), and carry their own unit override because one panel unit cannot describe both money and a count. MEANS: the first series is money going out; the second is the guard actively declining AI work because a limit was already reached. A non-zero refusal rate means features that depend on the model are degraded RIGHT NOW. NOTE: this metric is a per-call INCREMENT, so sum is the correct type for it — unlike the cost series on the panel beside it, which is an idempotent restatement of a running total and is therefore a gauge. The two money metrics have opposite writer semantics; do not 'fix' them the same way. WATCH: any refusal at all is worth knowing about; a provider labelled 'other' means a metered provider was added without being declared at the emit site.",
+      "description": "WHAT: AI API spend the budget guard is accumulating, and the calls it has refused. HOW: spend is increase(stacks_budget_cost_recorded_amount_micro_cents[1h]) by provider, divided by 10,000,000 — the series is MICRO-CENTS under a currencyUSD axis (1 dollar = 10,000,000 micro-cents), and an operator reading a money panel wants money over the window, not money-per-second. Refusals are rate(stacks_budget_limit_exceeded_count_total[5m]) by provider and type (daily/monthly), and carry their own unit override because one panel unit cannot describe both money and a count. MEANS: the first series is money going out; the second is the guard actively declining AI work because a limit was already reached. A non-zero refusal rate means features that depend on the model are degraded RIGHT NOW. NOTE: this metric is a per-call INCREMENT, so sum is the correct type for it — unlike the cost series on the panel beside it, which is an idempotent restatement of a running total and is therefore a gauge. The two money metrics have opposite writer semantics; do not 'fix' them the same way. WATCH: any refusal at all is worth knowing about; a provider labelled 'other' means a metered provider was added without being declared at the emit site.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -923,7 +923,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (provider) (increase(stacks_budget_cost_recorded_amount_cents[1h])) / 100",
+          "expr": "sum by (provider) (increase(stacks_budget_cost_recorded_amount_micro_cents[1h])) / 10000000",
           "legendFormat": "spend — {{provider}}",
           "refId": "A"
         },

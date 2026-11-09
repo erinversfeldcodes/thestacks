@@ -22,7 +22,7 @@ defmodule Stacks.UploadPipelineTest do
 
   alias Core.Repo
   alias Stacks.Accounts.Guardian
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.MockClient
   alias Stacks.AI.Spend
@@ -1642,10 +1642,10 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 6 — BudgetTracker" do
+  describe "Suite 6 — Budget" do
     @tag suite: :external
     test "check_budget returns :ok when under budget" do
-      assert :ok = BudgetTracker.check_budget(:modal)
+      assert :ok = Budget.check_budget(:modal)
     end
 
     @tag suite: :external
@@ -1655,10 +1655,10 @@ defmodule Stacks.UploadPipelineTest do
       try do
         Application.put_env(:core, :ai_budget, daily_limit_cents: 1, monthly_limit_cents: 50_000)
 
-        BudgetTracker.record_cost(:modal, 200_000)
+        Budget.record_cost(:modal, 200_000)
         Process.sleep(50)
 
-        assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
+        assert {:error, :daily_limit_exceeded} = Budget.check_budget(:modal)
       after
         Application.put_env(:core, :ai_budget, original_config)
       end
@@ -1673,7 +1673,7 @@ defmodule Stacks.UploadPipelineTest do
     test "record_cost increases daily spend" do
       before = Spend.spent(:test_provider, :daily)
 
-      BudgetTracker.record_cost(:test_provider, 1_000_000)
+      Budget.record_cost(:test_provider, 1_000_000)
 
       assert Spend.spent(:test_provider, :daily) == before + 1_000_000
     end

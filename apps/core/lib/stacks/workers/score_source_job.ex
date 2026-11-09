@@ -14,7 +14,7 @@ defmodule Stacks.Workers.ScoreSourceJob do
 
   require Logger
 
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.Discovery
 
   @impl true
@@ -31,7 +31,7 @@ defmodule Stacks.Workers.ScoreSourceJob do
 
   # ⛔ THIS PATH SPENT REAL MONEY AND WAS METERED NOWHERE.
   #
-  # `BudgetTracker` had exactly one caller — `Stacks.AI.Client` passing
+  # `Budget` had exactly one caller — `Stacks.AI.Client` passing
   # `:modal` — so the Together completions ran with no ceiling and no record.
   # A runaway queue could bill without limit, and nothing afterwards could say
   # how much it had cost, because nothing was counting.
@@ -41,7 +41,7 @@ defmodule Stacks.Workers.ScoreSourceJob do
   # charging a guess — and meant every other caller of the same client went
   # unmetered.
   defp score_source(source) do
-    case BudgetTracker.check_budget(:together) do
+    case Budget.check_budget(:together) do
       {:error, limit} ->
         # ⚖️ Discarded rather than retried, deliberately. A budget ceiling is
         # not a transient fault: retrying it burns attempts against a limit

@@ -92,7 +92,7 @@ defmodule Core.PromEx.MetricAudience do
     # The DoS concern is real but weak here: the limit is a cost ceiling, not a
     # capacity one, and anyone can already infer it by watching identification
     # fail. If that changes — a per-user limit, say — revisit this first.
-    "stacks_budget_cost_recorded_amount_cents" => :public,
+    "stacks_budget_cost_recorded_amount_micro_cents" => :public,
     "stacks_budget_limit_exceeded_count_total" => :public,
     # Aggregate spend per provider, no user in it — the same audience as the
     # cost series beside them.

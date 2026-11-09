@@ -3,7 +3,7 @@ defmodule Stacks.UploadCacheTest do
       Suite 8: Cache tests for upload pipeline.
 
       Covers BookDetailCache invalidation in upload context and
-      BudgetTracker budget enforcement for vision API calls.
+      Budget budget enforcement for vision API calls.
   """
 
   use Core.DataCase, async: false
@@ -11,7 +11,7 @@ defmodule Stacks.UploadCacheTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.Spend
   alias Stacks.Books
   alias Stacks.Books.BookDetailCache
@@ -239,7 +239,7 @@ defmodule Stacks.UploadCacheTest do
     end
   end
 
-  describe "BudgetTracker budget enforcement" do
+  describe "Budget budget enforcement" do
     # ⛔ THESE TESTS USED TO POKE THE GenServer'S STRUCT AND SEND IT
     # `:reset_daily`, AND THAT WAS THE DEFECT WRITTEN DOWN AS A REQUIREMENT.
     #
@@ -270,7 +270,7 @@ defmodule Stacks.UploadCacheTest do
 
     @tag suite: :cache
     test "record_cost/2 increases daily and monthly spend" do
-      assert :ok = BudgetTracker.record_cost(:modal, 5_000_000)
+      assert :ok = Budget.record_cost(:modal, 5_000_000)
 
       assert Spend.spent(:modal, :daily) == 5_000_000
       assert Spend.spent(:modal, :monthly) == 5_000_000
@@ -278,15 +278,15 @@ defmodule Stacks.UploadCacheTest do
 
     @tag suite: :cache
     test "record_cost/2 accumulates across multiple calls" do
-      BudgetTracker.record_cost(:modal, 10_000_000)
-      BudgetTracker.record_cost(:modal, 20_000_000)
+      Budget.record_cost(:modal, 10_000_000)
+      Budget.record_cost(:modal, 20_000_000)
 
       assert Spend.spent(:modal, :daily) == 30_000_000
     end
 
     @tag suite: :cache
     test "record_cost/2 with zero cost records nothing" do
-      BudgetTracker.record_cost(:modal, 0)
+      Budget.record_cost(:modal, 0)
 
       assert Spend.spent(:modal, :daily) == 0
       assert Spend.spent(:modal, :monthly) == 0
@@ -294,23 +294,23 @@ defmodule Stacks.UploadCacheTest do
 
     @tag suite: :cache
     test "check_budget/1 returns :ok when under daily limit" do
-      BudgetTracker.record_cost(:modal, 10_000_000)
+      Budget.record_cost(:modal, 10_000_000)
 
-      assert :ok = BudgetTracker.check_budget(:modal)
+      assert :ok = Budget.check_budget(:modal)
     end
 
     @tag suite: :cache
     test "check_budget/1 refuses at the daily limit" do
-      BudgetTracker.record_cost(:modal, 50_000_000)
+      Budget.record_cost(:modal, 50_000_000)
 
-      assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
+      assert {:error, :daily_limit_exceeded} = Budget.check_budget(:modal)
     end
 
     @tag suite: :cache
     test "check_budget/1 refuses over the daily limit" do
-      BudgetTracker.record_cost(:modal, 60_000_000)
+      Budget.record_cost(:modal, 60_000_000)
 
-      assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
+      assert {:error, :daily_limit_exceeded} = Budget.check_budget(:modal)
     end
 
     # ⚖️ THE DAILY ARM IS MADE UNREACHABLE RATHER THAN MERELY UNTRIGGERED.
@@ -333,13 +333,13 @@ defmodule Stacks.UploadCacheTest do
         )
       )
 
-      BudgetTracker.record_cost(:modal, 600_000_000)
+      Budget.record_cost(:modal, 600_000_000)
 
       assert Spend.spent(:modal, :daily) < 100_000_000_000,
              "the daily limit must be out of reach, or this case says nothing " <>
                "about the monthly one"
 
-      assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
+      assert {:error, :monthly_limit_exceeded} = Budget.check_budget(:modal)
     end
 
     # ⚖️ THE OLD "DAILY RESET" CASES, RESTATED AS DATES. Yesterday being full
@@ -351,7 +351,7 @@ defmodule Stacks.UploadCacheTest do
       :ok = Spend.record(:modal, 60_000_000, yesterday)
 
       assert Spend.spent(:modal, :daily, yesterday) == 60_000_000
-      assert :ok = BudgetTracker.check_budget(:modal)
+      assert :ok = Budget.check_budget(:modal)
     end
 
     # ⚖️ The monthly ceiling must outlive a day rollover — the half a single
@@ -375,7 +375,7 @@ defmodule Stacks.UploadCacheTest do
       :ok = Spend.record(:modal, 600_000_000, first_of_month)
 
       assert Spend.spent(:modal, :monthly) >= 500_000_000
-      assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
+      assert {:error, :monthly_limit_exceeded} = Budget.check_budget(:modal)
     end
   end
 end

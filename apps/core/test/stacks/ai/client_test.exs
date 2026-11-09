@@ -5,7 +5,7 @@ defmodule Stacks.AI.ClientTest do
   # like a flake and is really a missing sandbox.
   use Core.DataCase, async: false
 
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.Client
   alias Stacks.AI.MockClient
   alias Stacks.AI.Spend

@@ -14,7 +14,7 @@ defmodule Stacks.AI.Client do
       fault.
   """
 
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.ClientBehaviour
   alias Stacks.AI.VisionError
 
@@ -64,7 +64,7 @@ defmodule Stacks.AI.Client do
   end
 
   defp do_call_vision(endpoint, payload) do
-    case BudgetTracker.check_budget(:modal) do
+    case Budget.check_budget(:modal) do
       :ok ->
         case :fuse.ask(@fuse_name, :sync) do
           :ok -> make_vision_request(endpoint, payload)
@@ -225,7 +225,7 @@ defmodule Stacks.AI.Client do
   # ⛔ CONVERTED, BECAUSE THE LEDGER'S UNIT CHANGED UNDER THIS CALLER AND NOTHING
   # HERE NOTICED.
   #
-  # `BudgetTracker.record_cost/2` moved from cents to MICRO-cents when the spend
+  # `Budget.record_cost/2` moved from cents to MICRO-cents when the spend
   # ledger was re-denominated — token pricing is quoted per million, and a cent
   # cannot express the cost of a short completion. This call site kept passing a
   # cents-denominated config value, so **every Modal call charged 1 micro-cent
@@ -240,7 +240,7 @@ defmodule Stacks.AI.Client do
     cost_cents =
       Application.get_env(:core, :modal_cost_per_call_cents, @default_modal_cost_per_call_cents)
 
-    BudgetTracker.record_cost(:modal, cost_cents * @micro_cents_per_cent)
+    Budget.record_cost(:modal, cost_cents * @micro_cents_per_cent)
   end
 
   defp configured_client do

@@ -5,13 +5,13 @@ defmodule Stacks.ObservabilityTelemetryTest do
       Verifies that telemetry events fire correctly for:
       - Vision client requests (start/stop/exception)
       - Fuse melt/blown events
-      - BudgetTracker cost recording and limit exceeded
+      - Budget cost recording and limit exceeded
       - Costs context cost recording
   """
 
   use Core.DataCase, async: false
 
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
 
   defp attach_telemetry(events) do
     test_pid = self()
@@ -111,10 +111,10 @@ defmodule Stacks.ObservabilityTelemetryTest do
     test "emits cost_recorded event on record_cost" do
       attach_telemetry([[:stacks, :budget, :cost_recorded]])
 
-      :ok = BudgetTracker.record_cost(:modal, 42)
+      :ok = Budget.record_cost(:modal, 42)
 
-      assert_receive {:telemetry_event, [:stacks, :budget, :cost_recorded], %{amount_cents: 42},
-                      %{provider: "modal"}}
+      assert_receive {:telemetry_event, [:stacks, :budget, :cost_recorded],
+                      %{amount_micro_cents: 42}, %{provider: "modal"}}
     end
 
     # ⚠️ Driven through `check_budget/1` rather than the GenServer's
@@ -126,8 +126,8 @@ defmodule Stacks.ObservabilityTelemetryTest do
         [:stacks, :budget, :limit_exceeded]
       ])
 
-      :ok = BudgetTracker.record_cost(:modal, 60_000_000)
-      {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
+      :ok = Budget.record_cost(:modal, 60_000_000)
+      {:error, :daily_limit_exceeded} = Budget.check_budget(:modal)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},
                       %{provider: "modal", type: :daily}}
@@ -154,8 +154,8 @@ defmodule Stacks.ObservabilityTelemetryTest do
 
       on_exit(fn -> Application.delete_env(:core, :ai_budget) end)
 
-      :ok = BudgetTracker.record_cost(:modal, 600_000_000)
-      {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
+      :ok = Budget.record_cost(:modal, 600_000_000)
+      {:error, :monthly_limit_exceeded} = Budget.check_budget(:modal)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},
                       %{provider: "modal", type: :monthly}}

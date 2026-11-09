@@ -133,7 +133,7 @@ defmodule Core.PromEx.MetricLabelTest do
     provider:
       "AI provider the budget tracker meters. ⚠️ NOT bounded by its caller — it arrives as " <>
         "`to_string/1` on a caller-supplied atom — so it is bounded AT THE EMIT SITE against " <>
-        "`BudgetTracker.telemetry_providers/0`, with anything else collapsing to \"other\"",
+        "`Budget.telemetry_providers/0`, with anything else collapsing to \"other\"",
     service:
       "platform cost service name. ⚠️ The COLUMN is free text with no validation, so this is " <>
         "bounded at the emit site against `Costs.telemetry_services/0` — the ten names the module " <>

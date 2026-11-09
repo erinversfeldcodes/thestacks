@@ -11,7 +11,7 @@ end
 defmodule Stacks.UploadTelemetryTest do
   @moduledoc """
       Suite 11 — telemetry for the upload pipeline: SubscriberWorker
-      handler errors, Oban job lifecycle, BudgetTracker state changes,
+      handler errors, Oban job lifecycle, Budget state changes,
       Phoenix request telemetry on upload endpoints, circuit-breaker
       behaviour, and cost tracking, across the 111 upload user stories.
   """
@@ -23,7 +23,7 @@ defmodule Stacks.UploadTelemetryTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.Client
   alias Stacks.AI.Spend
   alias Stacks.Events.SubscriberWorker
@@ -363,7 +363,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — BudgetTracker spend tracking for metrics" do
+  describe "Suite 11 — Budget spend tracking for metrics" do
     # ⛔ THESE FOUR TESTS ASSERTED A SECOND COPY OF THE SPEND THAT NO LONGER
     # EXISTS.
     #
@@ -383,7 +383,7 @@ defmodule Stacks.UploadTelemetryTest do
     test "record_cost increases the daily total" do
       before = Spend.spent(:modal, :daily)
 
-      :ok = BudgetTracker.record_cost(:modal, 4_200_000)
+      :ok = Budget.record_cost(:modal, 4_200_000)
 
       assert Spend.spent(:modal, :daily) == before + 4_200_000
     end
@@ -392,15 +392,15 @@ defmodule Stacks.UploadTelemetryTest do
     test "record_cost increases the monthly total" do
       before = Spend.spent(:modal, :monthly)
 
-      :ok = BudgetTracker.record_cost(:modal, 10_000_000)
+      :ok = Budget.record_cost(:modal, 10_000_000)
 
       assert Spend.spent(:modal, :monthly) == before + 10_000_000
     end
 
     @tag suite: :telemetry
     test "each provider is metered separately" do
-      :ok = BudgetTracker.record_cost(:modal, 2_500_000)
-      :ok = BudgetTracker.record_cost(:together, 1_500_000)
+      :ok = Budget.record_cost(:modal, 2_500_000)
+      :ok = Budget.record_cost(:together, 1_500_000)
 
       assert Spend.spent(:modal, :daily) == 2_500_000
       assert Spend.spent(:together, :daily) == 1_500_000
@@ -425,10 +425,10 @@ defmodule Stacks.UploadTelemetryTest do
           monthly_limit_cents: 50_000
         )
 
-        BudgetTracker.record_cost(:telemetry_test, 1_100_000)
+        Budget.record_cost(:telemetry_test, 1_100_000)
         Process.sleep(50)
 
-        assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:telemetry_test)
+        assert {:error, :daily_limit_exceeded} = Budget.check_budget(:telemetry_test)
       after
         Application.put_env(:core, :ai_budget, original_config)
       end
@@ -444,10 +444,10 @@ defmodule Stacks.UploadTelemetryTest do
           monthly_limit_cents: 5
         )
 
-        BudgetTracker.record_cost(:monthly_test, 600_000)
+        Budget.record_cost(:monthly_test, 600_000)
         Process.sleep(50)
 
-        assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:monthly_test)
+        assert {:error, :monthly_limit_exceeded} = Budget.check_budget(:monthly_test)
       after
         Application.put_env(:core, :ai_budget, original_config)
       end

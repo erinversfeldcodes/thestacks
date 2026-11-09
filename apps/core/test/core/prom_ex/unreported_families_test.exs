@@ -26,11 +26,11 @@ defmodule Core.PromEx.UnreportedFamiliesTest do
 
   alias Core.PromEx.MetricAudience
   alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
 
   # family => the event that must produce it
   @families %{
-    "stacks_budget_cost_recorded_amount_cents" => [:stacks, :budget, :cost_recorded],
+    "stacks_budget_cost_recorded_amount_micro_cents" => [:stacks, :budget, :cost_recorded],
     "stacks_budget_limit_exceeded_count_total" => [:stacks, :budget, :limit_exceeded],
     "stacks_costs_recorded_amount_cents" => [:stacks, :costs, :recorded],
     "stacks_fuse_melt_count_total" => [:stacks, :fuse, :melt],
@@ -43,6 +43,19 @@ defmodule Core.PromEx.UnreportedFamiliesTest do
     output = PromEx.get_metrics(Core.PromEx)
     refute output == :prom_ex_down, "Core.PromEx must be running for this test"
     output
+  end
+
+  # Reads the `together` provider's current micro-cent total out of the scrape.
+  # Returns 0 before the series exists, so the delta works on a cold registry.
+  defp together_micro_cents do
+    scrape()
+    |> lines_for("stacks_budget_cost_recorded_amount_micro_cents")
+    |> Enum.find_value(0, fn line ->
+      case Regex.run(~r/provider="together"\}\s+([0-9.e+]+)/, line) do
+        [_, value] -> value |> Float.parse() |> elem(0) |> round()
+        _ -> nil
+      end
+    end)
   end
 
   defp lines_for(output, family) do
@@ -65,7 +78,7 @@ defmodule Core.PromEx.UnreportedFamiliesTest do
       # the registry had been put there by this test. The registry is global and
       # accumulates across tests in a run, so a presence fixture can silently
       # satisfy a sibling's assertion.
-      :telemetry.execute([:stacks, :budget, :cost_recorded], %{amount_cents: 7}, %{
+      :telemetry.execute([:stacks, :budget, :cost_recorded], %{amount_micro_cents: 7}, %{
         provider: "other"
       })
 
@@ -156,24 +169,54 @@ defmodule Core.PromEx.UnreportedFamiliesTest do
     test "a known provider passes through unchanged" do
       # Through the real API, so the assertion is about `bounded_provider/1`
       # and not about what this test chose to emit.
-      BudgetTracker.record_cost(:modal, 3)
+      Budget.record_cost(:modal, 3)
 
       output = scrape()
 
       assert Enum.any?(
-               lines_for(output, "stacks_budget_cost_recorded_amount_cents"),
+               lines_for(output, "stacks_budget_cost_recorded_amount_micro_cents"),
                &String.contains?(&1, ~s(provider="modal"))
              ),
              "a declared provider must label as itself — a bounding function that collapsed " <>
                "everything would pass the unknown-value test below while destroying the metric"
     end
 
+    # ⛔ THE UNIT, ASSERTED AT THE SCRAPE — the assertion the old suite lacked.
+    #
+    # The measurement was named `amount_cents` while carrying micro-cents, so a
+    # PUBLIC metric `…_amount_cents` and the money panel dividing it by 100 both
+    # reported 100,000× the real spend. Every test passed throughout: they
+    # asserted the key they were given rather than what the number meant, which
+    # is how a unit lie survives a green suite.
+    #
+    # ⚖️ So this pins the VALUE through the whole pipe. One cent in must scrape
+    # as 100,000, and the name must say micro-cents. A future "tidy-up" that
+    # converts at the emit, or renames the series back, reds this.
+    test "one cent of spend scrapes as 100,000 micro-cents, under a name that says so" do
+      # ⚖️ The DELTA across one record, not the absolute value: this is a
+      # cumulative `sum` and the whole suite shares one registry, so an absolute
+      # assertion passes or fails on test order rather than on the unit. (It
+      # did: it passed alone and failed in the full suite.)
+      before = together_micro_cents()
+
+      Budget.record_cost(:together, 100_000)
+
+      assert together_micro_cents() - before == 100_000,
+             "one cent recorded as 100,000 micro-cents moved the series by " <>
+               "#{together_micro_cents() - before} — the value is being converted " <>
+               "somewhere, and the money panel's divisor assumes it is not"
+
+      refute scrape() =~ "stacks_budget_cost_recorded_amount_cents ",
+             "a series named `amount_cents` is carrying micro-cents again — the exact " <>
+               "shape that put 100,000× the real spend on a transparency dashboard"
+    end
+
     test "an undeclared provider collapses to other" do
       # The shape that made this unbounded: a caller passing any atom at all.
-      BudgetTracker.record_cost(:some_provider_nobody_declared, 5)
+      Budget.record_cost(:some_provider_nobody_declared, 5)
 
       output = scrape()
-      lines = lines_for(output, "stacks_budget_cost_recorded_amount_cents")
+      lines = lines_for(output, "stacks_budget_cost_recorded_amount_micro_cents")
 
       refute Enum.any?(lines, &String.contains?(&1, "some_provider_nobody_declared")),
              "an undeclared provider reached the label set; `provider` is `to_string/1` on " <>
@@ -192,7 +235,7 @@ defmodule Core.PromEx.UnreportedFamiliesTest do
       # bypasses the bounding, which lives at the emit site inside this
       # function, so the test would have been asserting its own fixture rather
       # than the code. The provider test above goes through
-      # `BudgetTracker.record_cost/2` for the same reason.
+      # `Budget.record_cost/2` for the same reason.
       {:ok, _} =
         Stacks.Costs.upsert_cost(%{
           category: "compute",

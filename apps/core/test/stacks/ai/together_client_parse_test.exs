@@ -225,7 +225,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
   describe "what the completion is charged" do
     # ⛔ THE CHARGE FOLLOWS THE RESPONSE, NOT A PROMPT-SIDE ESTIMATE.
     #
-    # This path billed invisibly: `BudgetTracker` had one caller passing
+    # This path billed invisibly: `Budget` had one caller passing
     # `:modal`, so every Together completion spent unmetered. The number that
     # matters is the provider's — a completion that stops early, a retried
     # generation or a tokeniser disagreement all move it away from anything the

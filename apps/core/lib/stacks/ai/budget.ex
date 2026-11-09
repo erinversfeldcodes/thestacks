@@ -1,4 +1,4 @@
-defmodule Stacks.AI.BudgetTracker do
+defmodule Stacks.AI.Budget do
   @moduledoc """
       The ceiling on AI API spend, per provider, per period.
 
@@ -72,14 +72,25 @@ defmodule Stacks.AI.BudgetTracker do
       caller is in, which a separate process could not join.
   """
   @spec record_cost(atom() | String.t(), non_neg_integer()) :: :ok
-  def record_cost(provider, cost_cents) when is_integer(cost_cents) and cost_cents >= 0 do
-    Spend.record(provider, cost_cents)
+  def record_cost(provider, micro_cents) when is_integer(micro_cents) and micro_cents >= 0 do
+    Spend.record(provider, micro_cents)
 
     # ⚖️ Emitted here rather than from a GenServer, which is where it used to
     # live and the only thing that process did that nothing else does.
     :telemetry.execute(
       [:stacks, :budget, :cost_recorded],
-      %{amount_cents: cost_cents},
+      # ⛔ `amount_micro_cents`, NOT `amount_cents`. This measurement was named
+      # `amount_cents` while carrying micro-cents, and the lie travelled: a
+      # PUBLIC Prometheus metric `…_amount_cents` and the platform-ops money
+      # panel that divides it by 100 for dollars were both reporting 100,000×
+      # the real spend, on a dashboard whose stated purpose is transparency
+      # about what this costs to run.
+      #
+      # ⚖️ Renamed rather than converted. Converting to cents at the emit would
+      # round every individual call to zero — a Together completion costs a
+      # fraction of a cent, which is the entire reason the ledger meters in
+      # micro-cents — so a cents-shaped metric is either wrong or blank.
+      %{amount_micro_cents: micro_cents},
       %{provider: bounded_provider(provider)}
     )
 

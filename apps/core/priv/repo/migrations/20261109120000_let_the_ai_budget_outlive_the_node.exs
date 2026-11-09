@@ -3,7 +3,8 @@ defmodule Core.Repo.Migrations.LetTheAiBudgetOutliveTheNode do
       Spend per provider per period, as rows rather than as process state.
 
       ⛔ THE BUDGET RESET WHENEVER THE MACHINE IDLED, AND NOTHING SAID SO.
-      `Stacks.AI.BudgetTracker` is a GenServer whose totals live in a struct —
+      `Stacks.AI.Budget` (then named `BudgetTracker`) was a GenServer whose
+      totals lived in a struct —
       `providers: %{}, daily_total_cents: 0, monthly_total_cents: 0` — with no
       Repo reference anywhere in the module. On a node that scales to zero that
       is not a budget: the ceiling is restored by idling, the restore is

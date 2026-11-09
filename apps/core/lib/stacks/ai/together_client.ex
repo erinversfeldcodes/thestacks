@@ -36,7 +36,7 @@ defmodule Stacks.AI.TogetherClient do
 
   @behaviour Stacks.AI.TogetherClientBehaviour
 
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
 
   require Logger
 
@@ -111,7 +111,7 @@ defmodule Stacks.AI.TogetherClient do
   # ⛔ THE CHARGE IS MADE HERE, FROM WHAT THE RESPONSE SAYS, AND NOT BY THE
   # CALLER FROM WHAT IT GUESSED.
   #
-  # This path spent money and was metered nowhere: `BudgetTracker` had one
+  # This path spent money and was metered nowhere: `Budget` had one
   # caller, passing `:modal`, so every Together completion billed invisibly.
   # Charging in the client rather than in each worker means no caller can
   # forget — including the health-check smoke completion — and the seam does not
@@ -123,14 +123,14 @@ defmodule Stacks.AI.TogetherClient do
   # disagreement all move it. Charging from the response is what makes the
   # ledger match the invoice.
   defp charge_for(%{"usage" => %{"total_tokens" => tokens}}) when is_integer(tokens) do
-    BudgetTracker.record_cost(:together, micro_cents_for_tokens(tokens))
+    Budget.record_cost(:together, micro_cents_for_tokens(tokens))
   end
 
   # ⚖️ A response whose usage block we cannot read still cost something, and
   # recording nothing would make it free. One token's worth is the smallest
   # honest non-zero entry — it says "this happened" without inventing a size.
   defp charge_for(_decoded) do
-    BudgetTracker.record_cost(:together, micro_cents_for_tokens(1))
+    Budget.record_cost(:together, micro_cents_for_tokens(1))
   end
 
   # ⛔ NO CLAMP, BECAUSE THERE IS NOTHING LEFT TO ROUND. This used to be
@@ -255,7 +255,7 @@ defmodule Stacks.AI.TogetherClient do
     # ⚠️ Checked BEFORE the fuse, deliberately: a blown fuse is a transient
     # fault worth retrying, a spent budget is not, and the caller needs to be
     # able to tell them apart to decide whether to retry.
-    with :ok <- BudgetTracker.check_budget(:together),
+    with :ok <- Budget.check_budget(:together),
          :ok <- :fuse.ask(@fuse_name, :sync) do
       make_completion_request(prompt, opts)
     else
