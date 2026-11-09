@@ -14,10 +14,11 @@ import Components.BookAssociations
 import Expect
 import Html exposing (Html)
 import Json.Decode as Decode
+import Stacks.Api.V1.BlogResponses as Envelope
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import Types.BlogPost as BlogPost exposing (AssociationOutcome(..))
+import Types.BlogPost as BlogPost exposing (AssociationOutcome)
 
 
 render : Bool -> AssociationOutcome -> Query.Single ()
@@ -50,7 +51,7 @@ suite =
           -- CSS gate doing a test's job by accident.
           test "a failed pass says so, and says it is not permanent" <|
             \_ ->
-                render True Failed
+                render True Envelope.AssociationOutcomeUnreadableResponse
                     |> Expect.all
                         [ Query.has [ Selector.class "book-associations__note" ]
                         , Query.has
@@ -58,7 +59,7 @@ suite =
                         ]
         , test "a pass that found nothing says that instead" <|
             \_ ->
-                render True FoundNothing
+                render True Envelope.AssociationOutcomeNoBooksFound
                     |> Expect.all
                         [ Query.has [ Selector.class "book-associations__note" ]
                         , Query.has
@@ -70,40 +71,47 @@ suite =
         -- author can act on one of them.
         , test "the two outcomes do not share their copy" <|
             \_ ->
-                render True FoundNothing
+                render True Envelope.AssociationOutcomeNoBooksFound
                     |> Query.hasNot [ Selector.text "We couldn't link books to this post this time." ]
 
         -- ⚖️ A draft nobody has scanned yet says nothing at all. Claiming a
         -- result that does not exist would be worse than silence.
         , test "a pass that has not run yet says nothing" <|
             \_ ->
-                render True NotRunYet
+                render True Envelope.AssociationOutcomeUnspecified
                     |> Query.hasNot [ Selector.class "book-associations__note" ]
 
         -- ⚠️ And none of it is shown to a reader who is not the author.
         , test "a reader who is not the author is told nothing" <|
             \_ ->
-                render False Failed
+                render False Envelope.AssociationOutcomeUnreadableResponse
                     |> Query.hasNot [ Selector.class "book-associations__note" ]
         , describe "decoding the wire value"
             [ -- ⛔ ONE ASSERTION PER WIRE STRING, because three of the five had
               -- none and a reviewer proved it costs nothing to break them:
-              -- rewriting `"associated" -> NotRunYet` and
-              -- `"no_books_found" -> NotRunYet` — collapsing both successes into
+              -- rewriting `"associated" -> Envelope.AssociationOutcomeUnspecified` and
+              -- `"no_books_found" -> Envelope.AssociationOutcomeUnspecified` — collapsing both successes into
               -- the silence this issue exists to remove — left 2303 passing.
               --
               -- ⚠️ This is the function the issue records as having had three of
               -- four vocabularies disagree on ship day, with both consequences
               -- user-visible and both fixed by hand. Until the proto enum lands
               -- these five assertions are the interim guard, and the component
-              -- cases cannot stand in for them: they pass `FoundNothing` as a
+              -- cases cannot stand in for them: they pass `Envelope.AssociationOutcomeNoBooksFound` as a
               -- CONSTRUCTOR, so nothing connected the wire string
               -- `"no_books_found"` to the copy Requirement 2 asks for.
-              test "every wire string the server can send maps to its own outcome" <|
+              test "every wire string the server can send decodes to its own outcome" <|
                 \_ ->
                     Expect.equal
-                        [ Associated, FoundNothing, Failed, Failed, Failed ]
-                        (List.map BlogPost.fromProtoAssociationOutcome
+                        (Ok
+                            [ Envelope.AssociationOutcomeAssociated
+                            , Envelope.AssociationOutcomeNoBooksFound
+                            , Envelope.AssociationOutcomeUnreadableResponse
+                            , Envelope.AssociationOutcomeUnexpectedShape
+                            , Envelope.AssociationOutcomeLlmError
+                            ]
+                        )
+                        (decodeOutcomes
                             [ "associated"
                             , "no_books_found"
                             , "unreadable_response"
@@ -118,24 +126,18 @@ suite =
             , test "a pass that associated is not the same outcome as one that found nothing" <|
                 \_ ->
                     Expect.notEqual
-                        (BlogPost.fromProtoAssociationOutcome "associated")
-                        (BlogPost.fromProtoAssociationOutcome "no_books_found")
-            , test "the two failure outcomes both read as Failed" <|
-                \_ ->
-                    Expect.equal
-                        [ Failed, Failed ]
-                        (List.map BlogPost.fromProtoAssociationOutcome
-                            [ "unreadable_response", "llm_error" ]
-                        )
+                        (decodeOutcomes [ "associated" ])
+                        (decodeOutcomes [ "no_books_found" ])
 
-            -- ⚠️ An outcome this client has never heard of reads as NotRunYet,
-            -- not as Failed: the server growing a case the SPA has not been
-            -- taught must not make us claim a failure the author cannot act on.
+            -- ⚠️ An outcome this build has not been taught decodes to
+            -- UNSPECIFIED rather than to a failure: proto3 enums are open, and
+            -- claiming a failure the author cannot act on would be worse than
+            -- staying quiet about a result we cannot interpret.
             , test "an unrecognised outcome is not reported as a failure" <|
                 \_ ->
                     Expect.equal
-                        NotRunYet
-                        (BlogPost.fromProtoAssociationOutcome "something_new")
+                        (Ok [ Envelope.AssociationOutcomeUnspecified ])
+                        (decodeOutcomes [ "something_new" ])
             ]
         , describe "decoding the show response"
             [ -- ⛔ THE HAPPY PATH COULD NOT RENDER, AND NO TEST COULD SEE IT.
@@ -196,7 +198,7 @@ suite =
                                   }
                                 ]
                             , isOwner = True
-                            , outcome = Associated
+                            , outcome = Envelope.AssociationOutcomeAssociated
                             , onConfirm = always ()
                             , onDismiss = always ()
                             }
@@ -262,6 +264,22 @@ suite =
                             Expect.fail (Decode.errorToString err)
             ]
         ]
+
+
+{-| Decode a list of wire strings through the GENERATED enum decoder.
+
+⚖️ Through the generated decoder rather than a hand-written mapper, because the
+hand-written one is gone — that was the point of the enum. A new outcome on the
+contract now regenerates this decoder and breaks the exhaustive `case` in the
+component, instead of falling silently to a default.
+
+-}
+decodeOutcomes : List String -> Result Decode.Error (List AssociationOutcome)
+decodeOutcomes wire =
+    wire
+        |> List.map (\s -> "\"" ++ s ++ "\"")
+        |> List.map (Decode.decodeString Envelope.decodeAssociationOutcome)
+        |> List.foldr (Result.map2 (::)) (Ok [])
 
 
 {-| A show response carrying one association built from the given fields.

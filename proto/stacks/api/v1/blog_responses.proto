@@ -29,14 +29,78 @@ message BlogPostListResponse {
   optional string next_cursor = 2 [json_name = "next_cursor"];
 }
 
+// How the book-association pass over a post ended, so an author can be told
+// when it found nothing or could not run.
+//
+// ⛔ AN ENUM RATHER THAN A STRING, AND THE VOCABULARY WAS ALREADY DRIFTING WHEN
+// IT WAS ONE. This shipped as `string association_outcome` on
+// `stacks.common.v1.BlogPost`, with the closed set of values written down in
+// FIVE places: the CHECK constraint on `op.llm_call_log`, `Stacks.AI.CallLog`'s
+// `@outcomes`, a hand-written Elm `case`, a gated test helper's `~w()` list, and
+// a prose comment on the field itself. On the day it shipped three of them
+// disagreed — the comment omitted `unexpected_shape`, a value the worker records
+// and the constraint permits, so a client written from the contract had no
+// branch for something the server genuinely sends. A comment is not a contract.
+//
+// ⚖️ `ASSOCIATION_OUTCOME_UNSPECIFIED` means "no pass has finished for this
+// post" — a draft, or one still queued — and that is the whole reason this is an
+// enum rather than a string. An empty string reads as a confident answer from
+// any sender that did not set one, which is the same lie `PublicationState`
+// records one file over. It is also deliberately distinct from
+// `NO_BOOKS_FOUND`: a scan nobody has run and a completed scan that found
+// nothing are different facts, and the author deserves the right one.
+//
+// ⚠️ Proto3 enums are OPEN, so a client still needs a branch for a value it has
+// not been taught. What changes is that the mapping becomes exhaustive over a
+// generated type, so a NEW outcome breaks the build instead of falling silently
+// to a default.
+//
+// Wire values (strings sent by the controller): "associated",
+// "no_books_found", "unreadable_response", "unexpected_shape", "llm_error".
+enum AssociationOutcome {
+  // No pass has finished for this post. Do not render a result.
+  ASSOCIATION_OUTCOME_UNSPECIFIED = 0;
+
+  // The pass linked at least one book.
+  ASSOCIATION_OUTCOME_ASSOCIATED = 1;
+
+  // The pass completed and found no books. ⚠️ A SUCCESS, not a failure —
+  // grouping it with the errors would make a healthy post look broken.
+  ASSOCIATION_OUTCOME_NO_BOOKS_FOUND = 2;
+
+  // The model's answer could not be parsed at all.
+  ASSOCIATION_OUTCOME_UNREADABLE_RESPONSE = 3;
+
+  // The answer parsed as JSON but not as the shape asked for: the model
+  // understood the format and not the task.
+  ASSOCIATION_OUTCOME_UNEXPECTED_SHAPE = 4;
+
+  // The call to the provider failed.
+  ASSOCIATION_OUTCOME_LLM_ERROR = 5;
+}
+
 // BlogPostShowResponse is returned by GET /api/blog/posts/:id.
-// JSON shape: {post: {...}, associations: [...]}
+// JSON shape: {post: {...}, associations: [...], association_outcome: "..."}
 message BlogPostShowResponse {
   // The blog post with full content.
   stacks.common.v1.BlogPost post = 1 [json_name = "post"];
 
   // Book associations (filtered by ownership/visibility).
   repeated stacks.common.v1.BookAssociation associations = 2 [json_name = "associations"];
+
+  // ⛔ ON THE ENVELOPE, NOT ON `BlogPost`, and that placement is the point. It
+  // is not an attribute of the post — it is the result of the most recent pass
+  // OVER the post, with a different lifetime and a different source table
+  // (`op.llm_call_log`). Putting it on the message forced an `api_only`
+  // override, a `skip_fields` entry, a declared-count bump, a `KeyError` at
+  // runtime and a defaulted serializer argument; it rides here beside
+  // `associations`, which is the other thing this endpoint knows and the post
+  // does not.
+  //
+  // ⚖️ UNSPECIFIED for anyone who is not the author: a reader has no use for
+  // "we could not link books to this post", and it would disclose that the
+  // author ran the assistant at all.
+  AssociationOutcome association_outcome = 3 [json_name = "association_outcome"];
 }
 
 // AssociationActionResponse is returned by confirm/dismiss association actions.

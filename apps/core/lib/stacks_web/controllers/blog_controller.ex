@@ -83,8 +83,14 @@ defmodule StacksWeb.BlogController do
         outcome = if is_owner, do: Blog.latest_association_outcome(post.id)
 
         json(conn, %{
-          post: ProtoJSON.blog_post(post, outcome),
-          associations: associations
+          post: ProtoJSON.blog_post(post),
+          associations: associations,
+          # ⚖️ On the envelope, beside the associations — both are things this
+          # endpoint knows and the post does not. `nil` for a non-owner, which
+          # the client reads as UNSPECIFIED: a reader has no use for "we could
+          # not link books to this post", and it would disclose that the author
+          # ran the assistant at all.
+          association_outcome: outcome
         })
     end
   end

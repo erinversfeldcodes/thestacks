@@ -1,5 +1,5 @@
 module Types.BlogPost exposing
-    ( AssociationOutcome(..)
+    ( AssociationOutcome
     , AssociationStatus(..)
     , BlogPost
     , BlogPostSummary
@@ -15,11 +15,11 @@ module Types.BlogPost exposing
     , commentDecoder
     , commentId
     , commentReplies
-    , fromProtoAssociationOutcome
     , visibilityToString
     )
 
 import Json.Decode as Decode exposing (Decoder)
+import Stacks.Api.V1.BlogResponses as Envelope
 import Stacks.Common.V1.Blog as Proto
 import Types.ProtoHelpers exposing (emptyToNothing)
 
@@ -47,23 +47,23 @@ type alias BlogPost =
     }
 
 
-{-| How the book-association pass ended, for the author's eyes.
+{-| How the book-association pass over a post ended.
 
-⛔ `NotRunYet` is a distinct case and not a synonym for `FoundNothing`. A draft
-nobody has scanned and a completed scan that found no books are different facts,
-and showing the author the second when the first is true tells them something
-false about their own post.
+⛔ THIS IS THE GENERATED PROTO ENUM, NOT A HAND-WRITTEN COPY. It was a bare
+`string` on `BlogPost` with the vocabulary written down in five places, and on
+the day it shipped three of them disagreed — the `.proto` comment omitted
+`unexpected_shape`, a value the worker records and the database CHECK permits,
+so this module's `case` had no branch for something the server genuinely sends.
+Two consequences were user-visible and both were fixed by hand.
 
-⚖️ `Failed` carries no detail, deliberately. The author can act on "this did not
-work, and your post is fine"; the difference between an unparseable response and
-a provider error is ours to fix, not theirs to read.
+⚖️ Now a new outcome is a non-exhaustive-case compile error here rather than a
+silent fall-through to a default. Proto3 enums are open, so `Unspecified` still
+absorbs a value this build has not been taught — what changed is that adding one
+to the contract breaks the build instead of changing nothing.
 
 -}
-type AssociationOutcome
-    = NotRunYet
-    | Associated
-    | FoundNothing
-    | Failed
+type alias AssociationOutcome =
+    Envelope.AssociationOutcome
 
 
 type alias BlogPostSummary =
@@ -198,37 +198,13 @@ fromProtoBlogPost pb =
     , authorDisplayName = pb.authorDisplayName
     , authorHandle = pb.authorHandle
     , syndicated = pb.syndicated
-    , associationOutcome = fromProtoAssociationOutcome pb.associationOutcome
+
+    -- ⚖️ Unspecified here, and the envelope fills it — the same reason
+    -- `associations` is empty above. The outcome is not an attribute of the
+    -- post but the result of the most recent pass OVER it, so it rides
+    -- `BlogPostShowResponse` beside the associations rather than on `BlogPost`.
+    , associationOutcome = Envelope.AssociationOutcomeUnspecified
     }
-
-
-{-| ⚠️ An unrecognised outcome reads as `NotRunYet`, not as `Failed`.
-
-A string this client has never heard of means the server grew a case the SPA has
-not been taught, and claiming a failure the author can do nothing about would be
-worse than staying quiet about a pass whose result we cannot interpret.
-
--}
-fromProtoAssociationOutcome : String -> AssociationOutcome
-fromProtoAssociationOutcome raw =
-    case raw of
-        "associated" ->
-            Associated
-
-        "no_books_found" ->
-            FoundNothing
-
-        "unreadable_response" ->
-            Failed
-
-        "unexpected_shape" ->
-            Failed
-
-        "llm_error" ->
-            Failed
-
-        _ ->
-            NotRunYet
 
 
 fromProtoBlogPostSummary : Proto.BlogPostSummary -> BlogPostSummary
@@ -280,8 +256,10 @@ the viewer is known.
 -}
 blogPostShowDecoder : Decoder BlogPost
 blogPostShowDecoder =
-    Decode.map2
-        (\post associations -> { post | associations = associations })
+    Decode.map3
+        (\post associations outcome ->
+            { post | associations = associations, associationOutcome = outcome }
+        )
         (Decode.field "post" blogPostDecoder)
         -- ⛔ REQUIRED, NOT DEFAULTED, AND THAT IS THE WHOLE POINT OF THIS
         -- DECODER EXISTING.
@@ -300,6 +278,15 @@ blogPostShowDecoder =
         -- silence if a producer change ever does. Failing loudly is what makes
         -- such a change visible.
         (Decode.field "associations" (Decode.list associationDecoder))
+        -- ⚖️ Read from the envelope with the GENERATED decoder, which accepts
+        -- both the proto spelling and the lowercase wire spelling the
+        -- controller actually sends. An absent key is `Unspecified`, which is
+        -- the honest reading: no pass has finished.
+        (Decode.oneOf
+            [ Decode.field "association_outcome" Envelope.decodeAssociationOutcome
+            , Decode.succeed Envelope.AssociationOutcomeUnspecified
+            ]
+        )
 
 
 {-| An association as the envelope sends it.

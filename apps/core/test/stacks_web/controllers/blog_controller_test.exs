@@ -607,7 +607,7 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{post.id}")
         |> json_response(200)
 
-      assert body["post"]["association_outcome"] == "llm_error"
+      assert body["association_outcome"] == "llm_error"
     end
 
     # ⚠️ THE LATEST ROW, because the worker is retryable: an earlier failure
@@ -625,7 +625,7 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{post.id}")
         |> json_response(200)
 
-      assert body["post"]["association_outcome"] == "associated",
+      assert body["association_outcome"] == "associated",
              "the stale failure is still being reported — the worker is retryable, " <>
                "so the author would be told about an error that has since succeeded"
     end
@@ -652,7 +652,7 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{mine.id}")
         |> json_response(200)
 
-      assert body["post"]["association_outcome"] == "no_books_found",
+      assert body["association_outcome"] == "no_books_found",
              "the response carried another post's outcome — in production that is " <>
                "another author's"
     end
@@ -670,7 +670,7 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{post.id}")
         |> json_response(200)
 
-      assert body["post"]["association_outcome"] in [nil, ""]
+      assert body["association_outcome"] in [nil, ""]
     end
 
     # ⛔ NOT TOLD TO ANYONE ELSE. A reader has no use for "we could not link
@@ -695,7 +695,7 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{post.id}")
         |> json_response(200)
 
-      assert body["post"]["association_outcome"] in [nil, ""],
+      assert body["association_outcome"] in [nil, ""],
              "another reader was told how the author's association pass went"
     end
   end

@@ -45,7 +45,7 @@ run_gate() {
 # A manifest matching the gate's DECLARED COUNT exactly, so a case below fails
 # on the VERDICT rather than on the population check.
 #
-# ⚠️ THIRTEEN api_only fields across four messages is not decoration — the gate
+# ⚠️ Twelve api_only fields across four messages is not decoration — the gate
 # declares exactly that, in both directions, so a sandbox of any other size
 # makes every "allows" case fail for the wrong reason and every "refuses" case
 # pass for one. These manifests were 9 across 3 while the gate carried a FLOOR
@@ -84,8 +84,7 @@ compliant_manifest() {
       field_overrides: %{
         ten: %{api_only: true},
         eleven: %{api_only: true},
-        twelve: %{api_only: true},
-        thirteen: %{api_only: true}
+        twelve: %{api_only: true}
       }
     }
   ],
@@ -104,7 +103,7 @@ compliant_manifest() {
     },
     %{
       proto_message: "Delta",
-      skip_fields: [:ten, :eleven, :twelve, :thirteen]
+      skip_fields: [:ten, :eleven, :twelve]
     }
   ]
 }
@@ -118,7 +117,7 @@ compliant_manifest
 test_case "every_api_only_field_skipped_passes" "the gate allows a manifest that skips them all"
 run_gate
 assert_exit_zero "$RC" "the gate passes"
-assert_contains "$OUT" "13 api_only field(s) across 4 message(s)" "it reports what it actually read"
+assert_contains "$OUT" "12 api_only field(s) across 4 message(s)" "it reports what it actually read"
 
 # --- one unskipped api_only field fails -------------------------------------
 
@@ -157,8 +156,7 @@ write_manifest <<'EOF'
       field_overrides: %{
         ten: %{api_only: true},
         eleven: %{api_only: true},
-        twelve: %{api_only: true},
-        thirteen: %{api_only: true}
+        twelve: %{api_only: true}
       }
     }
   ],
@@ -177,7 +175,7 @@ write_manifest <<'EOF'
     },
     %{
       proto_message: "Delta",
-      skip_fields: [:ten, :eleven, :twelve, :thirteen]
+      skip_fields: [:ten, :eleven, :twelve]
     }
   ]
 }
@@ -238,8 +236,7 @@ write_manifest <<'EOF'
       field_overrides: %{
         ten: %{api_only: true},
         eleven: %{api_only: true},
-        twelve: %{api_only: true},
-        thirteen: %{api_only: true}
+        twelve: %{api_only: true}
       }
     }
   ],
@@ -282,7 +279,7 @@ test_case "an_empty_manifest_is_refused" "a clean verdict over nothing is refuse
 run_gate
 assert_exit_nonzero "$RC" "the gate refuses rather than reporting a clean manifest"
 assert_contains "$OUT" "parsed 0 api_only field(s)" "the refusal says what it read"
-assert_contains "$OUT" "expected exactly 13 across 4" "and what it expected"
+assert_contains "$OUT" "expected exactly 12 across 4" "and what it expected"
 assert_contains "$OUT" "stopped matching" "and names the likely cause"
 
 # --- the floor is below the real manifest, and the real manifest passes -----
@@ -340,8 +337,7 @@ write_manifest <<'EOF'
       field_overrides: %{
         ten: %{api_only: true},
         eleven: %{api_only: true},
-        twelve: %{api_only: true},
-        thirteen: %{api_only: true}
+        twelve: %{api_only: true}
       }
     }
   ],
@@ -360,7 +356,7 @@ write_manifest <<'EOF'
     },
     %{
       proto_message: "Delta",
-      skip_fields: [:ten, :eleven, :twelve, :thirteen]
+      skip_fields: [:ten, :eleven, :twelve]
     }
   ]
 }
@@ -369,7 +365,7 @@ EOF
 test_case "fewer_fields_than_declared_is_refused" "a floor would have passed this"
 run_gate
 assert_exit_nonzero "$RC" "eleven fields against a declared twelve is refused"
-assert_contains "$OUT" "expected exactly 13 across 4" "the refusal states the declared count"
+assert_contains "$OUT" "expected exactly 12 across 4" "the refusal states the declared count"
 assert_contains "$OUT" "FEWER means" "and distinguishes a drifted parse from a removed flag"
 
 # MORE than declared: thirteen fields across four messages, all correctly skipped,
@@ -407,8 +403,7 @@ write_manifest <<'EOF'
       field_overrides: %{
         ten: %{api_only: true},
         eleven: %{api_only: true},
-        twelve: %{api_only: true},
-        thirteen: %{api_only: true}
+        twelve: %{api_only: true}
       }
     }
   ],
@@ -427,7 +422,7 @@ write_manifest <<'EOF'
     },
     %{
       proto_message: "Delta",
-      skip_fields: [:ten, :eleven, :twelve, :thirteen]
+      skip_fields: [:ten, :eleven, :twelve]
     }
   ]
 }

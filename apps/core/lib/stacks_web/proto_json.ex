@@ -456,23 +456,17 @@ defmodule StacksWeb.ProtoJSON do
       denormalised projections of the author row (nil when `:user` isn't loaded;
       the frontend falls back to a generic label).
 
-      ⛔ `association_outcome` is PASSED IN rather than read off the post,
-      because there is no such column: it is the outcome of the most recent
-      finished association pass, which lives in the call log. The author was
-      previously told nothing at all — every terminal path in the worker counts
-      itself under telemetry, which reaches a dashboard and reaches the author
-      not at all, so a post whose pass failed rendered exactly like one that was
-      never tried.
-
-      ⚖️ `nil` (the default) when no pass has finished, which is deliberately
-      distinct from `"no_books_found"`: a draft nobody has scanned and a
-      completed scan that found nothing are different facts, and reporting the
-      second when the first is true tells the author something false about their
-      own post. It is also `nil` for anyone who is not the author — a reader has
-      no use for it, and it would disclose that the author ran the assistant.
+      ⚖️ `association_outcome` is NOT here. It shipped as a projected field on
+      this message and moved to `BlogPostShowResponse`, because it is not an
+      attribute of the post but the result of the most recent pass OVER it, with
+      a different lifetime and a different source table. Putting it here forced
+      an `api_only` override, a `skip_fields` entry, a declared-count bump, a
+      `KeyError` at runtime and a defaulted argument on this function — five
+      costs that the envelope does not have. It rides beside `associations`,
+      which is the other thing that endpoint knows and the post does not.
   """
-  @spec blog_post(map(), String.t() | nil) :: map()
-  def blog_post(post, association_outcome \\ nil) do
+  @spec blog_post(map()) :: map()
+  def blog_post(post) do
     Gen.blog_post(post)
     |> Map.take([
       :id,
@@ -487,7 +481,6 @@ defmodule StacksWeb.ProtoJSON do
     ])
     |> Map.put(:author_display_name, author_display_name(post))
     |> Map.put(:author_handle, author_handle(post))
-    |> Map.put(:association_outcome, association_outcome)
   end
 
   @spec author_display_name(map()) :: String.t() | nil

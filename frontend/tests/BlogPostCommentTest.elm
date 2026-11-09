@@ -7,11 +7,12 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.Blog.Post as Post exposing (Msg(..))
+import Stacks.Api.V1.BlogResponses as Envelope
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
-import Types.BlogPost as BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
+import Types.BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -275,7 +276,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
-                            , associationOutcome = BlogPost.NotRunYet
+                            , associationOutcome = Envelope.AssociationOutcomeUnspecified
                             }
 
                         model =
@@ -314,7 +315,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
-                            , associationOutcome = BlogPost.NotRunYet
+                            , associationOutcome = Envelope.AssociationOutcomeUnspecified
                             }
 
                         model =
@@ -371,7 +372,7 @@ postView { displayName, handle } =
             , authorDisplayName = displayName
             , authorHandle = handle
             , syndicated = True
-            , associationOutcome = BlogPost.NotRunYet
+            , associationOutcome = Envelope.AssociationOutcomeUnspecified
             }
 
         model =
@@ -399,7 +400,7 @@ blockMenuView { authorName } =
             , authorDisplayName = authorName
             , authorHandle = "fable_quill"
             , syndicated = True
-            , associationOutcome = BlogPost.NotRunYet
+            , associationOutcome = Envelope.AssociationOutcomeUnspecified
             }
 
         viewerModel =

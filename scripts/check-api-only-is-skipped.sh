@@ -126,7 +126,7 @@ for m in re.finditer(r'proto_message:\s*"([A-Za-z0-9_]+)"(.*?)(?=proto_message:\
 # layered ON it rather than replacing it. The fixture suite in
 # `test/platform/api_only_is_skipped_test.sh` sets the variables; nothing in
 # production does.
-EXPECTED_API_ONLY_FIELDS = 13
+EXPECTED_API_ONLY_FIELDS = 12
 EXPECTED_API_ONLY_MESSAGES = 4
 
 EXPECTED_API_ONLY_FIELDS = int(

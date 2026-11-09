@@ -3,7 +3,8 @@ module Components.BookAssociations exposing (view)
 import Html exposing (Html, button, div, p, span, text)
 import Html.Attributes exposing (class, title)
 import Html.Events exposing (onClick)
-import Types.BlogPost exposing (AssociationOutcome(..), BookAssociation)
+import Stacks.Api.V1.BlogResponses as Envelope
+import Types.BlogPost exposing (AssociationOutcome, BookAssociation)
 
 
 type alias Config msg =
@@ -56,30 +57,56 @@ viewNoAssociations config =
         text ""
 
     else
+        -- ⛔ EXHAUSTIVE OVER A GENERATED TYPE, which is the whole point of the
+        -- outcome being an enum. This used to match a hand-written sum type
+        -- whose `_ ->` catch-all swallowed `unexpected_shape` — a value the
+        -- worker records and the database permits — so one of the two failure
+        -- cases this component exists for rendered as nothing. Adding an
+        -- outcome to the contract now breaks this build instead of changing
+        -- nothing.
         case config.outcome of
-            NotRunYet ->
+            Envelope.AssociationOutcomeUnspecified ->
                 text ""
 
-            Associated ->
+            Envelope.AssociationOutcomeAssociated ->
                 -- A pass that associated books, and then the author dismissed
                 -- every one of them. Saying "we found none" here would
                 -- contradict what they just did.
                 text ""
 
-            FoundNothing ->
+            Envelope.AssociationOutcomeNoBooksFound ->
                 div [ class "book-associations book-associations--empty" ]
                     [ p [ class "book-associations__note" ]
                         [ text "No books from your shelves came up in this post." ]
                     ]
 
-            Failed ->
-                div [ class "book-associations book-associations--failed" ]
-                    [ p [ class "book-associations__note" ]
-                        -- ⚖️ "this time", because the worker is retryable and
-                        -- the author's post is fine. A permanent-sounding
-                        -- message would be wrong about the system.
-                        [ text "We couldn't link books to this post this time." ]
-                    ]
+            Envelope.AssociationOutcomeUnreadableResponse ->
+                failureNote
+
+            Envelope.AssociationOutcomeUnexpectedShape ->
+                failureNote
+
+            Envelope.AssociationOutcomeLlmError ->
+                failureNote
+
+
+{-| ⚖️ One note for all three failure outcomes, deliberately.
+
+The author can act on "this did not work, and your post is fine". Which of an
+unparseable answer, a wrong shape, or a provider error it was is ours to fix and
+not theirs to read — but they are separate enum values because the DASHBOARD
+needs to tell them apart.
+
+-}
+failureNote : Html msg
+failureNote =
+    div [ class "book-associations book-associations--failed" ]
+        [ p [ class "book-associations__note" ]
+            -- ⚖️ "this time", because the worker is retryable and
+            -- the author's post is fine. A permanent-sounding
+            -- message would be wrong about the system.
+            [ text "We couldn't link books to this post this time." ]
+        ]
 
 
 viewAssociation : Config msg -> BookAssociation -> Html msg

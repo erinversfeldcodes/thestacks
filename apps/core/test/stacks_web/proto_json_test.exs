@@ -739,30 +739,17 @@ defmodule StacksWeb.ProtoJSONTest do
                updated_at: post.updated_at,
                author_display_name: "Fable Quill",
                author_handle: user.handle,
-               syndicated: true,
-               association_outcome: nil
+               syndicated: true
              }
     end
 
-    # ⛔ THE AUTHOR WAS NEVER TOLD HOW THE ASSOCIATION PASS WENT. Every terminal
-    # path in the worker counts itself under telemetry, which reaches a
-    # dashboard and reaches the author not at all — so a post whose pass failed
-    # serialized exactly like one that was never tried.
-    test "it carries the association outcome it is given" do
-      post = insert(:post, user: insert(:user))
-
-      assert ProtoJSON.blog_post(post, "llm_error").association_outcome == "llm_error"
-    end
-
-    # ⚖️ `nil` by default, and deliberately NOT "no_books_found": a draft nobody
-    # has scanned and a completed scan that found nothing are different facts,
-    # and reporting the second when the first is true tells the author something
-    # false about their own post. It is also how a non-author gets nothing.
-    test "with no outcome given it says nothing rather than guessing one" do
-      post = insert(:post, user: insert(:user))
-
-      assert ProtoJSON.blog_post(post).association_outcome == nil
-    end
+    # ⚖️ `association_outcome` IS DELIBERATELY ABSENT FROM THIS SERIALIZER, and
+    # the exact-shape assertion above is what holds it out. It shipped here as a
+    # projected field and moved to `BlogPostShowResponse`, because it is the
+    # result of the most recent pass OVER a post rather than an attribute of it.
+    # Its behaviour is asserted where it now lives — in the controller's
+    # envelope cases — and a regression that put it back on the post would red
+    # the shape test rather than pass quietly.
 
     test "carries the syndicated flag — the take-list drops what it does not name" do
       user = insert(:user)

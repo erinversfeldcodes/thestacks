@@ -54,6 +54,7 @@ import Stacks.Api.V1.AuthResponses
 import Stacks.Api.V1.BlogResponses
     exposing
         ( AssociationActionResponse
+        , AssociationOutcome(..)
         , BlogPostListResponse
         , BlogPostResponse
         , BlogPostShowResponse
@@ -1555,7 +1556,6 @@ blogSuite =
                         , authorDisplayName = "Fable Quill"
                         , authorHandle = "fable_quill"
                         , syndicated = True
-                        , associationOutcome = ""
                         }
 
                     result =
@@ -1851,7 +1851,6 @@ blogResponseSuite =
                             , updatedAt = "2026-03-21T01:00:00Z"
                             , visibilityGroupId = ""
                             , syndicated = True
-                            , associationOutcome = ""
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             }
@@ -1964,6 +1963,7 @@ blogResponseSuite =
                               , createdAt = ""
                               }
                             ]
+                        , associationOutcome = AssociationOutcomeAssociated
                         }
 
                     result =
