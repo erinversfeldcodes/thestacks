@@ -18,6 +18,22 @@ defmodule Stacks.AI.TogetherClient do
 
   @model "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
+  @doc """
+      The model this client sends.
+
+      ⛔ EXISTS BECAUSE THE CALL LOG RECORDED A DIFFERENT ONE. The worker logged
+      `Application.get_env(:core, :together_model, "meta-llama/…")` while this
+      client sent the module attribute — **two sources of truth that agreed only
+      because the default string matched.** Setting that config key would have
+      made `op.llm_call_log.model` attribute scores to a model the client never
+      called, in the column an eval corpus is meant to group by.
+
+      ⚖️ The same defect as the vision eval's identity one directory over, and
+      the same fix: ask the thing that did the work what it did.
+  """
+  @spec model() :: String.t()
+  def model, do: @model
+
   @behaviour Stacks.AI.TogetherClientBehaviour
 
   alias Stacks.AI.BudgetTracker

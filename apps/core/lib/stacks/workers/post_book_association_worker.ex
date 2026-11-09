@@ -31,6 +31,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
   alias Core.Repo
   alias Stacks.AI.CallLog
   alias Stacks.AI.Structured
+  alias Stacks.AI.TogetherClient
   alias Stacks.Blog
   alias Stacks.Books.Book
   alias Stacks.Events
@@ -169,9 +170,10 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     :ok
   end
 
-  defp together_model do
-    Application.get_env(:core, :together_model, "meta-llama/Llama-3.3-70B-Instruct-Turbo")
-  end
+  # ⚖️ Asks the client what it sent rather than re-deriving it from config. The
+  # two used to agree only because the default string matched, which is not
+  # agreement — it is a coincidence that a deploy could end.
+  defp together_model, do: TogetherClient.model()
 
   defp emit_outcome(outcome) do
     :telemetry.execute([:stacks, :blog, :association], %{count: 1}, %{outcome: outcome})
