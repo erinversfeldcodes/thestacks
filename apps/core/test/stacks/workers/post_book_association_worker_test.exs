@@ -518,4 +518,42 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       assert Blog.list_associations(post.id) == []
     end
   end
+
+  describe "the confidence that reaches the database" do
+    # ⛔ A HALLUCINATED 1.4 OUTRANKED A CERTAIN 1.0 ON THE AUTHOR'S OWN PAGE.
+    #
+    # Nothing guarded the range — no `validate_number`, no CHECK, a plain
+    # `:float` — and `list_associations/1` orders by `confidence desc`. So the
+    # least trustworthy answer was presented first, *because* it was the most
+    # confident. Clamped at the `Structured` boundary, which is where the
+    # provider's answer becomes ours.
+    #
+    # ⚠️ Asserted HERE as well as in the decoder's own suite, because the claim
+    # that matters is about the row and the ordering, and only a run through the
+    # worker can show that.
+    test "an out-of-range confidence does not outrank a certain one" do
+      post = insert(:post, user: consenting_author())
+      certain = insert(:book)
+      overconfident = insert(:book)
+
+      MockTogetherClient.put_response(
+        {:ok,
+         ~s([{"book_id": "#{overconfident.id}", "confidence": 1.4, "reasoning": "invented"},) <>
+           ~s({"book_id": "#{certain.id}", "confidence": 1.0, "reasoning": "named"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      associations = Blog.list_associations(post.id)
+
+      assert Enum.all?(associations, &(&1.confidence <= 1.0)),
+             "a confidence above 1.0 reached the database: " <>
+               inspect(Enum.map(associations, & &1.confidence))
+
+      # ⬛ Both are now 1.0, so neither outranks the other — which is the
+      # honest outcome. The defect was not the tie; it was the invented answer
+      # sorting FIRST.
+      assert Enum.map(associations, & &1.confidence) == [1.0, 1.0]
+    end
+  end
 end

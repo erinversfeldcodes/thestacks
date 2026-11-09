@@ -435,7 +435,11 @@
     response:
       "[{\"book_id\": \"00000011-0000-4000-8000-000000000011\", \"confidence\": 1.4, \"reasoning\": \"Named.\"}]",
     notes:
-      "Above 1.0. The association is real; the number is not, and clamping versus dropping is a decision this item makes visible."
+      "Above 1.0. ⚖️ The association is real and the NUMBER is not — and the replay harness " <>
+        "cannot see the number at all, only which ids came back. That gap was found by a " <>
+        "reviewer (every confidence replaced with \"banana\" left 8/8 passing) and it is " <>
+        "why the clamp is scored in `structured_test.exs` instead. Kept here because the " <>
+        "association must SURVIVE an out-of-range confidence rather than be dropped."
   },
   %{
     name: "confidence_negative",
@@ -450,7 +454,9 @@
     ],
     response:
       "[{\"book_id\": \"00000012-0000-4000-8000-000000000012\", \"confidence\": -0.2, \"reasoning\": \"Named.\"}]",
-    notes: "Below 0. Same decision, opposite end."
+    notes:
+      "Below 0. Same claim as the high case, opposite end: the id comes back, and the number " <>
+        "it comes back with is asserted where the harness can see it."
   },
   %{
     name: "confidence_as_string",
@@ -465,7 +471,9 @@
     ],
     response:
       "[{\"book_id\": \"00000007-0000-4000-8000-000000000007\", \"confidence\": \"0.9\", \"reasoning\": \"Named.\"}]",
-    notes: "A JSON string where a number belongs — a real and common model slip."
+    notes:
+      "A JSON string where a number belongs — a real and common model slip, and the branch " <>
+        "of `as_float/1` that was still unclamped after the other two were fixed."
   },
   %{
     name: "reasoning_empty_string",

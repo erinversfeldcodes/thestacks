@@ -176,10 +176,19 @@ defmodule Stacks.AI.StructuredTest do
     # from parsing to `:unparseable`. A model quoting code in its explanation is
     # not exotic, and no test in this file saw it.
     #
-    # ⚖️ The fix is two-part and both parts are load-bearing: the fences must
-    # sit at LINE boundaries with greedy content, and `unfenced/1` keeps a
-    # stripped result only if it actually parses. The second part is what makes
-    # any future fence pattern unable to break a response that already worked.
+    # ⚖️ The fix is the OPENING ANCHOR, and that is all of it. A first attempt
+    # also carried a runtime guard that re-parsed and fell back — removed,
+    # because it probed green (the anchor makes it unreachable for anything that
+    # could parse) and because a regex trying to be exactly right plus a guard
+    # forgiving it for being wrong is two mechanisms for one job: the guard made
+    # the pattern's quality unobservable, which is how the first fix went
+    # unnoticed.
+    #
+    # ⬛ The class it defended — a fence change breaking a response that already
+    # decoded — has two confirmed instances, both from one day's edits to this
+    # one line. So it is defended by an ASSERTION instead, below: insurance
+    # never fires during the window you measure it in, which is exactly why
+    # "it probes green" is the wrong instrument for it.
 
     test "prose before the fence does not defeat it" do
       raw = "Here are the associations I found:\n\n```json\n" <> ~s([{"book_id": "a"}]) <> "\n```"
@@ -228,6 +237,133 @@ defmodule Stacks.AI.StructuredTest do
     test "an unterminated fence is unparseable" do
       assert {:error, {:unparseable, _}} =
                Structured.decode("```json\n" <> ~s([{"book_id": "e"}]))
+    end
+  end
+
+  describe "the shapes a transport produces, not a model" do
+    # ⛔ CRLF BROKE, AND IT WOULD HAVE ARRIVED AS A BLANKET FAILURE.
+    #
+    # Narrowing the fence regex's whitespace class from `\s` to `[ \t]` removed
+    # `\r` — so every fenced response over a transport using CRLF became
+    # `:unparseable` at once, rather than occasionally. Line endings are not a
+    # property of the model, which is what makes this worse than a model
+    # variant: no corpus item would have caught it.
+    test "a fenced response with CRLF line endings decodes" do
+      raw = "```json\r\n" <> ~s([{"book_id": "a", "confidence": 0.9}]) <> "\r\n```"
+
+      assert {:ok, [%{book_id: "a"}]} = Structured.decode(raw)
+    end
+
+    # ⚠️ And the two shapes that went with it. Both worked before the narrowing
+    # and neither weakens the opening anchor.
+    test "a single-line fence decodes" do
+      raw = "```json " <> ~s([{"book_id": "b"}]) <> " ```"
+
+      assert {:ok, [%{book_id: "b"}]} = Structured.decode(raw)
+    end
+
+    test "prose on the same line as the closing fence does not defeat it" do
+      raw = "```json\n" <> ~s([{"book_id": "c"}]) <> "\n``` hope that helps."
+
+      assert {:ok, [%{book_id: "c"}]} = Structured.decode(raw)
+    end
+  end
+
+  describe "the invariant the removed guard used to carry" do
+    # ⛔ THE ASSERTION THAT REPLACES THE RUNTIME FALLBACK, AND THE REASON IT IS
+    # AN ASSERTION.
+    #
+    # A guard that re-parsed and fell back would have caught a future fence
+    # pattern breaking a response that already decoded — the class that has
+    # happened twice, both times in one day, on the most-churned line in this
+    # module. But insurance never fires during the window you measure, so
+    # "it probes green" could not distinguish it from dead code, and keeping it
+    # made the regex's quality unobservable.
+    #
+    # ⚖️ So the invariant is stated instead of enforced: **anything plain JSON
+    # accepts, this decoder must also accept.** That reds the moment a regex
+    # change breaks it, keeps one mechanism, and leaves the pattern observable.
+    test "every response plain JSON can read, this decoder can read" do
+      corpus =
+        Path.join(Application.app_dir(:core), "priv/eval/association_corpus.exs")
+        |> Code.eval_file()
+        |> elem(0)
+
+      plain = Enum.filter(corpus, &match?({:ok, _}, Jason.decode(&1.response)))
+
+      assert plain != [],
+             "no corpus response is plain JSON, so this case asserts nothing — the " <>
+               "invariant needs at least one unfenced item to hold over"
+
+      for item <- plain do
+        assert match?({:ok, _}, Structured.decode(item.response)) or
+                 match?({:error, {:unexpected_shape, _}}, Structured.decode(item.response)),
+               "#{item.name} is readable by Jason.decode and this decoder reports " <>
+                 "#{inspect(Structured.decode(item.response))} — a fence change has " <>
+                 "broken a response that already worked"
+      end
+    end
+
+    # ⬛ AND THE TWO SHAPES THAT ARE NOT IN THE CORPUS, because backticks inside
+    # a string are the exact input the broken regex mangled.
+    test "backticks inside a string survive, fenced or not" do
+      unfenced = ~s([{"book_id": "d", "reasoning": "quotes ```code``` inline"}])
+      fenced = "```json\n" <> ~s([{"book_id": "e", "reasoning": "uses ``` thrice"}]) <> "\n```"
+
+      assert {:ok, [%{book_id: "d"}]} = Structured.decode(unfenced)
+      assert {:ok, [%{book_id: "e"}]} = Structured.decode(fenced)
+    end
+  end
+
+  describe "the confidence a model reports" do
+    # ⛔ A HALLUCINATED 1.4 SORTED ABOVE A CERTAIN 1.0 ON THE AUTHOR'S PAGE.
+    #
+    # Nothing guarded the range — no `validate_number`, no CHECK constraint, a
+    # plain `:float` column — and `Blog.list_associations/1` orders by
+    # `confidence desc`. So the least trustworthy answer was presented first,
+    # *because* it was the most confident.
+    #
+    # ⚠️ Found by a reviewer noting that the association corpus's eight
+    # confidence items **could not fail on a confidence value**: replacing every
+    # one with `"banana"` left 8/8 passing, and so did deleting the key. Three
+    # of those items' notes claimed to make clamping-versus-dropping visible and
+    # nothing scored it. These cases are what makes the number observable.
+    test "a confidence above one is clamped, not persisted as given" do
+      raw = ~s([{"book_id": "a", "confidence": 1.4, "reasoning": "x"}])
+
+      assert {:ok, [%{confidence: 1.0}]} = Structured.decode(raw)
+    end
+
+    test "a negative confidence is clamped to zero" do
+      raw = ~s([{"book_id": "b", "confidence": -0.2, "reasoning": "x"}])
+
+      assert {:ok, [%{confidence: +0.0}]} = Structured.decode(raw)
+    end
+
+    # ⚖️ CLAMPED, NOT DROPPED. The association is still information — the model
+    # named a book the post discusses — and only the number is out of range, so
+    # discarding the row would throw away the useful half to punish the useless
+    # one.
+    test "an out-of-range confidence keeps its association" do
+      raw = ~s([{"book_id": "c", "confidence": 99.0, "reasoning": "named twice"}])
+
+      assert {:ok, [%{book_id: "c", reasoning: "named twice"}]} = Structured.decode(raw)
+    end
+
+    # ⬛ ANTI-VACUITY: an in-range value must pass through untouched, or a
+    # clamp that returned a constant would satisfy every case above.
+    test "an in-range confidence is unchanged" do
+      raw = ~s([{"book_id": "d", "confidence": 0.37}, {"book_id": "e", "confidence": 1.0}])
+
+      assert {:ok, [%{confidence: 0.37}, %{confidence: 1.0}]} = Structured.decode(raw)
+    end
+
+    # ⚠️ And a string confidence is parsed THEN clamped — `as_float/1` has three
+    # branches and the clamp has to be on all of them.
+    test "a string confidence out of range is also clamped" do
+      raw = ~s([{"book_id": "f", "confidence": "2.5"}])
+
+      assert {:ok, [%{confidence: 1.0}]} = Structured.decode(raw)
     end
   end
 end

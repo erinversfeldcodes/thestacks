@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Eval.AssociationsTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Eval.Associations
+  alias Stacks.AI.Structured
 
   setup do
     {:ok, corpus: Associations.load_corpus()}
@@ -88,13 +89,25 @@ defmodule Mix.Tasks.Eval.AssociationsTest do
       item = Enum.find(corpus, &(&1.name == "truncated_mid_object"))
 
       assert item, "the truncated fixture is gone"
-      assert String.length(item.response) == 500
+      # ⚖️ `<=`, because the PROPERTY is "cut mid-object" and 500 is a historical
+      # detail — the cap that produced it. A 480-character cut mid-object
+      # reproduces the defect and a 500-character cut with a closed fence does
+      # not, so pinning the exact number is brittle for no return.
+      assert String.length(item.response) <= 500,
+             "the fixture is longer than the cap that produced it, so it is not what " <>
+               "the worker received"
 
       refute String.ends_with?(String.trim(item.response), "```"),
              "the fixture's fence is closed, so it was not cut mid-object"
 
-      assert {:error, _} = Jason.decode(item.response),
-             "the fixture parses, so it no longer reproduces the defect it is named for"
+      # ⛔ `Structured.decode/1`, NOT `Jason.decode/1`. The plain decoder fails on
+      # the first character of EVERY fenced item — that is why this module
+      # exists — so this assertion passed for a flawless response and its
+      # message ("the fixture parses, so it no longer reproduces the defect")
+      # claimed a guarantee it did not give. Proven: `Jason.decode` returns
+      # `:error` for `one_book_fenced`, which is a perfect fixture.
+      assert {:error, _} = Structured.decode(item.response),
+             "the fixture decodes, so it no longer reproduces the defect it is named for"
     end
   end
 
@@ -159,6 +172,14 @@ defmodule Mix.Tasks.Eval.AssociationsTest do
   end
 
   describe "the floor" do
+    # ⚖️ THIS IS THE REAL GATE, AND THE CI STEP IS THE END-TO-END CHECK.
+    #
+    # A reviewer noted the two duplicate each other, and they do — but not
+    # identically: this case names the failing items, which a task exit code
+    # cannot, and the CI step proves the task itself still runs. What was worth
+    # removing was the cost, not the step: the task now runs under `app.config`
+    # rather than `app.start`, so it no longer boots nine circuit breakers and
+    # opens a database connection to decode strings from a file.
     test "a corpus that scores perfectly passes", %{corpus: corpus} do
       results = Enum.map(corpus, &Associations.score_item/1)
 

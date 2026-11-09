@@ -137,35 +137,45 @@ defmodule Stacks.AI.Structured do
   end
 
   # ⛔ THE FENCE IS STRIPPED, NOT MATCHED EXACTLY. The model varies the opening
-  # (` ```json `, ` ```JSON `, bare ` ``` `) and whether a newline follows, and
-  # pinning one spelling would re-create the defect one variant along.
+  # (` ```json `, ` ```JSON `, bare ` ``` `), the line endings, and whether a
+  # newline follows at all — and pinning one spelling re-creates the defect one
+  # variant along. This regex has been wrong twice in two different directions,
+  # so the reasoning is written out rather than assumed:
   #
-  # ⚠️ AND IT IS FOUND, NOT REQUIRED TO BE THE WHOLE ANSWER. This regex used to
-  # be anchored `\A…\z`, so "Here are the associations I found:" before the
-  # fence — or "Let me know if you'd like more detail." after it — defeated the
-  # strip entirely and the whole response came back `:unparseable`. Chatty
-  # models do that constantly, and 16 tests in this module's suite did not see
-  # it; the association corpus found it on two items.
+  # ⚠️ **It is FOUND, not required to be the whole answer.** It used to be
+  # anchored `\A…\z`, so "Here are the associations I found:" before the fence —
+  # or "hope that helps" after it — defeated the strip entirely and the response
+  # came back `:unparseable`. Chatty models do that constantly, and 16 tests in
+  # this module's suite did not see it; the association corpus found it.
   #
-  # ⛔ THE LINE ANCHORS ARE WHAT KEEP THAT WIDENING SAFE, and they are the whole
-  # of it. An unanchored first attempt matched ``` INSIDE a JSON string — a
-  # `reasoning` field quoting ` ```code``` ` — and strip-then-parse turned a
-  # perfectly good response into garbage. Measured: both a fenced and an
-  # unfenced response carrying backticks in `reasoning` went from parsing to
-  # `:unparseable`. A model quoting a code block in its explanation is not
-  # exotic. Requiring a newline either side of both fences excludes every
-  # mid-line occurrence, and a JSON string cannot contain a raw newline, so no
-  # valid response can be caught by it.
+  # ⛔ **THE OPENING ANCHOR IS THE WHOLE OF THE SAFETY, and it has to be,
+  # because the first fix got this wrong.** Unanchoring without it matched ```
+  # INSIDE a JSON string — a `reasoning` field quoting a code block — and
+  # strip-then-parse turned a good response into garbage. `(?:\A|\r?\n)` requires
+  # the fence to sit at the start or after a RAW newline, and no input
+  # `Jason.decode/1` accepts can satisfy that inside itself: a raw newline is
+  # invalid inside a JSON string, and no line of valid JSON begins with three
+  # backticks. That is a proof rather than a probe, which matters because the
+  # alternative — a runtime guard that re-parses and falls back — makes this
+  # pattern's quality unobservable and is how the first fix went unnoticed.
   #
-  # ⚖️ The content is GREEDY, which decides one case and only one: a response
-  # carrying TWO fenced blocks spans both and fails as unparseable rather than
-  # silently returning the first. Two blocks is two answers, and picking one
-  # would be a guess presented as a result — `:unparseable` tells the author
-  # honestly and leaves the raw text in the call log for whoever looks.
+  # ⚠️ **The newlines around the content are OPTIONAL, and `\r` is matched
+  # everywhere whitespace is.** The second fix narrowed `\s` to `[ \t]` and made
+  # the inner newline mandatory, which cost three shapes that had worked:
+  # **CRLF line endings** (transport-level, so it would arrive as a blanket
+  # failure rather than an occasional one), a single-line
+  # ` ```json [...] ``` `, and prose on the same line as the closing fence.
+  # None of them weaken the anchor above.
+  #
+  # ⚖️ The content is GREEDY and there is no end anchor, which decides one case:
+  # a response carrying TWO fenced blocks spans both and fails as unparseable
+  # rather than silently returning the first. Two blocks is two answers, and
+  # picking one would be a guess presented as a result — `:unparseable` tells
+  # the author honestly and leaves the raw text in the call log.
   defp strip_fence(raw) do
     trimmed = String.trim(raw)
 
-    case Regex.run(~r/(?:\A|\n)```[a-zA-Z]*[ \t]*\n(.*)\n[ \t]*```[ \t]*(?:\n|\z)/s, trimmed) do
+    case Regex.run(~r/(?:\A|\r?\n)```[a-zA-Z]*[ \t\r]*\r?\n?(.*)\r?\n?[ \t\r]*```/s, trimmed) do
       [_, inner] -> String.trim(inner)
       _ -> trimmed
     end
@@ -191,18 +201,42 @@ defmodule Stacks.AI.Structured do
 
   defp normalise(_), do: []
 
-  defp as_float(value) when is_float(value), do: value
-  defp as_float(value) when is_integer(value), do: value * 1.0
+  # ⛔ CLAMPED TO [0, 1], AND THE PAGE IS WHY.
+  #
+  # Nothing guarded the range: no `validate_number`, no CHECK constraint, a
+  # plain `:float` column — so a model answering `1.4` had it persisted, and
+  # `Blog.list_associations/1` orders by `confidence desc`. **A hallucinated 1.4
+  # therefore sorted above a legitimate 1.0 on the author's own page**: the
+  # least trustworthy answer presented first, because it was the most confident.
+  #
+  # ⚖️ Clamped rather than dropped. The ASSOCIATION is still information — the
+  # model named a book the post discusses — and only the number is out of
+  # range, so discarding the row would throw away the useful half to punish the
+  # useless one. Clamping is the smallest edit that restores the ordering's
+  # meaning.
+  #
+  # ⚠️ Done at the BOUNDARY rather than in the changeset, because this is where
+  # the provider's answer becomes ours: a changeset rule would leave every
+  # other reader of `decode/2` holding an unclamped number.
+  defp as_float(value) when is_float(value), do: clamp(value)
+  defp as_float(value) when is_integer(value), do: clamp(value * 1.0)
 
   defp as_float(value) when is_binary(value) do
     case Float.parse(value) do
-      {float, _} -> float
+      # ⚠️ Clamped here too. `as_float/1` has three branches and a clamp on two
+      # of them is a clamp with a hole — a model sending `"2.5"` as a string
+      # went straight through, which a case caught the moment the number became
+      # observable.
+      {float, _} -> clamp(float)
       :error -> 0.0
     end
   end
 
   defp as_float(_), do: 0.0
 
+  defp clamp(value) when value < 0.0, do: 0.0
+  defp clamp(value) when value > 1.0, do: 1.0
+  defp clamp(value), do: value
   defp as_string(value) when is_binary(value), do: value
   defp as_string(nil), do: ""
   defp as_string(value), do: to_string(value)

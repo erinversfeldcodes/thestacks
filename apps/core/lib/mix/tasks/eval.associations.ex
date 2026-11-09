@@ -46,7 +46,13 @@ defmodule Mix.Tasks.Eval.Associations do
 
   @impl Mix.Task
   def run(argv) do
-    Mix.Task.run("app.start")
+    # ⚖️ `app.config`, NOT `app.start`. This eval reads one file and decodes
+    # strings: there is no provider, no network and no database in it. Starting
+    # the application booted nine circuit breakers and opened a DB connection to
+    # do that, which is cost with no purpose — and on a PR runner it is the only
+    # thing in the job that needs a configured environment at all. Loading is
+    # enough for `Application.app_dir/1` to resolve the corpus path.
+    Mix.Task.run("app.config")
     {cli, _, _} = OptionParser.parse(argv, strict: @switches)
 
     corpus =
