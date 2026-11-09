@@ -191,4 +191,56 @@ defmodule Stacks.AI.BudgetTrackerTest do
       assert_receive {:spend_gauge, %{daily_cents: 600}, _}
     end
   end
+
+  describe "the gauge in the metrics store" do
+    # ⛔ A FIRING TEST IS NOT A STORE READ-BACK, AND THIS PROJECT HAS ALREADY
+    # PAID FOR THE DIFFERENCE.
+    #
+    # The whole observability stack once shipped structurally complete, tests
+    # green, and blank: every emit was covered, every metric was declared, and
+    # no sample ever reached the store. So the question this block asks is not
+    # "did the event fire" but "does the value come back out of the thing that
+    # gets pushed".
+    #
+    # ⚖️ `PromEx.get_metrics/1` is exactly the text `MetricsPusher` POSTs to
+    # VictoriaMetrics — the same bytes, read at the same seam. That proves the
+    # series is registered, labelled and carries the ledger's number. It does
+    # NOT prove the POST arrives, which needs the deployed stack and is the
+    # remaining half of this work.
+    @tag :metrics_registry
+    test "the daily spend series comes back out of PromEx with the ledger's value" do
+      :ok = BudgetTracker.record_cost(:together, 137)
+      assert :ok = BudgetTracker.check_budget(:together)
+
+      scraped = PromEx.get_metrics(Core.PromEx)
+
+      assert is_binary(scraped),
+             "PromEx returned #{inspect(scraped)} — the exporter is not assembled, so " <>
+               "nothing could be pushed whatever the emits did"
+
+      assert scraped =~ "stacks_budget_spend_daily_cents",
+             "the series is absent from the text that gets pushed — a declared metric " <>
+               "that never reaches the exporter is the shape this project shipped blank once"
+
+      # ⬛ THE VALUE, not merely the name. A series present with no sample is
+      # exactly what a green firing test cannot distinguish from a working one.
+      #
+      # ⚠️ EVERY sample line is searched, not the first one, and that is not
+      # fussiness: PromEx's registry is process-global while the ledger is
+      # sandboxed per test, so other tests leave their own providers' samples
+      # in the same series. Taking the first line found `provider="modal"` at
+      # 0 and reported a working gauge as broken — which is the failure mode
+      # where a true assertion is attached to the wrong row.
+      lines =
+        scraped
+        |> String.split("\n")
+        |> Enum.filter(&String.starts_with?(&1, "stacks_budget_spend_daily_cents{"))
+
+      assert lines != [], "the series has a declaration but no sample line"
+
+      assert Enum.any?(lines, &(&1 =~ "137")),
+             "no sample carries the ledger's 137 cents; the lines were:\n" <>
+               Enum.join(lines, "\n")
+    end
+  end
 end
