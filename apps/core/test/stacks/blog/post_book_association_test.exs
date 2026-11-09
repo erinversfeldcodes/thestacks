@@ -83,5 +83,78 @@ defmodule Stacks.Blog.PostBookAssociationTest do
       assert changeset.valid?
       assert Ecto.Changeset.get_field(changeset, :visible) == true
     end
+
+    # ⛔ A CONFIDENCE OF 12.0 WOULD HAVE BEEN STORED AND SHOWN TO THE AUTHOR.
+    # The only bound was a clamp inside the JSON parser — correct for the
+    # model's answer, silent about every other writer of this column.
+    test "a confidence above one is refused" do
+      post = insert(:post, user: insert(:user))
+      book = insert(:book)
+
+      changeset =
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
+          post_id: post.id,
+          book_id: book.id,
+          confidence: 12.0,
+          source: "llm"
+        })
+
+      refute changeset.valid?
+      assert "must be less than or equal to 1.0" in errors_on(changeset).confidence
+    end
+
+    test "a negative confidence is refused" do
+      post = insert(:post, user: insert(:user))
+      book = insert(:book)
+
+      changeset =
+        Blog.post_book_association_changeset(%PostBookAssociation{}, %{
+          post_id: post.id,
+          book_id: book.id,
+          confidence: -0.5,
+          source: "llm"
+        })
+
+      refute changeset.valid?
+      assert "must be greater than or equal to 0.0" in errors_on(changeset).confidence
+    end
+
+    # ⬛ ANTI-VACUITY: the bounds themselves are VALID, or a changeset that
+    # rejected everything would satisfy both cases above.
+    test "the bounds themselves are accepted" do
+      post = insert(:post, user: insert(:user))
+      book = insert(:book)
+
+      for value <- [0.0, 1.0] do
+        changeset =
+          Blog.post_book_association_changeset(%PostBookAssociation{}, %{
+            post_id: post.id,
+            book_id: book.id,
+            confidence: value,
+            source: "llm"
+          })
+
+        assert changeset.valid?, "#{value} is in range and must be accepted"
+      end
+    end
+
+    # ⚖️ AND THE DATABASE REFUSES IT TOO, which is the claim that matters: the
+    # changeset is one writer's path, the CHECK holds for all of them. Driven
+    # by bypassing the changeset the way a backfill or a raw insert would.
+    test "the database refuses an out-of-range confidence even without the changeset" do
+      post = insert(:post, user: insert(:user))
+      book = insert(:book)
+
+      assert_raise Postgrex.Error, ~r/post_book_associations_confidence_in_range/, fn ->
+        Core.Repo.query!(
+          """
+          INSERT INTO op.post_book_associations
+            (id, post_id, book_id, confidence, source, visible, created_at)
+          VALUES (gen_random_uuid(), $1, $2, 12.0, 'llm', true, now())
+          """,
+          [Ecto.UUID.dump!(post.id), Ecto.UUID.dump!(book.id)]
+        )
+      end
+    end
   end
 end

@@ -635,6 +635,18 @@ defmodule Stacks.Blog do
     # changeset.
 
     |> validate_inclusion(:source, @assoc_valid_sources)
+    # ⛔ A CONFIDENCE OF 12.0 WOULD HAVE BEEN STORED AND SHOWN TO THE AUTHOR.
+    #
+    # The sibling column `discovered_sources.confidence` has had exactly this
+    # validation since it was added; this one, added later, did not — so the
+    # only bound was a clamp inside the JSON parser, which is correct for the
+    # model's answer and silent about every other writer. The range is a fact
+    # about the column, so it is also a CHECK at the database now.
+    |> validate_number(:confidence, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
+    |> check_constraint(:confidence,
+      name: :post_book_associations_confidence_in_range,
+      message: "must be between 0 and 1"
+    )
     # ⛔ A BOOK THAT DOES NOT EXIST IS AN ANSWER, NOT A CRASH.
     #
     # Without these the FK violation RAISES `Ecto.ConstraintError`, and the
