@@ -114,7 +114,29 @@ defmodule Mix.Tasks.Eval.VisionTest do
     # `Mix.shell().info` left it green, because this setup actually exercises
     # the MISMATCH path. A test that cannot say which refusal it got is
     # satisfied by the wrong one.
+    # ⛔ AND IT BRINGS ITS OWN BASELINE. It used to read the committed file,
+    # whose contents it did not control — so when that file turned out to
+    # predate model keying, this test silently started exercising a different
+    # branch than the one it is named for. A test whose subject depends on a
+    # tracked artefact's current contents is a test that changes meaning when
+    # someone edits that artefact.
     test "an unrecognised model fails rather than passing" do
+      tmp =
+        Path.join(System.tmp_dir!(), "eval-mismatch-#{System.unique_integer([:positive])}.json")
+
+      File.write!(
+        tmp,
+        ~s({"total": 2, "passed": 2, "model": "some-other-architecture", ) <>
+          ~s("modal_app": "http://localhost:8000"})
+      )
+
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(tmp)
+      end)
+
       results = [%{ok: true, name: "a", detail: ""}, %{ok: true, name: "b", detail: ""}]
 
       error =
@@ -124,6 +146,26 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
       assert error.message =~ "NO BASELINE FOR THIS MODEL",
              "expected the model-mismatch refusal; got: #{error.message}"
+
+      assert error.message =~ "some-other-architecture",
+             "the refusal should name the model the baseline WAS recorded for, or the " <>
+               "next person re-records blind"
+    end
+
+    # ⚠️ THE COMMITTED BASELINE IS A LEGACY ONE, AND THAT IS ITS OWN BRANCH.
+    # `priv/eval/vision_baseline.json` carries a score and no `model`, because
+    # it predates the keying. The generic mismatch message would read "recorded
+    # for nil" and send whoever hits it looking for a model called nil.
+    test "a baseline that names no model says so, rather than naming nil" do
+      results = [%{ok: true, name: "a", detail: ""}]
+
+      error = assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      assert error.message =~ "DOES NOT SAY WHICH MODEL IT DESCRIBES",
+             "expected the legacy-baseline refusal; got: #{error.message}"
+
+      refute error.message =~ "nil",
+             "the message names nil, which is the thing it exists to avoid"
     end
 
     # ⛔ THE HOUSE FAILURE MODE, AND IT NEEDS THE FILE GONE TO REACH IT. This
@@ -153,10 +195,58 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
     # ⚖️ ANTI-VACUITY: `--record` must still work, or the fix above would make
     # the baseline impossible to create and the gate permanently red.
+    #
+    # ⛔ AND IT RECORDS INTO A TEMP FILE, BECAUSE WITHOUT THAT IT OVERWRITES
+    # THE COMMITTED BASELINE. `_build/<env>/lib/core/priv` is a SYMLINK to
+    # `apps/core/priv`, so `Application.app_dir/1` under test does not reach a
+    # build copy — it reaches the tracked file. One run of this test replaced
+    # the real 6/6 baseline with `1/1` for a model called
+    # `a-model-with-no-baseline--576460752303423033`, and only `git status`
+    # caught it. A test that corrupts the artefact it is checking is worse
+    # than a failing one.
     test "but recording one is still allowed" do
+      tmp =
+        Path.join(System.tmp_dir!(), "eval-baseline-#{System.unique_integer([:positive])}.json")
+
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(tmp)
+      end)
+
       results = [%{ok: true, name: "a", detail: ""}]
 
       assert Vision.gate(results, true) != :error
+
+      assert File.exists?(tmp),
+             "recording wrote nothing to the override path, so this test is not " <>
+               "exercising the recording it claims to"
+    end
+
+    # ⬛ THE GUARD ON THE GUARD. If the override is ever dropped, recording goes
+    # back to writing the committed file — so this asserts the tracked baseline
+    # is untouched by a recording run, which is the property that actually
+    # matters rather than the mechanism that provides it.
+    test "recording does not touch the committed baseline" do
+      committed = Path.join(Application.app_dir(:core), "priv/eval/vision_baseline.json")
+      before = File.read(committed)
+
+      tmp =
+        Path.join(System.tmp_dir!(), "eval-baseline-#{System.unique_integer([:positive])}.json")
+
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(tmp)
+      end)
+
+      Vision.gate([%{ok: true, name: "a", detail: ""}], true)
+
+      assert File.read(committed) == before,
+             "a recording run modified the committed baseline — the gate's own reference " <>
+               "point, which outlives the test run"
     end
   end
 
@@ -422,6 +512,47 @@ defmodule Mix.Tasks.Eval.VisionTest do
       assert error.message =~ "clean_barcode",
              "the refusal should name the strata that DO exist, or the next person " <>
                "guesses twice"
+    end
+  end
+
+  describe "a baseline recorded before baselines named their model" do
+    # ⛔ THE COMMITTED BASELINE IS ONE OF THESE, AND THIS CHANGE MAKES THE
+    # DEPLOY GATE FAIL ON IT.
+    #
+    # `priv/eval/vision_baseline.json` carries `{"total": 6, "passed": 6,
+    # "recorded_at": …}` and no `model`, because it was recorded before scores
+    # were keyed by the model they describe. That is the right outcome — a
+    # score with no model cannot support a no-regression claim for any model —
+    # but the generic mismatch message would read "recorded for nil" and send
+    # whoever hits it looking for a model called nil.
+    #
+    # ⚠️ PR CI never runs this path; only a deploy does. So the message is the
+    # whole of the help available at the moment it fires.
+    test "it says the baseline names no model, not that the model is nil" do
+      identity = %{model: "Qwen/Qwen2.5-VL-7B-Instruct", modal_app: "https://example.test"}
+      legacy = ~s({"total": 6, "passed": 6, "recorded_at": "2026-08-20T10:08:09Z"})
+
+      assert {:mismatch, nil} = Vision.baseline_for(legacy, identity)
+    end
+
+    test "a baseline naming a DIFFERENT model is a different case" do
+      identity = %{model: "new-architecture", modal_app: "https://example.test"}
+
+      recorded =
+        ~s({"total": 6, "passed": 6, "model": "Qwen/Qwen2.5-VL-7B-Instruct", ) <>
+          ~s("modal_app": "https://example.test"})
+
+      assert {:mismatch, "Qwen/Qwen2.5-VL-7B-Instruct"} = Vision.baseline_for(recorded, identity)
+    end
+
+    # ⬛ ANTI-VACUITY: a baseline that DOES match must still be accepted, or the
+    # two cases above would be satisfied by a function that mismatched always.
+    test "a matching baseline is accepted" do
+      identity = %{model: "m", modal_app: "https://example.test"}
+
+      recorded = ~s({"total": 6, "passed": 6, "model": "m", "modal_app": "https://example.test"})
+
+      assert {:ok, 6} = Vision.baseline_for(recorded, identity)
     end
   end
 end

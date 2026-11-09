@@ -311,7 +311,7 @@ defmodule Mix.Tasks.Eval.Vision do
       )
     end
 
-    baseline_file = Path.join(Application.app_dir(:core), @baseline_path)
+    baseline_file = baseline_file()
     identity = model_identity()
 
     # ⛔ WRITTEN BEFORE THE VERDICT, deliberately. Every branch below can
@@ -322,49 +322,103 @@ defmodule Mix.Tasks.Eval.Vision do
     write_run_artefact(results, passed, total, unscored, identity)
     baseline = read_baseline(baseline_file, identity)
 
+    verdict(baseline, baseline_file, passed, total, identity, record?)
+  end
+
+  # ⚖️ THE DECISION, SPLIT OUT OF THE SCORING. `gate/2` counts and records;
+  # this says yes or no. They were one function until it crossed the
+  # complexity limit, and the split is the better shape regardless: the
+  # counting is arithmetic, the verdict is policy, and only one of them has
+  # five ways to refuse.
+  defp verdict(baseline, baseline_file, passed, total, identity, record?) do
     cond do
       record? ->
         write_baseline(baseline_file, passed, total, identity)
         Mix.shell().info("recorded #{passed}/#{total} as the new baseline for #{identity.model}")
 
-      # ⛔ FAILS. This used to print a note and exit 0 — a gate with nothing to
-      # compare against reporting success, which is the house failure mode: the
-      # deploy gate passed on every stack that had never recorded a baseline,
-      # and "nothing is being gated" read as "nothing is wrong".
       baseline == :absent ->
-        Mix.raise(
-          "eval.vision: NO BASELINE — nothing to compare #{passed}/#{total} against. " <>
-            "Run `mix eval.vision --record` to pin this score. A gate with no baseline " <>
-            "grants no pass."
-        )
+        Mix.raise(refusal(:absent, passed, total, identity, baseline))
 
       baseline == :unreadable ->
-        Mix.raise(
-          "eval.vision: UNREADABLE BASELINE — the file exists and could not be parsed, " <>
-            "which is not the same as having none. Fix or re-record it."
-        )
+        Mix.raise(refusal(:unreadable, passed, total, identity, baseline))
+
+      match?({:mismatch, nil}, baseline) ->
+        Mix.raise(refusal(:legacy_baseline, passed, total, identity, baseline))
 
       match?({:mismatch, _}, baseline) ->
-        {:mismatch, recorded_model} = baseline
-
-        Mix.raise(
-          "eval.vision: NO BASELINE FOR THIS MODEL — scored #{passed}/#{total} as " <>
-            "#{identity.model}, but the baseline was recorded for " <>
-            "#{inspect(recorded_model)}. A new architecture earns its own baseline " <>
-            "rather than inheriting one that describes a different system. " <>
-            "Run `mix eval.vision --record`."
-        )
+        Mix.raise(refusal(:other_model, passed, total, identity, baseline))
 
       elem(baseline, 1) > passed ->
-        Mix.raise(
-          "eval.vision: REGRESSION — scored #{passed}/#{total}, baseline is " <>
-            "#{elem(baseline, 1)} for #{identity.model}. " <>
-            "Something the vision service used to get right it now gets wrong."
-        )
+        Mix.raise(refusal(:regression, passed, total, identity, baseline))
 
       true ->
         Mix.shell().info("no regression (baseline #{elem(baseline, 1)} for #{identity.model})")
     end
+  end
+
+  # ⚖️ THE REFUSALS LIVE TOGETHER, so the five ways this gate can decline are
+  # readable side by side rather than scattered down a `cond`. They are the
+  # whole of the help available at the moment one fires — a deploy gate's
+  # message is read by someone who did not write it, under time pressure.
+  defp refusal(:absent, passed, total, _identity, _baseline) do
+    # ⛔ This used to print a note and exit 0 — a gate with nothing to compare
+    # against reporting success, which is the house failure mode: the deploy
+    # gate passed on every stack that had never recorded a baseline, and
+    # "nothing is being gated" read as "nothing is wrong".
+    "eval.vision: NO BASELINE — nothing to compare #{passed}/#{total} against. " <>
+      "Run `mix eval.vision --record` to pin this score. A gate with no baseline " <>
+      "grants no pass."
+  end
+
+  defp refusal(:unreadable, _passed, _total, _identity, _baseline) do
+    "eval.vision: UNREADABLE BASELINE — the file exists and could not be parsed, " <>
+      "which is not the same as having none. Fix or re-record it."
+  end
+
+  # ⚠️ A BASELINE RECORDED BEFORE BASELINES NAMED THEIR MODEL. The committed
+  # file predates the keying, so it carries a score and no `model` — and
+  # "recorded for nil" would send whoever hits it looking for a model called
+  # nil. It cannot support a no-regression claim for ANY model, which is the
+  # thing to say.
+  defp refusal(:legacy_baseline, passed, total, identity, _baseline) do
+    "eval.vision: THE BASELINE DOES NOT SAY WHICH MODEL IT DESCRIBES — scored " <>
+      "#{passed}/#{total} as #{identity.model}, against a baseline recorded " <>
+      "before baselines were keyed by model. A score is a fact about a model, so " <>
+      "this one cannot support a no-regression claim for any of them. " <>
+      "Run `mix eval.vision --record` against the deployed service to replace it."
+  end
+
+  defp refusal(:other_model, passed, total, identity, {:mismatch, recorded_model}) do
+    "eval.vision: NO BASELINE FOR THIS MODEL — scored #{passed}/#{total} as " <>
+      "#{identity.model}, but the baseline was recorded for " <>
+      "#{inspect(recorded_model)}. A new architecture earns its own baseline " <>
+      "rather than inheriting one that describes a different system. " <>
+      "Run `mix eval.vision --record`."
+  end
+
+  defp refusal(:regression, passed, total, identity, baseline) do
+    "eval.vision: REGRESSION — scored #{passed}/#{total}, baseline is " <>
+      "#{elem(baseline, 1)} for #{identity.model}. " <>
+      "Something the vision service used to get right it now gets wrong."
+  end
+
+  # ⛔ OVERRIDABLE, BECAUSE `Application.app_dir/1` REACHES THE TRACKED FILE.
+  #
+  # In a Mix project `_build/<env>/lib/core/priv` is a SYMLINK to
+  # `apps/core/priv`, so a `--record` run under test does not write a build
+  # copy — it writes the committed `vision_baseline.json`. One such run
+  # replaced the real 6/6 baseline with `1/1` for a model named
+  # `a-model-with-no-baseline--576460752303423033`, and the only reason it was
+  # noticed is that `git status` showed the file dirty.
+  #
+  # ⚠️ A test that can overwrite a tracked artefact is worse than a failing
+  # test: it corrupts the gate it is checking, and the corruption outlives the
+  # run. `EVAL_VISION_BASELINE_PATH` is how the suite keeps its recording in a
+  # temp directory; nothing sets it in production, where the app-dir path is
+  # the right one.
+  defp baseline_file do
+    System.get_env("EVAL_VISION_BASELINE_PATH") ||
+      Path.join(Application.app_dir(:core), @baseline_path)
   end
 
   @doc false
