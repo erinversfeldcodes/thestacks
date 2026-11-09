@@ -166,36 +166,6 @@ fromProtoVisibility pv =
             Owner
 
 
-parseAssociationStatus : String -> AssociationStatus
-parseAssociationStatus s =
-    case s of
-        "confirmed" ->
-            Confirmed
-
-        "dismissed" ->
-            Dismissed
-
-        _ ->
-            Pending
-
-
-{-| Map a proto BookAssociation to the app-level BookAssociation.
-
-The proto type now includes bookTitle and status fields, so no
-additional JSON decoding is needed.
-
--}
-fromProtoAssociation : Proto.BookAssociation -> BookAssociation
-fromProtoAssociation pa =
-    { id = pa.id
-    , bookId = pa.bookId
-    , bookTitle = pa.bookTitle
-    , confidence = pa.confidence
-    , reasoning = pa.reasoning
-    , status = parseAssociationStatus pa.status
-    }
-
-
 fromProtoBlogPost : Proto.BlogPost -> BlogPost
 fromProtoBlogPost pb =
     { id = pb.id
@@ -210,7 +180,21 @@ fromProtoBlogPost pb =
 
         else
             ""
-    , associations = List.map fromProtoAssociation pb.associations
+
+    -- ⛔ ALWAYS EMPTY HERE, AND THE ENVELOPE FILLS IT. This read
+    -- `List.map fromProtoAssociation pb.associations`, which was
+    -- STRUCTURALLY DEAD: `pb.associations` comes from an "associations" key
+    -- INSIDE the post object, and no serializer emits one — `blog_post`'s
+    -- `Map.take` excludes it, and `grep associations proto_json.ex` finds
+    -- nothing. The server sends them as a SIBLING key, which
+    -- `blogPostShowDecoder` reads and which overwrites this field anyway.
+    --
+    -- ⚠️ Measured: replacing `pb.associations` with `[]` left 2303 tests
+    -- passing. So `fromProtoAssociation` and `parseAssociationStatus` were
+    -- unreachable on every live path, and the latter duplicated
+    -- `statusFromString` verbatim two functions away — two spellings of one
+    -- rule, one of them dead. Both are deleted.
+    , associations = []
     , authorDisplayName = pb.authorDisplayName
     , authorHandle = pb.authorHandle
     , syndicated = pb.syndicated

@@ -86,7 +86,41 @@ suite =
                 render False Failed
                     |> Query.hasNot [ Selector.class "book-associations__note" ]
         , describe "decoding the wire value"
-            [ test "the two failure outcomes both read as Failed" <|
+            [ -- ⛔ ONE ASSERTION PER WIRE STRING, because three of the five had
+              -- none and a reviewer proved it costs nothing to break them:
+              -- rewriting `"associated" -> NotRunYet` and
+              -- `"no_books_found" -> NotRunYet` — collapsing both successes into
+              -- the silence this issue exists to remove — left 2303 passing.
+              --
+              -- ⚠️ This is the function the issue records as having had three of
+              -- four vocabularies disagree on ship day, with both consequences
+              -- user-visible and both fixed by hand. Until the proto enum lands
+              -- these five assertions are the interim guard, and the component
+              -- cases cannot stand in for them: they pass `FoundNothing` as a
+              -- CONSTRUCTOR, so nothing connected the wire string
+              -- `"no_books_found"` to the copy Requirement 2 asks for.
+              test "every wire string the server can send maps to its own outcome" <|
+                \_ ->
+                    Expect.equal
+                        [ Associated, FoundNothing, Failed, Failed, Failed ]
+                        (List.map BlogPost.fromProtoAssociationOutcome
+                            [ "associated"
+                            , "no_books_found"
+                            , "unreadable_response"
+                            , "unexpected_shape"
+                            , "llm_error"
+                            ]
+                        )
+
+            -- ⬛ AND THE TWO SUCCESSES ARE DISTINCT, asserted separately so a
+            -- collapse cannot hide behind a list comparison that happens to
+            -- stay the same length.
+            , test "a pass that associated is not the same outcome as one that found nothing" <|
+                \_ ->
+                    Expect.notEqual
+                        (BlogPost.fromProtoAssociationOutcome "associated")
+                        (BlogPost.fromProtoAssociationOutcome "no_books_found")
+            , test "the two failure outcomes both read as Failed" <|
                 \_ ->
                     Expect.equal
                         [ Failed, Failed ]
