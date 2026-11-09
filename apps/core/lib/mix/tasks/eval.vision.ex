@@ -196,7 +196,11 @@ defmodule Mix.Tasks.Eval.Vision do
     end)
   end
 
-  defp gate(results, record?) do
+  @doc false
+  # ⚠️ Public for the same reason the baseline reader is: this is the decision a
+  # deploy gate makes, and asserting it by running the task would need a live
+  # vision service — which is how it came to have no test at all.
+  def gate(results, record?) do
     passed = Enum.count(results, & &1.ok)
     total = length(results)
     unscored = Enum.count(results, &Map.get(&1, :unscored, false))
@@ -215,47 +219,115 @@ defmodule Mix.Tasks.Eval.Vision do
     end
 
     baseline_file = Path.join(Application.app_dir(:core), @baseline_path)
-    baseline = read_baseline(baseline_file)
+    identity = model_identity()
+    baseline = read_baseline(baseline_file, identity)
 
     cond do
       record? ->
-        write_baseline(baseline_file, passed, total)
-        Mix.shell().info("recorded #{passed}/#{total} as the new baseline")
+        write_baseline(baseline_file, passed, total, identity)
+        Mix.shell().info("recorded #{passed}/#{total} as the new baseline for #{identity.model}")
 
-      is_nil(baseline) ->
-        Mix.shell().info(
-          "no baseline recorded yet — run `mix eval.vision --record` to pin this score. " <>
-            "Nothing is being gated until you do."
+      # ⛔ FAILS. This used to print a note and exit 0 — a gate with nothing to
+      # compare against reporting success, which is the house failure mode: the
+      # deploy gate passed on every stack that had never recorded a baseline,
+      # and "nothing is being gated" read as "nothing is wrong".
+      baseline == :absent ->
+        Mix.raise(
+          "eval.vision: NO BASELINE — nothing to compare #{passed}/#{total} against. " <>
+            "Run `mix eval.vision --record` to pin this score. A gate with no baseline " <>
+            "grants no pass."
         )
 
-      passed < baseline ->
+      baseline == :unreadable ->
         Mix.raise(
-          "eval.vision: REGRESSION — scored #{passed}/#{total}, baseline is #{baseline}. " <>
+          "eval.vision: UNREADABLE BASELINE — the file exists and could not be parsed, " <>
+            "which is not the same as having none. Fix or re-record it."
+        )
+
+      match?({:mismatch, _}, baseline) ->
+        {:mismatch, recorded_model} = baseline
+
+        Mix.raise(
+          "eval.vision: NO BASELINE FOR THIS MODEL — scored #{passed}/#{total} as " <>
+            "#{identity.model}, but the baseline was recorded for " <>
+            "#{inspect(recorded_model)}. A new architecture earns its own baseline " <>
+            "rather than inheriting one that describes a different system. " <>
+            "Run `mix eval.vision --record`."
+        )
+
+      elem(baseline, 1) > passed ->
+        Mix.raise(
+          "eval.vision: REGRESSION — scored #{passed}/#{total}, baseline is " <>
+            "#{elem(baseline, 1)} for #{identity.model}. " <>
             "Something the vision service used to get right it now gets wrong."
         )
 
       true ->
-        Mix.shell().info("no regression (baseline #{baseline})")
+        Mix.shell().info("no regression (baseline #{elem(baseline, 1)} for #{identity.model})")
     end
   end
 
-  defp read_baseline(file) do
-    with {:ok, body} <- File.read(file),
-         {:ok, %{"passed" => passed}} <- Jason.decode(body) do
-      passed
-    else
-      _ -> nil
+  @doc false
+  # ⛔ THE BASELINE IS KEYED BY MODEL IDENTITY, and that is the whole point of
+  # this function rather than a detail of it.
+  #
+  # A score is a fact about a MODEL, not about the corpus. Reading only
+  # `"passed"` meant a new architecture inherited the VLM's number — so the
+  # first candidate for the vision redesign would have been gated against a
+  # baseline describing a different system, and either cleared or failed for a
+  # reason that had nothing to do with it.
+  #
+  # ⚖️ An identity mismatch is NOT a regression. It means "nothing to compare
+  # against", which is the `:no_baseline` case — a new model earns its own
+  # baseline rather than borrowing one.
+  def baseline_for(body, identity) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"passed" => passed} = recorded} ->
+        if Map.get(recorded, "model") == identity.model and
+             Map.get(recorded, "modal_app") == identity.modal_app do
+          {:ok, passed}
+        else
+          {:mismatch, Map.get(recorded, "model")}
+        end
+
+      _ ->
+        :unreadable
     end
   end
 
-  defp write_baseline(file, passed, total) do
+  defp read_baseline(file, identity) do
+    case File.read(file) do
+      {:ok, body} -> baseline_for(body, identity)
+      {:error, _} -> :absent
+    end
+  end
+
+  defp write_baseline(file, passed, total, identity) do
     File.mkdir_p!(Path.dirname(file))
 
     File.write!(
       file,
-      Jason.encode!(%{passed: passed, total: total, recorded_at: DateTime.utc_now()},
+      Jason.encode!(
+        %{
+          passed: passed,
+          total: total,
+          model: identity.model,
+          modal_app: identity.modal_app,
+          recorded_at: DateTime.utc_now()
+        },
         pretty: true
       )
     )
+  end
+
+  @doc false
+  # ⚠️ WHAT WAS SCORED, read from the same config the service call uses, so a
+  # baseline cannot be recorded against one model and compared against another
+  # without the identity changing too.
+  def model_identity do
+    %{
+      model: Application.get_env(:core, :vision_model, "unknown"),
+      modal_app: Application.get_env(:core, :vision_service_url, "unknown")
+    }
   end
 end
