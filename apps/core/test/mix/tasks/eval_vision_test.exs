@@ -27,8 +27,12 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
   @identity %{model: "qwen2-vl-7b", modal_app: "https://vision.example.test"}
 
+  # ⚠️ `"total" => nil` to match `@identity`, which these cases build by hand
+  # and which therefore carries no corpus size. The baseline is keyed to the
+  # corpus as well as the model now, so a literal 6 here would make every case
+  # below raise "THE CORPUS CHANGED SIZE" — true, and not what they are about.
   defp recorded(attrs) do
-    Jason.encode!(Map.merge(%{"passed" => 6, "total" => 6}, attrs))
+    Jason.encode!(Map.merge(%{"passed" => 6, "total" => nil}, attrs))
   end
 
   describe "a baseline belongs to a model" do
@@ -126,7 +130,7 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
       File.write!(
         tmp,
-        ~s({"total": 2, "passed": 2, "model": "some-other-architecture", ) <>
+        ~s({"total": null, "passed": 2, "model": "some-other-architecture", ) <>
           ~s("modal_app": "http://localhost:8000"})
       )
 
@@ -256,11 +260,55 @@ defmodule Mix.Tasks.Eval.VisionTest do
     # read is a fact about the CORPUS. Collapsing the last two into "miss" is
     # how a moved file or a cold service gets reported as a model regression —
     # which this task did once, and the retry comment records.
+    # ⛔ THIS TEST USED TO INVOKE NO PRODUCTION CODE AT ALL. It built a literal
+    # and asserted facts about the literal — so it passed with
+    # `lib/mix/tasks/eval.vision.ex` **deleted from the repository**, which is
+    # how a reviewer found it. And it was this issue's DoD evidence for the
+    # first of the three outcomes, so that row rested on nothing.
+    #
+    # ⚖️ Rewritten to drive `gate/2`, where the claim actually lives: a wrong
+    # answer is SCORED, so it counts against the baseline and a regression is
+    # reported. The distinction from an unscored case — which refuses the
+    # verdict instead of failing it — is the whole point of the three outcomes,
+    # and only a run can show it.
     test "a wrong answer is scored, and counts against the baseline" do
-      results = [%{ok: false, name: "a", detail: "is_book=false"}]
+      tmp = Path.join(System.tmp_dir!(), "eval-wrong-#{System.unique_integer([:positive])}.json")
+      identity = Vision.model_identity()
 
-      refute Enum.any?(results, & &1.ok)
-      refute Enum.any?(results, &Map.get(&1, :unscored, false))
+      File.write!(
+        tmp,
+        Jason.encode!(%{
+          # ⚠️ The identity's own total, so this case tests the REGRESSION arm
+          # rather than the corpus-changed one. Writing a literal 2 against an
+          # identity carrying `nil` made it raise "THE CORPUS CHANGED SIZE" —
+          # a true refusal, for the wrong reason, with my assertion still
+          # reading "REGRESSION".
+          total: Map.get(identity, :total),
+          passed: 2,
+          model: identity.model,
+          modal_app: identity.modal_app
+        })
+      )
+
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(tmp)
+      end)
+
+      results = [
+        %{ok: true, name: "a", detail: ""},
+        %{ok: false, name: "b", detail: "is_book=false"}
+      ]
+
+      error = assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      assert error.message =~ "REGRESSION",
+             "a wrong answer must count against the baseline; got: #{error.message}"
+
+      assert error.message =~ "1/2",
+             "the refusal should carry the score it reached"
     end
 
     # ⚠️ Drives `gate/2` rather than asserting a map shape: the claim is that an
@@ -406,23 +454,45 @@ defmodule Mix.Tasks.Eval.VisionTest do
     # fixture in a hurry: the corpus still scores, the gate still passes, and
     # the provenance of one image is simply absent. By the time anyone asks, the
     # person who took it may not remember.
-    @corpus_fields [:name, :path, :stratum, :expect_book, :expect_rejection, :provenance, :notes]
+    @corpus_fields [:name, :path, :stratum, :expect_book, :provenance, :notes]
 
     setup do
       path = Path.join(Application.app_dir(:core), "priv/eval/vision_corpus.exs")
       {corpus, _} = Code.eval_file(path)
+
+      # ⛔ NON-EMPTINESS LIVES HERE, NOT IN ONE TEST. It used to be an
+      # `assert length(corpus) >= 8` inside the field-coverage case — so with
+      # the corpus emptied to `[]`, that case reddened and **two siblings stayed
+      # green**: the provenance guard (the one defending the no-user-images
+      # rule) and the label-agreement one. Both are bare `for item <- corpus`
+      # loops, vacuous over nothing. The anti-vacuity check was in the test that
+      # needed it least. Measured again after hoisting: an empty corpus now reds
+      # every case in this block.
+      #
+      # ⚖️ And it is ONLY non-emptiness. The size floor is a separate named
+      # assertion below, because conflating the two means the first legitimate
+      # fixture deletion reds a test whose message says "the corpus shrank" —
+      # literally correct, and cheapest to resolve by lowering the number.
+      refute corpus == [], "the corpus is empty, so every case in this block is vacuous"
       {:ok, corpus: corpus}
     end
 
     test "every item carries the corpus plan's section-3 fields", %{corpus: corpus} do
-      # ⬛ ANTI-VACUITY: an empty corpus would satisfy every `Enum.each` below.
-      assert length(corpus) >= 8,
-             "the corpus shrank — eight fixtures is already the minimum this set has"
-
       for item <- corpus, field <- @corpus_fields do
         assert Map.has_key?(item, field),
                "#{inspect(Map.get(item, :name, item))} is missing #{inspect(field)}"
       end
+    end
+
+    # ⚖️ THE SIZE FLOOR, NAMED SEPARATELY from the non-emptiness guard in
+    # `setup`. This is the one that gets edited rather than investigated: a
+    # legitimate fixture deletion reds it, and the cheapest resolution is to
+    # lower the number. Keeping it distinct means nobody can satisfy
+    # anti-vacuity by doing that.
+    test "the corpus has not shrunk below what rejection scoring needs", %{corpus: corpus} do
+      assert length(corpus) >= 8,
+             "the corpus holds #{length(corpus)} fixtures; eight is what makes three " <>
+               "negatives a meaningful fraction of it"
     end
 
     test "provenance records who took the photograph and when", %{corpus: corpus} do
@@ -452,7 +522,11 @@ defmodule Mix.Tasks.Eval.VisionTest do
     # sometimes.
     test "there are enough negatives for rejection accuracy to mean something",
          %{corpus: corpus} do
-      negatives = Enum.filter(corpus, & &1.expect_rejection)
+      # ⚖️ DERIVED, not declared. `expect_rejection` was a second field that had
+      # to agree with `expect_book` — and a test enforcing agreement between two
+      # fields is the expensive substitute for having one. Nothing in `lib/`,
+      # `scripts/` or the workflows ever read it.
+      negatives = Enum.reject(corpus, & &1.expect_book)
 
       assert length(negatives) >= 3,
              "only #{length(negatives)} negative(s): a model answering \"yes, a book\" " <>
@@ -464,19 +538,6 @@ defmodule Mix.Tasks.Eval.VisionTest do
       # image would satisfy the count while testing one failure mode.
       assert length(Enum.uniq_by(negatives, & &1.path)) == length(negatives),
              "two negatives point at the same image"
-    end
-
-    # ⚖️ `expect_rejection` is a first-class expected outcome, not the absence
-    # of one — so it must AGREE with `expect_book` rather than drift from it. A
-    # negative fixture that says `expect_book: false, expect_rejection: false`
-    # is a label contradicting itself, and the score would be whichever the
-    # harness happened to read.
-    test "expect_rejection agrees with expect_book", %{corpus: corpus} do
-      for item <- corpus do
-        assert item.expect_rejection == not item.expect_book,
-               "#{item.name}: expect_book=#{item.expect_book} but " <>
-                 "expect_rejection=#{item.expect_rejection} — the two labels disagree"
-      end
     end
   end
 
@@ -539,7 +600,7 @@ defmodule Mix.Tasks.Eval.VisionTest do
       identity = %{model: "new-architecture", modal_app: "https://example.test"}
 
       recorded =
-        ~s({"total": 6, "passed": 6, "model": "Qwen/Qwen2.5-VL-7B-Instruct", ) <>
+        ~s({"total": null, "passed": 6, "model": "Qwen/Qwen2.5-VL-7B-Instruct", ) <>
           ~s("modal_app": "https://example.test"})
 
       assert {:mismatch, "Qwen/Qwen2.5-VL-7B-Instruct"} = Vision.baseline_for(recorded, identity)
@@ -550,9 +611,123 @@ defmodule Mix.Tasks.Eval.VisionTest do
     test "a matching baseline is accepted" do
       identity = %{model: "m", modal_app: "https://example.test"}
 
-      recorded = ~s({"total": 6, "passed": 6, "model": "m", "modal_app": "https://example.test"})
+      recorded =
+        ~s({"total": null, "passed": 6, "model": "m", "modal_app": "https://example.test"})
 
       assert {:ok, 6} = Vision.baseline_for(recorded, identity)
+    end
+  end
+
+  describe "what the baseline is keyed to" do
+    # ⛔ THE IDENTITY WAS A CONSTANT, SO THE BASELINE WAS STILL INHERITED.
+    #
+    # `model_identity/0` read `:core, :vision_model` — set **nowhere in this
+    # repository**, only by a test. Every real run therefore scored as
+    # `"unknown"`, and the gate printed it: "no regression (baseline 6 for
+    # unknown)". The only varying component was the service URL, and a redesign
+    # deploys to the same Modal app, so a new architecture would have inherited
+    # the previous model's number. The requirement this keying exists for was
+    # true in the suite and false in every environment.
+    #
+    # ⚖️ `/analyze` returns `model_used` and `Stacks.Moderation` already reads
+    # it. It was on the very response the eval parsed and discarded.
+    test "a model the service named beats the config default" do
+      Application.put_env(:core, :vision_model, "from-config")
+      on_exit(fn -> Application.delete_env(:core, :vision_model) end)
+
+      assert Vision.model_identity().model == "from-config"
+
+      # What a scored image leaves behind.
+      Process.put({Vision, :model_used}, "what-the-service-said")
+
+      assert Vision.model_identity().model == "what-the-service-said",
+             "the config value won over the service's own answer — which is how a " <>
+               "redesign inherits the previous model's baseline"
+    end
+
+    # ⬛ AND `"unknown"` IS STILL REACHABLE, deliberately: `model_identity/0` is
+    # called before any image has been scored (by `--record` and by this suite),
+    # so the fallback has to exist. What changed is that it is no longer the
+    # ONLY value a real run can produce.
+    test "with nothing scored and nothing configured it is unknown" do
+      Process.delete({Vision, :model_used})
+      Application.delete_env(:core, :vision_model)
+
+      assert Vision.model_identity().model == "unknown"
+    end
+  end
+
+  describe "the record an INCOMPLETE run leaves" do
+    # ⛔ IT LEFT NONE, AND THAT IS THE RUN MOST WORTH LOOKING AT LATER.
+    #
+    # `write_run_artefact/5` sat BELOW the unscored check's `Mix.raise`, so
+    # "written before the verdict" was true of every baseline branch and false
+    # of the one outcome a cold Modal service actually produces. A gate that
+    # records every failure except the transport ones has no history of the
+    # thing that goes wrong most.
+    test "an unscored run still writes its artefact" do
+      tmp = Path.join(System.tmp_dir!(), "eval-run-#{System.unique_integer([:positive])}.json")
+      System.put_env("EVAL_VISION_RESULT_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_RESULT_PATH")
+        File.rm(tmp)
+      end)
+
+      results = [
+        %{ok: true, name: "a", detail: ""},
+        %{ok: false, name: "b", detail: "call failed", unscored: true}
+      ]
+
+      error = assert_raise Mix.Error, fn -> Vision.gate(results, false) end
+
+      assert error.message =~ "INCOMPLETE"
+
+      assert File.exists?(tmp),
+             "the INCOMPLETE run left no artefact — the outcome a cold service produces " <>
+               "is the one with no record"
+
+      assert {:ok, %{"unscored" => 1}} = tmp |> File.read!() |> Jason.decode()
+    end
+  end
+
+  describe "the baseline is keyed to the corpus, not just the model" do
+    # ⛔ `total` WAS WRITTEN AND NEVER READ, so a 6/6 baseline cleared an
+    # 8-fixture run scoring 6 — **both negatives this branch added could fail
+    # and the gate would report no regression.** The reviewer's probe printed
+    # exactly that: `score: 6/8` → `no regression (baseline 6 for unknown)`.
+    #
+    # ⚖️ A changed corpus is its own refusal rather than a regression: the old
+    # number cannot be compared to the new one in either direction, so claiming
+    # "regressed" would be a claim the data does not support.
+    test "a baseline over a smaller corpus is refused, not compared" do
+      identity = %{model: "m", modal_app: "https://example.test", total: 8}
+
+      body = Jason.encode!(%{passed: 6, total: 6, model: "m", modal_app: "https://example.test"})
+
+      assert {:different_corpus, 6} = Vision.baseline_for(body, identity)
+    end
+
+    # ⬛ ANTI-VACUITY: the SAME corpus size must still compare, or the case
+    # above would be satisfied by a function that refused every baseline.
+    test "the same corpus size compares" do
+      identity = %{model: "m", modal_app: "https://example.test", total: 8}
+
+      body = Jason.encode!(%{passed: 6, total: 8, model: "m", modal_app: "https://example.test"})
+
+      assert {:ok, 6} = Vision.baseline_for(body, identity)
+    end
+
+    # ⚠️ And the model mismatch still wins, because it is the more fundamental
+    # disagreement: a different model's number is not comparable whatever the
+    # corpus did.
+    test "a different model is reported as such even when the corpus also changed" do
+      identity = %{model: "new", modal_app: "https://example.test", total: 8}
+
+      body =
+        Jason.encode!(%{passed: 6, total: 6, model: "old", modal_app: "https://example.test"})
+
+      assert {:mismatch, "old"} = Vision.baseline_for(body, identity)
     end
   end
 end

@@ -28,7 +28,6 @@
     # appears only in the manual-ISBN-entry specs; the corpus plan conflated the
     # two, and the model was right where this label was wrong.
     expect_isbn: "9780156001311",
-    expect_rejection: false,
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "A clean rear-cover barcode: the easiest case the barcode tier exists to get right. If this one fails, the tier is broken rather than strained."
@@ -39,7 +38,6 @@
     stratum: :negative,
     expect_book: false,
     expect_isbn: nil,
-    expect_rejection: true,
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "A negative. Rejection accuracy is unscorable without these — a model answering \"yes, a book\" to everything scores perfectly on books alone."
@@ -50,7 +48,6 @@
     stratum: :hostile_orientation,
     expect_book: true,
     expect_isbn: nil,
-    expect_rejection: false,
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "Spine away from the camera. Tests whether the cascade falls through to the VLM rather than guessing from a barcode that is not visible."
@@ -61,7 +58,6 @@
     stratum: :hostile_orientation,
     expect_book: true,
     expect_isbn: nil,
-    expect_rejection: false,
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "Reversed AND cropped, so neither barcode nor full cover is available. The hardest orientation case in the set."
@@ -72,7 +68,6 @@
     stratum: :occlusion,
     expect_book: true,
     expect_isbn: nil,
-    expect_rejection: false,
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "A hand across part of the cover. Occlusion is the commonest real-world failure a reader photographing their own shelf will produce."
@@ -83,7 +78,6 @@
     stratum: :text_clutter,
     expect_book: true,
     expect_isbn: nil,
-    expect_rejection: false,
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "Competing text in frame. Tests that the model picks the book rather than the loudest string."
@@ -94,7 +88,6 @@
     stratum: :negative,
     expect_book: false,
     expect_isbn: nil,
-    expect_rejection: true,
     provenance: %{photographer: "generated", captured: "2026-11-09", source: :synthetic},
     notes:
       "⛔ THE SHARPEST NEGATIVE IN THE SET, and the only one that can catch this " <>
@@ -110,7 +103,6 @@
     stratum: :negative,
     expect_book: false,
     expect_isbn: nil,
-    expect_rejection: true,
     provenance: %{photographer: "generated", captured: "2026-11-09", source: :synthetic},
     notes:
       "A page of printed text that is not a book cover — a utility statement. Tests " <>

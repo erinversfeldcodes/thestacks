@@ -37,6 +37,12 @@ defmodule Mix.Tasks.Eval.Vision do
 
   alias Stacks.AI.Client
 
+  # ⚖️ The size of the set that was scored, so the baseline is keyed to the
+  # corpus as well as the model. Set once per run, including for a `--stratum`
+  # selection — where a 1-fixture run and an 8-fixture run would otherwise share
+  # one `passed` scalar.
+  @corpus_size_key {__MODULE__, :corpus_size}
+
   @switches [record: :boolean, corpus: :string, stratum: :string]
   @baseline_path "priv/eval/vision_baseline.json"
   @call_attempts 3
@@ -52,6 +58,8 @@ defmodule Mix.Tasks.Eval.Vision do
       |> Keyword.get(:corpus)
       |> load_corpus()
       |> only_stratum(Keyword.get(cli, :stratum))
+
+    Process.put(@corpus_size_key, length(corpus))
 
     point_client_at_configured_service()
 
@@ -215,6 +223,22 @@ defmodule Mix.Tasks.Eval.Vision do
           |> Map.get("books", [])
           |> Enum.flat_map(fn b -> Map.get(b, "potential_isbns") || [] end)
 
+        # ⛔ THE MODEL NAMES ITSELF, AND THE IDENTITY USED TO IGNORE IT.
+        #
+        # `model_identity/0` read `:core, :vision_model` — set NOWHERE in this
+        # repository, so every real run keyed its baseline on the string
+        # `"unknown"` and the gate printed it: "no regression (baseline 6 for
+        # unknown)". The only varying part was the service URL, and a redesign
+        # deploys to the same Modal app — so a new architecture would have
+        # inherited the VLM's number, which is the exact inheritance this
+        # keying was added to prevent.
+        #
+        # ⚖️ `/analyze` has returned `model_used` all along and
+        # `Stacks.Moderation` already reads it. It was on the very response this
+        # function parsed and discarded. An identity the service asserts about
+        # itself cannot drift from what actually answered.
+        record_model_used(Map.get(resp, "model_used"))
+
         {classification == "CLASSIFICATION_RESULT_BOOK", isbns}
 
       other ->
@@ -303,6 +327,15 @@ defmodule Mix.Tasks.Eval.Vision do
     # regression (the model never answered) nor clear the gate (the baseline
     # counts every case). Say that, in words deploy-stack.sh classifies as a
     # broken gate rather than a scored regression — it greps for REGRESSION.
+    identity = model_identity()
+
+    # ⛔ WRITTEN BEFORE THE *UNSCORED* CHECK, NOT MERELY BEFORE THE VERDICT.
+    # The write used to sit below this `Mix.raise`, so "written before the
+    # verdict" was true of every baseline branch and false of the one outcome a
+    # cold Modal service actually produces — an INCOMPLETE run left no record
+    # at all, which is the run most worth looking at later.
+    write_run_artefact(results, passed, total, unscored, identity)
+
     if unscored > 0 and not record? do
       Mix.raise(
         "eval.vision: INCOMPLETE — #{unscored} of #{total} case(s) could not be scored " <>
@@ -312,14 +345,6 @@ defmodule Mix.Tasks.Eval.Vision do
     end
 
     baseline_file = baseline_file()
-    identity = model_identity()
-
-    # ⛔ WRITTEN BEFORE THE VERDICT, deliberately. Every branch below can
-    # `Mix.raise`, and an artefact written after the decision would exist only
-    # for runs that passed — so the runs most worth looking at later, the ones
-    # that failed, would leave nothing behind. A gate that records only its
-    # successes is a gate with no history.
-    write_run_artefact(results, passed, total, unscored, identity)
     baseline = read_baseline(baseline_file, identity)
 
     verdict(baseline, baseline_file, passed, total, identity, record?)
@@ -338,6 +363,16 @@ defmodule Mix.Tasks.Eval.Vision do
 
       baseline == :absent ->
         Mix.raise(refusal(:absent, passed, total, identity, baseline))
+
+      match?({:different_corpus, _}, baseline) ->
+        {:different_corpus, recorded_total} = baseline
+
+        Mix.raise(
+          "eval.vision: THE CORPUS CHANGED SIZE — scored #{passed}/#{total}, against a " <>
+            "baseline recorded over #{recorded_total} fixture(s). The two numbers are not " <>
+            "comparable in either direction, so no regression is claimed and no pass is " <>
+            "granted. Run `mix eval.vision --record`."
+        )
 
       baseline == :unreadable ->
         Mix.raise(refusal(:unreadable, passed, total, identity, baseline))
@@ -437,11 +472,26 @@ defmodule Mix.Tasks.Eval.Vision do
   def baseline_for(body, identity) when is_binary(body) do
     case Jason.decode(body) do
       {:ok, %{"passed" => passed} = recorded} ->
-        if Map.get(recorded, "model") == identity.model and
-             Map.get(recorded, "modal_app") == identity.modal_app do
-          {:ok, passed}
-        else
-          {:mismatch, Map.get(recorded, "model")}
+        cond do
+          Map.get(recorded, "model") != identity.model or
+              Map.get(recorded, "modal_app") != identity.modal_app ->
+            {:mismatch, Map.get(recorded, "model")}
+
+          # ⛔ KEYED TO THE CORPUS TOO, NOT JUST THE MODEL. `total` was written
+          # and never read, so a baseline of 6/6 cleared an 8-fixture run
+          # scoring 6 — **both new negatives could fail and the gate would
+          # report no regression.** Shrink the corpus instead and a perfect
+          # score reads as a regression. A score is a fact about a model AND the
+          # set it was scored on.
+          #
+          # ⚖️ A changed corpus is `:different_corpus`, not a regression: the
+          # old number cannot be compared to the new one in either direction, so
+          # saying "regressed" would be a claim the data does not support.
+          Map.get(recorded, "total") != Map.get(identity, :total) ->
+            {:different_corpus, Map.get(recorded, "total")}
+
+          true ->
+            {:ok, passed}
         end
 
       _ ->
@@ -514,14 +564,40 @@ defmodule Mix.Tasks.Eval.Vision do
       :ok
   end
 
+  # ⚖️ Stashed in the process dictionary rather than threaded through
+  # `score_image/1`'s return, because it is the same answer for every image in
+  # a run and threading it would widen three signatures to carry a constant.
+  # The task is a single sequential process; this is not shared state.
+  @model_used_key {__MODULE__, :model_used}
+
+  defp record_model_used(nil), do: :ok
+  defp record_model_used(model), do: Process.put(@model_used_key, model)
+
   @doc false
-  # ⚠️ WHAT WAS SCORED, read from the same config the service call uses, so a
-  # baseline cannot be recorded against one model and compared against another
-  # without the identity changing too.
+  # ⛔ WHAT ACTUALLY ANSWERED, taken from the service's own `model_used` rather
+  # than from config.
+  #
+  # This read `:core, :vision_model`, which is set **nowhere in this
+  # repository** — only by a test. So every real run scored as `"unknown"`, and
+  # the baseline was still inherited by anything deployed to the same app: the
+  # keying was true in the test suite and false in every environment. The gate
+  # said so itself on each run and nobody read it.
+  #
+  # ⚠️ Falls back to the config key and then to `"unknown"`, because
+  # `model_identity/0` is also called when no image has been scored yet — by
+  # `--record` on an empty selection, and by the suite. A run that reached the
+  # service overwrites it with the truth.
   def model_identity do
     %{
-      model: Application.get_env(:core, :vision_model, "unknown"),
-      modal_app: Application.get_env(:core, :vision_service_url, "unknown")
+      model:
+        Process.get(@model_used_key) ||
+          Application.get_env(:core, :vision_model) ||
+          "unknown",
+      modal_app: Application.get_env(:core, :vision_service_url, "unknown"),
+      # ⚠️ `nil` when nothing has set it — `gate/2` called directly, as the suite
+      # does. A `nil` on both sides compares equal, so a direct call behaves as
+      # it did before rather than reporting a phantom corpus change.
+      total: Process.get(@corpus_size_key)
     }
   end
 end

@@ -297,6 +297,15 @@ check-route-clients *ARGS:
 #
 #   just eval-vision <url>            # score against the baseline
 #   just eval-vision <url> --record   # pin today's score as the new baseline
+eval-vision URL="" *ARGS:
+    # ⛔ Through `just run`, never bare. A non-interactive shell gets neither
+    # direnv nor nix on PATH, so a bare `mix` silently falls back to a SYSTEM
+    # Elixir — and compiling `_build` with one toolchain then loading those
+    # beams under the pinned one corrupts it (`corrupt atom table` on core
+    # modules). This recipe is the one place a reader would copy the
+    # invocation from.
+    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" just run mix eval.vision {{ARGS}}
+
 # Score the blog post-book association pass against its labelled corpus.
 #
 # ⛔ REPLAY BY DEFAULT — no provider, no GPU, no network. The corpus holds a
@@ -311,15 +320,6 @@ check-route-clients *ARGS:
 #   just eval-associations --verbose          # every item
 eval-associations *ARGS:
     @just run mix eval.associations {{ARGS}}
-
-eval-vision URL="" *ARGS:
-    # ⛔ Through `just run`, never bare. A non-interactive shell gets neither
-    # direnv nor nix on PATH, so a bare `mix` silently falls back to a SYSTEM
-    # Elixir — and compiling `_build` with one toolchain then loading those
-    # beams under the pinned one corrupts it (`corrupt atom table` on core
-    # modules). This recipe is the one place a reader would copy the
-    # invocation from.
-    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" just run mix eval.vision {{ARGS}}
 
 # Lint changed migrations with squawk
 squawk:
