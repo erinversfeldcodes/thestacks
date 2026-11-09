@@ -616,6 +616,24 @@ defmodule Stacks.Blog do
     assoc
     |> cast(attrs, @assoc_required_fields ++ @assoc_optional_fields)
     |> validate_required(@assoc_required_fields)
+    |> validate_uuid(:book_id)
+    # ⛔ A MALFORMED `book_id` MUST BE A CHANGESET ERROR, NOT A RAISE, AND IT
+    # WAS A RAISE.
+    #
+    # `cast/3` leaves a non-UUID string on a `:binary_id` field untouched —
+    # the type check happens at dump time — so `Repo.insert/1` raised
+    # `Ecto.ChangeError: value "the one about the house" ... does not match type
+    # :binary_id`. The worker catches `{:error, reason}` and carries on to the
+    # next association; it cannot catch that, so **one malformed id from the
+    # model took the whole job down and every other association in the same
+    # response with it.** The same failure the FK constraint below was added to
+    # prevent, arriving one layer earlier.
+    #
+    # ⚠️ Found by moving the association eval off a copy of these rules and
+    # onto the real path. The eval had been scoring a candidate-list filter in
+    # its own code, which dropped the malformed id before it could ever reach a
+    # changeset.
+
     |> validate_inclusion(:source, @assoc_valid_sources)
     # ⛔ A BOOK THAT DOES NOT EXIST IS AN ANSWER, NOT A CRASH.
     #
@@ -632,6 +650,29 @@ defmodule Stacks.Blog do
     # invites the question of why.
     |> foreign_key_constraint(:book_id)
     |> foreign_key_constraint(:post_id)
+    |> unique_constraint([:post_id, :book_id],
+      name: :post_book_associations_post_id_book_id_index,
+      message: "already associated with this post"
+    )
+
+    # ⛔ THE SAME LESSON AS THE FK ABOVE, ONE CONSTRAINT ALONG. A model naming
+    # the same book twice is as likely as one naming a book that does not
+    # exist — likelier, for a post that discusses one book in two registers —
+    # and without this the unique index RAISES, taking the whole job down and
+    # the other associations in the same response with it. The worker handles
+    # `{:error, changeset}` and carries on; it cannot handle a raise.
+  end
+
+  # ⚖️ Validates rather than casts, so the failure is a readable message on the
+  # field instead of a dump-time raise. `Ecto.UUID.cast/1` is the same check
+  # Ecto would eventually apply; doing it here is what makes it catchable.
+  defp validate_uuid(changeset, field) do
+    validate_change(changeset, field, fn ^field, value ->
+      case Ecto.UUID.cast(value) do
+        {:ok, _} -> []
+        :error -> [{field, "is not a valid identifier"}]
+      end
+    end)
   end
 
   defp check_ownership(%Post{user_id: owner_id}, %{id: user_id})

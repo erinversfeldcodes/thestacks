@@ -96,14 +96,19 @@ defmodule Mix.Tasks.Eval.Associations do
   """
   @spec score_item(map()) :: map()
   def score_item(item) do
-    got = associate(item.response, item.candidates)
+    got = associate(item.response)
 
     # ⚖️ `:unreadable` IS A FIRST-CLASS EXPECTED OUTCOME, not an absence of
     # one. Four items expect it, and writing them as `[]` was my own labelling
     # error: "the model said nothing we could read" and "the model found no
     # books" are different facts that want different fixes, and an expectation
     # that cannot tell them apart scores the wrong thing as right.
-    expected = if is_list(item.expect), do: Enum.sort(item.expect), else: item.expect
+    # ⚖️ ORDER IS PRESERVED, NOT SORTED. The decoder reports what the model said
+    # in the order it said it, and the worker's `list_associations/1` orders by
+    # confidence afterwards — so sorting here would hide a decoder that
+    # reordered or dropped-and-reappended. The expectations are written in the
+    # response's own order.
+    expected = item.expect
 
     %{
       name: item.name,
@@ -116,33 +121,33 @@ defmodule Mix.Tasks.Eval.Associations do
   end
 
   @doc """
-      The association ids this code would persist, given a response and the
-      candidate books that exist.
+      The book ids a response yields, as the DECODER reads it.
 
-      ⛔ MIRRORS THE WORKER'S OWN RULES, AND THE THREE THAT MATTER ARE HERE
-      RATHER THAN IN THE DECODER:
+      ⛔ THIS USED TO REIMPLEMENT THE WORKER'S RULES, AND THE COPY DIVERGED —
+      WHICH IS EXACTLY WHAT A SECOND IMPLEMENTATION DOES.
+      It filtered ids to the candidate list and de-duplicated them, mirroring
+      `PostBookAssociationWorker` + `Blog.associate_book/3` in this module's own
+      code. Two of the corpus's items then certified behaviour production did
+      not have — and one of them was a **live defect**: nothing de-duplicated,
+      so a model naming the same book twice gave the reader two identical
+      associations, while the corpus item asserting it must not scored green.
+      An eval that restates the rules cannot find a disagreement with them.
 
-      * a `book_id` that is not among the candidates is DROPPED — a post cannot
-        be linked to a book that is not in the catalogue, and the ISBN hard
-        gate is why;
-      * the same `book_id` twice yields ONE association, so a reader's shelf
-        does not gain a duplicate because the model said a title twice;
-      * a decode failure yields NOTHING, loudly, rather than an empty answer —
-        "the model said nothing" and "the model found nothing" are different
-        facts and want different fixes.
+      ⚖️ So this is now only what the eval's own half is: decode, and report
+      the ids in order. The rules that belong to the worker are tested where
+      they live — against a real database, with real `op.books` rows, in
+      `post_book_association_worker_test.exs` — because that is the only place
+      a duplicate or a non-existent book can actually be refused.
+
+      ⚠️ `:unreadable` is kept distinct from `[]`: "the model said nothing we
+      could read" and "the model found no books" are different facts that want
+      different fixes.
   """
-  @spec associate(String.t(), [String.t()]) :: [String.t()] | :unreadable
-  def associate(response, candidates) do
+  @spec associate(String.t()) :: [String.t()] | :unreadable
+  def associate(response) do
     case Structured.decode(response) do
-      {:ok, associations} ->
-        associations
-        |> Enum.map(& &1.book_id)
-        |> Enum.filter(&(&1 in candidates))
-        |> Enum.uniq()
-        |> Enum.sort()
-
-      {:error, _} ->
-        :unreadable
+      {:ok, associations} -> Enum.map(associations, & &1.book_id)
+      {:error, _} -> :unreadable
     end
   end
 

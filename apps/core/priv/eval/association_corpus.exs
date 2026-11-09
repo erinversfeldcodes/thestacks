@@ -267,12 +267,20 @@
     ],
     # Labelled from the post text above, not from the response below.
     expect: [
-      "00000013-0000-4000-8000-000000000013"
+      "00000013-0000-4000-8000-000000000013",
+      "000003e7-0000-4000-8000-0000000003e7"
     ],
     response:
       "[{\"book_id\": \"00000013-0000-4000-8000-000000000013\", \"confidence\": 0.9, \"reasoning\": \"Named.\"}, {\"book_id\": \"000003e7-0000-4000-8000-0000000003e7\", \"confidence\": 0.8, \"reasoning\": \"A book the model invented.\"}]",
     notes:
-      "⛔ A hallucinated id alongside a real one. The invented book must not be associated — a post cannot be linked to a book that is not in the catalogue, and the ISBN hard gate is the reason."
+      "⛔ THE DECODER REPORTS BOTH IDS, INCLUDING THE INVENTED ONE, AND THAT IS " <>
+        "CORRECT HERE. Refusing a book that is not in the catalogue is the " <>
+        "WORKER's job — `Blog.associate_book/3`'s `foreign_key_constraint(:book_id)` " <>
+        "does it against real rows, which this replay has none of. This item used to " <>
+        "expect one id, because the eval filtered to the candidate list in its own " <>
+        "code: a second implementation of the rule, scoring itself. The refusal is " <>
+        "tested in `post_book_association_worker_test.exs`, where a hallucinated id " <>
+        "meets an actual foreign key."
   },
   %{
     name: "all_book_ids_hallucinated",
@@ -282,10 +290,15 @@
       "00000001-0000-4000-8000-000000000001"
     ],
     # Labelled from the post text above, not from the response below.
-    expect: [],
+    expect: [
+      "000003e6-0000-4000-8000-0000000003e6",
+      "000003e5-0000-4000-8000-0000000003e5"
+    ],
     response:
       "[{\"book_id\": \"000003e6-0000-4000-8000-0000000003e6\", \"confidence\": 0.9, \"reasoning\": \"Invented.\"}, {\"book_id\": \"000003e5-0000-4000-8000-0000000003e5\", \"confidence\": 0.7, \"reasoning\": \"Also invented.\"}]",
-    notes: "Every id invented. The pass answered confidently and must yield nothing."
+    notes:
+      "Every id invented. The decoder read two associations and says so; whether either " <>
+        "book exists is a question only the database can answer, and does."
   },
   %{
     name: "duplicate_book_id",
@@ -296,12 +309,19 @@
     ],
     # Labelled from the post text above, not from the response below.
     expect: [
+      "00000002-0000-4000-8000-000000000002",
       "00000002-0000-4000-8000-000000000002"
     ],
     response:
       "[{\"book_id\": \"00000002-0000-4000-8000-000000000002\", \"confidence\": 0.9, \"reasoning\": \"Named in the opening.\"}, {\"book_id\": \"00000002-0000-4000-8000-000000000002\", \"confidence\": 0.6, \"reasoning\": \"Named again at the close.\"}]",
     notes:
-      "The same book twice. One association, not two — a reader's shelf must not gain a duplicate because the model said a title twice."
+      "⛔ THE MODEL SAID IT TWICE, SO THE DECODER REPORTS IT TWICE — and this item " <>
+        "found a LIVE DEFECT once it stopped lying. It used to expect one id because " <>
+        "the eval de-duplicated in its own code, while `op.post_book_associations` " <>
+        "had no unique index and `associate_book/3` inserted unconditionally: a reader " <>
+        "whose post discussed one book in two registers got TWO identical " <>
+        "associations. Measured, then fixed with a unique index and a " <>
+        "`unique_constraint`. The de-duplication is now tested where it happens."
   },
   %{
     name: "book_id_not_a_uuid",
@@ -311,10 +331,15 @@
       "00000007-0000-4000-8000-000000000007"
     ],
     # Labelled from the post text above, not from the response below.
-    expect: [],
+    expect: [
+      "the one about the house"
+    ],
     response:
       "[{\"book_id\": \"the one about the house\", \"confidence\": 0.8, \"reasoning\": \"Named by description.\"}]",
-    notes: "A non-UUID where an id belongs. Must be dropped rather than raising."
+    notes:
+      "A non-UUID where an id belongs. The decoder passes the string through — `book_id` " <>
+        "is required to be a binary and nothing more — and the cast to `:binary_id` " <>
+        "refuses it at the changeset, which is where a malformed id should die."
   },
   %{
     name: "confidence_well_above",

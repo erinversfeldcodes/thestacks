@@ -49,15 +49,26 @@ defmodule Mix.Tasks.Eval.AssociationsTest do
       end
     end
 
-    # ⛔ NO EXPECTATION MAY NAME A BOOK THAT IS NOT A CANDIDATE. The whole
-    # hallucination stratum rests on the eval dropping ids outside the
-    # candidate set, so an expectation that named one would be asserting the
-    # opposite of the rule.
-    test "every expected id is one of that item's candidates", %{corpus: corpus} do
-      for item <- corpus, is_list(item.expect), id <- item.expect do
-        assert id in item.candidates,
-               "#{item.name} expects #{id}, which is not among its candidates"
-      end
+    # ⚖️ THE HALLUCINATION STRATUM IS THE EXCEPTION, DELIBERATELY. This guard
+    # used to require every expected id to be a candidate — which was only true
+    # while the eval filtered to the candidate list in its own code, a second
+    # implementation of a rule that lives in `Blog.associate_book/3`'s foreign
+    # key. The decoder reports what the model said, invented ids included; the
+    # refusal is the worker's and is tested there.
+    test "only the hallucination stratum expects an id outside its candidates",
+         %{corpus: corpus} do
+      offenders =
+        for item <- corpus,
+            is_list(item.expect),
+            item.stratum != :hallucination,
+            id <- item.expect,
+            id not in item.candidates,
+            do: {item.name, id}
+
+      assert offenders == [],
+             "these non-hallucination items expect ids that are not candidates, which " <>
+               "means their label is describing a filter nothing applies: " <>
+               inspect(offenders)
     end
 
     test "the strata cover more than the happy path", %{corpus: corpus} do
@@ -88,38 +99,43 @@ defmodule Mix.Tasks.Eval.AssociationsTest do
   end
 
   describe "what the eval makes of a response" do
-    test "a fenced array yields its book ids" do
-      ids = ["aaa", "bbb"]
-
+    test "a fenced array yields its book ids, in order" do
       raw =
         "```json\n" <>
-          ~s([{"book_id": "aaa", "confidence": 0.9, "reasoning": "x"},) <>
-          ~s({"book_id": "bbb", "confidence": 0.8, "reasoning": "y"}]) <> "\n```"
+          ~s([{"book_id": "bbb", "confidence": 0.9, "reasoning": "x"},) <>
+          ~s({"book_id": "aaa", "confidence": 0.8, "reasoning": "y"}]) <> "\n```"
 
-      assert Associations.associate(raw, ids) == ["aaa", "bbb"]
+      # ⚖️ Order preserved, not sorted: the model's order is information, and
+      # sorting here would hide a decoder that reordered.
+      assert Associations.associate(raw) == ["bbb", "aaa"]
     end
 
-    # ⛔ A book the model invented must not be associated. A post cannot be
-    # linked to a book that is not in the catalogue, and the ISBN hard gate is
-    # the reason.
-    test "an id outside the candidates is dropped" do
+    # ⛔ THESE TWO USED TO ASSERT RULES THE EVAL HAD COPIED FROM THE WORKER —
+    # dropping an id outside the candidate list, and de-duplicating a repeat.
+    # Both are the database's job (`foreign_key_constraint(:book_id)` and a
+    # unique index), and the copy diverged: nothing de-duplicated in
+    # production, so the corpus certified a behaviour the system did not have
+    # and a reader really did get two identical associations. Now the decoder's
+    # own behaviour is asserted, and the rules are tested where they live.
+    test "an id the catalogue has never heard of is still reported" do
       raw = ~s([{"book_id": "real"}, {"book_id": "invented"}])
 
-      assert Associations.associate(raw, ["real"]) == ["real"]
+      assert Associations.associate(raw) == ["real", "invented"]
     end
 
-    test "the same id twice yields one association" do
+    test "the same id twice is reported twice" do
       raw = ~s([{"book_id": "same", "confidence": 0.9}, {"book_id": "same", "confidence": 0.4}])
 
-      assert Associations.associate(raw, ["same"]) == ["same"]
+      assert Associations.associate(raw) == ["same", "same"]
     end
 
     # ⚖️ An unreadable response is NOT an empty one, and the eval must not
-    # collapse them — that was the labelling error above, and it would hide a
-    # decoder that had stopped working behind a corpus of posts with no books.
+    # collapse them — that was a labelling error on the corpus's first run, and
+    # it would hide a decoder that had stopped working behind a set of posts
+    # with no books.
     test "an unreadable response is distinguished from an empty answer" do
-      assert Associations.associate("I could not find any books.", ["a"]) == :unreadable
-      assert Associations.associate("[]", ["a"]) == []
+      assert Associations.associate("I could not find any books.") == :unreadable
+      assert Associations.associate("[]") == []
     end
   end
 

@@ -402,4 +402,120 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       assert [%CallLog{outcome: "associated"}] = Repo.all(CallLog)
     end
   end
+
+  describe "a model that names the same book twice" do
+    # ⛔ THE READER GOT TWO IDENTICAL ASSOCIATIONS, AND AN EVAL WAS HIDING IT.
+    #
+    # `op.post_book_associations` had an index on `post_id` and no uniqueness,
+    # and `Blog.associate_book/3` inserts unconditionally — so a response naming
+    # one `book_id` twice produced two rows. Measured before the fix: the second
+    # insert returned `:ok` and `list_associations/1` returned 2.
+    #
+    # ⚠️ It was invisible because the association eval de-duplicated in its OWN
+    # code: its corpus item said "a reader's shelf must not gain a duplicate
+    # because the model said a title twice" and scored green, while production
+    # did the opposite. That is the cost of an eval that reimplements the rules
+    # instead of driving them — the corpus certified a behaviour the system did
+    # not have.
+    test "yields one association, not two" do
+      post = insert(:post, user: consenting_author())
+      book = insert(:book)
+
+      MockTogetherClient.put_response(
+        {:ok,
+         ~s([{"book_id": "#{book.id}", "confidence": 0.9, "reasoning": "named in the opening"},) <>
+           ~s({"book_id": "#{book.id}", "confidence": 0.4, "reasoning": "named again at the close"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert length(Blog.list_associations(post.id)) == 1,
+             "the post gained a duplicate association because the model repeated a title"
+    end
+
+    # ⬛ AND THE REPEAT DOES NOT COST THE OTHERS. The whole reason the duplicate
+    # must be a changeset error rather than a raise: the worker carries on to
+    # the next association, and a raise would take the response's other books
+    # down with it.
+    test "a repeat does not discard the other books in the same response" do
+      post = insert(:post, user: consenting_author())
+      first = insert(:book)
+      second = insert(:book)
+
+      MockTogetherClient.put_response(
+        {:ok,
+         ~s([{"book_id": "#{first.id}", "confidence": 0.9, "reasoning": "a"},) <>
+           ~s({"book_id": "#{first.id}", "confidence": 0.5, "reasoning": "a again"},) <>
+           ~s({"book_id": "#{second.id}", "confidence": 0.8, "reasoning": "b"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      book_ids = Blog.list_associations(post.id) |> Enum.map(& &1.book_id) |> Enum.sort()
+
+      assert book_ids == Enum.sort([first.id, second.id])
+    end
+  end
+
+  describe "a model that names a book the catalogue does not have" do
+    # ⛔ THE RULE THE EVAL USED TO SCORE IN ITS OWN CODE. The association corpus
+    # filtered ids to a candidate list and called that "the refusal of books
+    # that are not in the catalogue" — a restatement, not a test. The real
+    # refusal is `Blog.associate_book/3`'s `foreign_key_constraint(:book_id)`,
+    # and it needs a database with real rows to mean anything, which a replay
+    # has none of.
+    test "the invented book is dropped and the real one survives" do
+      post = insert(:post, user: consenting_author())
+      real = insert(:book)
+      invented = Ecto.UUID.generate()
+
+      MockTogetherClient.put_response(
+        {:ok,
+         ~s([{"book_id": "#{real.id}", "confidence": 0.9, "reasoning": "named"},) <>
+           ~s({"book_id": "#{invented}", "confidence": 0.8, "reasoning": "invented"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert Blog.list_associations(post.id) |> Enum.map(& &1.book_id) == [real.id],
+             "a post was linked to a book that is not in the catalogue, which the ISBN " <>
+               "hard gate exists to prevent"
+    end
+
+    # ⚠️ AND A RESPONSE THAT IS ENTIRELY INVENTED YIELDS NOTHING, without
+    # raising. The FK violation would otherwise raise `Ecto.ConstraintError`
+    # and take the job down — the comment on the changeset records that lesson
+    # and this is the case that keeps it.
+    test "a wholly invented response yields nothing and does not crash" do
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      MockTogetherClient.put_response(
+        {:ok,
+         ~s([{"book_id": "#{Ecto.UUID.generate()}", "confidence": 0.9, "reasoning": "a"},) <>
+           ~s({"book_id": "#{Ecto.UUID.generate()}", "confidence": 0.7, "reasoning": "b"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert Blog.list_associations(post.id) == []
+    end
+
+    # ⬛ A MALFORMED ID DIES AT THE CHANGESET, not in a raise. `book_id` casts
+    # to `:binary_id`, so "the one about the house" is refused — the decoder
+    # passes any binary through, deliberately, because deciding what is a valid
+    # id is not a parsing question.
+    test "a book_id that is not a uuid is refused without crashing" do
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      MockTogetherClient.put_response(
+        {:ok, ~s([{"book_id": "the one about the house", "confidence": 0.8, "reasoning": "x"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert Blog.list_associations(post.id) == []
+    end
+  end
 end
