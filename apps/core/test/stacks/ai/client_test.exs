@@ -176,10 +176,23 @@ defmodule Stacks.AI.ClientTest do
 
       assert {:error, _reason} = Client.call_vision("analyze", %{image: "test"})
 
-      cost_per_call = Application.get_env(:core, :modal_cost_per_call_cents, 1)
+      # ⛔ THIS ASSERTION USED TO ENCODE A UNIT CONFUSION AS A REQUIREMENT. It
+      # read `Spend.spent(:modal, :daily) == cost_per_call` — a MICRO-cent
+      # ledger total equal to a CENTS-denominated config value — and so it
+      # passed while every Modal call charged 1 micro-cent instead of 1 cent,
+      # leaving the daily 500¢ ceiling needing 50,000,000 calls to trip.
+      #
+      # ⚖️ The conversion is now the thing asserted, because that is the claim:
+      # a call costing one cent must move a micro-cent ledger by 100,000.
+      cost_cents = Application.get_env(:core, :modal_cost_per_call_cents, 1)
+      expected = cost_cents * 100_000
 
-      assert Spend.spent(:modal, :daily) == cost_per_call
-      assert Spend.spent(:modal, :monthly) == cost_per_call
+      assert Spend.spent(:modal, :daily) == expected,
+             "a call costing #{cost_cents}c moved the micro-cent ledger by " <>
+               "#{Spend.spent(:modal, :daily)}, not #{expected} — the unit the ledger " <>
+               "stores and the unit this config value is written in have diverged"
+
+      assert Spend.spent(:modal, :monthly) == expected
     end
 
     test "the :exception event carries a bounded reason_class, not just the raw reason" do

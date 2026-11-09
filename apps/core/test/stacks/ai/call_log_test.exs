@@ -139,4 +139,85 @@ defmodule Stacks.AI.CallLogTest do
                "log cannot answer"
     end
   end
+
+  describe "truncating a response that is not plain ASCII" do
+    # ⛔ A BYTE SLICE PRODUCED INVALID UTF-8, POSTGRES REFUSED IT, AND THE ROW
+    # WAS SILENTLY LOST — for precisely the longest responses, which are the
+    # ones this table exists to capture.
+    #
+    # `binary_part/3` can cut inside a multi-byte codepoint. Measured before
+    # the fix: 8,191 ASCII bytes followed by "é" yielded an 8,192-byte value
+    # ending `<<97, 97, 195>>`, and `Repo.insert` raised
+    # `ERROR 22021 (character_not_in_repertoire) invalid byte sequence for
+    # encoding "UTF8": 0xc3`. The worker's `record_call/5` rescues, so nothing
+    # crashed and nothing was recorded.
+    #
+    # ⚠️ The comment above `truncate_raw/1` argued that byte-slicing existed to
+    # avoid "a changeset that passes and a database that fails". It was what
+    # created one. Model output about books carries curly quotes, em-dashes and
+    # accented author names as a matter of course.
+    test "a cut that would sever a codepoint is backed off until it is valid" do
+      raw = String.duplicate("a", 8_191) <> "é"
+
+      changeset = CallLog.changeset(%CallLog{}, valid_attrs(raw_response: raw))
+      stored = Ecto.Changeset.get_field(changeset, :raw_response)
+
+      assert String.valid?(stored),
+             "the stored value is not valid UTF-8 — byte_size=#{byte_size(stored)}, " <>
+               "tail=#{inspect(binary_part(stored, byte_size(stored) - 3, 3))}"
+
+      assert byte_size(stored) <= 8_192
+    end
+
+    # ⬛ AND IT REACHES THE DATABASE, which is the claim that matters: the
+    # changeset being valid was never the problem.
+    test "the truncated value is accepted by the database" do
+      raw = String.duplicate("a", 8_191) <> "é"
+      post = insert(:post, user: insert(:user))
+
+      assert {:ok, log} =
+               %CallLog{}
+               |> CallLog.changeset(valid_attrs(post_id: post.id, raw_response: raw))
+               |> Repo.insert()
+
+      assert String.valid?(log.raw_response)
+    end
+
+    # ⚠️ A multi-byte response that needs MORE than one byte backed off — a
+    # three-byte codepoint severed at its first byte needs two.
+    test "a three-byte codepoint is backed off correctly" do
+      raw = String.duplicate("a", 8_190) <> "—" <> "tail"
+
+      changeset = CallLog.changeset(%CallLog{}, valid_attrs(raw_response: raw))
+      stored = Ecto.Changeset.get_field(changeset, :raw_response)
+
+      assert String.valid?(stored)
+      assert byte_size(stored) <= 8_192
+    end
+
+    # ⬛ ANTI-VACUITY: a value already under the bound must be stored UNCUT, or
+    # a truncator that returned "" would satisfy every case above.
+    test "a short response is not touched" do
+      raw = ~s([{"book_id": "abc", "reasoning": "an em—dash and a curly ’quote’"}])
+
+      changeset = CallLog.changeset(%CallLog{}, valid_attrs(raw_response: raw))
+
+      assert Ecto.Changeset.get_field(changeset, :raw_response) == raw
+    end
+  end
+
+  # ⚖️ The required fields, so each case above states only the one thing it is
+  # about. `post_id` defaults to a generated UUID because most of these cases
+  # never reach the database and do not need a real post.
+  defp valid_attrs(overrides) do
+    Map.merge(
+      %{
+        post_id: Ecto.UUID.generate(),
+        model: "m",
+        prompt_sha256: CallLog.hash_prompt("p"),
+        outcome: "associated"
+      },
+      Map.new(overrides)
+    )
+  end
 end

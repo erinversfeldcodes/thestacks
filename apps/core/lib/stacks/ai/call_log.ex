@@ -94,17 +94,46 @@ defmodule Stacks.AI.CallLog do
   # the latency and the token counts along with it — trading all the diagnostic
   # value for strictness about the one field that has a bound.
   #
-  # ⛔ Bytes, not characters: the CHECK is `octet_length`, and a 8_192-character
+  # ⛔ Bytes, not characters: the CHECK is `octet_length`, and an 8_192-CHARACTER
   # slice of multi-byte text is larger than 8_192 bytes. Slicing by characters
   # would pass the changeset and fail at the database, which is the kind of
   # disagreement that only shows up in production.
+  #
+  # ⛔ BUT A BYTE SLICE ALONE CREATED THE VERY DISAGREEMENT THE LINE ABOVE
+  # CLAIMS TO PREVENT, and it was measured: `binary_part/3` can cut inside a
+  # multi-byte codepoint, and Postgres then refuses the value outright —
+  # `ERROR 22021 (character_not_in_repertoire) invalid byte sequence for
+  # encoding "UTF8": 0xc3`. 8,191 ASCII bytes followed by "é" produced a
+  # valid-looking 8,192-byte changeset ending `<<97, 97, 195>>`.
+  #
+  # ⚠️ And it failed INVISIBLY, which is worse than crashing: the worker's
+  # `record_call/5` rescues, so the row is simply dropped — for precisely the
+  # longest responses, which are the ones this table exists to capture. Model
+  # output about books carries curly quotes, em-dashes and accented author
+  # names as a matter of course.
+  #
+  # ⚖️ So trailing bytes come off until the result is valid UTF-8: at most three
+  # iterations, since no codepoint is longer than four bytes. Under the bound in
+  # bytes AND decodable, which is what the column actually requires.
   defp truncate_raw(changeset) do
     case get_change(changeset, :raw_response) do
       raw when is_binary(raw) and byte_size(raw) > @max_raw_bytes ->
-        put_change(changeset, :raw_response, binary_part(raw, 0, @max_raw_bytes))
+        put_change(changeset, :raw_response, trim_to_valid_utf8(raw, @max_raw_bytes))
 
       _ ->
         changeset
+    end
+  end
+
+  defp trim_to_valid_utf8(_raw, size) when size <= 0, do: ""
+
+  defp trim_to_valid_utf8(raw, size) do
+    candidate = binary_part(raw, 0, size)
+
+    if String.valid?(candidate) do
+      candidate
+    else
+      trim_to_valid_utf8(raw, size - 1)
     end
   end
 end

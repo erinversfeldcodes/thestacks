@@ -23,6 +23,9 @@ defmodule Stacks.AI.Client do
   @fuse_name :vision_fuse
   @default_modal_cost_per_call_cents 1
 
+  # The ledger is denominated in micro-cents; this config value is in cents.
+  @micro_cents_per_cent 100_000
+
   @modal_function_timeout_ms 300_000
 
   @transport_slack_ms 30_000
@@ -219,11 +222,25 @@ defmodule Stacks.AI.Client do
     end
   end
 
+  # ⛔ CONVERTED, BECAUSE THE LEDGER'S UNIT CHANGED UNDER THIS CALLER AND NOTHING
+  # HERE NOTICED.
+  #
+  # `BudgetTracker.record_cost/2` moved from cents to MICRO-cents when the spend
+  # ledger was re-denominated — token pricing is quoted per million, and a cent
+  # cannot express the cost of a short completion. This call site kept passing a
+  # cents-denominated config value, so **every Modal call charged 1 micro-cent
+  # instead of 1 cent and the daily 500¢ ceiling needed 50,000,000 calls to
+  # trip. The Modal budget was effectively unenforced.**
+  #
+  # ⚠️ The config key is named `_cents` and stays that way: a price a person
+  # sets should be written in the unit a person thinks in. The conversion
+  # belongs here, at the boundary between that decision and the ledger's
+  # precision — not in the key's name.
   defp record_vision_call_cost do
     cost_cents =
       Application.get_env(:core, :modal_cost_per_call_cents, @default_modal_cost_per_call_cents)
 
-    BudgetTracker.record_cost(:modal, cost_cents)
+    BudgetTracker.record_cost(:modal, cost_cents * @micro_cents_per_cent)
   end
 
   defp configured_client do
