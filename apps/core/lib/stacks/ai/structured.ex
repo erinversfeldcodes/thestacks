@@ -33,6 +33,40 @@ defmodule Stacks.AI.Structured do
   @type failure :: {:unparseable, String.t()} | {:unexpected_shape, String.t()}
 
   @doc """
+      The output schema for a book-association answer.
+
+      ⚖️ Lives beside the decoder deliberately. The schema describes what we ask
+      for and the decoder describes what we accept, and the two drifting apart
+      is how a boundary stops having a contract — asking for `confidence` while
+      reading `score` would be invisible until a model obeyed the schema.
+
+      ⚠️ `additionalProperties: false` because a model that volunteers extra
+      fields is answering a different question, and `required` names only
+      `book_id`: a missing confidence is still a usable answer, which is the
+      same judgement `normalise/1` makes one layer down.
+  """
+  @spec association_schema() :: map()
+  def association_schema do
+    %{
+      name: "book_associations",
+      strict: true,
+      schema: %{
+        type: "array",
+        items: %{
+          type: "object",
+          additionalProperties: false,
+          required: ["book_id"],
+          properties: %{
+            book_id: %{type: "string"},
+            confidence: %{type: "number", minimum: 0.0, maximum: 1.0},
+            reasoning: %{type: "string"}
+          }
+        }
+      }
+    }
+  end
+
+  @doc """
       Decode a completion into associations.
 
       Accepts a bare JSON array and a fenced one — ` ```json `, ` ``` `, with or

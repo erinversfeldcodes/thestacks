@@ -90,6 +90,45 @@ defmodule Stacks.AI.TogetherClient do
     end
   end
 
+  # ⛔ ASKING FOR A SHAPE IS NOT THE SAME AS SURVIVING ONE.
+  #
+  # `:schema` makes the provider return JSON matching it, which MEASURABLY
+  # changes what comes back: without it, 3 of 3 live responses arrived fenced in
+  # Markdown and `Jason.decode/1` failed on every one. With it they should not.
+  #
+  # ⚠️ "Should not" is why `Stacks.AI.Structured` still exists and still strips
+  # fences. A schema is a REQUEST to a remote model, not a guarantee from a type
+  # system — a provider that ignores it, or a fallback model that does not
+  # support it, must not take the association chain down. The two fixes are
+  # complementary and neither is redundant: this one makes the failure rare, the
+  # decoder makes it survivable.
+  @doc false
+  # ⚠️ PUBLIC SO IT CAN BE ASSERTED, for the same reason
+  # `parse_success_response/1` is: `complete/2` delegates to
+  # `configured_client()`, which in `:test` is `MockTogetherClient`, so no test
+  # driving the seam can observe what the real request looks like. The mock is
+  # an observability boundary, not just a substitution.
+  #
+  # ⛔ The alternative — asserting that the caller PASSED `:schema` — is the
+  # vacuous version: it checks the option's presence rather than that anything
+  # puts it on the wire, which is exactly the gap that let a 500-character
+  # truncation live in the shared success path unnoticed.
+  def completion_body(prompt, max_tokens, temperature, opts \\ []) do
+    %{
+      model: @model,
+      messages: [%{role: "user", content: prompt}],
+      max_tokens: max_tokens,
+      temperature: temperature
+    }
+    |> with_output_schema(Keyword.get(opts, :schema))
+  end
+
+  defp with_output_schema(body, nil), do: body
+
+  defp with_output_schema(body, schema) do
+    Map.put(body, :response_format, %{type: "json_schema", json_schema: schema})
+  end
+
   @impl true
   def complete(prompt, opts \\ []) do
     case configured_client() do
@@ -115,13 +154,7 @@ defmodule Stacks.AI.TogetherClient do
         max_tokens = Keyword.get(opts, :max_tokens, 256)
         temperature = Keyword.get(opts, :temperature, 0.3)
 
-        body =
-          Jason.encode!(%{
-            model: @model,
-            messages: [%{role: "user", content: prompt}],
-            max_tokens: max_tokens,
-            temperature: temperature
-          })
+        body = Jason.encode!(completion_body(prompt, max_tokens, temperature, opts))
 
         Finch.build(
           :post,

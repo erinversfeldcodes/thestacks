@@ -25,6 +25,9 @@ defmodule Stacks.AI.TogetherClientParseTest do
 
   use ExUnit.Case, async: false
 
+  alias Stacks.AI.Structured
+  alias Stacks.AI.TogetherClient
+
   alias Stacks.AI.TogetherClient
 
   # Four associations with realistic UUIDs and reasoning: the shape the blog
@@ -142,6 +145,41 @@ defmodule Stacks.AI.TogetherClientParseTest do
     test "a 200 with an unexpected JSON shape returns a tagged error" do
       assert {:error, {:unexpected_response, %{"error" => _}}} =
                TogetherClient.parse_success_response(Jason.encode!(%{"error" => "quota"}))
+    end
+  end
+
+  describe "the request body" do
+    # ⛔ ASSERTED ON THE BODY, NOT ON THE OPTION. MEASURED against the live
+    # model before this landed: 3 of 3 responses came back fenced in Markdown
+    # because nothing told the provider what shape to answer in. A test that
+    # checked the CALLER passed `:schema` would have passed against a client
+    # that dropped it on the floor.
+    test "a schema reaches the wire as a json_schema response_format" do
+      schema = Structured.association_schema()
+
+      body = TogetherClient.completion_body("find books", 1024, 0.2, schema: schema)
+
+      assert %{type: "json_schema", json_schema: ^schema} = body.response_format
+    end
+
+    # ⚖️ ANTI-VACUITY, and it is the half that makes the case above mean
+    # something: without it, a client that attached `response_format`
+    # unconditionally would pass. A caller wanting free text must still get it.
+    test "no schema means no response_format at all" do
+      body = TogetherClient.completion_body("summarise this", 256, 0.3)
+
+      refute Map.has_key?(body, :response_format),
+             "a completion with no schema must not ask the provider for JSON — " <>
+               "the review summariser wants prose"
+    end
+
+    test "the rest of the request is unchanged by the schema" do
+      with_schema =
+        TogetherClient.completion_body("p", 1024, 0.2, schema: Structured.association_schema())
+
+      assert with_schema.max_tokens == 1024
+      assert with_schema.temperature == 0.2
+      assert [%{role: "user", content: "p"}] = with_schema.messages
     end
   end
 end

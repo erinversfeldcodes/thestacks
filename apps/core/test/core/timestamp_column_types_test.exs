@@ -148,7 +148,17 @@ defmodule Core.TimestampColumnTypesTest do
                Enum.map_join(rows, "\n  ", fn [col, default] -> "#{col} => #{default}" end)
     end
 
-    test "the eight defaulted columns default to now()" do
+    # ⚠️ EIGHT BECAME TEN ON 2026-11-09, deliberately: `op.llm_call_log` added
+    # `created_at` and `updated_at`, both `timestamptz DEFAULT now()`.
+    #
+    # ⚖️ The count is the ratchet, not the claim. What this gate actually
+    # asserts is that EVERY defaulted timestamptz column defaults to `now()`
+    # and none to an expression that strips the zone back off — the two new
+    # columns satisfy that, so this is population growth rather than an
+    # exception. Raising the number without checking the property would be the
+    # wrong way round, and the `GROUP BY` above is what makes the difference
+    # visible: a bad default would show as a second row, not a bigger count.
+    test "the ten defaulted columns default to now()" do
       {:ok, %{rows: rows}} =
         Repo.query(
           """
@@ -166,8 +176,8 @@ defmodule Core.TimestampColumnTypesTest do
           [@owned_schemas]
         )
 
-      assert rows == [["now()", 8]],
-             "expected exactly eight defaulted timestamptz columns, all on now(); got " <>
+      assert rows == [["now()", 10]],
+             "expected exactly ten defaulted timestamptz columns, all on now(); got " <>
                inspect(rows)
     end
   end

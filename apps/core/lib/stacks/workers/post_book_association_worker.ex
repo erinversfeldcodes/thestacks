@@ -29,6 +29,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.CallLog
   alias Stacks.AI.Structured
   alias Stacks.Blog
   alias Stacks.Books.Book
@@ -78,9 +79,17 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     else
       prompt = build_prompt(post.body, books)
 
-      case together_client().complete(prompt, max_tokens: 1024, temperature: 0.2) do
+      opts = [max_tokens: 1024, temperature: 0.2, schema: Structured.association_schema()]
+
+      started = System.monotonic_time(:millisecond)
+      result = together_client().complete(prompt, opts)
+      latency_ms = System.monotonic_time(:millisecond) - started
+
+      case result do
         {:ok, response} ->
-          handle_response(post, response)
+          outcome = handle_response(post, response)
+          record_call(post, prompt, outcome, response, latency_ms)
+          :ok
 
         {:error, reason} ->
           Logger.warning(
@@ -88,9 +97,51 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
           )
 
           emit_outcome(:llm_error)
+          # ⚠️ No response to record — the field stays NULL rather than "", so
+          # "the model said nothing" and "the model was never reached" remain
+          # distinguishable in the log.
+          record_call(post, prompt, :llm_error, nil, latency_ms)
           {:error, reason}
       end
     end
+  end
+
+  # ⛔ RECORDS EVERY CALL, INCLUDING THE SUCCESSFUL ONES. A log of failures only
+  # answers "what went wrong" and not "what does this model usually do", and the
+  # eval harness this feeds needs the second. ⚖️ `emit_safe`-style: a logging
+  # failure must never fail the job, because the job's work is already done by
+  # the time this runs.
+  defp record_call(post, prompt, outcome, response, latency_ms) do
+    %CallLog{}
+    |> CallLog.changeset(%{
+      post_id: post.id,
+      model: together_model(),
+      prompt_sha256: CallLog.hash_prompt(prompt),
+      outcome: to_string(outcome),
+      latency_ms: latency_ms,
+      raw_response: response
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning(
+          "PostBookAssociationWorker: could not record the LLM call for post " <>
+            "#{post.id}: #{inspect(changeset.errors)}"
+        )
+
+        :ok
+    end
+  rescue
+    error ->
+      Logger.warning("PostBookAssociationWorker: call log write raised: #{inspect(error)}")
+      :ok
+  end
+
+  defp together_model do
+    Application.get_env(:core, :together_model, "meta-llama/Llama-3.3-70B-Instruct-Turbo")
   end
 
   defp emit_outcome(outcome) do
@@ -143,7 +194,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
         )
 
         emit_outcome(:unreadable_response)
-        :ok
+        :unexpected_shape
 
       {:error, {:unparseable, raw}} ->
         # ⚠️ The raw text is logged, bounded, rather than thrown away. Until
@@ -155,7 +206,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
         )
 
         emit_outcome(:unreadable_response)
-        :ok
+        :unreadable_response
     end
   end
 
@@ -172,7 +223,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     })
 
     emit_outcome(:associated)
-    :ok
+    :associated
   end
 
   # ⚠️ Atom keys, because `Structured.decode/2` has already normalised them and
