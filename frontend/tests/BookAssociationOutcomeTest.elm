@@ -13,6 +13,7 @@ or their post simply has no books in it.
 import Components.BookAssociations
 import Expect
 import Html exposing (Html)
+import Json.Decode as Decode
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -38,14 +39,31 @@ viewWith isOwner outcome =
 suite : Test
 suite =
     describe "what the author is told when no books were linked"
-        [ test "a failed pass says so, and says it is not permanent" <|
+        [ -- ⛔ THE POSITIVE ASSERTIONS NAME THE CLASS, AND THAT IS WHAT MAKES THE
+          -- ABSENCE ASSERTIONS BELOW MEAN ANYTHING.
+          --
+          -- They used to assert only `Selector.text`, while the `hasNot` cases
+          -- asserted `Selector.class "book-associations__note"` — so renaming
+          -- that class in the component left all seven green, forever. An
+          -- absence assertion anchored to a name nothing else pins is satisfied
+          -- by a typo. What caught the rename was `check-orphan-classes.sh`: a
+          -- CSS gate doing a test's job by accident.
+          test "a failed pass says so, and says it is not permanent" <|
             \_ ->
                 render True Failed
-                    |> Query.has [ Selector.text "We couldn't link books to this post this time." ]
+                    |> Expect.all
+                        [ Query.has [ Selector.class "book-associations__note" ]
+                        , Query.has
+                            [ Selector.text "We couldn't link books to this post this time." ]
+                        ]
         , test "a pass that found nothing says that instead" <|
             \_ ->
                 render True FoundNothing
-                    |> Query.has [ Selector.text "No books from your shelves came up in this post." ]
+                    |> Expect.all
+                        [ Query.has [ Selector.class "book-associations__note" ]
+                        , Query.has
+                            [ Selector.text "No books from your shelves came up in this post." ]
+                        ]
 
         -- ⛔ THE TWO MUST NOT BE THE SAME MESSAGE. A completed scan that found
         -- no books and a scan that could not run are different facts, and the
@@ -84,5 +102,71 @@ suite =
                     Expect.equal
                         NotRunYet
                         (BlogPost.fromProtoAssociationOutcome "something_new")
+            ]
+        , describe "decoding the show response"
+            [ -- ⛔ THE HAPPY PATH COULD NOT RENDER, AND NO TEST COULD SEE IT.
+              --
+              -- `GET /api/blog/posts/:id` answers `{post: …, associations: […]}`,
+              -- but the SPA decoded `Decode.field "post"` alone and then read
+              -- `post.associations` — which the generated decoder fills from
+              -- INSIDE the post object, defaulting an absent key to `[]`. So the
+              -- component was called with an empty list on every load, and the
+              -- book list, the confidence badges and the Confirm/Dismiss controls
+              -- were unreachable in the running app.
+              --
+              -- ⚠️ Every other test in this file renders with `associations = []`,
+              -- which is the same shape the broken payload produced — so the suite
+              -- could not tell "empty because the outcome says so" from "empty
+              -- because the payload never carried any".
+              test "the sibling associations key reaches the post" <|
+                \_ ->
+                    let
+                        json =
+                            """
+                            { "post":
+                                { "id": "p1", "user_id": "u1", "title": "T", "body": "B"
+                                , "visibility": "owner", "created_at": "", "updated_at": ""
+                                , "published_at": "", "syndicated": true
+                                }
+                            , "associations":
+                                [ { "id": "a1", "book_id": "b1", "book_title": "Piranesi"
+                                  , "confidence": 0.91, "reasoning": "named twice"
+                                  , "status": "confirmed"
+                                  }
+                                ]
+                            }
+                            """
+                    in
+                    case Decode.decodeString BlogPost.blogPostShowDecoder json of
+                        Ok post ->
+                            Expect.equal
+                                [ ( "Piranesi", 0.91 ) ]
+                                (List.map (\a -> ( a.bookTitle, a.confidence )) post.associations)
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+
+            -- ⬛ AND THE COMPONENT RENDERS IT. The decode alone would not prove
+            -- the reader sees anything.
+            , test "a real association renders its title, not a note" <|
+                \_ ->
+                    Query.fromHtml
+                        (Components.BookAssociations.view
+                            { associations =
+                                [ { id = "a1"
+                                  , bookId = "b1"
+                                  , bookTitle = "Piranesi"
+                                  , confidence = 0.91
+                                  , reasoning = "named twice"
+                                  , status = BlogPost.Confirmed
+                                  }
+                                ]
+                            , isOwner = True
+                            , outcome = Associated
+                            , onConfirm = always ()
+                            , onDismiss = always ()
+                            }
+                        )
+                        |> Query.has [ Selector.text "Piranesi" ]
             ]
         ]

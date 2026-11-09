@@ -93,7 +93,7 @@ initWithEffect postId maybeToken currentUserId origin =
         [ Effect.public (Api.blogPostRequest postId)
             maybeToken
             Nothing
-            (Api.resolveJson (Decode.field "post" Types.BlogPost.blogPostDecoder) >> PostLoaded)
+            (Api.resolveJson Types.BlogPost.blogPostShowDecoder >> PostLoaded)
         , Effect.public (Api.postCommentsRequest postId)
             maybeToken
             Nothing
@@ -188,7 +188,7 @@ updateWithEffect msg model maybeToken =
                         maybeToken
                         Nothing
                         (Api.resolveJson
-                            (Decode.field "post" Types.BlogPost.blogPostDecoder)
+                            Types.BlogPost.blogPostShowDecoder
                             >> PostLoaded
                         )
                     , NoOut
@@ -357,7 +357,7 @@ updateWithEffect msg model maybeToken =
                                     maybeToken
                                     Nothing
                                     (Api.resolveJson
-                                        (Decode.field "post" Types.BlogPost.blogPostDecoder)
+                                        Types.BlogPost.blogPostShowDecoder
                                         >> PostLoaded
                                     )
                                 ]

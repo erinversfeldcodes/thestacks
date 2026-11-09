@@ -6,6 +6,7 @@ defmodule StacksWeb.BlogControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Blog
   alias Stacks.Blog.Syndication
 
   defp auth_conn(conn, user) do
@@ -629,6 +630,33 @@ defmodule StacksWeb.BlogControllerTest do
                "so the author would be told about an error that has since succeeded"
     end
 
+    # ⛔ SCOPED TO THIS POST, AND NOTHING PINNED THAT. A probe making
+    # `latest_association_outcome/1` ignore its `post_id` left 114 tests green,
+    # because every test inserted rows for exactly one post. In production
+    # `op.llm_call_log` holds every author's rows, so the unscoped version shows
+    # author A the outcome of author B's pass — the precise disclosure the
+    # owner-only gate exists to prevent, reached by a different route.
+    test "another post's outcome is not reported as this one's", %{conn: conn} do
+      user = insert(:user)
+      mine = insert(:post, user: user)
+      theirs = insert(:post, user: insert(:user))
+
+      insert(:llm_call_log, post_id: mine.id, outcome: "no_books_found")
+
+      # Newer, so an unscoped `order_by desc … limit 1` would return THIS one.
+      insert(:llm_call_log, post_id: theirs.id, outcome: "llm_error")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{mine.id}")
+        |> json_response(200)
+
+      assert body["post"]["association_outcome"] == "no_books_found",
+             "the response carried another post's outcome — in production that is " <>
+               "another author's"
+    end
+
     # ⚖️ ABSENT, not "no_books_found". A post nobody has scanned and a scan that
     # found nothing are different facts, and reporting the second when the first
     # is true tells the author something false about their own post.
@@ -669,6 +697,98 @@ defmodule StacksWeb.BlogControllerTest do
 
       assert body["post"]["association_outcome"] in [nil, ""],
              "another reader was told how the author's association pass went"
+    end
+  end
+
+  describe "the associations the show response carries" do
+    # ⛔ NOTHING ASSERTED THE SIBLING KEY AT ALL, and the SPA was not reading it.
+    #
+    # `GET /api/blog/posts/:id` answers `{post: …, associations: […]}`, and the
+    # post serializer's take-list deliberately excludes `associations` — the
+    # envelope's copies carry `book_title` and an owner-gated `reasoning` that
+    # the post serializer cannot know. But no test checked the envelope, so when
+    # the client read `post.associations` instead and silently got `[]`, both
+    # halves were green and the component rendered nothing in the running app.
+    test "a visible association reaches the owner, with its title", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+      book = insert(:book, title: "Piranesi")
+
+      {:ok, _} = Blog.associate_book(post, book.id, %{visible: true, confidence: 0.9})
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert [assoc] = body["associations"]
+      assert assoc["book_id"] == book.id
+      assert assoc["book_title"] == "Piranesi"
+      assert assoc["status"] == "confirmed"
+    end
+
+    # ⚖️ THE OWNER SEES A DISMISSED ONE; A READER DOES NOT. This is the filter
+    # `is_owner || a.visible` in the controller, and it had no test — which also
+    # means the component's "the author dismissed every one of them" comment was
+    # describing a state nobody had checked the system produces.
+    test "a dismissed association is still the owner's to see", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+      book = insert(:book)
+
+      {:ok, _} = Blog.associate_book(post, book.id, %{visible: false, confidence: 0.4})
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert [%{"status" => "dismissed"}] = body["associations"]
+    end
+
+    test "but a reader is not shown it", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      reader = insert(:user)
+      post = insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+      book = insert(:book)
+
+      {:ok, _} = Blog.associate_book(post, book.id, %{visible: false, confidence: 0.4})
+
+      body =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["associations"] == []
+    end
+
+    # ⚠️ `reasoning` is the author's to read. The controller DELETES the key for
+    # a non-owner rather than blanking it, and the client decodes it optionally
+    # because of that.
+    test "reasoning is withheld from a reader", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      reader = insert(:user)
+      post = insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+      book = insert(:book)
+
+      {:ok, _} =
+        Blog.associate_book(post, book.id, %{
+          visible: true,
+          confidence: 0.9,
+          reasoning: "named in the second paragraph"
+        })
+
+      reader_body =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert [assoc] = reader_body["associations"]
+      refute Map.has_key?(assoc, "reasoning")
     end
   end
 end

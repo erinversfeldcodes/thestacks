@@ -7,6 +7,7 @@ module Types.BlogPost exposing
     , Comment(..)
     , Visibility(..)
     , blogPostDecoder
+    , blogPostShowDecoder
     , blogPostSummaryDecoder
     , commentAuthorId
     , commentBody
@@ -267,6 +268,75 @@ Delegates entirely to the proto decoder, then maps to the app type.
 blogPostDecoder : Decoder BlogPost
 blogPostDecoder =
     Decode.map fromProtoBlogPost Proto.decodeBlogPost
+
+
+{-| Decode a post's show response, associations included.
+
+⛔ THE ASSOCIATIONS RIDE THE ENVELOPE, NOT THE POST, AND READING ONLY THE POST
+MEANT THE COMPONENT NEVER RECEIVED ANY.
+
+`GET /api/blog/posts/:id` answers `{post: …, associations: […]}`. The post
+serializer's take-list does not include `associations` — deliberately, because
+the envelope's copies carry `book_title` and an owner-gated `reasoning` that the
+post serializer cannot know — but the SPA decoded `Decode.field "post"` alone and
+then read `post.associations`, which the generated decoder fills from _inside_
+the post object with `D.oneOf [ …, D.succeed [] ]`.
+
+⚠️ So an absent key became an empty list, silently, and
+`Components.BookAssociations.view` was called with `associations = []` on every
+load. "Books from my shelves", the confidence badges and the Confirm/Dismiss
+controls were unreachable in the running app, behind a green suite — every test
+rendered the component with an empty list, which is the same shape the broken
+payload produced, so nothing could tell the two apart.
+
+⚖️ Decoding the sibling key is the fix rather than widening the post, because
+the ownership filter and the `reasoning` redaction live in the controller where
+the viewer is known.
+
+-}
+blogPostShowDecoder : Decoder BlogPost
+blogPostShowDecoder =
+    Decode.map2
+        (\post associations -> { post | associations = associations })
+        (Decode.field "post" blogPostDecoder)
+        (Decode.oneOf
+            [ Decode.field "associations" (Decode.list associationDecoder)
+            , Decode.succeed []
+            ]
+        )
+
+
+{-| An association as the envelope sends it.
+
+⚠️ `reasoning` is absent for a non-owner — the controller deletes the key rather
+than blanking it — so it decodes optionally. `confidence` likewise: the server
+sends what the model said, and a null means the model did not answer that part.
+
+-}
+associationDecoder : Decoder BookAssociation
+associationDecoder =
+    Decode.map6 BookAssociation
+        (Decode.field "id" Decode.string)
+        (Decode.field "book_id" Decode.string)
+        (Decode.oneOf [ Decode.field "book_title" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "confidence" Decode.float, Decode.succeed 0.0 ])
+        (Decode.oneOf [ Decode.field "reasoning" Decode.string, Decode.succeed "" ])
+        (Decode.map statusFromString
+            (Decode.oneOf [ Decode.field "status" Decode.string, Decode.succeed "" ])
+        )
+
+
+statusFromString : String -> AssociationStatus
+statusFromString raw =
+    case raw of
+        "confirmed" ->
+            Confirmed
+
+        "dismissed" ->
+            Dismissed
+
+        _ ->
+            Pending
 
 
 {-| Decode a Comment from JSON. Replies are recursive via Decode.lazy.

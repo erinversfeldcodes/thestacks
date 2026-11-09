@@ -73,7 +73,7 @@ test.describe("the association outcome an author sees", () => {
     await expect(note).toHaveText("No books from your shelves came up in this post.");
   });
 
-  test("a pass that succeeded shows the books, not a note", async ({
+  test("a pass that succeeded shows no failure note", async ({
     page,
     request,
   }) => {
@@ -87,6 +87,13 @@ test.describe("the association outcome an author sees", () => {
 
     await page.goto(`/blog/${postId}`);
 
+    // ⚠️ IT DOES NOT ASSERT BOOKS, AND THE NAME NO LONGER CLAIMS TO.
+    // `seedAssociationOutcome` writes a call-log row and creates no
+    // associations, so there are no books for this case to show — the earlier
+    // name ("shows the books") would have misled whoever read a failure. A
+    // case that drives a real association belongs with the component's own
+    // suite, which now has one.
+    //
     // ⚠️ The note's ABSENCE is checked only after the post itself has rendered,
     // so the assertion cannot be satisfied by a page that simply had not loaded
     // yet. `associated` with no visible associations is the case where the
