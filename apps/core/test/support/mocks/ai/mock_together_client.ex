@@ -19,6 +19,7 @@ defmodule Stacks.AI.MockTogetherClient do
 
   @behaviour Stacks.AI.TogetherClientBehaviour
 
+  alias Stacks.AI.Budget
   alias Stacks.AI.TogetherClient
 
   @sent_key {__MODULE__, :sent}
@@ -28,9 +29,38 @@ defmodule Stacks.AI.MockTogetherClient do
   def complete(prompt, opts \\ []) do
     record({:complete, prompt, opts})
 
-    case get_response({:ok, "0.75"}) do
-      {:ok, content} -> charge_like_the_real_client(content)
-      other -> other
+    # ⛔ THE CHECK, NOT ONLY THE CHARGE. This mock reproduced
+    # `do_complete/2`'s charge and silently dropped its budget check, so the
+    # only ceiling on the system's most expensive LLM path had no test that
+    # could fail. Measured before this line existed: with 200,000 micro-cents
+    # spent against a 100,000 ceiling the worker returned `:ok` and billed
+    # 35,200 more.
+    #
+    # ⚠️ The asymmetry is what made it invisible. A reader auditing coverage
+    # sees a mock, assumes the seam is the transport — which is what the
+    # moduledoc says — and never asks what else the real function did. A mock
+    # replacing a function wholesale replaces every guard inside it.
+    #
+    # ⚖️ Same call, same order as `do_complete/2`, so the refusal shape the
+    # worker matches on is the shape it gets in production.
+    case Budget.check_budget(:together) do
+      :ok ->
+        case get_response({:ok, "0.75"}) do
+          {:ok, content} -> charge_like_the_real_client(content)
+          other -> other
+        end
+
+      # ⛔ WRAPPED EXACTLY AS `do_complete/2` WRAPS IT. A bare `with` passes
+      # `{:error, :daily_limit_exceeded}` straight through, and the worker
+      # matches `{:error, {:budget_exceeded, limit}}` — so the mock would
+      # refuse the call and the worker would not recognise the refusal, which
+      # is a *different* untested path rather than the one being covered.
+      #
+      # ⚠️ Caught by the test going green-then-red on its own terms: the
+      # ceiling refused, and the job still returned `:ok`. Faking a guard means
+      # faking its failure SHAPE, not only its decision.
+      {:error, limit} when limit in [:daily_limit_exceeded, :monthly_limit_exceeded] ->
+        {:error, {:budget_exceeded, limit}}
     end
   end
 

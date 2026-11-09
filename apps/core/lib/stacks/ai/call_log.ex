@@ -48,8 +48,6 @@ defmodule Stacks.AI.CallLog do
     field :model, :string
     field :prompt_sha256, :string
     field :outcome, :string
-    field :prompt_tokens, :integer
-    field :completion_tokens, :integer
     field :latency_ms, :integer
     field :raw_response, :string
 
@@ -65,8 +63,6 @@ defmodule Stacks.AI.CallLog do
       :model,
       :prompt_sha256,
       :outcome,
-      :prompt_tokens,
-      :completion_tokens,
       :latency_ms,
       :raw_response
     ])

@@ -34,15 +34,36 @@ defmodule Core.Repo.Migrations.OneAssociationPerBookPerPost do
     execute("SET LOCAL lock_timeout = '5s'")
     execute("SET LOCAL statement_timeout = '30s'")
 
-    # Collapse any existing duplicates before the index can refuse them. Keeps
-    # the highest-confidence row, which is the one `list_associations/1` orders
-    # first and therefore the one a reader has been seeing.
+    # Collapse any existing duplicates before the index can refuse them.
+    #
+    # ⛔ THE TIE-BREAK USED TO BE A RANDOM UUID. The old spelling compared
+    # `(a.confidence, a.id) < (b.confidence, b.id)`, so on equal confidence the
+    # survivor was decided by v4 random bytes — measured: the visible, newer row
+    # was deleted and a dismissed, older one survived. The comment claimed the
+    # survivor was "the one a reader has been seeing", a determinism that
+    # existed in neither this DELETE nor `list_associations/1`.
+    #
+    # ⚠️ And the confidence clamp landing the same day made ties the NORMAL
+    # case rather than a rare one: `Structured.clamp/1` maps every out-of-range
+    # value to exactly `1.0`, so a model answering `1.4` and `2.5` for one book
+    # now produces an exact tie. A normalisation that maps many inputs to one
+    # value raises collisions in every tie-break below it, by construction.
+    #
+    # ⚖️ `visible DESC` is a product decision and this is where it is recorded:
+    # a live suggestion beats a dismissal. A dismissal is a judgement about THAT
+    # suggestion, and these rows are competing representations of one
+    # `(post_id, book_id)` fact rather than two suggestions the author ruled on
+    # separately — so keeping the dismissed row would apply a judgement the
+    # author made about one row to a row they never saw. The opposite error,
+    # resurfacing something they dismissed, is visible and one click to undo;
+    # this one is invisible and permanent.
     execute """
-    DELETE FROM op.post_book_associations a
-     USING op.post_book_associations b
-     WHERE a.post_id = b.post_id
-       AND a.book_id = b.book_id
-       AND (a.confidence, a.id) < (b.confidence, b.id)
+    DELETE FROM op.post_book_associations
+     WHERE id NOT IN (
+       SELECT DISTINCT ON (post_id, book_id) id
+         FROM op.post_book_associations
+        ORDER BY post_id, book_id, confidence DESC, visible DESC, created_at DESC, id
+     )
     """
   end
 

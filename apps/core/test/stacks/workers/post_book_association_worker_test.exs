@@ -5,6 +5,7 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
   alias Core.Repo
   alias Stacks.AI.CallLog
   alias Stacks.AI.MockTogetherClient
+  alias Stacks.AI.Spend
   alias Stacks.AI.Structured
   alias Stacks.Blog
   alias Stacks.GDPR.Consent
@@ -367,6 +368,85 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
     )
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
+  end
+
+  describe "the budget ceiling on the most expensive path" do
+    # ⛔ THIS COULD NOT BE TESTED UNTIL THE MOCK LEARNED TO CHECK.
+    #
+    # The worker has no budget check of its own — it only HANDLES a refusal,
+    # `{:error, {:budget_exceeded, limit}} -> {:cancel, limit}`. The check lives
+    # in `do_complete/2`, which the mock replaced wholesale, so the ceiling on
+    # the system's costliest LLM path (1024 max tokens over up to 200 candidate
+    # books) had no test that could fail. Measured before the mock was fixed:
+    # 200,000 micro-cents spent against a 100,000 ceiling, the worker returned
+    # `:ok` and billed 35,200 more.
+    test "an exhausted budget cancels the job instead of calling the provider" do
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      {:ok, today} = Date.new(2026, 11, 9)
+      # ⚖️ Read the limit the way `check_budget/1` reads it — `:ai_budget`
+      # keyword list, not a flat key — so the test cannot pass by exhausting a
+      # ceiling the code does not consult. My first version guessed a key that
+      # does not exist, defaulted to 100, and the job ran happily within the
+      # real 500-cent limit.
+      daily_limit_cents =
+        :core
+        |> Application.get_env(:ai_budget, [])
+        |> Keyword.get(:daily_limit_cents, 500)
+
+      :ok = Spend.record(:together, daily_limit_cents * 100_000 * 2, today)
+
+      spent_before = Spend.spent(:together, :daily, today)
+
+      assert {:cancel, _limit} =
+               perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      # ⬛ AND IT DID NOT BILL. A cancel that still charged would satisfy the
+      # clause above while doing the exact thing the ceiling exists to stop.
+      assert Spend.spent(:together, :daily, today) == spent_before,
+             "the job cancelled and still spent money — the refusal happened after the " <>
+               "charge rather than before it"
+    end
+
+    # ⚠️ `:cancel`, NOT `:error`, and the difference is money. Oban RETRIES an
+    # `{:error, _}`, so an over-budget job returning error would re-call a
+    # provider that will refuse again, charging on every attempt until the
+    # attempts run out. `:cancel` stops.
+    test "the refusal cancels rather than erroring, so Oban does not retry it" do
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      {:ok, today} = Date.new(2026, 11, 9)
+      # ⚖️ Read the limit the way `check_budget/1` reads it — `:ai_budget`
+      # keyword list, not a flat key — so the test cannot pass by exhausting a
+      # ceiling the code does not consult. My first version guessed a key that
+      # does not exist, defaulted to 100, and the job ran happily within the
+      # real 500-cent limit.
+      daily_limit_cents =
+        :core
+        |> Application.get_env(:ai_budget, [])
+        |> Keyword.get(:daily_limit_cents, 500)
+
+      :ok = Spend.record(:together, daily_limit_cents * 100_000 * 2, today)
+
+      result = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert match?({:cancel, _}, result),
+             "expected {:cancel, _} and got #{inspect(result)} — an {:error, _} here is " <>
+               "retried, and every retry pays for a call that is already refused"
+    end
+
+    # ⬛ ANTI-VACUITY: within budget, the job must still run. Without this a
+    # worker that cancelled unconditionally would satisfy both cases above.
+    test "a job within budget still runs" do
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      MockTogetherClient.put_response({:ok, "[]"})
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+    end
   end
 
   describe "the metric and the ledger agree about what happened" do

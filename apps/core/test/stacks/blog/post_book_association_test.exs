@@ -157,4 +157,68 @@ defmodule Stacks.Blog.PostBookAssociationTest do
       end
     end
   end
+
+  describe "what a reader sees when two suggestions tie" do
+    # ⛔ THE ORDER WAS UNDETERMINED ON EQUAL CONFIDENCE, and the clamp made
+    # that the normal case: `Structured.clamp/1` maps every out-of-range value
+    # to exactly `1.0`, so a model answering `1.4` and `2.5` for one book
+    # produces an exact tie rather than two distinct scores.
+    #
+    # ⚖️ A live suggestion must outrank a dismissed one — the same keys the
+    # dedup migration uses, so the row that survives a collapse is the row that
+    # was on top before it.
+    test "a live suggestion outranks a dismissed one at equal confidence" do
+      post = insert(:post, user: insert(:user))
+      dismissed_book = insert(:book)
+      live_book = insert(:book)
+
+      insert(:post_book_association,
+        post: post,
+        book: dismissed_book,
+        confidence: 1.0,
+        visible: false
+      )
+
+      insert(:post_book_association,
+        post: post,
+        book: live_book,
+        confidence: 1.0,
+        visible: true
+      )
+
+      ordered = Blog.list_associations(post.id)
+
+      assert length(ordered) == 2,
+             "anti-vacuity: both rows must be present, or the ordering claim is empty"
+
+      assert hd(ordered).book_id == live_book.id,
+             "a dismissed suggestion came first at equal confidence — the reader's top " <>
+               "row is decided by the plan rather than by a rule"
+    end
+
+    # ⬛ AND CONFIDENCE STILL WINS, or an ordering that sorted on `visible`
+    # first would satisfy the case above while burying a better match.
+    test "confidence still outranks visibility" do
+      post = insert(:post, user: insert(:user))
+      strong_dismissed = insert(:book)
+      weak_live = insert(:book)
+
+      insert(:post_book_association,
+        post: post,
+        book: strong_dismissed,
+        confidence: 0.95,
+        visible: false
+      )
+
+      insert(:post_book_association,
+        post: post,
+        book: weak_live,
+        confidence: 0.40,
+        visible: true
+      )
+
+      assert hd(Blog.list_associations(post.id)).book_id == strong_dismissed.id,
+             "visibility outranked confidence — a weaker match is now shown first"
+    end
+  end
 end

@@ -380,7 +380,17 @@ defmodule Stacks.Blog do
   def list_associations(post_id) do
     from(a in PostBookAssociation,
       where: a.post_id == ^post_id,
-      order_by: [desc: a.confidence],
+      # ⛔ SECONDARY KEYS, or what the reader sees on a tie is undetermined.
+      # This ordered by `confidence` alone, so two rows at equal confidence
+      # came back in whatever order the plan produced — and the dedup
+      # migration's comment claimed the survivor was "the one a reader has
+      # been seeing", a determinism neither place had.
+      #
+      # ⚠️ The confidence clamp made ties the normal case for the hallucinating
+      # answer it exists to handle: every out-of-range value becomes exactly
+      # `1.0`. The same keys as the dedup, so the row that survives a collapse
+      # is the row that was on top before it.
+      order_by: [desc: a.confidence, desc: a.visible, desc: a.created_at, asc: a.id],
       preload: [:book]
     )
     |> Repo.all()

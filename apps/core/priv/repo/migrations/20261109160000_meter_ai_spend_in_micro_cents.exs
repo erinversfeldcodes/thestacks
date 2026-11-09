@@ -19,8 +19,21 @@ defmodule Core.Repo.Migrations.MeterAiSpendInMicroCents do
 
       ⚠️ Safe to re-denominate rather than backfill because this table was
       created today and has never been deployed. Existing rows are scaled so a
-      local database stays consistent; the `down` divides back, losing only the
-      sub-cent precision that could not be represented before.
+      local database stays consistent.
+
+      ⛔ THE `down` ROUNDS UP, AND THAT IS NOT A ROUNDING PREFERENCE. An earlier
+      version divided plainly — two `bigint`s, so `/` truncates toward zero.
+      Measured in a staged rollback: `99999` micro-cents became **0** cents and
+      `150000` became **1**. Every loss went one way, and a down+up round trip
+      made it permanent, because `0 * 100000 = 0`. So a deploy rollback followed
+      by a re-deploy handed back the daily ceiling.
+      
+      ⚖️ Which is the same shape as the defect this table exists to fix. The
+      budget used to reset whenever the machine idled; after a truncating `down`
+      it resets whenever someone rolls back. A ledger that under-counts fails
+      OPEN, and the `down` is the artefact that encodes the intent — this one
+      encoded the opposite of it. Rounding up matches the bias the ledger
+      already states for its own charges.
   """
   use Ecto.Migration
 
@@ -58,7 +71,9 @@ defmodule Core.Repo.Migrations.MeterAiSpendInMicroCents do
     execute("SET LOCAL lock_timeout = '5s'")
     execute("SET LOCAL statement_timeout = '30s'")
 
-    execute "UPDATE op.ai_spend SET spend_micro_cents = spend_micro_cents / 100000"
+    # Round UP: see the moduledoc. Plain integer division truncated toward
+    # zero, so sub-cent spend came back as zero and a rollback restored budget.
+    execute "UPDATE op.ai_spend SET spend_micro_cents = (spend_micro_cents + 99999) / 100000"
 
     drop constraint(:ai_spend, :spend_is_not_negative, prefix: "op")
 
