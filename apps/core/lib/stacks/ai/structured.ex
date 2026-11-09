@@ -144,13 +144,28 @@ defmodule Stacks.AI.Structured do
   # be anchored `\A…\z`, so "Here are the associations I found:" before the
   # fence — or "Let me know if you'd like more detail." after it — defeated the
   # strip entirely and the whole response came back `:unparseable`. Chatty
-  # models do that constantly, and the anchored version handled every fence
-  # variant while failing on the commonest thing a model actually wraps one in.
-  # Found by the association corpus, on two items, before it reached anyone.
+  # models do that constantly, and 16 tests in this module's suite did not see
+  # it; the association corpus found it on two items.
+  #
+  # ⛔ THE LINE ANCHORS ARE WHAT KEEP THAT WIDENING SAFE, and they are the whole
+  # of it. An unanchored first attempt matched ``` INSIDE a JSON string — a
+  # `reasoning` field quoting ` ```code``` ` — and strip-then-parse turned a
+  # perfectly good response into garbage. Measured: both a fenced and an
+  # unfenced response carrying backticks in `reasoning` went from parsing to
+  # `:unparseable`. A model quoting a code block in its explanation is not
+  # exotic. Requiring a newline either side of both fences excludes every
+  # mid-line occurrence, and a JSON string cannot contain a raw newline, so no
+  # valid response can be caught by it.
+  #
+  # ⚖️ The content is GREEDY, which decides one case and only one: a response
+  # carrying TWO fenced blocks spans both and fails as unparseable rather than
+  # silently returning the first. Two blocks is two answers, and picking one
+  # would be a guess presented as a result — `:unparseable` tells the author
+  # honestly and leaves the raw text in the call log for whoever looks.
   defp strip_fence(raw) do
     trimmed = String.trim(raw)
 
-    case Regex.run(~r/```[a-zA-Z]*[ \t]*\n?(.*?)\n?[ \t]*```/s, trimmed) do
+    case Regex.run(~r/(?:\A|\n)```[a-zA-Z]*[ \t]*\n(.*)\n[ \t]*```[ \t]*(?:\n|\z)/s, trimmed) do
       [_, inner] -> String.trim(inner)
       _ -> trimmed
     end

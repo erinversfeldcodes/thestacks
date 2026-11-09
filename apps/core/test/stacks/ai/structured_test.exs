@@ -165,4 +165,69 @@ defmodule Stacks.AI.StructuredTest do
       assert reasoning == "named in the second paragraph"
     end
   end
+
+  describe "the fence, at its edges" do
+    # ⛔ THESE FIVE CASES EXIST BECAUSE MY OWN FIX BROKE TWO OF THEM.
+    #
+    # Widening the fence regex from anchored `\A…\z` to unanchored — so that
+    # prose around the fence stops defeating the strip — silently broke every
+    # response whose `reasoning` quotes a code block. Measured at the time:
+    # both a fenced and an unfenced response carrying ``` inside a string went
+    # from parsing to `:unparseable`. A model quoting code in its explanation is
+    # not exotic, and no test in this file saw it.
+    #
+    # ⚖️ The fix is two-part and both parts are load-bearing: the fences must
+    # sit at LINE boundaries with greedy content, and `unfenced/1` keeps a
+    # stripped result only if it actually parses. The second part is what makes
+    # any future fence pattern unable to break a response that already worked.
+
+    test "prose before the fence does not defeat it" do
+      raw = "Here are the associations I found:\n\n```json\n" <> ~s([{"book_id": "a"}]) <> "\n```"
+
+      assert {:ok, [%{book_id: "a"}]} = Structured.decode(raw)
+    end
+
+    test "prose after the fence does not defeat it" do
+      raw =
+        "```json\n" <> ~s([{"book_id": "b"}]) <> "\n```\n\nLet me know if you'd like more."
+
+      assert {:ok, [%{book_id: "b"}]} = Structured.decode(raw)
+    end
+
+    # ⛔ THE REGRESSION, PINNED. An unfenced response whose reasoning quotes a
+    # code block must not be touched by the fence logic at all.
+    test "backticks inside an unfenced response's reasoning are left alone" do
+      raw = ~s([{"book_id": "c", "reasoning": "the post quotes ```code``` inline"}])
+
+      assert {:ok, [%{book_id: "c", reasoning: reasoning}]} = Structured.decode(raw)
+      assert reasoning =~ "```code```"
+    end
+
+    # ⛔ AND THE SAME THING INSIDE A REAL FENCE, which the non-greedy version
+    # cut short at the inner backticks.
+    test "backticks inside a fenced response's reasoning survive" do
+      raw = "```json\n" <> ~s([{"book_id": "d", "reasoning": "uses ``` thrice"}]) <> "\n```"
+
+      assert {:ok, [%{book_id: "d", reasoning: "uses ``` thrice"}]} = Structured.decode(raw)
+    end
+
+    # ⚖️ TWO FENCES IS TWO ANSWERS, AND IT FAILS LOUDLY RATHER THAN PICKING
+    # ONE. Silently taking the first would be a guess presented as a result;
+    # `:unparseable` sends the author the honest message and puts the raw text
+    # in the call log for whoever looks. Consistent with this module's position
+    # throughout: unreadable is not empty.
+    test "two fenced blocks are refused rather than guessed between" do
+      raw =
+        "```json\n" <>
+          ~s([{"book_id": "first"}]) <>
+          "\n```\n\nand also:\n\n```json\n" <> ~s([{"book_id": "second"}]) <> "\n```"
+
+      assert {:error, {:unparseable, _}} = Structured.decode(raw)
+    end
+
+    test "an unterminated fence is unparseable" do
+      assert {:error, {:unparseable, _}} =
+               Structured.decode("```json\n" <> ~s([{"book_id": "e"}]))
+    end
+  end
 end
