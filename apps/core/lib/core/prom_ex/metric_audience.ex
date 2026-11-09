@@ -94,6 +94,11 @@ defmodule Core.PromEx.MetricAudience do
     # fail. If that changes — a per-user limit, say — revisit this first.
     "stacks_budget_cost_recorded_amount_micro_cents" => :public,
     "stacks_budget_limit_exceeded_count_total" => :public,
+    # ⚖️ Public like the rest of the budget family: this is the honesty figure
+    # behind the published spend numbers. A reader of the cost page is entitled
+    # to know the meter dropped a charge, because it means the published total
+    # is low rather than merely imprecise.
+    "stacks_budget_charge_dropped_count_total" => :public,
     # Aggregate spend per provider, no user in it — the same audience as the
     # cost series beside them.
     "stacks_budget_spend_daily_cents" => :public,

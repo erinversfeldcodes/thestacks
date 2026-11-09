@@ -17,12 +17,32 @@ defmodule Core.Repo.Migrations.ValidateTheConfidenceConstraints do
       no-op in Postgres, so a partial deploy that ran this and failed later can
       re-run it. `down` is deliberately empty — "un-validating" a constraint is
       not an operation, and dropping it belongs to `…180000`'s `down`.
+
+      ⛔ `statement_timeout = 0`, MATCHING THE PRECEDENT, and an earlier version
+      of this file capped it at 60s. The cap is the wrong shape here: a
+      `VALIDATE CONSTRAINT` is a full table scan whose duration is a function of
+      table size, not of anything this migration controls, and the scan holds
+      only SHARE UPDATE EXCLUSIVE — readers and writers continue throughout, so
+      there is nothing to protect them from.
+      
+      ⚠️ And the failure it would cause is QUIET, which is why it is worth
+      fixing while both tables are still small enough that it cannot bite. If
+      the scan exceeded the cap, the migration fails and the constraints stay
+      `NOT VALID` — which still checks new writes. So new rows are guarded,
+      pre-existing bad rows are never caught, and nothing afterwards says the
+      validation did not finish. That is a gate that looks enforced and is half
+      enforced.
+
+      ⚖️ Plain `SET` under `@disable_ddl_transaction`, since there is no
+      transaction for a LOCAL setting to scope to.
   """
   use Ecto.Migration
 
+  @disable_ddl_transaction true
+
   def up do
-    execute("SET LOCAL lock_timeout = '5s'")
-    execute("SET LOCAL statement_timeout = '60s'")
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
 
     execute(
       "ALTER TABLE op.post_book_associations VALIDATE CONSTRAINT post_book_associations_confidence_in_range"

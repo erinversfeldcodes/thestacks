@@ -176,30 +176,62 @@ defmodule Stacks.AI.SpendTest do
     # metering failure costing a second charge is the exact opposite of the
     # claim.
     #
-    # ⚠️ A REAL FAILURE IS FORCED, not simulated. My first attempt at these two
-    # cases called `record/3` twice with valid input and asserted `:ok` — which
-    # is the happy path asserted twice and proves nothing about the rescue. An
-    # unparseable period is a genuine raise from inside the write.
-    test "a failing write returns :ok instead of raising" do
-      assert :ok = Spend.record(:together, 5_000_000, "not-a-date")
+    # ⚠️ A REAL DATABASE FAULT IS FORCED, not simulated — and the forcing
+    # mechanism changed when the rescue was narrowed. These cases used to pass
+    # `"not-a-date"` as `today`, which raises out of `Date.beginning_of_month/1`
+    # before any SQL runs. The blanket rescue swallowed it, so the tests passed
+    # and proved the wrong thing: that a PROGRAMMING error is survivable.
+    #
+    # ⛔ It no longer is, deliberately. A malformed argument, a renamed column
+    # or a wrong `conflict_target` raises on every call, which would swallow
+    # every charge, read the ledger as 0, and make `check_budget/1` answer `:ok`
+    # to everything — the ceiling gone, fail-OPEN, with only a log line. So the
+    # rescue covers `Postgrex.Error` and `DBConnection.ConnectionError` and
+    # nothing else, and a value past `bigint` is how a genuine database fault
+    # gets raised here.
+    test "a database fault returns :ok instead of raising" do
+      assert :ok = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
     end
 
     # ⬛ AND NOTHING IS RECORDED, so the failure is a reporting gap rather than
     # a wrong number. The ceiling is then too generous for as long as the
     # outage lasts — the better of the two failures, because the alternative
     # bills twice for the same answer.
-    test "a failing write records nothing rather than something wrong" do
-      assert :ok = Spend.record(:together, 5_000_000, "not-a-date")
-
-      assert Repo.aggregate(Spend, :count) == 0
+    test "a database fault records nothing rather than something wrong" do
+      assert :ok = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
+      assert Spend.spent(:together, :daily) == 0
     end
 
-    # ⬛ ANTI-VACUITY: a GOOD write must still land, or a `record/3` that
-    # swallowed everything would satisfy both cases above.
-    test "a good write still lands" do
-      assert :ok = Spend.record(:together, 5_000_000, @today)
+    # ⛔ AND THE SWALLOWED PATH IS ALARMABLE. A `Logger.error` alone is
+    # indistinguishable from success to everything that watches, and this is
+    # the one accepted failure mode of the money ledger.
+    test "a dropped charge emits a counter, not only a log line" do
+      handler_id = "charge-dropped-#{inspect(make_ref())}"
+      test_pid = self()
 
-      assert Spend.spent(:together, :daily, @today) == 5_000_000
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :budget, :charge_dropped],
+        fn _e, _m, meta, _c -> send(test_pid, {:charge_dropped, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert :ok = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
+
+      assert_receive {:charge_dropped, %{provider: "together"}},
+                     1_000,
+                     "a charge was dropped with no counter — the ledger is now under-counting " <>
+                       "and nothing can alarm on it"
+    end
+
+    # ⬛ ANTI-VACUITY: a programming error must NOT be swallowed, or the narrowed
+    # rescue would be a blanket rescue again.
+    test "a malformed argument raises rather than being swallowed" do
+      assert_raise FunctionClauseError, fn ->
+        Spend.record(:together, 5_000_000, "not-a-date")
+      end
     end
   end
 

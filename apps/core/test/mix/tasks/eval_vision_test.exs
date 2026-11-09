@@ -88,6 +88,36 @@ defmodule Mix.Tasks.Eval.VisionTest do
                "but it is the only record of where a score came from"
     end
 
+    # ⛔ THE COMMITTED BASELINE IS READ, not a fixture — because the thing this
+    # case protects is a FILE, and a fixture asserting the same shape would stay
+    # green while the real file was unusable. That is exactly what happened:
+    # the committed baseline predated model-keying, so a full `just ci` scored
+    # 8/8 against a live service and then refused, naming its own baseline as
+    # the broken half.
+    #
+    # ⚖️ The identity here is deliberately a DIFFERENT deployment from the one
+    # the file was recorded on. The recorded `modal_app` is an ephemeral preview
+    # URL that the same CI run then deleted, so if the URL were still part of
+    # the key this file could never support a production run — one file, two
+    # environments, each `--record` destroying the other's.
+    test "the committed baseline compares from a deployment that is not the one it was recorded on" do
+      body = File.read!("priv/eval/vision_baseline.json")
+      recorded = Jason.decode!(body)
+
+      identity = %{
+        model: recorded["model"],
+        modal_app: "https://some-other-deployment.example.modal.run",
+        total: recorded["total"]
+      }
+
+      assert {:ok, passed} = Vision.baseline_for(body, identity),
+             "the committed baseline does not support a run from another deployment of the " <>
+               "same model — a preview-recorded baseline must serve production, or the file " <>
+               "can only ever describe one environment"
+
+      assert passed == recorded["passed"]
+    end
+
     # ⬛ ANTI-VACUITY: if `baseline_for/2` returned `{:mismatch, _}` for
     # everything, the two cases above would pass and the gate would never
     # compare anything again. The matching case above is what excludes that —
@@ -181,20 +211,23 @@ defmodule Mix.Tasks.Eval.VisionTest do
                "next person re-records blind"
     end
 
-    # ⚠️ THE COMMITTED BASELINE IS A LEGACY ONE, AND THAT IS ITS OWN BRANCH.
-    # `priv/eval/vision_baseline.json` carries a score and no `model`, because
-    # it predates the keying. The generic mismatch message would read "recorded
-    # for nil" and send whoever hits it looking for a model called nil.
+    # ⚠️ A LEGACY BASELINE IS ITS OWN BRANCH: a score with no `model`, from
+    # before baselines were keyed. The generic mismatch message would read
+    # "recorded for nil" and send whoever hits it looking for a model called nil.
+    #
+    # ⛔ DRIVEN THROUGH `baseline_for/2` ON A FIXTURE, not through `gate/2` on
+    # the committed file — because it used to do the latter, and it was passing
+    # only BECAUSE the real baseline was broken. Recording a valid one flipped
+    # this case to the ordinary mismatch refusal, which is correct behaviour and
+    # looked like a regression. A test that reads a real artefact to exercise a
+    # defect branch dies the moment the artefact is fixed, and takes its branch's
+    # coverage with it.
     test "a baseline that names no model says so, rather than naming nil" do
-      results = [%{ok: true, name: "a", detail: ""}]
+      legacy = ~s({"total": 6, "passed": 6, "recorded_at": "2026-08-20T10:08:09Z"})
 
-      error = assert_raise Mix.Error, fn -> Vision.gate(results, false) end
-
-      assert error.message =~ "DOES NOT SAY WHICH MODEL IT DESCRIBES",
-             "expected the legacy-baseline refusal; got: #{error.message}"
-
-      refute error.message =~ "nil",
-             "the message names nil, which is the thing it exists to avoid"
+      assert {:mismatch, nil} = Vision.baseline_for(legacy, @identity),
+             "a baseline with no model must be distinguishable from one recorded for a " <>
+               "different model — the refusal wording depends on telling them apart"
     end
 
     # ⛔ THE HOUSE FAILURE MODE, AND IT NEEDS THE FILE GONE TO REACH IT. This

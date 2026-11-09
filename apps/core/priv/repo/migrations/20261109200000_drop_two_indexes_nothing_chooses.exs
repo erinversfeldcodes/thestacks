@@ -35,14 +35,24 @@ defmodule Core.Repo.Migrations.DropTwoIndexesNothingChooses do
       place.
 
       ⚠️ No `@breaking_ok`, deliberately, and this is not an oversight to be
-      corrected later: `lint-migrations.sh`'s destructive patterns are
-      `remove :col`, `drop_column`, `drop … table`, `rename`, `modify … null:
-      false`, `modify :col, :type`, and the SQL-literal equivalents. Its
-      table-drop pattern requires the word `table`, so `drop index` falls
-      through — correctly. The expand–contract reasoning the annotation exists
-      to force ("no N-1 reader still reads the doomed shape") has no analogue
-      for an index: no code names one, dropping it loses no data, and
-      re-creating it restores the previous state exactly.
+      corrected later. `lint-migrations.sh` flags column removals, table drops,
+      renames, nullability tightening and column type changes. Its table-drop
+      pattern requires the word "table", so an index drop falls through —
+      correctly. The expand–contract reasoning the annotation exists to force
+      ("no N-1 reader still reads the doomed shape") has no analogue for an
+      index: no code names one, dropping it loses no data, and re-creating it
+      restores the previous state exactly. Adding the annotation to be safe
+      would make the rule incoherent.
+
+      ⛔ THAT PARAGRAPH IS DESCRIBED RATHER THAN QUOTED, AND THAT IS LOAD-BEARING.
+      An earlier version listed the gate's patterns as literal code spans, and
+      `lint-migrations.sh` went RED on this file for a column-removal pattern
+      and two column-alteration patterns — none of which this migration
+      performs. Its DSL regexes
+      scan the whole file; the heredoc strip runs only before SQL-literal
+      extraction, and the comment strip only removes lines starting with `#`, so
+      a `@moduledoc` is scanned like code. An explanation of why a pattern does
+      not apply must not contain the pattern.
 
       ⬛ `lock_timeout` but no `statement_timeout = 0`: there is no long build
       here to be interrupted, and the short lock timeout still matters so the
@@ -65,8 +75,27 @@ defmodule Core.Repo.Migrations.DropTwoIndexesNothingChooses do
     drop_if_exists index(:llm_call_log, [:outcome], prefix: "op", concurrently: true)
   end
 
+  # ⛔ THE `down` DROPS BEFORE IT CREATES, AND `IF NOT EXISTS` IS THE REASON
+  # RATHER THAN THE MITIGATION.
+  #
+  # Measured against an existing INVALID index: `CREATE INDEX CONCURRENTLY IF
+  # NOT EXISTS` emits `NOTICE: relation already exists, skipping`, reports
+  # `CREATE INDEX` — i.e. SUCCESS — and leaves an index that is both
+  # `indisvalid = f` and not the one asked for. Without `if_not_exists` you at
+  # least get a loud `ERROR: relation already exists`.
+  #
+  # ⚖️ And the asymmetry runs toward the `down`, not away from it: a `down` runs
+  # exactly when something has already gone wrong, usually under time pressure,
+  # so a silent wrong-index outcome is worst here.
   def down do
     execute("SET lock_timeout = '5s'")
+
+    drop_if_exists index(:post_book_associations, [:post_id],
+                     prefix: "op",
+                     concurrently: true
+                   )
+
+    drop_if_exists index(:llm_call_log, [:outcome], prefix: "op", concurrently: true)
 
     create_if_not_exists index(:post_book_associations, [:post_id],
                            prefix: "op",

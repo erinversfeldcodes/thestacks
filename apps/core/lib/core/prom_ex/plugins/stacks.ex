@@ -272,6 +272,27 @@ defmodule Core.PromEx.Plugins.Stacks do
             "Budget refusals: an AI call the guard declined because the daily or monthly limit was already reached.",
           tags: [:provider, :type]
         ),
+        # ⛔ A CHARGE THE LEDGER COULD NOT RECORD — the accepted failure mode of
+        # `Spend.record/3`, made alarmable.
+        #
+        # That function swallows a database fault so a transient error does not
+        # kill a job that has already spent the money. The money is still gone,
+        # so the swallowed path has to be visible: a `Logger.error` alone is
+        # indistinguishable from success to everything that watches, and an
+        # under-counting ledger makes `check_budget/1` answer `:ok` to
+        # everything.
+        #
+        # ⚠️ Any non-zero rate here means the ceiling is being computed from an
+        # incomplete ledger, which is the fail-OPEN direction. It is not a
+        # refusal (that is the counter above) and not a cost (that is the sum);
+        # it is the meter itself failing.
+        counter(
+          [:stacks, :budget, :charge_dropped, :count, :total],
+          event_name: [:stacks, :budget, :charge_dropped],
+          description:
+            "Charges the ledger could not record: a database fault swallowed by Spend.record/3, which means the budget ceiling is being compared against an incomplete total.",
+          tags: [:provider]
+        ),
         # ⚠️ `last_value`, NOT `sum`, and the difference is the whole meaning of
         # this series.
         #

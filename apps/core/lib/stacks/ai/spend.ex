@@ -82,19 +82,55 @@ defmodule Stacks.AI.Spend do
   def record(provider, micro_cents, today) when is_integer(micro_cents) and micro_cents > 0 do
     provider = to_string(provider)
 
-    try do
-      upsert_both_periods(provider, micro_cents, today)
-    rescue
-      error ->
-        # ⚠️ Logged at error, because an unrecorded charge is money spent with
-        # no trace of it — invisible in the ledger, the gauge and the panel.
-        Logger.error(
-          "Spend.record: could not record #{micro_cents} micro-cents for #{provider}: " <>
-            Exception.message(error)
-        )
-    end
-
+    upsert_both_periods(provider, micro_cents, today)
     :ok
+  rescue
+    # ⛔ NARROWED FROM A BLANKET RESCUE, WHICH MADE THIS FUNCTION FAIL OPEN.
+    #
+    # It used to rescue everything. A renamed column, a dropped unique index or
+    # a wrong `conflict_target` raises on EVERY insert — so every charge is
+    # swallowed, the ledger reads 0, and `check_budget/1` therefore answers
+    # `:ok` to everything. The ceiling disappears and the only trace is a log
+    # line.
+    #
+    # ⚠️ That is this module's founding defect arriving by another route. The
+    # moduledoc above says the budget "was restored by going quiet, and the
+    # restore was invisible". A blanket rescue restores it by swallowing every
+    # write rather than by the node sleeping — invisible in exactly the same
+    # way, on the one function whose job is to refuse.
+    #
+    # ⚖️ So a transient database fault is survivable and a schema mistake is
+    # not: these two clauses let the first through and let the second crash,
+    # where the caller's own supervision can surface it.
+    # ⚖️ `DBConnection.EncodeError` belongs here with the other two: it is the
+    # driver refusing a value the column cannot hold, which is a database fault
+    # arriving before the wire rather than a mistake in this module's logic.
+    error in [Postgrex.Error, DBConnection.ConnectionError, DBConnection.EncodeError] ->
+      Logger.error(
+        "Spend.record: could not record #{micro_cents} micro-cents for #{provider}: " <>
+          Exception.message(error)
+      )
+
+      # ⛔ A COUNTER, NOT ONLY A LOG LINE — and the inconsistency that argued
+      # for it was inside this same change. `log_write_failed/3` in the
+      # association worker gives a DIAGNOSTIC write a telemetry counter,
+      # reasoning that "a `Logger.warning` and `:ok` is indistinguishable from
+      # success to everything that watches". The MONEY ledger's write had only
+      # the log. If a dropped call-log row earns a counter, a dropped charge
+      # earns one more: this is the accepted failure mode, so it has to be
+      # alarmable rather than merely recorded.
+      # ⚠️ `to_string/1` AGAIN HERE, not the body's rebound `provider`. A
+      # function-level `rescue` cannot see bindings made in the body, so
+      # `provider` is the original argument — an atom at every call site. The
+      # label would have been `:together` while every other series in this
+      # family carries `"together"`, splitting the metric in two for anyone
+      # grouping by provider. Caught by the test asserting the label's value
+      # rather than merely its presence.
+      :telemetry.execute([:stacks, :budget, :charge_dropped], %{count: 1}, %{
+        provider: to_string(provider)
+      })
+
+      :ok
   end
 
   defp upsert_both_periods(provider, micro_cents, today) do
