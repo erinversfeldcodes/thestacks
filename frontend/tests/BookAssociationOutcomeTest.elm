@@ -37,6 +37,44 @@ viewWith isOwner outcome =
         }
 
 
+{-| Render with a surviving association, so the POPULATED path is reachable.
+
+⚖️ Every other case in this file renders with `associations = []`, which could
+not reach the populated branch at all — that is how the view consulting the
+outcome only inside `List.isEmpty` went unnoticed.
+
+-}
+renderWithRows : Bool -> AssociationOutcome -> Query.Single ()
+renderWithRows isOwner outcome =
+    Query.fromHtml
+        (Components.BookAssociations.view
+            { associations =
+                [ { id = "a1"
+                  , bookId = "b1"
+                  , bookTitle = "Piranesi"
+                  , confidence = 0.9
+                  , reasoning = "named twice"
+                  , status = BlogPost.Confirmed
+                  }
+                ]
+            , isOwner = isOwner
+            , outcome = outcome
+            , onConfirm = always ()
+            , onDismiss = always ()
+            }
+        )
+
+
+staleSentence : String
+staleSentence =
+    "The latest attempt to find books didn't finish, so these are from an earlier one."
+
+
+emptySentence : String
+emptySentence =
+    "We couldn't link books to this post this time."
+
+
 suite : Test
 suite =
     describe "what the author is told when no books were linked"
@@ -138,6 +176,50 @@ suite =
                     Expect.equal
                         (Ok [ Envelope.AssociationOutcomeUnspecified ])
                         (decodeOutcomes [ "something_new" ])
+            ]
+        , describe "a failed pass with rows that survived it"
+            [ -- ⛔ THE AUTHOR SAW THEIR BOOKS AND WAS NEVER TOLD THE NEWEST PASS
+              -- FAILED. Reachable by republishing: no already-published guard,
+              -- the worker deletes nothing on a failure branch, and the outcome
+              -- reports the newest pass.
+              test "the owner is told the latest attempt did not finish" <|
+                \_ ->
+                    renderWithRows True Envelope.AssociationOutcomeLlmError
+                        |> Query.has [ Selector.text staleSentence ]
+
+            -- ⬛ AND THE ROWS ARE STILL THERE — a note that replaced the list
+            -- would satisfy the case above while losing the author's books.
+            , test "the surviving books are still rendered beside the note" <|
+                \_ ->
+                    renderWithRows True Envelope.AssociationOutcomeLlmError
+                        |> Query.has [ Selector.text "Piranesi" ]
+
+            -- ⚠️ BOTH DIRECTIONS of the copy guard. Two strings that drift into
+            -- each other is the same defect in a new place, and the suite
+            -- already carries this hazard for the other pair.
+            , test "the populated note does not borrow the empty-state sentence" <|
+                \_ ->
+                    renderWithRows True Envelope.AssociationOutcomeLlmError
+                        |> Query.hasNot [ Selector.text emptySentence ]
+            , test "the empty state does not borrow the populated sentence" <|
+                \_ ->
+                    render True Envelope.AssociationOutcomeLlmError
+                        |> Query.hasNot [ Selector.text staleSentence ]
+
+            -- ⚖️ `NoBooksFound` is DELIBERATELY silent here. Its list is equally
+            -- "from an earlier pass", but it is a completed, correct answer —
+            -- the list is simply what the post has. This pins the asymmetry so
+            -- it reads as a decision rather than as the oversight above.
+            , test "a pass that found nothing says nothing, even with rows present" <|
+                \_ ->
+                    renderWithRows True Envelope.AssociationOutcomeNoBooksFound
+                        |> Query.hasNot [ Selector.text staleSentence ]
+
+            -- ⬛ A reader is never told how the author's pass went.
+            , test "a reader is not told the author's pass failed" <|
+                \_ ->
+                    renderWithRows False Envelope.AssociationOutcomeLlmError
+                        |> Query.hasNot [ Selector.text staleSentence ]
             ]
         , describe "the envelope's outcome, in the shapes the server really sends"
             [ -- ⛔ ZERO TESTS MENTIONED THIS KEY AT ALL. `grep -rn

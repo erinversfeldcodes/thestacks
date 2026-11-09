@@ -7993,3 +7993,19 @@ h4 {
     line-height: 1.65;
     color: var(--text-muted);
 }
+
+/* The note above a POPULATED list saying the newest pass failed and these
+   books are from an earlier one. It sits in the same muted register as
+   __note — this is information, not an alarm — but carries the accent rule
+   that --failed uses, so a reader who has learned that rule reads the same
+   meaning in both places. Bottom margin rather than top: it is introducing
+   the list below it, so the space belongs between the two. */
+.book-associations__stale-note {
+    margin: 0 0 var(--space-3);
+    padding-left: var(--space-3);
+    border-left: 2px solid var(--accent);
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    line-height: 1.65;
+    color: var(--text-muted);
+}

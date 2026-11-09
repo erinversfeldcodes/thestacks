@@ -31,11 +31,75 @@ view config =
 
     else
         div [ class "book-associations" ]
-            [ div [ class "book-associations__title" ]
-                [ text "Books from my shelves" ]
-            , div [ class "book-associations__list" ]
-                (List.map (viewAssociation config) visible)
-            ]
+            -- ⛔ THE OUTCOME USED TO BE CONSULTED ONLY WHEN THE LIST WAS EMPTY,
+            -- so the author was never told a pass had failed whenever earlier
+            -- rows survived — the one case where they have most reason to ask,
+            -- because they are the one who just triggered it.
+            --
+            -- Reachable through the public API, not hypothetical: `publish_post/2`
+            -- has no already-published guard, so a second publish enqueues a
+            -- second pass; the worker never deletes rows on a failure branch;
+            -- and `latest_association_outcome/1` reports the NEWEST pass. So
+            -- "outcome = a failure, associations = rows from an earlier pass" is
+            -- a state an author can produce by republishing.
+            (staleFailureNote config
+                ++ [ div [ class "book-associations__title" ]
+                        [ text "Books from my shelves" ]
+                   , div [ class "book-associations__list" ]
+                        (List.map (viewAssociation config) visible)
+                   ]
+            )
+
+
+{-| A note above a populated list saying the newest pass failed.
+
+⚖️ THIS NOTE IS ABOUT FAILURE, NOT ABOUT STALENESS, and the distinction decides
+which outcomes get it. The author needs it because an attempt did not complete
+and they may want to retry. `NoBooksFound` is deliberately silent here even
+though its list is equally "from an earlier pass": it is a completed, correct
+answer, and the list is simply what the post has. Reading that silence as the
+same oversight this note fixes would be wrong — it is the opposite, a result
+that needs no caveat.
+
+⚠️ Its own copy, not `failureNote`'s. "We couldn't link books to this post this
+time." implies there is nothing here, which is accurate above an empty state and
+false above a populated one. One sentence cannot be true in both positions, so
+there are two — and a test asserts neither drifts into the other's wording.
+
+⬛ Owner only. A reader is never told how the author's pass went, here or
+anywhere else.
+
+-}
+staleFailureNote : Config msg -> List (Html msg)
+staleFailureNote config =
+    let
+        latestPassFailed =
+            case config.outcome of
+                Envelope.AssociationOutcomeUnreadableResponse ->
+                    True
+
+                Envelope.AssociationOutcomeUnexpectedShape ->
+                    True
+
+                Envelope.AssociationOutcomeLlmError ->
+                    True
+
+                Envelope.AssociationOutcomeUnspecified ->
+                    False
+
+                Envelope.AssociationOutcomeAssociated ->
+                    False
+
+                Envelope.AssociationOutcomeNoBooksFound ->
+                    False
+    in
+    if config.isOwner && latestPassFailed then
+        [ p [ class "book-associations__stale-note" ]
+            [ text "The latest attempt to find books didn't finish, so these are from an earlier one." ]
+        ]
+
+    else
+        []
 
 
 {-| ⛔ The author used to be told nothing at all.
