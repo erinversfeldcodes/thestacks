@@ -77,7 +77,15 @@ defmodule StacksWeb.BlogController do
           |> Enum.filter(fn a -> is_owner || a.visible end)
           |> Enum.map(&ProtoJSON.blog_association(&1, is_owner))
 
-        json(conn, %{post: ProtoJSON.blog_post(post), associations: associations})
+        # ⚖️ The outcome is told to the OWNER only. A reader looking at someone
+        # else's post has no use for "we could not link books to this post",
+        # and it would disclose that the author ran the assistant at all.
+        outcome = if is_owner, do: Blog.latest_association_outcome(post.id)
+
+        json(conn, %{
+          post: ProtoJSON.blog_post(post, outcome),
+          associations: associations
+        })
     end
   end
 

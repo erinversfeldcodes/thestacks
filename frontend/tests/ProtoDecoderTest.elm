@@ -1555,6 +1555,7 @@ blogSuite =
                         , authorDisplayName = "Fable Quill"
                         , authorHandle = "fable_quill"
                         , syndicated = True
+                        , associationOutcome = ""
                         }
 
                     result =
@@ -1850,6 +1851,7 @@ blogResponseSuite =
                             , updatedAt = "2026-03-21T01:00:00Z"
                             , visibilityGroupId = ""
                             , syndicated = True
+                            , associationOutcome = ""
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             }

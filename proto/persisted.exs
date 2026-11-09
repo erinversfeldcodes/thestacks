@@ -690,7 +690,8 @@
         syndicated: %{default: true, null: false},
         associations: %{api_only: true},
         author_display_name: %{api_only: true},
-        author_handle: %{api_only: true}
+        author_handle: %{api_only: true},
+        association_outcome: %{api_only: true}
       }
     },
     %{
@@ -1510,7 +1511,12 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BlogPost",
       function_name: :blog_post,
-      skip_fields: [:associations, :author_display_name, :author_handle],
+      skip_fields: [
+        :associations,
+        :author_display_name,
+        :author_handle,
+        :association_outcome
+      ],
       field_overrides: %{}
     },
     %{

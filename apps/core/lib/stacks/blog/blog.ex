@@ -10,6 +10,7 @@ defmodule Stacks.Blog do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.CallLog
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Events
   alias Stacks.Social
@@ -383,6 +384,35 @@ defmodule Stacks.Blog do
       preload: [:book]
     )
     |> Repo.all()
+  end
+
+  @doc """
+      How the most recent finished book-association pass for this post ended.
+
+      ⛔ **The author was never told.** Every terminal path in the association
+      worker counts itself under telemetry, which reaches a dashboard and
+      reaches the author not at all — so a post whose pass failed renders
+      exactly like one that was never tried, and the writer is left to guess
+      whether the feature is broken or their post simply has no books in it.
+
+      ⚖️ Returns `nil` when no pass has finished, which is deliberately
+      distinct from `"no_books_found"`. A draft nobody has scanned yet and a
+      completed scan that found nothing are different facts, and a reader told
+      the second when the first is true has been told something false.
+
+      ⚠️ Reads the LATEST row by creation, because the worker is retryable: an
+      earlier `llm_error` followed by a successful retry must not keep
+      reporting the failure.
+  """
+  @spec latest_association_outcome(Ecto.UUID.t()) :: String.t() | nil
+  def latest_association_outcome(post_id) do
+    from(l in CallLog,
+      where: l.post_id == ^post_id,
+      order_by: [desc: l.created_at],
+      limit: 1,
+      select: l.outcome
+    )
+    |> Repo.one()
   end
 
   @doc """

@@ -7966,3 +7966,30 @@ h4 {
 .business-claim:focus-visible {
     color: var(--accent);
 }
+
+/* ⛔ The author used to be told nothing when no books were linked. An empty
+   association list rendered no element at all, so a post whose association pass
+   failed looked exactly like one that was never tried — and the writer was left
+   to guess whether the feature was broken or their post simply had no books in
+   it.
+
+   ⚖️ Deliberately quiet. This is a note about a background pass, not an error
+   the author did anything to cause: it borrows the block's own muted body type
+   rather than any alert styling, and the failed variant is distinguished by a
+   left rule in the accent rather than by alarm. */
+.book-associations--empty,
+.book-associations--failed {
+    padding: var(--space-3) var(--space-4);
+}
+
+.book-associations--failed {
+    border-left: 2px solid var(--accent);
+}
+
+.book-associations__note {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    line-height: 1.65;
+    color: var(--text-muted);
+}

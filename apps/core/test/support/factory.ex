@@ -531,6 +531,15 @@ defmodule Stacks.Factory do
     }
   end
 
+  def llm_call_log_factory do
+    %Stacks.AI.CallLog{
+      model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      outcome: "associated",
+      prompt_sha256: :crypto.hash(:sha256, "a prompt") |> Base.encode16(case: :lower),
+      raw_response: ~s([{"book_id": "abc", "confidence": 0.9, "reasoning": "named"}])
+    }
+  end
+
   def post_syndication_factory do
     %Stacks.Blog.PostSyndication{
       post: build(:post),

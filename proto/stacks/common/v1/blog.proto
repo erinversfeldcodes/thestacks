@@ -136,6 +136,24 @@ message BlogPost {
   // control). Only PUBLIC posts can actually reach the feed; the flag on a
   // lower-visibility post is inert until the post is made public.
   bool syndicated = 15 [json_name = "syndicated"];
+  // How the book-association pass ended, so an author can be told when it
+  // found nothing or could not run.
+  //
+  // The worker counts every terminal path under telemetry, which reaches a
+  // dashboard and reaches the author not at all: a post whose association pass
+  // failed renders exactly like one that was never tried, and the reader is
+  // left to wonder whether the feature is broken or their post simply has no
+  // books in it. Those are different answers and the author deserves the right
+  // one.
+  //
+  // Wire value is one of "", "associated", "no_books_found",
+  // "unreadable_response", "llm_error". Empty means no pass has finished for
+  // this post — a draft, or one still queued — and is deliberately distinct
+  // from "no_books_found", which is a completed pass that found nothing.
+  //
+  // API-only projection: read from the most recent completed call log for this
+  // post, not a stored column on the post itself.
+  string association_outcome = 16 [json_name = "association_outcome"];
 }
 
 // PostSyndication records one act of syndication for a post —

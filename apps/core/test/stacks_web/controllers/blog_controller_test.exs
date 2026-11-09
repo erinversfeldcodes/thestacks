@@ -588,4 +588,87 @@ defmodule StacksWeb.BlogControllerTest do
       assert %{"error" => "forbidden"} = json_response(conn, 403)
     end
   end
+
+  describe "the association outcome on GET /api/blog/posts/:id" do
+    # ⛔ THE AUTHOR WAS NEVER TOLD. Every terminal path in the association
+    # worker counts itself under telemetry, which reaches a dashboard and
+    # reaches the author not at all — so a post whose pass failed was
+    # indistinguishable from one that was never tried.
+    test "the owner is told how the last finished pass ended", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      insert(:llm_call_log, post_id: post.id, outcome: "llm_error")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["post"]["association_outcome"] == "llm_error"
+    end
+
+    # ⚠️ THE LATEST ROW, because the worker is retryable: an earlier failure
+    # followed by a successful retry must not keep reporting the failure.
+    test "a successful retry supersedes the earlier failure", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      insert(:llm_call_log, post_id: post.id, outcome: "llm_error")
+      insert(:llm_call_log, post_id: post.id, outcome: "associated")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["post"]["association_outcome"] == "associated",
+             "the stale failure is still being reported — the worker is retryable, " <>
+               "so the author would be told about an error that has since succeeded"
+    end
+
+    # ⚖️ ABSENT, not "no_books_found". A post nobody has scanned and a scan that
+    # found nothing are different facts, and reporting the second when the first
+    # is true tells the author something false about their own post.
+    test "a post with no finished pass carries no outcome", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["post"]["association_outcome"] in [nil, ""]
+    end
+
+    # ⛔ NOT TOLD TO ANYONE ELSE. A reader has no use for "we could not link
+    # books to this post", and it would disclose that the author ran the
+    # assistant at all.
+    test "a reader who is not the author is not told", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      reader = insert(:user)
+
+      post =
+        insert(:post,
+          user: author,
+          visibility: "public",
+          published_at: DateTime.utc_now()
+        )
+
+      insert(:llm_call_log, post_id: post.id, outcome: "llm_error")
+
+      body =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["post"]["association_outcome"] in [nil, ""],
+             "another reader was told how the author's association pass went"
+    end
+  end
 end

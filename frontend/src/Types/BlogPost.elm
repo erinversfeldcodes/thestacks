@@ -1,5 +1,6 @@
 module Types.BlogPost exposing
-    ( AssociationStatus(..)
+    ( AssociationOutcome(..)
+    , AssociationStatus(..)
     , BlogPost
     , BlogPostSummary
     , BookAssociation
@@ -13,6 +14,7 @@ module Types.BlogPost exposing
     , commentDecoder
     , commentId
     , commentReplies
+    , fromProtoAssociationOutcome
     , visibilityToString
     )
 
@@ -40,7 +42,27 @@ type alias BlogPost =
     , authorDisplayName : String
     , authorHandle : String
     , syndicated : Bool
+    , associationOutcome : AssociationOutcome
     }
+
+
+{-| How the book-association pass ended, for the author's eyes.
+
+⛔ `NotRunYet` is a distinct case and not a synonym for `FoundNothing`. A draft
+nobody has scanned and a completed scan that found no books are different facts,
+and showing the author the second when the first is true tells them something
+false about their own post.
+
+⚖️ `Failed` carries no detail, deliberately. The author can act on "this did not
+work, and your post is fine"; the difference between an unparseable response and
+a provider error is ours to fix, not theirs to read.
+
+-}
+type AssociationOutcome
+    = NotRunYet
+    | Associated
+    | FoundNothing
+    | Failed
 
 
 type alias BlogPostSummary =
@@ -191,7 +213,34 @@ fromProtoBlogPost pb =
     , authorDisplayName = pb.authorDisplayName
     , authorHandle = pb.authorHandle
     , syndicated = pb.syndicated
+    , associationOutcome = fromProtoAssociationOutcome pb.associationOutcome
     }
+
+
+{-| ⚠️ An unrecognised outcome reads as `NotRunYet`, not as `Failed`.
+
+A string this client has never heard of means the server grew a case the SPA has
+not been taught, and claiming a failure the author can do nothing about would be
+worse than staying quiet about a pass whose result we cannot interpret.
+
+-}
+fromProtoAssociationOutcome : String -> AssociationOutcome
+fromProtoAssociationOutcome raw =
+    case raw of
+        "associated" ->
+            Associated
+
+        "no_books_found" ->
+            FoundNothing
+
+        "unreadable_response" ->
+            Failed
+
+        "llm_error" ->
+            Failed
+
+        _ ->
+            NotRunYet
 
 
 fromProtoBlogPostSummary : Proto.BlogPostSummary -> BlogPostSummary

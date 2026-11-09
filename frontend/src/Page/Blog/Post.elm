@@ -541,6 +541,7 @@ viewPost post isOwner =
         , BookAssociations.view
             { associations = post.associations
             , isOwner = isOwner
+            , outcome = post.associationOutcome
             , onConfirm = ConfirmAssociation
             , onDismiss = DismissAssociation
             }

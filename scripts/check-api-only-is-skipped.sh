@@ -102,7 +102,7 @@ for m in re.finditer(r'proto_message:\s*"([A-Za-z0-9_]+)"(.*?)(?=proto_message:\
 # It fails in both directions on purpose: fewer than expected means the parse
 # drifted or a flag was removed, more means one was added without the review
 # that should accompany publishing a field with no column.
-EXPECTED_API_ONLY_FIELDS = 12
+EXPECTED_API_ONLY_FIELDS = 13
 EXPECTED_API_ONLY_MESSAGES = 4
 
 found_fields = sum(len(v) for v in api_only.values())

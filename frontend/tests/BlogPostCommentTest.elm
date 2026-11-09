@@ -11,7 +11,7 @@ import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
-import Types.BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
+import Types.BlogPost as BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -275,6 +275,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
+                            , associationOutcome = BlogPost.NotRunYet
                             }
 
                         model =
@@ -313,6 +314,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
+                            , associationOutcome = BlogPost.NotRunYet
                             }
 
                         model =
@@ -369,6 +371,7 @@ postView { displayName, handle } =
             , authorDisplayName = displayName
             , authorHandle = handle
             , syndicated = True
+            , associationOutcome = BlogPost.NotRunYet
             }
 
         model =
@@ -396,6 +399,7 @@ blockMenuView { authorName } =
             , authorDisplayName = authorName
             , authorHandle = "fable_quill"
             , syndicated = True
+            , associationOutcome = BlogPost.NotRunYet
             }
 
         viewerModel =
