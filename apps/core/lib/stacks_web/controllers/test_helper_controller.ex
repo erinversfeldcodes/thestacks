@@ -14,6 +14,7 @@ defmodule StacksWeb.TestHelperController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Admin.SessionContext
   alias Stacks.AgeVerification
+  alias Stacks.AI.CallLog
   alias Stacks.Blog
   alias Stacks.Books
   alias Stacks.Email
@@ -219,6 +220,79 @@ defmodule StacksWeb.TestHelperController do
   end
 
   def seed_book_writing(conn, _params), do: not_found(conn)
+
+  @doc """
+      POST /api/test/association-outcome  body: {"email", "outcome", "title"?}
+
+      Seeds a blog post whose book-association pass FINISHED WITH NO
+      ASSOCIATIONS, recording `outcome` in the call log — the state an author
+      sees when the pass found nothing or could not run.
+
+      ⛔ **The failing half is what nothing could drive.** `seed_book_writing`
+      above writes the happy path (a visible association), and production
+      reaches the failing paths only through an async LLM worker whose outcome a
+      browser test cannot steer. So the surface that tells an author "we
+      couldn't link books to this post" had no drivable route to it, which is
+      exactly the half of this component that had never been seen rendered.
+
+      ⚖️ Writes the same end state the worker would, through the same schema,
+      and **weakens no invariant**: `outcome` is validated against the worker's
+      own closed vocabulary rather than taken as given, so this cannot create a
+      row production could not. `.test`-domain emails only.
+
+      `201 {ok, post_id}`, `404` out of scope, `422 {errors}`.
+  """
+  # The worker's own terminal vocabulary. A caller asking for anything else is
+  # asking for a row production cannot produce, and gets a 422 rather than a
+  # fixture that proves something untrue.
+  @association_outcomes ~w(associated no_books_found unreadable_response unexpected_shape llm_error)
+
+  def seed_association_outcome(conn, %{"email" => email, "outcome" => outcome} = params)
+      when is_binary(email) and is_binary(outcome) do
+    title = Map.get(params, "title", "E2E post whose association pass finished")
+
+    # ⚠️ TAGGED, because two bare `true <-` clauses are indistinguishable in
+    # `else`: an out-of-scope email was answering with the outcome-vocabulary
+    # 422 instead of a 404, so the scope refusal was reporting the wrong reason
+    # — and a caller debugging it would go looking at its outcome string.
+    with true <- e2e_test_email?(email),
+         {:outcome, true} <- {:outcome, outcome in @association_outcomes},
+         %{} = user <- Accounts.get_user_by_email(email),
+         {:ok, post} <-
+           Blog.create_post(user, %{title: title, body: "Seeded by the association spec."}),
+         {:ok, _log} <- log_outcome(post.id, outcome) do
+      conn
+      |> put_status(:created)
+      |> json(%{ok: true, post_id: post.id})
+    else
+      {:outcome, false} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: %{outcome: "must be one of #{Enum.join(@association_outcomes, ", ")}"}})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  def seed_association_outcome(conn, _params), do: not_found(conn)
+
+  defp log_outcome(post_id, outcome) do
+    %CallLog{}
+    |> CallLog.changeset(%{
+      post_id: post_id,
+      model: "e2e-seeded",
+      outcome: outcome,
+      prompt_sha256: CallLog.hash_prompt("seeded by the association spec"),
+      raw_response: ""
+    })
+    |> Core.Repo.insert()
+  end
 
   @doc """
       POST /api/test/book-description  body: {"title", "description", "isbn"?}

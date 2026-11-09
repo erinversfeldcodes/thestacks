@@ -368,4 +368,38 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
+
+  describe "a pass that found nothing" do
+    # ⛔ IT USED TO RECORD `associated`, LIKE A PASS THAT FOUND THREE BOOKS.
+    # So neither the dashboard nor the author could tell a working pass over a
+    # post with no books in it from one that linked some — and the
+    # author-facing difference is the point: "no books came up" is a result,
+    # silence is a question.
+    test "records its own outcome, not the one a successful match uses" do
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      MockTogetherClient.put_response({:ok, "[]"})
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert [%CallLog{outcome: "no_books_found"}] = Repo.all(CallLog)
+    end
+
+    # ⬛ ANTI-VACUITY: a pass that DID find a book must still record
+    # `associated`. Without this, renaming every outcome to `no_books_found`
+    # would satisfy the case above.
+    test "a pass that found a book still records associated" do
+      post = insert(:post, user: consenting_author())
+      book = insert(:book)
+
+      MockTogetherClient.put_response(
+        {:ok, ~s([{"book_id": "#{book.id}", "confidence": 0.9, "reasoning": "named"}])}
+      )
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert [%CallLog{outcome: "associated"}] = Repo.all(CallLog)
+    end
+  end
 end

@@ -46,9 +46,9 @@ done
 # counter's documentation and the metric's description state, and the whole
 # point is to compare them against the router — so reading them out of the
 # counter would make the gate agree with itself.
-EXPECTED_STATE_CHANGING=92
+EXPECTED_STATE_CHANGING=93
 EXPECTED_PARTNER=4
-EXPECTED_TEST_HELPERS=5
+EXPECTED_TEST_HELPERS=6
 EXPECTED_IN_SCOPE=83
 
 MANIFEST="docs/csrf-scope.generated.md"

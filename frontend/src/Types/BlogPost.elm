@@ -236,6 +236,9 @@ fromProtoAssociationOutcome raw =
         "unreadable_response" ->
             Failed
 
+        "unexpected_shape" ->
+            Failed
+
         "llm_error" ->
             Failed
 

@@ -394,6 +394,39 @@ export async function seedBookWriting(
 }
 
 /**
+ * Seed a post whose book-association pass FINISHED WITH NO ASSOCIATIONS,
+ * recording `outcome` — the state an author sees when the pass found nothing or
+ * could not run.
+ *
+ * ⛔ THE FAILING HALF HAD NO DRIVABLE ROUTE. `seedBookWriting` above writes the
+ * happy path, and production reaches the failure outcomes only through an async
+ * LLM worker whose result a browser test cannot steer. So the surface that tells
+ * an author "we couldn't link books to this post" had never been seen rendered.
+ *
+ * ⚖️ `outcome` is validated server-side against the worker's own closed
+ * vocabulary, so this cannot seed a state production never reaches. Asserts 201
+ * — the caller has already minted a session, so the STACKS_E2E_TEST_HELPERS flag
+ * is guaranteed on by the time this runs.
+ */
+export async function seedAssociationOutcome(
+  request: APIRequestContext,
+  email: string,
+  outcome:
+    | "associated"
+    | "no_books_found"
+    | "unreadable_response"
+    | "unexpected_shape"
+    | "llm_error",
+): Promise<string> {
+  const resp = await request.post("/api/test/association-outcome", {
+    data: { email, outcome },
+  });
+  expect(resp.status(), `seed association outcome ${outcome}`).toBe(201);
+  const body = await resp.json();
+  return body.post_id as string;
+}
+
+/**
  * Make this browser context be this user, and nobody else.
  *
  * ⛔ THE CONTRACT IS EXCLUSIVE, and that is the part worth stating. The server

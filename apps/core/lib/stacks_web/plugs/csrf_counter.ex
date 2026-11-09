@@ -33,7 +33,7 @@ defmodule StacksWeb.Plugs.CsrfCounter do
 
       ⚖️ So a zero here means "no browser request arrived without a proof on a
       route this plug saw". It does NOT mean "every state-changing route is
-      proven". The scope is 83 of 92 state-changing routes, and that number is
+      proven". The scope is 83 of 93 state-changing routes, and that number is
       the thing to quote when reading the counter — a zero over a population you
       have not stated is the shape this project has twice mistaken for coverage.
 

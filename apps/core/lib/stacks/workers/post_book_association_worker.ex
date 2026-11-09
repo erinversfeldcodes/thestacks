@@ -238,8 +238,23 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
       payload: %{book_ids: book_ids, count: length(book_ids)}
     })
 
-    emit_outcome(:associated)
-    :associated
+    # ⛔ A PASS THAT FOUND NOTHING IS ITS OWN OUTCOME, AND USED TO BE
+    # INDISTINGUISHABLE FROM ONE THAT FOUND BOOKS.
+    #
+    # Both recorded `:associated`, so neither the dashboard nor the author could
+    # tell a working pass over a post with no books in it from a pass that
+    # linked three — and the author-facing difference is the whole point: "no
+    # books from your shelves came up in this post" is a result, while silence
+    # is a question.
+    #
+    # ⚖️ Counted separately rather than inferred from `count: 0` on the event:
+    # an aggregate that has to be reconstructed from a measurement is not a
+    # label, and the outcome vocabulary is what both the call log and the metric
+    # are keyed on.
+    outcome = if book_ids == [], do: :no_books_found, else: :associated
+
+    emit_outcome(outcome)
+    outcome
   end
 
   # ⚠️ Atom keys, because `Structured.decode/2` has already normalised them and

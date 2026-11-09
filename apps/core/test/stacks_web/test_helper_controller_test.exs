@@ -14,6 +14,7 @@ defmodule StacksWeb.TestHelperControllerTest do
 
   import Stacks.Factory
 
+  alias Stacks.Blog
   alias Stacks.Books.ISBN
   alias Swoosh.Adapters.Local.Storage.Memory
 
@@ -56,7 +57,8 @@ defmodule StacksWeb.TestHelperControllerTest do
       {:delete, "/api/test/admin-sessions"},
       {:post, "/api/test/session"},
       {:post, "/api/test/book-writing"},
-      {:post, "/api/test/book-description"}
+      {:post, "/api/test/book-description"},
+      {:post, "/api/test/association-outcome"}
     ]
 
     test "the route list matches the router's gated scope" do
@@ -87,7 +89,7 @@ defmodule StacksWeb.TestHelperControllerTest do
                "router has #{inspect(Enum.sort(declared) -- Enum.sort(@gated_routes))}, " <>
                "suite has #{inspect(Enum.sort(@gated_routes) -- Enum.sort(declared))}"
 
-      assert length(@gated_routes) == 8
+      assert length(@gated_routes) == 9
     end
 
     for {verb, path} <- [
@@ -98,7 +100,8 @@ defmodule StacksWeb.TestHelperControllerTest do
           {:delete, "/api/test/admin-sessions"},
           {:post, "/api/test/session"},
           {:post, "/api/test/book-writing"},
-          {:post, "/api/test/book-description"}
+          {:post, "/api/test/book-description"},
+          {:post, "/api/test/association-outcome"}
         ] do
       test "#{verb} #{path} is 404 with the flag absent", %{conn: conn} do
         conn = dispatch(conn, @endpoint, unquote(verb), unquote(path), %{})
@@ -861,6 +864,73 @@ defmodule StacksWeb.TestHelperControllerTest do
 
       assert conn.status == 404
       assert own_posts(user.id) == []
+    end
+  end
+
+  describe "POST /api/test/association-outcome" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    # ⛔ THE FAILING HALF HAD NO DRIVABLE ROUTE. `seed_book_writing` writes the
+    # happy path, and production reaches the failure outcomes only through an
+    # async LLM worker whose result a browser test cannot steer — so the surface
+    # that tells an author "we couldn't link books to this post" had never been
+    # seen rendered.
+    test "it seeds a post whose pass finished with no associations", %{conn: conn} do
+      user = insert(:user, email: "e2e-outcome@thestacks.test")
+
+      body =
+        conn
+        |> post("/api/test/association-outcome", %{email: user.email, outcome: "llm_error"})
+        |> json_response(201)
+
+      assert body["ok"] == true
+
+      assert Blog.latest_association_outcome(body["post_id"]) == "llm_error"
+    end
+
+    # ⬛ ANTI-VACUITY: the outcome it RECORDS must be the outcome it was ASKED
+    # for. A helper that always wrote the same value would satisfy the case
+    # above and make every spec built on it assert one state.
+    test "it records the outcome it was asked for", %{conn: conn} do
+      user = insert(:user, email: "e2e-outcome2@thestacks.test")
+
+      for outcome <- ~w(no_books_found unreadable_response associated) do
+        body =
+          conn
+          |> post("/api/test/association-outcome", %{email: user.email, outcome: outcome})
+          |> json_response(201)
+
+        assert Blog.latest_association_outcome(body["post_id"]) == outcome
+      end
+    end
+
+    # ⚠️ IT WEAKENS NO INVARIANT, and this is the case that proves it. The
+    # outcome is validated against the worker's own closed vocabulary rather
+    # than taken as given, so the helper cannot create a row production could
+    # not — a fixture in a state the system never reaches would prove something
+    # untrue about the surface built on it.
+    test "an outcome production cannot produce is refused", %{conn: conn} do
+      user = insert(:user, email: "e2e-outcome3@thestacks.test")
+
+      body =
+        conn
+        |> post("/api/test/association-outcome", %{email: user.email, outcome: "exploded"})
+        |> json_response(422)
+
+      assert body["errors"]["outcome"] =~ "must be one of"
+    end
+
+    # ⚠️ `.test` emails only, like every helper beside it — a gated endpoint
+    # that would act on a real account is a production-reachable write.
+    test "a non-test email is out of scope", %{conn: conn} do
+      user = insert(:user, email: "someone@example.com")
+
+      conn
+      |> post("/api/test/association-outcome", %{email: user.email, outcome: "llm_error"})
+      |> json_response(404)
     end
   end
 end

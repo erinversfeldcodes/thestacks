@@ -62,6 +62,7 @@ exempt:partner_auth POST /api/partner/inventory/import
 in-scope POST /api/partners/register
 in-scope POST /api/placements/:id/restore
 in-scope POST /api/posts/:post_id/comments
+exempt:test_helper POST /api/test/association-outcome
 exempt:test_helper POST /api/test/book-description
 exempt:test_helper POST /api/test/book-writing
 exempt:test_helper POST /api/test/session

@@ -444,6 +444,7 @@ defmodule CoreWeb.Router do
     post "/session", TestHelperController, :mint_session
     post "/book-writing", TestHelperController, :seed_book_writing
     post "/book-description", TestHelperController, :seed_book_description
+    post "/association-outcome", TestHelperController, :seed_association_outcome
   end
 
   # ⛔ Must stay ABOVE the SPA catch-all. Everything under `/api` that no route

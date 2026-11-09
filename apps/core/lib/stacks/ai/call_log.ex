@@ -36,7 +36,12 @@ defmodule Stacks.AI.CallLog do
   # is a remote model's output.
   @max_raw_bytes 8_192
 
-  @outcomes ~w(associated unreadable_response unexpected_shape llm_error)
+  # ⚠️ `no_books_found` is a SUCCESS, not a failure: the pass ran and the
+  # model found nothing. It is separate from `associated` because the two used
+  # to share a label, which made a working pass over a post with no books
+  # indistinguishable from one that linked three — to the dashboard and to the
+  # author alike.
+  @outcomes ~w(associated no_books_found unreadable_response unexpected_shape llm_error)
 
   schema "llm_call_log" do
     field :post_id, :binary_id
