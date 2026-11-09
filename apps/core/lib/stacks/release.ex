@@ -26,6 +26,7 @@ defmodule Stacks.Release do
   alias Stacks.Workers.GuardianTokenSweepJob
   alias Stacks.Workers.ImageRetentionJob
   alias Stacks.Workers.LibraryImportRowRetentionJob
+  alias Stacks.Workers.LlmCallLogRetentionJob
   alias Stacks.Workers.RefreshCostsJob
   alias StacksWeb.Plugs.E2ETestHelper
 
@@ -739,6 +740,17 @@ defmodule Stacks.Release do
 
     :ok
   end
+
+  @doc """
+      Drops LLM call records past their 30-day retention.
+
+      ⚠️ A SCHEDULED DUTY, because a retention policy that only runs when
+      someone remembers is a retention policy in name. The bound on
+      `raw_response` limits what one response can write; this is what limits how
+      long any of it is kept.
+  """
+  @spec sweep_llm_call_log() :: :ok
+  def sweep_llm_call_log, do: run_duty(LlmCallLogRetentionJob, "LLM_CALL_LOG_RETENTION")
 
   @spec sweep_guardian_tokens() :: :ok
   def sweep_guardian_tokens, do: run_duty(GuardianTokenSweepJob, "GUARDIAN_TOKEN_SWEEP")
