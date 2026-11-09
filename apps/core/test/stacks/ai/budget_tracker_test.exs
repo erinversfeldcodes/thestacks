@@ -128,4 +128,67 @@ defmodule Stacks.AI.BudgetTrackerTest do
       assert Spend.spent(:together, :daily) == 250
     end
   end
+
+  describe "the spend gauge" do
+    setup do
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach(
+        {__MODULE__, ref},
+        [:stacks, :budget, :spend],
+        fn _event, measurements, metadata, _ ->
+          send(parent, {:spend_gauge, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, ref}) end)
+
+      :ok
+    end
+
+    # ⛔ THE GAUGE REPORTS THE LEDGER, NOT THE EVENT STREAM.
+    #
+    # The pre-existing spend series is a `sum` over `cost_recorded` events,
+    # which accumulates what the application happened to emit. That is not what
+    # refuses a request: a dropped event, a restart mid-charge or a retention
+    # sweep moves one and not the other, and a dashboard showing the wrong one
+    # says a provider has budget left when it does not.
+    test "it carries the totals the decision was made from" do
+      :ok = BudgetTracker.record_cost(:together, 120)
+
+      assert :ok = BudgetTracker.check_budget(:together)
+
+      assert_receive {:spend_gauge, %{daily_cents: 120, monthly_cents: 120}, %{provider: "other"}}
+    end
+
+    # ⬛ ANTI-VACUITY: a second charge must move the gauge. Without this, a
+    # hardcoded zero measurement would satisfy the case above whenever nothing
+    # had been spent.
+    test "it moves when more is spent" do
+      :ok = BudgetTracker.record_cost(:together, 120)
+      assert :ok = BudgetTracker.check_budget(:together)
+      assert_receive {:spend_gauge, %{daily_cents: 120}, _}
+
+      :ok = BudgetTracker.record_cost(:together, 30)
+      assert :ok = BudgetTracker.check_budget(:together)
+
+      assert_receive {:spend_gauge, %{daily_cents: 150}, _},
+                     100,
+                     "the gauge did not follow the ledger — a gauge that does not move " <>
+                       "is indistinguishable from a provider that is not spending"
+    end
+
+    # ⚠️ Emitted on a REFUSAL too. A gauge that stops updating at the ceiling
+    # goes flat exactly when someone is looking at it to find out why calls are
+    # being declined.
+    test "it is emitted when the budget refuses" do
+      :ok = BudgetTracker.record_cost(:together, 600)
+
+      assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:together)
+
+      assert_receive {:spend_gauge, %{daily_cents: 600}, _}
+    end
+  end
 end

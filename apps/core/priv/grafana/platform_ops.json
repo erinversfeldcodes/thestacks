@@ -935,6 +935,53 @@
       ]
     },
     {
+      "id": 21,
+      "title": "Recorded AI spend against its ceiling (from the ledger)",
+      "description": "What the budget guard actually compared against, read from the durable ledger at decision time — not an accumulation of emitted events. The two drift: a dropped event, a restart mid-charge or a retention sweep moves one and not the other, and the number that matters is the one that refuses a request.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (provider) (stacks_budget_spend_daily_cents) / 100",
+          "legendFormat": "today — {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (provider) (stacks_budget_spend_monthly_cents) / 100",
+          "legendFormat": "this month — {{provider}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
       "id": 20,
       "type": "timeseries",
       "title": "robots.txt fetches",

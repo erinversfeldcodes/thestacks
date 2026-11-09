@@ -243,6 +243,28 @@ defmodule Core.PromEx.Plugins.Stacks do
             "AI API spend recorded, in cents — the running total the budget guard compares against its daily and monthly limits.",
           tags: [:provider]
         ),
+        # ⚠️ `last_value`, and fed from the LEDGER rather than from the event
+        # stream above. The `sum` series accumulates what the application
+        # emitted; these two report what the budget guard actually compared
+        # against at decision time. They drift — a dropped event, a restart
+        # mid-charge or a retention sweep moves one and not the other — and the
+        # number a dashboard shows should be the one that refuses a request.
+        last_value(
+          [:stacks, :budget, :spend, :daily_cents],
+          event_name: [:stacks, :budget, :spend],
+          measurement: :daily_cents,
+          description:
+            "Today's recorded AI spend for this provider, in cents, as read from the durable ledger the daily limit is compared against.",
+          tags: [:provider]
+        ),
+        last_value(
+          [:stacks, :budget, :spend, :monthly_cents],
+          event_name: [:stacks, :budget, :spend],
+          measurement: :monthly_cents,
+          description:
+            "This month's recorded AI spend for this provider, in cents, as read from the durable ledger the monthly limit is compared against.",
+          tags: [:provider]
+        ),
         counter(
           [:stacks, :budget, :limit_exceeded, :count, :total],
           event_name: [:stacks, :budget, :limit_exceeded],

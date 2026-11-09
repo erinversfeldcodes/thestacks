@@ -93,8 +93,28 @@ defmodule Stacks.AI.BudgetTracker do
     # ⚠️ Per-provider, where the struct's totals were global: a single shared
     # ceiling meant one provider's spend refused another's requests, which is
     # not what a per-provider budget means.
+    daily_spent = Spend.spent(provider, :daily)
+    monthly_spent = Spend.spent(provider, :monthly)
+
+    # ⛔ A GAUGE OF WHAT THE CEILING IS ACTUALLY COMPARING AGAINST.
+    #
+    # The existing spend series is a `sum` over `cost_recorded` events, which is
+    # an accumulation of what the application happened to emit — not the
+    # ledger. The two drift: a dropped event, a restart mid-charge, or a
+    # retention sweep moves one and not the other, and the number a dashboard
+    # shows is then not the number that refuses a request.
+    #
+    # ⚖️ `last_value` on the ledger's own totals, emitted at the moment the
+    # decision is made, so the series answers "how close is this provider to
+    # being cut off" rather than "how much have we emitted events about".
+    :telemetry.execute(
+      [:stacks, :budget, :spend],
+      %{daily_cents: daily_spent, monthly_cents: monthly_spent},
+      %{provider: bounded_provider(provider)}
+    )
+
     cond do
-      Spend.spent(provider, :monthly) >= monthly_limit ->
+      monthly_spent >= monthly_limit ->
         :telemetry.execute(
           [:stacks, :budget, :limit_exceeded],
           %{},
@@ -103,7 +123,7 @@ defmodule Stacks.AI.BudgetTracker do
 
         {:error, :monthly_limit_exceeded}
 
-      Spend.spent(provider, :daily) >= daily_limit ->
+      daily_spent >= daily_limit ->
         :telemetry.execute(
           [:stacks, :budget, :limit_exceeded],
           %{},

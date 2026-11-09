@@ -94,6 +94,10 @@ defmodule Core.PromEx.MetricAudience do
     # fail. If that changes — a per-user limit, say — revisit this first.
     "stacks_budget_cost_recorded_amount_cents" => :public,
     "stacks_budget_limit_exceeded_count_total" => :public,
+    # Aggregate spend per provider, no user in it — the same audience as the
+    # cost series beside them.
+    "stacks_budget_spend_daily_cents" => :public,
+    "stacks_budget_spend_monthly_cents" => :public,
     "stacks_gdpr_audit_read_count_total" => :public,
     "stacks_gdpr_audit_write_count_total" => :public,
     "stacks_gdpr_consent_grant_count_total" => :public,
