@@ -25,14 +25,14 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
   alias Mix.Tasks.Eval.Vision
 
-  @identity %{model: "qwen2-vl-7b", modal_app: "https://vision.example.test"}
+  @identity %{model: "qwen2-vl-7b", modal_app: "https://vision.example.test", total: 6}
 
-  # ⚠️ `"total" => nil` to match `@identity`, which these cases build by hand
+  # ⚠️ `"total" => 6` to match `@identity`, which these cases build by hand
   # and which therefore carries no corpus size. The baseline is keyed to the
   # corpus as well as the model now, so a literal 6 here would make every case
   # below raise "THE CORPUS CHANGED SIZE" — true, and not what they are about.
   defp recorded(attrs) do
-    Jason.encode!(Map.merge(%{"passed" => 6, "total" => nil}, attrs))
+    Jason.encode!(Map.merge(%{"passed" => 6, "total" => 6}, attrs))
   end
 
   describe "a baseline belongs to a model" do
@@ -84,7 +84,7 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
   describe "the identity it scores under" do
     test "is read from the same config the service call uses" do
-      identity = Vision.model_identity()
+      identity = Vision.model_identity(6)
 
       assert Map.has_key?(identity, :model)
       assert Map.has_key?(identity, :modal_app)
@@ -273,16 +273,16 @@ defmodule Mix.Tasks.Eval.VisionTest do
     # and only a run can show it.
     test "a wrong answer is scored, and counts against the baseline" do
       tmp = Path.join(System.tmp_dir!(), "eval-wrong-#{System.unique_integer([:positive])}.json")
-      identity = Vision.model_identity()
+      # ⚖️ The identity is built with the SAME size this case scores — two
+      # results — so the corpus-changed arm cannot fire and the case tests the
+      # REGRESSION arm it is named for. Writing a mismatched total made it raise
+      # "THE CORPUS CHANGED SIZE": a true refusal, for the wrong reason, with
+      # the assertion still reading "REGRESSION".
+      identity = Vision.model_identity(2)
 
       File.write!(
         tmp,
         Jason.encode!(%{
-          # ⚠️ The identity's own total, so this case tests the REGRESSION arm
-          # rather than the corpus-changed one. Writing a literal 2 against an
-          # identity carrying `nil` made it raise "THE CORPUS CHANGED SIZE" —
-          # a true refusal, for the wrong reason, with my assertion still
-          # reading "REGRESSION".
           total: Map.get(identity, :total),
           passed: 2,
           model: identity.model,
@@ -635,12 +635,12 @@ defmodule Mix.Tasks.Eval.VisionTest do
       Application.put_env(:core, :vision_model, "from-config")
       on_exit(fn -> Application.delete_env(:core, :vision_model) end)
 
-      assert Vision.model_identity().model == "from-config"
+      assert Vision.model_identity(6).model == "from-config"
 
       # What a scored image leaves behind.
       Process.put({Vision, :model_used}, "what-the-service-said")
 
-      assert Vision.model_identity().model == "what-the-service-said",
+      assert Vision.model_identity(6).model == "what-the-service-said",
              "the config value won over the service's own answer — which is how a " <>
                "redesign inherits the previous model's baseline"
     end
@@ -653,7 +653,7 @@ defmodule Mix.Tasks.Eval.VisionTest do
       Process.delete({Vision, :model_used})
       Application.delete_env(:core, :vision_model)
 
-      assert Vision.model_identity().model == "unknown"
+      assert Vision.model_identity(6).model == "unknown"
     end
   end
 
@@ -728,6 +728,60 @@ defmodule Mix.Tasks.Eval.VisionTest do
         Jason.encode!(%{passed: 6, total: 6, model: "old", modal_app: "https://example.test"})
 
       assert {:mismatch, "old"} = Vision.baseline_for(body, identity)
+    end
+  end
+
+  describe "a baseline written the way the task writes one" do
+    # ⛔ MY FIXTURES AGREED WITH A FILE THE TASK CANNOT PRODUCE.
+    #
+    # The corpus size used to reach `model_identity/0` through the process
+    # dictionary, set once at corpus selection — so a direct `gate/2` call left
+    # it `nil`, while a baseline written by `write_baseline/4` always carries a
+    # number. I then wrote `"total" => nil` into every fixture to stop the
+    # cases tripping "THE CORPUS CHANGED SIZE", which made the suite agree with
+    # a shape nothing emits. Measured at the time: a real artefact against a
+    # direct identity gave `{:different_corpus, 6}` where the hand-written
+    # fixture gave `{:ok, 6}`.
+    #
+    # ⚖️ This case closes that gap by round-tripping the task's OWN writer into
+    # its own reader, so no hand-written shape can stand in for the real one.
+    test "the task's own writer produces a baseline its own reader accepts" do
+      tmp = Path.join(System.tmp_dir!(), "eval-rt-#{System.unique_integer([:positive])}.json")
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(tmp)
+      end)
+
+      results = [
+        %{ok: true, name: "a", detail: ""},
+        %{ok: true, name: "b", detail: ""}
+      ]
+
+      # Record, then read back with the identity the same run would compute.
+      Vision.gate(results, true)
+
+      assert {:ok, 2} = Vision.baseline_for(File.read!(tmp), Vision.model_identity(2)),
+             "the baseline this task wrote is not one it will accept — the writer and " <>
+               "the reader disagree about a field, which a hand-written fixture cannot show"
+    end
+
+    # ⬛ AND A GENUINELY DIFFERENT CORPUS IS STILL REFUSED, so the case above
+    # cannot pass by the comparison having been dropped.
+    test "the same baseline is refused once the corpus has changed size" do
+      tmp = Path.join(System.tmp_dir!(), "eval-rt2-#{System.unique_integer([:positive])}.json")
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(tmp)
+      end)
+
+      Vision.gate([%{ok: true, name: "a", detail: ""}], true)
+
+      assert {:different_corpus, 1} =
+               Vision.baseline_for(File.read!(tmp), Vision.model_identity(8))
     end
   end
 end

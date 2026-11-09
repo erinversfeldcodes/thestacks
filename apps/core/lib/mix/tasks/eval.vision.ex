@@ -37,12 +37,6 @@ defmodule Mix.Tasks.Eval.Vision do
 
   alias Stacks.AI.Client
 
-  # ⚖️ The size of the set that was scored, so the baseline is keyed to the
-  # corpus as well as the model. Set once per run, including for a `--stratum`
-  # selection — where a 1-fixture run and an 8-fixture run would otherwise share
-  # one `passed` scalar.
-  @corpus_size_key {__MODULE__, :corpus_size}
-
   @switches [record: :boolean, corpus: :string, stratum: :string]
   @baseline_path "priv/eval/vision_baseline.json"
   @call_attempts 3
@@ -58,8 +52,6 @@ defmodule Mix.Tasks.Eval.Vision do
       |> Keyword.get(:corpus)
       |> load_corpus()
       |> only_stratum(Keyword.get(cli, :stratum))
-
-    Process.put(@corpus_size_key, length(corpus))
 
     point_client_at_configured_service()
 
@@ -327,7 +319,7 @@ defmodule Mix.Tasks.Eval.Vision do
     # regression (the model never answered) nor clear the gate (the baseline
     # counts every case). Say that, in words deploy-stack.sh classifies as a
     # broken gate rather than a scored regression — it greps for REGRESSION.
-    identity = model_identity()
+    identity = model_identity(total)
 
     # ⛔ WRITTEN BEFORE THE *UNSCORED* CHECK, NOT MERELY BEFORE THE VERDICT.
     # The write used to sit below this `Mix.raise`, so "written before the
@@ -587,17 +579,30 @@ defmodule Mix.Tasks.Eval.Vision do
   # `model_identity/0` is also called when no image has been scored yet — by
   # `--record` on an empty selection, and by the suite. A run that reached the
   # service overwrites it with the truth.
-  def model_identity do
+  def model_identity(total) do
     %{
       model:
         Process.get(@model_used_key) ||
           Application.get_env(:core, :vision_model) ||
           "unknown",
       modal_app: Application.get_env(:core, :vision_service_url, "unknown"),
-      # ⚠️ `nil` when nothing has set it — `gate/2` called directly, as the suite
-      # does. A `nil` on both sides compares equal, so a direct call behaves as
-      # it did before rather than reporting a phantom corpus change.
-      total: Process.get(@corpus_size_key)
+      # ⛔ PASSED IN, WHERE IT USED TO COME FROM THE PROCESS DICTIONARY — and the
+      # dictionary version was wrong in a way my own tests hid.
+      #
+      # It read `Process.get(@corpus_size_key)`, set once at corpus selection.
+      # A direct `gate/2` call never set it, so the identity carried `nil` while
+      # a REAL baseline — written by `write_baseline/4`, which always records
+      # `total` — carried a number. Measured: a real artefact against a direct
+      # identity gives `{:different_corpus, 6}` where a hand-written fixture
+      # gives `{:ok, 6}`.
+      #
+      # ⚠️ And my test fixtures were written as `"total" => nil` specifically to
+      # dodge that, which is a shape `write_baseline/4` never emits — so the
+      # suite agreed with a file the task cannot produce. Threading the value
+      # deletes the key, the fixture workaround, and the comment that claimed a
+      # nil on both sides was harmless. `length(results)` is already in scope at
+      # the only call site and equals the corpus length by construction.
+      total: total
     }
   end
 end

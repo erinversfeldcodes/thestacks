@@ -24,6 +24,20 @@ defmodule Core.Repo.Migrations.MeterAiSpendInMicroCents do
   """
   use Ecto.Migration
 
+  # ⛔ A RENAME IS DESTRUCTIVE AND `scripts/lint-migrations.sh` IS RIGHT TO ASK.
+  # The attestation it wants is exactly the reasoning in the moduledoc above, so
+  # it is stated here rather than argued: `op.ai_spend` was created earlier the
+  # same day, in `20261109120000`, and has never been deployed — there is no N-1
+  # release reading `spend_cents`, and the `UPDATE` below touches only rows a
+  # local database holds.
+  #
+  # ⚠️ `check-schema-diff.sh` cannot see this: it compares final per-table column
+  # SETS, so a rename contained within one branch is invisible to it. The linter
+  # is the only gate that looks, and it only runs in the `migration-safety` CI
+  # job against `origin/main` — not in a local `just ci`. So this was a CI
+  # failure that no local run would have surfaced.
+  @breaking_ok "op.ai_spend was created the same day and has never been deployed, so no N-1 reader of spend_cents exists"
+
   def up do
     execute("SET LOCAL lock_timeout = '5s'")
     execute("SET LOCAL statement_timeout = '30s'")
