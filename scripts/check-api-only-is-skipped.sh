@@ -39,6 +39,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 python3 - <<'PY'
+import os
 import re
 import sys
 
@@ -102,8 +103,38 @@ for m in re.finditer(r'proto_message:\s*"([A-Za-z0-9_]+)"(.*?)(?=proto_message:\
 # It fails in both directions on purpose: fewer than expected means the parse
 # drifted or a flag was removed, more means one was added without the review
 # that should accompany publishing a field with no column.
+# ⛔ ONE CONSTANT WAS HOLDING TWO DIFFERENT FACTS, and that is why a legitimate
+# 12 → 13 change resized every fixture in the suite that tests this gate.
+#
+# The number below asserts "what `proto/persisted.exs` should hold". But
+# `test/platform/api_only_is_skipped_test.sh` runs this same script against
+# FIXTURE manifests, so the same constant was simultaneously asserting "what
+# every fixture holds" — not the same fact, and collapsing them meant a real
+# `api_only` addition touched N+1 places instead of one.
+#
+# ⚖️ The declared count stays exact; what changes is that the fixture suite can
+# declare its own. This is not punting the decision to the caller — it is
+# un-conflating two decisions that were sharing a variable.
+# ⬛ THE LITERALS STAY, AND THAT IS NOT REDUNDANCY — it is what
+# `check-guard-is-unbypassable.sh` requires: it detects a declared-count guard by
+# matching `EXPECTED_X = <digit>`, so writing the default inline as an
+# `os.environ.get` call dropped this script out of its population (23 → 22) and
+# the guard refused. Correctly: the point of a declared count is that it is
+# visible in a diff, and a count hidden inside an environment lookup is not.
+#
+# ⚖️ So the production number is declared here as a literal, and the override is
+# layered ON it rather than replacing it. The fixture suite in
+# `test/platform/api_only_is_skipped_test.sh` sets the variables; nothing in
+# production does.
 EXPECTED_API_ONLY_FIELDS = 13
 EXPECTED_API_ONLY_MESSAGES = 4
+
+EXPECTED_API_ONLY_FIELDS = int(
+    os.environ.get("EXPECTED_API_ONLY_FIELDS", EXPECTED_API_ONLY_FIELDS)
+)
+EXPECTED_API_ONLY_MESSAGES = int(
+    os.environ.get("EXPECTED_API_ONLY_MESSAGES", EXPECTED_API_ONLY_MESSAGES)
+)
 
 found_fields = sum(len(v) for v in api_only.values())
 if found_fields != EXPECTED_API_ONLY_FIELDS or len(api_only) != EXPECTED_API_ONLY_MESSAGES:
