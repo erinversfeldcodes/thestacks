@@ -87,5 +87,35 @@
     provenance: %{photographer: "owner", captured: "2026-08-19", source: :owned},
     notes:
       "Competing text in frame. Tests that the model picks the book rather than the loudest string."
+  },
+  %{
+    name: "negative_non_isbn_barcode",
+    path: "images/negative_non_isbn_barcode.jpg",
+    stratum: :negative,
+    expect_book: false,
+    expect_isbn: nil,
+    expect_rejection: true,
+    provenance: %{photographer: "generated", captured: "2026-11-09", source: :synthetic},
+    notes:
+      "⛔ THE SHARPEST NEGATIVE IN THE SET, and the only one that can catch this " <>
+        "particular mistake. It is a real, cleanly decodable EAN-13 — verified live, " <>
+        "pyzbar reads 0123456789050 — so \"I read a barcode\" is TRUE and \"this is a " <>
+        "book\" is FALSE. ISBN-13 lives under the 978/979 Bookland prefixes; this is an " <>
+        "ordinary product code. A barcode tier that accepts any EAN-13 as a book passes " <>
+        "every other fixture here and fails only this one."
+  },
+  %{
+    name: "negative_text_document",
+    path: "images/negative_text_document.jpg",
+    stratum: :negative,
+    expect_book: false,
+    expect_isbn: nil,
+    expect_rejection: true,
+    provenance: %{photographer: "generated", captured: "2026-11-09", source: :synthetic},
+    notes:
+      "A page of printed text that is not a book cover — a utility statement. Tests " <>
+        "that recognising TEXT does not imply recognising a BOOK: OCR succeeds here and " <>
+        "the right answer is still no. Verified to carry no barcode at all, so it " <>
+        "exercises the far end of the cascade rather than the near end."
   }
 ]

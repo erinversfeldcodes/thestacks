@@ -326,8 +326,8 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
     test "every item carries the corpus plan's section-3 fields", %{corpus: corpus} do
       # ⬛ ANTI-VACUITY: an empty corpus would satisfy every `Enum.each` below.
-      assert length(corpus) >= 6,
-             "the corpus shrank — six fixtures is already the minimum this set has"
+      assert length(corpus) >= 8,
+             "the corpus shrank — eight fixtures is already the minimum this set has"
 
       for item <- corpus, field <- @corpus_fields do
         assert Map.has_key?(item, field),
@@ -345,6 +345,35 @@ defmodule Mix.Tasks.Eval.VisionTest do
                "#{item.name} claims source #{inspect(source)} — the corpus rule is owned " <>
                  "or synthetic photographs only, never a reader's image"
       end
+    end
+
+    # ⛔ REJECTION ACCURACY WAS UNSCORABLE, AND THAT IS WHAT THESE NEGATIVES ARE
+    # FOR.
+    #
+    # With one negative out of six fixtures, a model answering "yes, a book" to
+    # every image scores 5/6 — which reads as a good model and is a measurement
+    # of nothing. The number of negatives IS the resolution of the rejection
+    # score, so it is asserted rather than left to whoever adds the next
+    # fixture.
+    #
+    # ⚠️ Three is still coarse. It is enough to tell a model that rejects from
+    # one that never does, which is the distinction the corpus could not make
+    # at all before, and not enough to rank two models that both reject
+    # sometimes.
+    test "there are enough negatives for rejection accuracy to mean something",
+         %{corpus: corpus} do
+      negatives = Enum.filter(corpus, & &1.expect_rejection)
+
+      assert length(negatives) >= 3,
+             "only #{length(negatives)} negative(s): a model answering \"yes, a book\" " <>
+               "to everything would score " <>
+               "#{length(corpus) - length(negatives)}/#{length(corpus)}, which is not a " <>
+               "measurement of rejection"
+
+      # ⬛ And they must be DIFFERENT KINDS of negative, or three copies of one
+      # image would satisfy the count while testing one failure mode.
+      assert length(Enum.uniq_by(negatives, & &1.path)) == length(negatives),
+             "two negatives point at the same image"
     end
 
     # ⚖️ `expect_rejection` is a first-class expected outcome, not the absence
