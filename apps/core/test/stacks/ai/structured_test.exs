@@ -254,18 +254,59 @@ defmodule Stacks.AI.StructuredTest do
       assert {:ok, [%{book_id: "a"}]} = Structured.decode(raw)
     end
 
-    # ⚠️ And the two shapes that went with it. Both worked before the narrowing
-    # and neither weakens the opening anchor.
-    test "a single-line fence decodes" do
-      raw = "```json " <> ~s([{"book_id": "b"}]) <> " ```"
+    # ⛔ A1, A2 AND A7 — THE REALISTIC FAMILY, AND THE THREE I BROKE BY
+    # RELAXING THE ANCHORS.
+    #
+    # Making the inner newlines optional and dropping the trailing anchor did
+    # not reopen the string-match hole (the opening anchor still closes that),
+    # but it changed WHICH fence the match selects: the greedy capture ran to
+    # the last ``` anywhere, and a line merely beginning ` ```json ` swallowed
+    # the real fence after it. All three are a model that answers and then says
+    # one more thing — the same family as the backticks-in-reasoning bug.
+    test "prose containing backticks AFTER the fence does not confuse it" do
+      raw =
+        "```json\n" <> ~s([{"book_id": "a"}]) <> "\n```\n\nBy the way, use ``` to fence code."
+
+      assert {:ok, [%{book_id: "a"}]} = Structured.decode(raw)
+    end
+
+    test "a line that merely begins with a fence does not swallow the real one" do
+      raw =
+        "I will use:\n```json blocks for this\n\nand the answer:\n\n```json\n" <>
+          ~s([{"book_id": "b"}]) <> "\n```"
 
       assert {:ok, [%{book_id: "b"}]} = Structured.decode(raw)
     end
 
-    test "prose on the same line as the closing fence does not defeat it" do
-      raw = "```json\n" <> ~s([{"book_id": "c"}]) <> "\n``` hope that helps."
+    test "the same, in the wrapped-object shape" do
+      raw =
+        "```json\n" <>
+          ~s({"associations": [{"book_id": "c"}]}) <> "\n```\n\nuse ``` for code."
 
       assert {:ok, [%{book_id: "c"}]} = Structured.decode(raw)
+    end
+
+    # ⚖️ THE PRICE, STATED RATHER THAN INHERITED. These two are refused, and the
+    # decision is deliberate: neither has been observed from this provider — the
+    # measured captures are all multi-line `\n`-fenced — and neither worked
+    # before the relaxation either. Recovering them needs a candidate set with
+    # both greedy and non-greedy extractions, because a non-greedy scan alone
+    # consumes past the real fence and the genuine block never becomes a
+    # candidate. That is measured work, not a regex tweak.
+    #
+    # ⬛ Asserted rather than left untested, so the next person sees the trade
+    # instead of discovering it. If these start arriving, this is the case to
+    # delete — and the three above are what it must not cost.
+    test "a single-line fence is refused, by choice" do
+      raw = "```json " <> ~s([{"book_id": "d"}]) <> " ```"
+
+      assert {:error, {:unparseable, _}} = Structured.decode(raw)
+    end
+
+    test "prose on the closing fence's own line is refused, by the same choice" do
+      raw = "```json\n" <> ~s([{"book_id": "e"}]) <> "\n``` done."
+
+      assert {:error, {:unparseable, _}} = Structured.decode(raw)
     end
   end
 

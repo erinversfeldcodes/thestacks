@@ -159,23 +159,43 @@ defmodule Stacks.AI.Structured do
   # alternative — a runtime guard that re-parses and falls back — makes this
   # pattern's quality unobservable and is how the first fix went unnoticed.
   #
-  # ⚠️ **The newlines around the content are OPTIONAL, and `\r` is matched
-  # everywhere whitespace is.** The second fix narrowed `\s` to `[ \t]` and made
-  # the inner newline mandatory, which cost three shapes that had worked:
-  # **CRLF line endings** (transport-level, so it would arrive as a blanket
-  # failure rather than an occasional one), a single-line
-  # ` ```json [...] ``` `, and prose on the same line as the closing fence.
-  # None of them weaken the anchor above.
+  # ⚠️ **`\r` IS MATCHED EVERYWHERE WHITESPACE IS, and that is the only
+  # relaxation.** Narrowing `\s` to `[ \t]` had removed it, so every fenced
+  # response over a CRLF transport became `:unparseable` at once. Line endings
+  # are not a property of the model, which makes that worse than a model
+  # variant: no corpus item could have caught it.
   #
-  # ⚖️ The content is GREEDY and there is no end anchor, which decides one case:
-  # a response carrying TWO fenced blocks spans both and fails as unparseable
-  # rather than silently returning the first. Two blocks is two answers, and
-  # picking one would be a guess presented as a result — `:unparseable` tells
-  # the author honestly and leaves the raw text in the call log.
+  # ⛔ **I ALSO MADE THE INNER NEWLINES OPTIONAL AND DROPPED THE TRAILING
+  # ANCHOR, AND THAT COST THREE SHAPES THAT WORKED — the anchors were never
+  # redundant with the opening one.** They constrain WHICH fence the match
+  # selects, not whether it can match. Without the trailing anchor the greedy
+  # capture ran to the LAST ``` anywhere, including one sitting mid-sentence in
+  # trailing prose; without the mandatory inner newline a line that merely
+  # BEGINS ` ```json ` opened the match and swallowed the real fence that
+  # followed. Both are the realistic family — a model that answers and then says
+  # one more thing — and both are measured, not imagined.
+  #
+  # ⚖️ The price is two shapes this refuses: a single-line ` ```json [...] ``` `
+  # and prose on the closing fence's own line. Neither has been observed from
+  # this provider (the measured captures are all multi-line `\n`-fenced) and
+  # neither worked before either, so this is a stated trade rather than an
+  # inherited one. Recovering them needs a candidate set with both greedy and
+  # non-greedy extractions, which is measured work: a non-greedy scan alone
+  # consumes past the real fence, so the genuine block never becomes a
+  # candidate — validation protects against a wrong candidate being USED, not
+  # against the right one never being GENERATED.
+  #
+  # ⚖️ The content is GREEDY, which decides one case: a response carrying TWO
+  # fenced blocks spans both and fails as unparseable rather than silently
+  # returning the first. Two blocks is two answers, and picking one would be a
+  # guess presented as a result.
   defp strip_fence(raw) do
     trimmed = String.trim(raw)
 
-    case Regex.run(~r/(?:\A|\r?\n)```[a-zA-Z]*[ \t\r]*\r?\n?(.*)\r?\n?[ \t\r]*```/s, trimmed) do
+    case Regex.run(
+           ~r/(?:\A|\r?\n)```[a-zA-Z]*[ \t\r]*\r?\n(.*)\r?\n[ \t\r]*```[ \t\r]*(?:\r?\n|\z)/s,
+           trimmed
+         ) do
       [_, inner] -> String.trim(inner)
       _ -> trimmed
     end
