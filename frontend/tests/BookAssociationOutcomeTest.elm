@@ -67,12 +67,17 @@ renderWithRows isOwner outcome =
 
 staleSentence : String
 staleSentence =
-    "The latest attempt to find books didn't finish, so these are from an earlier one."
+    "We couldn't link new books this time, so these are from an earlier pass."
 
 
 emptySentence : String
 emptySentence =
     "We couldn't link books to this post this time."
+
+
+foundNothingSentence : String
+foundNothingSentence =
+    "No books from your shelves came up in this post."
 
 
 suite : Test
@@ -93,7 +98,7 @@ suite =
                     |> Expect.all
                         [ Query.has [ Selector.class "book-associations__note" ]
                         , Query.has
-                            [ Selector.text "We couldn't link books to this post this time." ]
+                            [ Selector.exactText emptySentence ]
                         ]
         , test "a pass that found nothing says that instead" <|
             \_ ->
@@ -101,7 +106,7 @@ suite =
                     |> Expect.all
                         [ Query.has [ Selector.class "book-associations__note" ]
                         , Query.has
-                            [ Selector.text "No books from your shelves came up in this post." ]
+                            [ Selector.exactText foundNothingSentence ]
                         ]
 
         -- ⛔ THE TWO MUST NOT BE THE SAME MESSAGE. A completed scan that found
@@ -110,7 +115,7 @@ suite =
         , test "the two outcomes do not share their copy" <|
             \_ ->
                 render True Envelope.AssociationOutcomeNoBooksFound
-                    |> Query.hasNot [ Selector.text "We couldn't link books to this post this time." ]
+                    |> Query.hasNot [ Selector.exactText emptySentence ]
 
         -- ⚖️ A draft nobody has scanned yet says nothing at all. Claiming a
         -- result that does not exist would be worse than silence.
@@ -185,7 +190,7 @@ suite =
               test "the owner is told the latest attempt did not finish" <|
                 \_ ->
                     renderWithRows True Envelope.AssociationOutcomeLlmError
-                        |> Query.has [ Selector.text staleSentence ]
+                        |> Query.has [ Selector.exactText staleSentence ]
 
             -- ⬛ AND THE ROWS ARE STILL THERE — a note that replaced the list
             -- would satisfy the case above while losing the author's books.
@@ -194,17 +199,24 @@ suite =
                     renderWithRows True Envelope.AssociationOutcomeLlmError
                         |> Query.has [ Selector.text "Piranesi" ]
 
-            -- ⚠️ BOTH DIRECTIONS of the copy guard. Two strings that drift into
+            -- ⚠️ BOTH DIRECTIONS of the copy guard, and `exactText` rather
+            -- than `text` — because `Selector.text` is a CONTAINMENT match.
+            -- Measured: appending " And more." to a sentence left all 2313
+            -- tests green, so the positive assertions could not detect appended
+            -- copy and only truncation reddened them. Worse, a `hasNot` guard
+            -- between two sentences fails OPEN the moment one becomes a
+            -- substring of the other — an invisible constraint that a natural
+            -- rewording would break while the suite stayed green. Two strings that drift into
             -- each other is the same defect in a new place, and the suite
             -- already carries this hazard for the other pair.
             , test "the populated note does not borrow the empty-state sentence" <|
                 \_ ->
                     renderWithRows True Envelope.AssociationOutcomeLlmError
-                        |> Query.hasNot [ Selector.text emptySentence ]
+                        |> Query.hasNot [ Selector.exactText emptySentence ]
             , test "the empty state does not borrow the populated sentence" <|
                 \_ ->
                     render True Envelope.AssociationOutcomeLlmError
-                        |> Query.hasNot [ Selector.text staleSentence ]
+                        |> Query.hasNot [ Selector.exactText staleSentence ]
 
             -- ⚖️ `NoBooksFound` is DELIBERATELY silent here. Its list is equally
             -- "from an earlier pass", but it is a completed, correct answer —
@@ -213,13 +225,13 @@ suite =
             , test "a pass that found nothing says nothing, even with rows present" <|
                 \_ ->
                     renderWithRows True Envelope.AssociationOutcomeNoBooksFound
-                        |> Query.hasNot [ Selector.text staleSentence ]
+                        |> Query.hasNot [ Selector.exactText staleSentence ]
 
             -- ⬛ A reader is never told how the author's pass went.
             , test "a reader is not told the author's pass failed" <|
                 \_ ->
                     renderWithRows False Envelope.AssociationOutcomeLlmError
-                        |> Query.hasNot [ Selector.text staleSentence ]
+                        |> Query.hasNot [ Selector.exactText staleSentence ]
             ]
         , describe "the envelope's outcome, in the shapes the server really sends"
             [ -- ⛔ ZERO TESTS MENTIONED THIS KEY AT ALL. `grep -rn

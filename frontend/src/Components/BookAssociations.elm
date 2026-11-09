@@ -66,6 +66,29 @@ time." implies there is nothing here, which is accurate above an empty state and
 false above a populated one. One sentence cannot be true in both positions, so
 there are two — and a test asserts neither drifts into the other's wording.
 
+⛔ "DIDN'T WORK", NOT "DIDN'T FINISH". An earlier version said the attempt
+"didn't finish", which is false for two of the three outcomes this covers:
+`unreadable_response` and `unexpected_shape` are the model ANSWERING and the
+answer being unreadable or the wrong shape — a completed pass with a bad result.
+Only `llm_error` plausibly did not finish. So the sentence invited the author to
+wait for something that had already concluded, which is the mirror of the error
+"this time" exists to avoid: a permanent-sounding message is wrong about the
+system, and so is an unfinished-sounding one.
+
+⚖️ And it keeps the first-person voice and the verb "link" from the empty-state
+sentence. The operation is linking books, not finding them, and one surface
+shifting from "We couldn't…" to "The latest attempt…" reads as two different
+authors.
+
+⛔ NEITHER SENTENCE MAY CONTAIN THE OTHER, and that is a constraint on the
+WORDS, not a style preference. `Test.Html.Selector.text` is a CONTAINMENT match,
+so a stale note reading "We couldn't link books to this post this time. These
+are from an earlier pass." would satisfy the empty-state's positive assertion
+too, and the `hasNot` guard between them would fail open while reading as
+covered. "new books" rather than "books to this post" is what keeps them
+disjoint — and the guards now use `exactText`, so the constraint is enforced
+rather than remembered.
+
 ⬛ Owner only. A reader is never told how the author's pass went, here or
 anywhere else.
 
@@ -95,7 +118,7 @@ staleFailureNote config =
     in
     if config.isOwner && latestPassFailed then
         [ p [ class "book-associations__stale-note" ]
-            [ text "The latest attempt to find books didn't finish, so these are from an earlier one." ]
+            [ text "We couldn't link new books this time, so these are from an earlier pass." ]
         ]
 
     else

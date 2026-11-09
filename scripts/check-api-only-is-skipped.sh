@@ -115,26 +115,25 @@ for m in re.finditer(r'proto_message:\s*"([A-Za-z0-9_]+)"(.*?)(?=proto_message:\
 # ⚖️ The declared count stays exact; what changes is that the fixture suite can
 # declare its own. This is not punting the decision to the caller — it is
 # un-conflating two decisions that were sharing a variable.
-# ⬛ THE LITERALS STAY, AND THAT IS NOT REDUNDANCY — it is what
-# `check-guard-is-unbypassable.sh` requires: it detects a declared-count guard by
-# matching `EXPECTED_X = <digit>`, so writing the default inline as an
-# `os.environ.get` call dropped this script out of its population (23 → 22) and
-# the guard refused. Correctly: the point of a declared count is that it is
-# visible in a diff, and a count hidden inside an environment lookup is not.
+# ⛔ NO ENVIRONMENT OVERRIDE. The counts are literals and nothing can replace
+# them from outside.
 #
-# ⚖️ So the production number is declared here as a literal, and the override is
-# layered ON it rather than replacing it. The fixture suite in
-# `test/platform/api_only_is_skipped_test.sh` sets the variables; nothing in
-# production does.
+# An override existed here briefly, layered on these literals so the fixture
+# suite could declare its own count while the production number moved 12 → 13.
+# That move was then unwound — the field went to the envelope instead — so the
+# override's whole motivation evaporated and what remained was an undocumented
+# environment bypass of a declared count, in a repo that has a dedicated gate
+# (`check-guard-is-unbypassable.sh`) for exactly that property. Nothing set it,
+# so the guard was no weaker in practice; it was weaker in the way that matters
+# later, when someone discovers the lever.
+#
+# ⚠️ Its justifying comment had also gone stale into a falsehood: it said the
+# fixture suite "sets the variables", present tense, after the fixtures had
+# stopped doing so. A bypass whose stated reason is untrue is worse than one
+# with no comment at all, because the comment answers the question a reader
+# would otherwise ask.
 EXPECTED_API_ONLY_FIELDS = 12
 EXPECTED_API_ONLY_MESSAGES = 4
-
-EXPECTED_API_ONLY_FIELDS = int(
-    os.environ.get("EXPECTED_API_ONLY_FIELDS", EXPECTED_API_ONLY_FIELDS)
-)
-EXPECTED_API_ONLY_MESSAGES = int(
-    os.environ.get("EXPECTED_API_ONLY_MESSAGES", EXPECTED_API_ONLY_MESSAGES)
-)
 
 found_fields = sum(len(v) for v in api_only.values())
 if found_fields != EXPECTED_API_ONLY_FIELDS or len(api_only) != EXPECTED_API_ONLY_MESSAGES:
