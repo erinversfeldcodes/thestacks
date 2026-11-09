@@ -31,7 +31,7 @@ defmodule Stacks.Workers.LlmCallLogRetentionJob do
   alias Stacks.AI.CallLog
 
   @retention_days 30
-  @batch_size 1_000
+  @default_batch_size 1_000
 
   # ⚠️ A CEILING, not a target. A run that cannot finish must say so rather than
   # return :ok on a backlog — the shape that lets a retention failure stay
@@ -75,7 +75,7 @@ defmodule Stacks.Workers.LlmCallLogRetentionJob do
       CallLog
       |> where([c], c.created_at < ^cutoff)
       |> select([c], c.id)
-      |> limit(^@batch_size)
+      |> limit(^batch_size())
       |> Repo.all()
 
     case ids do
@@ -84,9 +84,32 @@ defmodule Stacks.Workers.LlmCallLogRetentionJob do
 
       ids ->
         {count, _} = Repo.delete_all(from c in CallLog, where: c.id in ^ids)
+
+        # ⚖️ Emitted per batch so the SHAPE is observable, not just the outcome.
+        # Without it, replacing this loop with a single unbounded DELETE passes
+        # every behavioural test — the rows go either way — and the reason this
+        # job is batched at all survives only in a comment.
+        :telemetry.execute([:stacks, :ai, :call_log_retention_batch], %{deleted: count}, %{})
+
         delete_in_batches(cutoff, deleted + count, batches + 1)
     end
   end
+
+  @doc """
+      How many rows one DELETE takes.
+
+      ⚠️ Configurable so a test can set it small enough to force several
+      batches without inserting a thousand rows — otherwise the batching is
+      unobservable, and a probe replacing the whole loop with one unbounded
+      DELETE passes every behavioural assertion, because the OUTCOME is
+      identical and only the statement count differs.
+  """
+  @spec batch_size() :: pos_integer()
+  def batch_size, do: Application.get_env(:core, :llm_call_log_batch_size, @default_batch_size)
+
+  @doc "How many batches one run will work through before reporting a backlog."
+  @spec max_batches() :: pos_integer()
+  def max_batches, do: @max_batches
 
   @doc "How long a record is kept, in days — read by the test rather than restated."
   @spec retention_days() :: pos_integer()

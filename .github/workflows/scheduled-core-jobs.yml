@@ -68,6 +68,7 @@ on:
     - cron: "0 9 * * *"
     - cron: "30 9 * * *"
     - cron: "45 9 * * *"
+    - cron: "15 10 * * *"
   workflow_dispatch:
     inputs:
       job:
@@ -87,6 +88,7 @@ on:
           - unverified-accounts
           - expired-invites
           - lapsed-email-changes
+          - llm-call-log
           - all-retention
 
 permissions:
@@ -125,10 +127,10 @@ jobs:
           run_events=false
           duties=""
 
-          # The eight retention duties, named once. Both the `all-retention`
+          # The nine retention duties, named once. Both the `all-retention`
           # dispatch and the single-duty validation read this, so neither can
           # drift into recognising a duty the other does not.
-          RETENTION_DUTIES="images exports import-rows audit-log guardian-tokens unverified-accounts expired-invites lapsed-email-changes"
+          RETENTION_DUTIES="images exports import-rows audit-log guardian-tokens unverified-accounts expired-invites lapsed-email-changes llm-call-log"
 
           # ⚠️ Every retention cadence appears exactly once here, and a schedule
           # with no case below is REFUSED rather than defaulted. That matters
@@ -147,6 +149,7 @@ jobs:
             "0 9 * * *:"*)   duties="unverified-accounts" ;;
             "30 9 * * *:"*)  duties="expired-invites" ;;
             "45 9 * * *:"*)  duties="lapsed-email-changes" ;;
+            "15 10 * * *:"*) duties="llm-call-log" ;;
             *:costs)            run_costs=true ;;
             *:bookstore-events) run_events=true ;;
             *:both)             run_costs=true; run_events=true ;;
@@ -308,6 +311,8 @@ jobs:
                 spec="Stacks.Release.sweep_expired_invites EXPIRED_INVITES_SWEEP expired_invites_sweep" ;;
               lapsed-email-changes)
                 spec="Stacks.Release.sweep_lapsed_email_changes EMAIL_CHANGES_SWEEP email_changes_sweep" ;;
+              llm-call-log)
+                spec="Stacks.Release.sweep_llm_call_log LLM_CALL_LOG_RETENTION llm_call_log_retention" ;;
               *)
                 # Unreachable via the plan step, which validates against the
                 # same roster. Refused anyway: a duty key with no spec must not

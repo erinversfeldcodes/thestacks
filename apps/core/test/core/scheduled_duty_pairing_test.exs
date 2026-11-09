@@ -32,9 +32,9 @@ defmodule Core.ScheduledDutyPairingTest do
     {Stacks.Workers.RefreshCostsJob, "Stacks.Release.refresh_costs"},
     {Stacks.Workers.DiscoverBookstoreEventsJob, "Stacks.Release.discover_bookstore_events"},
     {Stacks.Workers.DbtRefreshJob, "scripts/dbt-deployed.sh"},
-    # The eight retention and account-lifecycle duties. ⚠️ Each is anchored on
+    # The nine retention and account-lifecycle duties. ⚠️ Each is anchored on
     # its own release function rather than on the shared runner script, and that
-    # is the point: eight duties sharing one anchor would let any of them be
+    # is the point: nine duties sharing one anchor would let any of them be
     # dropped from its schedule while the guard still found the one reference
     # and reported every duty paired.
     {Stacks.Workers.ImageRetentionJob, "Stacks.Release.sweep_images"},
@@ -44,6 +44,7 @@ defmodule Core.ScheduledDutyPairingTest do
     {Stacks.Workers.GuardianTokenSweepJob, "Stacks.Release.sweep_guardian_tokens"},
     {Stacks.Workers.ExpiredUnverifiedAccountsJob, "Stacks.Release.sweep_unverified_accounts"},
     {Stacks.Workers.ExpiredInvitesSweepJob, "Stacks.Release.sweep_expired_invites"},
+    {Stacks.Workers.LlmCallLogRetentionJob, "Stacks.Release.sweep_llm_call_log"},
     {Stacks.Workers.ExpiredEmailChangesJob, "Stacks.Release.sweep_lapsed_email_changes"}
   ]
 

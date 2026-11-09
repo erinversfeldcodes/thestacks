@@ -127,17 +127,33 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
         :ok
 
       {:error, changeset} ->
-        Logger.warning(
-          "PostBookAssociationWorker: could not record the LLM call for post " <>
-            "#{post.id}: #{inspect(changeset.errors)}"
-        )
-
-        :ok
+        log_write_failed(:invalid, inspect(changeset.errors), post)
     end
   rescue
     error ->
-      Logger.warning("PostBookAssociationWorker: call log write raised: #{inspect(error)}")
-      :ok
+      log_write_failed(:raised, inspect(error), post)
+  end
+
+  # ⛔ SWALLOWED, BUT NOT SILENT — AND THE DIFFERENCE IS THE WHOLE POINT.
+  #
+  # Swallowing is right: the association work is already done by the time this
+  # runs, and a diagnostic write must never fail a job whose real work
+  # succeeded. But a `Logger.warning` and `:ok` is indistinguishable from
+  # success to everything that watches, so a log that silently stopped being
+  # written would be discovered by whoever goes looking for the eval corpus
+  # weeks later and finds it empty.
+  #
+  # ⚖️ The counter makes the failure a thing that can be alarmed on, which is
+  # what separates "we accepted this failure mode" from "we did not notice it".
+  defp log_write_failed(reason, detail, post) do
+    Logger.warning(
+      "PostBookAssociationWorker: could not record the LLM call for post " <>
+        "#{post.id} (#{reason}): #{detail}"
+    )
+
+    :telemetry.execute([:stacks, :ai, :call_log_write_failed], %{count: 1}, %{reason: reason})
+
+    :ok
   end
 
   defp together_model do

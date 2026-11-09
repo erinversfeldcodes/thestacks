@@ -2,7 +2,10 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
   use Core.DataCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  alias Core.Repo
+  alias Stacks.AI.CallLog
   alias Stacks.AI.MockTogetherClient
+  alias Stacks.AI.Structured
   alias Stacks.Blog
   alias Stacks.GDPR.Consent
   alias Stacks.Test.Fixtures.LlmAssociationResponses, as: Responses
@@ -59,6 +62,21 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       lighthouse = Enum.find(associations, &(&1.book_id == first.id))
       assert lighthouse.confidence == 0.92
       assert lighthouse.reasoning =~ "lighthouse"
+
+      # ⛔ THE WRITER, WHICH NOTHING ASSERTED. A probe replacing `Repo.insert/1`
+      # in `record_call/5` with a pass-through left 120 tests green: the
+      # migration, the schema, the 8 KB bound and the retention were all proven
+      # while the thing that fills the table was not. `CallLogTest` builds its
+      # rows by hand, so it cannot see this.
+      #
+      # ⚠️ It matters because the eval corpus is model OUTPUTS. A silently empty
+      # log is discovered weeks later, by whoever goes looking for a dataset
+      # that was never being collected.
+      assert [%CallLog{} = logged] = Repo.all(CallLog)
+      assert logged.post_id == post.id
+      assert logged.outcome == "associated"
+      assert logged.raw_response == response
+      assert logged.prompt_sha256 != nil
     end
 
     test "a bare ``` fence works too, because the model varies it" do
@@ -271,8 +289,19 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
 
       assert :ok == perform_job(PostBookAssociationWorker, %{post_id: post.id})
 
-      assert [{:complete, prompt, _opts}] = MockTogetherClient.sent()
+      assert [{:complete, prompt, opts}] = MockTogetherClient.sent()
       assert prompt =~ @body
+
+      # ⛔ THE PRODUCTION CALL SITE ASKS FOR A SHAPE, and nothing asserted it
+      # until a probe removed `schema:` from the worker's opts and left 94 tests
+      # green. The measured defect — 3 of 3 responses fenced — is fixed AT this
+      # call site, so an unguarded call site is an unguarded fix. The
+      # observation point was already here, one underscore away.
+      assert Keyword.fetch!(opts, :schema) == Structured.association_schema(),
+             "the worker must ask the provider for the association schema; without it " <>
+               "the model answers in whatever shape it likes, which is the defect this " <>
+               "whole boundary was rebuilt around"
+
       assert [%{book_id: book_id}] = Blog.list_associations(post.id)
       assert book_id == book.id
       assert_receive {:association_outcome, :associated}
