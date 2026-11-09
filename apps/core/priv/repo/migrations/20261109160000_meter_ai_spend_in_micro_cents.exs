@@ -25,6 +25,9 @@ defmodule Core.Repo.Migrations.MeterAiSpendInMicroCents do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     rename table(:ai_spend, prefix: "op"), :spend_cents, to: :spend_micro_cents
 
     execute "UPDATE op.ai_spend SET spend_micro_cents = spend_micro_cents * 100000"
@@ -38,6 +41,9 @@ defmodule Core.Repo.Migrations.MeterAiSpendInMicroCents do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     execute "UPDATE op.ai_spend SET spend_micro_cents = spend_micro_cents / 100000"
 
     drop constraint(:ai_spend, :spend_is_not_negative, prefix: "op")

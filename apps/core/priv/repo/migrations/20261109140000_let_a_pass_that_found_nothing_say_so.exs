@@ -18,6 +18,9 @@ defmodule Core.Repo.Migrations.LetAPassThatFoundNothingSaySo do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     drop constraint(:llm_call_log, :outcome_is_known, prefix: "op")
 
     create constraint(:llm_call_log, :outcome_is_known,
@@ -29,6 +32,9 @@ defmodule Core.Repo.Migrations.LetAPassThatFoundNothingSaySo do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     # ⚠️ Rows holding the new value would violate the narrower constraint, so
     # they are folded back into the label they used to carry rather than left to
     # fail the migration. Lossy by necessity, and in the direction that keeps

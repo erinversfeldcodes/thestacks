@@ -23,6 +23,9 @@ defmodule Core.Repo.Migrations.LetTheAiBudgetOutliveTheNode do
   use Ecto.Migration
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     create table(:ai_spend, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
 
@@ -67,6 +70,9 @@ defmodule Core.Repo.Migrations.LetTheAiBudgetOutliveTheNode do
   end
 
   def down do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     drop table(:ai_spend, prefix: "op")
   end
 end

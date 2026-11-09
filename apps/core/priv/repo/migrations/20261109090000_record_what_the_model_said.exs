@@ -25,6 +25,14 @@ defmodule Core.Repo.Migrations.RecordWhatTheModelSaid do
   use Ecto.Migration
 
   def up do
+    # ⚠️ The project's convention, and `scripts/security-squawk.sh` enforces it:
+    # a migration that can wait on a lock says how long it will wait. Without
+    # these, a DDL statement blocks behind any open transaction indefinitely and
+    # every reader queues behind it — which is worse than failing and being
+    # retried.
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     create table(:llm_call_log, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
 
@@ -88,6 +96,14 @@ defmodule Core.Repo.Migrations.RecordWhatTheModelSaid do
   end
 
   def down do
+    # ⚠️ The project's convention, and `scripts/security-squawk.sh` enforces it:
+    # a migration that can wait on a lock says how long it will wait. Without
+    # these, a DDL statement blocks behind any open transaction indefinitely and
+    # every reader queues behind it — which is worse than failing and being
+    # retried.
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     drop table(:llm_call_log, prefix: "op")
   end
 end

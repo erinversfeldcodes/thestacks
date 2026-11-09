@@ -23,7 +23,17 @@ defmodule Core.Repo.Migrations.OneAssociationPerBookPerPost do
   """
   use Ecto.Migration
 
+  # ⚖️ THE DELETE ONLY. The unique index that enforces this invariant lives in the
+  # next migration, because it must be built CONCURRENTLY on a table that has
+  # rows — and `concurrently: true` cannot run inside a transaction, which is
+  # the only place `SET LOCAL` has any effect. Rather than waive one of the two
+  # safety rules, each statement sits in the migration whose transaction
+  # semantics suit it: this one collapses duplicates under timeouts, the next
+  # builds the index without blocking writes.
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     # Collapse any existing duplicates before the index can refuse them. Keeps
     # the highest-confidence row, which is the one `list_associations/1` orders
     # first and therefore the one a reader has been seeing.
@@ -34,11 +44,15 @@ defmodule Core.Repo.Migrations.OneAssociationPerBookPerPost do
        AND a.book_id = b.book_id
        AND (a.confidence, a.id) < (b.confidence, b.id)
     """
-
-    create unique_index(:post_book_associations, [:post_id, :book_id], prefix: "op")
   end
 
+  # ⚠️ Deliberately empty: a collapsed duplicate cannot be reconstructed, and
+  # inventing a second row to restore symmetry would be worse than admitting the
+  # deletion was one-way. The index's own migration rolls back cleanly.
   def down do
-    drop unique_index(:post_book_associations, [:post_id, :book_id], prefix: "op")
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
+    :ok
   end
 end
