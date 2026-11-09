@@ -465,8 +465,25 @@ defmodule Mix.Tasks.Eval.Vision do
     case Jason.decode(body) do
       {:ok, %{"passed" => passed} = recorded} ->
         cond do
-          Map.get(recorded, "model") != identity.model or
-              Map.get(recorded, "modal_app") != identity.modal_app ->
+          # ⛔ `modal_app` IS PROVENANCE, NOT IDENTITY — and keeping it in the
+          # key made the file unable to hold a true answer at all.
+          #
+          # `MODAL_APP` is `thestacks-vision` in production and an EPHEMERAL
+          # per-branch URL on a preview. With the URL in the key, one file could
+          # describe only one environment: each `--record` destroyed the other's
+          # and whichever deployed next halted as a broken gate. Demonstrated,
+          # not predicted — a full `just ci` wrote
+          # `…thestacks-vision-refactor-vision-rede-df1ee4.us-east.modal.run`
+          # into its artefact and the same run's cleanup then deleted that
+          # deployment. So the baseline the gate was asking for could not
+          # usefully be recorded: every preview would pin one to a dead URL and
+          # production would reject it.
+          #
+          # ⚖️ A score is a fact about a MODEL on a CORPUS. Both of those are
+          # still in the key. Where it was served is recorded in the file as
+          # metadata, printed when the gate refuses, and compared against
+          # nothing — which is what provenance is for.
+          Map.get(recorded, "model") != identity.model ->
             {:mismatch, Map.get(recorded, "model")}
 
           # ⛔ KEYED TO THE CORPUS TOO, NOT JUST THE MODEL. `total` was written

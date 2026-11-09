@@ -53,14 +53,39 @@ defmodule Mix.Tasks.Eval.VisionTest do
                "architecture earns its own"
     end
 
-    # ⚠️ Same model, different deployment. The service URL is part of the
-    # identity because the same weights behind a different app are not
-    # self-evidently the same system, and assuming they are is how a baseline
-    # silently spans two.
-    test "the same model on a different app is also a mismatch" do
+    # ⛔ REVERSED DELIBERATELY: the same model on a different deployment is
+    # NOT a mismatch, and the previous rule here made the file unusable.
+    #
+    # The earlier reasoning — "the same weights behind a different app are not
+    # self-evidently the same system" — is defensible in the abstract and was
+    # wrong in this deployment topology. `MODAL_APP` is `thestacks-vision` in
+    # production and an EPHEMERAL per-branch URL on a preview, so with the URL
+    # in the key one file could describe only one environment: each `--record`
+    # destroyed the other's, and whichever deployed next halted as a broken
+    # gate. A real `just ci` run proved it, writing a preview URL into its
+    # artefact that the same run's cleanup then deleted.
+    #
+    # ⚖️ So the score is keyed on the MODEL and the CORPUS, and the deployment
+    # is kept in the file as provenance — printed when the gate refuses,
+    # compared against nothing.
+    test "the same model on a different deployment is comparable, not a mismatch" do
       body = recorded(%{"model" => "qwen2-vl-7b", "modal_app" => "https://other.example.test"})
 
-      assert {:mismatch, _} = Vision.baseline_for(body, @identity)
+      assert {:ok, 6} = Vision.baseline_for(body, @identity),
+             "a baseline recorded on another deployment of the SAME model must still " <>
+               "compare — keying on an ephemeral preview URL is what made this file " <>
+               "unable to hold a true answer for prod and preview at once"
+    end
+
+    # ⬛ AND THE PROVENANCE IS STILL RECORDED, or dropping it from the key
+    # would have quietly dropped it altogether — leaving no way to tell which
+    # deployment produced a number that looks wrong.
+    test "the deployment is still written to the file, as provenance" do
+      identity = Vision.model_identity(6)
+
+      assert Map.has_key?(identity, :modal_app),
+             "the service URL must still be captured — it is not part of the comparison, " <>
+               "but it is the only record of where a score came from"
     end
 
     # ⬛ ANTI-VACUITY: if `baseline_for/2` returned `{:mismatch, _}` for
