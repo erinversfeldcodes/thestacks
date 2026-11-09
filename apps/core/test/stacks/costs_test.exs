@@ -652,4 +652,94 @@ defmodule Stacks.CostsTest do
       refute modal.description =~ "0 inferences"
     end
   end
+
+  describe "a cost line says how its figure was arrived at" do
+    # ⛔ FIVE BUILDERS ANSWERED AN UNAVAILABLE MEASUREMENT WITH `amount_cents: 0`,
+    # and their own descriptions said so — Modal's reads "this month's inference
+    # count is temporarily unavailable, so no charge is shown". The description
+    # was right and the number contradicted it, on a page whose closing line
+    # claimed every number was real.
+    #
+    # ⚠️ This surfaced only after the upstream fix: stopping
+    # `metric_count_this_month/1` mapping :no_data to {:ok, 0} let the nil
+    # clauses run, and the nil clauses did the same conversion themselves. Two
+    # layers of one defect, the second invisible until the first was gone.
+    test "an unavailable measurement is absent, not zero" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      items = Costs.build_cost_items(period_start, period_end, nil, [])
+
+      modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
+
+      assert modal.basis == "absent",
+             "an unmeasured line is not marked absent, so the page renders its placeholder " <>
+               "zero as a real $0.00 for a service it has no measurement of"
+    end
+
+    # ⬛ ANTI-VACUITY, and it is the half that stops a blanket "absent": a line
+    # WITH a measurement must say so, or marking everything absent would satisfy
+    # the case above and blank the entire page.
+    test "a measured line is not marked absent" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      items = Costs.build_cost_items(period_start, period_end, 120, [])
+
+      modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
+
+      assert modal.basis == "rate_card"
+      assert modal.amount_cents > 0
+    end
+
+    # ⚖️ A published-price fallback is RATE_CARD, not ABSENT. Three of the eight
+    # nil clauses fall back to a constant rather than to zero — those lines do
+    # carry a defensible figure, and calling them absent would be the same
+    # dishonesty pointed the other way.
+    test "a published-price fallback is rate_card, not absent" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      items = Costs.build_cost_items(period_start, period_end, nil, [])
+
+      neon = Enum.find(items, &(&1.service =~ "Neon"))
+
+      assert neon.basis == "rate_card"
+
+      # ⬛ AND THE AMOUNT IS NOT ASSERTED NON-ZERO, deliberately: `@neon_cents`
+      # is 0 because Neon's published price for this tier IS zero. That makes
+      # the crucial point explicit — a rate-card zero and a measured zero are
+      # both HONEST ("the free tier costs nothing"), and only an ABSENT figure
+      # must not render as money. The defect was never "zero is bad"; it was a
+      # zero standing in for a number nobody had.
+      #
+      # ⚠️ My first version of this case asserted `> 0` and failed, on the
+      # assumption that a rate-card line must carry a charge. It does not, and
+      # `basis` rather than the amount is the thing that separates the honest
+      # zeros from the lying one.
+      assert is_integer(neon.amount_cents)
+    end
+
+    # ⛔ THE VOCABULARY IS CLOSED AT THE DATABASE, not only in the changeset,
+    # because the factory and any future non-changeset writer bypass the
+    # changeset entirely — and a typo putting an unknown basis on a line would
+    # put a $0.00 back on a figure that does not exist.
+    test "an unknown basis is refused" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      changeset =
+        Costs.platform_cost_changeset(%Stacks.Costs.PlatformCost{}, %{
+          category: "compute",
+          service: "Probe",
+          amount_cents: 1,
+          currency: "USD",
+          period_start: period_start,
+          period_end: period_end,
+          basis: "guessed"
+        })
+
+      refute changeset.valid?
+    end
+  end
 end

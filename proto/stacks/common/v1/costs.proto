@@ -59,4 +59,25 @@ message PlatformCost {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 10 [json_name = "updated_at"];
+
+  // How this figure was arrived at: "measured", "rate_card" or "absent".
+  //
+  // ⛔ ABSENT IS NOT ZERO. Five of the cost-item builders answered an
+  // unavailable measurement with amount_cents: 0, and their own descriptions
+  // said so — Modal's reads "this month's inference count is temporarily
+  // unavailable, so no charge is shown". The description was right and the
+  // number contradicted it, on a public page claiming every figure on it was
+  // real. A reader seeing zero concludes the service is free.
+  //
+  // ⚖️ Three states because the honest answer is not binary: "measured" read
+  // from a meter, "rate_card" computed from a published price and an observed
+  // quantity, "absent" no figure for this period. A rate-card ZERO is honest —
+  // a free tier costs nothing — so the amount alone cannot carry this; only
+  // "absent" means amount_cents must not be rendered as money.
+  //
+  // A bare string rather than an enum because this is the PERSISTED message,
+  // whose vocabulary is closed by a database CHECK
+  // (platform_costs_basis_is_known) and a changeset inclusion. The API-facing
+  // CostItem exposes it as the CostBasis enum.
+  string basis = 11 [json_name = "basis"];
 }

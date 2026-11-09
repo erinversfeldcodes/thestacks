@@ -840,7 +840,8 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        currency: %{default: "USD"}
+        currency: %{default: "USD"},
+        basis: %{null: false, default: "rate_card"}
       }
     },
     %{

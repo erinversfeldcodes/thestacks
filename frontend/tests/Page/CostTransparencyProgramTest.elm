@@ -220,16 +220,40 @@ displaysStoryCards =
                     [ Selector.text "11 books" ]
 
 
+{-| ⛔ THIS TEST PINNED A CLAIM THE PAGE COULD NOT KEEP.
+
+It asserted "Every number on this page is real." — a sentence that was false in
+two directions at once. Most lines are a published price times an observed
+quantity, which is honest arithmetic and _is_ an estimate of spend since a
+provider's invoice may differ; and five cost-item builders answered an
+unavailable measurement with zero, so the page rendered "$0.00" for services it
+had no measurement of, directly above that sentence.
+
+⚖️ Reversed rather than deleted, because the page's purpose IS the claim. What
+it now asserts is the per-line form, which the reader can check against the
+basis shown beside each figure — a claim you can verify beats a claim you must
+take on trust.
+
+⚠️ AND NO COMPANION ABSENCE ASSERTION, deliberately. I added one — "the
+unqualified every-number claim is absent" — and `check-prose-assertions.sh`
+refused it, correctly: the string no longer appears anywhere in `frontend/src/`,
+so nothing can make that assertion fail and it would keep passing if this page
+were deleted entirely. An absence assertion on a string that does not exist is
+unfalsifiable, which is the vacuity that gate exists to catch. The positive
+assertion above is the real guard: restore the old sentence in place of the new
+one and it reds.
+
+-}
 displaysPhilosophyNote : Test
 displaysPhilosophyNote =
-    test "philosophy_note: shows the transparency philosophy text" <|
+    test "philosophy_note: states how each figure was arrived at, per line" <|
         \() ->
             startCostPage
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/costs"
                     sampleCostResponseJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Every number on this page is real." ]
+                    [ Selector.text "Each line above says how its figure was arrived at" ]
 
 
 displaysMonthlyTrend : Test

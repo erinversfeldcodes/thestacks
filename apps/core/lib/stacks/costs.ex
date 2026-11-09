@@ -175,6 +175,7 @@ defmodule Stacks.Costs do
   end
 
   @platform_cost_valid_categories ~w(hosting compute database domain services)
+  @platform_cost_valid_bases ~w(measured rate_card absent)
 
   # The service names this module itself writes — every `service:` literal in
   # the seeding functions below, which is the whole vocabulary the column is
@@ -224,7 +225,8 @@ defmodule Stacks.Costs do
       :amount_cents,
       :currency,
       :period_start,
-      :period_end
+      :period_end,
+      :basis
     ])
     |> validate_required([
       :category,
@@ -235,6 +237,11 @@ defmodule Stacks.Costs do
       :period_end
     ])
     |> validate_inclusion(:category, @platform_cost_valid_categories)
+    # ⛔ A closed vocabulary, mirrored by a CHECK below. "absent" is the value
+    # the page keys on to render text instead of money, so a typo here would put
+    # a $0.00 back on a line that has no figure — the exact defect this column
+    # was added to remove.
+    |> validate_inclusion(:basis, @platform_cost_valid_bases)
     |> validate_number(:amount_cents, greater_than_or_equal_to: 0)
     |> unique_constraint([:service, :period_start, :period_end])
     # The column now carries the same two rules as a CHECK, because the factory
@@ -244,6 +251,10 @@ defmodule Stacks.Costs do
     |> check_constraint(:category,
       name: :platform_costs_category_known,
       message: "is not a recognised category"
+    )
+    |> check_constraint(:basis,
+      name: :platform_costs_basis_is_known,
+      message: "is not a recognised basis"
     )
     |> check_constraint(:amount_cents,
       name: :platform_costs_amount_not_negative,
@@ -340,7 +351,8 @@ defmodule Stacks.Costs do
         "Qwen2.5-VL-7B on A10G (~$0.03/inference; Modal exposes no billing API, " <>
           "so this is our own count) — this month's inference count is " <>
           "temporarily unavailable, so no charge is shown",
-      amount_cents: 0
+      amount_cents: 0,
+      basis: "absent"
     })
   end
 
@@ -353,7 +365,8 @@ defmodule Stacks.Costs do
           "(~$0.03/each; Modal exposes no billing API, so this is our own count. " <>
           "Counts inference only: a container also bills while idle for up to " <>
           "its scaledown window after the last request, which this figure omits)",
-      amount_cents: vision_jobs * @modal_per_inference_cents
+      amount_cents: vision_jobs * @modal_per_inference_cents,
+      basis: "rate_card"
     })
   end
 
@@ -367,7 +380,8 @@ defmodule Stacks.Costs do
       description:
         "Llama 3.3 70B for source vetting, post-book linking, review summaries — " <>
           "usage counted daily from our own metrics",
-      amount_cents: 0
+      amount_cents: 0,
+      basis: "absent"
     })
   end
 
@@ -379,7 +393,8 @@ defmodule Stacks.Costs do
         "Llama 3.3 70B for source vetting, post-book linking, review summaries — " <>
           "#{completions} completions this month (~$0.001/each at published token " <>
           "rates; no billing API, so this is our own count)",
-      amount_cents: round(completions * 0.1)
+      amount_cents: round(completions * 0.1),
+      basis: "rate_card"
     })
   end
 
@@ -391,7 +406,8 @@ defmodule Stacks.Costs do
       description:
         "Transactional email (confirmations, invites) — usage counted daily " <>
           "against the 3,000/month free tier",
-      amount_cents: 0
+      amount_cents: 0,
+      basis: "absent"
     })
   end
 
@@ -405,7 +421,8 @@ defmodule Stacks.Costs do
         "Transactional email (confirmations, invites) — #{sends} of 3,000 " <>
           "free-tier sends this month" <>
           if(over, do: " (over the allowance: requires the $20/month plan)", else: ""),
-      amount_cents: if(over, do: 2000, else: 0)
+      amount_cents: if(over, do: 2000, else: 0),
+      basis: "rate_card"
     })
   end
 
@@ -418,7 +435,8 @@ defmodule Stacks.Costs do
       description:
         "Author/bookshop source discovery — usage counted daily against the " <>
           "2,000/month free tier",
-      amount_cents: 0
+      amount_cents: 0,
+      basis: "absent"
     })
   end
 
@@ -432,7 +450,8 @@ defmodule Stacks.Costs do
         "Author/bookshop source discovery — #{searches} of 2,000 free-tier " <>
           "queries this month" <>
           if(overage > 0, do: " (#{overage} over, at $3 per 1,000)", else: ""),
-      amount_cents: round(overage * 0.3)
+      amount_cents: round(overage * 0.3),
+      basis: "rate_card"
     })
   end
 
@@ -443,7 +462,8 @@ defmodule Stacks.Costs do
       category: "services",
       service: "Google Books & Open Library",
       description: "ISBN verification for every book entering the system — free at any volume",
-      amount_cents: 0
+      amount_cents: 0,
+      basis: "absent"
     })
   end
 
@@ -454,7 +474,8 @@ defmodule Stacks.Costs do
       description:
         "ISBN verification for every book entering the system — #{lookups} " <>
           "lookups this month; both APIs are free at any volume",
-      amount_cents: 0
+      amount_cents: 0,
+      basis: "rate_card"
     })
   end
 
@@ -470,7 +491,8 @@ defmodule Stacks.Costs do
       category: "hosting",
       service: "Fly.io Core",
       description: "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD) — estimated flat-rate",
-      amount_cents: @fly_core_cents
+      amount_cents: @fly_core_cents,
+      basis: "rate_card"
     })
   end
 
@@ -484,7 +506,8 @@ defmodule Stacks.Costs do
       description:
         "Phoenix API + Elm SPA (shared-cpu-1x, 512MB, IAD) — measured: " <>
           "awake #{hours}h this period (scales to zero when idle)",
-      amount_cents: cents
+      amount_cents: cents,
+      basis: "rate_card"
     })
   end
 
@@ -501,7 +524,8 @@ defmodule Stacks.Costs do
       description:
         "Always-on support services (Grafana, metrics store, search, scraper) — " <>
           "estimated flat-rate",
-      amount_cents: @fly_services_cents
+      amount_cents: @fly_services_cents,
+      basis: "rate_card"
     })
   end
 
@@ -513,7 +537,8 @@ defmodule Stacks.Costs do
         "All non-core machines and volumes on the account (support services + " <>
           "any running preview stacks) — measured from the live machine inventory " <>
           "at Fly's rate card",
-      amount_cents: cents
+      amount_cents: cents,
+      basis: "measured"
     })
   end
 
@@ -522,7 +547,8 @@ defmodule Stacks.Costs do
       category: "database",
       service: "Neon PostgreSQL",
       description: "Serverless Postgres (free tier: 0.5 GiB, 190 compute hours)",
-      amount_cents: @neon_cents
+      amount_cents: @neon_cents,
+      basis: "rate_card"
     })
   end
 
@@ -533,7 +559,8 @@ defmodule Stacks.Costs do
       description:
         "Serverless Postgres — measured from Neon's own consumption API " <>
           "(all projects, compute + storage vs plan allowance)",
-      amount_cents: cents
+      amount_cents: cents,
+      basis: "measured"
     })
   end
 
@@ -714,9 +741,19 @@ defmodule Stacks.Costs do
     %{
       service: cost.service,
       description: cost.description,
-      amount_cents: cost.amount_cents
+      amount_cents: cost.amount_cents,
+      basis: cost.basis,
+      refreshed_at: refreshed_at(cost)
     }
   end
+
+  # ⚖️ `updated_at`, not `created_at`: the reader's question is "how fresh is
+  # this number", and the row is upserted on each refresh. Empty rather than a
+  # timestamp when there is no figure, because there is no refresh to report —
+  # a date beside "not yet measured" would imply the absence was measured then.
+  defp refreshed_at(%PlatformCost{basis: "absent"}), do: ""
+  defp refreshed_at(%PlatformCost{updated_at: nil}), do: ""
+  defp refreshed_at(%PlatformCost{} = cost), do: DateTime.to_iso8601(cost.updated_at)
 
   defp serialize_monthly_total(%{} = total) do
     %{

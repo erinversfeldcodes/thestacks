@@ -17,7 +17,8 @@ import Json.Decode as D
 import Json.Encode as E
 import Stacks.Api.V1.Admin
     exposing
-        ( CostBreakdown
+        ( CostBasis(..)
+        , CostBreakdown
         , CostItem
         , EnrichmentGaps
         , MetricsDashboard
@@ -2605,6 +2606,13 @@ adminSuite =
                         { service = "Fly.io"
                         , description = "Compute"
                         , amountCents = 15000
+
+                        -- ⚖️ A measured line, so the page may render the
+                        -- amount as money. An `absent` basis means there is no
+                        -- figure for the period and the number must not be
+                        -- shown — the distinction a $0.00 destroyed.
+                        , basis = CostBasisMeasured
+                        , refreshedAt = "2026-11-10T00:00:00Z"
                         }
 
                     result =
@@ -2682,6 +2690,8 @@ adminSuite =
                                     [ { service = "Fly.io"
                                       , description = "VM"
                                       , amountCents = 15000
+                                      , basis = CostBasisMeasured
+                                      , refreshedAt = "2026-11-10T00:00:00Z"
                                       }
                                     ]
                               }

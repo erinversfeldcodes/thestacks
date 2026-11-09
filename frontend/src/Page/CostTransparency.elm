@@ -28,6 +28,17 @@ type alias CostItem =
     { service : String
     , description : Maybe String
     , amountCents : Int
+
+    -- ⛔ `basis` IS WHAT STOPS THIS PAGE LYING. `amountCents` alone cannot say
+    -- whether a 0 is a measurement, a free tier's published price, or a figure
+    -- nobody has — and five cost-item builders answered an unavailable
+    -- measurement with 0, so this page rendered "$0.00" for services it had no
+    -- measurement of, under a closing line claiming every number was real.
+    --
+    -- ⚖️ A rate-card ZERO is honest; only `CostBasisAbsent` means the amount
+    -- must not be rendered as money.
+    , basis : ProtoAdmin.CostBasis
+    , refreshedAt : String
     }
 
 
@@ -135,6 +146,8 @@ fromProtoCostItem proto =
     { service = proto.service
     , description = emptyToNothing proto.description
     , amountCents = proto.amountCents
+    , basis = proto.basis
+    , refreshedAt = proto.refreshedAt
     }
 
 
@@ -287,7 +300,7 @@ viewServiceItem item =
         [ div [ class "costs__service-name" ] [ text item.service ]
         , div [ class "costs__service-desc" ]
             [ text (Maybe.withDefault "" item.description) ]
-        , div [ class "costs__service-amount" ] [ text (formatCents item.amountCents) ]
+        , div [ class "costs__service-amount" ] [ amountText item ]
         ]
 
 
@@ -331,19 +344,77 @@ viewTrendBar maxCents total =
         ]
 
 
+{-| The page's closing statement about its own honesty.
+
+⛔ IT USED TO SAY "EVERY NUMBER ON THIS PAGE IS REAL … NOT ESTIMATES OR
+PROJECTIONS", AND THAT WAS FALSE IN TWO DIRECTIONS AT ONCE. Most lines are
+computed from a published rate card times an observed quantity — which is
+honest arithmetic and _is_ an estimate of spend, since a provider's invoice may
+differ. And five cost-item builders answered an unavailable measurement with
+zero, so the page rendered "$0.00" for services it had no measurement of, under
+that very sentence.
+
+⚖️ Replaced rather than removed, because the page's purpose is the claim. What
+it can honestly say is now true per line and verifiable by the reader against
+the basis shown beside each figure — which is a stronger statement than the
+blanket one, not a weaker one: a claim you can check beats a claim you must
+take on trust.
+
+-}
 viewPhilosophy : Html Msg
 viewPhilosophy =
     div [ class "costs__philosophy" ]
         [ p [ class "costs__philosophy-text" ]
             [ text
-                ("Every number on this page is real. Costs are computed from "
-                    ++ "published rate cards and actual database metrics — not estimates "
-                    ++ "or projections. The Stacks is source-available and maintainer-funded; "
-                    ++ "this page exists because we believe you should know exactly "
-                    ++ "what it costs run this platform."
+                ("Each line above says how its figure was arrived at: measured "
+                    ++ "from a meter, computed from a published price, or not yet "
+                    ++ "measured this period. The Stacks is source-available and "
+                    ++ "maintainer-funded; this page exists because we believe you "
+                    ++ "should know exactly what it costs to run this platform."
                 )
             ]
         ]
+
+
+{-| The amount, or a sentence saying there is none.
+
+⛔ A figure the page does not have must not look like money. `CostBasisAbsent`
+means the meter returned no samples or the store could not be read, and the
+caller's own nil path already said so ("a measurement we could not take is nil,
+never 0 … a transparency page printing '0' would be claiming the service went
+unused") — this is that sentence reaching the reader instead of a $0.00.
+
+⚖️ `Unspecified` is treated as absent rather than as a measurement: an unset
+basis on a line carrying a number is exactly the ambiguity the field removes, so
+the safe reading is the one that does not assert a figure.
+
+⚠️ The refresh date is shown only when there IS one. A date beside "not yet
+measured" would imply the absence itself was measured then.
+
+-}
+amountText : CostItem -> Html msg
+amountText item =
+    case item.basis of
+        ProtoAdmin.CostBasisAbsent ->
+            text (absentCopy item.refreshedAt)
+
+        ProtoAdmin.CostBasisUnspecified ->
+            text (absentCopy item.refreshedAt)
+
+        ProtoAdmin.CostBasisMeasured ->
+            text (formatCents item.amountCents)
+
+        ProtoAdmin.CostBasisRateCard ->
+            text (formatCents item.amountCents)
+
+
+absentCopy : String -> String
+absentCopy refreshedAt =
+    if String.isEmpty refreshedAt then
+        "not yet measured this period"
+
+    else
+        "not yet measured this period — last refresh " ++ String.left 10 refreshedAt
 
 
 formatCents : Int -> String
