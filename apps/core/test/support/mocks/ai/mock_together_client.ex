@@ -19,13 +19,56 @@ defmodule Stacks.AI.MockTogetherClient do
 
   @behaviour Stacks.AI.TogetherClientBehaviour
 
+  alias Stacks.AI.TogetherClient
+
   @sent_key {__MODULE__, :sent}
+  @usage_key {__MODULE__, :usage_tokens}
 
   @impl true
   def complete(prompt, opts \\ []) do
     record({:complete, prompt, opts})
-    get_response({:ok, "0.75"})
+
+    case get_response({:ok, "0.75"}) do
+      {:ok, content} -> charge_like_the_real_client(content)
+      other -> other
+    end
   end
+
+  # ⛔ THE MOCK CHARGES THE BUDGET, BECAUSE OTHERWISE NOTHING IN THE TEST
+  # ENVIRONMENT EVER DOES.
+  #
+  # `config :core, :together_client, #{inspect(__MODULE__)}` replaces
+  # `complete/2` wholesale, so a mock that answers with a bare string bypasses
+  # the real client's success path — and the charge lives there, where the
+  # provider's token usage is. The effect is that every worker driven under the
+  # mock spends nothing, and a test asking "was this billed?" cannot tell a
+  # working meter from an absent one.
+  #
+  # ⚖️ So the mock stops short of reimplementing the billing and instead hands a
+  # canned envelope to the REAL parser. Only the transport is faked; the
+  # charging, the usage reading and the rounding are the shipped code. A mock
+  # that computed the cost itself would be a second implementation of the thing
+  # under test, and the two would drift.
+  defp charge_like_the_real_client(content) do
+    body =
+      Jason.encode!(%{
+        "choices" => [%{"message" => %{"content" => content}}],
+        "usage" => %{"total_tokens" => usage_tokens()}
+      })
+
+    TogetherClient.parse_success_response(body)
+  end
+
+  @doc """
+      The `usage.total_tokens` the next canned response will report.
+
+      Defaults to a small, realistic completion. Set it when a test needs the
+      charge to be a particular size.
+  """
+  @spec put_usage_tokens(non_neg_integer()) :: term()
+  def put_usage_tokens(tokens), do: Process.put(@usage_key, tokens)
+
+  defp usage_tokens, do: Process.get(@usage_key, 400)
 
   defp get_response(default) do
     case Process.get(__MODULE__) do
@@ -55,6 +98,7 @@ defmodule Stacks.AI.MockTogetherClient do
   @spec clear() :: term()
   def clear do
     Process.delete(@sent_key)
+    Process.delete(@usage_key)
     Process.delete(__MODULE__)
   end
 end

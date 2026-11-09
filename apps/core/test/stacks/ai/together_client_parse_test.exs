@@ -23,11 +23,12 @@ defmodule Stacks.AI.TogetherClientParseTest do
       still be parsed.
   """
 
-  use ExUnit.Case, async: false
+  # ⚠️ DataCase: the success path now charges the durable budget ledger, so
+  # these tests need a sandboxed connection.
+  use Core.DataCase, async: false
 
+  alias Stacks.AI.Spend
   alias Stacks.AI.Structured
-  alias Stacks.AI.TogetherClient
-
   alias Stacks.AI.TogetherClient
 
   # Four associations with realistic UUIDs and reasoning: the shape the blog
@@ -218,6 +219,74 @@ defmodule Stacks.AI.TogetherClientParseTest do
     test "408 and 429 melt, because they are the dependency saying wait" do
       assert TogetherClient.meltable?(408)
       assert TogetherClient.meltable?(429)
+    end
+  end
+
+  describe "what the completion is charged" do
+    # ⛔ THE CHARGE FOLLOWS THE RESPONSE, NOT A PROMPT-SIDE ESTIMATE.
+    #
+    # This path billed invisibly: `BudgetTracker` had one caller passing
+    # `:modal`, so every Together completion spent unmetered. The number that
+    # matters is the provider's — a completion that stops early, a retried
+    # generation or a tokeniser disagreement all move it away from anything the
+    # caller could have guessed from the prompt.
+    test "the charge comes from usage.total_tokens, not from the prompt's size" do
+      # A tiny prompt and a tiny answer, with a provider-reported usage far
+      # larger than either — the disagreement is the point of the case.
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "0.8"}}],
+          "usage" => %{"total_tokens" => 2_000_000}
+        })
+
+      assert {:ok, "0.8"} = TogetherClient.parse_success_response(body)
+
+      charged = Spend.spent(:together, :daily)
+
+      assert charged == 40,
+             "2,000,000 tokens at the configured rate should charge 40 cents; " <>
+               "charged #{charged} — the charge is not following the response"
+    end
+
+    # ⬛ ANTI-VACUITY: a DIFFERENT usage must produce a DIFFERENT charge. Without
+    # this, a hardcoded constant would satisfy the case above.
+    test "a smaller usage is charged less" do
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "0.5"}}],
+          "usage" => %{"total_tokens" => 500_000}
+        })
+
+      assert {:ok, "0.5"} = TogetherClient.parse_success_response(body)
+
+      assert Spend.spent(:together, :daily) == 10
+    end
+
+    # ⚖️ A response with no usage block still cost something. Zero would make a
+    # non-conforming usage field free, and a budget that under-counts fails
+    # open — so it is charged the minimum instead.
+    test "a response with no usage block is still charged" do
+      body = Jason.encode!(%{"choices" => [%{"message" => %{"content" => "0.3"}}]})
+
+      assert {:ok, "0.3"} = TogetherClient.parse_success_response(body)
+
+      assert Spend.spent(:together, :daily) >= 1,
+             "a completion with an unreadable usage block was free — which is the " <>
+               "direction that under-counts"
+    end
+
+    # ⚠️ Rounded UP: a short completion must not be free, or the daily total
+    # drifts below the real spend one cheap call at a time.
+    test "a charge too small to be a whole cent is charged one cent" do
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"content" => "0.1"}}],
+          "usage" => %{"total_tokens" => 3}
+        })
+
+      assert {:ok, "0.1"} = TogetherClient.parse_success_response(body)
+
+      assert Spend.spent(:together, :daily) == 1
     end
   end
 end

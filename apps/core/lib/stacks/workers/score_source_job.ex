@@ -36,12 +36,10 @@ defmodule Stacks.Workers.ScoreSourceJob do
   # A runaway queue could bill without limit, and nothing afterwards could say
   # how much it had cost, because nothing was counting.
   #
-  # ⚠️ The budget is checked BEFORE the call and recorded AFTER it, which is
-  # the only order that holds: checking after would refuse the next request
-  # having already paid for this one, and recording before would charge for a
-  # call that may never have been made.
-  @cost_cents_per_scoring_call 1
-
+  # ⚠️ The CHECK lives here; the CHARGE lives in the client, which is where the
+  # response and its token usage are. Charging from the caller would mean
+  # charging a guess — and meant every other caller of the same client went
+  # unmetered.
   defp score_source(source) do
     case BudgetTracker.check_budget(:together) do
       {:error, limit} ->
@@ -67,8 +65,6 @@ defmodule Stacks.Workers.ScoreSourceJob do
 
     case client.complete(prompt, max_tokens: 64, temperature: 0.1) do
       {:ok, response} ->
-        BudgetTracker.record_cost(:together, @cost_cents_per_scoring_call)
-
         confidence = parse_confidence(response)
         persist_confidence(source, confidence)
 

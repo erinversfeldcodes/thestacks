@@ -20,6 +20,8 @@ defmodule Stacks.AI.TogetherClient do
 
   @behaviour Stacks.AI.TogetherClientBehaviour
 
+  alias Stacks.AI.BudgetTracker
+
   require Logger
 
   @fuse_name :together_ai_fuse
@@ -81,12 +83,49 @@ defmodule Stacks.AI.TogetherClient do
   # a mock, so nothing that drives the seam can see this function at all — which
   # is how a truncation here corrupted a caller's JSON undetected. `handle_response/1`
   # is deliberately NOT exposed: it takes a `%Finch.Response{}` and would couple
+  # ⛔ THE CHARGE IS MADE HERE, FROM WHAT THE RESPONSE SAYS, AND NOT BY THE
+  # CALLER FROM WHAT IT GUESSED.
+  #
+  # This path spent money and was metered nowhere: `BudgetTracker` had one
+  # caller, passing `:modal`, so every Together completion billed invisibly.
+  # Charging in the client rather than in each worker means no caller can
+  # forget — including the health-check smoke completion, which also costs
+  # money — and the seam does not have to widen to carry usage back out.
+  #
+  # ⚠️ `usage.total_tokens` comes from the PROVIDER. A prompt-side estimate
+  # would be a different number, and the one that gets billed is theirs: a
+  # completion that stops early, a retried generation or a tokeniser
+  # disagreement all move it. Charging from the response is what makes the
+  # ledger match the invoice.
+  defp charge_for(%{"usage" => %{"total_tokens" => tokens}}) when is_integer(tokens) do
+    BudgetTracker.record_cost(:together, cents_for_tokens(tokens))
+  end
+
+  # ⚖️ A response with no usage block still cost something, so it is charged the
+  # minimum rather than nothing. Zero would make an unparseable or
+  # non-conforming usage field free, which is the direction that under-counts —
+  # and a budget that under-counts fails open.
+  defp charge_for(_decoded) do
+    BudgetTracker.record_cost(:together, 1)
+  end
+
+  defp cents_for_tokens(tokens) do
+    per_million = Application.get_env(:core, :together_cents_per_million_tokens, 20)
+
+    # Rounded UP, so a small call is charged one cent rather than nothing. A
+    # floor here would make every short completion free and the daily total
+    # drift below the real spend.
+    max(1, ceil(tokens * per_million / 1_000_000))
+  end
+
   # a caller to the transport, which is the real implementation detail.
   def parse_success_response(resp_body) do
     case Jason.decode(resp_body) do
-      {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]}} ->
+      {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]} = decoded} ->
         # one billable completion — the cost page counts these
         :telemetry.execute([:stacks, :ai, :together_completion], %{count: 1}, %{})
+
+        charge_for(decoded)
 
         # ⚠️ No truncation here, deliberately, and removing it FIXED a live bug.
         #

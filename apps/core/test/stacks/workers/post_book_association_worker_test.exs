@@ -75,7 +75,11 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       assert [%CallLog{} = logged] = Repo.all(CallLog)
       assert logged.post_id == post.id
       assert logged.outcome == "associated"
-      assert logged.raw_response == response
+      # ⚠️ TRIMMED, because that is what the client hands back. The real
+      # success path ends in `String.trim/1`, so a trailing newline in the
+      # canned fixture never reaches a caller in production — and asserting the
+      # untrimmed string would pin behaviour the shipped code does not have.
+      assert logged.raw_response == String.trim(response)
       assert logged.prompt_sha256 != nil
     end
 
