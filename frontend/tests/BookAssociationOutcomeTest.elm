@@ -139,6 +139,38 @@ suite =
                         (Ok [ Envelope.AssociationOutcomeUnspecified ])
                         (decodeOutcomes [ "something_new" ])
             ]
+        , describe "the envelope's outcome, in the shapes the server really sends"
+            [ -- ⛔ ZERO TESTS MENTIONED THIS KEY AT ALL. `grep -rn
+              -- "association_outcome" frontend/tests/` returned nothing, while
+              -- the live non-owner payload carried `null` and decoded only
+              -- because `decodeAssociationOutcome` opens with `Decode.string`,
+              -- which fails on `null`, and a bare `oneOf` fallback swallowed
+              -- the failure. The server now OMITS the key; these pin all three
+              -- shapes so neither half can drift back.
+              test "an absent key reads as Unspecified — the server's real shape" <|
+                \_ ->
+                    Expect.equal
+                        (Ok Envelope.AssociationOutcomeUnspecified)
+                        (decodeOutcomeFromEnvelope Nothing)
+
+            -- ⚠️ `null` is NOT a value the enum declares, and is no longer sent
+            -- — handled on purpose because a proxy or a non-Elm producer still
+            -- could, and the alternative is a whole page failing to decode.
+            , test "an explicit null reads as Unspecified, rather than failing the page" <|
+                \_ ->
+                    Expect.equal
+                        (Ok Envelope.AssociationOutcomeUnspecified)
+                        (decodeOutcomeFromEnvelope (Just "null"))
+
+            -- ⬛ ANTI-VACUITY: a real outcome must come through as itself, or a
+            -- decoder that answered Unspecified to everything would satisfy
+            -- both cases above.
+            , test "a real outcome on the envelope is not flattened to Unspecified" <|
+                \_ ->
+                    Expect.equal
+                        (Ok Envelope.AssociationOutcomeNoBooksFound)
+                        (decodeOutcomeFromEnvelope (Just "\"no_books_found\""))
+            ]
         , describe "decoding the show response"
             [ -- ⛔ THE HAPPY PATH COULD NOT RENDER, AND NO TEST COULD SEE IT.
               --
@@ -264,6 +296,40 @@ suite =
                             Expect.fail (Decode.errorToString err)
             ]
         ]
+
+
+{-| Decode a show response whose `association_outcome` is absent, null, or a value.
+
+⚖️ Through the real `blogPostShowDecoder`, not a hand-rolled one — the defect
+these cases exist for lived in how the three arms compose, which a decoder
+written for the test would not reproduce.
+
+-}
+decodeOutcomeFromEnvelope : Maybe String -> Result Decode.Error AssociationOutcome
+decodeOutcomeFromEnvelope rawOutcome =
+    let
+        outcomeKey =
+            case rawOutcome of
+                Just raw ->
+                    ", \"association_outcome\": " ++ raw
+
+                Nothing ->
+                    ""
+
+        json =
+            """
+            { "post":
+                { "id": "p1", "user_id": "u1", "title": "T", "body": "B"
+                , "visibility": "owner", "created_at": "", "updated_at": ""
+                , "published_at": "", "syndicated": true
+                }
+            , "associations": []
+            """
+                ++ outcomeKey
+                ++ "}"
+    in
+    Decode.decodeString BlogPost.blogPostShowDecoder json
+        |> Result.map .associationOutcome
 
 
 {-| Decode a list of wire strings through the GENERATED enum decoder.

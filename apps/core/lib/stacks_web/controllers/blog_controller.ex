@@ -82,16 +82,31 @@ defmodule StacksWeb.BlogController do
         # and it would disclose that the author ran the assistant at all.
         outcome = if is_owner, do: Blog.latest_association_outcome(post.id)
 
-        json(conn, %{
+        body = %{
           post: ProtoJSON.blog_post(post),
-          associations: associations,
-          # ⚖️ On the envelope, beside the associations — both are things this
-          # endpoint knows and the post does not. `nil` for a non-owner, which
-          # the client reads as UNSPECIFIED: a reader has no use for "we could
-          # not link books to this post", and it would disclose that the author
-          # ran the assistant at all.
-          association_outcome: outcome
-        })
+          associations: associations
+        }
+
+        # ⛔ THE KEY IS OMITTED, NOT SENT AS `null`. `null` is not one of the
+        # six values the enum declares, and sending it worked only by accident
+        # of composition: the generated `decodeAssociationOutcome` opens with
+        # `D.string`, which FAILS on `null`, and the client's `oneOf` absorbed
+        # that failure into UNSPECIFIED. So every non-owner's view of every post
+        # depended on a decode error being swallowed — and the contract told a
+        # client to expect UNSPECIFIED, which is not what the wire carried.
+        #
+        # ⚖️ Omitting it is the canonical proto3 JSON shape for a zero value,
+        # and it makes the client's fallback correct BY DESIGN: absent really is
+        # what this endpoint produces when there is nothing to say. A
+        # hand-written or non-Elm client built from the `.proto` now sees the
+        # shape the `.proto` describes.
+        #
+        # ⬛ Both cases that reach here are genuinely "nothing to say": a
+        # non-owner, who is not told; and an owner whose post has no finished
+        # pass, which is not the same fact as a pass that found nothing.
+        body = if outcome, do: Map.put(body, :association_outcome, outcome), else: body
+
+        json(conn, body)
     end
   end
 

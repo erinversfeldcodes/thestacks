@@ -280,10 +280,25 @@ blogPostShowDecoder =
         (Decode.field "associations" (Decode.list associationDecoder))
         -- ⚖️ Read from the envelope with the GENERATED decoder, which accepts
         -- both the proto spelling and the lowercase wire spelling the
-        -- controller actually sends. An absent key is `Unspecified`, which is
-        -- the honest reading: no pass has finished.
+        -- controller actually sends.
+        --
+        -- ⛔ THREE ARMS, AND THE ORDER OF THE LAST TWO IS THE POINT. The key is
+        -- ABSENT when there is nothing to say — a non-owner, or an owner whose
+        -- post has no finished pass. That is the server's real shape, asserted
+        -- on the controller side.
+        --
+        -- ⚠️ The explicit `null` arm is defence, not the normal path, and it
+        -- used to be the normal path: the controller sent
+        -- `"association_outcome": null` unconditionally, which decoded only
+        -- because `decodeAssociationOutcome` opens with `Decode.string`, which
+        -- FAILS on `null`, and a bare `oneOf` fallback absorbed that failure.
+        -- So every non-owner's view depended on a swallowed decode error. The
+        -- server no longer sends it, and a proxy or a non-Elm producer still
+        -- might, so it is handled on purpose rather than by accident.
         (Decode.oneOf
             [ Decode.field "association_outcome" Envelope.decodeAssociationOutcome
+            , Decode.field "association_outcome"
+                (Decode.null Envelope.AssociationOutcomeUnspecified)
             , Decode.succeed Envelope.AssociationOutcomeUnspecified
             ]
         )

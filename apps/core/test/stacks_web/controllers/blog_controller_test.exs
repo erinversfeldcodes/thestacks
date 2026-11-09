@@ -670,7 +670,18 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{post.id}")
         |> json_response(200)
 
-      assert body["association_outcome"] in [nil, ""]
+      # ⛔ THE KEY IS ABSENT, asserted exactly — not `in [nil, ""]`.
+      #
+      # The hedge was defensible while this was a proto3 `string`, where `""`
+      # was the genuine zero value. Now that it is an `enum`, **`""` is
+      # contract-invalid** — it is not one of the six declared values — and so
+      # is `null`. A hedge that accepts three shapes cannot tell which one the
+      # server sends, which is how `null` shipped while the contract promised
+      # UNSPECIFIED.
+      refute Map.has_key?(body, "association_outcome"),
+             "an owner whose post has no finished pass must get NO key — `null` is not " <>
+               "one of the enum's six values, and it decoded only because the client's " <>
+               "`oneOf` swallowed a decode failure"
     end
 
     # ⛔ NOT TOLD TO ANYONE ELSE. A reader has no use for "we could not link
@@ -695,8 +706,9 @@ defmodule StacksWeb.BlogControllerTest do
         |> get("/api/blog/posts/#{post.id}")
         |> json_response(200)
 
-      assert body["association_outcome"] in [nil, ""],
-             "another reader was told how the author's association pass went"
+      refute Map.has_key?(body, "association_outcome"),
+             "another reader was told how the author's association pass went — and the " <>
+               "key must be ABSENT rather than `null`, which is not a value the enum declares"
     end
   end
 
