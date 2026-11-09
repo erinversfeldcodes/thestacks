@@ -93,19 +93,25 @@ defmodule Stacks.ObservabilityTelemetryTest do
   end
 
   describe "budget tracker telemetry" do
+    # ⛔ NO PROCESS TO START. This block used to spin up a named GenServer and
+    # drive it with `GenServer.cast`, which is neither what production calls nor
+    # where the decision lives any more. The tracker is two functions over a
+    # durable ledger.
     setup do
-      name = :"budget_tracker_#{System.unique_integer([:positive])}"
-      {:ok, pid} = BudgetTracker.start_link(name: name)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
-      %{tracker: name}
+      Application.put_env(:core, :ai_budget,
+        daily_limit_cents: 500,
+        monthly_limit_cents: 5_000
+      )
+
+      on_exit(fn -> Application.delete_env(:core, :ai_budget) end)
+
+      :ok
     end
 
-    test "emits cost_recorded event on record_cost", %{tracker: name} do
+    test "emits cost_recorded event on record_cost" do
       attach_telemetry([[:stacks, :budget, :cost_recorded]])
 
-      GenServer.cast(name, {:record_cost, :modal, 42})
-
-      _ = GenServer.call(name, :current_state)
+      :ok = BudgetTracker.record_cost(:modal, 42)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :cost_recorded], %{amount_cents: 42},
                       %{provider: "modal"}}
@@ -114,20 +120,20 @@ defmodule Stacks.ObservabilityTelemetryTest do
     # ⚠️ Driven through `check_budget/1` rather than the GenServer's
     # `{:check_budget, …}` message, which no longer exists: the decision moved
     # to the durable ledger, and the message was a copy of it.
-    test "emits limit_exceeded event when daily limit exceeded", %{tracker: _name} do
+    test "emits limit_exceeded event when daily limit exceeded" do
       attach_telemetry([
         [:stacks, :budget, :cost_recorded],
         [:stacks, :budget, :limit_exceeded]
       ])
 
-      :ok = BudgetTracker.record_cost(:modal, 600)
+      :ok = BudgetTracker.record_cost(:modal, 60_000_000)
       {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},
                       %{provider: "modal", type: :daily}}
     end
 
-    test "emits limit_exceeded event when monthly limit exceeded", %{tracker: _name} do
+    test "emits limit_exceeded event when monthly limit exceeded" do
       attach_telemetry([
         [:stacks, :budget, :cost_recorded],
         [:stacks, :budget, :limit_exceeded]
@@ -136,10 +142,19 @@ defmodule Stacks.ObservabilityTelemetryTest do
       # ⚖️ The daily limit is put out of reach so the MONTHLY arm is the one
       # that fires — otherwise this asserts the daily event's label and says
       # nothing about the monthly one.
-      Application.put_env(:core, :daily_limit_cents, 1_000_000)
-      on_exit(fn -> Application.delete_env(:core, :daily_limit_cents) end)
+      Application.put_env(
+        :core,
+        :ai_budget,
+        Keyword.put(
+          Application.get_env(:core, :ai_budget, []),
+          :daily_limit_cents,
+          1_000_000
+        )
+      )
 
-      :ok = BudgetTracker.record_cost(:modal, 6_000)
+      on_exit(fn -> Application.delete_env(:core, :ai_budget) end)
+
+      :ok = BudgetTracker.record_cost(:modal, 600_000_000)
       {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},

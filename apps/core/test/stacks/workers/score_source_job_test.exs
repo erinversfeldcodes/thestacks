@@ -88,12 +88,13 @@ defmodule Stacks.Workers.ScoreSourceJobTest do
 
   describe "the together budget" do
     setup do
-      Application.put_env(:core, :daily_limit_cents, 500)
-      Application.put_env(:core, :monthly_limit_cents, 5_000)
+      Application.put_env(:core, :ai_budget,
+        daily_limit_cents: 500,
+        monthly_limit_cents: 5_000
+      )
 
       on_exit(fn ->
-        Application.delete_env(:core, :daily_limit_cents)
-        Application.delete_env(:core, :monthly_limit_cents)
+        Application.delete_env(:core, :ai_budget)
       end)
 
       :ok
@@ -123,12 +124,12 @@ defmodule Stacks.Workers.ScoreSourceJobTest do
       source = insert(:discovered_source)
       MockTogetherClient.put_response({:ok, "0.8"})
 
-      :ok = Spend.record(:together, 600)
+      :ok = Spend.record(:together, 60_000_000)
 
       assert {:cancel, :daily_limit_exceeded} =
                perform_job(ScoreSourceJob, %{"source_id" => source.id})
 
-      assert Spend.spent(:together, :daily) == 600,
+      assert Spend.spent(:together, :daily) == 60_000_000,
              "a refused request must not be charged for"
     end
 
@@ -139,7 +140,7 @@ defmodule Stacks.Workers.ScoreSourceJobTest do
       source = insert(:discovered_source)
       MockTogetherClient.put_response({:ok, "0.8"})
 
-      :ok = Spend.record(:together, 600)
+      :ok = Spend.record(:together, 60_000_000)
 
       assert {:cancel, _} = perform_job(ScoreSourceJob, %{"source_id" => source.id})
     end

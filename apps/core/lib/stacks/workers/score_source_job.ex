@@ -68,6 +68,16 @@ defmodule Stacks.Workers.ScoreSourceJob do
         confidence = parse_confidence(response)
         persist_confidence(source, confidence)
 
+      # ⚖️ The client refuses a spent budget too, now that the check sits beside
+      # the charge. Mapping it here as well keeps the Oban outcome right
+      # whichever layer notices first.
+      {:error, {:budget_exceeded, limit}} ->
+        Logger.warning(
+          "ScoreSourceJob: not scoring #{source.id} — the together budget is spent (#{limit})"
+        )
+
+        {:cancel, limit}
+
       {:error, reason} ->
         Logger.warning("ScoreSourceJob: LLM scoring failed for #{source.id}: #{inspect(reason)}")
         {:error, reason}

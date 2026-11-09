@@ -26,6 +26,15 @@ defmodule Stacks.AI.TogetherClient do
 
   @fuse_name :together_ai_fuse
 
+  # ⚖️ 88 micro-cents per token = $0.88 per million, the most commonly cited
+  # published rate for `meta-llama/Llama-3.3-70B-Instruct-Turbo` as of
+  # 2026-11-09. ⚠️ Trackers disagree (0.44–1.04), and the previous default of
+  # 20¢/1M was in the code with no source and set by nothing — a number nobody
+  # could check. Overridable via `:core, :together_micro_cents_per_token` so a
+  # confirmed rate does not need a deploy of this module; the date and the
+  # spread are recorded here so the next reader knows what to re-check.
+  @default_micro_cents_per_token 88
+
   defp handle_response({:ok, %Finch.Response{status: 200, body: resp_body}}) do
     parse_success_response(resp_body)
   end
@@ -89,8 +98,8 @@ defmodule Stacks.AI.TogetherClient do
   # This path spent money and was metered nowhere: `BudgetTracker` had one
   # caller, passing `:modal`, so every Together completion billed invisibly.
   # Charging in the client rather than in each worker means no caller can
-  # forget — including the health-check smoke completion, which also costs
-  # money — and the seam does not have to widen to carry usage back out.
+  # forget — including the health-check smoke completion — and the seam does not
+  # have to widen to carry usage back out.
   #
   # ⚠️ `usage.total_tokens` comes from the PROVIDER. A prompt-side estimate
   # would be a different number, and the one that gets billed is theirs: a
@@ -98,24 +107,29 @@ defmodule Stacks.AI.TogetherClient do
   # disagreement all move it. Charging from the response is what makes the
   # ledger match the invoice.
   defp charge_for(%{"usage" => %{"total_tokens" => tokens}}) when is_integer(tokens) do
-    BudgetTracker.record_cost(:together, cents_for_tokens(tokens))
+    BudgetTracker.record_cost(:together, micro_cents_for_tokens(tokens))
   end
 
-  # ⚖️ A response with no usage block still cost something, so it is charged the
-  # minimum rather than nothing. Zero would make an unparseable or
-  # non-conforming usage field free, which is the direction that under-counts —
-  # and a budget that under-counts fails open.
+  # ⚖️ A response whose usage block we cannot read still cost something, and
+  # recording nothing would make it free. One token's worth is the smallest
+  # honest non-zero entry — it says "this happened" without inventing a size.
   defp charge_for(_decoded) do
-    BudgetTracker.record_cost(:together, 1)
+    BudgetTracker.record_cost(:together, micro_cents_for_tokens(1))
   end
 
-  defp cents_for_tokens(tokens) do
-    per_million = Application.get_env(:core, :together_cents_per_million_tokens, 20)
+  # ⛔ NO CLAMP, BECAUSE THERE IS NOTHING LEFT TO ROUND. This used to be
+  # `max(1, ceil(tokens * cents_per_million / 1_000_000))`, in CENTS — and a
+  # cent is the wrong unit for a quantity whose natural scale is 10⁻⁵ of one. At
+  # the published rate a 400-token completion costs ~0.035¢, so the clamp
+  # charged it a whole cent: roughly 28× over. It bound on every call under
+  # ~50,000 tokens, which is every call here except the association worker's —
+  # and above ~11,400 tokens the old 20¢/1M default under-charged, asymptotically
+  # by 4.4×. Both errors are gone with the unit, not with a better rounding rule.
+  defp micro_cents_for_tokens(tokens) do
+    rate =
+      Application.get_env(:core, :together_micro_cents_per_token, @default_micro_cents_per_token)
 
-    # Rounded UP, so a small call is charged one cent rather than nothing. A
-    # floor here would make every short completion free and the daily total
-    # drift below the real spend.
-    max(1, ceil(tokens * per_million / 1_000_000))
+    tokens * rate
   end
 
   # a caller to the transport, which is the real implementation detail.
@@ -211,9 +225,29 @@ defmodule Stacks.AI.TogetherClient do
   end
 
   defp do_complete(prompt, opts) do
-    case :fuse.ask(@fuse_name, :sync) do
-      :blown -> {:error, :circuit_open}
-      :ok -> make_completion_request(prompt, opts)
+    # ⛔ THE CHECK SITS BESIDE THE CHARGE, BECAUSE THE CHARGE IS UNIVERSAL AND
+    # THE CHECK WAS NOT.
+    #
+    # The charge moved in here so that no caller could forget it. The ceiling
+    # was then left in ONE caller — and the caller that did not have it is the
+    # expensive one: the association worker asks for `max_tokens: 1024` over up
+    # to 200 candidate books, with no budget reference anywhere in the module.
+    # So a runaway queue could bill without limit, and the new ledger row, gauge
+    # and dashboard panel would all show the spend climbing while nothing
+    # refused it. A meter is not a ceiling.
+    #
+    # ⚠️ Checked BEFORE the fuse, deliberately: a blown fuse is a transient
+    # fault worth retrying, a spent budget is not, and the caller needs to be
+    # able to tell them apart to decide whether to retry.
+    with :ok <- BudgetTracker.check_budget(:together),
+         :ok <- :fuse.ask(@fuse_name, :sync) do
+      make_completion_request(prompt, opts)
+    else
+      {:error, limit} when limit in [:daily_limit_exceeded, :monthly_limit_exceeded] ->
+        {:error, {:budget_exceeded, limit}}
+
+      :blown ->
+        {:error, :circuit_open}
     end
   end
 

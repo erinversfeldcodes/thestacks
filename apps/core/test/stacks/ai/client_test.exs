@@ -8,6 +8,7 @@ defmodule Stacks.AI.ClientTest do
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client
   alias Stacks.AI.MockClient
+  alias Stacks.AI.Spend
 
   @token_format ~r/\A\d+\.[0-9a-f]{64}\z/
 
@@ -151,37 +152,34 @@ defmodule Stacks.AI.ClientTest do
     setup do
       original_url = Application.get_env(:core, :vision_service_url)
       original_client = Application.get_env(:core, :vision_client)
-      original_state = :sys.get_state(BudgetTracker)
 
       Application.put_env(:core, :vision_service_url, "http://127.0.0.1:1")
       Application.put_env(:core, :vision_client, Stacks.AI.Client)
       :fuse.reset(:vision_fuse)
 
-      :sys.replace_state(BudgetTracker, fn state ->
-        %{state | daily_total_cents: 0, monthly_total_cents: 0, providers: %{}}
-      end)
-
       on_exit(fn ->
         Application.put_env(:core, :vision_service_url, original_url)
         Application.put_env(:core, :vision_client, original_client)
-        :sys.replace_state(BudgetTracker, fn _ -> original_state end)
         :fuse.reset(:vision_fuse)
       end)
 
       :ok
     end
 
-    test "records modal cost in BudgetTracker even when the request errors" do
-      assert BudgetTracker.current_state().daily_total_cents == 0
+    # ⛔ READ FROM THE LEDGER, NOT FROM A GenServer'S STRUCT. This asserted
+    # `current_state().daily_total_cents` — a second copy of the spend that died
+    # with the process and has now been deleted. The claim is the same and the
+    # evidence is better: the charge is a row, so it is still there after the
+    # thing that recorded it is gone.
+    test "records modal cost even when the request errors" do
+      assert Spend.spent(:modal, :daily) == 0
 
-      result = Client.call_vision("analyze", %{image: "test"})
-      assert {:error, _reason} = result
+      assert {:error, _reason} = Client.call_vision("analyze", %{image: "test"})
 
-      state = BudgetTracker.current_state()
       cost_per_call = Application.get_env(:core, :modal_cost_per_call_cents, 1)
-      assert state.daily_total_cents == cost_per_call
-      assert state.monthly_total_cents == cost_per_call
-      assert state.providers["modal"] == cost_per_call
+
+      assert Spend.spent(:modal, :daily) == cost_per_call
+      assert Spend.spent(:modal, :monthly) == cost_per_call
     end
 
     test "the :exception event carries a bounded reason_class, not just the raw reason" do

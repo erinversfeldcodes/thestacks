@@ -20,12 +20,13 @@ defmodule Stacks.AI.BudgetTrackerTest do
 
   setup do
     # The default limits, so the numbers below read against something stated.
-    Application.put_env(:core, :daily_limit_cents, 500)
-    Application.put_env(:core, :monthly_limit_cents, 5_000)
+    Application.put_env(:core, :ai_budget,
+      daily_limit_cents: 500,
+      monthly_limit_cents: 5_000
+    )
 
     on_exit(fn ->
-      Application.delete_env(:core, :daily_limit_cents)
-      Application.delete_env(:core, :monthly_limit_cents)
+      Application.delete_env(:core, :ai_budget)
     end)
 
     :ok
@@ -37,19 +38,19 @@ defmodule Stacks.AI.BudgetTrackerTest do
     end
 
     test "allows a provider under its daily limit" do
-      :ok = BudgetTracker.record_cost(:together, 100)
+      :ok = BudgetTracker.record_cost(:together, 10_000_000)
 
       assert :ok == BudgetTracker.check_budget(:together)
     end
 
     test "refuses a provider at its daily limit" do
-      :ok = BudgetTracker.record_cost(:together, 600)
+      :ok = BudgetTracker.record_cost(:together, 60_000_000)
 
       assert {:error, :daily_limit_exceeded} == BudgetTracker.check_budget(:together)
     end
 
     test "refuses a provider at its monthly limit" do
-      :ok = BudgetTracker.record_cost(:together, 6_000)
+      :ok = BudgetTracker.record_cost(:together, 600_000_000)
 
       assert {:error, :monthly_limit_exceeded} == BudgetTracker.check_budget(:together)
     end
@@ -62,7 +63,7 @@ defmodule Stacks.AI.BudgetTrackerTest do
     # spent. The ceiling was restored by idling, invisibly, and the only way to
     # exceed a daily cap was to stay busy enough to stay alive.
     test "a restart does not restore the budget" do
-      :ok = BudgetTracker.record_cost(:together, 600)
+      :ok = BudgetTracker.record_cost(:together, 60_000_000)
       assert {:error, :daily_limit_exceeded} == BudgetTracker.check_budget(:together)
 
       # Whatever process was holding a view of this is now gone.
@@ -79,7 +80,7 @@ defmodule Stacks.AI.BudgetTrackerTest do
     # whose tracker had crashed would answer ":ok" to everything — failing OPEN
     # on the one check whose job is to refuse.
     test "the decision does not depend on the tracker process running" do
-      :ok = BudgetTracker.record_cost(:together, 600)
+      :ok = BudgetTracker.record_cost(:together, 60_000_000)
 
       if pid = Process.whereis(BudgetTracker) do
         Process.exit(pid, :kill)
@@ -93,7 +94,7 @@ defmodule Stacks.AI.BudgetTrackerTest do
     # another provider's requests — which is not what a per-provider budget
     # means.
     test "one provider's spend does not refuse another's requests" do
-      :ok = BudgetTracker.record_cost(:together, 600)
+      :ok = BudgetTracker.record_cost(:together, 60_000_000)
 
       assert {:error, :daily_limit_exceeded} == BudgetTracker.check_budget(:together)
       assert :ok == BudgetTracker.check_budget(:modal)
@@ -102,18 +103,18 @@ defmodule Stacks.AI.BudgetTrackerTest do
 
   describe "record_cost/2" do
     test "accumulates across calls" do
-      :ok = BudgetTracker.record_cost(:together, 100)
-      :ok = BudgetTracker.record_cost(:together, 200)
+      :ok = BudgetTracker.record_cost(:together, 10_000_000)
+      :ok = BudgetTracker.record_cost(:together, 20_000_000)
 
-      assert Spend.spent(:together, :daily) == 300
+      assert Spend.spent(:together, :daily) == 30_000_000
     end
 
     test "meters each provider separately" do
-      :ok = BudgetTracker.record_cost(:together, 100)
-      :ok = BudgetTracker.record_cost(:modal, 200)
+      :ok = BudgetTracker.record_cost(:together, 10_000_000)
+      :ok = BudgetTracker.record_cost(:modal, 20_000_000)
 
-      assert Spend.spent(:together, :daily) == 100
-      assert Spend.spent(:modal, :daily) == 200
+      assert Spend.spent(:together, :daily) == 10_000_000
+      assert Spend.spent(:modal, :daily) == 20_000_000
     end
 
     # ⚠️ The ledger write happens in the CALLER's process, not in the
@@ -124,8 +125,8 @@ defmodule Stacks.AI.BudgetTrackerTest do
         Process.exit(pid, :kill)
       end
 
-      assert :ok == BudgetTracker.record_cost(:together, 250)
-      assert Spend.spent(:together, :daily) == 250
+      assert :ok == BudgetTracker.record_cost(:together, 25_000_000)
+      assert Spend.spent(:together, :daily) == 25_000_000
     end
   end
 
@@ -156,22 +157,28 @@ defmodule Stacks.AI.BudgetTrackerTest do
     # sweep moves one and not the other, and a dashboard showing the wrong one
     # says a provider has budget left when it does not.
     test "it carries the totals the decision was made from" do
-      :ok = BudgetTracker.record_cost(:together, 120)
+      :ok = BudgetTracker.record_cost(:together, 12_000_000)
 
       assert :ok = BudgetTracker.check_budget(:together)
 
-      assert_receive {:spend_gauge, %{daily_cents: 120, monthly_cents: 120}, %{provider: "other"}}
+      # ⚠️ "together", not "other". This used to pin the bounded-label fallback
+      # on the one provider the work exists to meter, because
+      # `@telemetry_providers` did not declare it — so a dashboard legend
+      # reading "today — other" was expected behaviour. A test that asserts the
+      # signal instead of acting on it is the failure mode here.
+      assert_receive {:spend_gauge, %{daily_cents: 120, monthly_cents: 120},
+                      %{provider: "together"}}
     end
 
     # ⬛ ANTI-VACUITY: a second charge must move the gauge. Without this, a
     # hardcoded zero measurement would satisfy the case above whenever nothing
     # had been spent.
     test "it moves when more is spent" do
-      :ok = BudgetTracker.record_cost(:together, 120)
+      :ok = BudgetTracker.record_cost(:together, 12_000_000)
       assert :ok = BudgetTracker.check_budget(:together)
       assert_receive {:spend_gauge, %{daily_cents: 120}, _}
 
-      :ok = BudgetTracker.record_cost(:together, 30)
+      :ok = BudgetTracker.record_cost(:together, 3_000_000)
       assert :ok = BudgetTracker.check_budget(:together)
 
       assert_receive {:spend_gauge, %{daily_cents: 150}, _},
@@ -184,7 +191,7 @@ defmodule Stacks.AI.BudgetTrackerTest do
     # goes flat exactly when someone is looking at it to find out why calls are
     # being declined.
     test "it is emitted when the budget refuses" do
-      :ok = BudgetTracker.record_cost(:together, 600)
+      :ok = BudgetTracker.record_cost(:together, 60_000_000)
 
       assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:together)
 
@@ -209,7 +216,7 @@ defmodule Stacks.AI.BudgetTrackerTest do
     # remaining half of this work.
     @tag :metrics_registry
     test "the daily spend series comes back out of PromEx with the ledger's value" do
-      :ok = BudgetTracker.record_cost(:together, 137)
+      :ok = BudgetTracker.record_cost(:together, 13_700_000)
       assert :ok = BudgetTracker.check_budget(:together)
 
       scraped = PromEx.get_metrics(Core.PromEx)

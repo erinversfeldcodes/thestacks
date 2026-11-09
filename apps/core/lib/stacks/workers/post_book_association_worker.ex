@@ -86,6 +86,19 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
       latency_ms = System.monotonic_time(:millisecond) - started
 
       case result do
+        # ⚖️ CANCELLED, NOT RETRIED. A spent budget will not move until the
+        # period does, so retrying burns every attempt against a ceiling — and
+        # `{:error, _}` is what Oban retries. This is the caller that had no
+        # budget reference at all, at `max_tokens: 1024` over up to 200
+        # candidate books; the check now lives in the client beside the charge.
+        {:error, {:budget_exceeded, limit}} ->
+          Logger.warning(
+            "PostBookAssociationWorker: not associating for #{post.id} — " <>
+              "the together budget is spent (#{limit})"
+          )
+
+          {:cancel, limit}
+
         {:ok, response} ->
           outcome = handle_response(post, response)
           record_call(post, prompt, outcome, response, latency_ms)

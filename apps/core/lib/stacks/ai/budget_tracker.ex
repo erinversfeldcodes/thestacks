@@ -1,15 +1,31 @@
 defmodule Stacks.AI.BudgetTracker do
   @moduledoc """
-      GenServer that tracks daily and monthly AI API spend per provider.
-      Resets the daily counter at midnight UTC. Monthly limit is also enforced.
+      The ceiling on AI API spend, per provider, per period.
+
+      ⛔ THIS USED TO BE A GenServer WHOSE TOTALS DIED WITH THE NODE, and that
+      was the defect rather than a detail of it: on a host that scales to zero
+      the budget was restored by going quiet, invisibly, and the only way to
+      exceed a daily cap was to stay busy enough to stay alive. Its midnight
+      reset had the same shape — a message that arrived only if the process was
+      there to receive it.
+
+      ⚖️ The spend now lives in `Stacks.AI.Spend`, a row per provider per
+      period, so both functions here are plain calls against a durable fact.
+      There is no process: a second copy of the spend is not a cache, it is a
+      disagreement waiting to happen.
+
+      ⚠️ The ledger is denominated in MICRO-CENTS, because token pricing is
+      quoted per million and a cent cannot express the cost of a short
+      completion. Limits stay in cents — a ceiling is a human decision, written
+      in the unit a person would write it in — and are converted once, at the
+      comparison.
 
       Budget limits are read from application config:
-        config:core,:ai_budget,
-          daily_limit_cents: 5_00,    # $5/day
-          monthly_limit_cents: 50_00  # $50/month
-  """
 
-  use GenServer
+          config :core, :ai_budget,
+            daily_limit_cents: 500,
+            monthly_limit_cents: 5_000
+  """
 
   alias Stacks.AI.Spend
 
@@ -29,42 +45,43 @@ defmodule Stacks.AI.BudgetTracker do
   # appearing in the store is the signal that someone did not. That is the
   # intended failure mode: visible under-labelling beats an unbounded label set
   # on a metric that meters money.
-  @telemetry_providers ~w(modal)
+  # ⚠️ `together` was missing, and the gauge this issue added labelled it
+  # `"other"` — on the one provider the work exists to meter. Because the
+  # series is a `last_value` keyed on `provider`, a second undeclared provider
+  # would ALIAS rather than merely mislabel, and the dashboard legend would read
+  # "today — other". The comment below names that failure mode; declaring the
+  # provider is what acts on it.
+  @telemetry_providers ~w(modal together)
+
+  @micro_cents_per_cent 100_000
 
   @default_daily_limit_cents 500
   @default_monthly_limit_cents 5_000
 
-  defstruct providers: %{}, daily_total_cents: 0, monthly_total_cents: 0
+  @doc """
+      Record an AI API cost, in MICRO-CENTS, against a provider.
 
-  @doc "Starts the BudgetTracker GenServer."
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, :ok, name: Keyword.get(opts, :name, __MODULE__))
-  end
+      ⛔ WRITTEN SYNCHRONOUSLY, WHERE IT USED TO BE A `cast` TO A GenServer.
+      A cast is fire-and-forget, so a ledger write inside one is lost silently
+      if the process is busy, restarting or gone — and this is the record that
+      decides whether the next request is allowed. The caller has just spent the
+      money; the durable note
+      of it should not depend on a mailbox.
 
-  @doc "Records an AI API cost in cents for a given provider."
+      ⚖️ It also keeps the write inside whatever transaction or sandbox the
+      caller is in, which a separate process could not join.
+  """
   @spec record_cost(atom() | String.t(), non_neg_integer()) :: :ok
   def record_cost(provider, cost_cents) when is_integer(cost_cents) and cost_cents >= 0 do
-    # ⛔ THE LEDGER IS WRITTEN HERE, IN THE CALLER'S PROCESS, AND NOT IN THE
-    # GenServer BELOW.
-    #
-    # Two reasons, and the second is the stronger. A `cast` is fire-and-forget,
-    # so a ledger write inside it is lost silently if the process is busy,
-    # restarting or gone — and this is the record that decides whether the next
-    # request is allowed. The caller has just spent the money; the durable note
-    # of it should not depend on a mailbox.
-    #
-    # ⚖️ It also keeps the write inside whatever transaction or sandbox the
-    # caller is in, which a separate process cannot join.
     Spend.record(provider, cost_cents)
 
-    # ⚠️ Best-effort, and allowed to find nobody home. Since the decision moved
-    # to the ledger, this cast feeds telemetry and an in-memory view — useful,
-    # and not something a charge should depend on. `GenServer.cast/2` to an
-    # unregistered name raises, so the lookup is explicit.
-    case Process.whereis(__MODULE__) do
-      nil -> :ok
-      pid -> GenServer.cast(pid, {:record_cost, provider, cost_cents})
-    end
+    # ⚖️ Emitted here rather than from a GenServer, which is where it used to
+    # live and the only thing that process did that nothing else does.
+    :telemetry.execute(
+      [:stacks, :budget, :cost_recorded],
+      %{amount_cents: cost_cents},
+      %{provider: bounded_provider(provider)}
+    )
 
     :ok
   end
@@ -93,8 +110,16 @@ defmodule Stacks.AI.BudgetTracker do
     # ⚠️ Per-provider, where the struct's totals were global: a single shared
     # ceiling meant one provider's spend refused another's requests, which is
     # not what a per-provider budget means.
+    # ⚖️ THE LEDGER IS IN MICRO-CENTS; THE LIMITS ARE IN CENTS. The conversion
+    # happens here, once, at the comparison — rather than storing the limits in
+    # micro-cents, because a limit is a human decision ("five dollars a day")
+    # and a spend is a measurement. Keeping the configured ceiling in the unit
+    # a person would write it in is worth one multiplication.
     daily_spent = Spend.spent(provider, :daily)
     monthly_spent = Spend.spent(provider, :monthly)
+
+    daily_limit = daily_limit * @micro_cents_per_cent
+    monthly_limit = monthly_limit * @micro_cents_per_cent
 
     # ⛔ A GAUGE OF WHAT THE CEILING IS ACTUALLY COMPARING AGAINST.
     #
@@ -109,7 +134,13 @@ defmodule Stacks.AI.BudgetTracker do
     # being cut off" rather than "how much have we emitted events about".
     :telemetry.execute(
       [:stacks, :budget, :spend],
-      %{daily_cents: daily_spent, monthly_cents: monthly_spent},
+      # ⚠️ Reported in CENTS, divided from the ledger's micro-cents, because the
+      # panel is read by a person and the unit on the axis is currency. The
+      # ledger keeps the precision; the gauge keeps the legibility.
+      %{
+        daily_cents: div(daily_spent, @micro_cents_per_cent),
+        monthly_cents: div(monthly_spent, @micro_cents_per_cent)
+      },
       %{provider: bounded_provider(provider)}
     )
 
@@ -137,74 +168,24 @@ defmodule Stacks.AI.BudgetTracker do
     end
   end
 
-  @doc "Returns current spend state (for observability)."
-  @spec current_state() :: map()
-  def current_state do
-    GenServer.call(__MODULE__, :current_state)
-  end
-
-  @impl true
-  def init(:ok) do
-    schedule_midnight_reset()
-    {:ok, %__MODULE__{}}
-  end
-
-  @impl true
-  def handle_cast({:record_cost, provider, cost_cents}, state) do
-    provider_key = to_string(provider)
-
-    :telemetry.execute(
-      [:stacks, :budget, :cost_recorded],
-      %{amount_cents: cost_cents},
-      %{provider: bounded_provider(provider_key)}
-    )
-
-    # ⛔ THE DURABLE LEDGER IS THE RECORD; THE STRUCT IS A CACHE OF IT.
-    #
-    # These totals used to live only here, and this process dies with the node.
-    # On a machine that scales to zero that made the budget resettable by
-    # idling: the ceiling came back when traffic stopped, nothing said so, and
-    # the only way to exceed a daily cap was to stay busy enough to stay alive.
-    #
-    providers =
-      Map.update(state.providers, provider_key, cost_cents, &(&1 + cost_cents))
-
-    new_state = %{
-      state
-      | providers: providers,
-        daily_total_cents: state.daily_total_cents + cost_cents,
-        monthly_total_cents: state.monthly_total_cents + cost_cents
-    }
-
-    {:noreply, new_state}
-  end
-
-  @impl true
-  def handle_call(:current_state, _from, state) do
-    {:reply,
-     %{
-       daily_total_cents: state.daily_total_cents,
-       monthly_total_cents: state.monthly_total_cents,
-       providers: state.providers
-     }, state}
-  end
-
-  @impl true
-  def handle_info(:reset_daily, state) do
-    Logger.info("BudgetTracker: resetting daily AI spend counters")
-    schedule_midnight_reset()
-    {:noreply, %{state | daily_total_cents: 0, providers: %{}}}
-  end
-
-  defp schedule_midnight_reset do
-    now = DateTime.utc_now()
-
-    tomorrow_midnight =
-      now |> DateTime.to_date() |> Date.add(1) |> DateTime.new!(~T[00:00:00], "Etc/UTC")
-
-    ms_until_midnight = DateTime.diff(tomorrow_midnight, now, :millisecond)
-    Process.send_after(self(), :reset_daily, ms_until_midnight)
-  end
+  # ⛔ THE GenServer IS GONE, AND WITH IT THE SECOND COPY OF THE SPEND.
+  #
+  # It held `providers`, `daily_total_cents` and `monthly_total_cents` in a
+  # struct, behind a `current_state/0` documented "for observability" — which
+  # had **twelve references, all in test files and none in `lib/`**. Once the
+  # decision moved to the durable ledger, that struct was not a cache but a
+  # disagreement waiting to happen: resettable by restart, reset at midnight
+  # only if the process happened to be alive, and documented in a way that
+  # invited an admin panel onto the pre-fix wrong number.
+  #
+  # ⚠️ The unit change settled it. The ledger is micro-cents now, so the struct
+  # was accumulating micro-cents into fields named `_cents` — a copy that is
+  # both redundant AND mislabelled is not worth keeping for a reader that does
+  # not exist.
+  #
+  # ⚖️ What the process actually did that nothing else does — emit
+  # `[:stacks, :budget, :cost_recorded]` — moved into `record_cost/2`, where the
+  # charge is. The midnight timer is unnecessary: the period is a date.
 
   @doc "The provider values the budget metrics may label. Anything else labels as `other`."
   @spec telemetry_providers() :: [String.t()]

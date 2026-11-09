@@ -25,8 +25,8 @@ defmodule Stacks.UploadPipelineTest do
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.MockClient
+  alias Stacks.AI.Spend
   alias Stacks.Books
-  alias Stacks.Books.{Book, BookEdition, UploadedImage}
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
   alias Stacks.GDPR.ImageRetention
@@ -35,6 +35,8 @@ defmodule Stacks.UploadPipelineTest do
   alias Stacks.Storage.Mock, as: StorageMock
   alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
+
+  alias Stacks.Books.{Book, BookEdition, UploadedImage}
 
   @image_b64 Base.encode64("fake image bytes for testing")
 
@@ -1653,7 +1655,7 @@ defmodule Stacks.UploadPipelineTest do
       try do
         Application.put_env(:core, :ai_budget, daily_limit_cents: 1, monthly_limit_cents: 50_000)
 
-        BudgetTracker.record_cost(:modal, 2)
+        BudgetTracker.record_cost(:modal, 200_000)
         Process.sleep(50)
 
         assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
@@ -1662,14 +1664,18 @@ defmodule Stacks.UploadPipelineTest do
       end
     end
 
+    # ⛔ READ FROM THE LEDGER. This asserted on a GenServer struct that has been
+    # deleted — a second copy of the spend that died with the process — and
+    # needed a `Process.sleep(50)` because the write was a `cast`. The write is
+    # synchronous now, so the sleep goes too: a test that waits on a mailbox is
+    # a test that can be flaky for reasons that have nothing to do with it.
     @tag suite: :external
     test "record_cost increases daily spend" do
-      state_before = BudgetTracker.current_state()
-      BudgetTracker.record_cost(:test_provider, 10)
-      Process.sleep(50)
-      state_after = BudgetTracker.current_state()
+      before = Spend.spent(:test_provider, :daily)
 
-      assert state_after.daily_total_cents >= state_before.daily_total_cents + 10
+      BudgetTracker.record_cost(:test_provider, 1_000_000)
+
+      assert Spend.spent(:test_provider, :daily) == before + 1_000_000
     end
   end
 

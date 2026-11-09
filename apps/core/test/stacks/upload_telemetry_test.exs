@@ -25,6 +25,7 @@ defmodule Stacks.UploadTelemetryTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client
+  alias Stacks.AI.Spend
   alias Stacks.Events.SubscriberWorker
   alias Stacks.Workers.IdentifyBookJob
   alias Stacks.Workers.RefreshCostsJob
@@ -362,50 +363,56 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — BudgetTracker state tracking for metrics" do
+  describe "Suite 11 — BudgetTracker spend tracking for metrics" do
+    # ⛔ THESE FOUR TESTS ASSERTED A SECOND COPY OF THE SPEND THAT NO LONGER
+    # EXISTS.
+    #
+    # `current_state/0` returned a GenServer struct — `daily_total_cents`,
+    # `monthly_total_cents`, `providers` — documented "for observability" and
+    # read by nothing in `lib/`. It died with the process, was reset at midnight
+    # only if that process happened to be alive, and the unit change made it
+    # actively misleading: it accumulated micro-cents into fields named
+    # `_cents`. It has been deleted.
+    #
+    # ⚖️ The claims are kept and asked of the ledger instead, which is where
+    # the dashboard's own series now comes from — so these tests and the panel
+    # read the same number. The `Process.sleep(50)` goes too: the write was a
+    # `cast` and is now synchronous, and a test that waits on a mailbox can be
+    # flaky for reasons that have nothing to do with it.
     @tag suite: :telemetry
-    test "record_cost updates daily_total_cents" do
-      state_before = BudgetTracker.current_state()
-      BudgetTracker.record_cost(:modal, 42)
-      Process.sleep(50)
-      state_after = BudgetTracker.current_state()
+    test "record_cost increases the daily total" do
+      before = Spend.spent(:modal, :daily)
 
-      assert state_after.daily_total_cents == state_before.daily_total_cents + 42
+      :ok = BudgetTracker.record_cost(:modal, 4_200_000)
+
+      assert Spend.spent(:modal, :daily) == before + 4_200_000
     end
 
     @tag suite: :telemetry
-    test "record_cost updates monthly_total_cents" do
-      state_before = BudgetTracker.current_state()
-      BudgetTracker.record_cost(:modal, 100)
-      Process.sleep(50)
-      state_after = BudgetTracker.current_state()
+    test "record_cost increases the monthly total" do
+      before = Spend.spent(:modal, :monthly)
 
-      assert state_after.monthly_total_cents == state_before.monthly_total_cents + 100
+      :ok = BudgetTracker.record_cost(:modal, 10_000_000)
+
+      assert Spend.spent(:modal, :monthly) == before + 10_000_000
     end
 
     @tag suite: :telemetry
-    test "record_cost tracks per-provider breakdown" do
-      BudgetTracker.record_cost(:modal, 25)
-      BudgetTracker.record_cost(:together, 15)
-      Process.sleep(50)
-      state = BudgetTracker.current_state()
+    test "each provider is metered separately" do
+      :ok = BudgetTracker.record_cost(:modal, 2_500_000)
+      :ok = BudgetTracker.record_cost(:together, 1_500_000)
 
-      assert Map.has_key?(state.providers, "modal")
-      assert Map.has_key?(state.providers, "together")
-      assert state.providers["modal"] >= 25
-      assert state.providers["together"] >= 15
+      assert Spend.spent(:modal, :daily) == 2_500_000
+      assert Spend.spent(:together, :daily) == 1_500_000
     end
 
+    # ⬛ THE DASHBOARD'S OWN QUESTION, asked of the ledger. The old version
+    # checked that a struct had three keys of the right type — a shape
+    # assertion over a value no dashboard read. This asks what the panel asks.
     @tag suite: :telemetry
-    test "current_state returns all fields needed for metrics dashboard" do
-      state = BudgetTracker.current_state()
-
-      assert Map.has_key?(state, :daily_total_cents)
-      assert Map.has_key?(state, :monthly_total_cents)
-      assert Map.has_key?(state, :providers)
-      assert is_integer(state.daily_total_cents)
-      assert is_integer(state.monthly_total_cents)
-      assert is_map(state.providers)
+    test "a provider with no spend reads as zero rather than missing" do
+      assert Spend.spent(:a_provider_that_has_not_spent, :daily) == 0
+      assert Spend.spent(:a_provider_that_has_not_spent, :monthly) == 0
     end
 
     @tag suite: :telemetry
@@ -418,7 +425,7 @@ defmodule Stacks.UploadTelemetryTest do
           monthly_limit_cents: 50_000
         )
 
-        BudgetTracker.record_cost(:telemetry_test, 11)
+        BudgetTracker.record_cost(:telemetry_test, 1_100_000)
         Process.sleep(50)
 
         assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:telemetry_test)
@@ -437,7 +444,7 @@ defmodule Stacks.UploadTelemetryTest do
           monthly_limit_cents: 5
         )
 
-        BudgetTracker.record_cost(:monthly_test, 6)
+        BudgetTracker.record_cost(:monthly_test, 600_000)
         Process.sleep(50)
 
         assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:monthly_test)

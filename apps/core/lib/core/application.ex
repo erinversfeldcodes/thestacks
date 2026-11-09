@@ -24,7 +24,6 @@ defmodule Core.Application do
           Stacks.Accounts.ArgonPool,
           Stacks.CircuitBreakers,
           StacksWeb.Plugs.RateLimiter.Server,
-          Stacks.AI.BudgetTracker,
           {Task.Supervisor, name: Stacks.Books.CacheWriteSupervisor},
           Stacks.Books.BookDetailCache,
           Stacks.Books.ISBNResolverCache,
