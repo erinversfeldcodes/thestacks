@@ -83,7 +83,29 @@ refuses label decoder json =
 suite : Test
 suite =
     describe "Api.elm decoders fed the shapes their endpoints emit"
-        [ describe "GET /api/settings/privacy"
+        [ -- ⛔ A REQUEST'S METHOD IS PART OF ITS CONTRACT, AND ONE WAS WRONG IN
+          -- PRODUCTION. `completeOnboardingStepRequest` sent POST to a path the
+          -- router declares as `put "/onboarding/step/:step"`, so every
+          -- onboarding step the overlay tried to record went to a verb that
+          -- path does not route. No step was ever recorded, and a reader who
+          -- closed the tab mid-onboarding was offered the same step again.
+          --
+          -- ⚠️ `scripts/check-route-clients.sh` cannot catch this class. It
+          -- parses verbs but says so at its own line 29: "matching is by path,
+          -- not by verb". So a client calling a REAL path with the wrong method
+          -- is invisible to it, and the only thing that found this was an E2E
+          -- spec waiting for the PUT the router declares.
+          --
+          -- ⚖️ Pinned here rather than left to that gate, because the gate's
+          -- blindness is deliberate (a second verb on a path is a legitimate
+          -- addition) and this is a per-request fact a unit test can hold.
+          describe "a request's method matches the verb its route declares"
+            [ test "onboarding step completion is a PUT, as the router declares" <|
+                \_ ->
+                    Expect.equal "PUT"
+                        (Api.completeOnboardingStepRequest "profile").method
+            ]
+        , describe "GET /api/settings/privacy"
             -- Source: `UserSettingsController.show_privacy/2` — a hand-built map
             -- of profile_visibility, shelves, consent_analytics,
             -- consent_writing_assistant. `shelves` rows come from

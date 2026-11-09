@@ -5605,11 +5605,22 @@ onboardingStatusRequest =
     }
 
 
-{-| `POST /api/onboarding/step/:step` — marking an onboarding step done, as data.
+{-| `PUT /api/onboarding/step/:step` — marking an onboarding step done, as data.
+
+⛔ PUT, NOT POST, AND THE SPA SENT POST. The router declares
+`put "/onboarding/step/:step"`, so every step completion the overlay attempted
+went to a verb that path does not route — no step was ever recorded, and a
+reader who closed the tab mid-onboarding was offered the same step again.
+
+⚠️ `scripts/check-route-clients.sh` cannot see this class: it parses verbs but
+states at its own line 29 that "matching is by path, not by verb", so a client
+calling a real path with the wrong method is invisible to it. The E2E spec that
+caught it was waiting for the PUT the router declares.
+
 -}
 completeOnboardingStepRequest : String -> RequestSpec
 completeOnboardingStepRequest step =
-    { method = "POST"
+    { method = "PUT"
     , url = Api.Url.path [ "api", "onboarding", "step", step ] []
     , body = NoBody
     }
