@@ -74,7 +74,7 @@ defmodule Stacks.AI.Spend do
       as the outage lasts. That is the better of the two failures — the
       alternative bills twice for the same answer.
   """
-  @spec record(String.t() | atom(), non_neg_integer(), Date.t()) :: :ok
+  @spec record(String.t() | atom(), non_neg_integer(), Date.t()) :: :ok | :dropped
   def record(provider, micro_cents, today \\ Date.utc_today())
 
   def record(_provider, 0, _today), do: :ok
@@ -111,26 +111,21 @@ defmodule Stacks.AI.Spend do
           Exception.message(error)
       )
 
-      # ⛔ A COUNTER, NOT ONLY A LOG LINE — and the inconsistency that argued
-      # for it was inside this same change. `log_write_failed/3` in the
-      # association worker gives a DIAGNOSTIC write a telemetry counter,
-      # reasoning that "a `Logger.warning` and `:ok` is indistinguishable from
-      # success to everything that watches". The MONEY ledger's write had only
-      # the log. If a dropped call-log row earns a counter, a dropped charge
-      # earns one more: this is the accepted failure mode, so it has to be
-      # alarmable rather than merely recorded.
-      # ⚠️ `to_string/1` AGAIN HERE, not the body's rebound `provider`. A
-      # function-level `rescue` cannot see bindings made in the body, so
-      # `provider` is the original argument — an atom at every call site. The
-      # label would have been `:together` while every other series in this
-      # family carries `"together"`, splitting the metric in two for anyone
-      # grouping by provider. Caught by the test asserting the label's value
-      # rather than merely its presence.
-      :telemetry.execute([:stacks, :budget, :charge_dropped], %{count: 1}, %{
-        provider: to_string(provider)
-      })
-
-      :ok
+      # ⛔ THE COUNTER IS EMITTED BY `Budget.record_cost/2`, NOT HERE, AND THE
+      # REASON IS THE LABEL.
+      #
+      # It was emitted here on raw `to_string(provider)` while all four
+      # pre-existing `provider`-tagged budget emits go through
+      # `bounded_provider/1` — and that bounding rule is written down verbatim
+      # in the label gate's own justification for the tag. A public series with
+      # an unbounded label, and arbitrary atoms demonstrably reach this function
+      # from tests.
+      #
+      # ⚖️ The cause was a module boundary, so the fix respects it rather than
+      # importing the vocabulary across: the ledger owns the WRITE and reports
+      # whether it happened; the policy module owns the LABEL and the emit.
+      # Returning `:dropped` is how that travels.
+      :dropped
   end
 
   defp upsert_both_periods(provider, micro_cents, today) do

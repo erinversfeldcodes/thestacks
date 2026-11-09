@@ -250,4 +250,83 @@ defmodule Stacks.AI.BudgetTest do
                Enum.join(lines, "\n")
     end
   end
+
+  describe "a charge the ledger could not record" do
+    # ⛔ ALARMABLE, NOT ONLY LOGGED. `Spend.record/3` swallows a database fault
+    # so a transient error does not kill a job that has already spent the money
+    # — but the money is gone, so an under-counting ledger makes
+    # `check_budget/1` permit calls it should refuse. A `Logger.error` alone is
+    # indistinguishable from success to everything that watches.
+    test "emits a counter when the write is dropped" do
+      handler_id = "charge-dropped-#{inspect(make_ref())}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :budget, :charge_dropped],
+        fn _e, _m, meta, _c -> send(test_pid, {:charge_dropped, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      :ok = Budget.record_cost(:together, 9_223_372_036_854_775_808)
+
+      assert_receive {:charge_dropped, %{provider: "together"}},
+                     1_000,
+                     "a charge was dropped with no counter — the ledger is under-counting and " <>
+                       "nothing can alarm on it"
+    end
+
+    # ⛔ THE LABEL IS BOUNDED, which is why this emit lives here and not in the
+    # ledger. It was emitted from `Spend` on raw `to_string(provider)` while
+    # every other `provider`-tagged budget series goes through
+    # `bounded_provider/1` — a PUBLIC series with an unbounded label, against a
+    # rule written down in the label gate's own justification for that tag.
+    #
+    # ⚖️ Arbitrary atoms genuinely reach this path: the upload telemetry and
+    # pipeline suites pass `:telemetry_test`, `:monthly_test` and
+    # `:test_provider`.
+    test "an undeclared provider collapses to other rather than reaching the label" do
+      handler_id = "charge-dropped-bound-#{inspect(make_ref())}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :budget, :charge_dropped],
+        fn _e, _m, meta, _c -> send(test_pid, {:charge_dropped, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      :ok = Budget.record_cost(:a_provider_nobody_declared, 9_223_372_036_854_775_808)
+
+      assert_receive {:charge_dropped, %{provider: provider}}, 1_000
+
+      assert provider == "other",
+             "an undeclared provider reached the label as #{inspect(provider)} — this is a " <>
+               "public series and the tag is an unbounded cardinality commitment to the store"
+    end
+
+    # ⬛ ANTI-VACUITY: a successful charge must emit NO drop counter, or an
+    # emitter that fired unconditionally would satisfy both cases above.
+    test "a charge that lands emits no drop counter" do
+      handler_id = "charge-dropped-none-#{inspect(make_ref())}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :budget, :charge_dropped],
+        fn _e, _m, meta, _c -> send(test_pid, {:charge_dropped, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      :ok = Budget.record_cost(:together, 5_000)
+
+      refute_receive {:charge_dropped, _}, 200
+    end
+  end
 end

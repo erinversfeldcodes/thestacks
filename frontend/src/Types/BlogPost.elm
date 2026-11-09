@@ -282,10 +282,20 @@ blogPostShowDecoder =
         -- both the proto spelling and the lowercase wire spelling the
         -- controller actually sends.
         --
-        -- ⛔ THREE ARMS, AND THE ORDER OF THE LAST TWO IS THE POINT. The key is
-        -- ABSENT when there is nothing to say — a non-owner, or an owner whose
-        -- post has no finished pass. That is the server's real shape, asserted
-        -- on the controller side.
+        -- ⛔ TWO ARMS, EACH WITH A JOB A READER CAN STATE WITHOUT THE OTHER:
+        -- "the key is present, string or null" and "the key is absent". The key
+        -- is ABSENT when there is nothing to say — a non-owner, or an owner
+        -- whose post has no finished pass — which is the server's real shape,
+        -- asserted on the controller side.
+        --
+        -- ⚖️ It was three arms, with an explicit `Decode.null` between them.
+        -- That shape created its own hazard: the null arm is behaviourally
+        -- redundant with the trailing fallback, so a reader could take it as
+        -- load-bearing and the fallback as dead, then delete the wrong one. A
+        -- comment saying "this arm is redundant" is an invitation to delete it,
+        -- and the knowledge goes with it. `Decode.nullable` is the idiom that
+        -- already means what the comment would have had to explain, and it puts
+        -- the null-to-UNSPECIFIED mapping in code rather than prose.
         --
         -- ⚠️ The explicit `null` arm is defence, not the normal path, and it
         -- used to be the normal path: the controller sent
@@ -296,9 +306,9 @@ blogPostShowDecoder =
         -- server no longer sends it, and a proxy or a non-Elm producer still
         -- might, so it is handled on purpose rather than by accident.
         (Decode.oneOf
-            [ Decode.field "association_outcome" Envelope.decodeAssociationOutcome
-            , Decode.field "association_outcome"
-                (Decode.null Envelope.AssociationOutcomeUnspecified)
+            [ Decode.field "association_outcome"
+                (Decode.nullable Envelope.decodeAssociationOutcome)
+                |> Decode.map (Maybe.withDefault Envelope.AssociationOutcomeUnspecified)
             , Decode.succeed Envelope.AssociationOutcomeUnspecified
             ]
         )
@@ -307,8 +317,10 @@ blogPostShowDecoder =
 {-| An association as the envelope sends it.
 
 ⚠️ `reasoning` is absent for a non-owner — the controller deletes the key rather
-than blanking it — so it decodes optionally. `confidence` likewise: the server
-sends what the model said, and a null means the model did not answer that part.
+than blanking it — so it decodes optionally. ⛔ `confidence` is NOT likewise, and
+this clause used to say it was: it is `Decode.field "confidence" Decode.float`,
+REQUIRED, six lines below. The server always sends it, and a decoder that
+tolerated its absence would have absorbed a producer that stopped.
 
 -}
 associationDecoder : Decoder BookAssociation

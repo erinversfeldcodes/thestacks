@@ -40,6 +40,16 @@ defmodule Core.Repo.Migrations.ValidateTheConfidenceConstraints do
 
   @disable_ddl_transaction true
 
+  # ⛔ ITS PAIR, AND IT MATTERS MORE BECAUSE OF THE LINE ABOVE IT.
+  #
+  # At a bounded `statement_timeout` the advisory lock this holds was bounded
+  # too. With the timeout at 0 the scan is unbounded by design, so without this
+  # Ecto holds the GLOBAL migration lock for the scan's whole duration and a
+  # second node's `mix ecto.migrate` — or a concurrent deploy — blocks behind it
+  # for as long as it runs. Both precedents carry the pair, and this was the
+  # only non-transactional migration in its set missing it.
+  @disable_migration_lock true
+
   def up do
     execute("SET lock_timeout = '5s'")
     execute("SET statement_timeout = 0")
@@ -51,6 +61,19 @@ defmodule Core.Repo.Migrations.ValidateTheConfidenceConstraints do
     execute(
       "ALTER TABLE op.discovered_sources VALIDATE CONSTRAINT discovered_sources_confidence_in_range"
     )
+
+    # ⚖️ RESET, because a plain `SET` is CONNECTION-scoped and outlives this
+    # migration. `SET LOCAL` in a later migration reverts at COMMIT to the
+    # SESSION value — whatever the last plain `SET` left — not to the server
+    # default, so `statement_timeout = 0` would be inherited by anything
+    # relying on a scoped setting rather than stating its own.
+    #
+    # ⚠️ Only the timeout, and only here. `0` is the one value where inheriting
+    # it is actively dangerous: an unbounded timeout is the opposite of the
+    # guarantee every other migration in this repo asserts. A leaked
+    # `lock_timeout = '5s'` is harmless or helpful, so it is left rather than
+    # reset for symmetry.
+    execute("RESET statement_timeout")
   end
 
   def down do

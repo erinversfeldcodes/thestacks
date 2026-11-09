@@ -189,8 +189,11 @@ defmodule Stacks.AI.SpendTest do
     # rescue covers `Postgrex.Error` and `DBConnection.ConnectionError` and
     # nothing else, and a value past `bigint` is how a genuine database fault
     # gets raised here.
-    test "a database fault returns :ok instead of raising" do
-      assert :ok = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
+    test "a database fault returns rather than raising, and says it dropped" do
+      # ⚖️ `:dropped`, not `:ok` — the caller needs to know, because the COUNTER
+      # is emitted by `Budget.record_cost/2` where the provider vocabulary
+      # lives. This function used to emit it itself on an unbounded label.
+      assert :dropped = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
     end
 
     # ⬛ AND NOTHING IS RECORDED, so the failure is a reporting gap rather than
@@ -198,33 +201,14 @@ defmodule Stacks.AI.SpendTest do
     # outage lasts — the better of the two failures, because the alternative
     # bills twice for the same answer.
     test "a database fault records nothing rather than something wrong" do
-      assert :ok = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
+      assert :dropped = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
       assert Spend.spent(:together, :daily) == 0
     end
 
-    # ⛔ AND THE SWALLOWED PATH IS ALARMABLE. A `Logger.error` alone is
-    # indistinguishable from success to everything that watches, and this is
-    # the one accepted failure mode of the money ledger.
-    test "a dropped charge emits a counter, not only a log line" do
-      handler_id = "charge-dropped-#{inspect(make_ref())}"
-      test_pid = self()
-
-      :telemetry.attach(
-        handler_id,
-        [:stacks, :budget, :charge_dropped],
-        fn _e, _m, meta, _c -> send(test_pid, {:charge_dropped, meta}) end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler_id) end)
-
-      assert :ok = Spend.record(:together, 9_223_372_036_854_775_808, Date.utc_today())
-
-      assert_receive {:charge_dropped, %{provider: "together"}},
-                     1_000,
-                     "a charge was dropped with no counter — the ledger is now under-counting " <>
-                       "and nothing can alarm on it"
-    end
+    # ⬛ THE COUNTER'S CASE LIVES IN `budget_test.exs` NOW, with the emit. What
+    # this file still owns is that the drop is REPORTED — the two halves are
+    # deliberately in different modules, so they are asserted where each one
+    # happens rather than both here.
 
     # ⬛ ANTI-VACUITY: a programming error must NOT be swallowed, or the narrowed
     # rescue would be a blanket rescue again.

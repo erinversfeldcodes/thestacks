@@ -73,7 +73,28 @@ defmodule Stacks.AI.Budget do
   """
   @spec record_cost(atom() | String.t(), non_neg_integer()) :: :ok
   def record_cost(provider, micro_cents) when is_integer(micro_cents) and micro_cents >= 0 do
-    Spend.record(provider, micro_cents)
+    # ⛔ THE DROPPED-CHARGE COUNTER IS EMITTED HERE, where the provider
+    # vocabulary lives, and that placement is the whole point.
+    #
+    # `Spend.record/3` swallows a database fault so a transient error does not
+    # kill a job that has already spent the money — but the money is gone, so
+    # the swallowed path must be alarmable rather than merely logged. It first
+    # emitted the counter itself, on raw `to_string(provider)`, while all four
+    # `provider`-tagged series below go through `bounded_provider/1`; the
+    # bounding rule is written down in the label gate's justification for that
+    # tag, and a public series with an unbounded label bypassed it.
+    #
+    # ⚖️ The ledger reports WHETHER the write happened; the policy module owns
+    # the label and the emit. A new emit site added where a failure is detected
+    # would otherwise keep landing on the wrong side of where the vocabulary is
+    # declared.
+    if Spend.record(provider, micro_cents) == :dropped do
+      :telemetry.execute(
+        [:stacks, :budget, :charge_dropped],
+        %{count: 1},
+        %{provider: bounded_provider(provider)}
+      )
+    end
 
     # ⚖️ Emitted here rather than from a GenServer, which is where it used to
     # live and the only thing that process did that nothing else does.
