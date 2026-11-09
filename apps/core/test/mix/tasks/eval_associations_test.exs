@@ -1,0 +1,165 @@
+defmodule Mix.Tasks.Eval.AssociationsTest do
+  @moduledoc """
+      That the association eval measures something, and that its corpus is honest.
+
+      ⛔ THE CORPUS IS THE ARTEFACT MOST LIKELY TO ROT, and it rots silently: a
+      fixture that stops reproducing what it was built to reproduce still
+      scores, and the eval still passes. The first block here asserts the
+      corpus's own properties — the labels, the strata, the truncated fixture
+      actually being truncated — rather than trusting them.
+  """
+  use ExUnit.Case, async: true
+
+  alias Mix.Tasks.Eval.Associations
+
+  setup do
+    {:ok, corpus: Associations.load_corpus()}
+  end
+
+  describe "the corpus itself" do
+    test "it is at least thirty posts", %{corpus: corpus} do
+      assert length(corpus) >= 30,
+             "the corpus holds #{length(corpus)} items; a smaller set cannot cover the " <>
+               "failure space this pass actually has"
+    end
+
+    test "every item carries the fields the eval reads", %{corpus: corpus} do
+      for item <- corpus do
+        assert is_binary(item.name) and item.name != ""
+        assert is_atom(item.stratum)
+        assert is_binary(item.body) and item.body != ""
+        assert is_list(item.candidates)
+        assert is_binary(item.response)
+
+        assert is_binary(item.notes) and item.notes != "",
+               "#{item.name} has no notes — an item nobody can justify is an item " <>
+                 "nobody will dare delete when it becomes wrong"
+      end
+    end
+
+    # ⚖️ `:unreadable` IS A FIRST-CLASS EXPECTED OUTCOME, not an absence of one.
+    # Writing those items as `[]` was a real labelling error on this corpus's
+    # first run: "the model said nothing we could read" and "the model found no
+    # books" are different facts that want different fixes, and an expectation
+    # that cannot tell them apart scores the wrong thing as right.
+    test "an expectation is either a list of ids or :unreadable", %{corpus: corpus} do
+      for item <- corpus do
+        assert is_list(item.expect) or item.expect == :unreadable,
+               "#{item.name} expects #{inspect(item.expect)}"
+      end
+    end
+
+    # ⛔ NO EXPECTATION MAY NAME A BOOK THAT IS NOT A CANDIDATE. The whole
+    # hallucination stratum rests on the eval dropping ids outside the
+    # candidate set, so an expectation that named one would be asserting the
+    # opposite of the rule.
+    test "every expected id is one of that item's candidates", %{corpus: corpus} do
+      for item <- corpus, is_list(item.expect), id <- item.expect do
+        assert id in item.candidates,
+               "#{item.name} expects #{id}, which is not among its candidates"
+      end
+    end
+
+    test "the strata cover more than the happy path", %{corpus: corpus} do
+      strata = corpus |> Enum.map(& &1.stratum) |> Enum.uniq() |> Enum.sort()
+
+      for required <- [:broken, :empty, :fence, :hallucination, :happy] do
+        assert required in strata, "the corpus lost its #{required} stratum"
+      end
+    end
+
+    # ⛔ THE FIXTURE THAT CAN LIE MOST QUIETLY. `truncated_mid_object`
+    # reproduces the production defect — a 500-character cap cutting the JSON
+    # mid-object — and my first attempt at it was 404 characters long, so the
+    # "truncation" was a no-op and the item asserted the opposite of what its
+    # name claimed. The eval caught it; this case is what keeps it caught.
+    test "the truncated fixture is actually truncated", %{corpus: corpus} do
+      item = Enum.find(corpus, &(&1.name == "truncated_mid_object"))
+
+      assert item, "the truncated fixture is gone"
+      assert String.length(item.response) == 500
+
+      refute String.ends_with?(String.trim(item.response), "```"),
+             "the fixture's fence is closed, so it was not cut mid-object"
+
+      assert {:error, _} = Jason.decode(item.response),
+             "the fixture parses, so it no longer reproduces the defect it is named for"
+    end
+  end
+
+  describe "what the eval makes of a response" do
+    test "a fenced array yields its book ids" do
+      ids = ["aaa", "bbb"]
+
+      raw =
+        "```json\n" <>
+          ~s([{"book_id": "aaa", "confidence": 0.9, "reasoning": "x"},) <>
+          ~s({"book_id": "bbb", "confidence": 0.8, "reasoning": "y"}]) <> "\n```"
+
+      assert Associations.associate(raw, ids) == ["aaa", "bbb"]
+    end
+
+    # ⛔ A book the model invented must not be associated. A post cannot be
+    # linked to a book that is not in the catalogue, and the ISBN hard gate is
+    # the reason.
+    test "an id outside the candidates is dropped" do
+      raw = ~s([{"book_id": "real"}, {"book_id": "invented"}])
+
+      assert Associations.associate(raw, ["real"]) == ["real"]
+    end
+
+    test "the same id twice yields one association" do
+      raw = ~s([{"book_id": "same", "confidence": 0.9}, {"book_id": "same", "confidence": 0.4}])
+
+      assert Associations.associate(raw, ["same"]) == ["same"]
+    end
+
+    # ⚖️ An unreadable response is NOT an empty one, and the eval must not
+    # collapse them — that was the labelling error above, and it would hide a
+    # decoder that had stopped working behind a corpus of posts with no books.
+    test "an unreadable response is distinguished from an empty answer" do
+      assert Associations.associate("I could not find any books.", ["a"]) == :unreadable
+      assert Associations.associate("[]", ["a"]) == []
+    end
+  end
+
+  describe "the stratum filter" do
+    test "it selects only that stratum", %{corpus: corpus} do
+      filtered = Associations.only_stratum(corpus, "fence")
+
+      assert filtered != []
+      assert Enum.all?(filtered, &(&1.stratum == :fence))
+      assert length(filtered) < length(corpus)
+    end
+
+    # ⛔ A misspelled stratum would otherwise score 0/0 and report no
+    # regression — a gate passing because it tested nothing.
+    test "a stratum nobody has refuses rather than scoring nothing", %{corpus: corpus} do
+      error = assert_raise Mix.Error, fn -> Associations.only_stratum(corpus, "fences") end
+
+      assert error.message =~ "no corpus item has stratum"
+      assert error.message =~ "fence"
+    end
+  end
+
+  describe "the floor" do
+    test "a corpus that scores perfectly passes", %{corpus: corpus} do
+      results = Enum.map(corpus, &Associations.score_item/1)
+
+      assert Enum.all?(results, & &1.passed),
+             "these items fail: " <>
+               inspect(results |> Enum.reject(& &1.passed) |> Enum.map(& &1.name))
+    end
+
+    # ⬛ ANTI-VACUITY FOR THE FLOOR: it must actually refuse. A gate whose
+    # failure path has never run is a gate nobody has tested.
+    test "one wrong item fails the gate" do
+      results = [
+        %{name: "ok", stratum: :happy, expected: [], got: [], passed: true, notes: "n"},
+        %{name: "bad", stratum: :happy, expected: ["a"], got: [], passed: false, notes: "n"}
+      ]
+
+      assert_raise Mix.Error, fn -> Associations.gate(results) end
+    end
+  end
+end

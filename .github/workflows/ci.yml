@@ -416,6 +416,20 @@ jobs:
           npm ci
           npm run deploy
       - run: scripts/test-elixir.sh
+      # ⛔ THE ASSOCIATION EVAL RUNS ON EVERY PR, BECAUSE IT CAN.
+      #
+      # Replay only: the corpus holds a recorded model response per post, so
+      # there is no provider, no GPU and no network in the loop. What it scores
+      # is this repository's half of the pass — the decoder, the id mapping, the
+      # de-duplication, the refusal of books outside the catalogue — which is
+      # the half that broke in production twice. Both of those were found by a
+      # reader, after shipping; this is the gate that would have caught them.
+      #
+      # ⚠️ Its floor is 100%, and that is not optimism. Every expectation is a
+      # fact about code in this repository applied to a fixed string, so a drop
+      # is a regression here rather than a model having an off day.
+      - name: Score the association corpus (replay, no provider)
+        run: cd apps/core && mix eval.associations
 
   test-elm:
     needs: [changes, versions]

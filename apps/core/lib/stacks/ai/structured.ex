@@ -139,10 +139,18 @@ defmodule Stacks.AI.Structured do
   # ⛔ THE FENCE IS STRIPPED, NOT MATCHED EXACTLY. The model varies the opening
   # (` ```json `, ` ```JSON `, bare ` ``` `) and whether a newline follows, and
   # pinning one spelling would re-create the defect one variant along.
+  #
+  # ⚠️ AND IT IS FOUND, NOT REQUIRED TO BE THE WHOLE ANSWER. This regex used to
+  # be anchored `\A…\z`, so "Here are the associations I found:" before the
+  # fence — or "Let me know if you'd like more detail." after it — defeated the
+  # strip entirely and the whole response came back `:unparseable`. Chatty
+  # models do that constantly, and the anchored version handled every fence
+  # variant while failing on the commonest thing a model actually wraps one in.
+  # Found by the association corpus, on two items, before it reached anyone.
   defp strip_fence(raw) do
     trimmed = String.trim(raw)
 
-    case Regex.run(~r/\A```[a-zA-Z]*\s*\n?(.*?)\n?\s*```\z/s, trimmed) do
+    case Regex.run(~r/```[a-zA-Z]*[ \t]*\n?(.*?)\n?[ \t]*```/s, trimmed) do
       [_, inner] -> String.trim(inner)
       _ -> trimmed
     end

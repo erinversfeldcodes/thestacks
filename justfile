@@ -297,6 +297,21 @@ check-route-clients *ARGS:
 #
 #   just eval-vision <url>            # score against the baseline
 #   just eval-vision <url> --record   # pin today's score as the new baseline
+# Score the blog post-book association pass against its labelled corpus.
+#
+# ⛔ REPLAY BY DEFAULT — no provider, no GPU, no network. The corpus holds a
+# recorded model response per post, so this scores OUR half: the decoder, the id
+# mapping, the de-duplication, the refusal of books that are not in the
+# catalogue. That is the half that broke in production twice (an unstripped
+# Markdown fence, and a 500-character cap cutting the JSON mid-object) and
+# neither needed a model to find.
+#
+#   just eval-associations                    # the whole corpus
+#   just eval-associations --stratum fence    # one stratum
+#   just eval-associations --verbose          # every item
+eval-associations *ARGS:
+    @just run mix eval.associations {{ARGS}}
+
 eval-vision URL="" *ARGS:
     # ⛔ Through `just run`, never bare. A non-interactive shell gets neither
     # direnv nor nix on PATH, so a bare `mix` silently falls back to a SYSTEM
