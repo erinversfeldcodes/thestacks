@@ -28,9 +28,32 @@ defmodule Stacks.AI.TogetherClient do
     parse_success_response(resp_body)
   end
 
+  # ⛔ A CLIENT ERROR DOES NOT MELT THE FUSE, AND THE DISTINCTION IS NOT
+  # COSMETIC.
+  #
+  # A circuit breaker protects against an unhealthy DEPENDENCY: it exists so a
+  # service that is failing is left alone to recover. A 4xx says the opposite —
+  # the dependency is fine and OUR REQUEST is wrong. Melting on one is
+  # self-harm: the error is deterministic, so it recurs on every call, trips the
+  # breaker, and then `do_complete/2` answers `{:error, :circuit_open}` for
+  # EVERY caller of this module. One malformed request takes the whole LLM
+  # boundary dark, and the logs say "circuit open" rather than what was wrong.
+  #
+  # ⚠️ THIS IS LIVE RISK, NOT A HYPOTHETICAL. `response_format: json_schema` was
+  # just added and the schema has never been sent to the real provider —
+  # Together's reference is silent on whether an array root is allowed, and
+  # whether `Llama-3.3-70B-Instruct-Turbo` supports structured outputs at all is
+  # unconfirmed (RL-477). If it answers 400, the old behaviour would have
+  # disabled every completion in the system rather than just the one that asked
+  # for a schema.
+  #
+  # ⚖️ 408 and 429 stay meltable: those ARE the dependency saying "not now", and
+  # backing off is the correct response to both.
   defp handle_response({:ok, %Finch.Response{status: status, body: resp_body}}) do
     Logger.warning("TogetherClient: HTTP #{status}: #{resp_body}")
-    Stacks.CircuitBreakers.melt(@fuse_name)
+
+    if meltable?(status), do: Stacks.CircuitBreakers.melt(@fuse_name)
+
     {:error, %{status: status, body: resp_body}}
   end
 
@@ -39,6 +62,17 @@ defmodule Stacks.AI.TogetherClient do
     Stacks.CircuitBreakers.melt(@fuse_name)
     {:error, reason}
   end
+
+  @doc false
+  # ⚠️ Public so the policy can be asserted directly. `handle_response/1` takes
+  # a `%Finch.Response{}` and is deliberately NOT exposed — coupling a test to
+  # the transport is the thing this module's existing comment refuses — but the
+  # DECISION it makes is exactly what needs a test, because getting it wrong
+  # disables every caller rather than the one that erred.
+  def meltable?(408), do: true
+  def meltable?(429), do: true
+  def meltable?(status) when status >= 400 and status < 500, do: false
+  def meltable?(_), do: true
 
   @doc false
   # Public for one reason: so a test can observe what this does to a 200 body

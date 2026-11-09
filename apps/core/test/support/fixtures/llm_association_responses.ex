@@ -16,7 +16,8 @@ defmodule Stacks.Test.Fixtures.LlmAssociationResponses do
         - a 500-character truncation of the same text **also** fails
 
       ⚖️ These reproduce every one of those properties, and
-      `LlmAssociationResponsesTest` asserts each rather than trusting this
+      `Stacks.AI.StructuredTest`'s "the fixtures still match the measured
+      captures" block asserts each rather than trusting this
       comment. That makes them a faithful stand-in for the decoder's purposes —
       the fence is a real fence and the length is a real length — but it does
       NOT make them captures, and nothing here should be cited as "the model

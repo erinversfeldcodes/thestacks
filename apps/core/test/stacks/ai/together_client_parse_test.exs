@@ -182,4 +182,42 @@ defmodule Stacks.AI.TogetherClientParseTest do
       assert [%{role: "user", content: "p"}] = with_schema.messages
     end
   end
+
+  describe "which failures melt the circuit breaker" do
+    # ⛔ A CLIENT ERROR MUST NOT TRIP THE BREAKER. A 4xx says the dependency is
+    # healthy and OUR request is wrong — deterministic, so it recurs on every
+    # call, trips the fuse, and then every caller of this module gets
+    # `{:error, :circuit_open}`. One malformed request takes the whole LLM
+    # boundary dark, and the logs say "circuit open" instead of what was wrong.
+    #
+    # ⚠️ Live risk when this was written: `response_format: json_schema` had
+    # just been added and had never been sent to the real provider. A 400 on an
+    # unsupported schema would have disabled every completion in the system
+    # rather than just the one asking for a schema.
+    test "a 400 — an invalid schema, say — does not melt" do
+      refute TogetherClient.meltable?(400),
+             "a rejected request must not trip the breaker for everyone else"
+    end
+
+    test "nor a 401, 404 or 422" do
+      refute TogetherClient.meltable?(401)
+      refute TogetherClient.meltable?(404)
+      refute TogetherClient.meltable?(422)
+    end
+
+    # ⚖️ ANTI-VACUITY, and it is the half that makes the cases above mean
+    # something: a `meltable?/1` that answered false for everything would pass
+    # them while disabling the breaker entirely.
+    test "a 500 still melts — that IS the dependency failing" do
+      assert TogetherClient.meltable?(500)
+      assert TogetherClient.meltable?(503)
+    end
+
+    # ⚖️ The two 4xx codes that mean "not now" rather than "not like that".
+    # Backing off is the correct response to both.
+    test "408 and 429 melt, because they are the dependency saying wait" do
+      assert TogetherClient.meltable?(408)
+      assert TogetherClient.meltable?(429)
+    end
+  end
 end
