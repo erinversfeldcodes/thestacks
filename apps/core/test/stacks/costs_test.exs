@@ -349,10 +349,50 @@ defmodule Stacks.CostsTest do
       assert query =~ "sum(increase(stacks_discovery_brave_search_count_total{"
     end
 
-    test "a family with no samples yet counts as zero, not an error" do
+    # ⛔ REVERSED DELIBERATELY. This test used to assert `{:ok, 0}` for a family
+    # with no samples, which PINNED THE DEFECT AS A REQUIREMENT — the same shape
+    # as the test that encoded a cents/micro-cent confusion elsewhere in this
+    # wave, where a test agreeing with the code proved nothing about either.
+    #
+    # ⚖️ Its own title was the argument against it: "counts as zero, not an
+    # error" treats those as the only two options, when the real answer is a
+    # third — no figure for this period. `RefreshCostsJob`'s `unwrap/1` already
+    # said so ("a measurement we could not take is `nil`, never 0 … a
+    # transparency page printing '0' would be claiming the service went
+    # unused"), and every cost item already had a nil clause for it. Mapping
+    # `:no_data` to `{:ok, 0}` here made that clause unreachable.
+    #
+    # ⬛ THE PROBE, quoted as this issue requires: restoring
+    # `{:error, :no_data} -> {:ok, 0}` in `metric_count_this_month/1` reds this
+    # case with `Expected truthy, got false` on the `:error` match — so the
+    # reversal is load-bearing rather than a relabelling.
+    test "a family with no samples is no figure, not a zero" do
       MockPrometheusClient.put_response({:error, :no_data})
 
-      assert {:ok, 0} = Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
+      assert :error = Costs.metric_count_this_month("stacks_ai_together_completion_count_total"),
+             "a family with no samples returned a NUMBER — the caller's nil clause is then " <>
+               "unreachable and the transparency page prints $0.00 for a service it has no " <>
+               "measurement of"
+    end
+
+    # ⬛ ANTI-VACUITY: a real measurement must still come back as a number, or a
+    # function that returned `:error` for everything would satisfy the case
+    # above and silently blank the whole page.
+    test "a family with samples still returns its count" do
+      MockPrometheusClient.put_response({:ok, 42})
+
+      assert {:ok, 42} =
+               Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
+    end
+
+    # ⚖️ AND A GENUINE ZERO IS STILL A ZERO — the store answering "0 samples"
+    # is a measurement, and conflating it with "no data" would be the same
+    # error pointed the other way.
+    test "a measured zero is reported as zero" do
+      MockPrometheusClient.put_response({:ok, 0})
+
+      assert {:ok, 0} =
+               Costs.metric_count_this_month("stacks_ai_together_completion_count_total")
     end
 
     test "an unreachable store is an error so callers fall back" do

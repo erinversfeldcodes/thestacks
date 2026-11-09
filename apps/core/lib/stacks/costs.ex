@@ -596,9 +596,30 @@ defmodule Stacks.Costs do
     query = ~s|sum(increase(#{family}{app="#{app}"}[#{window_s}s]))|
 
     case prometheus_client().query(query) do
-      {:ok, count} when is_number(count) and count >= 0 -> {:ok, round(count)}
-      {:error, :no_data} -> {:ok, 0}
-      _ -> :error
+      {:ok, count} when is_number(count) and count >= 0 ->
+        {:ok, round(count)}
+
+      # ⛔ `:no_data` IS NOT ZERO, AND MAPPING IT TO ZERO DEFEATED A RULE THIS
+      # CODEBASE HAD ALREADY WRITTEN DOWN ONE LAYER DOWN.
+      #
+      # `RefreshCostsJob`'s `unwrap/1` says it outright — "a measurement we
+      # could not take is `nil`, never 0 … because a transparency page printing
+      # '0' would be claiming the service went unused" — and every cost item has
+      # a nil clause for exactly that. But this function converted the
+      # unavailable signal into a real `{:ok, 0}` BEFORE that unwrap could see
+      # it, so the nil clause was unreachable and the page printed `$0.00` for a
+      # family with no samples, under the heading "Every number on this page is
+      # real".
+      #
+      # ⚖️ A family with no samples and a store that errored are both "no figure
+      # for this period", and both must reach the caller's nil path. They are
+      # distinguishable here if a future caller needs to tell them apart; what
+      # is not acceptable is either one arriving as a number.
+      {:error, :no_data} ->
+        :error
+
+      _ ->
+        :error
     end
   end
 

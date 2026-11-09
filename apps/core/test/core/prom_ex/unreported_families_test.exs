@@ -201,10 +201,32 @@ defmodule Core.PromEx.UnreportedFamiliesTest do
 
       Budget.record_cost(:together, 100_000)
 
-      assert together_micro_cents() - before == 100_000,
-             "one cent recorded as 100,000 micro-cents moved the series by " <>
-               "#{together_micro_cents() - before} — the value is being converted " <>
-               "somewhere, and the money panel's divisor assumes it is not"
+      moved = together_micro_cents() - before
+
+      # ⚖️ `>=`, NOT `==`, AND THE REASON IS NOT LAZINESS. This is a cumulative
+      # `sum` in a process-global registry, so a concurrent test charging the
+      # same provider lands inside the before/after window — measured: a delta
+      # of 100,352 when another suite's 352-micro-cent Together charge
+      # interleaved. An exact assertion on a shared counter is not achievable
+      # under concurrency, and the earlier `==` version was flaky rather than
+      # strict.
+      #
+      # ⛔ The guard it exists for is undamaged. The defect was a 100,000× UNIT
+      # error — one cent arriving as `1` instead of `100_000` — so the bound
+      # that catches it is the lower one. A conversion at the emit moves the
+      # series by 1 and reds this; nothing a concurrent charge can do makes a
+      # converted value pass.
+      assert moved >= 100_000,
+             "one cent recorded as 100,000 micro-cents moved the series by #{moved} — the " <>
+               "value is being converted somewhere, and the money panel's divisor assumes " <>
+               "it is not"
+
+      # ⬛ AND IT IS NOT MERELY LARGE: an upper bound rules out the series being
+      # denominated in something smaller still, while leaving room for a
+      # concurrent charge. Without this, `>=` would pass for any inflation.
+      assert moved < 1_000_000,
+             "the series moved by #{moved} for a one-cent charge — far more than concurrent " <>
+               "test charges can explain, so the denomination is wrong in the other direction"
 
       refute scrape() =~ "stacks_budget_cost_recorded_amount_cents ",
              "a series named `amount_cents` is carrying micro-cents again — the exact " <>
