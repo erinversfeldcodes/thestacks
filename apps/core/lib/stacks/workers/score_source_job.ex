@@ -14,6 +14,7 @@ defmodule Stacks.Workers.ScoreSourceJob do
 
   require Logger
 
+  alias Stacks.AI.BudgetTracker
   alias Stacks.Discovery
 
   @impl true
@@ -28,13 +29,46 @@ defmodule Stacks.Workers.ScoreSourceJob do
     end
   end
 
+  # ⛔ THIS PATH SPENT REAL MONEY AND WAS METERED NOWHERE.
+  #
+  # `BudgetTracker` had exactly one caller — `Stacks.AI.Client` passing
+  # `:modal` — so the Together completions ran with no ceiling and no record.
+  # A runaway queue could bill without limit, and nothing afterwards could say
+  # how much it had cost, because nothing was counting.
+  #
+  # ⚠️ The budget is checked BEFORE the call and recorded AFTER it, which is
+  # the only order that holds: checking after would refuse the next request
+  # having already paid for this one, and recording before would charge for a
+  # call that may never have been made.
+  @cost_cents_per_scoring_call 1
+
   defp score_source(source) do
+    case BudgetTracker.check_budget(:together) do
+      {:error, limit} ->
+        # ⚖️ Discarded rather than retried, deliberately. A budget ceiling is
+        # not a transient fault: retrying it burns attempts against a limit
+        # that will not move until the period does, and `{:error, …}` from a
+        # worker is what Oban retries.
+        Logger.warning(
+          "ScoreSourceJob: not scoring #{source.id} — the together budget is spent (#{limit})"
+        )
+
+        {:cancel, limit}
+
+      :ok ->
+        call_and_meter(source)
+    end
+  end
+
+  defp call_and_meter(source) do
     client = together_client()
 
     prompt = build_scoring_prompt(source)
 
     case client.complete(prompt, max_tokens: 64, temperature: 0.1) do
       {:ok, response} ->
+        BudgetTracker.record_cost(:together, @cost_cents_per_scoring_call)
+
         confidence = parse_confidence(response)
         persist_confidence(source, confidence)
 

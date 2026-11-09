@@ -12,6 +12,7 @@ defmodule Stacks.UploadCacheTest do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Spend
   alias Stacks.Books
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.Handlers.CacheInvalidationHandler
@@ -238,28 +239,39 @@ defmodule Stacks.UploadCacheTest do
   end
 
   describe "BudgetTracker budget enforcement" do
+    # ⛔ THESE TESTS USED TO POKE THE GenServer'S STRUCT AND SEND IT
+    # `:reset_daily`, AND THAT WAS THE DEFECT WRITTEN DOWN AS A REQUIREMENT.
+    #
+    # The totals lived in process state with no database behind them, so the
+    # budget was cleared by a message arriving at a live process — which on a
+    # scale-to-zero node meant it was cleared by the node going quiet, silently,
+    # every time. `:sys.replace_state/2` and `send(…, :reset_daily)` could set
+    # up any total at all, so the suite was green against a ceiling that did not
+    # survive a restart.
+    #
+    # ⚖️ The INTENT of the old cases was right and is kept: a new day restores
+    # the budget, a full previous day does not refuse today, and the monthly
+    # limit outlives the daily one. What changes is the mechanism they assert —
+    # a date rather than a timer — which is both the fix and a stronger test,
+    # because it needs no process to be alive to be true.
     setup do
-      original = :sys.get_state(BudgetTracker)
-
-      :sys.replace_state(BudgetTracker, fn state ->
-        %{state | daily_total_cents: 0, monthly_total_cents: 0, providers: %{}}
-      end)
+      Application.put_env(:core, :daily_limit_cents, 500)
+      Application.put_env(:core, :monthly_limit_cents, 5_000)
 
       on_exit(fn ->
-        :sys.replace_state(BudgetTracker, fn _ -> original end)
+        Application.delete_env(:core, :daily_limit_cents)
+        Application.delete_env(:core, :monthly_limit_cents)
       end)
 
       :ok
     end
 
     @tag suite: :cache
-    test "record_cost/2 increases daily spend" do
+    test "record_cost/2 increases daily and monthly spend" do
       assert :ok = BudgetTracker.record_cost(:modal, 50)
 
-      state = BudgetTracker.current_state()
-      assert state.daily_total_cents == 50
-      assert state.monthly_total_cents == 50
-      assert state.providers["modal"] == 50
+      assert Spend.spent(:modal, :daily) == 50
+      assert Spend.spent(:modal, :monthly) == 50
     end
 
     @tag suite: :cache
@@ -267,88 +279,84 @@ defmodule Stacks.UploadCacheTest do
       BudgetTracker.record_cost(:modal, 100)
       BudgetTracker.record_cost(:modal, 200)
 
-      state = BudgetTracker.current_state()
-      assert state.daily_total_cents == 300
-      assert state.providers["modal"] == 300
+      assert Spend.spent(:modal, :daily) == 300
     end
 
     @tag suite: :cache
-    test "record_cost/2 with zero cost is a no-op on totals" do
+    test "record_cost/2 with zero cost records nothing" do
       BudgetTracker.record_cost(:modal, 0)
-      state = BudgetTracker.current_state()
-      assert state.daily_total_cents == 0
-      assert state.monthly_total_cents == 0
+
+      assert Spend.spent(:modal, :daily) == 0
+      assert Spend.spent(:modal, :monthly) == 0
     end
 
     @tag suite: :cache
     test "check_budget/1 returns :ok when under daily limit" do
       BudgetTracker.record_cost(:modal, 100)
-      _ = BudgetTracker.current_state()
 
       assert :ok = BudgetTracker.check_budget(:modal)
     end
 
     @tag suite: :cache
-    test "check_budget/1 returns {:error, :daily_limit_exceeded} when at daily limit" do
+    test "check_budget/1 refuses at the daily limit" do
       BudgetTracker.record_cost(:modal, 500)
-      _ = BudgetTracker.current_state()
 
       assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
 
     @tag suite: :cache
-    test "check_budget/1 returns {:error, :daily_limit_exceeded} when over daily limit" do
+    test "check_budget/1 refuses over the daily limit" do
       BudgetTracker.record_cost(:modal, 600)
-      _ = BudgetTracker.current_state()
 
       assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
 
+    # ⚖️ THE DAILY ARM IS MADE UNREACHABLE RATHER THAN MERELY UNTRIGGERED.
+    #
+    # The obvious setup — spend on earlier days so today is empty — is wrong at
+    # a month boundary: `Date.add(today, -1)` can land in the previous month,
+    # where it counts toward a different monthly total. (My first attempt did
+    # exactly that and recorded 4000 of an intended 5000, because two of the ten
+    # days were in October.) Raising the daily limit out of reach means only the
+    # monthly arm can fire, whatever today's date is.
     @tag suite: :cache
-    test "check_budget/1 returns {:error, :monthly_limit_exceeded} when over monthly limit" do
-      :sys.replace_state(BudgetTracker, fn state ->
-        %{state | monthly_total_cents: 5000, daily_total_cents: 0}
-      end)
+    test "check_budget/1 refuses at the monthly limit" do
+      Application.put_env(:core, :daily_limit_cents, 1_000_000)
+
+      BudgetTracker.record_cost(:modal, 6_000)
+
+      assert Spend.spent(:modal, :daily) < 1_000_000,
+             "the daily limit must be out of reach, or this case says nothing " <>
+               "about the monthly one"
 
       assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
 
+    # ⚖️ THE OLD "DAILY RESET" CASES, RESTATED AS DATES. Yesterday being full
+    # is simply a different row from today — no reset message, no live process.
     @tag suite: :cache
-    test "daily reset clears daily total and providers but preserves monthly total" do
-      BudgetTracker.record_cost(:modal, 200)
-      _ = BudgetTracker.current_state()
+    test "a full previous day does not refuse today" do
+      yesterday = Date.add(Date.utc_today(), -1)
 
-      send(Process.whereis(BudgetTracker), :reset_daily)
+      :ok = Spend.record(:modal, 600, yesterday)
 
-      state = BudgetTracker.current_state()
-      assert state.daily_total_cents == 0
-      assert state.providers == %{}
-      assert state.monthly_total_cents == 200
-    end
-
-    @tag suite: :cache
-    test "after daily reset, check_budget returns :ok even if previous day was full" do
-      BudgetTracker.record_cost(:modal, 500)
-      _ = BudgetTracker.current_state()
-      assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
-
-      send(Process.whereis(BudgetTracker), :reset_daily)
-      _ = BudgetTracker.current_state()
-
+      assert Spend.spent(:modal, :daily, yesterday) == 600
       assert :ok = BudgetTracker.check_budget(:modal)
     end
 
+    # ⚖️ The monthly ceiling must outlive a day rollover — the half a single
+    # resettable counter could not express at all. The spend goes on the first
+    # of this month (which may or may not be today; either way it is inside the
+    # same monthly row) and the daily limit is again out of reach.
     @tag suite: :cache
-    test "monthly limit enforced even after daily reset" do
-      BudgetTracker.record_cost(:modal, 4900)
-      _ = BudgetTracker.current_state()
+    test "the monthly limit still refuses once the day has rolled over" do
+      Application.put_env(:core, :daily_limit_cents, 1_000_000)
 
-      send(Process.whereis(BudgetTracker), :reset_daily)
-      _ = BudgetTracker.current_state()
+      first_of_month = Date.beginning_of_month(Date.utc_today())
 
-      BudgetTracker.record_cost(:modal, 200)
-      _ = BudgetTracker.current_state()
+      :ok = Spend.record(:modal, 6_000, first_of_month)
 
+      assert Spend.spent(:modal, :monthly) >= 5_000
       assert {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
     end
   end

@@ -158,7 +158,7 @@ defmodule Core.TimestampColumnTypesTest do
     # exception. Raising the number without checking the property would be the
     # wrong way round, and the `GROUP BY` above is what makes the difference
     # visible: a bad default would show as a second row, not a bigger count.
-    test "the ten defaulted columns default to now()" do
+    test "the twelve defaulted columns default to now()" do
       {:ok, %{rows: rows}} =
         Repo.query(
           """
@@ -176,8 +176,8 @@ defmodule Core.TimestampColumnTypesTest do
           [@owned_schemas]
         )
 
-      assert rows == [["now()", 10]],
-             "expected exactly ten defaulted timestamptz columns, all on now(); got " <>
+      assert rows == [["now()", 12]],
+             "expected exactly twelve defaulted timestamptz columns, all on now(); got " <>
                inspect(rows)
     end
   end

@@ -111,31 +111,36 @@ defmodule Stacks.ObservabilityTelemetryTest do
                       %{provider: "modal"}}
     end
 
-    test "emits limit_exceeded event when daily limit exceeded", %{tracker: name} do
+    # ⚠️ Driven through `check_budget/1` rather than the GenServer's
+    # `{:check_budget, …}` message, which no longer exists: the decision moved
+    # to the durable ledger, and the message was a copy of it.
+    test "emits limit_exceeded event when daily limit exceeded", %{tracker: _name} do
       attach_telemetry([
         [:stacks, :budget, :cost_recorded],
         [:stacks, :budget, :limit_exceeded]
       ])
 
-      GenServer.cast(name, {:record_cost, :modal, 600})
-      _ = GenServer.call(name, :current_state)
-
-      GenServer.call(name, {:check_budget, :modal})
+      :ok = BudgetTracker.record_cost(:modal, 600)
+      {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},
                       %{provider: "modal", type: :daily}}
     end
 
-    test "emits limit_exceeded event when monthly limit exceeded", %{tracker: name} do
+    test "emits limit_exceeded event when monthly limit exceeded", %{tracker: _name} do
       attach_telemetry([
         [:stacks, :budget, :cost_recorded],
         [:stacks, :budget, :limit_exceeded]
       ])
 
-      GenServer.cast(name, {:record_cost, :modal, 6_000})
-      _ = GenServer.call(name, :current_state)
+      # ⚖️ The daily limit is put out of reach so the MONTHLY arm is the one
+      # that fires — otherwise this asserts the daily event's label and says
+      # nothing about the monthly one.
+      Application.put_env(:core, :daily_limit_cents, 1_000_000)
+      on_exit(fn -> Application.delete_env(:core, :daily_limit_cents) end)
 
-      GenServer.call(name, {:check_budget, :modal})
+      :ok = BudgetTracker.record_cost(:modal, 6_000)
+      {:error, :monthly_limit_exceeded} = BudgetTracker.check_budget(:modal)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},
                       %{provider: "modal", type: :monthly}}

@@ -1,5 +1,9 @@
 defmodule Stacks.AI.ClientTest do
-  use ExUnit.Case, async: false
+  # ⚠️ DataCase rather than ExUnit.Case: the budget check this module drives
+  # now reads a durable ledger instead of GenServer state, so these tests need
+  # a sandboxed connection. Without one they fail on ownership, which looks
+  # like a flake and is really a missing sandbox.
+  use Core.DataCase, async: false
 
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client

@@ -11,6 +11,8 @@ defmodule Stacks.AI.BudgetTracker do
 
   use GenServer
 
+  alias Stacks.AI.Spend
+
   require Logger
 
   # The providers this tracker actually meters. Production has exactly one
@@ -42,7 +44,29 @@ defmodule Stacks.AI.BudgetTracker do
   @doc "Records an AI API cost in cents for a given provider."
   @spec record_cost(atom() | String.t(), non_neg_integer()) :: :ok
   def record_cost(provider, cost_cents) when is_integer(cost_cents) and cost_cents >= 0 do
-    GenServer.cast(__MODULE__, {:record_cost, provider, cost_cents})
+    # ⛔ THE LEDGER IS WRITTEN HERE, IN THE CALLER'S PROCESS, AND NOT IN THE
+    # GenServer BELOW.
+    #
+    # Two reasons, and the second is the stronger. A `cast` is fire-and-forget,
+    # so a ledger write inside it is lost silently if the process is busy,
+    # restarting or gone — and this is the record that decides whether the next
+    # request is allowed. The caller has just spent the money; the durable note
+    # of it should not depend on a mailbox.
+    #
+    # ⚖️ It also keeps the write inside whatever transaction or sandbox the
+    # caller is in, which a separate process cannot join.
+    Spend.record(provider, cost_cents)
+
+    # ⚠️ Best-effort, and allowed to find nobody home. Since the decision moved
+    # to the ledger, this cast feeds telemetry and an in-memory view — useful,
+    # and not something a charge should depend on. `GenServer.cast/2` to an
+    # unregistered name raises, so the lookup is explicit.
+    case Process.whereis(__MODULE__) do
+      nil -> :ok
+      pid -> GenServer.cast(pid, {:record_cost, provider, cost_cents})
+    end
+
+    :ok
   end
 
   @doc """
@@ -51,7 +75,46 @@ defmodule Stacks.AI.BudgetTracker do
   """
   @spec check_budget(atom() | String.t()) :: :ok | {:error, atom()}
   def check_budget(provider) do
-    GenServer.call(__MODULE__, {:check_budget, provider})
+    daily_limit = get_limit(:daily_limit_cents, @default_daily_limit_cents)
+    monthly_limit = get_limit(:monthly_limit_cents, @default_monthly_limit_cents)
+
+    # ⛔ ANSWERED FROM THE LEDGER, NOT FROM PROCESS STATE, AND NOT THROUGH THE
+    # GenServer AT ALL.
+    #
+    # This used to ask the tracker for its in-memory totals. A freshly woken
+    # node has an empty struct and a full day's spend behind it, so the answer
+    # was "plenty of budget" every time the machine had been idle — which on a
+    # scale-to-zero host is most mornings.
+    #
+    # ⚖️ Once the spend is durable, a process holding a second copy of it is
+    # not a cache, it is a disagreement waiting to happen. The decision belongs
+    # where the fact is.
+    #
+    # ⚠️ Per-provider, where the struct's totals were global: a single shared
+    # ceiling meant one provider's spend refused another's requests, which is
+    # not what a per-provider budget means.
+    cond do
+      Spend.spent(provider, :monthly) >= monthly_limit ->
+        :telemetry.execute(
+          [:stacks, :budget, :limit_exceeded],
+          %{},
+          %{provider: bounded_provider(provider), type: :monthly}
+        )
+
+        {:error, :monthly_limit_exceeded}
+
+      Spend.spent(provider, :daily) >= daily_limit ->
+        :telemetry.execute(
+          [:stacks, :budget, :limit_exceeded],
+          %{},
+          %{provider: bounded_provider(provider), type: :daily}
+        )
+
+        {:error, :daily_limit_exceeded}
+
+      true ->
+        :ok
+    end
   end
 
   @doc "Returns current spend state (for observability)."
@@ -76,6 +139,13 @@ defmodule Stacks.AI.BudgetTracker do
       %{provider: bounded_provider(provider_key)}
     )
 
+    # ⛔ THE DURABLE LEDGER IS THE RECORD; THE STRUCT IS A CACHE OF IT.
+    #
+    # These totals used to live only here, and this process dies with the node.
+    # On a machine that scales to zero that made the budget resettable by
+    # idling: the ceiling came back when traffic stopped, nothing said so, and
+    # the only way to exceed a daily cap was to stay busy enough to stay alive.
+    #
     providers =
       Map.update(state.providers, provider_key, cost_cents, &(&1 + cost_cents))
 
@@ -87,38 +157,6 @@ defmodule Stacks.AI.BudgetTracker do
     }
 
     {:noreply, new_state}
-  end
-
-  @impl true
-  def handle_call({:check_budget, provider}, _from, state) do
-    daily_limit = get_limit(:daily_limit_cents, @default_daily_limit_cents)
-    monthly_limit = get_limit(:monthly_limit_cents, @default_monthly_limit_cents)
-
-    result =
-      cond do
-        state.monthly_total_cents >= monthly_limit ->
-          :telemetry.execute(
-            [:stacks, :budget, :limit_exceeded],
-            %{},
-            %{provider: bounded_provider(provider), type: :monthly}
-          )
-
-          {:error, :monthly_limit_exceeded}
-
-        state.daily_total_cents >= daily_limit ->
-          :telemetry.execute(
-            [:stacks, :budget, :limit_exceeded],
-            %{},
-            %{provider: bounded_provider(provider), type: :daily}
-          )
-
-          {:error, :daily_limit_exceeded}
-
-        true ->
-          :ok
-      end
-
-    {:reply, result, state}
   end
 
   @impl true

@@ -153,13 +153,13 @@ defmodule Stacks.AI.StructuredTest do
     test "a null confidence is handled like a missing one" do
       raw = ~s([{"book_id": "keep", "confidence": null, "reasoning": null}])
 
-      assert {:ok, [%{book_id: "keep", confidence: 0.0, reasoning: ""}]} = Structured.decode(raw)
+      assert {:ok, [%{book_id: "keep", confidence: +0.0, reasoning: ""}]} = Structured.decode(raw)
     end
 
     test "a missing confidence does not discard the association" do
       raw = ~s([{"book_id": "keep", "reasoning": "named in the second paragraph"}])
 
-      assert {:ok, [%{book_id: "keep", confidence: 0.0, reasoning: reasoning}]} =
+      assert {:ok, [%{book_id: "keep", confidence: +0.0, reasoning: reasoning}]} =
                Structured.decode(raw)
 
       assert reasoning == "named in the second paragraph"
