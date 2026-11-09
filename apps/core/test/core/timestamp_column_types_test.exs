@@ -148,8 +148,21 @@ defmodule Core.TimestampColumnTypesTest do
                Enum.map_join(rows, "\n  ", fn [col, default] -> "#{col} => #{default}" end)
     end
 
-    # ⚠️ EIGHT BECAME TEN ON 2026-11-09, deliberately: `op.llm_call_log` added
-    # `created_at` and `updated_at`, both `timestamptz DEFAULT now()`.
+    # ⚠️ EIGHT BECAME TWELVE ON 2026-11-09, deliberately — **four** new
+    # columns across **two** new tables, not two across one:
+    #
+    #   op.llm_call_log   created_at, updated_at
+    #   op.ai_spend       created_at, updated_at
+    #
+    # ⛔ An earlier version of this comment said "eight became ten" and named
+    # only `op.llm_call_log`, while the assertion below said twelve. Measured
+    # against `information_schema`: twelve, contributed by ten tables, with
+    # `op.ai_spend` and `op.llm_call_log` the only two holding a pair. So the
+    # arithmetic was wrong AND a whole table was missing from the account —
+    # which matters because this comment is the only record of WHY the number
+    # moved, and a reader reconciling twelve against "eight plus two" would
+    # conclude the gate had drifted and go looking for a column that should not
+    # be there.
     #
     # ⚖️ The count is the ratchet, not the claim. What this gate actually
     # asserts is that EVERY defaulted timestamptz column defaults to `now()`

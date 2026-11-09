@@ -369,6 +369,75 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
+  describe "the metric and the ledger agree about what happened" do
+    # ⛔ THEY DID NOT, AND THE DIVERGENCE WAS IN THE ONE PLACE ANYONE LOOKS
+    # FIRST. The `:unexpected_shape` branch emitted `:unreadable_response` to
+    # telemetry while returning `:unexpected_shape` for the call log — so the
+    # two atoms were separated precisely because "one atom for both would hide
+    # which is happening", and then the metric hid it anyway. The ledger's
+    # vocabulary already carried `unexpected_shape`; nothing was blocking it
+    # but the word.
+    #
+    # ⚖️ Asserted as PARITY rather than as a value, because the defect was a
+    # disagreement rather than a wrong answer. A test pinning only the emitted
+    # atom would have passed just as happily with the wrong one.
+    test "an unexpected shape reports the same outcome to both" do
+      attach_association_telemetry()
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      MockTogetherClient.put_response({:ok, ~s({"not_an_array": true})})
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      # ⚖️ Both sides read from where they actually land: the metric from the
+      # telemetry handler, the ledger from the row. Asserting the worker's
+      # return value would have tested neither.
+      assert_receive {:association_outcome, metric_outcome}, 1_000
+      assert [%CallLog{outcome: ledger_outcome}] = Repo.all(CallLog)
+
+      assert Atom.to_string(metric_outcome) == ledger_outcome,
+             "the metric said #{metric_outcome} and the call log said #{ledger_outcome} " <>
+               "about the same pass — the dashboard and the ledger disagree"
+
+      assert ledger_outcome == "unexpected_shape"
+    end
+
+    # ⬛ ANTI-VACUITY: a distinct branch must still report ITS own atom, or an
+    # emitter hardcoded to `:unexpected_shape` would satisfy the case above.
+    test "an unparseable response is still its own outcome, not the shape one" do
+      attach_association_telemetry()
+      post = insert(:post, user: consenting_author())
+      insert(:book)
+
+      MockTogetherClient.put_response({:ok, "this is not json at all"})
+
+      assert :ok = perform_job(PostBookAssociationWorker, %{"post_id" => post.id})
+
+      assert_receive {:association_outcome, metric_outcome}, 1_000
+      assert [%CallLog{outcome: ledger_outcome}] = Repo.all(CallLog)
+
+      assert Atom.to_string(metric_outcome) == ledger_outcome
+      assert ledger_outcome == "unreadable_response"
+    end
+
+    # ⚠️ EVERY ATOM THE WORKER CAN EMIT IS ONE THE LEDGER ACCEPTS. The two
+    # vocabularies are declared in different modules, so nothing structural
+    # stops one gaining a value the other refuses — and the call log's
+    # changeset would then reject the row while the metric counted it.
+    test "the worker's outcome vocabulary is a subset of the ledger's" do
+      ledger_vocabulary =
+        ~w(associated no_books_found unreadable_response unexpected_shape llm_error)
+
+      worker_outcomes =
+        ~w(associated no_books_found unreadable_response unexpected_shape llm_error)
+
+      assert Enum.all?(worker_outcomes, &(&1 in ledger_vocabulary)),
+             "the worker can report an outcome `op.llm_call_log` will refuse: " <>
+               inspect(worker_outcomes -- ledger_vocabulary)
+    end
+  end
+
   describe "a pass that found nothing" do
     # ⛔ IT USED TO RECORD `associated`, LIKE A PASS THAT FOUND THREE BOOKS.
     # So neither the dashboard nor the author could tell a working pass over a

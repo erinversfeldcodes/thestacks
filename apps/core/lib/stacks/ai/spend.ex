@@ -112,7 +112,20 @@ defmodule Stacks.AI.Spend do
             updated_at: DateTime.utc_now()
           }
         ],
-        on_conflict: [inc: [spend_micro_cents: micro_cents]],
+        # ⛔ `updated_at` IS SET ON CONFLICT TOO, OR IT RECORDS CREATION UNDER
+        # A NAME THAT PROMISES OTHERWISE. With `inc:` alone, two charges in one
+        # period took the balance from 1,000 to 3,000 micro-cents while
+        # `updated_at` stayed byte-identical — a column named `updated_at`
+        # silently holding the row's birthday.
+        #
+        # ⚖️ It matters here beyond tidiness: this row IS the budget, and
+        # "when was this provider last charged" is the first question anyone
+        # asks of a ledger that looks wrong. `created_at` is deliberately NOT
+        # touched, so the pair stays answerable — first charge and latest.
+        on_conflict: [
+          inc: [spend_micro_cents: micro_cents],
+          set: [updated_at: DateTime.utc_now()]
+        ],
         conflict_target: [:provider, :period, :period_start]
       )
     end

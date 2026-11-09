@@ -202,4 +202,43 @@ defmodule Stacks.AI.SpendTest do
       assert Spend.spent(:together, :daily, @today) == 5_000_000
     end
   end
+
+  describe "the timestamps answer the questions their names promise" do
+    # ⛔ `updated_at` RECORDED CREATION. The upsert's `inc:` touched only the
+    # balance, so two charges in one period moved the money and left
+    # `updated_at` byte-identical — a column whose name promises the last write
+    # and delivered the first. "When was this provider last charged" is the
+    # first question anyone asks of a ledger that looks wrong.
+    test "a second charge moves updated_at" do
+      {:ok, today} = Date.new(2026, 11, 9)
+
+      :ok = Spend.record(:together, 1_000, today)
+      [first] = Repo.all(from s in Spend, where: s.period == "daily")
+
+      :ok = Spend.record(:together, 2_000, today)
+      [second] = Repo.all(from s in Spend, where: s.period == "daily")
+
+      assert second.spend_micro_cents == 3_000,
+             "anti-vacuity: the second charge must actually have landed"
+
+      assert DateTime.compare(second.updated_at, first.updated_at) == :gt,
+             "updated_at did not move on the second charge — it is recording creation " <>
+               "under a name that promises the latest write"
+    end
+
+    # ⬛ AND `created_at` DOES NOT MOVE, or the pair stops being answerable:
+    # first-charge and latest-charge would collapse into one fact.
+    test "the same charge leaves created_at alone" do
+      {:ok, today} = Date.new(2026, 11, 9)
+
+      :ok = Spend.record(:together, 1_000, today)
+      [first] = Repo.all(from s in Spend, where: s.period == "daily")
+
+      :ok = Spend.record(:together, 2_000, today)
+      [second] = Repo.all(from s in Spend, where: s.period == "daily")
+
+      assert DateTime.compare(second.created_at, first.created_at) == :eq,
+             "created_at moved on an update — the row's birthday is no longer recoverable"
+    end
+  end
 end

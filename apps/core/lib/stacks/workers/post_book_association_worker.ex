@@ -224,7 +224,14 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
             String.slice(raw, 0, 200)
         )
 
-        emit_outcome(:unreadable_response)
+        # ⛔ `:unexpected_shape` IN BOTH PLACES. The metric used to emit
+        # `:unreadable_response` here while the call log recorded
+        # `:unexpected_shape` — so the two atoms were separated precisely
+        # because "one atom for both would hide which is happening", and then
+        # the metric, which is where anyone looks first, hid it anyway. The
+        # vocabulary already carries `unexpected_shape` (`call_log.ex:44`);
+        # nothing was blocking it but the word.
+        emit_outcome(:unexpected_shape)
         :unexpected_shape
 
       {:error, {:unparseable, raw}} ->
