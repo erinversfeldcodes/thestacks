@@ -1,0 +1,109 @@
+defmodule Stacks.AI.Structured do
+  @moduledoc """
+      Reading a model's answer as data, and keeping the answer when it cannot be.
+
+      ⛔ THE BOUNDARY HAD NO CONTRACT, AND THE FAILURE WAS SILENT. The worker
+      asked for JSON in prose and ran `Jason.decode/1` on whatever came back.
+      MEASURED against the live model (`Llama-3.3-70B-Instruct-Turbo`, the
+      worker's own prompt, three calls): **3 of 3 responses were fenced** — they
+      begin ` ```json ` and end ` ``` ` — and `Jason.decode/1` fails on the first
+      character of every one of them. The associations were dropped, a warning
+      was logged, and the text that would have explained it was thrown away.
+
+      ⚖️ TWO THINGS FIX THAT, AND THEY ARE DIFFERENT THINGS. Asking the provider
+      for `response_format: json_schema` makes a fenced answer unlikely; this
+      module makes one survivable. Neither replaces the other — a schema is a
+      request, not a guarantee, and a model that ignores it must not take the
+      association chain down with it.
+
+      ⚠️ ON FAILURE THE RAW TEXT TRAVELS WITH THE ERROR. `{:error, {:unparseable,
+      raw}}` rather than `{:error, :unparseable}`, because the question anyone
+      asks next is "what did it actually say?" and the old code's answer was
+      "gone". The caller bounds it before storing; this module does not truncate,
+      having just been written to survive a truncation.
+  """
+
+  @typedoc "One association the model proposes: which book, how sure, and why."
+  @type association :: %{
+          book_id: String.t(),
+          confidence: float(),
+          reasoning: String.t()
+        }
+
+  @type failure :: {:unparseable, String.t()} | {:unexpected_shape, String.t()}
+
+  @doc """
+      Decode a completion into associations.
+
+      Accepts a bare JSON array and a fenced one — ` ```json `, ` ``` `, with or
+      without a trailing newline — because the model sends all of these and the
+      difference is not meaningful.
+  """
+  @spec decode(String.t(), keyword()) :: {:ok, [association()]} | {:error, failure()}
+  def decode(raw, _opts \\ []) when is_binary(raw) do
+    case raw |> strip_fence() |> Jason.decode() do
+      {:ok, items} when is_list(items) ->
+        {:ok, Enum.flat_map(items, &normalise/1)}
+
+      # ⚠️ A DIFFERENT FAILURE FROM UNPARSEABLE, and worth its own name. Valid
+      # JSON that is not a list means the model understood the format and not
+      # the task — a prose object, or a single association where an array was
+      # asked for. Collapsing the two would hide which one is happening, and
+      # they want different fixes: one is a prompt problem, the other a parsing
+      # problem.
+      {:ok, _other} ->
+        {:error, {:unexpected_shape, raw}}
+
+      {:error, _} ->
+        {:error, {:unparseable, raw}}
+    end
+  end
+
+  # ⛔ THE FENCE IS STRIPPED, NOT MATCHED EXACTLY. The model varies the opening
+  # (` ```json `, ` ```JSON `, bare ` ``` `) and whether a newline follows, and
+  # pinning one spelling would re-create the defect one variant along.
+  defp strip_fence(raw) do
+    trimmed = String.trim(raw)
+
+    case Regex.run(~r/\A```[a-zA-Z]*\s*\n?(.*?)\n?\s*```\z/s, trimmed) do
+      [_, inner] -> String.trim(inner)
+      _ -> trimmed
+    end
+  end
+
+  # ⚠️ DROPS AN ITEM IT CANNOT READ RATHER THAN FAILING THE WHOLE ANSWER. One
+  # malformed entry among five should not cost the other four — the worker's
+  # old behaviour was all-or-nothing in the other direction, and losing every
+  # association to one bad row is the same defect wearing a different face.
+  #
+  # ⚖️ `book_id` is the only required field. A missing confidence is a model
+  # that did not answer the question asked; it is still telling us which book,
+  # and the caller decides what an unscored association is worth.
+  defp normalise(%{"book_id" => book_id} = item) when is_binary(book_id) do
+    [
+      %{
+        book_id: book_id,
+        confidence: as_float(Map.get(item, "confidence")),
+        reasoning: as_string(Map.get(item, "reasoning"))
+      }
+    ]
+  end
+
+  defp normalise(_), do: []
+
+  defp as_float(value) when is_float(value), do: value
+  defp as_float(value) when is_integer(value), do: value * 1.0
+
+  defp as_float(value) when is_binary(value) do
+    case Float.parse(value) do
+      {float, _} -> float
+      :error -> 0.0
+    end
+  end
+
+  defp as_float(_), do: 0.0
+
+  defp as_string(value) when is_binary(value), do: value
+  defp as_string(nil), do: ""
+  defp as_string(value), do: to_string(value)
+end

@@ -587,6 +587,21 @@ defmodule Stacks.Blog do
     |> cast(attrs, @assoc_required_fields ++ @assoc_optional_fields)
     |> validate_required(@assoc_required_fields)
     |> validate_inclusion(:source, @assoc_valid_sources)
+    # ⛔ A BOOK THAT DOES NOT EXIST IS AN ANSWER, NOT A CRASH.
+    #
+    # Without these the FK violation RAISES `Ecto.ConstraintError`, and the
+    # likeliest failure of an LLM association is exactly this: the model names
+    # a book id that is not in the catalogue. The association worker catches
+    # `{:error, reason}` and carries on to the next association — it cannot
+    # catch a raise, so one hallucinated id took the whole job down and the
+    # other associations in the same response with it.
+    #
+    # ⚖️ `post_id` is here for symmetry rather than because it is reachable
+    # today: a post deleted between the worker reading it and writing the
+    # association is the same shape of race, and leaving one side unguarded
+    # invites the question of why.
+    |> foreign_key_constraint(:book_id)
+    |> foreign_key_constraint(:post_id)
   end
 
   defp check_ownership(%Post{user_id: owner_id}, %{id: user_id})

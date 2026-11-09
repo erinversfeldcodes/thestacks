@@ -5,6 +5,7 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
   alias Stacks.AI.MockTogetherClient
   alias Stacks.Blog
   alias Stacks.GDPR.Consent
+  alias Stacks.Test.Fixtures.LlmAssociationResponses, as: Responses
   alias Stacks.Workers.PostBookAssociationWorker
 
   import Stacks.Factory
@@ -12,6 +13,104 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
   setup do
     MockTogetherClient.clear()
     :ok
+  end
+
+  describe "the shape the model actually sends" do
+    @moduletag :association_contract
+
+    # ⛔ EVERY CASE HERE WOULD HAVE FAILED BEFORE `Stacks.AI.Structured`, AND THE
+    # SUITE WAS GREEN THROUGHOUT. The existing cases feed `Jason.encode!/1` —
+    # bare, unfenced JSON that the model does not send. MEASURED against the live
+    # model with this worker's own prompt: 3 of 3 responses came back FENCED,
+    # 744-782 characters, and `Jason.decode/1` failed on the first character of
+    # every one. The worker dropped the associations and logged a warning.
+    #
+    # ⚖️ So the old tests were not wrong, they were testing a shape nothing
+    # produces. That is the gap a contract closes, and these are the cases that
+    # hold it closed.
+
+    test "a fenced response from the model persists its associations" do
+      user = consenting_author()
+      first = insert(:book, title: "To the Lighthouse")
+      second = insert(:book, title: "The Waves")
+      post = insert(:post, user: user, body: "On Woolf, and what to read next.")
+
+      # The captured shape, with this test's real book ids substituted in.
+      response =
+        Responses.fenced_three()
+        |> String.replace("9d1f0c3a-5e4b-4a21-8f07-2c6b9ad3e114", first.id)
+        |> String.replace("3b7e2d14-9a6c-4f58-b013-7e8a1c45d920", second.id)
+
+      MockTogetherClient.put_response({:ok, response})
+
+      assert :ok == perform_job(PostBookAssociationWorker, %{post_id: post.id})
+
+      associations = Blog.list_associations(post.id)
+
+      # ⚠️ Two, not three: the third id in the fixture belongs to no book here,
+      # so `Blog.associate_book/3` refuses it. That is the right behaviour and
+      # worth asserting — a model naming a book outside the catalogue must not
+      # create a row.
+      assert length(associations) == 2
+
+      assert Enum.map(associations, & &1.book_id) |> Enum.sort() ==
+               Enum.sort([first.id, second.id])
+
+      lighthouse = Enum.find(associations, &(&1.book_id == first.id))
+      assert lighthouse.confidence == 0.92
+      assert lighthouse.reasoning =~ "lighthouse"
+    end
+
+    test "a bare ``` fence works too, because the model varies it" do
+      user = consenting_author()
+      book = insert(:book, title: "Inherited Libraries")
+      post = insert(:post, user: user, body: "What my father's shelves held.")
+
+      response =
+        Responses.fenced_two_bare_fence()
+        |> String.replace("7f2c9b31-8e05-4d6a-9c14-3a7e5d2b0f88", book.id)
+
+      MockTogetherClient.put_response({:ok, response})
+
+      assert :ok == perform_job(PostBookAssociationWorker, %{post_id: post.id})
+      assert [assoc] = Blog.list_associations(post.id)
+      assert assoc.book_id == book.id
+      assert assoc.confidence == 0.88
+    end
+
+    test "a fenced empty array is an answer, and persists nothing" do
+      user = consenting_author()
+      post = insert(:post, user: user, body: "A post about gardening.")
+
+      MockTogetherClient.put_response({:ok, Responses.fenced_empty()})
+
+      assert :ok == perform_job(PostBookAssociationWorker, %{post_id: post.id})
+      assert Blog.list_associations(post.id) == []
+    end
+
+    # ⛔ THE M1 PROBE, AS AN ASSERTION. M1 was removing the 500-character
+    # truncation from `complete/2`, which left the whole suite green — nothing
+    # guarded it. The truncation is gone now, so the probe that matters is the
+    # INVERSE: a response cut at 500 characters must be refused rather than
+    # silently dropped, and this is the case that notices.
+    test "a response truncated at 500 characters associates nothing" do
+      user = consenting_author()
+      book = insert(:book, title: "To the Lighthouse")
+      post = insert(:post, user: user, body: "On Woolf.")
+
+      truncated =
+        Responses.fenced_three()
+        |> String.replace("9d1f0c3a-5e4b-4a21-8f07-2c6b9ad3e114", book.id)
+        |> String.slice(0, 500)
+
+      MockTogetherClient.put_response({:ok, truncated})
+
+      assert :ok == perform_job(PostBookAssociationWorker, %{post_id: post.id})
+
+      assert Blog.list_associations(post.id) == [],
+             "a half-read response must not produce associations — the truncation this " <>
+               "guards against cut the JSON mid-object and the worker parsed the fragment"
+    end
   end
 
   describe "perform/1" do

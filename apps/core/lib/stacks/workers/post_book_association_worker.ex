@@ -29,6 +29,7 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.Structured
   alias Stacks.Blog
   alias Stacks.Books.Book
   alias Stacks.Events
@@ -119,20 +120,38 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     """
   end
 
+  # ⛔ THROUGH `Stacks.AI.Structured`, NOT `Jason.decode/1` DIRECTLY. MEASURED
+  # against the live model: 3 of 3 responses came back FENCED — ```json … ``` —
+  # and `Jason.decode/1` fails on the first character of every one. The
+  # associations were dropped, a warning was logged, and the text that would
+  # have explained it was discarded.
+  #
+  # ⚖️ The two failures are kept apart on purpose. `:unparseable` is the model
+  # answering in a shape nothing can read; `:unexpected_shape` is valid JSON
+  # that is not a list, i.e. the model understood the format and not the task.
+  # They want different fixes — a parsing change versus a prompt change — and
+  # one outcome atom for both would hide which is happening.
   defp handle_response(post, response) do
-    case Jason.decode(response) do
-      {:ok, associations} when is_list(associations) ->
+    case Structured.decode(response) do
+      {:ok, associations} ->
         persist_associations(post, associations)
 
-      {:ok, _other} ->
-        Logger.warning("PostBookAssociationWorker: unexpected JSON shape for post #{post.id}")
+      {:error, {:unexpected_shape, raw}} ->
+        Logger.warning(
+          "PostBookAssociationWorker: unexpected JSON shape for post #{post.id}: " <>
+            String.slice(raw, 0, 200)
+        )
 
         emit_outcome(:unreadable_response)
         :ok
 
-      {:error, _reason} ->
+      {:error, {:unparseable, raw}} ->
+        # ⚠️ The raw text is logged, bounded, rather than thrown away. Until
+        # `op.llm_call_log` lands this is the only record of what the model
+        # actually said, and "failed to parse" without it is unactionable.
         Logger.warning(
-          "PostBookAssociationWorker: failed to parse LLM response for post #{post.id}"
+          "PostBookAssociationWorker: could not read the LLM response for post #{post.id}: " <>
+            String.slice(raw, 0, 200)
         )
 
         emit_outcome(:unreadable_response)
@@ -143,7 +162,6 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
   defp persist_associations(post, associations) do
     book_ids =
       associations
-      |> Enum.filter(&Map.get(&1, "book_id"))
       |> Enum.reduce([], fn assoc, acc -> associate_single(post, assoc, acc) end)
 
     Events.emit_safe(%{
@@ -157,10 +175,11 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     :ok
   end
 
+  # ⚠️ Atom keys, because `Structured.decode/2` has already normalised them and
+  # filtered the entries it could not read. The string-keyed `Map.get` that was
+  # here trusted the model's spelling of its own field names.
   defp associate_single(post, assoc, acc) do
-    book_id = Map.get(assoc, "book_id")
-    confidence = Map.get(assoc, "confidence", 0.5)
-    reasoning = Map.get(assoc, "reasoning")
+    %{book_id: book_id, confidence: confidence, reasoning: reasoning} = assoc
     attrs = %{source: "llm", confidence: confidence, reasoning: reasoning, visible: true}
 
     case Blog.associate_book(post, book_id, attrs) do
