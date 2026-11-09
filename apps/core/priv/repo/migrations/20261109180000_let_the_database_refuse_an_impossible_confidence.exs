@@ -8,33 +8,45 @@ defmodule Core.Repo.Migrations.LetTheDatabaseRefuseAnImpossibleConfidence do
       was a clamp inside the JSON parser, three layers from the table.
 
       ⚖️ Moved to the database because a range invariant is a fact about the
-      COLUMN, not about the one path that currently happens to write it. A
-      clamp in the parser is correct for the model's answer and says nothing
-      about a manual admin override, a backfill, an import, or a second model
-      adapter — each of which writes the same column without passing that
-      clamp. The reasoning that the clamp is sufficient is a claim about the
-      caller list, which changes without anyone revisiting the clamp.
+      COLUMN, not about the one path that currently happens to write it. A clamp
+      in the parser is correct for the model's answer and says nothing about a
+      manual admin override, a backfill, an import, or a second model adapter —
+      each of which writes the same column without passing that clamp. The
+      reasoning that the clamp is sufficient is a claim about the caller list,
+      which changes without anyone revisiting the clamp.
 
       ⚠️ CLASS, NOT INSTANCE — and the two columns were already inconsistent.
-      `op.discovered_sources.confidence` had a changeset
-      `validate_number` and `op.post_book_associations.confidence`, added
-      later, did not: the house pattern existed and the newer column missed it.
-      Guarding only the new one would have left the identical hole in the older
-      one, since neither had anything at the database.
+      `op.discovered_sources.confidence` had a changeset `validate_number` and
+      `op.post_book_associations.confidence`, added later, did not: the house
+      pattern existed and the newer column missed it. Guarding only the new one
+      would have left the identical hole in the older one, since neither had
+      anything at the database.
 
-      ⬛ `NOT VALID` then `VALIDATE`, deliberately: the ADD takes a brief lock
-      and does not read the table, and the VALIDATE scans without blocking
-      writers. On a table this size either would do; the split is so the
-      pattern is the one already in use when a table here is large enough for
-      it to matter.
+      ⬛ THIS MIGRATION ONLY ADDS THE CONSTRAINTS, `NOT VALID`. The scan that
+      validates them is its own migration, `…180100` — the shape this repo
+      already uses for `…120100` / `…120200`.
+
+      ⚠️ Two earlier versions of this got it wrong and the second is the
+      instructive one. First I ran ADD and VALIDATE in one transaction, where
+      the split achieves nothing — `squawk`'s `constraint-missing-not-valid`:
+      *"Using `NOT VALID` and `VALIDATE CONSTRAINT` in the same transaction will
+      block all reads while the constraint is validated."* Then I set
+      `@disable_ddl_transaction` and left both statements in this file, and it
+      STILL failed, because squawk lints the SQL extracted from the file and
+      cannot see an Elixir module attribute. Two statements in one file read as
+      one transaction to the linter — and it is right to say so, because nothing
+      in the file proves otherwise to a human reader either.
+
+      ⚖️ So the separation has to be real at the file level rather than asserted
+      in an attribute. The comment claiming the benefit was the thing to
+      distrust, on the same day I wrote a note about descriptions that
+      over-claim.
   """
   use Ecto.Migration
 
-  @disable_ddl_transaction false
-
   def up do
     execute("SET LOCAL lock_timeout = '5s'")
-    execute("SET LOCAL statement_timeout = '60s'")
+    execute("SET LOCAL statement_timeout = '30s'")
 
     execute("""
     ALTER TABLE op.post_book_associations
@@ -43,19 +55,9 @@ defmodule Core.Repo.Migrations.LetTheDatabaseRefuseAnImpossibleConfidence do
     """)
 
     execute("""
-    ALTER TABLE op.post_book_associations
-      VALIDATE CONSTRAINT post_book_associations_confidence_in_range
-    """)
-
-    execute("""
     ALTER TABLE op.discovered_sources
       ADD CONSTRAINT discovered_sources_confidence_in_range
       CHECK (confidence >= 0.0 AND confidence <= 1.0) NOT VALID
-    """)
-
-    execute("""
-    ALTER TABLE op.discovered_sources
-      VALIDATE CONSTRAINT discovered_sources_confidence_in_range
     """)
   end
 
