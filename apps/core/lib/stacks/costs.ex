@@ -33,6 +33,18 @@ defmodule Stacks.Costs do
   # the cost vocabulary lives. The client reads it through `modal_per_inference_cents/0`
   # rather than declaring its own default.
   @modal_per_inference_cents 3
+  # ⛔ AN ALLOWLIST, NOT A DENYLIST, AND THE POLARITY IS THE WHOLE POINT.
+  #
+  # The aggregations used to reject `basis == "absent"`. Add a fourth value
+  # later — `estimated`, `pending`, `unavailable`, any of which is also not a
+  # measurement — and every one would be SILENTLY SUMMED AS MONEY, because the
+  # filter only knew the one name. An allowlist fails closed: a new basis is
+  # excluded from money until someone deliberately adds it here.
+  #
+  # ⚖️ For a column whose entire job is to stop a page rendering a number it
+  # does not have, the money side is the side that must opt in.
+  @bases_that_carry_money ~w(measured rate_card)
+
   @neon_cents 0
   @domain_monthly_cents 100
 
@@ -77,7 +89,7 @@ defmodule Stacks.Costs do
     # the easiest to miss. A monthly total that silently includes figures nobody
     # measured is a chart that lies about the past, where nobody will ever
     # re-check it.
-    |> where([c], c.basis != "absent")
+    |> where([c], c.basis in ^@bases_that_carry_money)
     |> group_by([c], [c.period_start, c.period_end])
     |> select([c], %{
       period_start: c.period_start,
@@ -746,7 +758,7 @@ defmodule Stacks.Costs do
     # over-count silently. Relying on it is relying on the defect.
     current_total =
       costs
-      |> Enum.reject(&(&1.basis == "absent"))
+      |> Enum.filter(&(&1.basis in @bases_that_carry_money))
       |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end)
 
     cost_per_book =
@@ -780,7 +792,7 @@ defmodule Stacks.Costs do
           category: category,
           total_cents:
             items
-            |> Enum.reject(&(&1.basis == "absent"))
+            |> Enum.filter(&(&1.basis in @bases_that_carry_money))
             |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end),
           unmeasured_count: Enum.count(items, &(&1.basis == "absent")),
           items: Enum.map(items, &serialize_cost/1)

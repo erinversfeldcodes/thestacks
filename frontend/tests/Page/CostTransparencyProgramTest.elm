@@ -26,6 +26,11 @@ suite =
         , displaysTotalBanner
         , displaysStoryCards
         , displaysPhilosophyNote
+        , absentLineShowsTextNotZero
+        , measuredLineStillShowsMoney
+        , unmeasuredIsMarkedForStyling
+        , categoryHeaderSaysWhenIncomplete
+        , storyCardUnitAttachesToTheMoney
         , displaysMonthlyTrend
         ]
 
@@ -66,6 +71,134 @@ costInitEffects =
                 CostTransparency.CostsReceived
                 CostTransparency.costBreakdownDecoder
         }
+
+
+{-| A response whose Compute category has one measured line and one absent one.
+
+⛔ THE ABSENT CASE HAD NO ELM TEST AT ALL. A reviewer's probe rewrote
+`amountText`'s absent arms back to `formatCents` — reinstating the `$0.00` this
+whole issue exists to remove — and **all 2314 tests passed**. `grep` over
+`frontend/tests/` found zero occurrences of "not yet measured" and zero of any
+`CostBasis` constructor but `Measured`. The only guard was an E2E spec needing a
+deployed stack that happens to have an unmeasured line, which made the headline
+requirement deploy-gated to re-verify forever.
+
+-}
+mixedBasisResponseJson : String
+mixedBasisResponseJson =
+    Encode.encode 0
+        (Encode.object
+            [ ( "data"
+              , Encode.object
+                    [ ( "total_cents", Encode.int 500 )
+                    , ( "currency", Encode.string "USD" )
+                    , ( "cost_per_book", Encode.float 0.5 )
+                    , ( "categories"
+                      , Encode.list identity
+                            [ categoryJson "compute"
+                                500
+                                [ basisServiceJson "Modal GPU" "d" 500 "rate_card"
+                                , basisServiceJson "Together AI" "d" 0 "absent"
+                                ]
+                            ]
+                      )
+                    , ( "metrics"
+                      , Encode.object
+                            [ ( "books", Encode.int 11 )
+                            , ( "uploads", Encode.int 5 )
+                            , ( "placements", Encode.int 2 )
+                            , ( "db_size_bytes", Encode.int 8929280 )
+                            , ( "avg_upload_payload_bytes", Encode.int 0 )
+                            , ( "vision_jobs_this_month", Encode.int 47 )
+                            ]
+                      )
+                    , ( "monthly_totals", Encode.list identity [] )
+                    , ( "generated_at", Encode.string "2026-11-10T00:00:00Z" )
+                    ]
+              )
+            ]
+        )
+
+
+startMixed : ProgramTest.ProgramTest CostTransparency.Model CostTransparency.Msg (SimulatedEffect CostTransparency.Msg)
+startMixed =
+    startCostPage
+        |> ProgramTest.simulateHttpOk "GET" "/api/costs" mixedBasisResponseJson
+
+
+absentLineShowsTextNotZero : Test
+absentLineShowsTextNotZero =
+    test "absent_line: an unmeasured line renders a sentence, not a currency zero" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas
+                    -- ⛔ SCOPED TO THE AMOUNT CELL, and the unscoped version was
+                    -- VACUOUS. `Selector.text` is a containment match, and the
+                    -- page's own closing sentence contains "or not yet measured
+                    -- this period" — so a bare text assertion matched the
+                    -- philosophy paragraph and passed with every line still
+                    -- rendering $0.00. Caught by re-running the reviewer's probe
+                    -- against my own new test rather than trusting it.
+                    [ Selector.all
+                        [ Selector.class "costs__service-amount--unmeasured"
+                        , Selector.text "not yet measured this period"
+                        ]
+                    ]
+
+
+{-| ⬛ ANTI-VACUITY: a page that rendered the sentence for EVERY line would
+satisfy the case above while hiding every real figure.
+-}
+measuredLineStillShowsMoney : Test
+measuredLineStillShowsMoney =
+    test "absent_line: a line that has a figure still shows it" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas [ Selector.text "$5.00" ]
+
+
+{-| ⚖️ The modifier is what stops a sentence being dressed as a figure — the fix
+for a browser finding where the amount column, sized for "$15.60", received a
+30-character sentence and crushed the description to ~60px.
+-}
+unmeasuredIsMarkedForStyling : Test
+unmeasuredIsMarkedForStyling =
+    test "absent_line: the unmeasured cell carries its modifier and no currency" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHasNot
+                    -- ⚖️ The modifier alone is not enough: `amountClass` is
+                    -- independent of `amountText`, so a cell can carry the
+                    -- modifier AND render money. What must not exist is an
+                    -- unmeasured cell containing a currency figure.
+                    [ Selector.all
+                        [ Selector.class "costs__service-amount--unmeasured"
+                        , Selector.text "$0.00"
+                        ]
+                    ]
+
+
+{-| ⛔ The category header summed absent lines as money until a browser drive
+caught it — "Compute $0.00" over one measured and one unmeasured line.
+-}
+categoryHeaderSaysWhenIncomplete : Test
+categoryHeaderSaysWhenIncomplete =
+    test "absent_line: the category header reports its unmeasured count" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas [ Selector.text "+ 1 unmeasured" ]
+
+
+{-| ⛔ "/mo" IS A SUFFIX ON A NUMBER, NOT ON A SENTENCE. When the aggregate fix
+changed the story card's argument from an `Int` to rendered text, the card
+shipped "$X.XX + 1 unmeasured/mo" — on the figure a reader sees first.
+-}
+storyCardUnitAttachesToTheMoney : Test
+storyCardUnitAttachesToTheMoney =
+    test "absent_line: the story card's /mo follows the money, not the note" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas [ Selector.text "$5.00/mo" ]
 
 
 sampleCostResponseJson : String
@@ -127,17 +260,47 @@ categoryJson category totalCents items =
     Encode.object
         [ ( "category", Encode.string category )
         , ( "total_cents", Encode.int totalCents )
+        , ( "unmeasured_count"
+          , Encode.int (List.length (List.filter isAbsentItem items))
+          )
         , ( "items", Encode.list identity items )
         ]
 
 
 serviceJson : String -> String -> Int -> Encode.Value
 serviceJson service description amountCents =
+    basisServiceJson service description amountCents "rate_card"
+
+
+{-| A service line with an explicit basis.
+
+⚖️ The three-argument form defaults to `rate_card` so every existing fixture
+keeps its meaning; this one exists for the cases that need `absent`.
+
+-}
+basisServiceJson : String -> String -> Int -> String -> Encode.Value
+basisServiceJson service description amountCents basis =
     Encode.object
         [ ( "service", Encode.string service )
         , ( "description", Encode.string description )
         , ( "amount_cents", Encode.int amountCents )
+        , ( "basis", Encode.string basis )
+        , ( "refreshed_at", Encode.string "" )
         ]
+
+
+{-| Whether an encoded service line is an absent one.
+
+⚖️ Derived from the items rather than passed in, so a fixture cannot declare a
+count that disagrees with its own lines — which is the shape of the defect this
+whole feature is about.
+
+-}
+isAbsentItem : Encode.Value -> Bool
+isAbsentItem item =
+    item
+        |> Encode.encode 0
+        |> String.contains "\"basis\":\"absent\""
 
 
 monthlyTotalJson : String -> String -> Int -> Encode.Value

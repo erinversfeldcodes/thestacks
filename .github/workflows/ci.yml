@@ -1254,8 +1254,20 @@ jobs:
           # deployed, so its send budget is intact and a 429 is a real signal;
           # the exhaustion that motivated the gate came from repeated local runs
           # against one reused stack.
+          # ⚖️ E2E_EXPECT_ABSENT_COST_LINE: SET DELIBERATELY. The cost page's
+          # unmeasured-line rendering is only exercised when some metric family
+          # has no samples for the period, and on a preview — fresh Neon branch,
+          # fresh metrics store, no real provider billing — several never do.
+          # Measured on a live preview: 4 of 10 cost lines were absent.
+          #
+          # If that ever stops being true the case would SILENTLY SKIP and the
+          # unmeasured-line rendering would go unexercised in CI forever. With
+          # the flag set, the precondition disappearing is a loud failure, which
+          # is information rather than noise — and an opt-in flag nothing sets
+          # is indistinguishable from a forgotten one.
           CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 E2E_EXPECT_FULL_SEEDS=1 \
             E2E_EXPECT_RATE_LIMITING=1 E2E_EXPECT_EMAIL_DELIVERY=1 \
+            E2E_EXPECT_ABSENT_COST_LINE=1 \
             GRAFANA_URL="${GRAFANA_URL}" BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: E2E repeatability (two identical runs must agree)
         if: ${{ !cancelled() }}

@@ -96,13 +96,15 @@ test.describe("Cost Transparency", () => {
       .filter((i: { basis: string }) => i.basis === "absent");
 
     if (absent.length === 0) {
-      const required = process.env.E2E_EXPECT_ABSENT_COST_LINE === "1";
+      // ⚖️ Asserts the PRECONDITION and names the flag in the failure text, the
+      // shape the sibling helpers use. The inverted form asserted `required`
+      // was false, so its message — advising the reader to set the flag — only
+      // ever printed when the flag was already set.
       expect(
-        required,
-        "no cost line has basis=absent on this stack, so the no-currency-zero " +
-          "rendering is unexercised — set E2E_EXPECT_ABSENT_COST_LINE=1 only " +
-          "where an unmeasured line is guaranteed"
-      ).toBe(false);
+        process.env.E2E_EXPECT_ABSENT_COST_LINE !== "1",
+        "E2E_EXPECT_ABSENT_COST_LINE=1 but no cost line has basis=absent on " +
+          "this stack, so the no-currency-zero rendering is unexercised"
+      ).toBe(true);
       test.skip(true, "no absent cost line on this stack to render");
       return;
     }
@@ -122,10 +124,16 @@ test.describe("Cost Transparency", () => {
 
     // ⬛ The API said there is an absent line, so the page must show one. If
     // this is empty the page is rendering a figure for it — which is the defect.
+    // ⛔ COUNT-COUPLED, NOT `>= 1`. This asserted `toBeGreaterThan(0)` while its
+    // own message claimed a fact about `absent.length` — so with 5 absent lines
+    // and 4 still rendering `$0.00` it passed and printed a message that was
+    // false. The original defect was FIVE builders answering an unavailable
+    // measurement with zero, so a partial regression is the realistic shape,
+    // and it is exactly what `>= 1` cannot see.
     expect(
       absentRendered.length,
-      `the API reports ${absent.length} absent line(s) and the page renders none as text`
-    ).toBeGreaterThan(0);
+      `the API reports ${absent.length} absent line(s) and the page renders ${absentRendered.length} as text`
+    ).toBe(absent.length);
 
     for (const t of absentRendered) {
       expect(t).not.toMatch(/\$/);

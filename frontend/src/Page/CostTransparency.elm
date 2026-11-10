@@ -248,7 +248,7 @@ viewStorySection breakdown =
                     ++ String.fromInt m.visionJobsThisMonth
                     ++ " identifications this month."
                 )
-                (categoryTotalText (categoryFor "compute" breakdown.categories))
+                (categoryFor "compute" breakdown.categories)
             , viewStoryCard "Store & Shelve"
                 ("Each book has metadata — title, author, ISBN, cover URL — plus your "
                     ++ "placement on a shelf. "
@@ -259,13 +259,13 @@ viewStorySection breakdown =
                     ++ formatBytes m.dbSizeBytes
                     ++ "."
                 )
-                (categoryTotalText (categoryFor "database" breakdown.categories))
+                (categoryFor "database" breakdown.categories)
             , viewStoryCard "Serve & Browse"
                 ("The app runs on a small VM in Virginia (IAD). Every page load, "
                     ++ "API call, and shelf browse is served from here. The vision "
                     ++ "sidecar proxies GPU requests via HMAC-authenticated HTTPS."
                 )
-                (categoryTotalText (categoryFor "hosting" breakdown.categories))
+                (categoryFor "hosting" breakdown.categories)
             ]
         ]
 
@@ -276,12 +276,13 @@ the page, and they were printing `$0.00/mo` for categories whose lines are
 unmeasured — the same false claim as the header, on the cards a reader sees
 first.
 -}
-viewStoryCard : String -> String -> String -> Html Msg
-viewStoryCard title narrative costText =
+viewStoryCard : String -> String -> CostCategory -> Html Msg
+viewStoryCard title narrative cat =
     div [ class "costs__story-card" ]
         [ h3 [ class "costs__story-title" ] [ text title ]
         , p [ class "costs__story-text" ] [ text narrative ]
-        , span [ class "costs__story-cost" ] [ text (costText ++ "/mo") ]
+        , span [ class "costs__story-cost" ]
+            [ text (categoryMoneyText cat ++ "/mo" ++ unmeasuredSuffix cat) ]
         ]
 
 
@@ -511,17 +512,40 @@ reader more than either a bare number or nothing.
 -}
 categoryTotalText : CostCategory -> String
 categoryTotalText cat =
+    categoryMoneyText cat ++ unmeasuredSuffix cat
+
+
+{-| Just the money part of a category's figure.
+
+⛔ SEPARATED BECAUSE A UNIT BELONGS TO A NUMBER, NOT TO A SENTENCE. The story
+cards render `costText ++ "/mo"`, which was correct while `costText` was a
+currency figure — and the moment the aggregate fix made it a sentence, the card
+shipped **"$X.XX + 1 unmeasured/mo"** on the most prominent figure on the page.
+The `Int -> String` change was the right fix for the aggregate and carried this
+with it.
+
+⚖️ So the suffix is composed per-part: the card appends "/mo" to the money and
+the unmeasured note trails it, instead of "/mo" landing on whatever the last
+word happens to be.
+
+-}
+categoryMoneyText : CostCategory -> String
+categoryMoneyText cat =
+    formatCents cat.totalCents
+
+
+{-| The trailing note when a category has lines with no figure, or "".
+-}
+unmeasuredSuffix : CostCategory -> String
+unmeasuredSuffix cat =
     if cat.unmeasuredCount == 0 then
-        formatCents cat.totalCents
+        ""
 
     else if cat.unmeasuredCount == 1 then
-        formatCents cat.totalCents ++ " + 1 unmeasured"
+        " + 1 unmeasured"
 
     else
-        formatCents cat.totalCents
-            ++ " + "
-            ++ String.fromInt cat.unmeasuredCount
-            ++ " unmeasured"
+        " + " ++ String.fromInt cat.unmeasuredCount ++ " unmeasured"
 
 
 formatCategoryName : String -> String
