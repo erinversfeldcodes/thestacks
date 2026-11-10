@@ -215,14 +215,22 @@ test.describe("Cost Transparency", () => {
     const resp = await request.get("/api/costs");
     const body = await resp.json();
 
-    const starts = body.data.categories
-      .flatMap((c: { items: Array<{ period_start?: string }> }) => c.items)
-      .map((i: { period_start?: string }) => i.period_start)
+    // ⛔ READ FROM monthly_totals, NOT FROM THE ITEMS. My first version of this
+    // test read `period_start` off each cost ITEM — a field `CostItem` does not
+    // have — so it would have failed its own anti-vacuity check. The Elm fix it
+    // was written for had the same wrong source and fell back silently to the
+    // old label, leaving the page unchanged while the fix read as landed.
+    const starts = (body.data.monthly_totals || [])
+      .map((m: { period_start?: string }) => m.period_start)
       .filter((s: string | undefined) => !!s);
 
-    // ⬛ ANTI-VACUITY: the assertion below is about a month name derived from
-    // this value, so an empty list would make it unfalsifiable.
-    expect(starts.length, "no cost item carries a period_start").toBeGreaterThan(0);
+    // ⬛ ANTI-VACUITY: the assertion below derives a month name from this
+    // value, so an empty list would make it unfalsifiable — and that is exactly
+    // the state the wrong source produced.
+    expect(
+      starts.length,
+      "no monthly total carries a period_start, so the period label has no source"
+    ).toBeGreaterThan(0);
 
     await page.goto("/costs");
     await expect(page.getByTestId("costs-content")).toBeVisible({
@@ -239,10 +247,22 @@ test.describe("Cost Transparency", () => {
       "January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December",
     ];
-    const expected = monthNames[Number(starts[0].slice(5, 7)) - 1];
+    // The CURRENT period is the last monthly total, which is the one the
+    // headline figure covers.
+    const current = starts[starts.length - 1];
+    const expected = monthNames[Number(current.slice(5, 7)) - 1];
 
     await expect(label).toContainText(expected);
-    await expect(label).toContainText(starts[0].slice(0, 4));
+    await expect(label).toContainText(current.slice(0, 4));
+
+    // ⛔ AND THE FALLBACK MUST NOT BE WHAT WE ARE SEEING. A graceful default is
+    // what made the broken version invisible, so this asserts the PRIMARY path
+    // was taken rather than merely that the page rendered something.
+    await expect(label).not.toHaveText("Total monthly cost");
+
+    // How fresh the figures are — a different question from which period they
+    // cover, and the page left both open.
+    await expect(page.locator(".costs__banner-asof")).toContainText(/figures as of/);
   });
 
   test("API endpoint returns cost data without auth", async ({ request }) => {

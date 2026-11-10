@@ -2535,7 +2535,7 @@ h4 {
     font-weight: 400;
     color: var(--text-muted);
     line-height: 1.4;
-    margin-top: 0.35rem;
+    margin-top: var(--space-1);
     max-width: 38ch;
 }
 
@@ -2732,6 +2732,44 @@ h4 {
     font-style: italic;
     color: var(--text-muted);
     line-height: 1.4;
+
+    /* ⛔ A SENTENCE IS NOT A FIGURE, SO IT MUST NOT SIT IN THE FIGURE COLUMN.
+       The rule above already said a line with no figure is prose and should not
+       be dressed as a number; the GRID PLACEMENT never followed through, so
+       "not yet measured this period" was squeezed into a column sized for
+       "$15.60" — taking MORE width than the amount on a measured row and
+       leaving the description 134px at phone width. The hierarchy inverted on
+       exactly the rows carrying the least information.
+
+       ⚖️ Moved to its own line under the description rather than capped or
+       truncated. Truncation with a `title` was the obvious alternative and is
+       wrong twice over: on a transparency page the reason a figure is missing
+       is the content, not an aside, and `title` is unreachable on touch.
+
+       Measured at 375px: description 134px → 286px (2.1x) and rows SHORTER
+       (Modal GPU Idle 201px → 140px), with measured rows untouched at 244px
+       and no horizontal overflow. Column 2's `auto` track collapses to zero
+       when unoccupied, so this also fixes the same inversion in the desktop
+       grid with no media query — it was never width-dependent. */
+    grid-column: 1;
+    grid-row: 3;
+    text-align: left;
+    max-width: none;
+    align-self: start;
+    margin-top: var(--space-1);
+}
+
+/* When the figures were computed, under the figure itself. ⚖️ Quieter than the
+   completeness caveat above it: "which period" is a property of the number and
+   "how fresh" is a property of the page, so they are not given equal weight. */
+.costs__banner-asof {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: var(--space-1);
 }
 
 .costs__trend {

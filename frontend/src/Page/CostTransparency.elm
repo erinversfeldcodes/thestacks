@@ -222,6 +222,7 @@ viewTotalBanner breakdown =
             [ span [ class "costs__banner-label" ] [ text (bannerLabel breakdown) ]
             , span [ class "costs__banner-amount" ] [ text (formatCents breakdown.totalCents) ]
             , span [ class "costs__banner-caveat" ] [ text (totalCaveat breakdown) ]
+            , span [ class "costs__banner-asof" ] [ text (asOfText breakdown.generatedAt) ]
             ]
         , div [ class "costs__banner-formula" ]
             (breakdown.categories
@@ -544,7 +545,7 @@ differed — which is exactly the case a reader needs the date for.
 -}
 bannerLabel : CostBreakdown -> String
 bannerLabel breakdown =
-    case firstPeriodStart breakdown of
+    case currentPeriodStart breakdown of
         Just start ->
             "Total cost for " ++ monthLabel start
 
@@ -552,13 +553,62 @@ bannerLabel breakdown =
             "Total monthly cost"
 
 
-firstPeriodStart : CostBreakdown -> Maybe String
-firstPeriodStart breakdown =
-    breakdown.categories
-        |> List.concatMap .items
+{-| ⛔ THIS READ `.periodStart` OFF EACH COST ITEM, A FIELD THAT DOES NOT EXIST.
+`CostItem` carries five fields — service, description, amount\_cents, basis,
+refreshed\_at — and `serialize_cost/1` sends exactly those. So `periodStart`
+decoded as `""` for every item, the filter dropped them all, this returned
+`Nothing`, and the label fell back to the old "Total monthly cost".
+
+⚠️ **The page was unchanged and the fix read as landed**, because the fallback
+is graceful. A reviewer caught it minutes after I reported it done. The lesson
+is not the wrong field name: it is that a tolerant default turns a broken
+feature into an invisible one, so a fallback path needs a test that proves the
+PRIMARY path was taken.
+
+⚖️ `monthlyTotals` is the right source and was already decoded and already
+rendered by the trend chart — the period was on the page all along, just never
+beside the figure it describes. The LAST entry is the current period.
+
+-}
+currentPeriodStart : CostBreakdown -> Maybe String
+currentPeriodStart breakdown =
+    breakdown.monthlyTotals
         |> List.map .periodStart
         |> List.filter (\s -> s /= "")
+        |> List.reverse
         |> List.head
+
+
+{-| When these figures were computed.
+
+⚖️ A separate question from WHICH PERIOD they cover, and the page left both
+open. "November 2026" says what is being measured; "as of 10 November" says how
+stale the answer is — and with a daily refresh job behind some of these lines,
+a reader needs the second to know whether a zero means "free" or "not yet run".
+
+-}
+asOfText : String -> String
+asOfText generatedAt =
+    case String.split "-" (String.left 10 generatedAt) of
+        [ _, month, day ] ->
+            case monthName month of
+                Just name ->
+                    "figures as of " ++ stripLeadingZero day ++ " " ++ name
+
+                Nothing ->
+                    ""
+
+        _ ->
+            ""
+
+
+stripLeadingZero : String -> String
+stripLeadingZero s =
+    if String.startsWith "0" s then
+        String.dropLeft 1 s
+
+    else
+        s
 
 
 {-| `2026-11-01T00:00:00Z` -> `November 2026`. ⚖️ Falls back to the raw string
