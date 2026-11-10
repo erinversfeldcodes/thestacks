@@ -34,6 +34,27 @@ defmodule Core.Repo.Migrations.SayHowEachCostFigureWasArrivedAt do
   """
   use Ecto.Migration
 
+  # ⚠️ THE CONSTRAINT IS ADDED AND VALIDATED IN ONE STATEMENT, DELIBERATELY —
+  # and the two sibling CHECKs on this same table are not.
+  #
+  # `20261014120100` added its constraints `NOT VALID` and validated them in
+  # `20261014120200`, which is the house pattern for a table large enough that
+  # the validating scan holds ACCESS EXCLUSIVE for a noticeable time.
+  # `op.platform_costs` holds one row per service per billing period — tens of
+  # rows, not millions — so the scan is milliseconds and the split would buy
+  # nothing. Recorded because the table now carries two spellings and a reader
+  # comparing them deserves to know the difference is a size judgement rather
+  # than an oversight.
+  #
+  # ⛔ AND `security-squawk.sh` CANNOT ADJUDICATE THAT CHOICE HERE, which is the
+  # part worth knowing. `scripts/extract-migration-sql.py` does not translate
+  # the Ecto DSL, so `alter table … add` and `create constraint(…)` are
+  # invisible to it: this file yields only its two `SET` statements, and the
+  # gate therefore reports it as analysed-and-clean rather than listing it
+  # PARTIAL. The same `ADD CONSTRAINT` written as a raw `execute` string WOULD
+  # be checked — including by `constraint-missing-not-valid`, the rule that
+  # forced the confidence CHECK into two files. A gate whose verdict depends on
+  # which spelling you used is a gate that cannot be read as a verdict.
   def up do
     execute("SET LOCAL lock_timeout = '5s'")
     execute("SET LOCAL statement_timeout = '30s'")

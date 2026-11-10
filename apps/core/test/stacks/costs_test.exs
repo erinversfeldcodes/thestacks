@@ -800,6 +800,49 @@ defmodule Stacks.CostsTest do
                "while looking complete"
     end
 
+    # ⛔ THE HEADLINE TOTAL AND THE HISTORICAL SERIES TOO — the other two of four
+    # aggregation sites, caught by a reviewer re-driving the diff after the
+    # first two were fixed.
+    #
+    # ⚠️ The case above already had a fixture shaped to catch this and did not
+    # assert it, so it passed while `current_total` summed the absent line. That
+    # is the same vacuity I had just caught one level down: a fixture that CAN
+    # distinguish two behaviours proves nothing unless something reads the
+    # number it distinguishes.
+    test "the top-level total excludes absent lines" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      measured = %{
+        category: "compute",
+        service: "Measured Thing",
+        description: "d",
+        amount_cents: 500,
+        currency: "USD",
+        basis: "rate_card",
+        period_start: period_start,
+        period_end: period_end
+      }
+
+      # The same deliberately unrealistic non-zero placeholder: production
+      # absent rows carry 0, which makes their inclusion invisible.
+      absent = %{measured | service: "Unmeasured Thing", amount_cents: 999, basis: "absent"}
+
+      for attrs <- [measured, absent] do
+        {:ok, _} = Costs.upsert_cost(attrs)
+      end
+
+      breakdown = Costs.cost_breakdown()
+
+      assert breakdown.total_cents == 500,
+             "the headline total summed a figure nobody has — this and cost_per_book are the " <>
+               "FIRST numbers a reader sees, above every line already corrected below"
+
+      refute Enum.any?(breakdown.monthly_totals, &(&1.total_cents == 1499)),
+             "the historical series includes the absent line — a chart that lies about the " <>
+               "past, where nobody will re-check it"
+    end
+
     # ⬛ ANTI-VACUITY: a category with nothing absent reports zero unmeasured, or
     # a header that always said "+ N unmeasured" would satisfy the case above
     # and cry wolf on every complete category.

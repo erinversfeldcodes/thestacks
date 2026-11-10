@@ -72,6 +72,12 @@ defmodule Stacks.Costs do
 
     PlatformCost
     |> where([c], c.period_start >= ^cutoff)
+    # ⛔ THE HISTORICAL SERIES EXCLUDES THEM AS WELL — the fourth aggregation
+    # site, and the only one in SQL rather than in Elixir, which is why it was
+    # the easiest to miss. A monthly total that silently includes figures nobody
+    # measured is a chart that lies about the past, where nobody will ever
+    # re-check it.
+    |> where([c], c.basis != "absent")
     |> group_by([c], [c.period_start, c.period_end])
     |> select([c], %{
       period_start: c.period_start,
@@ -725,7 +731,23 @@ defmodule Stacks.Costs do
     totals = monthly_totals()
     metrics = usage_metrics()
 
-    current_total = Enum.reduce(costs, 0, fn c, acc -> acc + c.amount_cents end)
+    # ⛔ THE HEADLINE TOTAL EXCLUDES ABSENT LINES TOO, and this was the third of
+    # four aggregation sites — fixed only after a reviewer re-drove the diff.
+    #
+    # The per-line fix landed, then the category total, and these two were still
+    # summing figures nobody has: `total_cents` and the `cost_per_book` derived
+    # from it are the FIRST numbers a reader sees, above everything already
+    # corrected below.
+    #
+    # ⚠️ All four sites were correct in production for one reason only: every
+    # absent row happens to carry `amount_cents: 0`, so summing it changed
+    # nothing. That is the coincidence this issue exists to remove — the moment
+    # a builder emits a non-zero amount beside an absent basis, these
+    # over-count silently. Relying on it is relying on the defect.
+    current_total =
+      costs
+      |> Enum.reject(&(&1.basis == "absent"))
+      |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end)
 
     cost_per_book =
       if metrics.books > 0,
