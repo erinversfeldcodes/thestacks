@@ -133,7 +133,25 @@ defmodule Core.Repo.Migrations.CreateTheRolesTheWarehouseGrantsAssume do
   # Idempotent in both directions: creates the role when absent, and resets the
   # password when present, so rotating a secret and re-running is the supported
   # path rather than a manual `ALTER ROLE` someone has to remember.
-  defp ensure_login_role(_role, nil), do: :ok
+  #
+  # ⛔ A MISSING PASSWORD USED TO SKIP THE ROLE ENTIRELY (`do: :ok`), WHICH
+  # BROKE THE SCHEMA RATHER THAN THE LOGIN. Migration `20261020140000` grants
+  # `EXECUTE ON FUNCTION op.current_scope()` to `stacks_app`, so a run with no
+  # password left a later migration failing with `role "stacks_app" does not
+  # exist` — which is what CI's `migration-safety` and `test-dbt` jobs did,
+  # because neither supplies the password that `test-elixir` does.
+  #
+  # ⚖️ The role's EXISTENCE is structural — later migrations grant to it — while
+  # its ability to LOG IN is a deployment concern. Conflating the two meant an
+  # absent secret produced a broken schema instead of an unusable account. So a
+  # passwordless run now creates the role NOLOGIN, exactly as the readonly role
+  # already is, and supplying a password later upgrades it in place via the
+  # `ALTER ROLE … LOGIN PASSWORD` branch below.
+  #
+  # ⚠️ NOLOGIN is the safe direction: a role nobody can authenticate as cannot
+  # be used by accident, whereas inventing a password would create a real
+  # credential nobody chose.
+  defp ensure_login_role(role, nil), do: ensure_nologin_role(role)
 
   defp ensure_login_role(role, password) do
     execute(

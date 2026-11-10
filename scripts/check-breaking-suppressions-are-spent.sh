@@ -65,6 +65,7 @@ fi
 
 python3 - "$BUF_YAML" "$REPO_ROOT" <<'PY'
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -174,6 +175,19 @@ def breaking_violations_without_suppressions():
         assert "ignore_only" not in stripped, "failed to strip ignore_only from the copy"
         staged.joinpath("buf.yaml").write_text(stripped, encoding="utf-8")
 
+        # ⛔ GIT_LFS_SKIP_SMUDGE=1, FOR THE SAME REASON AS THE SIBLING CALL IN
+        # lint-proto.sh, AND LEAVING IT OFF HERE IS WHAT BROKE CI. `--against`
+        # makes buf clone the local repository, and that checkout runs the LFS
+        # smudge filter over `concepts/**/*.png`. A CI checkout with
+        # `lfs: false` has pointer files and no objects, so the clone dies —
+        # and this gate then saw ZERO violations where it expects 34.
+        #
+        # ⚖️ The zero is what caught it: this gate refuses an empty result
+        # rather than reading "no violations" as "nothing to suppress". So an
+        # incomplete fix to the LFS problem surfaced as a loud anti-vacuity
+        # failure instead of a silently passing contract check.
+        env = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
+
         proc = subprocess.run(
             [
                 "buf",
@@ -185,6 +199,7 @@ def breaking_violations_without_suppressions():
             cwd=staged,
             capture_output=True,
             text=True,
+            env=env,
         )
 
     found = Counter()
