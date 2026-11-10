@@ -550,8 +550,8 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Vision call latency p50 / p95 / p99",
-      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call, at the 50th, 95th and 99th percentile. The sidecar serves one identification endpoint, /analyze; the panel named classify / extract / associate alongside it until 2026-10-15, when those three were deleted. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response \u2014 success or not. MEANS: the value is milliseconds per call. \u26a0\ufe0f An upload now makes ONE such HTTP call, not two \u2014 this said 'up to two of these back to back, so the upload's own latency floor is roughly twice p50', which stopped being true when /classify and /extract were deleted. Note the fan-out did not go away, it moved: /analyze invokes two Modal METHODS internally, and that cost is inside this single measurement rather than beside it; the long-standing '~3\u20138s per upload' figure was an estimate in a comment, and the first real measurement put p50 at 8.4s with warm calls under 30s and cold starts under 60s. READ IT WITH THE PANEL BESIDE IT: these quantiles only count calls that got a response, so a call that hits the client's 330s deadline is absent from this panel entirely and appears only as a vision give-up. WATCH: p99 climbing past the 60s (cold-start) edge means something other than a cold start is slow \u2014 most likely uploads queuing on a single A10G, the term Modal's own 300s timeout was sized for; a p50 that jumps while p99 is flat is a container-warmth shift, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading.",
+      "title": "Vision call latency p50 / p95 / p99, by tier",
+      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call, at the 50th, 95th and 99th percentile. The sidecar serves one identification endpoint, /analyze; the panel named classify / extract / associate alongside it until 2026-10-15, when those three were deleted. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response \u2014 success or not. MEANS: the value is milliseconds per call. \u26a0\ufe0f An upload now makes ONE such HTTP call, not two \u2014 this said 'up to two of these back to back, so the upload's own latency floor is roughly twice p50', which stopped being true when /classify and /extract were deleted. Note the fan-out did not go away, it moved: /analyze invokes two Modal METHODS internally, and that cost is inside this single measurement rather than beside it; the long-standing '~3\u20138s per upload' figure was an estimate in a comment, and the first real measurement put p50 at 8.4s with warm calls under 30s and cold starts under 60s. READ IT WITH THE PANEL BESIDE IT: these quantiles only count calls that got a response, so a call that hits the client's 330s deadline is absent from this panel entirely and appears only as a vision give-up. WATCH: p99 climbing past the 60s (cold-start) edge means something other than a cold start is slow \u2014 most likely uploads queuing on a single A10G, the term Modal's own 300s timeout was sized for; a p50 that jumps while p99 is flat is a container-warmth shift, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading. \u26d4 SPLIT BY TIER, BECAUSE A SINGLE PERCENTILE OVER BOTH IS AN ARITHMETIC ARTEFACT. Measured live: a barcode decode totals 7ms against ~21,900ms for a GPU inference \u2014 a factor of ~3,100. A blended p95 therefore moves with the barcode HIT RATE rather than with anything about either path, so sizing a timeout from it sizes it for neither. The tier label was added to the histogram for this and nothing read it until now.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -586,8 +586,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
-          "legendFormat": "vision p50"
+          "expr": "histogram_quantile(0.50, sum by (le, tier) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{tier}}"
         },
         {
           "refId": "B",
@@ -595,8 +595,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
-          "legendFormat": "vision p95"
+          "expr": "histogram_quantile(0.95, sum by (le, tier) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{tier}}"
         },
         {
           "refId": "C",
@@ -604,8 +604,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
-          "legendFormat": "vision p99"
+          "expr": "histogram_quantile(0.99, sum by (le, tier) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{tier}}"
         }
       ]
     },
