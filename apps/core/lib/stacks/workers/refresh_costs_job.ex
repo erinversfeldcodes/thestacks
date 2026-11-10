@@ -44,6 +44,13 @@ defmodule Stacks.Workers.RefreshCostsJob do
         fly_services_cents: fly_services_cents,
         neon_cents: neon_cents,
         together_completions: metric_count("stacks_ai_together_completion_count_total"),
+        gpu_cold_starts: metric_count("stacks_vision_gpu_cold_start_count_total"),
+        # ⛔ WITHOUT THIS LINE THE IDLE COST IS BUILT AND UNREACHABLE. The
+        # builder, the model, the rate and the panel all existed and the page
+        # still rendered "not yet measured", because nothing supplied the
+        # count — the defect class where every piece is present and no caller
+        # joins them.
+
         brave_searches: metric_count("stacks_discovery_brave_search_count_total"),
         isbn_lookups: metric_count("stacks_moderation_isbn_resolution_count_total"),
         emails_sent: unwrap(Costs.emails_this_month())
