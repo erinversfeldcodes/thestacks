@@ -100,12 +100,23 @@ probe() {
 plant "$RUNTIME" "Selection.choose" "Selection.pick"
 probe "plant_runtime_stops_delegating" "no longer calls Stacks.Storage.Selection.choose"
 
-plant "$RUNTIME" "  case Stacks.Storage.Selection.choose" \
+# ⚠️ ANCHORED ON `storage_decision =`, NOT ON THE `case` LINE IT USED TO NAME.
+# `runtime.exs` no longer calls `Selection.choose/2` directly from a `case`: the
+# call is wrapped in a `Code.ensure_loaded?/1` guard, because the proto-codegen
+# bootstrap reads this file before the app is compiled and the module does not
+# exist yet. The old anchor matched zero times, so the plant never applied — and
+# a plant that does not apply leaves the gate correctly GREEN, which this suite
+# then reports as its own failure rather than as a pass. That is the right
+# behaviour and it is why the anchor is checked for an exact count.
+#
+# ⚖️ The planted violation itself is unchanged: a credential-presence check
+# deciding the backend, inserted immediately before the real decision.
+plant "$RUNTIME" "  storage_decision =" \
       "  if a = System.get_env(\"R2_ACCOUNT_ID\") do
     config :core, :storage, Stacks.Storage.R2
   end
 
-  case Stacks.Storage.Selection.choose"
+  storage_decision ="
 probe "plant_credential_read_as_intent" "inside a credential-presence check"
 
 plant "$SELECTION" 'declared(env, "R2_BUCKET_NAME")}}' \

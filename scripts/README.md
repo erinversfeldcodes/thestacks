@@ -28,12 +28,13 @@ in code by" and check it before relying on it.
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-csrf-clients.sh` | `scripts/lint-elixir.sh`, `test/platform/csrf_clients_gate_test.sh` | Every non-browser client that writes to our own API carries the CSRF proof. |
 | `scripts/check-csrf-scope.sh` | `scripts/lint-elixir.sh` | The CSRF counter's declared scope must match the router's actual population. |
+| `scripts/check-css-contrast.sh` | `scripts/lint-elm.sh` | ⛔ THE STYLESHEET HAD NO CONTRAST GATE, AND A 3.81:1 TEXT COLOUR SHIPPED. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
-| `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elixir.sh` |  |
 | `scripts/check-e2e-repeatability.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | A spec that passes must pass again, immediately, against the same stack. |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
 | `scripts/check-effect-seam.sh` | `scripts/lint-elm.sh`, `test/platform/effect_seam_gate_test.sh` |  |
