@@ -17,8 +17,7 @@ import Json.Decode as D
 import Json.Encode as E
 import Stacks.Api.V1.Admin
     exposing
-        ( CostBasis(..)
-        , CostBreakdown
+        ( CostBreakdown
         , CostItem
         , EnrichmentGaps
         , MetricsDashboard
@@ -128,6 +127,7 @@ import Stacks.Common.V1.Book
         , encodeBook
         , encodeEdition
         )
+import Stacks.Common.V1.Costs exposing (CostBasis(..))
 import Stacks.Common.V1.Listing
     exposing
         ( Listing

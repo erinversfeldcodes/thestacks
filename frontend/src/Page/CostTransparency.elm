@@ -19,6 +19,7 @@ import Html.Attributes exposing (class)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Stacks.Api.V1.Admin as ProtoAdmin
+import Stacks.Common.V1.Costs as ProtoCosts
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -37,7 +38,7 @@ type alias CostItem =
     --
     -- ⚖️ A rate-card ZERO is honest; only `CostBasisAbsent` means the amount
     -- must not be rendered as money.
-    , basis : ProtoAdmin.CostBasis
+    , basis : ProtoCosts.CostBasis
     , refreshedAt : String
     }
 
@@ -400,16 +401,16 @@ field, carried into the visual register rather than left to the words alone.
 amountClass : CostItem -> String
 amountClass item =
     case item.basis of
-        ProtoAdmin.CostBasisAbsent ->
+        ProtoCosts.CostBasisAbsent ->
             "costs__service-amount costs__service-amount--unmeasured"
 
-        ProtoAdmin.CostBasisUnspecified ->
+        ProtoCosts.CostBasisUnspecified ->
             "costs__service-amount costs__service-amount--unmeasured"
 
-        ProtoAdmin.CostBasisMeasured ->
+        ProtoCosts.CostBasisMeasured ->
             "costs__service-amount"
 
-        ProtoAdmin.CostBasisRateCard ->
+        ProtoCosts.CostBasisRateCard ->
             "costs__service-amount"
 
 
@@ -432,16 +433,16 @@ measured" would imply the absence itself was measured then.
 amountText : CostItem -> Html msg
 amountText item =
     case item.basis of
-        ProtoAdmin.CostBasisAbsent ->
+        ProtoCosts.CostBasisAbsent ->
             text (absentCopy item.refreshedAt)
 
-        ProtoAdmin.CostBasisUnspecified ->
+        ProtoCosts.CostBasisUnspecified ->
             text (absentCopy item.refreshedAt)
 
-        ProtoAdmin.CostBasisMeasured ->
+        ProtoCosts.CostBasisMeasured ->
             text (formatCents item.amountCents)
 
-        ProtoAdmin.CostBasisRateCard ->
+        ProtoCosts.CostBasisRateCard ->
             text (formatCents item.amountCents)
 
 

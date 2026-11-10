@@ -7,6 +7,8 @@ syntax = "proto3";
 
 package stacks.api.v1;
 
+import "stacks/common/v1/costs.proto";
+
 // ─── Admin Metrics Dashboard (GET /api/metrics) ─────────────────────────
 
 // SystemHealth mirrors Stacks.Admin.Metrics.system_health/0 fallback shape.
@@ -187,42 +189,11 @@ message CostItem {
   // reader to assume it was measured. This field is what lets the page say
   // which lines are measurements and which are rate-card arithmetic, per line
   // rather than in one blanket claim at the bottom.
-  CostBasis basis = 4 [json_name = "basis"];
+  stacks.common.v1.CostBasis basis = 4 [json_name = "basis"];
 
   // When the figure was last refreshed, RFC3339. Empty when basis is
   // COST_BASIS_ABSENT, because there is no refresh to report.
   string refreshed_at = 5 [json_name = "refreshed_at"];
-}
-
-// CostBasis says how a cost figure was arrived at.
-//
-// ⛔ ABSENT IS NOT ZERO, AND CONFLATING THEM WAS THE DEFECT THIS ENUM EXISTS
-// FOR. `Costs.metric_count_this_month/1` mapped a metric family with no samples
-// to a real 0, so the transparency page printed "$0.00" for a service it had no
-// measurement of — on a page whose own closing line claimed every number on it
-// was real. A reader seeing zero concludes the thing is free.
-//
-// The caller's nil path already existed and already said the right thing: "a
-// measurement we could not take is nil, never 0". This vocabulary is that
-// distinction made explicit on the wire rather than left to a convention one
-// layer down.
-enum CostBasis {
-  // Unset. A client should treat this as ABSENT rather than as a measurement,
-  // because an unset basis on a line that carries a number is exactly the
-  // ambiguity this enum removes.
-  COST_BASIS_UNSPECIFIED = 0;
-
-  // Read from a meter: the figure is what was observed for this period.
-  COST_BASIS_MEASURED = 1;
-
-  // Computed from a published price and an observed quantity. Honest
-  // arithmetic, not an observation of spend — a provider's invoice may differ.
-  COST_BASIS_RATE_CARD = 2;
-
-  // No figure for this period. The meter returned no samples, or the store
-  // could not be read. `amount_cents` is not meaningful and must not be
-  // rendered as money.
-  COST_BASIS_ABSENT = 3;
 }
 
 // CostCategory groups cost items by category.
