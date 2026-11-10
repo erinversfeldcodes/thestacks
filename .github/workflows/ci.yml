@@ -909,9 +909,21 @@ jobs:
           python3 scripts/gen_python_proto.py --language python
       - name: Build images for CIS benchmark
         run: |
-          docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
-          docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
-          docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
+          # ⛔ NOT `-q`. These are the only full image builds in PR CI, so when
+          # one fails this step is the only place the reason exists — and `-q`
+          # discarded it, leaving `process "/bin/sh -c bash
+          # scripts/gen-ecto-proto.sh && ..." did not complete successfully`
+          # as the entire diagnosis. A real failure took three separate log
+          # reads to attribute, and was ultimately only identified by
+          # reproducing the build's MIX_ENV locally.
+          #
+          # ⚖️ The quiet flag buys a shorter log on the runs that pass, and
+          # costs the diagnosis on the ones that do not. `--progress=plain`
+          # also drops the TTY redraws, so a failing RUN step's own stdout and
+          # stderr appear in order rather than being overwritten.
+          docker build --progress=plain -t stacks-dockle-core    -f deploy/Dockerfile.core    .
+          docker build --progress=plain -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
+          docker build --progress=plain -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
       - name: Scan images with dockle
         env:
           DOCKLE_IGNORES: DKL-DI-0006,CIS-DI-0010,DKL-DI-0005

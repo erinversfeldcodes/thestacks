@@ -81,18 +81,48 @@ else
   # ⚠️ AND THE SKIP IS LOUD IN THE ONE PLACE IT MUST NEVER HAPPEN. Silently
   # leaving storage unconfigured is how a tolerant default turns a broken
   # deployment into an invisible one, so prod refuses to boot instead.
+  # ⚖️ True only inside a started release. `:application.get_key/2` answers from
+  # the loaded application controller, which a release has and a `mix run`
+  # bootstrap does not — so this separates "the app is up and something is
+  # wrong" from "the app does not exist yet".
+  # ⚠️ AND THE SECOND CONDITION THIS USED TO CARRY WAS A TAUTOLOGY. It also
+  # asked `:code.is_loaded(Stacks.Storage.Selection) != false` — but this
+  # predicate is only consulted on the branch where `Code.ensure_loaded?/1`
+  # has already returned false, so that conjunct was always false and the
+  # raise below was unreachable. A guard that cannot fire is the shape this
+  # whole session has been finding; it does not stop being one because I wrote
+  # it while fixing another.
+  release_is_running? = fn ->
+    match?({:ok, _}, :application.get_key(:core, :vsn))
+  end
+
   storage_decision =
     if Code.ensure_loaded?(Stacks.Storage.Selection) do
       Stacks.Storage.Selection.choose(System.get_env(), config_env() == :prod)
     else
-      if config_env() == :prod do
+      # ⛔ `config_env() == :prod` IS NOT THE QUESTION, AND ASKING IT BROKE THE
+      # PRODUCTION IMAGE BUILD. `deploy/Dockerfile.core` sets `MIX_ENV=prod`
+      # and then runs the proto bootstrap, so the release BUILD reads this file
+      # in :prod before `core` has compiled — the exact state this branch
+      # exists for. Raising there failed `docker build`, and `-q` hid the
+      # reason, so it surfaced only as "process /bin/sh -c ... did not
+      # complete successfully".
+      #
+      # ⚖️ The distinguishing fact is not the environment but whether the
+      # RELEASE IS RUNNING. `:code.is_loaded/1` on a module every release
+      # carries answers that: at boot the application is loaded and
+      # `Selection` resolves, so this branch is unreachable; during a build
+      # nothing is loaded yet. A boot that genuinely cannot see the module will
+      # fail at the first storage call rather than here, which is worse than a
+      # raise and is why the check is kept at all — it is just keyed on
+      # something true.
+      if release_is_running?.() do
         raise """
-        Stacks.Storage.Selection is not loadable while reading runtime config in :prod.
+        Stacks.Storage.Selection is not loadable while a release is running.
 
-        In prod this file is read at BOOT, when the release is fully compiled, so an
-        unloadable module here means the release is broken rather than bootstrapping.
-        Refusing to start instead of defaulting the storage backend, because the
-        default would be silent and wrong.
+        A running release is fully compiled, so an unloadable module here means the
+        release is broken rather than bootstrapping. Refusing to continue instead of
+        defaulting the storage backend, because the default would be silent and wrong.
         """
       end
 
