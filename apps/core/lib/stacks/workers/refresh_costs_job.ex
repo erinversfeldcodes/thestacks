@@ -45,6 +45,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
         neon_cents: neon_cents,
         together_completions: metric_count("stacks_ai_together_completion_count_total"),
         gpu_cold_starts: metric_count("stacks_vision_gpu_cold_start_count_total"),
+
         # ⚖️ Seconds, from a millisecond counter — the inference line is priced
         # per GPU-second and converting at the read keeps one unit in the
         # builder rather than two that could be confused there.
