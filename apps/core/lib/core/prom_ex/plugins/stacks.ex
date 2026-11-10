@@ -424,6 +424,21 @@ defmodule Core.PromEx.Plugins.Stacks do
               "An upper bound: wall-clock around each Modal dispatch includes in-Modal queueing.",
           measurement: :milliseconds
         ),
+        # ⛔ THE COLD-START COUNT IS UNTRUSTWORTHY WHILE THIS IS NON-ZERO. A VLM
+        # tier answered with no GPU dispatch reported means the model ran and
+        # the telemetry did not — a sidecar or GPU image older than these
+        # fields. It is indistinguishable from an honest barcode answer in the
+        # cold-start series, so without this a deployment that stopped
+        # reporting reads as a GPU that stopped costing money.
+        counter(
+          [:stacks, :vision, :gpu_telemetry_gap, :count, :total],
+          event_name: [:stacks, :vision, :gpu_telemetry_gap],
+          description:
+            "Responses where a VLM tier answered but no GPU dispatch was reported — provably " <>
+              "missing telemetry, not absent GPU work. Read the cold-start count as a lower " <>
+              "bound whenever this is above zero.",
+          measurement: :count
+        ),
         counter(
           [:stacks, :vision, :gpu_cold_start, :count, :total],
           event_name: [:stacks, :vision, :gpu_cold_start],

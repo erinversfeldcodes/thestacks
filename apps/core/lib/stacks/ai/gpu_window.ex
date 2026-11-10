@@ -60,4 +60,31 @@ defmodule Stacks.AI.GpuWindow do
 
   defp container_id(%{"container_id" => id}) when is_binary(id), do: id
   defp container_id(_), do: nil
+  @vlm_tiers ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"]
+
+  @doc """
+  Whether a response proves its GPU telemetry is missing rather than absent.
+
+  ⛔ **An empty dispatch list has two opposite causes and the cost consequence
+  of guessing is zero idle dollars, silently.** A barcode answer genuinely made
+  no GPU dispatches; a sidecar or GPU image older than this telemetry makes
+  them and reports none. Both arrive as `[]`, and deleting
+  `unattributable_count/1` removed the only thing that told them apart.
+
+  ⚖️ The discriminator costs nothing because the response already carries it: a
+  VLM tier answered means the model ran, so an empty dispatch list alongside
+  one is **provably** a telemetry gap. A barcode tier can never produce that
+  combination, so there is no ambiguity to resolve — unlike the container-id
+  check this replaces, which could not distinguish the two cases at all.
+
+  ⚠️ It does not detect a PARTIAL gap: an old image that reports the classify
+  dispatch and not the extract one looks like a one-container request. Only the
+  total absence is provable from the response alone.
+  """
+  def telemetry_gap?(tier, dispatches)
+      when tier in @vlm_tiers and is_list(dispatches) do
+    Enum.all?(dispatches, &(container_id(&1) in [nil, ""]))
+  end
+
+  def telemetry_gap?(_tier, _dispatches), do: false
 end

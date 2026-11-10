@@ -1358,7 +1358,7 @@
     {
       "id": 23,
       "title": "GPU container cold starts (the unit idle time is billed per)",
-      "description": "GPU container cold starts, de-duplicated by container id. Multiply by the GPU scaledown window (300s) for billed idle seconds. \u26d4 THE SECOND SERIES IS A CEILING ON WHAT THIS PANEL CANNOT SEE: the cold flag rides the /analyze response body, which only exists on a 200. A request that woke a container and then failed \u2014 sidecar 502, model timeout, core-side timeout \u2014 bills its full 300s tail and is counted nowhere. That bias is NOT random: cold inferences are the slow ones, so timeouts and cold starts are correlated, and the miss is worst exactly when the number matters most. Read the two together as 'N counted, at most M uncounted' rather than treating the first line as the count.",
+      "description": "GPU container cold starts, de-duplicated by container id. Multiply by the GPU scaledown window (300s) for billed idle seconds. \u26d4 THE SECOND SERIES IS A CEILING ON WHAT THIS PANEL CANNOT SEE: the cold flag rides the /analyze response body, which only exists on a 200. A request that woke a container and then failed \u2014 sidecar 502, model timeout, core-side timeout \u2014 bills its full 300s tail and is counted nowhere. That bias is NOT random: cold inferences are the slow ones, so timeouts and cold starts are correlated, and the miss is worst exactly when the number matters most. Read the two together as 'N counted, at most M uncounted' rather than treating the first line as the count. \u26d4 THE THIRD SERIES INVALIDATES THE FIRST WHILE IT IS NON-ZERO: a VLM tier answered with no GPU dispatch reported means the model ran and the telemetry did not \u2014 an old sidecar or GPU image. That is indistinguishable from an honest barcode answer in the cold-start count, so a deployment that stopped reporting would read as a GPU that stopped costing money.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -1399,6 +1399,11 @@
           "expr": "sum(increase(stacks_vision_request_stop_duration_milliseconds_count{app=\"$app\",status!=\"200\"}[$__rate_interval])) + sum(increase(stacks_vision_request_exception_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "at most this many uncounted",
           "refId": "B"
+        },
+        {
+          "expr": "sum(increase(stacks_vision_gpu_telemetry_gap_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "TELEMETRY GAP (count is a lower bound)",
+          "refId": "C"
         }
       ]
     },

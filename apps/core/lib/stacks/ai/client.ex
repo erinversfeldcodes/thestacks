@@ -409,6 +409,27 @@ defmodule Stacks.AI.Client do
     else
       _ -> :ok
     end
+
+    maybe_report_telemetry_gap(resp_body)
+  end
+
+  # ⛔ A GAP MUST BE VISIBLE, NOT MERELY DETECTABLE. A VLM tier answered means
+  # the model ran, so an empty dispatch list beside one is provably a sidecar
+  # or GPU image older than this telemetry — and it is indistinguishable from
+  # an honest barcode answer in the cold-start count, which would silently
+  # report zero idle dollars for real GPU work.
+  #
+  # ⚖️ Emitted rather than logged, because the figure it undermines is on a
+  # dashboard: a reader comparing the cold-start count against this series can
+  # tell a quiet period from a deployment that stopped reporting.
+  defp maybe_report_telemetry_gap(resp_body) do
+    with {:ok, %{"gpu_dispatches" => dispatches} = body} when is_list(dispatches) <-
+           Jason.decode(resp_body),
+         true <- GpuWindow.telemetry_gap?(Map.get(body, "tier"), dispatches) do
+      :telemetry.execute([:stacks, :vision, :gpu_telemetry_gap], %{count: 1}, %{})
+    else
+      _ -> :ok
+    end
   end
 
   # ⚖️ Anything undeclared collapses to "other" rather than reaching the store,

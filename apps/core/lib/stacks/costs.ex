@@ -486,7 +486,9 @@ defmodule Stacks.Costs do
     "Qwen2.5-VL-7B on A10G — #{round(seconds)}s of measured GPU time across #{vision_jobs} " <>
       "inference(s) this month at $1.10/hour. Counts the model's own classify and extract " <>
       "stages only; the sidecar's download and CPU barcode work ran on no GPU, and the idle " <>
-      "tail is charged on its own line. Published rate, not an invoice"
+      "tail is charged on its own line. Published rate, not an invoice. ⚠️ Measured from " <>
+      "responses, so failed requests that still used GPU time are missing; and the timings " <>
+      "include queueing inside Modal, which can overstate a busy period"
   end
 
   defp inference_description(_seconds, vision_jobs) do

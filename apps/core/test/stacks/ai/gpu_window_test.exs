@@ -106,4 +106,55 @@ defmodule Stacks.AI.GpuWindowTest do
                "and nothing at runtime can see it"
     end
   end
+
+  describe "a missing GPU reading is told apart from an absent one" do
+    # ⛔ THE AMBIGUITY THAT DELETING unattributable_count/1 LEFT BEHIND. An
+    # empty dispatch list has two opposite causes — a barcode answer that
+    # genuinely used no GPU, and an old image that used one and reported
+    # nothing — and the cost consequence of guessing is zero idle dollars,
+    # silently, for real GPU work.
+    test "a VLM tier with no dispatch reported is provably a gap" do
+      assert GpuWindow.telemetry_gap?("ANALYSIS_TIER_VLM_EXTRACT", [])
+      assert GpuWindow.telemetry_gap?("ANALYSIS_TIER_VLM_CLASSIFY", [])
+    end
+
+    # ⬛ ANTI-VACUITY, and it is what makes the discriminator a discriminator: a
+    # BARCODE tier with no dispatches is the honest case and must NOT be
+    # flagged. A function returning true for every empty list would satisfy the
+    # case above and make the signal useless.
+    test "a barcode tier with no dispatch reported is not a gap" do
+      refute GpuWindow.telemetry_gap?("ANALYSIS_TIER_BARCODE", [])
+      refute GpuWindow.telemetry_gap?("ANALYSIS_TIER_UNSPECIFIED", [])
+      refute GpuWindow.telemetry_gap?(nil, [])
+    end
+
+    test "a VLM tier that did report a dispatch is not a gap" do
+      refute GpuWindow.telemetry_gap?("ANALYSIS_TIER_VLM_EXTRACT", [
+               %{"cold" => true, "container_id" => "one"}
+             ])
+    end
+
+    # ⚠️ A dispatch present but unattributable is still a gap: the model ran,
+    # and nothing can say on which container.
+    test "a VLM tier whose dispatches carry no usable id is a gap" do
+      assert GpuWindow.telemetry_gap?("ANALYSIS_TIER_VLM_EXTRACT", [%{"cold" => true}])
+
+      assert GpuWindow.telemetry_gap?("ANALYSIS_TIER_VLM_EXTRACT", [
+               %{"cold" => true, "container_id" => ""}
+             ])
+    end
+
+    # ⚠️ THE LIMIT, ASSERTED SO IT IS NOT MISTAKEN FOR COVERAGE. An old image
+    # that reports the classify dispatch and not the extract one is
+    # indistinguishable from a one-container request, and this function says
+    # "no gap" — correctly, because nothing in the response can prove
+    # otherwise. Only the total absence is provable.
+    test "a PARTIAL gap is not detectable and this says so" do
+      refute GpuWindow.telemetry_gap?("ANALYSIS_TIER_VLM_EXTRACT", [
+               %{"cold" => true, "container_id" => "classify-only"}
+             ]),
+             "if this ever returns true, the function has started guessing about dispatches " <>
+               "the response does not describe"
+    end
+  end
 end

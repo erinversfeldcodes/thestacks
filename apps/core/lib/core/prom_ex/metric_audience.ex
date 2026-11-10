@@ -106,6 +106,8 @@ defmodule Core.PromEx.MetricAudience do
     # is the multiplicand of the public cost page's idle figure — so it is as
     # public as the number it produces.
     "stacks_vision_gpu_cold_start_count_total" => :public,
+    # The honesty check on the cold-start count; as public as the figure it qualifies.
+    "stacks_vision_gpu_telemetry_gap_count_total" => :public,
     # Aggregate GPU seconds, no user dimension, and the multiplicand of the
     # public inference cost line — as public as the figure it produces.
     "stacks_vision_gpu_active_milliseconds_total" => :public,
