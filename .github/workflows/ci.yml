@@ -383,8 +383,18 @@ jobs:
           --health-retries 5
     env:
       MIX_ENV: test
-      STACKS_APP_DB_PASSWORD: ci-stacks-app-password
-      STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password
+      # ⛔ 24 CHARACTERS MINIMUM, AND THESE WERE 22. The warehouse-roles
+      # migration validates the shape — 24-128 chars of [A-Za-z0-9._~-] —
+      # because `CREATE ROLE ... PASSWORD` cannot be parameterised, so the
+      # value is interpolated into DDL that runs as the database owner. These
+      # CI literals failed that check, so `test-elixir` died in migrations
+      # before running a single test, on a branch whose tests pass locally.
+      #
+      # ⚠️ Not secrets — they are plaintext in a public workflow by design, for
+      # an ephemeral CI Postgres. The suffix says so, which is why lengthening
+      # them is the right fix rather than shortening the requirement.
+      STACKS_APP_DB_PASSWORD: ci-stacks-app-password-not-a-secret
+      STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password-not-a-secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
