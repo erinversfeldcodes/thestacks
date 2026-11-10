@@ -481,3 +481,91 @@ def test_multiple_books_all_surface() -> None:
 
     assert response.status_code == 200
     assert [b["title"] for b in response.json()["books"]] == ["First", "Second", "Third"]
+
+
+def test_barcode_and_vlm_tiers_are_distinguishable() -> None:
+    """The response says WHICH tier answered, and the two differ.
+
+    ⛔ Without this the per-tier cost question is unanswerable, and that is the
+    question the vision redesign turns on. Cost was charged as a flat constant
+    per call regardless of whether a CPU barcode scan answered in milliseconds
+    or a 7B VLM ran on an A10G — so "should a cover-embedding tier exist?"
+    could not be argued from a figure that cannot tell those apart.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        barcode = client.post(
+            "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
+        ).json()
+
+    assert barcode["tier"] == "ANALYSIS_TIER_BARCODE"
+
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={"classification": "book", "confidence": 0.9},
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={"books": []},
+        ),
+        TestClient(app) as client,
+    ):
+        vlm = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert vlm["tier"] == "ANALYSIS_TIER_VLM_EXTRACT"
+
+    # ⬛ ANTI-VACUITY: the two must actually DIFFER. A producer hardcoding one
+    # tier would satisfy either assertion alone, and a field that always says
+    # the same thing is the flat constant this change replaces.
+    assert barcode["tier"] != vlm["tier"]
+
+
+def test_a_stage_that_did_not_run_reports_no_timing() -> None:
+    """Absent, not zero — because 0ms and "did not run" are different facts.
+
+    ⚖️ A barcode-answered request never calls classify or extract. Reporting 0
+    for them would be indistinguishable from a stage that ran instantly, and
+    the redesign's latency case is argued from exactly these numbers.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    timings = data["timings_ms"]
+
+    assert timings["classify"] is None
+    assert timings["extract"] is None
+
+    # ⬛ ANTI-VACUITY: the stages that DID run must report a number, or a
+    # timings block of all-None would satisfy the assertions above while
+    # measuring nothing.
+    assert isinstance(timings["download"], int)
+    assert isinstance(timings["barcode"], int)
+
+
+def test_only_the_first_request_on_a_container_is_cold() -> None:
+    """Cold is a property of the container, claimed once.
+
+    ⚠️ Read-and-clear in one step, so two requests arriving together on a cold
+    container cannot both claim it — which would double-count the cold-start
+    cost the redesign is trying to measure.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        first = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+        second = client.post(
+            "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
+        ).json()
+
+    assert first["container_cold"] is True
+    assert second["container_cold"] is False

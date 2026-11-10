@@ -210,6 +210,72 @@ message AnalyzeResponse {
   repeated ExtractedBook books = 3 [json_name = "books"];
   // Name of the vision model used for inference.
   string model_used = 4 [json_name = "model_used"];
+
+  // Which cascade tier produced this answer.
+  //
+  // ⛔ WITHOUT THIS THE PER-TIER QUESTION IS UNANSWERABLE, and it is the
+  // question the vision redesign turns on. Cost was charged as a flat constant
+  // per call regardless of whether a CPU barcode scan answered in milliseconds
+  // or a 7B VLM ran on an A10G — so "should a cover-embedding tier exist?"
+  // could not be argued from a figure that cannot tell those apart.
+  AnalysisTier tier = 5 [json_name = "tier"];
+
+  // Per-stage wall-clock, milliseconds. A stage that did not run is absent.
+  StageTimings timings_ms = 6 [json_name = "timings_ms"];
+
+  // Whether the container was cold when this request arrived.
+  //
+  // ⚖️ A boolean rather than the age in seconds, because the decision it feeds
+  // is binary: a cold start is a different cost and a different latency story,
+  // and an age would invite a threshold nobody agreed. The age is available in
+  // the sidecar's own logs if the distribution is ever needed.
+  bool container_cold = 7 [json_name = "container_cold"];
+}
+
+// AnalysisTier names the cascade stage that produced an answer.
+//
+// ⛔ THE NUMBERS ARE IDENTITY, NOT SEQUENCE, AND MUST NOT BE COMPARED
+// ORDINALLY. The cascade runs barcode → cover-embedding → OCR → VLM, and it is
+// tempting to let these numbers carry that order. They must not: a consumer
+// comparing them numerically breaks the moment a tier is inserted out of
+// order, and `buf` will never flag it because the numbers stayed perfectly
+// valid. Order the cascade explicitly in code; let these be arbitrary.
+//
+// ⚖️ EMBEDDING and OCR are therefore NOT reserved space. Appending an enum
+// value is additive and allowed, so a future tier simply takes the next free
+// number — gaps buy nothing.
+enum AnalysisTier {
+  // Unset. A producer that has not been taught to report its tier, which is
+  // distinct from any real tier and must not be counted as one.
+  ANALYSIS_TIER_UNSPECIFIED = 0;
+
+  // A barcode decoded on CPU, before any model ran.
+  ANALYSIS_TIER_BARCODE = 1;
+
+  // The VLM answered the classify question and extraction was skipped.
+  ANALYSIS_TIER_VLM_CLASSIFY = 2;
+
+  // The VLM ran the full extract path.
+  ANALYSIS_TIER_VLM_EXTRACT = 3;
+}
+
+// StageTimings carries per-stage wall-clock in milliseconds.
+//
+// ⚖️ Each stage is optional: a request answered by the barcode tier never runs
+// classify or extract, and reporting 0 for a stage that did not run would be
+// indistinguishable from one that ran instantly. Absent means "did not run".
+message StageTimings {
+  // Fetching or decoding the image.
+  optional int32 download = 1 [json_name = "download"];
+
+  // The CPU barcode pre-pass.
+  optional int32 barcode = 2 [json_name = "barcode"];
+
+  // The VLM classify call.
+  optional int32 classify = 3 [json_name = "classify"];
+
+  // The VLM extract call.
+  optional int32 extract = 4 [json_name = "extract"];
 }
 
 // Cover association: request, response, callback and status enum.

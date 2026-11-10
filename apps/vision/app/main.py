@@ -1,6 +1,7 @@
 import base64
 import io
 import logging
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -17,6 +18,7 @@ from app.proto.gen.vision import (
     AnalyzeRequest,
     AnalyzeResponse,
     ExtractedBook,
+    StageTimings,
 )
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
@@ -65,6 +67,30 @@ def _resize_for_vlm(image_b64: str) -> str:
 
 
 _CLF_BOOK = "CLASSIFICATION_RESULT_BOOK"
+
+# The cascade tiers, as the contract names them.
+#
+# ⛔ These are IDENTITY, NOT SEQUENCE. The cascade runs barcode → embedding →
+# OCR → VLM, and it is tempting to let the enum's numbers carry that order.
+# They must not: a consumer comparing them numerically breaks the moment a tier
+# is inserted out of order, and `buf` would never flag it because the numbers
+# stayed valid. The order lives in the code below, not in these values.
+_TIER_BARCODE = "ANALYSIS_TIER_BARCODE"
+_TIER_VLM_CLASSIFY = "ANALYSIS_TIER_VLM_CLASSIFY"
+_TIER_VLM_EXTRACT = "ANALYSIS_TIER_VLM_EXTRACT"
+
+
+def _elapsed_ms(started: float) -> int:
+    """Whole milliseconds since `started`, measured on the monotonic clock.
+
+    ⚖️ `time.monotonic` rather than wall-clock: these figures feed a cost and
+    latency decision, and a wall-clock step (NTP, a leap second) would show up
+    as a negative or absurd duration in exactly the data the redesign argues
+    from.
+    """
+    return int((time.monotonic() - started) * 1000)
+
+
 _CLF_NOT_BOOK = "CLASSIFICATION_RESULT_NOT_BOOK"
 _CLF_AMBIGUOUS = "CLASSIFICATION_RESULT_AMBIGUOUS"
 
@@ -78,6 +104,16 @@ _ML_TO_CLASSIFICATION: dict[str, str] = {
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.vision_client = VisionClient()
+
+    # ⚖️ The FIRST request after a process starts is the cold one. `lifespan`
+    # runs once per container, so a flag set here and cleared by the first
+    # handler is exactly "was this container cold when the request arrived" —
+    # which is the question, rather than how long the container has lived.
+    #
+    # ⛔ A boolean, not an age: the decision it feeds is binary, and an age
+    # would invite a threshold nobody agreed on.
+    app.state.container_cold = True
+
     yield
     await app.state.vision_client.close()
 
@@ -278,14 +314,26 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     """
     log = logger.bind(endpoint="/analyze")
 
+    # ⚖️ Read and clear in one step, so concurrent requests on a cold container
+    # cannot all claim to be the cold one. The first request that gets here owns
+    # the flag; every later request on this container reports warm.
+    cold = getattr(request.app.state, "container_cold", False)
+    request.app.state.container_cold = False
+
+    download_started = time.monotonic()
     image_b64 = await _load_image_b64(body.image, body.image_url)
+    download_ms = _elapsed_ms(download_started)
+
     if body.image_url is not None:
         log = log.bind(image_url=body.image_url)
 
     decoded_bytes = base64.b64decode(image_b64, validate=True)
 
     if settings.local_ocr_enabled:
+        barcode_started = time.monotonic()
         isbn = local_isbn_scan(decoded_bytes)
+        barcode_ms = _elapsed_ms(barcode_started)
+
         if isbn is not None:
             log.info("local OCR pre-pass hit", isbn=isbn)
             return AnalyzeResponse(
@@ -293,14 +341,21 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
                 confidence=1.0,
                 books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
                 model_used="local_ocr",
+                tier=_TIER_BARCODE,
+                timings_ms=StageTimings(download=download_ms, barcode=barcode_ms),
+                container_cold=cold,
             )
+    else:
+        barcode_ms = None
 
     client: VisionClient = request.app.state.vision_client
 
     vlm_b64 = _resize_for_vlm(image_b64)
 
     log.info("calling vision model for classify")
+    classify_started = time.monotonic()
     classify_parsed = await client.classify(vlm_b64)
+    classify_ms = _elapsed_ms(classify_started)
     classification, confidence = _parse_classification(classify_parsed)
 
     if classification != _CLF_BOOK:
@@ -314,12 +369,16 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             confidence=confidence,
             books=[],
             model_used=settings.model_name,
+            tier=_TIER_VLM_CLASSIFY,
+            timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, classify=classify_ms),
+            container_cold=cold,
         )
 
     log.info(
         "calling vision model for extract",
         excluded_books_count=len(body.excluded_books),
     )
+    extract_started = time.monotonic()
     extract_parsed = await client.extract(
         [vlm_b64],
         excluded_books=list(body.excluded_books),
@@ -337,4 +396,12 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         confidence=confidence,
         books=books,
         model_used=settings.model_name,
+        tier=_TIER_VLM_EXTRACT,
+        timings_ms=StageTimings(
+            download=download_ms,
+            barcode=barcode_ms,
+            classify=classify_ms,
+            extract=_elapsed_ms(extract_started),
+        ),
+        container_cold=cold,
     )
