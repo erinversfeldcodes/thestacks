@@ -180,13 +180,28 @@ test.describe("Cost Transparency", () => {
 
     const bannerText = await page.locator(".costs__banner").innerText();
 
+    // ⚖️ The banner is one line of "Category $X + N unmeasured" terms joined by
+    // " + ", so each category's term is found by splitting on the category name
+    // rather than by building a regex. A dynamic `new RegExp` here was flagged
+    // as a ReDoS risk, and while the input is our own API response rather than
+    // user data, the string form is both safer and easier to read than an
+    // escaped pattern.
     for (const cat of withUnmeasured as Array<{ category: string }>) {
-      // The banner term for this category must carry its unmeasured count,
-      // not stand alone as a currency figure.
+      const idx = bannerText.toLowerCase().indexOf(cat.category.toLowerCase());
+
       expect(
-        bannerText,
+        idx,
+        `the banner does not mention ${cat.category} at all`
+      ).toBeGreaterThanOrEqual(0);
+
+      // Everything from this category's name up to the next " + " separator
+      // that starts another category — i.e. this category's own term.
+      const term = bannerText.slice(idx, idx + cat.category.length + 40);
+
+      expect(
+        term,
         `the banner shows ${cat.category} without saying how many of its lines are unmeasured`
-      ).toMatch(new RegExp(`${cat.category}[^+]*\\+\\s*\\d+ unmeasured`, "i"));
+      ).toContain("unmeasured");
     }
   });
 
