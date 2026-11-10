@@ -60,6 +60,13 @@ defmodule Stacks.AI.GpuWindow do
 
   defp container_id(%{"container_id" => id}) when is_binary(id), do: id
   defp container_id(_), do: nil
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_BARCODE — a barcode
+  #   answer is the one case that is PROVABLY NOT a telemetry gap, which is the
+  #   whole discriminator: it never woke the GPU, so an empty dispatch list
+  #   beside it is the honest reading rather than a missing one. Handling it
+  #   here would mean returning a verdict about GPU telemetry for a request
+  #   that made no GPU dispatch, and the catch-all clause already answers
+  #   `false` for it. Listing it is the point, not an oversight.
   @vlm_tiers ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"]
 
   @doc """

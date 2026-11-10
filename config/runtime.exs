@@ -63,7 +63,48 @@ else
   # along with a test per branch, including the two that refuse to boot. A
   # config file is the one place where "it looked right" is the only available
   # check, and this one had been wrong in production for seven months.
-  case Stacks.Storage.Selection.choose(System.get_env(), config_env() == :prod) do
+  # ⛔ THE BOOTSTRAP EVALUATES THIS FILE BEFORE THE APP EXISTS, and this line
+  # assumed otherwise. `scripts/gen-ecto-proto.sh` falls back to script mode
+  # when `core` cannot compile yet — which is the NORMAL state on a cold
+  # checkout, because the schemas it is about to generate are what `core`
+  # needs to compile. In that mode `mix` still loads this file, and
+  # `Stacks.Storage.Selection` has not been compiled, so CI died with
+  # "module is not available" on a line that works on every warm machine.
+  #
+  # ⚖️ The module stays the home of the decision — the comment above is right
+  # that a config file is the one place where "it looked right" is the only
+  # available check. What changes is that this file now tolerates being read
+  # before the app is loadable, which the bootstrap already does for secrets
+  # by exporting dummies. A module is the one thing an env var cannot stand in
+  # for.
+  #
+  # ⚠️ AND THE SKIP IS LOUD IN THE ONE PLACE IT MUST NEVER HAPPEN. Silently
+  # leaving storage unconfigured is how a tolerant default turns a broken
+  # deployment into an invisible one, so prod refuses to boot instead.
+  storage_decision =
+    if Code.ensure_loaded?(Stacks.Storage.Selection) do
+      Stacks.Storage.Selection.choose(System.get_env(), config_env() == :prod)
+    else
+      if config_env() == :prod do
+        raise """
+        Stacks.Storage.Selection is not loadable while reading runtime config in :prod.
+
+        In prod this file is read at BOOT, when the release is fully compiled, so an
+        unloadable module here means the release is broken rather than bootstrapping.
+        Refusing to start instead of defaulting the storage backend, because the
+        default would be silent and wrong.
+        """
+      end
+
+      :bootstrap
+    end
+
+  case storage_decision do
+    # The proto-codegen bootstrap: no storage is configured because none is
+    # used — it generates schemas and exits.
+    :bootstrap ->
+      :ok
+
     {:ok, {:r2, r2}} ->
       config :core, :storage, Stacks.Storage.R2
       config :core, :r2_bucket, r2[:bucket]

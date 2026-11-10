@@ -115,6 +115,11 @@ step_in_core() {
     fi
 }
 
+# ⚖️ Lives here rather than with the Elm gates because it needs `mix` to
+# enumerate the application's real routes, and the Elm CI job has no Elixir
+# toolchain. Its SUBJECT is the E2E specs; its DEPENDENCY decides where it can
+# run.
+gate check-e2e-mock-routes.sh
 gate check-outbound-test-default.sh
 gate check-route-clients.sh
 gate check-mapping-truth.sh
