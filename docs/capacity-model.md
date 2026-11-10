@@ -110,11 +110,29 @@ A breach triggers automatic rollback. The endpoint-level targets in the tables a
 
 ### Assumptions
 
-All costs in South African Rand (ZAR). Exchange rates as of 2026-03.
+All costs in South African Rand (ZAR). Exchange rates as of 2026-03 (~R18/USD, consistent with
+the Brave row's `$3/1K ≈ R0.054/query`).
+
+> ⛔ **The Modal row was wrong in its basis, and roughly right in its range by coincidence.**
+> It read "~$0.03–$0.14/min GPU time at 30–60s per call" against a published A10G rate of
+> **$0.0184/min** — so the per-minute figure was **1.6× to 7.6× too high**, most likely by
+> conflating Modal's ~$0.03 *per inference* with a *per minute* rate. The stated call duration
+> was wrong too: identifications measure **5.2s warm and 24s cold**, not 30–60s.
+>
+> ⚖️ Two compensating errors landed the old range (R0.50–R2.50) near the corrected one
+> (R0.19–R1.78), which is exactly why it survived: **a range that looks plausible is not
+> evidence, and nothing here was checkable until the vision response began reporting its own
+> tier, stage timings and container lifetime.**
+>
+> ⬛ **The correction that matters is not the number but the DRIVER.** The old row attributed the
+> spread to how long a call takes. It is actually **how many identifications share a GPU
+> container**: at one per container, **R1.65 of the R1.78 — about 93% — is the idle tail**, a
+> GPU awake and answering nothing. Tuning model speed moves the ~R0.03 active term; tuning
+> batching or the scaledown window moves the other 93%.
 
 | Service | Unit cost assumption | Basis |
 |---------|---------------------|-------|
-| Modal (vision, A10G) | R0.50–R2.50 per identification | ~$0.03–$0.14/min GPU time at 30–60s per call. Stack: HF Transformers + Qwen2.5-VL-7B-Instruct (bf16) on A10G, single inference per container, `max_containers=10` (see `apps/vision/modal_app.py`; rationale in ADR-001 / ADR-015) |
+| Modal (vision, A10G) | **R0.19–R1.78 per identification** — and ~93% of the top of that range is the GPU doing nothing | **Reconciled against measurement and the published rate.** A10G at $0.000306/sec ($1.10/hour) = **$0.0184/min**. Measured GPU time per identification: **5.2s warm** (classify 1.8s + extract 3.4s), **24s cold**. The dominant term is neither: a container bills its **300s scaledown window** after its last request, which is **$0.0918 = R1.65** per container lifetime. So the cost per identification is `(R1.65 / identifications sharing a container) + ~R0.03 active`: **R1.78 at one per container, R0.19 at ten.** Stack: HF Transformers + Qwen2.5-VL-7B-Instruct (bf16) on A10G, single inference per container, `max_containers=10` (`apps/vision/modal_app.py`; ADR-001 / ADR-015) |
 | Together AI (summarisation) | ~R0.10 per review summary | Per-token pricing at ~R0.002/1K tokens, ~50K tokens/summary |
 | Brave Search API | R0.054/query (free tier: 2K queries/month; paid: $3/1K ≈ R0.054/query) | Brave pricing page |
 | Fly.io (core app, shared-cpu-1x, 2 cpus, 512MB; plus scraper/log-shipper/searxng) | R150–R250/month flat | Fly.io pricing; sizing per `deploy/fly.*.toml` |
