@@ -1073,7 +1073,7 @@
     {
       "id": 23,
       "title": "GPU container cold starts (the unit idle time is billed per)",
-      "description": "One per GPU container lifetime. Multiply by the GPU scaledown window (300s) for billed idle seconds: the tail Modal charges after a container last answered. NOTE the container age on a response is sampled only when a request runs, and the idle seconds are exactly the ones with no request attached \u2014 so a sum of observed ages under-counts, in the direction that makes the GPU look cheap.",
+      "description": "GPU container cold starts, de-duplicated by container id. Multiply by the GPU scaledown window (300s) for billed idle seconds. \u26d4 THE SECOND SERIES IS A CEILING ON WHAT THIS PANEL CANNOT SEE: the cold flag rides the /analyze response body, which only exists on a 200. A request that woke a container and then failed \u2014 sidecar 502, model timeout, core-side timeout \u2014 bills its full 300s tail and is counted nowhere. That bias is NOT random: cold inferences are the slow ones, so timeouts and cold starts are correlated, and the miss is worst exactly when the number matters most. Read the two together as 'N counted, at most M uncounted' rather than treating the first line as the count.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -1109,6 +1109,11 @@
           "expr": "sum(increase(stacks_vision_gpu_cold_start_count_total[$__rate_interval]))",
           "legendFormat": "cold starts",
           "refId": "A"
+        },
+        {
+          "expr": "sum(increase(stacks_vision_request_stop_duration_milliseconds_count{app=\"$app\",status!=\"200\"}[$__rate_interval])) + sum(increase(stacks_vision_request_exception_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "at most this many uncounted",
+          "refId": "B"
         }
       ]
     },

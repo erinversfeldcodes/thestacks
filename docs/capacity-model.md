@@ -124,6 +124,22 @@ the Brave row's `$3/1K ≈ R0.054/query`).
 > evidence, and nothing here was checkable until the vision response began reporting its own
 > tier, stage timings and container lifetime.**
 >
+> ⚠️ **Both Modal figures under-charge on FAILED requests, and the two errors do not cancel.**
+> The tier, the stage timings and the cold flag all ride the `/analyze` response body, which only
+> exists on a 200. A request that woke a GPU container and then failed — sidecar 502, model
+> timeout, core-side timeout — bills its full 300s tail and is counted nowhere. ⛔ That bias is
+> not random: cold inferences are the slow ones, so **timeouts and cold starts are correlated**
+> and the miss is worst exactly when the number matters most. The dashboard's cold-start panel
+> carries a second series bounding what is uncounted, so the gap is visible rather than assumed
+> away.
+>
+> ⚠️ **And the active figure errs the OTHER way under load, so the sum's direction is unknown
+> rather than conservative.** The GPU-seconds series is wall-clock around each Modal dispatch, so
+> it includes in-Modal queueing — and queue wait on a busy container is time that container is
+> already billing for a different input. Under load the active line over-counts while the idle
+> line under-counts. Neither figure is a bound on the truth; only the provider's invoice is, which
+> is why `stacks_billing_mtd_cents` is the series worth reconciling against.
+
 > ⬛ **The correction that matters is not the number but the DRIVER.** The old row attributed the
 > spread to how long a call takes. It is actually **how many identifications share a GPU
 > container**: at one per container, **R1.65 of the R1.78 — about 93% — is the idle tail**, a
