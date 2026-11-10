@@ -82,7 +82,7 @@ _TIER_VLM_EXTRACT = "ANALYSIS_TIER_VLM_EXTRACT"
 
 def _container_telemetry(
     parsed: dict[str, object],
-) -> tuple[bool | None, float | None]:
+) -> tuple[bool | None, float | None, str | None]:
     """The GPU container's own reading, or (None, None) if it did not report one.
 
     ⚖️ Tolerant by design: a GPU image deployed before these fields existed
@@ -98,14 +98,16 @@ def _container_telemetry(
     """
     container = parsed.get("_container")
     if not isinstance(container, dict):
-        return (None, None)
+        return (None, None, None)
 
     cold = container.get("gpu_cold")
     age = container.get("gpu_container_age_s")
+    cid = container.get("gpu_container_id")
 
     return (
         cold if isinstance(cold, bool) else None,
         float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) else None,
+        cid if isinstance(cid, str) and cid != "" else None,
     )
 
 
@@ -385,7 +387,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     classify_started = time.monotonic()
     classify_parsed = await client.classify(vlm_b64)
     classify_ms = _elapsed_ms(classify_started)
-    gpu_cold, gpu_age_s = _container_telemetry(classify_parsed)
+    gpu_cold, gpu_age_s, gpu_cid = _container_telemetry(classify_parsed)
     classification, confidence = _parse_classification(classify_parsed)
 
     if classification != _CLF_BOOK:
@@ -402,6 +404,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             tier=_TIER_VLM_CLASSIFY,
             gpu_cold=gpu_cold,
             gpu_container_age_s=gpu_age_s,
+            gpu_container_id=gpu_cid,
             timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, classify=classify_ms),
             sidecar_cold=cold,
         )
@@ -435,6 +438,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         # request that did pay a cold start.
         gpu_cold=gpu_cold,
         gpu_container_age_s=gpu_age_s,
+        gpu_container_id=gpu_cid,
         timings_ms=StageTimings(
             download=download_ms,
             barcode=barcode_ms,

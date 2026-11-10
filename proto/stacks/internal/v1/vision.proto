@@ -265,6 +265,26 @@ message AnalyzeResponse {
   // long the container has been billing — which is what the idle-cost figure
   // is derived from. Absent when no GPU ran.
   optional double gpu_container_age_s = 9 [json_name = "gpu_container_age_s"];
+
+  // Which GPU container answered, so the billed window can be bounded.
+  //
+  // ⛔ WITHOUT AN IDENTITY THE AGE CANNOT BE TURNED INTO A COST. The age is
+  // sampled only when an inference runs, so a container that wakes, serves one
+  // request and idles out the rest of its scaledown window reports an age near
+  // zero and nothing afterwards — and the idle seconds are exactly the ones
+  // with no request attached to them. Summing observed ages under-counts, in
+  // the direction that makes the GPU look cheap.
+  //
+  // ⚖️ With an id, the billed window per container is the MAXIMUM age seen for
+  // that id plus the scaledown window Modal bills after the last request. That
+  // needs no second channel out of the GPU and does not depend on an exit hook
+  // firing, which a container killed by the platform may never run.
+  //
+  // ⚠️ Opaque and per-container, not per-user: it identifies a machine
+  // lifetime, carries nothing about who sent the image, and must not be
+  // used as a metric label — a new container id per cold start is unbounded
+  // cardinality. It is for aggregation, then discard.
+  optional string gpu_container_id = 10 [json_name = "gpu_container_id"];
 }
 
 // AnalysisTier names the cascade stage that produced an answer.

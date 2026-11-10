@@ -183,6 +183,7 @@ class VisionModel:
         than continuous batching.
         """
         import time
+        import uuid
 
         # ⛔ THE GPU'S OWN COLD START, WHICH IS THE ONE THAT COSTS MONEY.
         #
@@ -198,6 +199,24 @@ class VisionModel:
         # it both followed a cold start, but only the first paid for the load.
         self._loaded_at = time.monotonic()
         self._inferences_since_load = 0
+
+        # ⛔ AN IDENTITY FOR THE BILLED WINDOW, which the age alone cannot give.
+        #
+        # `gpu_container_age_s` is sampled only when an inference runs, so a
+        # container that wakes, serves one request and then idles out the rest
+        # of its scaledown window reports `age ~ 0` and nothing afterwards —
+        # and the idle seconds are precisely the ones with no request attached.
+        # Summing observed ages therefore UNDER-counts, in the direction that
+        # makes the GPU look cheap, which is the direction that would wrongly
+        # settle the architecture question.
+        #
+        # ⚖️ With an id, a reader can take the MAXIMUM age seen per container
+        # and add the scaledown window — the tail Modal bills after the last
+        # request. That is derivable from what already crosses the wire, needs
+        # no `modal.Dict` and no second channel out of the GPU, and does not
+        # depend on `@modal.exit` firing (a container killed by the platform
+        # may never run it).
+        self._container_id = uuid.uuid4().hex
 
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -285,6 +304,7 @@ class VisionModel:
         parsed["_container"] = {
             "gpu_cold": gpu_cold,
             "gpu_container_age_s": round(gpu_container_age_s, 3),
+            "gpu_container_id": getattr(self, "_container_id", ""),
         }
         return parsed
 
