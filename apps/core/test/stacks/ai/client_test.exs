@@ -410,9 +410,23 @@ defmodule Stacks.AI.ClientTest do
         ]
       })
 
+      before = cold_start_series_total()
+
       assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
 
-      assert_receive {:cold_start, %{count: 2}}, 5_000
+      assert_receive {:cold_start, _}, 5_000
+
+      # ⛔ ASSERTED AT THE SCRAPE, NOT AT THE EMIT, AND THAT DISTINCTION IS THE
+      # WHOLE REASON THIS TEST EXISTS IN THIS FORM. An earlier version asserted
+      # `{:cold_start, %{count: 2}}` — the measurement this code puts on the
+      # event — and passed while the exported series moved by ONE, because
+      # `telemetry_metrics`' `counter/2` increments by one regardless of the
+      # measurement. The event was right and the metric was wrong, and only the
+      # store's own number can tell those apart.
+      assert cold_start_series_total() - before == 2,
+             "two cold containers must move the exported series by 2; a counter increments by " <>
+               "one per EVENT regardless of any measurement on it, so this is the assertion " <>
+               "that distinguishes counting containers from counting requests"
     end
 
     # ⬛ ANTI-VACUITY: the count must FOLLOW the response. A fixed `count: 1`
@@ -428,9 +442,18 @@ defmodule Stacks.AI.ClientTest do
         ]
       })
 
+      before = cold_start_series_total()
+
       assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
 
-      assert_receive {:cold_start, %{count: 1}}, 5_000
+      assert_receive {:cold_start, _}, 5_000
+
+      # ⬛ ANTI-VACUITY for the case above: the SAME container twice must move
+      # the series by 1, not 2. Without this, emitting one event per dispatch
+      # rather than per container would satisfy the two-container case.
+      assert cold_start_series_total() - before == 1,
+             "two dispatches on one container are one lifetime; the series moved by " <>
+               "#{cold_start_series_total() - before}"
     end
 
     test "a barcode answer with no GPU dispatches records nothing" do
@@ -440,9 +463,12 @@ defmodule Stacks.AI.ClientTest do
         "gpu_dispatches" => []
       })
 
+      before = cold_start_series_total()
+
       assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
 
       refute_receive {:cold_start, _}, 200
+      assert cold_start_series_total() == before
     end
 
     test "a warm dispatch records nothing" do
@@ -452,9 +478,35 @@ defmodule Stacks.AI.ClientTest do
         "gpu_dispatches" => [%{"cold" => false, "container_id" => "warm"}]
       })
 
+      before = cold_start_series_total()
+
       assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
 
       refute_receive {:cold_start, _}, 200
+      assert cold_start_series_total() == before
+    end
+  end
+
+  # Reads the EXPORTED series, which is the only number that reflects what a
+  # reader of the dashboard or the cost page actually gets.
+  defp cold_start_series_total do
+    Process.sleep(50)
+
+    case PromEx.get_metrics(Core.PromEx) do
+      :prom_ex_down ->
+        flunk("Core.PromEx must be running for this test")
+
+      output ->
+        # ⚠️ The label block is OPTIONAL in this pattern, and that was a real
+        # bug: this metric carries no metadata, so it exports as
+        # `stacks_vision_gpu_cold_start_count_total 2` with NO braces, and a
+        # pattern requiring `{...}` matched nothing and summed to zero — a
+        # vacuous reading that would have reported every series as unmoved.
+        ~r/^stacks_vision_gpu_cold_start_count_total(?:\{[^}]*\})?\s+(\S+)$/m
+        |> Regex.scan(output)
+        |> Enum.map(fn [_, v] -> v |> Float.parse() |> elem(0) end)
+        |> Enum.sum()
+        |> round()
     end
   end
 

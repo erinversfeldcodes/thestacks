@@ -390,10 +390,22 @@ defmodule Stacks.AI.Client do
       # nothing, and billed container lifetimes were under-counted by up to
       # half, in the direction that makes the GPU look cheap.
       #
-      # ⚖️ A measurement of `count` rather than N separate events: one request
-      # can start two containers, and emitting twice would make the event count
-      # and the container count two different things nobody reconciles.
-      :telemetry.execute([:stacks, :vision, :gpu_cold_start], %{count: count}, %{})
+      # ⛔ ONE EVENT PER CONTAINER, AND THE OPPOSITE ARGUMENT SHIPPED BROKEN.
+      # This emitted ONE event carrying `%{count: count}`, reasoning that N
+      # events would make the event count and the container count diverge. It
+      # is the other way round: `telemetry_metrics`' `counter/2` documents that
+      # "the value of the counter is always incremented by one, regardless of
+      # the value of the measurement", so a request waking two containers moved
+      # the series by ONE. The measurement was discarded, the series counted
+      # requests-that-woke-something, and the under-count this function exists
+      # to remove was still there at up to half.
+      #
+      # ⚖️ With one event per container the two coincide by construction, the
+      # family's `_count_total` name stays true, and the plugin's "one per
+      # container lifetime" description stays true.
+      Enum.each(1..count, fn _ ->
+        :telemetry.execute([:stacks, :vision, :gpu_cold_start], %{count: 1}, %{})
+      end)
     else
       _ -> :ok
     end
