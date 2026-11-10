@@ -165,4 +165,137 @@ defmodule Core.PromEx.DashboardUnitsTest do
                "above are passing over an empty set"
     end
   end
+
+  # ⛔ THE GATE ONLY EVER CAUGHT CENTS-UNDER-CURRENCY, so a seconds panel
+  # formatted as dollars passed — and four did: a count of identifications, a
+  # count of container lifetimes and a percentage all shipped as `currencyUSD`,
+  # inherited from the money panels they were copied from. A reviewer found
+  # them; this gate did not.
+  #
+  # ⚖️ A RULE, NOT A TABLE. A per-panel unit table rots: nobody updates it, and
+  # it would have to be edited by the same change that breaks it. The checkable
+  # invariant is a CORRESPONDENCE between the expression and the declaration,
+  # and it is checkable only because this repo's families already name their
+  # units — `_cents`, `_micro_cents`, `_pct`, `_milliseconds`, `_seconds`,
+  # `_bytes`, `_count_total`.
+  #
+  # ⚠️ SO THE CONVENTION IS LOAD-BEARING: whoever adds a family whose name does
+  # not carry its unit has disarmed this gate for that family, silently. That
+  # is the cost of deriving the rule from names, and it is stated here because
+  # the alternative — a hand-maintained list — fails in a way nobody notices
+  # either.
+  @currency_units ~w(currencyUSD currencyEUR currencyGBP)
+  @money_suffixes ~w(_cents _micro_cents)
+
+  defp money_families(expr) do
+    ~r/stacks_[a-z0-9_]+/
+    |> Regex.scan(expr)
+    |> Enum.map(fn [f] -> f end)
+    |> Enum.filter(fn f -> Enum.any?(@money_suffixes, &String.contains?(f, &1)) end)
+  end
+
+  defp non_money_families(expr) do
+    ~r/stacks_[a-z0-9_]+/
+    |> Regex.scan(expr)
+    |> Enum.map(fn [f] -> f end)
+    |> Enum.reject(fn f -> Enum.any?(@money_suffixes, &String.contains?(f, &1)) end)
+  end
+
+  describe "a unit declaration must correspond to what the expression returns" do
+    test "a currency unit is only used over money-denominated families" do
+      offenders =
+        for name <- @dashboards,
+            dashboard = load(name),
+            dashboard != nil,
+            panel <- data_panels(dashboard),
+            unit(panel) in @currency_units,
+            # ⚖️ Only panels with NO per-series overrides, and that boundary is
+            # where a name-derived rule honestly stops. A panel may carry a
+            # currency DEFAULT and override the series that are not money —
+            # panel 19 does exactly that for its refusal rates — and checking
+            # that each override actually addresses the right series means
+            # resolving Grafana's matcher semantics against templated legends,
+            # which this gate cannot settle and should not pretend to.
+            #
+            # ⚠️ So the rule catches the case that bit us (a panel whose single
+            # declared unit is wrong for everything on it) and trusts a panel
+            # that has declared per-series intent. The residual risk is an
+            # override that addresses the wrong series; that needs a human
+            # looking at the panel, and the row titles are what make that
+            # likely to happen.
+            overrides(panel) == [],
+            expr <- exprs(panel),
+            non_money_families(expr) != [],
+            money_families(expr) == [],
+            do: "#{label(name, panel)} — #{inspect(non_money_families(expr))}"
+
+      assert offenders == [],
+             "these panels render a non-money series as currency, so a reader sees dollars " <>
+               "where the series is a count, a percentage or a duration: " <>
+               inspect(Enum.uniq(offenders))
+    end
+
+    test "a money family is not rendered in a non-currency unit unless the expression converts it" do
+      offenders =
+        for name <- @dashboards,
+            dashboard = load(name),
+            dashboard != nil,
+            panel <- data_panels(dashboard),
+            unit(panel) not in @currency_units,
+            unit(panel) != "",
+            expr <- exprs(panel),
+            money_families(expr) != [],
+            not String.contains?(expr, "/ 100"),
+            do: "#{label(name, panel)} — unit #{unit(panel)}"
+
+      assert offenders == [],
+             "these panels show a cents series under a non-currency unit without converting it: " <>
+               inspect(Enum.uniq(offenders))
+    end
+
+    # ⛔ THE RULE THAT CATCHES THE WORST OF THE FOUR. Panel 29 put a ~10^8 byte
+    # series on the same unitless axis as ~10 cost line items and ~40 mart rows,
+    # flattening the two series the panel exists to make visible — so it
+    # defeated its own stated purpose while every other gate passed.
+    test "a panel spanning families with conflicting unit suffixes carries per-series overrides" do
+      # ⚠️ ORDER MATTERS AND THE FIRST VERSION HAD IT WRONG. A histogram
+      # exports `..._duration_milliseconds_count`, which is a COUNT of
+      # observations, not a duration — and checking `_milliseconds` first
+      # classified it as one, flagging a panel that correctly plots two counts
+      # together. The `_count` / `_total` suffixes are the outermost fact about
+      # a family name and must be read before the unit they are counting.
+      suffix = fn family ->
+        cond do
+          String.ends_with?(family, "_count") -> :count
+          String.ends_with?(family, "_count_total") -> :count
+          String.ends_with?(family, "_total") -> :count
+          String.contains?(family, "_bytes") -> :bytes
+          String.contains?(family, "_milliseconds") -> :duration
+          String.contains?(family, "_seconds") -> :duration
+          String.contains?(family, "_pct") -> :ratio
+          true -> :count
+        end
+      end
+
+      offenders =
+        for name <- @dashboards,
+            dashboard = load(name),
+            dashboard != nil,
+            panel <- data_panels(dashboard),
+            overrides(panel) == [],
+            kinds =
+              panel
+              |> exprs()
+              |> Enum.flat_map(&non_money_families/1)
+              |> Enum.map(suffix)
+              |> Enum.uniq(),
+            length(kinds) > 1,
+            do: "#{label(name, panel)} — #{inspect(kinds)}"
+
+      assert offenders == [],
+             "these panels plot series of different units on one axis with no per-series " <>
+               "override, so the smaller series are flattened invisible: " <>
+               inspect(Enum.uniq(offenders))
+    end
+  end
 end

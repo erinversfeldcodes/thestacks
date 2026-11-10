@@ -878,7 +878,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "AI spend against budget, and refusals",
-      "description": "WHAT: AI API spend the budget guard is accumulating, and the calls it has refused. HOW: spend is increase(stacks_budget_cost_recorded_amount_micro_cents[1h]) by provider, divided by 10,000,000 \u2014 the series is MICRO-CENTS under a currencyUSD axis (1 dollar = 10,000,000 micro-cents), and an operator reading a money panel wants money over the window, not money-per-second. Refusals are rate(stacks_budget_limit_exceeded_count_total[5m]) by provider and type (daily/monthly), and carry their own unit override because one panel unit cannot describe both money and a count. MEANS: the first series is money going out; the second is the guard actively declining AI work because a limit was already reached. A non-zero refusal rate means features that depend on the model are degraded RIGHT NOW. NOTE: this metric is a per-call INCREMENT, so sum is the correct type for it \u2014 unlike the cost series on the panel beside it, which is an idempotent restatement of a running total and is therefore a gauge. The two money metrics have opposite writer semantics; do not 'fix' them the same way. WATCH: any refusal at all is worth knowing about; a provider labelled 'other' means a metered provider was added without being declared at the emit site. THIRD SERIES \u2014 'charge DROPPED' is the meter failing, not the budget working: rate(stacks_budget_charge_dropped_count_total[5m]) counts charges Spend.record/3 could not write because of a database fault. It is swallowed deliberately, so a transient error does not kill a job that has already spent the money \u2014 but the money IS gone, so every count here means the ceiling is being compared against an incomplete ledger. That is the fail-OPEN direction: an under-counting ledger makes the guard permit calls it should refuse. A non-zero rate on this line invalidates the other two while it lasts.",
+      "description": "WHAT: AI API spend the budget guard is accumulating, and the calls it has refused. HOW: spend is increase(stacks_budget_cost_recorded_amount_micro_cents[1h]) by provider, divided by 10,000,000 \u2014 the series is MICRO-CENTS under a currencyUSD axis (1 dollar = 10,000,000 micro-cents), and an operator reading a money panel wants money over the window, not money-per-second. Refusals are rate(stacks_budget_limit_exceeded_count_total[5m]) by provider and type (daily/monthly), and carry their own unit override because one panel unit cannot describe both money and a count. MEANS: the first series is money going out; the second is the guard actively declining AI work because a limit was already reached. A non-zero refusal rate means features that depend on the model are degraded RIGHT NOW. NOTE: this metric is a per-call INCREMENT, so sum is the correct type for it \u2014 unlike the cost series on the panel beside it, which is an idempotent restatement of a running total and is therefore a gauge. The two money metrics have opposite writer semantics; do not 'fix' them the same way. WATCH: any refusal at all is worth knowing about; a provider labelled 'other' means a metered provider was added without being declared at the emit site. THIRD SERIES \u2014 'charge DROPPED' is the meter failing, not the budget working: rate(stacks_budget_charge_dropped_count_total[5m]) counts charges Spend.record/3 could not write because of a database fault. It is swallowed deliberately, so a transient error does not kill a job that has already spent the money \u2014 but the money IS gone, so every count here means the ceiling is being compared against an incomplete ledger. That is the fail-OPEN direction: an under-counting ledger makes the guard permit calls it should refuse. A non-zero rate on this line invalidates the other two while it lasts. \u26a0\ufe0f The two refusal series are COUNTS on the right axis, not money: they shipped under this panel's currencyUSD unit, so a reader saw dollar signs on a rate of refusals. Found by the unit-correspondence rule after it was written for a different defect.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -907,6 +907,46 @@
               {
                 "id": "unit",
                 "value": "cps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^refused/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "refusals/sec"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^charge DROPPED/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "refusals/sec"
               }
             ]
           }
@@ -1043,7 +1083,7 @@
             "drawStyle": "line",
             "fillOpacity": 10
           },
-          "unit": "currencyUSD"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -1085,7 +1125,7 @@
             "drawStyle": "line",
             "fillOpacity": 10
           },
-          "unit": "currencyUSD"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -1174,7 +1214,7 @@
             "drawStyle": "line",
             "fillOpacity": 10
           },
-          "unit": "currencyUSD"
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -1402,7 +1442,7 @@
     {
       "id": 29,
       "title": "What the scheduled jobs produced",
-      "description": "What each job actually PRODUCED. \u26d4 A zero or a collapse here is the failure a success signal cannot see: a pipeline that runs, reports success and delivers nothing \u2014 which this project has shipped before. A backup that succeeds and contains almost nothing, a cost refresh that writes fewer line items than there are services, or marts with no rows are each a green job and a broken system.",
+      "description": "What each job actually PRODUCED. \u26d4 A zero or a collapse here is the failure a success signal cannot see: a pipeline that runs, reports success and delivers nothing \u2014 which this project has shipped before. A backup that succeeds and contains almost nothing, a cost refresh that writes fewer line items than there are services, or marts with no rows are each a green job and a broken system. \u26a0\ufe0f The byte series is on the RIGHT axis: a ~10^8 dump size on one axis with ~10 cost line items and ~40 mart rows flattens the two series this panel exists to make visible, which would have defeated its stated purpose.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -1415,7 +1455,48 @@
             "fillOpacity": 10
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "backup bytes"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost line items"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mart rows"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
