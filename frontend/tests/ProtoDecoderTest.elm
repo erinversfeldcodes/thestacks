@@ -2686,6 +2686,7 @@ adminSuite =
                         , categories =
                             [ { category = "hosting"
                               , totalCents = 15000
+                              , unmeasuredCount = 0
                               , items =
                                     [ { service = "Fly.io"
                                       , description = "VM"

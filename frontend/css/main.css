@@ -2695,6 +2695,27 @@ h4 {
     grid-row: 1 / 3;
     align-self: center;
     text-align: right;
+
+    /* The column is `auto` in the grid, so it grows to fit its content. A
+       currency figure is ~6 characters; the unmeasured sentence is ~30, and
+       without a cap it ate the description column down to about 60px and left
+       the service name wrapping mid-word. Measured on a live stack: the
+       "Together AI" card was barely readable. */
+    max-width: 11rem;
+}
+
+/* A line with no figure is PROSE, not a number, and should not be dressed as
+   one. Mono-spaced right-aligned text reads as a value; this is a sentence
+   explaining why there is no value, so it drops the mono face and the emphasis
+   and sits in the muted register the description uses. The distinction is the
+   point of the basis field — a reader should be able to tell at a glance which
+   lines carry a figure. */
+.costs__service-amount--unmeasured {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    font-style: italic;
+    color: var(--text-muted);
+    line-height: 1.4;
 }
 
 .costs__trend {

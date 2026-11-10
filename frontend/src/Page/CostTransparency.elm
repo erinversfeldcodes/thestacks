@@ -45,6 +45,11 @@ type alias CostItem =
 type alias CostCategory =
     { category : String
     , totalCents : Int
+
+    -- ⛔ How many lines in this category have NO figure. The total above
+    -- excludes them, so without this the header would quietly under-report and
+    -- look complete — which is the same shape as the $0.00 it replaces.
+    , unmeasuredCount : Int
     , items : List CostItem
     }
 
@@ -137,6 +142,7 @@ fromProtoCostCategory : ProtoAdmin.CostCategory -> CostCategory
 fromProtoCostCategory proto =
     { category = proto.category
     , totalCents = proto.totalCents
+    , unmeasuredCount = proto.unmeasuredCount
     , items = List.map fromProtoCostItem proto.items
     }
 
@@ -242,7 +248,7 @@ viewStorySection breakdown =
                     ++ String.fromInt m.visionJobsThisMonth
                     ++ " identifications this month."
                 )
-                (categoryTotal "compute" breakdown.categories)
+                (categoryTotalText (categoryFor "compute" breakdown.categories))
             , viewStoryCard "Store & Shelve"
                 ("Each book has metadata — title, author, ISBN, cover URL — plus your "
                     ++ "placement on a shelf. "
@@ -253,23 +259,29 @@ viewStorySection breakdown =
                     ++ formatBytes m.dbSizeBytes
                     ++ "."
                 )
-                (categoryTotal "database" breakdown.categories)
+                (categoryTotalText (categoryFor "database" breakdown.categories))
             , viewStoryCard "Serve & Browse"
                 ("The app runs on a small VM in Virginia (IAD). Every page load, "
                     ++ "API call, and shelf browse is served from here. The vision "
                     ++ "sidecar proxies GPU requests via HMAC-authenticated HTTPS."
                 )
-                (categoryTotal "hosting" breakdown.categories)
+                (categoryTotalText (categoryFor "hosting" breakdown.categories))
             ]
         ]
 
 
-viewStoryCard : String -> String -> Int -> Html Msg
-viewStoryCard title narrative cents =
+{-| ⛔ TAKES THE RENDERED TEXT, NOT AN INT, because an int cannot say "and one
+line we could not measure". These three cards are the most prominent figures on
+the page, and they were printing `$0.00/mo` for categories whose lines are
+unmeasured — the same false claim as the header, on the cards a reader sees
+first.
+-}
+viewStoryCard : String -> String -> String -> Html Msg
+viewStoryCard title narrative costText =
     div [ class "costs__story-card" ]
         [ h3 [ class "costs__story-title" ] [ text title ]
         , p [ class "costs__story-text" ] [ text narrative ]
-        , span [ class "costs__story-cost" ] [ text (formatCents cents ++ "/mo") ]
+        , span [ class "costs__story-cost" ] [ text (costText ++ "/mo") ]
         ]
 
 
@@ -287,7 +299,7 @@ viewCategoryCard cat =
     div [ class "costs__category-card", testId "costs-category-card" ]
         [ div [ class "costs__category-header" ]
             [ h3 [ class "costs__category-name" ] [ text (formatCategoryName cat.category) ]
-            , span [ class "costs__category-total" ] [ text (formatCents cat.totalCents) ]
+            , span [ class "costs__category-total" ] [ text (categoryTotalText cat) ]
             ]
         , div [ class "costs__category-items" ]
             (List.map viewServiceItem cat.items)
@@ -300,7 +312,7 @@ viewServiceItem item =
         [ div [ class "costs__service-name" ] [ text item.service ]
         , div [ class "costs__service-desc" ]
             [ text (Maybe.withDefault "" item.description) ]
-        , div [ class "costs__service-amount" ] [ amountText item ]
+        , div [ class (amountClass item) ] [ amountText item ]
         ]
 
 
@@ -374,6 +386,30 @@ viewPhilosophy =
                 )
             ]
         ]
+
+
+{-| The amount cell's class, marking the unmeasured case.
+
+⚖️ A sentence explaining why there is no figure should not be dressed as a
+figure. The modifier drops the mono face and the emphasis so a reader can tell
+at a glance which lines carry a number — which is the whole point of the basis
+field, carried into the visual register rather than left to the words alone.
+
+-}
+amountClass : CostItem -> String
+amountClass item =
+    case item.basis of
+        ProtoAdmin.CostBasisAbsent ->
+            "costs__service-amount costs__service-amount--unmeasured"
+
+        ProtoAdmin.CostBasisUnspecified ->
+            "costs__service-amount costs__service-amount--unmeasured"
+
+        ProtoAdmin.CostBasisMeasured ->
+            "costs__service-amount"
+
+        ProtoAdmin.CostBasisRateCard ->
+            "costs__service-amount"
 
 
 {-| The amount, or a sentence saying there is none.
@@ -460,6 +496,34 @@ roundTo places value =
     toFloat (round (value * factor)) / factor
 
 
+{-| A category's subtotal, saying when it is incomplete.
+
+⛔ THE HEADER USED TO SUM ABSENT LINES AS MONEY. The per-line fix landed and
+this did not, so on a live stack "Compute" printed `$0.00` over one measured
+line and one unmeasured one — the same false claim the basis field removes at
+the line, at the altitude most readers stop at.
+
+⚖️ The subtotal is still shown rather than withheld: a category with two
+measured lines and one absent one has a defensible figure, it is merely
+incomplete. Saying "this much, and one line we could not measure" tells the
+reader more than either a bare number or nothing.
+
+-}
+categoryTotalText : CostCategory -> String
+categoryTotalText cat =
+    if cat.unmeasuredCount == 0 then
+        formatCents cat.totalCents
+
+    else if cat.unmeasuredCount == 1 then
+        formatCents cat.totalCents ++ " + 1 unmeasured"
+
+    else
+        formatCents cat.totalCents
+            ++ " + "
+            ++ String.fromInt cat.unmeasuredCount
+            ++ " unmeasured"
+
+
 formatCategoryName : String -> String
 formatCategoryName category =
     case category of
@@ -482,9 +546,22 @@ formatCategoryName category =
             other
 
 
-categoryTotal : String -> List CostCategory -> Int
-categoryTotal name categories =
-    categories
-        |> List.filter (\c -> c.category == name)
-        |> List.map .totalCents
-        |> List.sum
+{-| The category by name, collapsed to one record.
+
+⚖️ Returns a record rather than an Int so callers can report incompleteness.
+The previous `categoryTotal` summed `.totalCents` and discarded the unmeasured
+count, which is how the story cards kept printing a bare `$0.00/mo` after the
+header had learned not to.
+
+-}
+categoryFor : String -> List CostCategory -> CostCategory
+categoryFor name categories =
+    let
+        matching =
+            List.filter (\c -> c.category == name) categories
+    in
+    { category = name
+    , totalCents = matching |> List.map .totalCents |> List.sum
+    , unmeasuredCount = matching |> List.map .unmeasuredCount |> List.sum
+    , items = List.concatMap .items matching
+    }

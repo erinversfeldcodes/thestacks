@@ -742,4 +742,90 @@ defmodule Stacks.CostsTest do
       refute changeset.valid?
     end
   end
+
+  describe "a category total does not sum figures nobody has" do
+    # ⛔ THE PER-LINE FIX LANDED AND THE HEADER STILL LIED. A browser drive on a
+    # live stack found "Compute $0.00" over one measured Modal line and one
+    # unmeasured Together AI line — the same false claim the basis field removes
+    # at the line, at the altitude most readers stop at. 4591 Elixir tests, 2314
+    # Elm tests, 9 E2E specs and a GDPR lens all passed while it was there.
+    #
+    # ⚠️ The E2E spec could not have caught it: it asserted
+    # `.costs__service-amount`, the elements the fix changed, and nothing on
+    # `.costs__category-total`. A test shaped around the fix cannot find what
+    # the fix missed.
+    test "an absent line is excluded from its category total" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      measured = %{
+        category: "compute",
+        service: "Measured Thing",
+        description: "d",
+        amount_cents: 500,
+        currency: "USD",
+        basis: "rate_card",
+        period_start: period_start,
+        period_end: period_end
+      }
+
+      # ⛔ A NON-ZERO PLACEHOLDER, AND THE FIXTURE IS DELIBERATELY UNREALISTIC.
+      #
+      # Production absent lines carry `amount_cents: 0`, and my first version of
+      # this test used that — which made the whole assertion VACUOUS: summing a
+      # zero or excluding it gives the same total, so the test passed with the
+      # defect restored. The probe caught it, which is the only reason I know.
+      #
+      # ⚖️ The rule under test is "an absent line is excluded", and testing a
+      # rule requires an input whose inclusion would be VISIBLE. A zero
+      # placeholder cannot distinguish the two behaviours, so the fixture uses a
+      # figure that can — even though no builder emits one.
+      absent = %{measured | service: "Unmeasured Thing", amount_cents: 999, basis: "absent"}
+
+      for attrs <- [measured, absent] do
+        {:ok, _} = Costs.upsert_cost(attrs)
+      end
+
+      compute =
+        Costs.cost_breakdown()
+        |> Map.fetch!(:categories)
+        |> Enum.find(&(&1.category == "compute"))
+
+      assert compute.total_cents == 500,
+             "the absent line was summed into the category total — a reader who never " <>
+               "scrolls past the header sees the figure this issue exists to remove"
+
+      assert compute.unmeasured_count == 1,
+             "the total excludes the absent line but does not SAY so, which under-reports " <>
+               "while looking complete"
+    end
+
+    # ⬛ ANTI-VACUITY: a category with nothing absent reports zero unmeasured, or
+    # a header that always said "+ N unmeasured" would satisfy the case above
+    # and cry wolf on every complete category.
+    test "a category with every figure present reports none unmeasured" do
+      {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
+      {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
+
+      {:ok, _} =
+        Costs.upsert_cost(%{
+          category: "database",
+          service: "All Measured",
+          description: "d",
+          amount_cents: 700,
+          currency: "USD",
+          basis: "measured",
+          period_start: period_start,
+          period_end: period_end
+        })
+
+      database =
+        Costs.cost_breakdown()
+        |> Map.fetch!(:categories)
+        |> Enum.find(&(&1.category == "database"))
+
+      assert database.unmeasured_count == 0
+      assert database.total_cents == 700
+    end
+  end
 end

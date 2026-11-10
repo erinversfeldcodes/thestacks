@@ -736,9 +736,31 @@ defmodule Stacks.Costs do
       costs
       |> Enum.group_by(& &1.category)
       |> Enum.map(fn {category, items} ->
+        # ⛔ AN ABSENT LINE IS NOT SUMMED, AND THE COUNT OF THEM IS REPORTED.
+        #
+        # This used to reduce over every item's `amount_cents`, including lines
+        # whose basis is "absent" — where the amount is a placeholder the basis
+        # exists to say must not be rendered as money. So the per-line fix
+        # landed and the CATEGORY HEADER still printed a dollar figure that
+        # silently included figures nobody had: on a live stack, "Compute
+        # $0.00" over a Modal line and an unmeasured Together AI one.
+        #
+        # ⚖️ A reader who never scrolls past the header saw exactly the lie this
+        # issue exists to remove. Fixing the leaf and leaving the aggregate is
+        # not a partial fix; it is the same defect at the altitude most people
+        # read.
+        #
+        # `unmeasured_count` rather than a nullable total, because a category
+        # with two measured lines and one absent one DOES have a defensible
+        # subtotal — it is just incomplete, and saying so is more useful than
+        # withholding it.
         %{
           category: category,
-          total_cents: Enum.reduce(items, 0, fn c, acc -> acc + c.amount_cents end),
+          total_cents:
+            items
+            |> Enum.reject(&(&1.basis == "absent"))
+            |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end),
+          unmeasured_count: Enum.count(items, &(&1.basis == "absent")),
           items: Enum.map(items, &serialize_cost/1)
         }
       end)
