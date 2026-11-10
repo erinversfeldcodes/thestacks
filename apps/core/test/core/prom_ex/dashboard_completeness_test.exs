@@ -9,14 +9,29 @@ defmodule Core.PromEx.DashboardCompletenessTest do
   """
   use ExUnit.Case, async: true
 
+  alias Core.PromEx.ExternalFamilies
   alias Core.PromEx.MetricAudience
   alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
 
+  # ⛔ "MEASURED" MEANT "REGISTERED BY THIS APP", so this gate passed vacuously
+  # over every series pushed from outside it — and the families it could not
+  # see were the billing ones, the only figures in the system that come from a
+  # provider's invoice rather than our own arithmetic. `measured ⊆ displayed`
+  # held over a set that never contained them, which is the shape that let the
+  # whole metrics pipeline ship blank once before: a green gate whose inputs
+  # exclude the thing that is broken.
+  #
+  # ⚖️ Externally-pushed families are now part of the universe, so they must
+  # have panels like anything else. Declared in `Core.PromEx.ExternalFamilies`
+  # rather than matched by prefix, because the requirement is enumerable or it
+  # is nothing.
   defp registered_families do
-    StacksPlugin.event_metrics([])
-    |> Enum.flat_map(& &1.metrics)
-    |> Enum.map(&Enum.join(&1.name, "_"))
-    |> Enum.uniq()
+    plugin =
+      StacksPlugin.event_metrics([])
+      |> Enum.flat_map(& &1.metrics)
+      |> Enum.map(&Enum.join(&1.name, "_"))
+
+    Enum.uniq(plugin ++ ExternalFamilies.families())
   end
 
   defp all_panels(%{"panels" => panels}) when is_list(panels),

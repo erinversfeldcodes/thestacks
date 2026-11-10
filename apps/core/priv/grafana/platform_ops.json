@@ -1111,6 +1111,132 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 25,
+      "title": "Fly run-rate projected to a month",
+      "description": "Current spend extrapolated to a full month. Watch for a step change with no deploy behind it \u2014 that is usually a machine that stopped auto-stopping, which costs money continuously and produces no errors, so nothing else here would show it.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 106
+      },
+      "targets": [
+        {
+          "expr": "(sum(last_over_time(stacks_billing_run_rate_cents_per_month{provider=\"fly\"}[48h]))) / 100",
+          "legendFormat": "fly run-rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Neon free-tier allowance consumed",
+      "description": "Percent of the Neon free tier used this period. \u26a0\ufe0f The /costs page reports Neon at 0 cents BECAUSE of this allowance, not because the database is free \u2014 so this panel is what makes that zero honest. When it approaches 100 the Neon cost line stops being zero and the page's figure changes without any code changing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 114
+      },
+      "targets": [
+        {
+          "expr": "max(last_over_time(stacks_billing_allowance_pct[48h]))",
+          "legendFormat": "allowance %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "Provider spend month-to-date (what the invoice will say)",
+      "description": "Month-to-date cents per provider, pushed daily from each provider's own billing API. \u26d4 THIS IS THE ONLY SERIES ON ANY DASHBOARD THAT IS AN INVOICE RATHER THAN AN ESTIMATE. Every figure on the /costs page is a published price times a quantity we counted; this is what the provider actually intends to charge. Watch for it diverging from the /costs total: that gap is the error in our own rate-card arithmetic, and it is the only way to detect a wrong price constant.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 98
+      },
+      "targets": [
+        {
+          "expr": "(sum by (provider, component) (last_over_time(stacks_billing_mtd_cents[48h]))) / 100",
+          "legendFormat": "{{provider}}/{{component}}",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

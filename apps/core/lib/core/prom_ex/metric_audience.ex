@@ -106,6 +106,19 @@ defmodule Core.PromEx.MetricAudience do
     # is the multiplicand of the public cost page's idle figure — so it is as
     # public as the number it produces.
     "stacks_vision_gpu_cold_start_count_total" => :public,
+    # ⛔ EXTERNALLY PUSHED, AND THE OMISSION HERE IS WHAT KEPT THE HOLE OPEN.
+    # Widening the dashboard gates' universe was not enough: the completeness
+    # test filters to families classified `:public`, so an unclassified family
+    # is still skipped — a probe removing the billing panel left the gate GREEN
+    # even after the universe included it. Two layers had to agree before the
+    # money series could be required to be visible.
+    #
+    # ⚖️ `:public` because these are the figures the cost page's honesty rests
+    # on: aggregate provider spend, no user dimension, and the only numbers in
+    # the system that come from an invoice rather than our own arithmetic.
+    "stacks_billing_mtd_cents" => :public,
+    "stacks_billing_run_rate_cents_per_month" => :public,
+    "stacks_billing_allowance_pct" => :public,
     # Aggregate spend per provider, no user in it — the same audience as the
     # cost series beside them.
     "stacks_budget_spend_daily_cents" => :public,
