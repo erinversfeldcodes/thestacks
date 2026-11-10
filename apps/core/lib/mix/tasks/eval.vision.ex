@@ -153,7 +153,16 @@ defmodule Mix.Tasks.Eval.Vision do
       {:ok, bytes} ->
         b64 = Base.encode64(bytes)
 
-        case analyze_with_retry(b64, @call_attempts) do
+        # ⚖️ Wall-clock around the whole retried call, measured here rather than
+        # taken from the response's own stage timings. They answer different
+        # questions: the stages say where the service spent its time, the wall
+        # says what a reader waited — and the gap between them is queueing and
+        # transport, which a candidate that moves work off the GPU would change.
+        started = System.monotonic_time(:millisecond)
+        outcome = analyze_with_retry(b64, @call_attempts)
+        wall_ms = System.monotonic_time(:millisecond) - started
+
+        case outcome do
           {:error, reason} ->
             Map.merge(item, %{
               ok: false,
@@ -161,13 +170,17 @@ defmodule Mix.Tasks.Eval.Vision do
               detail: "call failed after #{@call_attempts} attempt(s): #{inspect(reason)}"
             })
 
-          {classified, isbns} ->
+          {classified, isbns, resp} ->
             book_ok = classified == item.expect_book
             isbn_ok = is_nil(item.expect_isbn) or item.expect_isbn in isbns
 
             Map.merge(item, %{
               ok: book_ok and isbn_ok,
-              detail: "is_book=#{classified} isbns=#{inspect(Enum.take(isbns, 3))}"
+              detail: "is_book=#{classified} isbns=#{inspect(Enum.take(isbns, 3))}",
+              tier: Map.get(resp, "tier"),
+              timings_ms: Map.get(resp, "timings_ms"),
+              gpu_cold: Map.get(resp, "gpu_cold"),
+              wall_ms: wall_ms
             })
         end
     end
@@ -231,7 +244,19 @@ defmodule Mix.Tasks.Eval.Vision do
         # itself cannot drift from what actually answered.
         record_model_used(Map.get(resp, "model_used"))
 
-        {classification == "CLASSIFICATION_RESULT_BOOK", isbns}
+        # ⛔ THE TIER AND THE STAGE TIMINGS WERE ON THIS RESPONSE AND DISCARDED
+        # TOO, which left accuracy and speed in different systems: this task
+        # scored correctness with no timing at all, while the latency histogram
+        # measured production traffic with no notion of whether the answer was
+        # right. So no single run could say what a candidate architecture costs
+        # for the accuracy it buys — which is the only comparison that settles
+        # "do we need the GPU?".
+        #
+        # ⚖️ Carried on the result rather than accumulated in the process
+        # dictionary like `model_used`, because that one is the same answer for
+        # every image in a run and these differ per fixture — which is the
+        # point of reporting them.
+        {classification == "CLASSIFICATION_RESULT_BOOK", isbns, resp}
 
       other ->
         {:error, other}
@@ -250,6 +275,68 @@ defmodule Mix.Tasks.Eval.Vision do
     end)
   end
 
+  # ⚖️ One column, not four. The tier and the wall clock are what a reader
+  # compares between two architectures; the per-stage breakdown is for
+  # diagnosing one, and printing it inline would push the detail that says
+  # whether the answer was RIGHT off the edge of the terminal.
+  defp timing_column(r) do
+    case Map.get(r, :wall_ms) do
+      # ⚖️ Padded blank rather than omitted, so an unscored row stays aligned
+      # with the timed ones above it — a column that disappears for some rows
+      # makes the ones that have a figure harder to compare, which is the only
+      # reason the column is here.
+      nil -> String.pad_trailing("", 16)
+      wall -> String.pad_trailing("#{wall}ms #{short_tier(Map.get(r, :tier))}", 16)
+    end
+  end
+
+  defp short_tier(nil), do: "?"
+  defp short_tier("ANALYSIS_TIER_BARCODE"), do: "barcode"
+  defp short_tier("ANALYSIS_TIER_VLM_CLASSIFY"), do: "vlm-cls"
+  defp short_tier("ANALYSIS_TIER_VLM_EXTRACT"), do: "vlm-ext"
+  defp short_tier("ANALYSIS_TIER_UNSPECIFIED"), do: "unspec"
+  defp short_tier(other), do: String.slice(to_string(other), 0, 7)
+
+  # ⛔ THE LINE THIS WHOLE TASK EXISTS TO PRODUCE, and it could not be written
+  # before the tier was on the response. "Do we need the GPU?" is not answerable
+  # from an accuracy score or from a latency curve — it is answerable from what
+  # each tier COSTS for what it GETS RIGHT, which is one table.
+  #
+  # ⚠️ Reported per tier and never averaged across them. A single mean over a
+  # 7ms barcode decode and a ~20s GPU inference is an artefact of the hit rate,
+  # not a property of either path — the same reason the latency histogram is
+  # tagged by tier rather than aggregated.
+  defp report_cost_of_accuracy(results) do
+    scored = Enum.reject(results, &Map.get(&1, :unscored, false))
+
+    by_tier =
+      scored
+      |> Enum.filter(&Map.get(&1, :wall_ms))
+      |> Enum.group_by(&short_tier(Map.get(&1, :tier)))
+
+    if by_tier == %{} do
+      Mix.shell().info(
+        "\naccuracy per tier: no timing captured — the service returned no `tier`, " <>
+          "so this run cannot say what each path cost for what it got right"
+      )
+    else
+      Mix.shell().info(
+        "\naccuracy and latency per tier (what each path costs for what it gets right):"
+      )
+
+      Enum.each(by_tier, fn {tier, rs} ->
+        passed = Enum.count(rs, & &1.ok)
+        walls = rs |> Enum.map(& &1.wall_ms) |> Enum.sort()
+        median = Enum.at(walls, div(length(walls), 2))
+
+        Mix.shell().info(
+          "  #{String.pad_trailing(tier, 10)} #{passed}/#{length(rs)} correct   " <>
+            "median #{median}ms   slowest #{List.last(walls)}ms"
+        )
+      end)
+    end
+  end
+
   defp report(results) do
     Mix.shell().info("\nvision eval — #{length(results)} image(s)\n")
 
@@ -261,8 +348,12 @@ defmodule Mix.Tasks.Eval.Vision do
           true -> "FAIL"
         end
 
-      Mix.shell().info("  #{mark} #{String.pad_trailing(r.name, 18)} #{r.detail}")
+      Mix.shell().info(
+        "  #{mark} #{String.pad_trailing(r.name, 18)} #{timing_column(r)} #{r.detail}"
+      )
     end)
+
+    report_cost_of_accuracy(results)
 
     Mix.shell().info("\nby stratum:")
 
