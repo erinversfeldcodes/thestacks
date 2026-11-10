@@ -182,6 +182,23 @@ class VisionModel:
         ``_infer``); concurrency is bounded by ``max_containers`` rather
         than continuous batching.
         """
+        import time
+
+        # ⛔ THE GPU'S OWN COLD START, WHICH IS THE ONE THAT COSTS MONEY.
+        #
+        # `@modal.enter` runs once per GPU container, so the first inference
+        # after it is the cold one. The sidecar cannot know this: its FastAPI
+        # `lifespan` tracks a different container whose warmth is, by this
+        # file's own reckoning, independent of the GPU's — and an idle A10G is
+        # roughly two orders of magnitude more expensive per second than an
+        # idle CPU container.
+        #
+        # ⚖️ Recording the moment rather than a flag, because `_infer` wants
+        # the AGE: a request arriving 2s after load and one arriving 200s after
+        # it both followed a cold start, but only the first paid for the load.
+        self._loaded_at = time.monotonic()
+        self._inferences_since_load = 0
+
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
@@ -208,8 +225,16 @@ class VisionModel:
         return self._infer(images_b64[0], prompt)
 
     def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
+        import time
+
         import torch
         from qwen_vl_utils import process_vision_info
+
+        # ⚖️ Captured BEFORE the inference, so a slow generate does not inflate
+        # the age of the container it ran on.
+        gpu_container_age_s = time.monotonic() - getattr(self, "_loaded_at", 0.0)
+        gpu_cold = getattr(self, "_inferences_since_load", 0) == 0
+        self._inferences_since_load = getattr(self, "_inferences_since_load", 0) + 1
 
         messages = [
             {
@@ -246,7 +271,22 @@ class VisionModel:
             out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids, strict=False)
         ]
         response = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-        return _parse_json(response)
+        parsed = _parse_json(response)
+
+        # ⚖️ Under a reserved key rather than merged flat, so a model that ever
+        # emits a field called `gpu_cold` cannot overwrite the measurement —
+        # and so a reader can tell the model's answer from the container's
+        # telemetry at a glance.
+        #
+        # ⛔ This is the cold start that costs money. The sidecar's own flag
+        # tracks a CPU container whose warmth is independent of this one's; an
+        # idle A10G is roughly two orders of magnitude more expensive per
+        # second. Without this the expensive cold start was unmeasured.
+        parsed["_container"] = {
+            "gpu_cold": gpu_cold,
+            "gpu_container_age_s": round(gpu_container_age_s, 3),
+        }
+        return parsed
 
 
 def _parse_json(text: str) -> dict[str, Any]:

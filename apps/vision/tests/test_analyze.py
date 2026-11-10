@@ -569,3 +569,92 @@ def test_only_the_first_request_on_a_container_is_cold() -> None:
 
     assert first["sidecar_cold"] is True
     assert second["sidecar_cold"] is False
+
+
+def test_gpu_cold_is_absent_when_no_gpu_ran() -> None:
+    """A barcode answer never woke the model, so it reports no GPU reading.
+
+    ⛔ Absent, not False. `False` would say "the GPU was warm" about a request
+    that never touched it — and the idle-GPU cost figure the architecture
+    decision turns on is derived from exactly these readings.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert data["tier"] == "ANALYSIS_TIER_BARCODE"
+    assert data["gpu_cold"] is None
+    assert data["gpu_container_age_s"] is None
+
+
+def test_gpu_reading_is_relayed_when_the_model_reports_one() -> None:
+    """The sidecar passes the GPU's own reading through, unaltered."""
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={
+                "classification": "book",
+                "confidence": 0.9,
+                "_container": {"gpu_cold": True, "gpu_container_age_s": 12.5},
+            },
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={"books": []},
+        ),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert data["gpu_cold"] is True
+    assert data["gpu_container_age_s"] == 12.5
+
+
+def test_gpu_cold_and_sidecar_cold_are_independent() -> None:
+    """⛔ THE DISTINCTION THIS FIELD EXISTS FOR.
+
+    The sidecar runs in a cheap CPU container whose warmth `modal_app.py` says
+    is independent of the GPU's, and an idle A10G is roughly two orders of
+    magnitude more expensive per second. A test that let these collapse would
+    let the cheap container's warmth stand in for the expensive one — which is
+    the defect that renaming `container_cold` to `sidecar_cold` surfaced.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={
+                "classification": "book",
+                "confidence": 0.9,
+                "_container": {"gpu_cold": True, "gpu_container_age_s": 0.4},
+            },
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={"books": []},
+        ),
+        TestClient(app) as client,
+    ):
+        first = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+        second = client.post(
+            "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
+        ).json()
+
+    # The sidecar warms after its first request; the GPU's reading is whatever
+    # the GPU reported, both times.
+    assert first["sidecar_cold"] is True
+    assert second["sidecar_cold"] is False
+    assert first["gpu_cold"] is True
+    assert second["gpu_cold"] is True
+
+    # ⬛ ANTI-VACUITY: on the second request the two disagree — sidecar warm,
+    # GPU cold. If one were derived from the other this could not happen, and
+    # the whole point is that they are different facts.
+    assert second["sidecar_cold"] != second["gpu_cold"]

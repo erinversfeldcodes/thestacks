@@ -243,6 +243,28 @@ message AnalyzeResponse {
   // A boolean rather than an age, because the decision it feeds is binary and
   // an age would invite a threshold nobody agreed.
   bool sidecar_cold = 7 [json_name = "sidecar_cold"];
+
+  // Whether the GPU container was cold for this inference.
+  //
+  // ⛔ THIS IS THE COLD START THAT COSTS MONEY, and it is a different fact from
+  // `sidecar_cold`. An idle A10G is roughly two orders of magnitude more
+  // expensive per second than the idle CPU container the sidecar runs in, so
+  // these must not be conflated — the field above was briefly the only one and
+  // would have put the cheap container's warmth into the architecture
+  // decision.
+  //
+  // ⚖️ Absent, not false, when no GPU ran: a barcode-tier answer never woke the
+  // model, and reporting `false` would say "the GPU was warm" about a request
+  // that never touched it.
+  optional bool gpu_cold = 8 [json_name = "gpu_cold"];
+
+  // How long the GPU container had been alive when this inference started.
+  //
+  // ⚖️ Seconds alongside the boolean because they answer different questions:
+  // `gpu_cold` says whether this request paid the load, and the age says how
+  // long the container has been billing — which is what the idle-cost figure
+  // is derived from. Absent when no GPU ran.
+  optional double gpu_container_age_s = 9 [json_name = "gpu_container_age_s"];
 }
 
 // AnalysisTier names the cascade stage that produced an answer.
