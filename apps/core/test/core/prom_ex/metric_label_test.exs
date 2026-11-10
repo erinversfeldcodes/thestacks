@@ -138,7 +138,18 @@ defmodule Core.PromEx.MetricLabelTest do
       "platform cost service name. ⚠️ The COLUMN is free text with no validation, so this is " <>
         "bounded at the emit site against `Costs.telemetry_services/0` — the ten names the module " <>
         "itself writes — with anything else collapsing to \"other\". The row keeps the exact value",
+    cold:
+      ~s|container temperature when a vision request arrived — "cold", "warm" or "unknown". | <>
+        ~s|⚠️ Three values and the third is load-bearing: a sidecar deployed before the field | <>
+        ~s|existed sends no `container_cold`, and reading that absence as "warm" would | <>
+        ~s|silently under-count exactly the cold starts the redesign is measuring|,
     status: "HTTP status code — bounded by the protocol",
+    tier:
+      "vision cascade tier that answered. ⚠️ NOT bounded by its caller — it is a string off " <>
+        "the wire from a sidecar that may be deployed AHEAD of this build — so it is bounded " <>
+        ~s|AT THE EMIT SITE against the tiers this build declares, with anything else | <>
+        ~s|collapsing to "other". An unbounded label here is a cardinality commitment to the | <>
+        ~s|store that whoever deploys the sidecar never agreed to make|,
     template: "email template name, one per declared template",
     tier: "age-gate tier — a small closed ladder",
     type:

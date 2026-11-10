@@ -286,6 +286,23 @@ defmodule Core.PromEx.Plugins.Stacks do
         # incomplete ledger, which is the fail-OPEN direction. It is not a
         # refusal (that is the counter above) and not a cost (that is the sum);
         # it is the meter itself failing.
+        # ⛔ PER TIER AND PER TEMPERATURE, which is the whole point of the
+        # vision response carrying a tier. A single call counter cannot answer
+        # "should a cover-embedding tier exist?" — it cannot tell a CPU barcode
+        # decode from a 7B VLM inference, and those differ by roughly the cost
+        # of the GPU.
+        #
+        # ⚠️ Both labels are bounded AT THE EMIT SITE: `tier` arrives as a
+        # string off the wire from a sidecar that may be deployed ahead of this
+        # build, and `cold` has an "unknown" arm for a response that predates
+        # the field. Neither is caller-trusted.
+        counter(
+          [:stacks, :vision, :tier, :count, :total],
+          event_name: [:stacks, :vision, :tier],
+          description:
+            "Vision identifications by cascade tier and container temperature — the breakdown the architecture decision is argued from. A barcode hit never woke the GPU; a VLM tier did.",
+          tags: [:tier, :cold]
+        ),
         counter(
           [:stacks, :budget, :charge_dropped, :count, :total],
           event_name: [:stacks, :budget, :charge_dropped],

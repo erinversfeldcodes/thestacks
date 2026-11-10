@@ -239,4 +239,45 @@ defmodule Stacks.AI.ClientTest do
                ":unreachable; got #{inspect(metadata.reason_class)} from #{inspect(metadata.reason)}"
     end
   end
+
+  describe "a barcode hit and a VLM inference are not the same cost" do
+    # ⛔ THIS IS THE WHOLE POINT OF THE TIER FIELD, and it was unanswerable
+    # before it. Every Modal call was charged a flat rate, so a CPU barcode
+    # decode that never woke the GPU cost the same as a 7B VLM inference — and
+    # "should a cover-embedding tier exist?" cannot be argued from a figure
+    # that cannot tell those apart.
+    test "a barcode tier adds no GPU surcharge" do
+      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_BARCODE") == 0
+    end
+
+    test "a VLM tier adds the GPU surcharge" do
+      expected = Costs.modal_gpu_inference_surcharge_cents() * 100_000
+
+      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_EXTRACT") == expected
+      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_CLASSIFY") == expected
+    end
+
+    # ⬛ ANTI-VACUITY, and it is the assertion that matters: the two must
+    # actually DIFFER. A surcharge function returning 0 for everything would
+    # satisfy the first case, and one returning the same figure for everything
+    # would satisfy the second — either way reinstating the flat rate this
+    # change exists to remove.
+    test "the two tiers are charged differently" do
+      barcode = Client.tier_surcharge_micro_cents("ANALYSIS_TIER_BARCODE")
+      vlm = Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_EXTRACT")
+
+      assert barcode != vlm,
+             "a barcode decode and a GPU inference are charged the same — the ledger cannot " <>
+               "answer the question the vision redesign is decided on"
+    end
+
+    # ⚠️ A tier this build has not been taught adds NOTHING rather than a
+    # guess. Under-charging a new tier shows up as a ledger lagging the
+    # invoice, which someone notices; billing for work we cannot describe does
+    # not.
+    test "an unknown tier adds no surcharge" do
+      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_SOMETHING_NEW") == 0
+      assert Client.tier_surcharge_micro_cents(nil) == 0
+    end
+  end
 end

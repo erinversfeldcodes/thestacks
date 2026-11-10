@@ -58,6 +58,26 @@ defmodule Stacks.Costs do
   def modal_per_inference_cents, do: @modal_per_inference_cents
 
   @doc """
+      What a GPU inference costs BEYOND the baseline charged for every call.
+
+      ⛔ A BARCODE DECODE AND A 7B VLM INFERENCE ARE NOT THE SAME COST, and
+      until the vision response carried a tier they were charged identically.
+      A CPU barcode pre-pass answers without waking the model at all; billing
+      it at the GPU rate is what made "should a cover-embedding tier exist?"
+      unanswerable from this ledger.
+
+      ⚖️ A surcharge rather than a second price, because the baseline is
+      already charged before the response is parsed — a request that errored
+      still ran the container. This is the difference, not the total.
+
+      ⚠️ Derived from the one price rather than declared separately. Two
+      constants for one price is how they drift, and these already had: the
+      page billed 3 cents while the budget guard charged 1.
+  """
+  @spec modal_gpu_inference_surcharge_cents() :: non_neg_integer()
+  def modal_gpu_inference_surcharge_cents, do: @modal_per_inference_cents
+
+  @doc """
       Returns all cost line items for the current billing period (current calendar month).
   """
   @spec current_period_costs() :: [PlatformCost.t()]

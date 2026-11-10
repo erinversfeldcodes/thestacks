@@ -99,6 +99,9 @@ defmodule Core.PromEx.MetricAudience do
     # to know the meter dropped a charge, because it means the published total
     # is low rather than merely imprecise.
     "stacks_budget_charge_dropped_count_total" => :public,
+    # ⚖️ Public: the cost page's figures derive from this breakdown, and a
+    # reader entitled to the total is entitled to know which tier incurred it.
+    "stacks_vision_tier_count_total" => :public,
     # Aggregate spend per provider, no user in it — the same audience as the
     # cost series beside them.
     "stacks_budget_spend_daily_cents" => :public,

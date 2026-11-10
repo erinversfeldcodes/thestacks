@@ -26,6 +26,14 @@ defmodule Stacks.AI.Client do
   # The ledger is denominated in micro-cents; this config value is in cents.
   @micro_cents_per_cent 100_000
 
+  # The tiers this build knows. A label outside this set collapses to "other".
+  @known_tiers [
+    "ANALYSIS_TIER_UNSPECIFIED",
+    "ANALYSIS_TIER_BARCODE",
+    "ANALYSIS_TIER_VLM_CLASSIFY",
+    "ANALYSIS_TIER_VLM_EXTRACT"
+  ]
+
   @modal_function_timeout_ms 300_000
 
   @transport_slack_ms 30_000
@@ -138,6 +146,16 @@ defmodule Stacks.AI.Client do
         request_timeout: @receive_timeout_ms
       )
 
+    # ⛔ CHARGED UNCONDITIONALLY AND THEN ADJUSTED, rather than charged after
+    # the parse — because a request that errored STILL COST GPU TIME. The
+    # container ran; only the answer was lost. Charging only on success would
+    # make a failing model free, which is the direction that under-counts, and
+    # a test pins that behaviour deliberately.
+    #
+    # ⚖️ So the baseline is taken here and the tier-specific difference is
+    # settled below once the response says which tier answered. A call whose
+    # tier we never learn keeps the baseline, which is the honest reading: we
+    # know it cost something and not what.
     record_vision_call_cost()
 
     case result do
@@ -149,6 +167,8 @@ defmodule Stacks.AI.Client do
           %{duration: duration},
           %{endpoint: endpoint, status: 200}
         )
+
+        charge_and_report_tier(resp_body)
 
         decode_success_body(resp_body)
 
@@ -248,6 +268,81 @@ defmodule Stacks.AI.Client do
 
     Budget.record_cost(:modal, cost_cents * @micro_cents_per_cent)
   end
+
+  # ⛔ THE TIER IS READ FROM THE RESPONSE, NOT ASSUMED. Charging a flat rate
+  # per call made a CPU barcode decode and a 7B VLM inference indistinguishable
+  # in the ledger — which is the figure the vision redesign's cost case is
+  # argued from.
+  #
+  # ⚖️ Parsed leniently and on purpose: a sidecar that has not been redeployed
+  # yet sends no `tier`, and the honest response to that is the baseline
+  # charge plus an `unspecified` label — not a crash, and not a guessed
+  # surcharge.
+  defp charge_and_report_tier(resp_body) do
+    tier =
+      case Jason.decode(resp_body) do
+        {:ok, %{"tier" => tier}} when is_binary(tier) and tier != "" -> tier
+        _ -> "ANALYSIS_TIER_UNSPECIFIED"
+      end
+
+    surcharge = tier_surcharge_micro_cents(tier)
+
+    if surcharge > 0 do
+      Budget.record_cost(:modal, surcharge)
+    end
+
+    # ⚠️ The label is bounded HERE, at the emit site, against the tiers this
+    # build knows. A sidecar ahead of this deployment could send a tier name
+    # nothing here declares, and `tier` is a string off the wire — an
+    # unbounded label on a metric is a cardinality commitment to the store that
+    # whoever deploys the sidecar never agreed to make.
+    :telemetry.execute(
+      [:stacks, :vision, :tier],
+      %{count: 1},
+      %{tier: bounded_tier(tier), cold: cold_label(resp_body)}
+    )
+  end
+
+  # ⚖️ Anything undeclared collapses to "other" rather than reaching the store,
+  # and the visible under-labelling is the signal to come and declare it —
+  # the same rule every other bounded label in this app follows.
+  defp bounded_tier(tier) when tier in @known_tiers, do: tier
+  defp bounded_tier(_), do: "other"
+
+  defp cold_label(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"container_cold" => true}} -> "cold"
+      {:ok, %{"container_cold" => false}} -> "warm"
+      _ -> "unknown"
+    end
+  end
+
+  @doc false
+  @spec tier_surcharge_micro_cents(String.t() | nil) :: non_neg_integer()
+  def tier_surcharge_micro_cents(tier)
+
+  # ⛔ THE BARCODE TIER DID NOT RUN THE GPU, SO IT MUST NOT BE BILLED AS IF IT
+  # HAD — and until the response carried a tier, every call was charged the
+  # same flat rate regardless.
+  #
+  # ⚖️ A SURCHARGE on top of the baseline, not a replacement for it. The
+  # baseline is already recorded before the parse, so this adds only the
+  # difference a GPU inference costs beyond a CPU barcode decode. That keeps
+  # the "a failed call still charges" guarantee intact while making a barcode
+  # hit cost what a barcode hit costs.
+  #
+  # ⚠️ Zero for a tier this build has not been taught. Guessing a surcharge for
+  # an unknown tier would bill for work we cannot describe; under-charging a
+  # new tier is visible as a ledger that lags the invoice, which is the
+  # direction someone notices.
+  def tier_surcharge_micro_cents("ANALYSIS_TIER_BARCODE"), do: 0
+
+  def tier_surcharge_micro_cents(tier)
+      when tier in ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"] do
+    Costs.modal_gpu_inference_surcharge_cents() * @micro_cents_per_cent
+  end
+
+  def tier_surcharge_micro_cents(_unknown), do: 0
 
   defp configured_client do
     Application.get_env(:core, :vision_client, __MODULE__)
