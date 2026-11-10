@@ -353,14 +353,31 @@ showsErrorState =
 
 displaysTotalBanner : Test
 displaysTotalBanner =
-    test "total_banner: displays total monthly cost" <|
+    test "total_banner: names the period, the freshness and the completeness" <|
         \() ->
             startCostPage
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/costs"
                     sampleCostResponseJson
+                -- ⛔ THE PERIOD, FROM THE LAST MONTHLY TOTAL. This asserted
+                -- "Total monthly cost" — the generic label — and the page said
+                -- "this period" five times without ever defining it. The
+                -- fixture's last total is March 2026, so that is the period
+                -- the headline figure covers.
                 |> ProgramTest.ensureViewHas
+                    [ Selector.text "Total cost for March 2026" ]
+                -- ⬛ AND THE FALLBACK MUST NOT BE WHAT RENDERS. My first
+                -- attempt at this feature read the period off each cost ITEM,
+                -- a field `CostItem` does not carry, so it decoded as "" and
+                -- the label fell back to the generic text — leaving the page
+                -- unchanged while the fix read as landed. A graceful default
+                -- turns a broken feature into an invisible one, so the
+                -- fallback needs an assertion of its own.
+                |> ProgramTest.ensureViewHasNot
                     [ Selector.text "Total monthly cost" ]
+                -- How fresh, which is a different question from which period.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "figures as of 14 March" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "$13.09" ]
 

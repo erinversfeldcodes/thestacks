@@ -547,7 +547,7 @@ bannerLabel : CostBreakdown -> String
 bannerLabel breakdown =
     case currentPeriodStart breakdown of
         Just start ->
-            "Total cost for " ++ monthLabel start
+            "Total cost for " ++ periodMonthLabel start
 
         Nothing ->
             "Total monthly cost"
@@ -615,8 +615,8 @@ stripLeadingZero s =
 rather than guessing: a format this does not recognise is better shown verbatim
 than rendered as a confidently wrong month.
 -}
-monthLabel : String -> String
-monthLabel iso =
+periodMonthLabel : String -> String
+periodMonthLabel iso =
     case String.split "-" (String.left 7 iso) of
         [ year, month ] ->
             case monthName month of
