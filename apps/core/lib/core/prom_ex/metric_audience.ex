@@ -119,6 +119,22 @@ defmodule Core.PromEx.MetricAudience do
     # ⚖️ `:public` because these are the figures the cost page's honesty rests
     # on: aggregate provider spend, no user dimension, and the only numbers in
     # the system that come from an invoice rather than our own arithmetic.
+    # ⚖️ Scheduled-job health, all `:public`. These say whether a cron ran, how
+    # long it took and how much it produced — aggregate, no user dimension, and
+    # nothing about them is sensitive. ⛔ `:own` would have been the easy call
+    # and the wrong one: it exempts a family from needing a panel, which is
+    # exactly the state these eleven were already in when a reviewer found them.
+    "stacks_backup_dump_last_success_timestamp_seconds" => :public,
+    "stacks_backup_dump_size_bytes" => :public,
+    "stacks_backup_dump_duration_seconds" => :public,
+    "stacks_costs_refresh_last_success_timestamp_seconds" => :public,
+    "stacks_costs_refresh_duration_seconds" => :public,
+    "stacks_costs_refresh_items" => :public,
+    "stacks_bookstore_events_sweep_last_success_timestamp_seconds" => :public,
+    "stacks_bookstore_events_sweep_duration_seconds" => :public,
+    "stacks_dbt_refresh_last_success_timestamp_seconds" => :public,
+    "stacks_dbt_refresh_duration_seconds" => :public,
+    "stacks_dbt_refresh_mart_rows" => :public,
     "stacks_billing_mtd_cents" => :public,
     "stacks_billing_run_rate_cents_per_month" => :public,
     "stacks_billing_allowance_pct" => :public,
