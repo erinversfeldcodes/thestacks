@@ -389,7 +389,12 @@ defmodule Core.PromEx.Plugins.Stacks do
           unit: {:native, :millisecond},
           description:
             "Per-call Modal vision request latency (ms), by endpoint and HTTP status — the distribution timeouts are sized from.",
-          tags: [:endpoint, :status],
+          # ⛔ `:tier` is here because a percentile over both tiers is an
+          # arithmetic artefact, not a latency. Live: 7ms for a barcode decode
+          # against 21,903ms for a GPU inference — so a blended p95 moves with
+          # the barcode hit rate rather than with anything about either path,
+          # and sizing a timeout from it would size it for neither.
+          tags: [:endpoint, :status, :tier],
           reporter_options: [buckets: @vision_duration_buckets]
         ),
         counter(

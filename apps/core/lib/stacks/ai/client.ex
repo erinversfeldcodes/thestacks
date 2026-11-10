@@ -161,14 +161,25 @@ defmodule Stacks.AI.Client do
     case result do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
+        tier = extract_tier(resp_body)
 
+        # ⛔ TAGGED BY TIER, because without it this histogram blends a 7ms
+        # barcode decode with a ~22s GPU inference into one curve — and the
+        # p95 everybody would quote is then a MIXTURE whose shape moves with
+        # the barcode hit rate rather than with either tier's own behaviour.
+        # Observed live: 7ms versus 21,903ms, a factor of ~3,100. A single
+        # percentile over both is not a slow number or a fast one, it is an
+        # arithmetic artefact of how many covers happened to carry a barcode.
+        #
+        # ⚖️ The label is bounded by the same `bounded_tier/1` the counter
+        # uses, so a sidecar ahead of this build cannot widen the series.
         :telemetry.execute(
           [:stacks, :vision, :request, :stop],
           %{duration: duration},
-          %{endpoint: endpoint, status: 200}
+          %{endpoint: endpoint, status: 200, tier: bounded_tier(tier)}
         )
 
-        charge_and_report_tier(resp_body)
+        charge_and_report_tier(resp_body, tier)
 
         decode_success_body(resp_body)
 
@@ -178,7 +189,11 @@ defmodule Stacks.AI.Client do
         :telemetry.execute(
           [:stacks, :vision, :request, :stop],
           %{duration: duration},
-          %{endpoint: endpoint, status: status}
+          # ⚖️ "none" rather than "unspecified": a non-200 means no tier
+          # answered at all, which is a different fact from a tier the
+          # sidecar declined to name. Collapsing them would hide failures
+          # inside the unspecified bucket.
+          %{endpoint: endpoint, status: status, tier: "none"}
         )
 
         error = VisionError.from_http_error(status, resp_body)
@@ -278,13 +293,19 @@ defmodule Stacks.AI.Client do
   # yet sends no `tier`, and the honest response to that is the baseline
   # charge plus an `unspecified` label — not a crash, and not a guessed
   # surcharge.
-  defp charge_and_report_tier(resp_body) do
-    tier =
-      case Jason.decode(resp_body) do
-        {:ok, %{"tier" => tier}} when is_binary(tier) and tier != "" -> tier
-        _ -> "ANALYSIS_TIER_UNSPECIFIED"
-      end
+  # ⚖️ One parse, read twice. The tier reaches the latency histogram and the
+  # ledger, and parsing the body separately for each would let them disagree
+  # about what the same response said — a pair of metrics that can contradict
+  # each other is worse than either alone, because it makes both unusable
+  # without knowing which to trust.
+  defp extract_tier(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"tier" => tier}} when is_binary(tier) and tier != "" -> tier
+      _ -> "ANALYSIS_TIER_UNSPECIFIED"
+    end
+  end
 
+  defp charge_and_report_tier(resp_body, tier) do
     surcharge = tier_surcharge_micro_cents(tier)
 
     if surcharge > 0 do
@@ -306,8 +327,15 @@ defmodule Stacks.AI.Client do
   # ⚖️ Anything undeclared collapses to "other" rather than reaching the store,
   # and the visible under-labelling is the signal to come and declare it —
   # the same rule every other bounded label in this app follows.
-  defp bounded_tier(tier) when tier in @known_tiers, do: tier
-  defp bounded_tier(_), do: "other"
+  # ⛔ PUBLIC SO THE BOUND CAN BE TESTED AT ITS OWN LAYER. It was private, and
+  # the consequence was that the only test of it emitted telemetry directly
+  # and so bypassed it entirely — the assertion held with the bound REMOVED.
+  # A guard whose test cannot fail is not a guard, and this one protects the
+  # metrics store's cardinality against a string from a separately deployed
+  # service, which is not a risk worth leaving unprovable to keep a `defp`.
+  @doc false
+  def bounded_tier(tier) when tier in @known_tiers, do: tier
+  def bounded_tier(_), do: "other"
 
   defp cold_label(resp_body) do
     case Jason.decode(resp_body) do

@@ -240,6 +240,43 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
+  describe "the tier label is bounded before it reaches the metrics store" do
+    # ⛔ THIS GUARD HAD NO TEST THAT COULD FAIL UNTIL NOW. Its first test lived
+    # in the PromEx suite, whose helper emits telemetry directly and so walked
+    # straight past the bound — the assertion passed with `bounded_tier/1`
+    # reduced to the identity function. A probe is the only reason that is
+    # known.
+    #
+    # ⚖️ `tier` is the first label on the vision metrics that arrives as a
+    # STRING OFF THE WIRE. `endpoint` and `status` are ours; a tier name comes
+    # from a sidecar that may be deployed ahead of this build, so an unbounded
+    # label here is a cardinality commitment to the metrics store that whoever
+    # deploys the sidecar never agreed to make.
+    test "a declared tier passes through unchanged" do
+      assert Client.bounded_tier("ANALYSIS_TIER_BARCODE") == "ANALYSIS_TIER_BARCODE"
+      assert Client.bounded_tier("ANALYSIS_TIER_VLM_EXTRACT") == "ANALYSIS_TIER_VLM_EXTRACT"
+    end
+
+    test "an undeclared tier collapses to other" do
+      assert Client.bounded_tier("ANALYSIS_TIER_COVER_EMBEDDING") == "other"
+      assert Client.bounded_tier("whatever the sidecar felt like sending") == "other"
+      assert Client.bounded_tier("") == "other"
+      assert Client.bounded_tier(nil) == "other"
+    end
+
+    # ⬛ ANTI-VACUITY, and it is the assertion the earlier version lacked: a
+    # tier this build does NOT declare must come out DIFFERENT from what went
+    # in. An identity function satisfies the first case above; only this one
+    # distinguishes a bound from no bound.
+    test "the collapse actually changes the value" do
+      undeclared = "ANALYSIS_TIER_SOMETHING_THE_SIDECAR_SHIPPED_FIRST"
+
+      assert Client.bounded_tier(undeclared) != undeclared,
+             "an undeclared tier reached the label unchanged — the metrics store's cardinality " <>
+               "is then set by whatever a separately deployed sidecar sends"
+    end
+  end
+
   describe "a barcode hit and a VLM inference are not the same cost" do
     # ⛔ THIS IS THE WHOLE POINT OF THE TIER FIELD, and it was unanswerable
     # before it. Every Modal call was charged a flat rate, so a CPU barcode

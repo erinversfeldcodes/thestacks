@@ -42,11 +42,11 @@ defmodule Core.PromEx.VisionLatencyTest do
 
   defp buckets, do: metric!().reporter_options[:buckets]
 
-  defp emit(duration_ms, endpoint, status) do
+  defp emit(duration_ms, endpoint, status, tier \\ "ANALYSIS_TIER_BARCODE") do
     :telemetry.execute(
       @event,
       %{duration: System.convert_time_unit(duration_ms, :millisecond, :native)},
-      %{endpoint: endpoint, status: status}
+      %{endpoint: endpoint, status: status, tier: tier}
     )
   end
 
@@ -73,10 +73,40 @@ defmodule Core.PromEx.VisionLatencyTest do
     |> MapSet.new()
   end
 
-  defp whitelist, do: MapSet.new(["endpoint", "status", "le"])
+  defp whitelist, do: MapSet.new(["endpoint", "status", "tier", "le"])
+
+  # ⛔ THE KEY WHITELIST DOES NOT BOUND THE VALUES, and `tier` is the first
+  # label on this metric that arrives as a STRING OFF THE WIRE rather than from
+  # this codebase. `endpoint` and `status` are ours; a tier name comes from a
+  # sidecar that may be deployed ahead of this build. So adding "tier" to the
+  # key whitelist above would have widened what reaches the store from "two
+  # values we choose" to "anything a separately deployed service sends", and
+  # the key-based assertion could not see the difference.
+  #
+  # ⚖️ Hence a second, value-level bound: every exported tier must be one this
+  # build declares, or the collapsed "other", or the "none" a failed request
+  # carries. An unbounded label is a cardinality commitment to the metrics
+  # store that whoever deploys the sidecar never agreed to make.
+  defp allowed_tier_values,
+    do:
+      MapSet.new([
+        "ANALYSIS_TIER_UNSPECIFIED",
+        "ANALYSIS_TIER_BARCODE",
+        "ANALYSIS_TIER_VLM_CLASSIFY",
+        "ANALYSIS_TIER_VLM_EXTRACT",
+        "other",
+        "none"
+      ])
+
+  defp tier_value(block) do
+    case Regex.run(~r/tier="([^"]*)"/, block) do
+      [_, value] -> value
+      _ -> nil
+    end
+  end
 
   describe "the metric is registered at all (the defect this issue is)" do
-    test "a distribution over the vision stop event exists, keyed by endpoint and status" do
+    test "a distribution over the vision stop event exists, keyed by endpoint, status and tier" do
       metric = metric!()
 
       assert %Telemetry.Metrics.Distribution{} = metric,
@@ -84,7 +114,7 @@ defmodule Core.PromEx.VisionLatencyTest do
                inspect(metric.__struct__)
 
       assert metric.event_name == @event
-      assert metric.tags == [:endpoint, :status]
+      assert metric.tags == [:endpoint, :status, :tier]
 
       assert metric.unit == :millisecond
       assert is_function(metric.measurement, 1)
@@ -134,7 +164,7 @@ defmodule Core.PromEx.VisionLatencyTest do
   end
 
   describe "the metric is ATTACHED, not merely defined (emit → PromEx export)" do
-    test "emitting the real event exports the bucket/sum/count triple with both labels" do
+    test "emitting the real event exports the bucket/sum/count triple with its labels" do
       emit(1_500, "analyze", @error_status)
 
       output = scrape()
@@ -177,7 +207,7 @@ defmodule Core.PromEx.VisionLatencyTest do
   end
 
   describe "no non-whitelisted metadata reaches a label (GDPR: telemetry is warehouse-adjacent)" do
-    test "the exported label set is exactly endpoint, status and the histogram's le" do
+    test "the exported label set is exactly endpoint, status, tier and the histogram's le" do
       emit(2_000, "analyze", @error_status)
 
       output = scrape()
@@ -192,10 +222,24 @@ defmodule Core.PromEx.VisionLatencyTest do
       for block <- blocks do
         assert MapSet.equal?(label_keys(block), whitelist()),
                "unexpected label key on #{@family} — only the bounded endpoint/status pair " <>
-                 "(plus the histogram's le) may reach the metrics sink; no ISBN, title, " <>
+                 "and the bounded tier (plus the histogram's le) may reach the metrics sink; " <>
+                 "no ISBN, title, " <>
                  "filename, image id or user id: #{block}"
       end
     end
+
+    # ⛔ THE VALUE BOUND IS NOT TESTABLE FROM THIS FILE, and a test here that
+    # looked like it was is what proved it. This suite's `emit/4` helper calls
+    # `:telemetry.execute` directly, so it injects a tier label straight past
+    # `Client.bounded_tier/1` — the assertion "every exported tier is one we
+    # declare" therefore held with the bound DELETED, because the only tiers it
+    # ever saw were the declared ones the test itself passed in.
+    #
+    # ⚖️ So the bound is tested where it runs, against the function rather than
+    # the scrape: `Stacks.AI.ClientTest`, "an undeclared tier collapses to
+    # other". The key whitelist above still belongs here — it is a property of
+    # the exported series — but a value bound enforced at an emit site this
+    # file does not call cannot be observed from this file.
 
     test "metadata outside the whitelist is DROPPED, not exported, if an emit site adds it" do
       :telemetry.execute(
