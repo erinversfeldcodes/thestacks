@@ -147,14 +147,25 @@ defmodule Core.PromEx.MetricLabelTest do
         ~s|existed sends no `sidecar_cold`, and reading that absence as "warm" would silently | <>
         ~s|under-count exactly the cold starts the redesign is measuring|,
     status: "HTTP status code — bounded by the protocol",
-    tier:
-      "vision cascade tier that answered. ⚠️ NOT bounded by its caller — it is a string off " <>
-        "the wire from a sidecar that may be deployed AHEAD of this build — so it is bounded " <>
-        ~s|AT THE EMIT SITE against the tiers this build declares, with anything else | <>
-        ~s|collapsing to "other". An unbounded label here is a cardinality commitment to the | <>
-        ~s|store that whoever deploys the sidecar never agreed to make|,
     template: "email template name, one per declared template",
-    tier: "age-gate tier — a small closed ladder",
+    # ⛔ TWO PRODUCERS, ONE LABEL NAME, AND ADDING THE SECOND SILENTLY ERASED
+    # THE FIRST. This registry is keyed by label NAME, so declaring a `tier:`
+    # entry for the vision cascade overwrote the age-gate one already here —
+    # Elixir warned (`key :tier will be overridden in map`) and the suite stayed
+    # green, because a map with a duplicate key is valid and the test only ever
+    # looks up by name. A staff reviewer found it; no gate did.
+    #
+    # ⚖️ Described together rather than split, because the registry cannot
+    # distinguish them and pretending otherwise is what caused this. The same
+    # pattern is already documented below for `type`, which also has two
+    # producers with different vocabularies.
+    tier:
+      "TWO PRODUCERS. (1) The vision cascade tier that answered — ⚠️ NOT bounded by its " <>
+        "caller, because it is a string off the wire from a sidecar that may be deployed AHEAD " <>
+        ~s|of this build, so it is bounded AT THE EMIT SITE against the tiers this build | <>
+        ~s|declares, with anything else collapsing to "other". An unbounded label there is a | <>
+        ~s|cardinality commitment to the store that whoever deploys the sidecar never agreed | <>
+        ~s|to make. (2) The age-gate tier — a small closed ladder, bounded by its own code.|,
     type:
       "a bounded type atom — but from TWO producers with different vocabularies: login failure " <>
         "kinds, and the budget guard's :monthly / :daily period. Both are literals at their emit " <>

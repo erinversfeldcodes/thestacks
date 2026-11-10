@@ -485,8 +485,58 @@ defmodule Stacks.AI.ClientTest do
       refute_receive {:cold_start, _}, 200
       assert cold_start_series_total() == before
     end
+
+    # ⛔ THE HEADLINE OF THIS WHOLE CHANGE HAD NO TEST THAT COULD FAIL, and a
+    # staff reviewer's probe is how that is known: deleting the
+    # `Budget.record_cost(:modal, surcharge)` call entirely left 4,619 tests
+    # green. `tier_surcharge_micro_cents/1` was tested thoroughly AS A PURE
+    # FUNCTION — four cases, a written-out literal, an anti-vacuity pair — and
+    # nothing asserted the figure it returns ever reaches the ledger.
+    #
+    # ⚖️ The same mistake as two other findings in this review: testing the
+    # computation rather than the effect. The computation is the easy half; the
+    # charge is the claim.
+    test "a VLM tier charges the baseline AND the GPU surcharge to the ledger" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_EXTRACT",
+        "gpu_dispatches" => []
+      })
+
+      before = Spend.spent(:modal, :daily)
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      # Baseline (one call, charged before the body is parsed) plus the GPU
+      # surcharge. 3 cents each, 100,000 micro-cents to the cent, so 600,000 —
+      # written out rather than derived from the constants the code reads.
+      assert Spend.spent(:modal, :daily) - before == 600_000,
+             "a VLM inference must move the ledger by the baseline plus the GPU surcharge; " <>
+               "moved by #{Spend.spent(:modal, :daily) - before}"
+    end
+
+    # ⬛ ANTI-VACUITY, and the pair is the point: a barcode decode must move the
+    # ledger by the BASELINE ALONE. Charging both tiers the same would satisfy
+    # the case above on its own, and that flat rate is what this change exists
+    # to remove.
+    test "a barcode tier charges the baseline only" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_BARCODE",
+        "gpu_dispatches" => []
+      })
+
+      before = Spend.spent(:modal, :daily)
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert Spend.spent(:modal, :daily) - before == 300_000,
+             "a barcode decode must cost the baseline and no GPU surcharge; moved by " <>
+               "#{Spend.spent(:modal, :daily) - before}"
+    end
   end
 
+  # Reads the EXPORTED series, which is the only number that reflects what a
   # Reads the EXPORTED series, which is the only number that reflects what a
   # reader of the dashboard or the cost page actually gets.
   defp cold_start_series_total do

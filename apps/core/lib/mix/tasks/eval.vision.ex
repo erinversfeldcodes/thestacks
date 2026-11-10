@@ -179,7 +179,13 @@ defmodule Mix.Tasks.Eval.Vision do
               detail: "is_book=#{classified} isbns=#{inspect(Enum.take(isbns, 3))}",
               tier: Map.get(resp, "tier"),
               timings_ms: Map.get(resp, "timings_ms"),
-              gpu_cold: Map.get(resp, "gpu_cold"),
+              # ⚠️ Read from the dispatch LIST, because the flat `gpu_cold` key
+              # this once read no longer exists — the contract became
+              # `gpu_dispatches` when a reviewer found that a single flag
+              # described only the classify dispatch. `Map.get` on a removed
+              # key returns nil silently, so this reported "no cold start" for
+              # every fixture and no test noticed.
+              gpu_cold: any_cold?(Map.get(resp, "gpu_dispatches")),
               wall_ms: wall_ms
             })
         end
@@ -289,6 +295,14 @@ defmodule Mix.Tasks.Eval.Vision do
       wall -> String.pad_trailing("#{wall}ms #{short_tier(Map.get(r, :tier))}", 16)
     end
   end
+
+  # ⚖️ nil, not false, when the response carries no dispatch list at all: a
+  # service too old to report them is a different fact from one that reported
+  # none, and printing "warm" for the first would be a claim we cannot make.
+  defp any_cold?(dispatches) when is_list(dispatches),
+    do: Enum.any?(dispatches, &match?(%{"cold" => true}, &1))
+
+  defp any_cold?(_), do: nil
 
   defp short_tier(nil), do: "?"
   defp short_tier("ANALYSIS_TIER_BARCODE"), do: "barcode"
