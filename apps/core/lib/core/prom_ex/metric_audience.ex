@@ -102,6 +102,10 @@ defmodule Core.PromEx.MetricAudience do
     # ⚖️ Public: the cost page's figures derive from this breakdown, and a
     # reader entitled to the total is entitled to know which tier incurred it.
     "stacks_vision_tier_count_total" => :public,
+    # A count of GPU container lifetimes. Aggregate, no user dimension, and it
+    # is the multiplicand of the public cost page's idle figure — so it is as
+    # public as the number it produces.
+    "stacks_vision_gpu_cold_start_count_total" => :public,
     # Aggregate spend per provider, no user in it — the same audience as the
     # cost series beside them.
     "stacks_budget_spend_daily_cents" => :public,

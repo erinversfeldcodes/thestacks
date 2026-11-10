@@ -322,6 +322,29 @@ defmodule Stacks.AI.Client do
       %{count: 1},
       %{tier: bounded_tier(tier), cold: cold_label(resp_body)}
     )
+
+    maybe_record_gpu_cold_start(resp_body)
+  end
+
+  # ⛔ ONE EVENT PER GPU CONTAINER LIFETIME, which is what makes idle time
+  # costable at all. `gpu_cold` is true for exactly the first inference on a
+  # container, so counting it counts containers — and the idle tail Modal bills
+  # after a container's last request is a per-container cost, not a per-request
+  # one.
+  #
+  # ⚖️ A counter rather than the container id as a label. The id is the right
+  # key for the exact model in `Stacks.AI.GpuWindow`, but a new id per cold
+  # start is unbounded cardinality, and a metrics store is the wrong place to
+  # put a key that grows without limit. So the id stays out of the store and
+  # the store holds the one number the cost line needs.
+  defp maybe_record_gpu_cold_start(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"gpu_cold" => true}} ->
+        :telemetry.execute([:stacks, :vision, :gpu_cold_start], %{count: 1}, %{})
+
+      _ ->
+        :ok
+    end
   end
 
   # ⚖️ Anything undeclared collapses to "other" rather than reaching the store,

@@ -397,6 +397,27 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:endpoint, :status, :tier],
           reporter_options: [buckets: @vision_duration_buckets]
         ),
+
+        # ⛔ THE ONLY BOUNDED SIGNAL FOR A PER-CONTAINER COST. The idle tail
+        # Modal bills after a container's last request is charged once per
+        # container, not once per request, so costing it needs a count of
+        # CONTAINERS — and `gpu_cold` is true for exactly the first inference
+        # on each one.
+        #
+        # ⚠️ Without this the idle seconds were uncountable: the container age
+        # on a response is sampled only when a request runs, and the idle
+        # seconds are precisely the ones with no request attached. A sum of
+        # observed ages under-counts, in the direction that makes the GPU look
+        # cheap — the direction that would wrongly settle the architecture
+        # question this figure exists to inform.
+        counter(
+          [:stacks, :vision, :gpu_cold_start, :count, :total],
+          event_name: [:stacks, :vision, :gpu_cold_start],
+          description:
+            "GPU container cold starts — one per container lifetime, which is what the idle " <>
+              "tail is billed per. Multiply by the GPU scaledown window for billed idle seconds.",
+          measurement: :count
+        ),
         counter(
           [:stacks, :vision, :request, :exception, :count, :total],
           event_name: [:stacks, :vision, :request, :exception],
