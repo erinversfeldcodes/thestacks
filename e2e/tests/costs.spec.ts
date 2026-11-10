@@ -205,6 +205,46 @@ test.describe("Cost Transparency", () => {
     await expect(caveat).toContainText(/services measured/);
   });
 
+  // ⛔ THE PAGE SAID "THIS PERIOD" FIVE TIMES AND NEVER DEFINED IT. Every
+  // absent line reads "not yet measured this period" and the total was
+  // labelled "Total monthly cost", with no date anywhere — so a reader could
+  // not tell whether they were seeing the current month, the last complete
+  // one, or something cached. On a page whose claim is that each figure says
+  // how it was arrived at, omitting WHEN leaves the claim half-made.
+  test("the page names the period its figures cover", async ({ page, request }) => {
+    const resp = await request.get("/api/costs");
+    const body = await resp.json();
+
+    const starts = body.data.categories
+      .flatMap((c: { items: Array<{ period_start?: string }> }) => c.items)
+      .map((i: { period_start?: string }) => i.period_start)
+      .filter((s: string | undefined) => !!s);
+
+    // ⬛ ANTI-VACUITY: the assertion below is about a month name derived from
+    // this value, so an empty list would make it unfalsifiable.
+    expect(starts.length, "no cost item carries a period_start").toBeGreaterThan(0);
+
+    await page.goto("/costs");
+    await expect(page.getByTestId("costs-content")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const label = page.locator(".costs__banner-label");
+    await expect(label).toBeVisible();
+
+    // The server's own period, not the browser's clock: a locally-computed
+    // month would silently disagree with the figures whenever the two differed,
+    // which is exactly when a reader needs the date.
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
+    const expected = monthNames[Number(starts[0].slice(5, 7)) - 1];
+
+    await expect(label).toContainText(expected);
+    await expect(label).toContainText(starts[0].slice(0, 4));
+  });
+
   test("API endpoint returns cost data without auth", async ({ request }) => {
     const resp = await request.get("/api/costs");
     expect(resp.status()).toBe(200);

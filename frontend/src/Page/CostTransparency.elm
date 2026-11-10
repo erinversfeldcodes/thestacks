@@ -219,7 +219,7 @@ viewTotalBanner : CostBreakdown -> Html Msg
 viewTotalBanner breakdown =
     div [ class "costs__banner" ]
         [ div [ class "costs__banner-total" ]
-            [ span [ class "costs__banner-label" ] [ text "Total monthly cost" ]
+            [ span [ class "costs__banner-label" ] [ text (bannerLabel breakdown) ]
             , span [ class "costs__banner-amount" ] [ text (formatCents breakdown.totalCents) ]
             , span [ class "costs__banner-caveat" ] [ text (totalCaveat breakdown) ]
             ]
@@ -525,6 +525,102 @@ reader more than either a bare number or nothing.
 categoryTotalText : CostCategory -> String
 categoryTotalText cat =
     categoryMoneyText cat ++ unmeasuredSuffix cat
+
+
+{-| The label, naming the period the figure covers.
+
+⛔ THE PAGE SAID "THIS PERIOD" FIVE TIMES AND NEVER DEFINED IT. Every absent
+line reads "not yet measured this period" and the total was labelled "Total
+monthly cost", with no date anywhere — so a reader could not tell whether they
+were looking at the current month, the last complete one, or something cached.
+On a page whose whole claim is that each figure says how it was arrived at,
+omitting _when_ leaves the claim half-made.
+
+⚖️ Taken from the items the page already decodes rather than from the client's
+clock: `periodStart` is a fact the server asserted about these figures, and a
+locally-computed month would silently disagree with them whenever the two
+differed — which is exactly the case a reader needs the date for.
+
+-}
+bannerLabel : CostBreakdown -> String
+bannerLabel breakdown =
+    case firstPeriodStart breakdown of
+        Just start ->
+            "Total cost for " ++ monthLabel start
+
+        Nothing ->
+            "Total monthly cost"
+
+
+firstPeriodStart : CostBreakdown -> Maybe String
+firstPeriodStart breakdown =
+    breakdown.categories
+        |> List.concatMap .items
+        |> List.map .periodStart
+        |> List.filter (\s -> s /= "")
+        |> List.head
+
+
+{-| `2026-11-01T00:00:00Z` -> `November 2026`. ⚖️ Falls back to the raw string
+rather than guessing: a format this does not recognise is better shown verbatim
+than rendered as a confidently wrong month.
+-}
+monthLabel : String -> String
+monthLabel iso =
+    case String.split "-" (String.left 7 iso) of
+        [ year, month ] ->
+            case monthName month of
+                Just name ->
+                    name ++ " " ++ year
+
+                Nothing ->
+                    iso
+
+        _ ->
+            iso
+
+
+monthName : String -> Maybe String
+monthName month =
+    case month of
+        "01" ->
+            Just "January"
+
+        "02" ->
+            Just "February"
+
+        "03" ->
+            Just "March"
+
+        "04" ->
+            Just "April"
+
+        "05" ->
+            Just "May"
+
+        "06" ->
+            Just "June"
+
+        "07" ->
+            Just "July"
+
+        "08" ->
+            Just "August"
+
+        "09" ->
+            Just "September"
+
+        "10" ->
+            Just "October"
+
+        "11" ->
+            Just "November"
+
+        "12" ->
+            Just "December"
+
+        _ ->
+            Nothing
 
 
 {-| What the headline figure leaves out, said beside the headline figure.
