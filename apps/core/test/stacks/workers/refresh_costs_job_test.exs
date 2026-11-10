@@ -14,7 +14,7 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       assert :ok = perform_job(RefreshCostsJob, %{})
 
       costs = Stacks.Costs.current_period_costs()
-      assert length(costs) == 10
+      assert length(costs) == 11
 
       services = Enum.map(costs, & &1.service)
       assert "Fly.io Core" in services
@@ -34,7 +34,7 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       assert :ok = perform_job(RefreshCostsJob, %{})
 
       costs = Stacks.Costs.current_period_costs()
-      assert length(costs) == 10
+      assert length(costs) == 11
     end
 
     test "emits costs.refreshed event" do

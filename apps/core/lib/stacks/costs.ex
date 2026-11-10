@@ -14,6 +14,7 @@ defmodule Stacks.Costs do
   alias Core.Repo
   alias Oban.Job
   alias Stacks.Accounts.User
+  alias Stacks.AI.GpuWindow
   alias Stacks.Books.{Book, UploadedImage}
   alias Stacks.Costs.PlatformCost
 
@@ -44,6 +45,19 @@ defmodule Stacks.Costs do
   # ⚖️ For a column whose entire job is to stop a page rendering a number it
   # does not have, the money side is the side that must opt in.
   @bases_that_carry_money ~w(measured rate_card)
+
+  # Modal's published A10 serverless rate: $0.000306/sec, i.e. $1.10/hour,
+  # consistent across modal.com/pricing, their notebooks page and their
+  # GPU-types article. Held in MICRO-cents per second because $0.000306 is
+  # 0.0306 cents — a cents-denominated integer cannot express it, and rounding
+  # it to 0 is how a GPU becomes free.
+  #
+  # ⚠️ Two honest caveats, written here because this figure reaches a public
+  # page. Modal's current pages list the GPU as "A10" while the deployment
+  # requests "A10G", so this is the A10 listing applied to an A10G; and the
+  # only page naming the A10G directly is roughly fifteen months old. A
+  # provider's invoice is the ground truth and this is a rate card.
+  @a10g_micro_cents_per_second 3_060
 
   @neon_cents 0
   @domain_monthly_cents 100
@@ -255,6 +269,11 @@ defmodule Stacks.Costs do
     "Fly.io Services",
     "Google Books & Open Library",
     "Modal GPU Inference",
+    # ⚖️ Declared because the counter collapsed it to "other" the moment the
+    # line existed — which is this allowlist working as its comment above
+    # promises, and the reason a denylist would have been wrong here: a new
+    # service would have minted a time series forever before anyone noticed.
+    "Modal GPU Idle",
     "Neon PostgreSQL",
     "Resend",
     "Together AI"
@@ -375,6 +394,7 @@ defmodule Stacks.Costs do
       fly_core_item(base, Keyword.get(opts, :core_awake_seconds)),
       fly_services_item(base, Keyword.get(opts, :fly_services_cents)),
       modal_item(base, vision_jobs),
+      modal_idle_item(base, Keyword.get(opts, :gpu_cold_starts)),
       together_item(base, Keyword.get(opts, :together_completions)),
       neon_item(base, Keyword.get(opts, :neon_cents)),
       resend_item(base, Keyword.get(opts, :emails_sent)),
@@ -399,6 +419,47 @@ defmodule Stacks.Costs do
   # When the metric store cannot be reached we say the figure is unavailable
   # rather than printing "0 inferences", which on a transparency page would read
   # as a claim that nothing ran.
+  # ⛔ A SEPARATE LINE, BECAUSE IT IS A SEPARATE COST AND THE OLD LINE SAID SO.
+  # The inference line's own description admitted it "counts inference only: a
+  # container also bills while idle for up to its scaledown window after the
+  # last request, which this figure omits". That omission was the honest thing
+  # to write and the wrong thing to leave — a reader cannot weigh a cost they
+  # are told exists but never shown.
+  defp modal_idle_item(base, nil) do
+    Map.merge(base, %{
+      category: "compute",
+      service: "Modal GPU Idle",
+      description:
+        "A10G seconds billed while a container was awake but answering nothing — the tail " <>
+          "after each container's last request. This month's container count is unavailable, " <>
+          "so no charge is shown",
+      amount_cents: 0,
+      basis: "absent"
+    })
+  end
+
+  defp modal_idle_item(base, cold_starts) when is_integer(cold_starts) do
+    seconds = idle_gpu_seconds(cold_starts)
+
+    # ⚖️ Micro-cents throughout, divided to cents only at the end. At
+    # 3,060 micro-cents per second a cents-first calculation rounds every
+    # individual second to zero, which is the same class of unit error that
+    # left the Modal ceiling needing 50,000,000 calls to trip.
+    cents = div(seconds * @a10g_micro_cents_per_second, 100_000)
+
+    Map.merge(base, %{
+      category: "compute",
+      service: "Modal GPU Idle",
+      description:
+        "#{cold_starts} GPU container(s) started this month × " <>
+          "#{GpuWindow.scaledown_window_s()}s scaledown window = #{seconds}s of " <>
+          "idle A10G time at $1.10/hour. This is the cost of a GPU waiting, which the " <>
+          "inference line excludes. Published rate, not an invoice",
+      amount_cents: cents,
+      basis: "rate_card"
+    })
+  end
+
   defp modal_item(base, nil) do
     Map.merge(base, %{
       category: "compute",
@@ -411,6 +472,30 @@ defmodule Stacks.Costs do
       basis: "absent"
     })
   end
+
+  @doc """
+  Billed idle GPU seconds implied by a count of container cold starts.
+
+  ⛔ **The idle tail is the cost nothing was measuring.** A container bills
+  from the moment it wakes until its scaledown window expires after the last
+  request, and the container age on a response is sampled only when a request
+  runs — so the idle seconds are precisely the ones no observation covers.
+  Counting cold starts counts container lifetimes, which is the unit the tail
+  is billed per.
+
+  ⚠️ **The dominant term, not the whole figure.** It omits the seconds a
+  container spent actually answering, which the inference line charges
+  separately — so the two lines together are the estimate and neither is
+  double-counting the other. `GpuWindow` holds the exact
+  per-container model; this is what the metrics store can carry without an
+  unbounded container-id label.
+  """
+  def idle_gpu_seconds(cold_starts) when is_integer(cold_starts) and cold_starts >= 0 do
+    cold_starts * GpuWindow.scaledown_window_s()
+  end
+
+  @doc "Micro-cents per GPU-second at the published A10 rate."
+  def a10g_micro_cents_per_second, do: @a10g_micro_cents_per_second
 
   defp modal_item(base, vision_jobs) when is_integer(vision_jobs) do
     Map.merge(base, %{

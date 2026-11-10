@@ -221,15 +221,27 @@ defmodule Stacks.CostsTest do
       %{period_start: period_start, period_end: period_end}
     end
 
-    test "with vision_jobs 0 yields the 10 seeded line items summing to 1660", ctx do
+    test "with vision_jobs 0 yields the 11 seeded line items summing to 1660", ctx do
       items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0)
 
-      assert length(items) == 10
+      # ⚖️ Asserted by SERVICE NAME as well as by length. A bare count told me
+      # nothing about WHICH line had appeared when this went from 10 to 11, and
+      # a count is equally satisfied by a line being added and an unrelated one
+      # being dropped in the same change.
+      assert Enum.map(items, & &1.service) |> Enum.take(5) == [
+               "Fly.io Core",
+               "Fly.io Services",
+               "Modal GPU Inference",
+               "Modal GPU Idle",
+               "Together AI"
+             ]
+
+      assert length(items) == 11
 
       assert Enum.map(items, & &1.category) ==
-               ~w(hosting hosting compute compute database services services services services domain)
+               ~w(hosting hosting compute compute compute database services services services services domain)
 
-      assert Enum.map(items, & &1.amount_cents) == [534, 1026, 0, 0, 0, 0, 0, 0, 0, 100]
+      assert Enum.map(items, & &1.amount_cents) == [534, 1026, 0, 0, 0, 0, 0, 0, 0, 0, 100]
       assert Enum.reduce(items, 0, fn i, acc -> acc + i.amount_cents end) == 1660
 
       for item <- items do
@@ -458,14 +470,14 @@ defmodule Stacks.CostsTest do
       %{now | day: days, hour: 23, minute: 59, second: 59, microsecond: {999_999, 6}}
     end
 
-    test "populates current_period_costs/0 with the 5 static line items" do
+    test "populates current_period_costs/0 with the static line items" do
       assert Costs.current_period_costs() == []
 
       Costs.seed_current_period_costs()
 
       costs = Costs.current_period_costs()
       assert costs != []
-      assert length(costs) == 10
+      assert length(costs) == 11
     end
 
     test "seeded items sum to a positive total (1660 cents with Modal at 0)" do
@@ -486,7 +498,7 @@ defmodule Stacks.CostsTest do
       month_end = end_of_current_month()
 
       seeded_rows = Core.Repo.all(PlatformCost)
-      assert length(seeded_rows) == 10
+      assert length(seeded_rows) == 11
 
       for cost <- seeded_rows do
         assert DateTime.compare(cost.period_start, month_start) == :eq
@@ -498,18 +510,18 @@ defmodule Stacks.CostsTest do
       Costs.seed_current_period_costs()
       Costs.seed_current_period_costs()
 
-      assert length(Costs.current_period_costs()) == 10
+      assert length(Costs.current_period_costs()) == 11
     end
   end
 
   describe "seed_current_period_costs/0 telemetry (Layer 11)" do
-    test "emits exactly 5 [:stacks, :costs, :recorded] events, one per line item" do
+    test "emits one [:stacks, :costs, :recorded] event per line item" do
       attach_telemetry([[:stacks, :costs, :recorded]])
 
       Costs.seed_current_period_costs()
 
-      events = collect_costs_events(10)
-      assert length(events) == 10
+      events = collect_costs_events(11)
+      assert length(events) == 11
 
       refute_receive {:telemetry_event, [:stacks, :costs, :recorded], _, _}, 50
 
@@ -526,6 +538,12 @@ defmodule Stacks.CostsTest do
                  "Fly.io Core",
                  "Fly.io Services",
                  "Modal GPU Inference",
+                 # ⛔ A SEPARATE LINE BECAUSE IT IS A SEPARATE COST. The
+                 # inference line's own text admitted it omitted the idle tail;
+                 # this is that tail, and it had to be declared in
+                 # `@telemetry_services` because the counter collapsed it to
+                 # "other" the moment it existed.
+                 "Modal GPU Idle",
                  "Together AI",
                  "Neon PostgreSQL",
                  "Resend",
@@ -587,7 +605,7 @@ defmodule Stacks.CostsTest do
       refute Enum.any?(costs, &(&1.id == prior_row.id))
 
       assert "Fly.io Core" in services
-      assert length(costs) == 10
+      assert length(costs) == 11
     end
   end
 
