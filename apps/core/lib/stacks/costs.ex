@@ -794,7 +794,13 @@ defmodule Stacks.Costs do
             items
             |> Enum.filter(&(&1.basis in @bases_that_carry_money))
             |> Enum.reduce(0, fn c, acc -> acc + c.amount_cents end),
-          unmeasured_count: Enum.count(items, &(&1.basis == "absent")),
+          # ⚖️ THE COMPLEMENT OF THE ALLOWLIST, not `== "absent"`. Counting the
+          # one known name would desynchronise the moment a fourth basis
+          # arrives: the total (an allowlist) would correctly exclude a
+          # `pending` line while this count ignored it, so the header would
+          # print a figure that silently omits money with no note saying so.
+          # Deriving both from one list makes them consistent by construction.
+          unmeasured_count: Enum.count(items, &(&1.basis not in @bases_that_carry_money)),
           items: Enum.map(items, &serialize_cost/1)
         }
       end)
