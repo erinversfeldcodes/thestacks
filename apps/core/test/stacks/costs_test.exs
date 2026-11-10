@@ -252,15 +252,64 @@ defmodule Stacks.CostsTest do
 
       modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
       assert modal.amount_cents == 0
-      assert modal.description =~ "0 inferences this month"
+      assert modal.description =~ "0 inference(s) counted this month"
     end
 
-    test "with vision_jobs 7 computes the Modal item from the usage count", ctx do
+    # ⛔ THE COUNT NO LONGER SETS THE PRICE, AND THIS TEST USED TO ENFORCE THAT
+    # IT DID. It read `7 inferences × 3 cents == 21`, and that 3-cent constant
+    # is 18.9x the measured warm cost of an identification (0.159c for 5.2s of
+    # A10G at $0.000306/s) and 4.1x the cold one. It was really an ALL-IN
+    # figure — ~3c is almost exactly the cost at three inferences per container
+    # — so charging it beside a separate idle line double-counted the tail.
+    #
+    # ⚖️ So the count is now only narrative and the GPU SECONDS set the price.
+    # 600s at 3,060 micro-cents per second is 1,836,000 micro-cents = 18 cents
+    # ($0.1836, i.e. 600s of A10G at $1.10/hour), written out rather than
+    # derived from the constant the code reads.
+    #
+    # ⚠️ MY FIRST VERSION OF THIS LITERAL SAID 183, off by 10x from a slipped
+    # digit in 1,836,000. The test failed and the code was right — which is the
+    # whole argument for writing the figure out: an expectation derived from
+    # `@a10g_micro_cents_per_second` would have agreed with the code silently,
+    # and agreed just as happily if the code had been the one that was wrong.
+    test "the Modal inference line is priced from measured GPU seconds, not the count", ctx do
+      items =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 7, gpu_active_seconds: 600)
+
+      modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
+
+      assert modal.amount_cents == 18
+      assert modal.basis == "rate_card"
+      assert modal.description =~ "600s of measured GPU time across 7 inference(s)"
+    end
+
+    # ⬛ ANTI-VACUITY for the pair above: the count must NOT move the figure.
+    # If it did, the flat rate would still be in here somewhere.
+    test "changing the inference count alone does not change the charge", ctx do
+      few = Costs.build_cost_items(ctx.period_start, ctx.period_end, 1, gpu_active_seconds: 600)
+
+      many =
+        Costs.build_cost_items(ctx.period_start, ctx.period_end, 900, gpu_active_seconds: 600)
+
+      a = Enum.find(few, &(&1.service == "Modal GPU Inference")).amount_cents
+      b = Enum.find(many, &(&1.service == "Modal GPU Inference")).amount_cents
+
+      assert a == b,
+             "the inference count moved the charge (#{a} vs #{b}), so a per-inference rate is " <>
+               "still in play — and beside the separate idle line that double-counts the tail"
+    end
+
+    # ⚠️ A counted month with no GPU-time measurement is ABSENT, not zero.
+    # Knowing how many inferences ran says nothing about cost once the price is
+    # per second, and rendering "$0.00" over a month that definitely used a GPU
+    # is the exact defect the basis vocabulary was added to remove.
+    test "a counted month with no GPU measurement is absent, not a free month", ctx do
       items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 7)
 
       modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
-      assert modal.amount_cents == 21
-      assert modal.description =~ "7 inferences this month"
+
+      assert modal.basis == "absent"
+      assert modal.description =~ "measurement they are priced from is unavailable"
     end
 
     test "without a measurement the Fly core line is the flat estimate and says so", ctx do
@@ -702,7 +751,8 @@ defmodule Stacks.CostsTest do
       {:ok, period_start} = DateTime.new(~D[2026-11-01], ~T[00:00:00.000000])
       {:ok, period_end} = DateTime.new(~D[2026-11-30], ~T[23:59:59.999999])
 
-      items = Costs.build_cost_items(period_start, period_end, 120, [])
+      items =
+        Costs.build_cost_items(period_start, period_end, 120, gpu_active_seconds: 900)
 
       modal = Enum.find(items, &(&1.service == "Modal GPU Inference"))
 

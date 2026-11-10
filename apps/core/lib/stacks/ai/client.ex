@@ -279,7 +279,11 @@ defmodule Stacks.AI.Client do
     # honoured for an operator who needs to override, but its default is now
     # the one number rather than a second opinion about it.
     cost_cents =
-      Application.get_env(:core, :modal_cost_per_call_cents, Costs.modal_per_inference_cents())
+      Application.get_env(
+        :core,
+        :modal_cost_per_call_cents,
+        Costs.modal_budget_estimate_cents_per_call()
+      )
 
     Budget.record_cost(:modal, cost_cents * @micro_cents_per_cent)
   end
@@ -324,6 +328,44 @@ defmodule Stacks.AI.Client do
     )
 
     maybe_record_gpu_cold_start(resp_body)
+    record_gpu_active_time(resp_body)
+  end
+
+  # ⛔ THE ACTIVE GPU SECONDS, SO THE INFERENCE LINE CAN STOP GUESSING.
+  #
+  # That line charged a flat 3 cents per inference, and measurement shows that
+  # is **18.9x** the warm active cost (0.159c for 5.2s) and 4.1x the cold one.
+  # It was never an active rate: ~3c is almost exactly the ALL-IN cost at three
+  # inferences per container, which is how it looked right for years — and
+  # which means that once idle is charged on its own line, the flat rate
+  # DOUBLE-COUNTS the tail.
+  #
+  # ⚖️ Summing the model's own stage timings replaces one wrong constant with a
+  # measurement, and leaves `Costs.a10g_micro_cents_per_second/0` as the single
+  # price in the system rather than two that disagree.
+  #
+  # ⚠️ A PROXY, AND NAMED AS ONE: these are wall-clock around each Modal
+  # dispatch, so they include whatever queueing happened inside Modal and are
+  # an upper bound on billed GPU time. Upper-bounding is the safe direction for
+  # a cost figure — the previous constant erred the same way by 19x with
+  # nothing to check it against.
+  defp record_gpu_active_time(resp_body) do
+    with {:ok, %{"timings_ms" => timings}} when is_map(timings) <- Jason.decode(resp_body),
+         ms when ms > 0 <- gpu_stage_ms(timings) do
+      :telemetry.execute([:stacks, :vision, :gpu_active], %{milliseconds: ms}, %{})
+    else
+      _ -> :ok
+    end
+  end
+
+  # ⚖️ Only the stages that run ON the GPU. `download` is the sidecar fetching
+  # bytes and `barcode` is a CPU decode in the sidecar — charging either to the
+  # GPU would inflate the figure with work no A10G did.
+  defp gpu_stage_ms(timings) do
+    ["classify", "extract"]
+    |> Enum.map(&Map.get(timings, &1))
+    |> Enum.filter(&is_integer/1)
+    |> Enum.sum()
   end
 
   # ⛔ ONE EVENT PER GPU CONTAINER LIFETIME, which is what makes idle time

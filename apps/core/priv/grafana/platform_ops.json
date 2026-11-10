@@ -1237,6 +1237,48 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 27,
+      "title": "GPU seconds actually spent inferring",
+      "description": "Sum of the model's own classify + extract stage times. \u26d4 THIS REPLACED A FLAT 3-CENT-PER-INFERENCE CONSTANT that was ~19x the measured warm cost and ~4x the cold one \u2014 it was really an all-in figure, roughly right at three inferences per container, so charging it beside a separate idle line double-counted the tail. Excludes the sidecar's download and CPU barcode stages, which no A10G ran. An upper bound: wall-clock around each Modal dispatch includes in-Modal queueing. Watch this against the cold-start panel: active seconds rising while cold starts stay flat means containers are being shared, which is the cheap direction.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 122
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(stacks_vision_gpu_active_milliseconds_total{app=\"$app\"}[$__rate_interval])) / 1000",
+          "legendFormat": "gpu seconds",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }

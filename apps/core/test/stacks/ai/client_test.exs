@@ -190,12 +190,22 @@ defmodule Stacks.AI.ClientTest do
       # `1` in `Client` while `Costs` billed the public page at `3`. So three
       # artefacts named one price and two of them disagreed with the page.
       #
-      # ⚖️ Read from the owner, `Costs.modal_per_inference_cents/0`, so this
+      # ⚖️ Read from the owner, `Costs.modal_budget_estimate_cents_per_call/0`,
+      # which is now NAMED for what it is: a deliberately conservative BUDGET
+      # estimate, not a price. As a price it was 18.9x the measured active cost
+      # of an identification; as a ceiling input, over-charging is the safe
+      # direction, so the figure is right here and was wrong on the cost page.
+      # The page now prices inference from measured GPU seconds. ⚠️ Do not
+      # reunify them without deciding which way each caller must err. This
       # assertion cannot drift from the number that is actually charged. A test
       # carrying its own copy of the value under test agrees with whichever copy
       # it holds and proves nothing about the other two.
       cost_cents =
-        Application.get_env(:core, :modal_cost_per_call_cents, Costs.modal_per_inference_cents())
+        Application.get_env(
+          :core,
+          :modal_cost_per_call_cents,
+          Costs.modal_budget_estimate_cents_per_call()
+        )
 
       expected = cost_cents * 100_000
 

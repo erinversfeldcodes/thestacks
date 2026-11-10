@@ -30,10 +30,23 @@ defmodule Stacks.Costs do
   # inference while this page told readers 3. Two constants for one price is how
   # they drift, and these had already drifted 3×.
   #
-  # ⚖️ `Costs` owns it because a price is a cost fact, and this module is where
-  # the cost vocabulary lives. The client reads it through `modal_per_inference_cents/0`
-  # rather than declaring its own default.
-  @modal_per_inference_cents 3
+  # ⛔ RENAMED, BECAUSE ONE NAME WAS SERVING TWO PURPOSES AND THAT WAS THE BUG.
+  #
+  # As a PRICE this figure was wrong by 18.9x: measurement puts the warm active
+  # cost of an identification at 0.159c (5.2s of A10G at $0.000306/s) and the
+  # cold one at 0.734c. ~3c is almost exactly the ALL-IN cost at three
+  # inferences per container, which is why it survived — and which means that
+  # beside a separate idle line it double-counted the tail. The cost page now
+  # prices inference from MEASURED GPU seconds and never reads this.
+  #
+  # ⚖️ It stays, under an honest name, because the BUDGET CEILING is a
+  # different problem with the opposite safe direction. A ceiling that
+  # under-charges fails to stop runaway spend; one that over-charges trips
+  # early and is merely annoying. So a deliberately conservative per-call
+  # estimate is correct there and wrong on a page claiming to say what things
+  # cost. ⚠️ Do not reunify these without deciding which direction each caller
+  # needs to err in.
+  @modal_budget_estimate_cents_per_call 3
   # ⛔ AN ALLOWLIST, NOT A DENYLIST, AND THE POLARITY IS THE WHOLE POINT.
   #
   # The aggregations used to reject `basis == "absent"`. Add a fourth value
@@ -68,8 +81,8 @@ defmodule Stacks.Costs do
       ⚖️ Exposed so `Stacks.AI.Client` charges the budget at the same rate this
       page bills at. They were separate constants that disagreed by 3×.
   """
-  @spec modal_per_inference_cents() :: pos_integer()
-  def modal_per_inference_cents, do: @modal_per_inference_cents
+  @spec modal_budget_estimate_cents_per_call() :: pos_integer()
+  def modal_budget_estimate_cents_per_call, do: @modal_budget_estimate_cents_per_call
 
   @doc """
       What a GPU inference costs BEYOND the baseline charged for every call.
@@ -89,7 +102,7 @@ defmodule Stacks.Costs do
       page billed 3 cents while the budget guard charged 1.
   """
   @spec modal_gpu_inference_surcharge_cents() :: non_neg_integer()
-  def modal_gpu_inference_surcharge_cents, do: @modal_per_inference_cents
+  def modal_gpu_inference_surcharge_cents, do: @modal_budget_estimate_cents_per_call
 
   @doc """
       Returns all cost line items for the current billing period (current calendar month).
@@ -381,9 +394,10 @@ defmodule Stacks.Costs do
       is a map with `:category`, `:service`, `:description`, `:amount_cents`,
       `:period_start`, `:period_end`, and `:currency`.
 
-      The Modal item's `amount_cents` is `vision_jobs * #{@modal_per_inference_cents}`
-      and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
-      `amount_cents: 0` and `"0 inferences this month"`.
+      The Modal inference item's `amount_cents` is derived from `:gpu_active_seconds`
+      at the published A10G rate, NOT from `vision_jobs` — the count only appears in
+      the description. Without that measurement the line is `basis: "absent"`,
+      because an inference count says nothing about cost once the price is per second.
   """
   @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer() | nil, keyword()) ::
           [map()]
@@ -393,7 +407,7 @@ defmodule Stacks.Costs do
     [
       fly_core_item(base, Keyword.get(opts, :core_awake_seconds)),
       fly_services_item(base, Keyword.get(opts, :fly_services_cents)),
-      modal_item(base, vision_jobs),
+      modal_item(base, vision_jobs, Keyword.get(opts, :gpu_active_seconds)),
       modal_idle_item(base, Keyword.get(opts, :gpu_cold_starts)),
       together_item(base, Keyword.get(opts, :together_completions)),
       neon_item(base, Keyword.get(opts, :neon_cents)),
@@ -460,17 +474,24 @@ defmodule Stacks.Costs do
     })
   end
 
-  defp modal_item(base, nil) do
-    Map.merge(base, %{
-      category: "compute",
-      service: "Modal GPU Inference",
-      description:
-        "Qwen2.5-VL-7B on A10G (~$0.03/inference; Modal exposes no billing API, " <>
-          "so this is our own count) — this month's inference count is " <>
-          "temporarily unavailable, so no charge is shown",
-      amount_cents: 0,
-      basis: "absent"
-    })
+  # ⚖️ The basis follows the MEASUREMENT, not the count. Knowing how many
+  # inferences ran says nothing about what they cost once the price is per
+  # second — so a month with a known count and no GPU-seconds figure is
+  # genuinely unmeasured, and saying `rate_card` over a zero would be the same
+  # "$0.00 for something we did not measure" this vocabulary exists to stop.
+  defp inference_basis(seconds) when is_number(seconds) and seconds > 0, do: "rate_card"
+  defp inference_basis(_), do: "absent"
+
+  defp inference_description(seconds, vision_jobs) when is_number(seconds) and seconds > 0 do
+    "Qwen2.5-VL-7B on A10G — #{round(seconds)}s of measured GPU time across #{vision_jobs} " <>
+      "inference(s) this month at $1.10/hour. Counts the model's own classify and extract " <>
+      "stages only; the sidecar's download and CPU barcode work ran on no GPU, and the idle " <>
+      "tail is charged on its own line. Published rate, not an invoice"
+  end
+
+  defp inference_description(_seconds, vision_jobs) do
+    "Qwen2.5-VL-7B on A10G — #{vision_jobs} inference(s) counted this month, but the GPU-time " <>
+      "measurement they are priced from is unavailable, so no charge is shown"
   end
 
   @doc """
@@ -497,17 +518,46 @@ defmodule Stacks.Costs do
   @doc "Micro-cents per GPU-second at the published A10 rate."
   def a10g_micro_cents_per_second, do: @a10g_micro_cents_per_second
 
-  defp modal_item(base, vision_jobs) when is_integer(vision_jobs) do
+  defp modal_item(base, nil, _gpu_active_seconds) do
     Map.merge(base, %{
       category: "compute",
       service: "Modal GPU Inference",
       description:
-        "Qwen2.5-VL-7B on A10G — #{vision_jobs} inferences this month " <>
-          "(~$0.03/each; Modal exposes no billing API, so this is our own count. " <>
-          "Counts inference only: a container also bills while idle for up to " <>
-          "its scaledown window after the last request, which this figure omits)",
-      amount_cents: vision_jobs * @modal_per_inference_cents,
-      basis: "rate_card"
+        "Qwen2.5-VL-7B on A10G (~$0.03/inference; Modal exposes no billing API, " <>
+          "so this is our own count) — this month's inference count is " <>
+          "temporarily unavailable, so no charge is shown",
+      amount_cents: 0,
+      basis: "absent"
+    })
+  end
+
+  # ⛔ CHARGED ON MEASURED GPU SECONDS, NOT A FLAT RATE THAT WAS 18.9x WRONG.
+  #
+  # This read `vision_jobs * 3` cents. Measurement puts the warm active cost of
+  # an identification at 0.159c (5.2s x $0.000306) and the cold one at 0.734c,
+  # so 3c was 19x and 4x those. It was never an active rate: ~3c is almost
+  # exactly the ALL-IN cost at three inferences per container, which is why it
+  # looked right — and which means that once the idle tail got its own line,
+  # this one DOUBLE-COUNTED it.
+  #
+  # ⚖️ Both lines now derive from `@a10g_micro_cents_per_second`, so there is
+  # one price in the system instead of two that disagreed by a factor of 19.
+  defp modal_item(base, vision_jobs, gpu_active_seconds) when is_integer(vision_jobs) do
+    cents =
+      case gpu_active_seconds do
+        s when is_number(s) and s > 0 ->
+          div(round(s) * @a10g_micro_cents_per_second, 100_000)
+
+        _ ->
+          0
+      end
+
+    Map.merge(base, %{
+      category: "compute",
+      service: "Modal GPU Inference",
+      description: inference_description(gpu_active_seconds, vision_jobs),
+      amount_cents: cents,
+      basis: inference_basis(gpu_active_seconds)
     })
   end
 

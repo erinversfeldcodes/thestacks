@@ -410,6 +410,20 @@ defmodule Core.PromEx.Plugins.Stacks do
         # observed ages under-counts, in the direction that makes the GPU look
         # cheap — the direction that would wrongly settle the architecture
         # question this figure exists to inform.
+        # ⛔ MEASURED GPU TIME, REPLACING A CONSTANT THAT WAS 18.9x WRONG. The
+        # inference cost line charged a flat 3 cents, which is ~19x the warm
+        # active cost and ~4x the cold one — it was really an ALL-IN figure
+        # (roughly right at three inferences per container), so charging it
+        # beside a separate idle line double-counted the tail.
+        sum(
+          [:stacks, :vision, :gpu_active, :milliseconds, :total],
+          event_name: [:stacks, :vision, :gpu_active],
+          description:
+            "Milliseconds of GPU-stage time (classify + extract) the vision model reported. " <>
+              "Excludes the sidecar's download and CPU barcode stages, which no A10G ran. " <>
+              "An upper bound: wall-clock around each Modal dispatch includes in-Modal queueing.",
+          measurement: :milliseconds
+        ),
         counter(
           [:stacks, :vision, :gpu_cold_start, :count, :total],
           event_name: [:stacks, :vision, :gpu_cold_start],
