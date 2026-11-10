@@ -223,13 +223,26 @@ message AnalyzeResponse {
   // Per-stage wall-clock, milliseconds. A stage that did not run is absent.
   StageTimings timings_ms = 6 [json_name = "timings_ms"];
 
-  // Whether the container was cold when this request arrived.
+  // Whether the SIDECAR container was cold when this request arrived.
   //
-  // ⚖️ A boolean rather than the age in seconds, because the decision it feeds
-  // is binary: a cold start is a different cost and a different latency story,
-  // and an age would invite a threshold nobody agreed. The age is available in
-  // the sidecar's own logs if the distribution is ever needed.
-  bool container_cold = 7 [json_name = "container_cold"];
+  // ⛔ NAMED FOR THE CONTAINER IT ACTUALLY MEASURES. This was `container_cold`,
+  // which read as "the cold start that costs money" and is not what it
+  // reports: the FastAPI app runs in the sidecar, whose warmth `modal_app.py`
+  // states outright is "independent of the GPU's" — and "the money is in the
+  // GPU window". An idle A10G is roughly two orders of magnitude more
+  // expensive per second than an idle CPU container, so a field named for the
+  // cheap one and read as the expensive one would have put a wrong term in the
+  // architecture decision this data exists to inform.
+  //
+  // ⚖️ It is still worth reporting: a cold sidecar costs an ASGI cold start ON
+  // TOP OF whatever the GPU is doing, so it is a real term in request latency
+  // — just not the one the cost case turns on. The GPU's own cold start is
+  // knowable from `@modal.enter` and is NOT yet plumbed through; that is
+  // tracked as remaining work rather than implied by this field.
+  //
+  // A boolean rather than an age, because the decision it feeds is binary and
+  // an age would invite a threshold nobody agreed.
+  bool sidecar_cold = 7 [json_name = "sidecar_cold"];
 }
 
 // AnalysisTier names the cascade stage that produced an answer.

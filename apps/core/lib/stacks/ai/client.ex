@@ -311,8 +311,8 @@ defmodule Stacks.AI.Client do
 
   defp cold_label(resp_body) do
     case Jason.decode(resp_body) do
-      {:ok, %{"container_cold" => true}} -> "cold"
-      {:ok, %{"container_cold" => false}} -> "warm"
+      {:ok, %{"sidecar_cold" => true}} -> "cold"
+      {:ok, %{"sidecar_cold" => false}} -> "warm"
       _ -> "unknown"
     end
   end

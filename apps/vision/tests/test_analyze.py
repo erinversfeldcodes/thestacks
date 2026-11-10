@@ -567,5 +567,5 @@ def test_only_the_first_request_on_a_container_is_cold() -> None:
             "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
         ).json()
 
-    assert first["container_cold"] is True
-    assert second["container_cold"] is False
+    assert first["sidecar_cold"] is True
+    assert second["sidecar_cold"] is False

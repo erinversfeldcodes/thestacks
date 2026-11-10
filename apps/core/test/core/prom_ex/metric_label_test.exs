@@ -139,10 +139,13 @@ defmodule Core.PromEx.MetricLabelTest do
         "bounded at the emit site against `Costs.telemetry_services/0` — the ten names the module " <>
         "itself writes — with anything else collapsing to \"other\". The row keeps the exact value",
     cold:
-      ~s|container temperature when a vision request arrived — "cold", "warm" or "unknown". | <>
+      ~s|SIDECAR temperature when a vision request arrived — "cold", "warm" or "unknown". | <>
+        ~s|⛔ The sidecar, NOT the GPU: the FastAPI app runs in the cheap CPU container, whose | <>
+        ~s|warmth modal_app.py states is independent of the GPU's, and the money is in the GPU | <>
+        ~s|window. A cold sidecar is a real latency term but not the cost term. | <>
         ~s|⚠️ Three values and the third is load-bearing: a sidecar deployed before the field | <>
-        ~s|existed sends no `container_cold`, and reading that absence as "warm" would | <>
-        ~s|silently under-count exactly the cold starts the redesign is measuring|,
+        ~s|existed sends no `sidecar_cold`, and reading that absence as "warm" would silently | <>
+        ~s|under-count exactly the cold starts the redesign is measuring|,
     status: "HTTP status code — bounded by the protocol",
     tier:
       "vision cascade tier that answered. ⚠️ NOT bounded by its caller — it is a string off " <>

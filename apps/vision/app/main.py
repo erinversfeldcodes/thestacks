@@ -343,7 +343,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
                 model_used="local_ocr",
                 tier=_TIER_BARCODE,
                 timings_ms=StageTimings(download=download_ms, barcode=barcode_ms),
-                container_cold=cold,
+                sidecar_cold=cold,
             )
     else:
         barcode_ms = None
@@ -371,7 +371,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             model_used=settings.model_name,
             tier=_TIER_VLM_CLASSIFY,
             timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, classify=classify_ms),
-            container_cold=cold,
+            sidecar_cold=cold,
         )
 
     log.info(
@@ -403,5 +403,5 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             classify=classify_ms,
             extract=_elapsed_ms(extract_started),
         ),
-        container_cold=cold,
+        sidecar_cold=cold,
     )
