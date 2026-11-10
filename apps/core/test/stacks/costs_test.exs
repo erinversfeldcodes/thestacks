@@ -961,4 +961,42 @@ defmodule Stacks.CostsTest do
       assert database.total_cents == 700
     end
   end
+
+  describe "the budget ceiling's two Modal constants are independent" do
+    # ⛔ THEY WERE ONE CONSTANT, AND THAT SILENTLY HALVED THE GUARD'S TRIP
+    # POINT. `modal_gpu_inference_surcharge_cents/0` returned the baseline, on
+    # the reasoning that two constants for one price is how they drift — but
+    # these are two different quantities: a conservative all-in ceiling per
+    # call, and the incremental cost of waking a GPU. While they were equal, a
+    # VLM call charged 6c where it had charged 3c, so the Modal ceiling tripped
+    # at HALF the call volume, and nothing said so.
+    test "the baseline and the GPU surcharge are separate figures" do
+      baseline = Costs.modal_budget_estimate_cents_per_call()
+      surcharge = Costs.modal_gpu_inference_surcharge_cents()
+
+      assert baseline == 3
+      assert surcharge == 3
+    end
+
+    # ⬛ ANTI-VACUITY, and it is the whole point of the split: the two must be
+    # settable independently. They are EQUAL today, so an equality assertion
+    # cannot tell a shared constant from two that agree — only changing one and
+    # observing the other hold distinguishes them.
+    #
+    # ⚖️ Expressed as a claim about the SOURCE rather than the value, because a
+    # runtime test cannot rebind a module attribute: if these two functions
+    # ever return the same attribute again, this is the comment that says why
+    # that is wrong.
+    test "the two figures are read from different attributes" do
+      source = File.read!(Path.join([__DIR__, "..", "..", "lib", "stacks", "costs.ex"]))
+
+      assert source =~
+               "def modal_budget_estimate_cents_per_call, do: @modal_budget_estimate_cents_per_call"
+
+      assert source =~ "def modal_gpu_inference_surcharge_cents, do: @modal_gpu_surcharge_cents",
+             "the GPU surcharge is being read from the baseline attribute again — a VLM call " <>
+               "then charges twice the baseline and the Modal ceiling trips at half the call " <>
+               "volume, which is an operational change that must be stated rather than inherited"
+    end
+  end
 end

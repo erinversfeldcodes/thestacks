@@ -2773,6 +2773,35 @@ h4 {
     margin-top: var(--space-1);
 }
 
+/* ⛔ THE PAGE PROMISED EACH LINE SAYS HOW ITS FIGURE WAS ARRIVED AT, and
+   rendered `measured` and `rate_card` identically — so the promise held for
+   one of its three cases. The backend had been reasoning carefully in a
+   vocabulary the page collapsed.
+
+   ⚖️ A dotted underline, not a badge or an icon: the distinction is a footnote
+   about provenance, not part of the number, and a badge would compete with the
+   figure a reader is scanning. A MEASURED figure gets no marker at all —
+   reading from a meter is the unremarkable case, and marking everything marks
+   nothing. */
+/* ⚖️ The shared base exists so the two modifiers have something to modify, and
+   it deliberately changes nothing about the figure: the provenance marker is an
+   annotation ON a number, so the number must look the same either way. Declared
+   rather than omitted because a modifier whose base has no rule is a block
+   styled by accident — which is what the orphan-class gate caught here. */
+.costs__service-amount-basis {
+    font: inherit;
+    color: inherit;
+}
+
+.costs__service-amount-basis--rate-card {
+    border-bottom: 1px dotted var(--text-muted);
+    cursor: help;
+}
+
+.costs__service-amount-basis--measured {
+    border-bottom: none;
+}
+
 /* When the figures were computed, under the figure itself. ⚖️ Quieter than the
    completeness caveat above it: "which period" is a property of the number and
    "how fresh" is a property of the page, so they are not given equal weight. */

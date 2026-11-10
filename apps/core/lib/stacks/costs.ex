@@ -47,6 +47,33 @@ defmodule Stacks.Costs do
   # cost. ⚠️ Do not reunify these without deciding which direction each caller
   # needs to err in.
   @modal_budget_estimate_cents_per_call 3
+
+  # ⛔ A SECOND CONSTANT, AND TWO CONSTANTS ARE CORRECT HERE. This derived from
+  # the baseline above, justified as "two constants for one price is how they
+  # drift" — but these are not one price. The baseline is a conservative
+  # ALL-IN ceiling per call; this is the INCREMENTAL cost of waking a GPU
+  # instead of decoding a barcode on a CPU. Deriving the second from the first
+  # bought agreement at the cost of meaning, which is the same move as deriving
+  # a test's expectation from the constant under test.
+  #
+  # ⚠️ AND IT CHANGED THE GUARD'S BEHAVIOUR WITHOUT SAYING SO. While the
+  # surcharge equalled the baseline, a VLM call charged 6c where it had charged
+  # 3c — so the Modal ceiling tripped at HALF the call volume, and nothing in
+  # the code, the tests or the commit messages stated that as intended. A
+  # reviewer found it.
+  #
+  # ⚖️ Set to 3c deliberately rather than inherited: a GPU inference measures
+  # roughly 0.16c of active A10G time warm and 0.73c cold, so 3c over-charges
+  # the ceiling by a wide margin — which is the right direction for a ceiling
+  # and is why the figure is a judgement rather than a measurement. Both
+  # constants err the same way for different reasons, which is exactly when two
+  # constants beat one.
+  #
+  # ⚠️ The barcode tier is still charged the 3c baseline against the ceiling
+  # even though its GPU cost is zero. That is deliberate — it uses CPU, network
+  # and the sidecar — but it means the ceiling still trips largely on call
+  # count, so the tier awareness buys the GUARD less than it buys the cost page.
+  @modal_gpu_surcharge_cents 3
   # ⛔ AN ALLOWLIST, NOT A DENYLIST, AND THE POLARITY IS THE WHOLE POINT.
   #
   # The aggregations used to reject `basis == "absent"`. Add a fourth value
@@ -107,7 +134,7 @@ defmodule Stacks.Costs do
       page billed 3 cents while the budget guard charged 1.
   """
   @spec modal_gpu_inference_surcharge_cents() :: non_neg_integer()
-  def modal_gpu_inference_surcharge_cents, do: @modal_budget_estimate_cents_per_call
+  def modal_gpu_inference_surcharge_cents, do: @modal_gpu_surcharge_cents
 
   @doc """
       Returns all cost line items for the current billing period (current calendar month).

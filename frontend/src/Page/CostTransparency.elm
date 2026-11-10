@@ -15,7 +15,7 @@ usage metrics, sustainability footer.
 
 import Api
 import Html exposing (Html, div, h1, h2, h3, p, span, text)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (class, title)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Stacks.Api.V1.Admin as ProtoAdmin
@@ -451,11 +451,33 @@ amountText item =
         ProtoCosts.CostBasisUnspecified ->
             text (absentCopy item.refreshedAt)
 
+        -- ⛔ THESE TWO BRANCHES WERE IDENTICAL, WHICH MADE THE PAGE'S CLOSING
+        -- SENTENCE FALSE FOR TWO OF ITS THREE CASES. It promises "each line
+        -- says how its figure was arrived at: measured from a meter, computed
+        -- from a published price, or not yet measured" — and only the third was
+        -- distinguishable. The backend reasons carefully in a vocabulary the
+        -- page collapsed.
+        --
+        -- ⚖️ A dotted underline with a title rather than a badge or an icon: it
+        -- adds nothing to the scan line of a figure a reader is comparing, and
+        -- the distinction is a footnote about PROVENANCE rather than part of
+        -- the number. ⚠️ `title` alone would be unreachable on touch, so the
+        -- marker also carries visible text in the row's description, which is
+        -- where the rate-card lines already say "published rate, not an
+        -- invoice".
         ProtoCosts.CostBasisMeasured ->
-            text (formatCents item.amountCents)
+            span
+                [ class "costs__service-amount-basis costs__service-amount-basis--measured"
+                , title "Measured: read from a meter for this period."
+                ]
+                [ text (formatCents item.amountCents) ]
 
         ProtoCosts.CostBasisRateCard ->
-            text (formatCents item.amountCents)
+            span
+                [ class "costs__service-amount-basis costs__service-amount-basis--rate-card"
+                , title "Computed from a published price and a quantity we counted — not an invoice."
+                ]
+                [ text (formatCents item.amountCents) ]
 
 
 absentCopy : String -> String
