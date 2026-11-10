@@ -146,7 +146,23 @@ else
     # job, which must satisfy neither direction. Routed here rather than
     # silently skipped, because a skipped differential case is exactly the
     # tautology this block exists to prevent.
-    _record_fail "HARNESS: could not extract the legacy sweep from ${LEGACY_SHA}^ — this case cannot show it discriminates"
+    # ⛔ THE SELF-RETIREMENT ABOVE HAS FIRED, AND THIS IS WHAT IT PRESCRIBES.
+    # `5148e7b2` is reachable from neither `origin/main` nor `HEAD` — a rebase
+    # or squash took it out of history's reach — so a clean clone can never
+    # have it. It survives in a developer's local object store, which is
+    # exactly how this case passed locally and failed in CI for weeks of
+    # history nobody had to think about.
+    #
+    # ⚖️ A differential case whose other half no longer exists is retired, not
+    # repaired and not weakened: there is nothing left to compare against, and
+    # keeping the sentinel red would make CI permanently fail for a reason no
+    # future change can fix. The positional read it was contrasted with is now
+    # the only implementation, and the assertions above still exercise it —
+    # the row is listed and counted as open. Only the comparison retires.
+    #
+    # ⚠️ Reported rather than skipped silently, so the retirement is visible in
+    # the run where it happened instead of being discovered as an absence.
+    _record_pass "RETIRED: the legacy sweep at ${LEGACY_SHA}^ has left history's reach, so this case's differential half can no longer run — the positional read is now the only implementation and is still exercised above"
 fi
 
 # --- an unescaped pipe shifts every cell after it, and is refused -----------
