@@ -158,7 +158,9 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     #
     #   * a real upload batch — the `vision` Oban queue runs at concurrency 20
     #     against max_containers=10, so a batch arrives back-to-back and the gap
-    #     between requests is effectively zero;
+    #     between requests is effectively zero. That queue setting lives in
+    #     `apps/core/config/config.exs`, which now carries the reciprocal note;
+    #     the two numbers are one decision and each side points at the other;
     #   * the production probe — `scripts/probe-production.sh` fires every 15s
     #     for a 600s window.
     #

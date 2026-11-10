@@ -117,6 +117,24 @@ config :core, Oban,
        {"30 3 * * *", Stacks.Workers.CacheSweepJob}
      ]}
   ],
+  # ⚠️ `vision: 20` IS DELIBERATELY TWICE THE GPU CONTAINER CAP, and the other
+  # half of that decision lives in another language in another directory:
+  # `apps/vision/modal_app.py` sets `max_containers=10`. The two numbers are a
+  # single decision and a reader of either one should not have to find the
+  # other by accident — which, until this comment, a reader starting here did.
+  #
+  # ⚖️ The 2:1 oversubscription is intentional. Modal queues the overflow, so
+  # twenty workers against ten containers means ten requests waiting rather
+  # than ten rejected, and at ~20s per inference the second wave starts well
+  # inside Modal's 300s request timeout.
+  #
+  # ⬛ It is also the CHEAPER configuration, which is the non-obvious part. A
+  # GPU container bills for its whole 300s scaledown window after its last
+  # request, and measurement puts that idle tail at roughly 93% of the cost of
+  # an identification when a container serves only one. Keeping requests
+  # arriving back-to-back spreads one tail across many identifications — so
+  # LOWERING this number to match the cap would raise the per-identification
+  # cost, not lower it. See `docs/capacity-model.md` for the arithmetic.
   queues: [default: 10, events: 20, vision: 20, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
