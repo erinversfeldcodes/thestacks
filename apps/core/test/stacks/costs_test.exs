@@ -299,6 +299,28 @@ defmodule Stacks.CostsTest do
                "still in play — and beside the separate idle line that double-counts the tail"
     end
 
+    # ⛔ A LINE MUST NOT CLAIM BOTH "FREE AT ANY VOLUME" AND "NOT YET MEASURED".
+    # A ux reviewer read that contradiction straight off the page: the metadata
+    # APIs clause carried `basis: "absent"` while its own description said the
+    # service is free at any volume. If that is true the cost is a KNOWN zero
+    # and no measurement could change it — so the absence was about the lookup
+    # count, which is narrative, not about the figure.
+    test "a service that is free at any volume reports a known zero, not an absence", ctx do
+      items = Costs.build_cost_items(ctx.period_start, ctx.period_end, 0)
+
+      metadata = Enum.find(items, &(&1.service == "Google Books & Open Library"))
+
+      assert metadata.amount_cents == 0
+
+      assert metadata.basis == "rate_card",
+             "a published rate of zero needs no quantity, so this is a measured-at-zero line; " <>
+               "marking it absent makes the page say \"not yet measured\" beside \"free at any " <>
+               "volume\", which cannot both inform a reader"
+    end
+
+    # ⬛ ANTI-VACUITY for the pair: the GPU line, whose price is NOT zero, must
+    # still go absent without its measurement. If both went rate_card the basis
+    # would have stopped describing anything.
     # ⚠️ A counted month with no GPU-time measurement is ABSENT, not zero.
     # Knowing how many inferences ran says nothing about cost once the price is
     # per second, and rendering "$0.00" over a month that definitely used a GPU

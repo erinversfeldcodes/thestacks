@@ -657,13 +657,28 @@ defmodule Stacks.Costs do
 
   # Google Books and Open Library are free at any volume — the line exists so
   # the dependency is accounted for, with the real call volume shown.
+  #
+  # ⛔ `rate_card`, NOT `absent`, AND THE DIFFERENCE IS A CONTRADICTION A UX
+  # REVIEWER READ OFF THE PAGE. This clause said `absent`, so the page rendered
+  # "not yet measured this period" beside a description claiming the service is
+  # "free at any volume" — two statements that cannot both be useful. If it is
+  # free at any volume then the cost is a KNOWN zero and no measurement could
+  # change it.
+  #
+  # ⚖️ What is missing here is the lookup COUNT, which is narrative. The basis
+  # describes the figure, and the figure is zero at a published rate of zero —
+  # the same reasoning that makes `inference_basis/1` refuse `rate_card` when
+  # the thing it prices is unmeasured, applied in the other direction: a price
+  # of zero needs no quantity.
   defp metadata_apis_item(base, nil) do
     Map.merge(base, %{
       category: "services",
       service: "Google Books & Open Library",
-      description: "ISBN verification for every book entering the system — free at any volume",
+      description:
+        "ISBN verification for every book entering the system — free at any volume, so this " <>
+          "is zero whatever the count. This month's lookup count is unavailable",
       amount_cents: 0,
-      basis: "absent"
+      basis: "rate_card"
     })
   end
 
