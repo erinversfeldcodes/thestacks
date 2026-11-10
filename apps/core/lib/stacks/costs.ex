@@ -23,9 +23,27 @@ defmodule Stacks.Costs do
   # always-on support services (Grafana, VictoriaMetrics, SearXNG, scraper):
   # 2× shared-1x/256MB ($1.94) + 2× shared-1x/512MB ($3.19) at the Fly rate card
   @fly_services_cents 1026
+  # ⛔ THE SINGLE OWNER OF MODAL'S PRICE. It was declared twice — 3 cents here
+  # and 1 cent as `@default_modal_cost_per_call_cents` in `Stacks.AI.Client` —
+  # and nothing configured the second, so the budget guard charged 1 cent per
+  # inference while this page told readers 3. Two constants for one price is how
+  # they drift, and these had already drifted 3×.
+  #
+  # ⚖️ `Costs` owns it because a price is a cost fact, and this module is where
+  # the cost vocabulary lives. The client reads it through `modal_per_inference_cents/0`
+  # rather than declaring its own default.
   @modal_per_inference_cents 3
   @neon_cents 0
   @domain_monthly_cents 100
+
+  @doc """
+      Modal's price per inference, in whole cents.
+
+      ⚖️ Exposed so `Stacks.AI.Client` charges the budget at the same rate this
+      page bills at. They were separate constants that disagreed by 3×.
+  """
+  @spec modal_per_inference_cents() :: pos_integer()
+  def modal_per_inference_cents, do: @modal_per_inference_cents
 
   @doc """
       Returns all cost line items for the current billing period (current calendar month).

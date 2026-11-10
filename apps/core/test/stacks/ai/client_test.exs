@@ -9,6 +9,7 @@ defmodule Stacks.AI.ClientTest do
   alias Stacks.AI.Client
   alias Stacks.AI.MockClient
   alias Stacks.AI.Spend
+  alias Stacks.Costs
 
   @token_format ~r/\A\d+\.[0-9a-f]{64}\z/
 
@@ -184,7 +185,18 @@ defmodule Stacks.AI.ClientTest do
       #
       # ⚖️ The conversion is now the thing asserted, because that is the claim:
       # a call costing one cent must move a micro-cent ledger by 100,000.
-      cost_cents = Application.get_env(:core, :modal_cost_per_call_cents, 1)
+      # ⛔ A THIRD COPY OF MODAL'S PRICE LIVED HERE, and it was stale. This read
+      # `Application.get_env(..., 1)` — its own duplicate of a default that was
+      # `1` in `Client` while `Costs` billed the public page at `3`. So three
+      # artefacts named one price and two of them disagreed with the page.
+      #
+      # ⚖️ Read from the owner, `Costs.modal_per_inference_cents/0`, so this
+      # assertion cannot drift from the number that is actually charged. A test
+      # carrying its own copy of the value under test agrees with whichever copy
+      # it holds and proves nothing about the other two.
+      cost_cents =
+        Application.get_env(:core, :modal_cost_per_call_cents, Costs.modal_per_inference_cents())
+
       expected = cost_cents * 100_000
 
       assert Spend.spent(:modal, :daily) == expected,

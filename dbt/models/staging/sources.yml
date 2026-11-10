@@ -991,6 +991,15 @@ sources:
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
+          - name: basis
+            description: >
+              How the figure was arrived at: measured (read from a meter),
+              rate_card (a published price times an observed quantity), or
+              absent (no figure for this period). ABSENT means amount_cents
+              carries no figure and must not be aggregated as money — a
+              transparency page printing $0.00 for an unmeasured service is the
+              defect this column exists to prevent, and summing an absent row
+              into a total would reintroduce it downstream.
 
       - name: blog_assistant_sessions
         description: Writing-assistant chat sessions (user-scoped).

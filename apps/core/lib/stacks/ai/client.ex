@@ -17,11 +17,11 @@ defmodule Stacks.AI.Client do
   alias Stacks.AI.Budget
   alias Stacks.AI.ClientBehaviour
   alias Stacks.AI.VisionError
+  alias Stacks.Costs
 
   @behaviour ClientBehaviour
 
   @fuse_name :vision_fuse
-  @default_modal_cost_per_call_cents 1
 
   # The ledger is denominated in micro-cents; this config value is in cents.
   @micro_cents_per_cent 100_000
@@ -237,8 +237,14 @@ defmodule Stacks.AI.Client do
   # belongs here, at the boundary between that decision and the ledger's
   # precision — not in the key's name.
   defp record_vision_call_cost do
+    # ⛔ READ FROM `Costs`, WHICH OWNS THE PRICE. This used to default to its
+    # own `@default_modal_cost_per_call_cents 1` while `Costs` billed the
+    # public page at 3 — and nothing configured the override, so the budget
+    # guard charged a third of what the page claimed. The config key is still
+    # honoured for an operator who needs to override, but its default is now
+    # the one number rather than a second opinion about it.
     cost_cents =
-      Application.get_env(:core, :modal_cost_per_call_cents, @default_modal_cost_per_call_cents)
+      Application.get_env(:core, :modal_cost_per_call_cents, Costs.modal_per_inference_cents())
 
     Budget.record_cost(:modal, cost_cents * @micro_cents_per_cent)
   end

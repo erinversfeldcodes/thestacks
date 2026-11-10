@@ -384,7 +384,16 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       post = insert(:post, user: consenting_author())
       insert(:book)
 
-      {:ok, today} = Date.new(2026, 11, 9)
+      # ⛔ `Date.utc_today()`, NOT A LITERAL DATE. This read
+      # `Date.new(2026, 11, 9)` and passed on the day it was written, then
+      # failed at midnight: `check_budget/1` reads `Spend.spent(provider,
+      # :daily)`, which defaults to TODAY, so the test recorded yesterday's
+      # spend and the guard checked today's empty ledger.
+      #
+      # ⚖️ A test that pins "now" to a literal while the code under test asks
+      # the clock is not deterministic — it is deferred-flaky, and it fails in
+      # the night rather than in the change that broke it.
+      today = Date.utc_today()
       # ⚖️ Read the limit the way `check_budget/1` reads it — `:ai_budget`
       # keyword list, not a flat key — so the test cannot pass by exhausting a
       # ceiling the code does not consult. My first version guessed a key that
@@ -417,7 +426,16 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       post = insert(:post, user: consenting_author())
       insert(:book)
 
-      {:ok, today} = Date.new(2026, 11, 9)
+      # ⛔ `Date.utc_today()`, NOT A LITERAL DATE. This read
+      # `Date.new(2026, 11, 9)` and passed on the day it was written, then
+      # failed at midnight: `check_budget/1` reads `Spend.spent(provider,
+      # :daily)`, which defaults to TODAY, so the test recorded yesterday's
+      # spend and the guard checked today's empty ledger.
+      #
+      # ⚖️ A test that pins "now" to a literal while the code under test asks
+      # the clock is not deterministic — it is deferred-flaky, and it fails in
+      # the night rather than in the change that broke it.
+      today = Date.utc_today()
       # ⚖️ Read the limit the way `check_budget/1` reads it — `:ai_budget`
       # keyword list, not a flat key — so the test cannot pass by exhausting a
       # ceiling the code does not consult. My first version guessed a key that

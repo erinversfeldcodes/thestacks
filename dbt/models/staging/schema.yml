@@ -919,6 +919,10 @@ models:
         description: Period start.
       - name: period_end
         description: Period end.
+      - name: basis
+        description: Basis.
+        tests:
+          - not_null
       - name: created_at
         description: Timestamp when the record was created.
         tests:
