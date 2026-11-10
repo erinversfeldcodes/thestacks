@@ -39,6 +39,20 @@
     --text-muted: #a09070;
     --accent: #4a7c59;
     --accent-hover: #5a9a6e;
+
+    /* ⛔ THE ACCENT IS NOT READABLE AS BODY TEXT, measured at 3.81:1 against
+       --bg (#1a1208) where WCAG AA needs 4.5:1. A ux reviewer found two
+       failures on text this wave introduced — the category subtotal, which
+       this wave turned from a figure into a sentence, and the rewritten
+       closing claim.
+
+       ⚖️ A separate token rather than changing --accent, because the accent is
+       also a BAR fill and a BORDER colour, where 3.81:1 is fine (AA asks 3:1
+       for non-text) and where darkening or lightening it changes the brand for
+       no accessibility gain. #6a9d78 measures 5.91:1 on --bg and 5.61:1 on the
+       2.5%-white card wash, so it clears AA in both places this text actually
+       sits — with the same hue, just carried further from the background. */
+    --accent-text: #6a9d78;
     --shelf-bg: #3d2b1f;
     --wallpaper-color: #2a3d2f;
     --border: rgba(255, 255, 255, 0.1);
@@ -2620,7 +2634,7 @@ h4 {
 .costs__story-cost {
     font-family: var(--font-mono);
     font-size: var(--size-lg);
-    color: var(--accent);
+    color: var(--accent-text);
     font-weight: 700;
     padding-top: 0.5rem;
     border-top: 1px solid var(--border);
@@ -2666,7 +2680,7 @@ h4 {
 .costs__category-total {
     font-family: var(--font-mono);
     font-size: var(--size-base);
-    color: var(--accent);
+    color: var(--accent-text);
     font-weight: 700;
 }
 

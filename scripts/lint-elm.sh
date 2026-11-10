@@ -108,6 +108,7 @@ gate check-decoder-coverage.sh
 gate check-book-adapter-coverage.sh
 gate check-css.sh
 gate check-css-values.sh
+gate check-css-contrast.sh
 
 step "elm-format --validate" npx elm-format --validate src/
 step "npm audit" npm audit
