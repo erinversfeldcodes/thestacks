@@ -271,6 +271,29 @@ defmodule Stacks.AI.ClientTest do
                "answer the question the vision redesign is decided on"
     end
 
+    # ⛔ THE FIGURE IS A LITERAL, AND THAT IS THE POINT OF THIS CASE.
+    #
+    # The three cases above read `Costs.modal_gpu_inference_surcharge_cents()`
+    # — the same source the code reads — so they prove the two tiers differ and
+    # prove NOTHING about the unit. A test that derives its expectation through
+    # the same path as the code agrees with the code whatever the code says,
+    # which is exactly how this call site charged **1 micro-cent instead of 1
+    # cent** for months while a test asserted it was correct.
+    #
+    # ⚖️ So this one spells the arithmetic out: the price is 3 cents, a cent is
+    # 100,000 micro-cents, therefore a GPU tier's surcharge is 300,000. If
+    # someone changes the price, this case fails and they must come and change
+    # a number a person can read — which is the review this test exists to
+    # force.
+    test "a GPU tier's surcharge is 300_000 micro-cents, written out" do
+      assert Costs.modal_gpu_inference_surcharge_cents() == 3,
+             "the price changed; update the literal below deliberately rather than deriving it"
+
+      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_EXTRACT") == 300_000,
+             "3 cents is 300,000 micro-cents — a mismatch here is the unit confusion that " <>
+               "left the Modal ceiling needing 50,000,000 calls to trip"
+    end
+
     # ⚠️ A tier this build has not been taught adds NOTHING rather than a
     # guess. Under-charging a new tier shows up as a ledger lagging the
     # invoice, which someone notices; billing for work we cannot describe does
