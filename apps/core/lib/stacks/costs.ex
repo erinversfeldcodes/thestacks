@@ -65,11 +65,16 @@ defmodule Stacks.Costs do
   # 0.0306 cents — a cents-denominated integer cannot express it, and rounding
   # it to 0 is how a GPU becomes free.
   #
-  # ⚠️ Two honest caveats, written here because this figure reaches a public
-  # page. Modal's current pages list the GPU as "A10" while the deployment
-  # requests "A10G", so this is the A10 listing applied to an A10G; and the
-  # only page naming the A10G directly is roughly fifteen months old. A
-  # provider's invoice is the ground truth and this is a rate card.
+  # ⬛ CONFIRMED BY MODAL'S OWN API, not inferred from a pricing page:
+  # `modal billing rates` returns `Nvidia A10G: $1.10 / hour`. That disposes of
+  # the caveat this comment used to carry — that a page listing "A10" was being
+  # applied to an A10G, from an article fifteen months old.
+  #
+  # ⚠️ Still a rate card rather than an invoice: it is the published price, and
+  # what a reader is charged also depends on seconds nobody here counts. The
+  # reconciliation that checks this is `modal billing report`, and on
+  # 2026-11-10 it agreed — $0.904 of A10G against ~9.9 implied container
+  # lifetimes, matching the sessions driven by hand that day.
   @a10g_micro_cents_per_second 3_060
 
   @neon_cents 0
