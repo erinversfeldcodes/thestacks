@@ -29,9 +29,107 @@ test.describe("Cost Transparency", () => {
       page.locator(".costs__story-card").first()
     ).toContainText("$");
 
+    // ⛔ THE PAGE NO LONGER CLAIMS "EVERY NUMBER ON THIS PAGE IS REAL", and
+    // this assertion used to require that it did. The sentence was false in two
+    // directions: most lines are a published price times an observed quantity
+    // (honest arithmetic, but an estimate of spend), and five cost-item
+    // builders answered an unavailable measurement with zero — so the page
+    // rendered "$0.00" for services it had no measurement of, directly above
+    // that claim.
     await expect(page.locator(".costs__philosophy-text")).toContainText(
-      "Every number"
+      "Each line above says how its figure was arrived at"
     );
+  });
+
+  test("every cost line declares how its figure was arrived at", async ({
+    request,
+  }) => {
+    const resp = await request.get("/api/costs");
+    expect(resp.status()).toBe(200);
+    const body = await resp.json();
+
+    const items = body.data.categories.flatMap(
+      (c: { items: unknown[] }) => c.items
+    );
+
+    // ⬛ ANTI-VACUITY FIRST. A deployed stack with no cost rows would make every
+    // assertion below pass over an empty list — which is the shape this
+    // project's own notes call out as a guard that cannot fail.
+    expect(items.length).toBeGreaterThan(0);
+
+    const known = ["measured", "rate_card", "absent"];
+
+    for (const item of items as Array<{ service: string; basis: string }>) {
+      expect(known, `${item.service} declares an unknown basis`).toContain(
+        item.basis
+      );
+    }
+  });
+
+  // ⛔ A LINE WITH NO FIGURE MUST NOT RENDER AS MONEY. This is the whole point
+  // of the basis field: a reader seeing "$0.00" concludes the service is free,
+  // and five builders used to produce exactly that for an unmeasured metric.
+  //
+  // ⚠️ THE PRECONDITION IS SKIPPED VISIBLY, NOT GUARDED SILENTLY. My first
+  // version wrapped the assertion in `if (text.includes("not yet measured"))`,
+  // which on a stack where every meter happens to be populated is a loop that
+  // asserts nothing and reports green — the "guard that makes a test unable to
+  // fail" shape this repo already tracks sixteen of. A silent pass and a real
+  // pass are indistinguishable, and that is worse than a skip.
+  //
+  // ⚖️ So the absent line is located through the API first. No absent line
+  // means the precondition is absent, which `test.skip` says out loud and
+  // `E2E_EXPECT_ABSENT_COST_LINE=1` can turn into a hard failure where one is
+  // guaranteed — the same pattern the Modal-dependent specs use.
+  test("an absent line shows text, not a currency zero", async ({
+    page,
+    request,
+  }) => {
+    const resp = await request.get("/api/costs");
+    expect(resp.status()).toBe(200);
+    const body = await resp.json();
+
+    const absent = body.data.categories
+      .flatMap((c: { items: Array<{ service: string; basis: string }> }) =>
+        c.items
+      )
+      .filter((i: { basis: string }) => i.basis === "absent");
+
+    if (absent.length === 0) {
+      const required = process.env.E2E_EXPECT_ABSENT_COST_LINE === "1";
+      expect(
+        required,
+        "no cost line has basis=absent on this stack, so the no-currency-zero " +
+          "rendering is unexercised — set E2E_EXPECT_ABSENT_COST_LINE=1 only " +
+          "where an unmeasured line is guaranteed"
+      ).toBe(false);
+      test.skip(true, "no absent cost line on this stack to render");
+      return;
+    }
+
+    await page.goto("/costs");
+    await expect(page.locator(".costs__philosophy-text")).toBeVisible({
+      timeout: 15000,
+    });
+
+    const texts = await page
+      .locator(".costs__service-amount")
+      .allInnerTexts();
+
+    const absentRendered = texts.filter((t) =>
+      t.includes("not yet measured")
+    );
+
+    // ⬛ The API said there is an absent line, so the page must show one. If
+    // this is empty the page is rendering a figure for it — which is the defect.
+    expect(
+      absentRendered.length,
+      `the API reports ${absent.length} absent line(s) and the page renders none as text`
+    ).toBeGreaterThan(0);
+
+    for (const t of absentRendered) {
+      expect(t).not.toMatch(/\$/);
+    }
   });
 
   test("API endpoint returns cost data without auth", async ({ request }) => {
