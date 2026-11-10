@@ -31,7 +31,26 @@ elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
     # `buf breaking` — losing contract protection without saying so.
     _main_tree="$(git ls-tree -r origin/main --name-only 2>/dev/null || true)"
     if grep -q '\.proto$' <<< "${_main_tree}"; then
-        (cd "$REPO_ROOT/proto" && buf breaking --against '../.git#branch=origin/main,subdir=proto')
+        # ⛔ GIT_LFS_SKIP_SMUDGE=1 BECAUSE THIS CLONE PULLS FILES buf NEVER
+        # READS. `--against '../.git#...'` makes buf clone the local repository
+        # and check out `origin/main`, and that checkout runs the LFS smudge
+        # filter over everything `.gitattributes` tracks — `concepts/**/*.png`
+        # and `frontend/public/textures/*.png`. CI checks out with `lfs: false`,
+        # so those paths are pointer files with no objects behind them, the
+        # smudge filter fails, and the clone dies with
+        # "external filter 'git-lfs filter-process' failed" — taking the whole
+        # contract check with it for want of an image.
+        #
+        # ⚖️ Skipping the smudge is correct rather than a workaround: buf reads
+        # `subdir=proto`, and no `.proto` is LFS-tracked. The pointer files are
+        # exactly as useful to it as the images would be. The alternative —
+        # `lfs: true` on checkout — would download megabytes of textures on
+        # every proto lint to satisfy a filter whose output is discarded.
+        #
+        # ⚠️ Scoped to this command, not exported: a repo-wide skip would make
+        # a genuinely missing LFS object look like a successful checkout
+        # somewhere it matters.
+        (cd "$REPO_ROOT/proto" && GIT_LFS_SKIP_SMUDGE=1 buf breaking --against '../.git#branch=origin/main,subdir=proto')
     else
         echo "No .proto files on origin/main — skipping buf breaking check."
     fi
