@@ -184,7 +184,6 @@ class VisionModel:
         ``_infer``); concurrency is bounded by ``max_containers`` rather
         than continuous batching.
         """
-        import time
         import uuid
 
         # ⛔ THE GPU'S OWN COLD START, WHICH IS THE ONE THAT COSTS MONEY.
@@ -196,10 +195,12 @@ class VisionModel:
         # roughly two orders of magnitude more expensive per second than an
         # idle CPU container.
         #
-        # ⚖️ Recording the moment rather than a flag, because `_infer` wants
-        # the AGE: a request arriving 2s after load and one arriving 200s after
-        # it both followed a cold start, but only the first paid for the load.
-        self._loaded_at = time.monotonic()
+        # ⛔ NO TIMESTAMP ANY MORE. This recorded `_loaded_at` so `_infer`
+        # could report a container AGE, and a reviewer showed that age's only
+        # possible consumer would have double-counted a term the inference cost
+        # line already bills — so the field had no reader and is gone, here and
+        # on the wire. What remains is the one fact that is load-bearing: this
+        # container has not inferred yet, so the next inference pays the load.
         self._inferences_since_load = 0
 
         # ⛔ AN IDENTITY FOR THE BILLED WINDOW, which the age alone cannot give.
@@ -246,16 +247,21 @@ class VisionModel:
         return self._infer(images_b64[0], prompt)
 
     def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
-        import time
-
         import torch
         from qwen_vl_utils import process_vision_info
 
-        # ⚖️ Captured BEFORE the inference, so a slow generate does not inflate
-        # the age of the container it ran on.
-        gpu_container_age_s = time.monotonic() - getattr(self, "_loaded_at", 0.0)
-        gpu_cold = getattr(self, "_inferences_since_load", 0) == 0
-        self._inferences_since_load = getattr(self, "_inferences_since_load", 0) + 1
+        # ⛔ NO getattr DEFAULTS HERE ANY MORE. These read
+        # `getattr(self, "_loaded_at", 0.0)`, and a reviewer measured what that
+        # fabricates when it fires: `monotonic()`'s epoch is arbitrary, so the
+        # "age" came out as 281,885s — a plausible-looking number in the
+        # OVER-counting direction, against a cost model whose own docs say a
+        # figure above the invoice means the model is wrong.
+        #
+        # ⚖️ `@modal.enter` runs before any input is served, so if these are
+        # missing the container is in a state this code cannot describe. An
+        # AttributeError says so; a default invents a measurement.
+        gpu_cold = self._inferences_since_load == 0
+        self._inferences_since_load += 1
 
         messages = [
             {
@@ -304,9 +310,8 @@ class VisionModel:
         # idle A10G is roughly two orders of magnitude more expensive per
         # second. Without this the expensive cold start was unmeasured.
         parsed["_container"] = {
-            "gpu_cold": gpu_cold,
-            "gpu_container_age_s": round(gpu_container_age_s, 3),
-            "gpu_container_id": getattr(self, "_container_id", ""),
+            "cold": gpu_cold,
+            "container_id": self._container_id,
         }
         return parsed
 

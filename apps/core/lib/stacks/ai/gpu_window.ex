@@ -1,27 +1,20 @@
 defmodule Stacks.AI.GpuWindow do
   @moduledoc """
-  Turns the GPU container readings on a vision response into billed seconds.
+  Reads the GPU container facts a vision response reports.
 
-  ⛔ **The age on a response is a SAMPLE of a container's life, not its life.**
-  It is observed only when an inference runs, so a container that wakes, serves
-  one request and then idles out the rest of its scaledown window reports an age
-  near zero and nothing afterwards — and the idle seconds are precisely the ones
-  with no request attached to them. Summing observed ages therefore under-counts
-  the billed time, in the direction that makes the GPU look cheap, which is the
-  direction that would wrongly settle the architecture question this figure
-  exists to answer.
+  ⛔ **An earlier version of this module held an exact billed-seconds model —
+  maximum observed container age per container, plus one scaledown tail each —
+  and it was deleted rather than wired.** A reviewer showed why: that model
+  differs from `cold_starts x window` by the sum of observed ages, which is
+  exactly the term the inference cost line already bills per GPU-second. So
+  wiring it would not have refined the idle figure; it would have added a
+  double-counted term, and the container age it needed had no other possible
+  consumer. The age is gone from the wire with it.
 
-  ⚖️ So the billed window for a container is the **maximum age seen for its id,
-  plus the scaledown window Modal bills after the last request**. That second
-  term is the whole point: it is the idle tail, it is never sampled by any
-  request, and it is the larger share of the bill for a container that served
-  one image.
-
-  ⚠️ **This is a lower bound that becomes exact once a container is gone.**
-  While a container is alive, a later request can extend it, so the figure for
-  the current container can only grow. A reader comparing it to Modal's invoice
-  should expect this to sit at or below the invoice, never above — and a figure
-  that exceeds the invoice means the model is wrong, not that Modal is.
+  ⚖️ What survives is the scaledown window — the single source of the 300 that
+  `Stacks.Costs` prices idle from, and the anchor for the assertion that keeps
+  it equal to `apps/vision/modal_app.py` — and the de-duplication that turns a
+  dispatch list into a count of container lifetimes.
   """
 
   # The GPU class's `scaledown_window` in `apps/vision/modal_app.py`. ⚠️ The two
@@ -35,31 +28,36 @@ defmodule Stacks.AI.GpuWindow do
   def scaledown_window_s, do: @scaledown_window_s
 
   @doc """
-  Billed seconds implied by a set of `{container_id, age_s}` observations.
+  How many distinct GPU containers were cold among one response's dispatches.
 
-  Groups by container, takes each one's maximum observed age, and adds the
-  scaledown tail once per container — not once per observation, which would
-  multiply the tail by the request count.
+  ⛔ **Counting cold flags is not the same as counting containers**, and the
+  difference is the whole reason the dispatch list carries a container id. One
+  `/analyze` request makes up to two independent Modal dispatches, so a count
+  of `cold` booleans double-counts if both landed on the same container.
+
+  ⚠️ Those two happen to agree under today's deployment: the GPU class sets no
+  per-container concurrency, so a container serves one input at a time and its
+  cold flag is true exactly once per lifetime. The grouping is what keeps this
+  correct when that changes — and raising inputs per container is precisely the
+  obvious next cost move, since it is how the idle tail gets amortised.
+
+  ⚖️ Derived in core from observations core can re-derive, rather than trusted
+  as a scalar from the sidecar. This figure reaches a public money page, and
+  the only cost series in this system worth trusting is trustworthy because it
+  can catch our own arithmetic being wrong.
   """
-  def billed_seconds(observations) when is_list(observations) do
-    observations
-    |> Enum.reject(fn {id, age} -> is_nil(id) or id == "" or is_nil(age) end)
-    |> Enum.group_by(fn {id, _age} -> id end, fn {_id, age} -> age end)
-    |> Enum.map(fn {_id, ages} -> Enum.max(ages) + @scaledown_window_s end)
-    |> Enum.sum()
+  def cold_container_count(dispatches) when is_list(dispatches) do
+    dispatches
+    |> Enum.filter(&cold?/1)
+    |> Enum.map(&container_id/1)
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Enum.uniq()
+    |> length()
   end
 
-  @doc """
-  How many of these observations could say nothing about billed time.
+  defp cold?(%{"cold" => true}), do: true
+  defp cold?(_), do: false
 
-  ⬛ Reported rather than silently dropped. An observation with no container id
-  is a response from a GPU image deployed before the id existed, and a run made
-  up entirely of those yields `billed_seconds/1` of zero — which is
-  indistinguishable from "the GPU never ran" unless this count is read beside
-  it. A zero with a high unattributable count is a deployment gap; a zero with
-  none is a real absence of GPU work.
-  """
-  def unattributable_count(observations) when is_list(observations) do
-    Enum.count(observations, fn {id, age} -> is_nil(id) or id == "" or is_nil(age) end)
-  end
+  defp container_id(%{"container_id" => id}) when is_binary(id), do: id
+  defp container_id(_), do: nil
 end

@@ -18,6 +18,7 @@ from app.proto.gen.vision import (
     AnalyzeRequest,
     AnalyzeResponse,
     ExtractedBook,
+    GpuDispatch,
     StageTimings,
 )
 from app.services.hmac_auth import verify_hmac
@@ -80,35 +81,28 @@ _TIER_VLM_CLASSIFY = "ANALYSIS_TIER_VLM_CLASSIFY"
 _TIER_VLM_EXTRACT = "ANALYSIS_TIER_VLM_EXTRACT"
 
 
-def _container_telemetry(
-    parsed: dict[str, object],
-) -> tuple[bool | None, float | None, str | None]:
-    """The GPU container's own reading, or (None, None) if it did not report one.
+def _gpu_dispatch(parsed: dict[str, object]) -> GpuDispatch | None:
+    """One GPU dispatch's container reading, or None if it reported none.
 
-    ⚖️ Tolerant by design: a GPU image deployed before these fields existed
-    sends no `_container`, and the honest response is an absent reading rather
-    than a fabricated `False` — which would claim the GPU was warm for a
-    request we know nothing about.
+    ⚠️ Tolerant by design: a GPU image deployed before these fields existed
+    sends no `_container`, and the honest answer is "no reading" rather than a
+    fabricated one.
 
     ⛔ Each value is type-checked individually rather than the dict cast
-    wholesale. This payload crosses a process boundary from a separately
-    deployed image, so "it is a dict" says nothing about what is in it — and a
-    wrong type here would surface as a serialisation error on a response that
-    had already done the expensive work.
+    wholesale. This crosses a process boundary from a separately deployed
+    image, so "it is a dict" says nothing about what is inside it.
     """
     container = parsed.get("_container")
     if not isinstance(container, dict):
-        return (None, None, None)
+        return None
 
-    cold = container.get("gpu_cold")
-    age = container.get("gpu_container_age_s")
-    cid = container.get("gpu_container_id")
+    cold = container.get("cold")
+    cid = container.get("container_id")
 
-    return (
-        cold if isinstance(cold, bool) else None,
-        float(age) if isinstance(age, (int, float)) and not isinstance(age, bool) else None,
-        cid if isinstance(cid, str) and cid != "" else None,
-    )
+    if not isinstance(cold, bool) or not isinstance(cid, str) or cid == "":
+        return None
+
+    return GpuDispatch(cold=cold, container_id=cid)
 
 
 def _elapsed_ms(started: float) -> int:
@@ -387,7 +381,13 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     classify_started = time.monotonic()
     classify_parsed = await client.classify(vlm_b64)
     classify_ms = _elapsed_ms(classify_started)
-    gpu_cold, gpu_age_s, gpu_cid = _container_telemetry(classify_parsed)
+    # ⛔ A LIST, COLLECTED ACROSS EVERY DISPATCH. This read only the classify
+    # call, so a request whose EXTRACT woke a cold container reported no cold
+    # start — under-counting billed container lifetimes by up to half, in the
+    # direction that makes the GPU look cheap.
+    gpu_dispatches: list[GpuDispatch] = []
+    if (d := _gpu_dispatch(classify_parsed)) is not None:
+        gpu_dispatches.append(d)
     classification, confidence = _parse_classification(classify_parsed)
 
     if classification != _CLF_BOOK:
@@ -402,9 +402,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             books=[],
             model_used=settings.model_name,
             tier=_TIER_VLM_CLASSIFY,
-            gpu_cold=gpu_cold,
-            gpu_container_age_s=gpu_age_s,
-            gpu_container_id=gpu_cid,
+            gpu_dispatches=gpu_dispatches,
             timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, classify=classify_ms),
             sidecar_cold=cold,
         )
@@ -418,6 +416,17 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         [vlm_b64],
         excluded_books=list(body.excluded_books),
     )
+
+    # ⛔ THE DISPATCH THAT WAS BEING THROWN AWAY. `extract_parsed`'s `_container`
+    # block was already in hand and discarded, on the reasoning that "the
+    # extract runs on a container the classify just proved warm". Nothing
+    # enforces that: these are two independent `.remote.aio` dispatches against
+    # `max_containers=10`, and under this project's own documented load profile
+    # — the vision Oban queue at concurrency 20 against that cap, a batch
+    # arriving back-to-back — landing on different containers is the NORMAL
+    # case for a batch, not a corner.
+    if (d := _gpu_dispatch(extract_parsed)) is not None:
+        gpu_dispatches.append(d)
     books = _parse_extracted_books(extract_parsed)
     log.info(
         "analyze complete",
@@ -432,13 +441,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         books=books,
         model_used=settings.model_name,
         tier=_TIER_VLM_EXTRACT,
-        # ⚖️ From the CLASSIFY call, which is the one that woke the container.
-        # The extract that follows runs on a container the classify just proved
-        # warm, so reporting extract's own reading would say "warm" about a
-        # request that did pay a cold start.
-        gpu_cold=gpu_cold,
-        gpu_container_age_s=gpu_age_s,
-        gpu_container_id=gpu_cid,
+        gpu_dispatches=gpu_dispatches,
         timings_ms=StageTimings(
             download=download_ms,
             barcode=barcode_ms,

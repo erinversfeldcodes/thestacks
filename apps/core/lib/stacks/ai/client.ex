@@ -16,6 +16,7 @@ defmodule Stacks.AI.Client do
 
   alias Stacks.AI.Budget
   alias Stacks.AI.ClientBehaviour
+  alias Stacks.AI.GpuWindow
   alias Stacks.AI.VisionError
   alias Stacks.Costs
 
@@ -380,12 +381,21 @@ defmodule Stacks.AI.Client do
   # put a key that grows without limit. So the id stays out of the store and
   # the store holds the one number the cost line needs.
   defp maybe_record_gpu_cold_start(resp_body) do
-    case Jason.decode(resp_body) do
-      {:ok, %{"gpu_cold" => true}} ->
-        :telemetry.execute([:stacks, :vision, :gpu_cold_start], %{count: 1}, %{})
-
-      _ ->
-        :ok
+    with {:ok, %{"gpu_dispatches" => dispatches}} when is_list(dispatches) <-
+           Jason.decode(resp_body),
+         count when count > 0 <- GpuWindow.cold_container_count(dispatches) do
+      # ⛔ THE MEASUREMENT IS THE COUNT, NOT A FLAG. This matched a single
+      # `"gpu_cold" => true` on the response, which described only the CLASSIFY
+      # dispatch — so a request whose extract woke a cold container recorded
+      # nothing, and billed container lifetimes were under-counted by up to
+      # half, in the direction that makes the GPU look cheap.
+      #
+      # ⚖️ A measurement of `count` rather than N separate events: one request
+      # can start two containers, and emitting twice would make the event count
+      # and the container count two different things nobody reconciles.
+      :telemetry.execute([:stacks, :vision, :gpu_cold_start], %{count: count}, %{})
+    else
+      _ -> :ok
     end
   end
 

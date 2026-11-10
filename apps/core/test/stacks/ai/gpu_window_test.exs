@@ -3,58 +3,63 @@ defmodule Stacks.AI.GpuWindowTest do
 
   alias Stacks.AI.GpuWindow
 
-  describe "the idle tail is counted once per container, not once per request" do
-    test "a container that served one image still bills its whole tail" do
-      # ⛔ THE DEFECT THIS MODULE EXISTS TO PREVENT. One request, observed at an
-      # age of 2s, on a container that then idles out its window. Summing
-      # observed ages gives 2 seconds; the machine billed 302.
-      assert GpuWindow.billed_seconds([{"c1", 2.0}]) == 302.0
+  describe "a dispatch list becomes a count of container lifetimes" do
+    test "one cold dispatch is one container" do
+      assert GpuWindow.cold_container_count([%{"cold" => true, "container_id" => "a"}]) == 1
     end
 
-    test "many requests on one container add the tail only once" do
-      observations = [{"c1", 2.0}, {"c1", 40.0}, {"c1", 120.0}]
-
-      # ⬛ The maximum age, plus ONE tail. Adding a tail per observation would
-      # give 1062 — triple-billing a single machine's idle time, which is the
-      # obvious wrong implementation and the reason this case is here.
-      assert GpuWindow.billed_seconds(observations) == 420.0
+    test "a warm dispatch is not a container lifetime" do
+      assert GpuWindow.cold_container_count([%{"cold" => false, "container_id" => "a"}]) == 0
     end
 
-    test "two containers each bill their own tail" do
-      assert GpuWindow.billed_seconds([{"c1", 10.0}, {"c2", 30.0}]) == 640.0
+    test "no dispatches is no containers" do
+      assert GpuWindow.cold_container_count([]) == 0
     end
 
-    # ⬛ ANTI-VACUITY: the tail must actually be the dominant term for a
-    # lightly-used container. If this ratio collapsed to ~1 the model would
-    # have stopped accounting for idle time at all, which is the entire point.
-    test "for a single short request the tail dominates the measured time" do
-      billed = GpuWindow.billed_seconds([{"c1", 1.0}])
+    # ⛔ THE CASE THE CONTAINER ID EXISTS FOR. Two cold dispatches that landed
+    # on the SAME container are one lifetime, not two. Counting `cold` flags
+    # would say two and bill 600 idle seconds for a machine that ran once.
+    test "two cold dispatches on one container are one lifetime" do
+      dispatches = [
+        %{"cold" => true, "container_id" => "same"},
+        %{"cold" => true, "container_id" => "same"}
+      ]
 
-      assert billed / 1.0 > 100,
-             "the idle tail should dwarf a one-second inference; got #{billed}s billed for 1s " <>
-               "of observed work, which means idle time is no longer being counted"
-    end
-  end
-
-  describe "an observation that cannot be attributed is counted, not dropped" do
-    test "readings with no container id are reported" do
-      observations = [{nil, 5.0}, {"", 5.0}, {"c1", 5.0}]
-
-      assert GpuWindow.unattributable_count(observations) == 2
-      assert GpuWindow.billed_seconds(observations) == 305.0
+      assert GpuWindow.cold_container_count(dispatches) == 1
     end
 
-    # ⛔ A ZERO HERE HAS TWO CAUSES AND THEY ARE OPPOSITE FACTS. An empty run
-    # means no GPU ran; a run of unattributable readings means a GPU image
-    # predating the id field DID run and we cannot say for how long. Reading
-    # the billed figure without the count cannot tell those apart, and treating
-    # the second as the first would report a busy GPU as free.
-    test "zero billed seconds is distinguishable from zero attributable readings" do
-      assert GpuWindow.billed_seconds([]) == 0
-      assert GpuWindow.unattributable_count([]) == 0
+    # ⬛ ANTI-VACUITY for the case above: distinct ids must still count
+    # separately, or the de-duplication has collapsed everything to one.
+    test "two cold dispatches on different containers are two lifetimes" do
+      dispatches = [
+        %{"cold" => true, "container_id" => "one"},
+        %{"cold" => true, "container_id" => "two"}
+      ]
 
-      assert GpuWindow.billed_seconds([{nil, 9.0}, {nil, 9.0}]) == 0
-      assert GpuWindow.unattributable_count([{nil, 9.0}, {nil, 9.0}]) == 2
+      assert GpuWindow.cold_container_count(dispatches) == 2
+    end
+
+    # ⛔ THE DEFECT THAT FORCED THIS SHAPE: the cold dispatch is the SECOND
+    # one. The previous code read a single `gpu_cold` off the response, which
+    # described only the classify dispatch — so this request recorded nothing
+    # and its container was billed to nobody.
+    test "a cold EXTRACT after a warm classify is counted" do
+      dispatches = [
+        %{"cold" => false, "container_id" => "warm-classify"},
+        %{"cold" => true, "container_id" => "cold-extract"}
+      ]
+
+      assert GpuWindow.cold_container_count(dispatches) == 1,
+             "a container woken by the extract dispatch was not counted — this is the " <>
+               "under-count that made idle GPU cost look half what it is"
+    end
+
+    # ⚠️ A dispatch with no id cannot be attributed to a container, and is not
+    # guessed at. A GPU image predating the field sends none, and inventing a
+    # lifetime for it would over-count — the opposite error, equally wrong.
+    test "a cold dispatch with no usable id is not counted" do
+      assert GpuWindow.cold_container_count([%{"cold" => true}]) == 0
+      assert GpuWindow.cold_container_count([%{"cold" => true, "container_id" => ""}]) == 0
     end
   end
 

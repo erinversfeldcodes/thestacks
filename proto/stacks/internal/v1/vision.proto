@@ -244,47 +244,29 @@ message AnalyzeResponse {
   // an age would invite a threshold nobody agreed.
   bool sidecar_cold = 7 [json_name = "sidecar_cold"];
 
-  // Whether the GPU container was cold for this inference.
+  // The GPU dispatches this request made, one entry per inference.
   //
-  // ⛔ THIS IS THE COLD START THAT COSTS MONEY, and it is a different fact from
-  // `sidecar_cold`. An idle A10G is roughly two orders of magnitude more
-  // expensive per second than the idle CPU container the sidecar runs in, so
-  // these must not be conflated — the field above was briefly the only one and
-  // would have put the cheap container's warmth into the architecture
-  // decision.
+  // ⛔ REPEATED, BECAUSE THE NUMBER OF GPU STAGES IS THE OPEN QUESTION THIS
+  // DATA EXISTS TO SETTLE. A `VLM_EXTRACT` request already makes TWO
+  // independent Modal dispatches (`classify` then `extract`), and with
+  // `max_containers=10` they can land on different containers — so a single
+  // set of container fields described only the first and reported `cold=false`
+  // for a request whose extract paid a cold start. That under-counted billed
+  // container lifetimes by up to half, in the direction that flatters the GPU.
   //
-  // ⚖️ Absent, not false, when no GPU ran: a barcode-tier answer never woke the
-  // model, and reporting `false` would say "the GPU was warm" about a request
-  // that never touched it.
-  optional bool gpu_cold = 8 [json_name = "gpu_cold"];
-
-  // How long the GPU container had been alive when this inference started.
+  // ⚖️ A named `classify`/`extract` pair was the obvious correction and is the
+  // wrong one: it writes "there are exactly two GPU stages" into the wire
+  // contract while "should a cover-embedding tier exist?" is unanswered — and
+  // such a tier is another dispatch. Under `repeated` that costs nothing;
+  // under a named pair it costs a field, a new branch in every consumer, and a
+  // `buf breaking` argument. The barcode path sends an empty list rather than
+  // an absent message, so a consumer counts with no nil branch.
   //
-  // ⚖️ Seconds alongside the boolean because they answer different questions:
-  // `gpu_cold` says whether this request paid the load, and the age says how
-  // long the container has been billing — which is what the idle-cost figure
-  // is derived from. Absent when no GPU ran.
-  optional double gpu_container_age_s = 9 [json_name = "gpu_container_age_s"];
-
-  // Which GPU container answered, so the billed window can be bounded.
-  //
-  // ⛔ WITHOUT AN IDENTITY THE AGE CANNOT BE TURNED INTO A COST. The age is
-  // sampled only when an inference runs, so a container that wakes, serves one
-  // request and idles out the rest of its scaledown window reports an age near
-  // zero and nothing afterwards — and the idle seconds are exactly the ones
-  // with no request attached to them. Summing observed ages under-counts, in
-  // the direction that makes the GPU look cheap.
-  //
-  // ⚖️ With an id, the billed window per container is the MAXIMUM age seen for
-  // that id plus the scaledown window Modal bills after the last request. That
-  // needs no second channel out of the GPU and does not depend on an exit hook
-  // firing, which a container killed by the platform may never run.
-  //
-  // ⚠️ Opaque and per-container, not per-user: it identifies a machine
-  // lifetime, carries nothing about who sent the image, and must not be
-  // used as a metric label — a new container id per cold start is unbounded
-  // cardinality. It is for aggregation, then discard.
-  optional string gpu_container_id = 10 [json_name = "gpu_container_id"];
+  // ⚠️ No `stage` field and no container age. The tier field already says
+  // which path answered, dispatches arrive in execution order, and an age was
+  // carried here until a reviewer showed its only possible consumer would have
+  // double-counted a term the inference cost line already bills.
+  repeated GpuDispatch gpu_dispatches = 8 [json_name = "gpu_dispatches"];
 }
 
 // AnalysisTier names the cascade stage that produced an answer.
@@ -312,6 +294,32 @@ enum AnalysisTier {
 
   // The VLM ran the full extract path.
   ANALYSIS_TIER_VLM_EXTRACT = 3;
+}
+
+// StageTimings carries per-stage wall-clock in milliseconds.
+//
+// ⚖️ Each stage is optional: a request answered by the barcode tier never runs
+// classify or extract, and reporting 0 for a stage that did not run would be
+// indistinguishable from one that ran instantly. Absent means "did not run".
+// One GPU dispatch's reading of the container that served it.
+//
+// ⚖️ Two fields, and each is the other's reason for existing: `container_id`
+// gives the de-duplication a key, and the de-duplication is what gives the id
+// a reader. Together they produce a container count that is both correct and
+// RE-DERIVABLE by the consumer — which matters because that count reaches a
+// public money page, and this codebase's one trustworthy cost series is
+// trustworthy precisely because it can catch our own arithmetic being wrong.
+// A scalar count sent from the sidecar would be smaller and would have to be
+// believed.
+message GpuDispatch {
+  // Whether this dispatch paid the model load — true exactly once per
+  // container lifetime while the GPU class serves one input at a time.
+  bool cold = 1 [json_name = "cold"];
+
+  // Which container served it. ⚠️ Opaque, per-container, and NOT a metric
+  // label: a new id per cold start is unbounded cardinality. For aggregation,
+  // then discard.
+  string container_id = 2 [json_name = "container_id"];
 }
 
 // StageTimings carries per-stage wall-clock in milliseconds.

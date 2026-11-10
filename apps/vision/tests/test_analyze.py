@@ -571,12 +571,12 @@ def test_only_the_first_request_on_a_container_is_cold() -> None:
     assert second["sidecar_cold"] is False
 
 
-def test_gpu_cold_is_absent_when_no_gpu_ran() -> None:
-    """A barcode answer never woke the model, so it reports no GPU reading.
+def test_barcode_answer_reports_no_gpu_dispatches() -> None:
+    """A barcode answer never woke the model, so it lists no GPU dispatches.
 
-    ⛔ Absent, not False. `False` would say "the GPU was warm" about a request
-    that never touched it — and the idle-GPU cost figure the architecture
-    decision turns on is derived from exactly these readings.
+    ⚖️ An empty list, not a null: the request definitely made zero dispatches,
+    which is a measurement rather than an absence. A consumer counts it with no
+    nil branch — which is half the reason the field is `repeated`.
     """
     with (
         patch("app.main.local_isbn_scan", return_value="9780156001311"),
@@ -585,12 +585,17 @@ def test_gpu_cold_is_absent_when_no_gpu_ran() -> None:
         data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
 
     assert data["tier"] == "ANALYSIS_TIER_BARCODE"
-    assert data["gpu_cold"] is None
-    assert data["gpu_container_age_s"] is None
+    assert data["gpu_dispatches"] == []
 
 
-def test_gpu_reading_is_relayed_when_the_model_reports_one() -> None:
-    """The sidecar passes the GPU's own reading through, unaltered."""
+def test_both_dispatches_are_reported_not_just_the_first() -> None:
+    """⛔ THE DEFECT THIS SHAPE EXISTS TO FIX.
+
+    A VLM_EXTRACT request makes TWO independent Modal dispatches. Only
+    classify's container reading was kept, so a request whose EXTRACT woke a
+    cold container reported no cold start at all — under-counting billed
+    container lifetimes by up to half, in the direction that flatters the GPU.
+    """
     with (
         patch("app.main.local_isbn_scan", return_value=None),
         patch(
@@ -599,20 +604,61 @@ def test_gpu_reading_is_relayed_when_the_model_reports_one() -> None:
             return_value={
                 "classification": "book",
                 "confidence": 0.9,
-                "_container": {"gpu_cold": True, "gpu_container_age_s": 12.5},
+                "_container": {"cold": False, "container_id": "warm-one"},
             },
         ),
         patch(
             "app.services.vision_client.VisionClient.extract",
             new_callable=AsyncMock,
-            return_value={"books": []},
+            return_value={
+                "books": [],
+                "_container": {"cold": True, "container_id": "cold-two"},
+            },
         ),
         TestClient(app) as client,
     ):
         data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
 
-    assert data["gpu_cold"] is True
-    assert data["gpu_container_age_s"] == 12.5
+    dispatches = data["gpu_dispatches"]
+
+    assert len(dispatches) == 2, (
+        f"expected both dispatches, got {dispatches} — the extract reading is being discarded, "
+        "which is the under-count this field was reshaped to fix"
+    )
+
+    # ⬛ THE ASSERTION THAT WOULD HAVE CAUGHT THE ORIGINAL BUG: the cold one is
+    # the SECOND dispatch. Under the old single-valued shape this request
+    # reported cold=false, because only classify was read.
+    assert [d["cold"] for d in dispatches] == [False, True]
+    assert [d["container_id"] for d in dispatches] == ["warm-one", "cold-two"]
+
+
+def test_a_dispatch_with_no_container_reading_is_omitted() -> None:
+    """A GPU image predating these fields contributes no dispatch entry.
+
+    ⚠️ Omitted rather than entered as a false `cold=False`, which would claim
+    the container was warm for a dispatch we know nothing about.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={"classification": "book", "confidence": 0.9},
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={
+                "books": [],
+                "_container": {"cold": True, "container_id": "only-one"},
+            },
+        ),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert data["gpu_dispatches"] == [{"cold": True, "container_id": "only-one"}]
 
 
 def test_gpu_cold_and_sidecar_cold_are_independent() -> None:
@@ -632,7 +678,7 @@ def test_gpu_cold_and_sidecar_cold_are_independent() -> None:
             return_value={
                 "classification": "book",
                 "confidence": 0.9,
-                "_container": {"gpu_cold": True, "gpu_container_age_s": 0.4},
+                "_container": {"cold": True, "container_id": "gpu-one"},
             },
         ),
         patch(
@@ -651,10 +697,11 @@ def test_gpu_cold_and_sidecar_cold_are_independent() -> None:
     # the GPU reported, both times.
     assert first["sidecar_cold"] is True
     assert second["sidecar_cold"] is False
-    assert first["gpu_cold"] is True
-    assert second["gpu_cold"] is True
+    assert [d["cold"] for d in first["gpu_dispatches"]] == [True]
+    assert [d["cold"] for d in second["gpu_dispatches"]] == [True]
 
     # ⬛ ANTI-VACUITY: on the second request the two disagree — sidecar warm,
     # GPU cold. If one were derived from the other this could not happen, and
     # the whole point is that they are different facts.
-    assert second["sidecar_cold"] != second["gpu_cold"]
+    gpu_cold_second = any(d["cold"] for d in second["gpu_dispatches"])
+    assert second["sidecar_cold"] != gpu_cold_second
