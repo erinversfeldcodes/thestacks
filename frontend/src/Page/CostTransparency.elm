@@ -221,13 +221,24 @@ viewTotalBanner breakdown =
         [ div [ class "costs__banner-total" ]
             [ span [ class "costs__banner-label" ] [ text "Total monthly cost" ]
             , span [ class "costs__banner-amount" ] [ text (formatCents breakdown.totalCents) ]
+            , span [ class "costs__banner-caveat" ] [ text (totalCaveat breakdown) ]
             ]
         , div [ class "costs__banner-formula" ]
             (breakdown.categories
                 |> List.map
                     (\cat ->
                         span [ class "costs__banner-term" ]
-                            [ text (formatCategoryName cat.category ++ " " ++ formatCents cat.totalCents) ]
+                            -- ⛔ THE THIRD PRESENTATION SITE, AND IT WAS MISSED.
+                            -- `costs.ex` fixed four aggregation sites and this
+                            -- module fixed two of three display sites: the
+                            -- category CARD said "$4.88 + 2 unmeasured" while
+                            -- this banner, directly above it, said "$0.00" for
+                            -- a category whose every line was unmeasured. That
+                            -- is exactly the "$0.00 for something we did not
+                            -- measure" this whole change exists to delete,
+                            -- printed in the largest type on the page above
+                            -- the copy that contradicts it.
+                            [ text (formatCategoryName cat.category ++ " " ++ categoryTotalText cat) ]
                     )
                 |> List.intersperse (span [ class "costs__banner-plus" ] [ text " + " ])
             )
@@ -514,6 +525,39 @@ reader more than either a bare number or nothing.
 categoryTotalText : CostCategory -> String
 categoryTotalText cat =
     categoryMoneyText cat ++ unmeasuredSuffix cat
+
+
+{-| What the headline figure leaves out, said beside the headline figure.
+
+⛔ THE NUMBER A READER QUOTES WAS THE ONE THAT SILENTLY OMITTED MOST SERVICES.
+`TOTAL MONTHLY COST $21.56` was rendered with five of eleven lines excluded and
+nothing on the page saying so — so the page's most prominent claim was its least
+complete one, under a closing sentence promising that each line says how its
+figure was arrived at.
+
+⚖️ Phrased as a count of services rather than a hedge, because "approximately"
+tells a reader nothing they can act on while "6 of 11 services measured" tells
+them exactly how much of the total they are looking at.
+
+-}
+totalCaveat : CostBreakdown -> String
+totalCaveat breakdown =
+    let
+        unmeasured =
+            breakdown.categories |> List.map .unmeasuredCount |> List.sum
+
+        lines =
+            breakdown.categories |> List.map (.items >> List.length) |> List.sum
+    in
+    if unmeasured == 0 then
+        " — all " ++ String.fromInt lines ++ " services measured"
+
+    else
+        " — "
+            ++ String.fromInt (lines - unmeasured)
+            ++ " of "
+            ++ String.fromInt lines
+            ++ " services measured; the rest are not yet counted"
 
 
 {-| Just the money part of a category's figure.

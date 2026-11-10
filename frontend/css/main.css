@@ -2523,6 +2523,22 @@ h4 {
     line-height: 1.1;
 }
 
+/* The headline figure's own incompleteness, beside the headline figure.
+   ⚖️ Deliberately NOT small-print: it sits on its own line at readable body
+   size, because a caveat on the most-quoted number on a transparency page
+   that a reader has to hunt for is a caveat the page does not really make.
+   Muted rather than tiny — it recedes without hiding. */
+.costs__banner-caveat {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 0.35rem;
+    max-width: 38ch;
+}
+
 .costs__banner-formula {
     display: flex;
     flex-wrap: wrap;

@@ -473,7 +473,9 @@ defmodule Stacks.Costs do
         "#{cold_starts} GPU container(s) started this month × " <>
           "#{GpuWindow.scaledown_window_s()}s scaledown window = #{seconds}s of " <>
           "idle A10G time at $1.10/hour. This is the cost of a GPU waiting, which the " <>
-          "inference line excludes. Published rate, not an invoice",
+          "inference line excludes. Published rate, not an invoice. A lower bound: it counts " <>
+          "only containers whose first inference returned a response, so one that woke and then " <>
+          "failed is not counted here",
       amount_cents: cents,
       basis: "rate_card"
     })

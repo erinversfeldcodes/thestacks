@@ -140,6 +140,71 @@ test.describe("Cost Transparency", () => {
     }
   });
 
+  // ⛔ THE BANNER WAS THE THIRD DISPLAY SITE AND THE ONE THAT WAS MISSED.
+  // `costs.ex` fixed four aggregation sites and the Elm page fixed two of three
+  // presentation sites — so a category card read "$4.88 + 2 unmeasured" while
+  // the banner directly above it, in the largest type on the page, read
+  // "$0.00" for a category whose every line was unmeasured. That is exactly the
+  // "$0.00 for something we did not measure" this whole change exists to
+  // delete, printed above the copy that contradicts it. A ux reviewer found it
+  // by reading the live DOM; no test could see it.
+  test("the banner never shows a bare figure for a category with unmeasured lines", async ({
+    page,
+    request,
+  }) => {
+    const resp = await request.get("/api/costs");
+    expect(resp.status()).toBe(200);
+    const body = await resp.json();
+
+    const withUnmeasured = body.data.categories.filter(
+      (c: { unmeasured_count?: number }) => (c.unmeasured_count ?? 0) > 0
+    );
+
+    // ⬛ ANTI-VACUITY FIRST, and this precondition is the usual one on a stack
+    // where every meter happens to be populated. A skip says so out loud;
+    // a silent pass over an empty list is the shape this repo already tracks.
+    if (withUnmeasured.length === 0) {
+      expect(
+        process.env.E2E_EXPECT_ABSENT_COST_LINE !== "1",
+        "E2E_EXPECT_ABSENT_COST_LINE=1 but no category has unmeasured lines, so the banner's " +
+          "incompleteness rendering is unexercised"
+      ).toBe(true);
+      test.skip(true, "no category has unmeasured lines on this stack");
+      return;
+    }
+
+    await page.goto("/costs");
+    await expect(page.getByTestId("costs-content")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const bannerText = await page.locator(".costs__banner").innerText();
+
+    for (const cat of withUnmeasured as Array<{ category: string }>) {
+      // The banner term for this category must carry its unmeasured count,
+      // not stand alone as a currency figure.
+      expect(
+        bannerText,
+        `the banner shows ${cat.category} without saying how many of its lines are unmeasured`
+      ).toMatch(new RegExp(`${cat.category}[^+]*\\+\\s*\\d+ unmeasured`, "i"));
+    }
+  });
+
+  // ⛔ THE NUMBER A READER QUOTES WAS THE LEAST COMPLETE ONE ON THE PAGE.
+  // "TOTAL MONTHLY COST $21.56" rendered with five of eleven services excluded
+  // and nothing saying so — under a closing sentence promising that each line
+  // says how its figure was arrived at.
+  test("the headline total says how many services it covers", async ({ page }) => {
+    await page.goto("/costs");
+    await expect(page.getByTestId("costs-content")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const caveat = page.locator(".costs__banner-caveat");
+    await expect(caveat).toBeVisible();
+    await expect(caveat).toContainText(/services measured/);
+  });
+
   test("API endpoint returns cost data without auth", async ({ request }) => {
     const resp = await request.get("/api/costs");
     expect(resp.status()).toBe(200);
