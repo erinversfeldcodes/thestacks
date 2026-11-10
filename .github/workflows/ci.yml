@@ -695,7 +695,7 @@ jobs:
           apt-get update && apt-get install -y --no-install-recommends git \
             && rm -rf /var/lib/apt/lists/*
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Regenerate vision locks and fail on drift
+      - name: Regenerate the vision lockfiles
         run: |
           set -euo pipefail
           # Hash-pinned (scorecard pinned-dependencies): the requirements file
@@ -709,10 +709,43 @@ jobs:
             --output-file apps/vision/requirements-dev.lock \
             apps/vision/requirements.txt apps/vision/requirements-dev.txt
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # ⛔ THIS JOB COMPUTED THE CORRECT LOCKFILES AND THREW THEM AWAY. It
+      # regenerates them in the canonical container, prints a diff, and exits —
+      # so the only artefact of a 40-second job that already did the work was
+      # an instruction to do it again locally. And "run 'just lock-vision'"
+      # needs Docker: on a machine where the local container runtime will not
+      # start, a correct lockfile became unobtainable even though CI was
+      # holding one.
+      #
+      # ⚖️ Uploaded on drift so the regenerated files can be downloaded and
+      # committed directly. The environment that produced them is the one the
+      # gate compares against, which makes this artefact MORE trustworthy than
+      # a locally generated lock: resolving on another platform can change the
+      # transitive set through environment markers, and for a hash-pinned
+      # install a missing hash is a hard failure rather than a drift warning.
+      - name: Fail on drift
+        id: drift
+        run: |
+          set -euo pipefail
           if ! git diff --exit-code apps/vision/requirements.lock apps/vision/requirements-dev.lock; then
-            echo "::error::vision lockfiles are stale — run 'just lock-vision' and commit the result"
+            echo "::error::vision lockfiles are stale — download the 'vision-lockfiles' artifact from this run and commit it, or run 'just lock-vision' locally"
             exit 1
           fi
+
+      # ⚠️ `failure()`, not `always()`: on a green run the uploaded files would
+      # be byte-identical to the committed ones, and an artefact that is
+      # usually redundant is one nobody checks when it is not.
+      - name: Upload the regenerated lockfiles
+        if: failure() && steps.drift.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vision-lockfiles
+          path: |
+            apps/vision/requirements.lock
+            apps/vision/requirements-dev.lock
+          if-no-files-found: error
+          retention-days: 7
 
   checkov:
     needs: changes
