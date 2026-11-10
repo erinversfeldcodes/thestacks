@@ -350,4 +350,131 @@ defmodule Stacks.AI.ClientTest do
       assert Client.tier_surcharge_micro_cents(nil) == 0
     end
   end
+
+  describe "the GPU cold-start count reaches telemetry from a real 200" do
+    # ⛔ THE FIRST LINK OF THE IDLE-COST CHAIN HAD NO TEST THAT COULD FAIL.
+    # `maybe_record_gpu_cold_start/1` is private and reachable only through
+    # `make_vision_request/2`, and no test ever gave that function a 200 — the
+    # transport-path tests point at a closed port on purpose. So deleting the
+    # call, or changing the matched key, left the suite green and the public
+    # idle-cost line permanently at "unavailable".
+    #
+    # ⚖️ A real Bandit server on a real port, because the thing under test is
+    # what happens when a 200 with a body arrives. Stubbing the HTTP client
+    # would fake away the parse, the dedup and the emit — which is the shape
+    # that made an earlier test of this module vacuous.
+    setup do
+      original_url = Application.get_env(:core, :vision_service_url)
+      original_client = Application.get_env(:core, :vision_client)
+      test_pid = self()
+
+      {:ok, server} =
+        Bandit.start_link(
+          plug: {__MODULE__.StubVision, test_pid},
+          port: 0,
+          startup_log: false
+        )
+
+      {:ok, {_addr, port}} = ThousandIsland.listener_info(server)
+
+      Application.put_env(:core, :vision_service_url, "http://127.0.0.1:#{port}")
+      Application.put_env(:core, :vision_client, Stacks.AI.Client)
+      :fuse.reset(:vision_fuse)
+
+      handler = {__MODULE__, :cold_start_events, self()}
+
+      :telemetry.attach(
+        handler,
+        [:stacks, :vision, :gpu_cold_start],
+        fn _e, measurements, _meta, pid -> send(pid, {:cold_start, measurements}) end,
+        self()
+      )
+
+      on_exit(fn ->
+        :telemetry.detach(handler)
+        Application.put_env(:core, :vision_service_url, original_url)
+        Application.put_env(:core, :vision_client, original_client)
+        :fuse.reset(:vision_fuse)
+      end)
+
+      :ok
+    end
+
+    test "two cold dispatches on different containers record two lifetimes" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_EXTRACT",
+        "gpu_dispatches" => [
+          %{"cold" => true, "container_id" => "one"},
+          %{"cold" => true, "container_id" => "two"}
+        ]
+      })
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert_receive {:cold_start, %{count: 2}}, 5_000
+    end
+
+    # ⬛ ANTI-VACUITY: the count must FOLLOW the response. A fixed `count: 1`
+    # would satisfy the case above on its own, and an emit that fired
+    # unconditionally would satisfy both.
+    test "two cold dispatches on the SAME container record one lifetime" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_EXTRACT",
+        "gpu_dispatches" => [
+          %{"cold" => true, "container_id" => "same"},
+          %{"cold" => true, "container_id" => "same"}
+        ]
+      })
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert_receive {:cold_start, %{count: 1}}, 5_000
+    end
+
+    test "a barcode answer with no GPU dispatches records nothing" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_BARCODE",
+        "gpu_dispatches" => []
+      })
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      refute_receive {:cold_start, _}, 200
+    end
+
+    test "a warm dispatch records nothing" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_CLASSIFY",
+        "gpu_dispatches" => [%{"cold" => false, "container_id" => "warm"}]
+      })
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      refute_receive {:cold_start, _}, 200
+    end
+  end
+
+  defmodule StubVision do
+    @moduledoc false
+    # A real HTTP endpoint, so the 200 branch of `make_vision_request/2` runs
+    # for real: the body is parsed, the dispatch list de-duplicated and the
+    # telemetry emitted by the code under test rather than by the test.
+    import Plug.Conn
+
+    def respond(body), do: :persistent_term.put({__MODULE__, :body}, body)
+
+    def init(test_pid), do: test_pid
+
+    def call(conn, _test_pid) do
+      body = :persistent_term.get({__MODULE__, :body}, %{})
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(200, Jason.encode!(body))
+    end
+  end
 end
