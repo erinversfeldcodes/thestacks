@@ -140,6 +140,19 @@ the Brave row's `$3/1K ≈ R0.054/query`).
 > line under-counts. Neither figure is a bound on the truth; only the provider's invoice is, which
 > is why `stacks_billing_mtd_cents` is the series worth reconciling against.
 
+> ⚠️ **How firm the active figure is: not very, and the control says so.** Three runs of the same
+> eight-image corpus against the same service moved the VLM-classify median by **60%** and its
+> maximum by **6.8×**, while the barcode tier moved **2%**. That control matters: a CPU decode is
+> reproducible to within noise, so the VLM spread is the GPU path itself — almost entirely whether
+> a container happened to be warm. The ~R0.03 active term is therefore an order-of-magnitude
+> figure, not a measurement.
+>
+> ⬛ **The conclusion survives that uncertainty, which is the point of stating it.** The idle tail
+> is 300 seconds by CONFIGURATION, not by measurement, so it dwarfs any plausible active figure:
+> even a 5× error in the active term leaves idle dominating. What the uncertainty does rule out is
+> using these numbers to RANK two architectures — a candidate measuring 20% faster sits inside the
+> incumbent's noise against itself.
+>
 > ⬛ **The correction that matters is not the number but the DRIVER.** The old row attributed the
 > spread to how long a call takes. It is actually **how many identifications share a GPU
 > container**: at one per container, **R1.65 of the R1.78 — about 93% — is the idle tail**, a
