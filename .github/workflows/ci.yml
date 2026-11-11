@@ -825,6 +825,35 @@ jobs:
     needs: [changes, versions]
     if: needs.changes.outputs.platform == 'true'
     runs-on: ubuntu-latest
+    # ⛔ `deployed_posture_test.sh` PLANTS FIXTURES INTO A REAL DATABASE. It
+    # hardcodes `postgres://postgres:postgres@localhost:5432/stacks_dev` and
+    # mutates it — a past-expiry image, a relaxed NOT NULL, a flipped SECURITY
+    # DEFINER — because the gate it tests reads a live schema. Without a
+    # database 7 of its 42 cases fail with "could not plant the fixture", which
+    # is the suite refusing to report on something it could not set up.
+    #
+    # ⚖️ The database comes to the job rather than the suite moving out, for the
+    # reason `run_all.sh` states in its own header: "a suite present on disk
+    # but absent from the list is a suite nothing runs." Splitting one suite
+    # into another job would either duplicate the runner or re-create exactly
+    # the orphan that file exists to prevent.
+    #
+    # ⚠️ This is the THIRD dependency this job gained in one session — Elixir,
+    # buf, now Postgres — which means it is no longer the lightweight shell
+    # runner its name suggests. Said out loud rather than discovered again: if
+    # a fourth arrives, the split is the thing to revisit, not the dependency.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg${{ needs.versions.outputs.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
     timeout-minutes: 15
     steps:
       # fetch-depth: 0 is REQUIRED, not tidy, and this is the SECOND instance of
@@ -882,6 +911,17 @@ jobs:
         run: mix deps.get
       - name: Generate the proto artefacts two suites read
         run: bash scripts/gen-ecto-proto.sh
+
+      # ⚖️ `stacks_dev` specifically, because that is the database name the
+      # posture suite hardcodes. MIX_ENV=dev so `dev.exs`'s own Repo config
+      # applies rather than a URL this job would have to compose.
+      - name: Migrate the database the posture suite plants into
+        run: mix ecto.create --quiet && mix ecto.migrate
+        working-directory: apps/core
+        env:
+          MIX_ENV: dev
+          STACKS_APP_DB_PASSWORD: ci-stacks-app-password-not-a-secret
+          STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password-not-a-secret
 
       - name: Platform shell suites
         run: bash test/platform/run_all.sh
