@@ -111,8 +111,20 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
+          # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
+          # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
+          # deliberate backend, and refused with "No object storage is configured for
+          # a deployed build" — correctly. Two of the four variables it requires is
+          # not a configuration, which is the whole point of that module.
+          #
+          # ⚖️ Local rather than the two missing R2 variables, because the truthful
+          # answer is that this job never writes an object: `seeds.exs` inserts a
+          # `storage_path` STRING into `uploaded_images` and calls no storage API.
+          # Pointing a reseed at production object storage to satisfy a check it only
+          # trips by accident would hand it credentials it has no use for.
+          STORAGE_BACKEND: local
+          UPLOAD_DIR: /tmp/reseed-staging-uploads
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VISION_SERVICE_URL: http://localhost:8000
         run: mix stacks.data.correct --apply
@@ -124,8 +136,20 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
+          # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
+          # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
+          # deliberate backend, and refused with "No object storage is configured for
+          # a deployed build" — correctly. Two of the four variables it requires is
+          # not a configuration, which is the whole point of that module.
+          #
+          # ⚖️ Local rather than the two missing R2 variables, because the truthful
+          # answer is that this job never writes an object: `seeds.exs` inserts a
+          # `storage_path` STRING into `uploaded_images` and calls no storage API.
+          # Pointing a reseed at production object storage to satisfy a check it only
+          # trips by accident would hand it credentials it has no use for.
+          STORAGE_BACKEND: local
+          UPLOAD_DIR: /tmp/reseed-staging-uploads
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VISION_SERVICE_URL: http://localhost:8000
         run: mix ecto.migrate
@@ -137,8 +161,20 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
+          # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
+          # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
+          # deliberate backend, and refused with "No object storage is configured for
+          # a deployed build" — correctly. Two of the four variables it requires is
+          # not a configuration, which is the whole point of that module.
+          #
+          # ⚖️ Local rather than the two missing R2 variables, because the truthful
+          # answer is that this job never writes an object: `seeds.exs` inserts a
+          # `storage_path` STRING into `uploaded_images` and calls no storage API.
+          # Pointing a reseed at production object storage to satisfy a check it only
+          # trips by accident would hand it credentials it has no use for.
+          STORAGE_BACKEND: local
+          UPLOAD_DIR: /tmp/reseed-staging-uploads
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VISION_SERVICE_URL: http://localhost:8000
           ALLOW_SEEDS: "true"
