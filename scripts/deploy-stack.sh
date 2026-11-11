@@ -423,12 +423,40 @@ echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 if [[ "${PROD_MODE}" != 1 ]] && [[ -n "${NEON_CONNECTION_URI:-}" ]]; then
     echo ""
     echo "==> Applying this branch's migrations to the preview Neon branch..."
+    # ⛔ EVERY VARIABLE PROD RUNTIME CONFIG DEMANDS, SUPPLIED EXPLICITLY.
+    # `MIX_ENV=prod` buys the only env whose runtime config reads DATABASE_URL,
+    # and it also buys that config's whole production surface: five required
+    # variables plus a storage decision. Inheriting them from the job
+    # environment does not work — the first run of this block raised
+    # "No object storage is configured for a deployed build" with all four R2
+    # secrets present at job level — so they are named here rather than hoped
+    # for.
+    #
+    # ⚖️ Storage is declared LOCAL because a migration writes no objects. That
+    # is the truthful answer and it also removes the dependency rather than
+    # satisfying it: pointing a schema migration at production object storage
+    # would hand it credentials it has no use for. VISION_SERVICE_URL is a
+    # placeholder for the same reason — prod config requires it to exist, and
+    # a migration never calls vision. Both are deliberate statements, which is
+    # exactly what `Stacks.Storage.Selection` exists to insist on.
+    #
+    # ⚠️ Enumerated from `config/runtime.exs`'s prod block rather than
+    # discovered one failed run at a time. VISION_SERVICE_URL was absent from
+    # the job environment too, so it would have been the next failure.
+    migrate_env=(
+        "MIX_ENV=prod"
+        "DATABASE_URL=${NEON_CONNECTION_URI}"
+        "SECRET_KEY_BASE=${SECRET_KEY_BASE:-}"
+        "GUARDIAN_SECRET_KEY=${GUARDIAN_SECRET_KEY:-}"
+        "RESEND_API_KEY=${RESEND_API_KEY:-}"
+        "VISION_SERVICE_URL=${VISION_SERVICE_URL:-http://vision.invalid}"
+        "STORAGE_BACKEND=local"
+        "UPLOAD_DIR=/tmp/preview-migrate-uploads"
+    )
     if ! (cd "$REPO_ROOT/apps/core" && \
-            MIX_ENV=prod \
-            DATABASE_URL="${NEON_CONNECTION_URI}" \
-            mix deps.get --only prod >/dev/null && \
-            MIX_ENV=prod DATABASE_URL="${NEON_CONNECTION_URI}" mix compile >/dev/null && \
-            MIX_ENV=prod DATABASE_URL="${NEON_CONNECTION_URI}" mix ecto.migrate); then
+            env "${migrate_env[@]}" mix deps.get --only prod >/dev/null && \
+            env "${migrate_env[@]}" mix compile >/dev/null && \
+            env "${migrate_env[@]}" mix ecto.migrate); then
         # ⬛ A FAILURE HERE IS THE GATE DOING ITS JOB, not an inconvenience: a
         # migration that cannot apply to cloned staging data is a migration
         # that will not apply to production either. Reporting it as a deploy
