@@ -400,6 +400,50 @@ if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROO
 fi
 echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 
+# ── Apply THIS branch's migrations to the preview's own Neon branch ──────────
+#
+# ⛔ A PREVIEW USED TO INHERIT ITS SCHEMA AND NEVER ADVANCE IT, which made every
+# preview a representation of STAGING rather than of post-merge production. The
+# branch is a copy-on-write clone of `staging`, so it starts at whatever
+# migrations staging has applied; nothing here moved it forward, and the only
+# thing that ever did was `release_command` -> `Stacks.Release.deploy()` during
+# the core deploy — after every gate that reads the schema.
+#
+# ⚖️ Migrating here is what makes a preview an accurate rehearsal of the merge:
+# the data shape a reader exercises is the one `main` will have, and a migration
+# that fails against real cloned data fails HERE, before anything is deployed,
+# which is the whole value of cutting the branch from staging in the first
+# place.
+#
+# ⚠️ It runs in `MIX_ENV=prod` with `DATABASE_URL` pointed at the branch,
+# because `config/runtime.exs` reads `DATABASE_URL` only in `:prod` — in dev it
+# would silently use the hardcoded local `stacks_dev` and migrate a developer's
+# machine instead of the preview. This is also the earliest point the app can
+# compile: the generated schemas above are its prerequisite.
+if [[ "${PROD_MODE}" != 1 ]] && [[ -n "${NEON_CONNECTION_URI:-}" ]]; then
+    echo ""
+    echo "==> Applying this branch's migrations to the preview Neon branch..."
+    if ! (cd "$REPO_ROOT/apps/core" && \
+            MIX_ENV=prod \
+            DATABASE_URL="${NEON_CONNECTION_URI}" \
+            mix deps.get --only prod >/dev/null && \
+            MIX_ENV=prod DATABASE_URL="${NEON_CONNECTION_URI}" mix compile >/dev/null && \
+            MIX_ENV=prod DATABASE_URL="${NEON_CONNECTION_URI}" mix ecto.migrate); then
+        # ⬛ A FAILURE HERE IS THE GATE DOING ITS JOB, not an inconvenience: a
+        # migration that cannot apply to cloned staging data is a migration
+        # that will not apply to production either. Reporting it as a deploy
+        # failure before anything ships is the outcome this block exists for.
+        echo "FAIL deploy: the preview's migrations did not apply to its own Neon branch." >&2
+        echo "  This is what a merge to main would do to production data. Fix the migration" >&2
+        echo "  rather than the preview." >&2
+        exit 1
+    fi
+    echo "PASS deploy: preview branch migrated — its schema is now what main would have"
+elif [[ "${PROD_MODE}" != 1 ]]; then
+    echo "WARN: no Neon connection URI, so the preview keeps staging's schema and any"
+    echo "      gate that reads a newer table will fail rather than being misled."
+fi
+
 if ! vision_skipped && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     MODAL_PYTHON=""
     if [[ -x "${REPO_ROOT}/apps/vision/.venv/bin/python3" ]] \

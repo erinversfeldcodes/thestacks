@@ -111,4 +111,51 @@ for bad in off banana; do
 done
 rm -f "$VS_PROBE"
 
+# ── the preview migrates its own branch, before anything reads the schema ────
+
+test_case "preview_migrates_its_own_branch" "a preview is a rehearsal of the merge, not a copy of staging"
+
+PREVIEW_MIGRATE_LINE="$(grep -n "Applying this branch's migrations to the preview Neon branch" "$SCRIPT" | head -1 | cut -d: -f1)"
+
+# ⚠️ `assert_lt` and `assert_not_empty` DO NOT EXIST in lib/assert.sh, and an
+# earlier version of this block called them. The suite reported "14 passed, 0
+# failed" while bash printed `command not found` three times — the assertions
+# never ran and never failed anything. Only the five helpers that exist are
+# used here, and each numeric comparison goes through a real `[[ ]]` test whose
+# exit code `assert_exit_zero` can actually read.
+[[ -n "${PREVIEW_MIGRATE_LINE:-}" ]]
+assert_exit_zero $? "the preview migration block exists — without it a preview inherits staging's schema and never advances it"
+
+# ⛔ ORDER IS THE WHOLE POINT. Before the generated schemas the app cannot
+# compile, so the migration could not run; after the eval it is too late for
+# the gate that reads the tables. Both bounds are asserted because either one
+# alone permits the placement that fails.
+[[ "${GEN_LINE:-0}" -lt "${PREVIEW_MIGRATE_LINE:-0}" ]]
+assert_exit_zero $? "codegen (line ${GEN_LINE:-?}) precedes the preview migration (line ${PREVIEW_MIGRATE_LINE:-?}) — the app cannot compile before it"
+
+[[ "${PREVIEW_MIGRATE_LINE:-0}" -lt "${EVAL_LINE:-0}" ]]
+assert_exit_zero $? "the preview migration (line ${PREVIEW_MIGRATE_LINE:-?}) precedes the vision eval (line ${EVAL_LINE:-?}) — the eval reads op.ai_spend through the budget check"
+
+# ⚠️ `MIX_ENV=prod` is load-bearing, not incidental: `config/runtime.exs` reads
+# DATABASE_URL only in :prod, so a dev-mode migrate would silently target the
+# hardcoded local stacks_dev and migrate a developer's machine instead.
+PREVIEW_BLOCK="$(sed -n "${PREVIEW_MIGRATE_LINE:-1},$((${PREVIEW_MIGRATE_LINE:-1} + 24))p" "$SCRIPT")"
+
+# ⛔ THE MIGRATE LINE ITSELF, NOT THE BLOCK. `assert_contains "$PREVIEW_BLOCK"
+# "MIX_ENV=prod"` was satisfied by any of three occurrences in the window, so a
+# probe that stripped it from the deps.get line left the assertion GREEN. A
+# string that appears somewhere nearby is not the same claim as the command
+# under test carrying it.
+MIGRATE_INVOCATION="$(grep -E "MIX_ENV=prod.*mix ecto\.migrate" <<< "$PREVIEW_BLOCK")"
+[[ -n "$MIGRATE_INVOCATION" ]]
+assert_exit_zero $? "the ecto.migrate invocation ITSELF carries MIX_ENV=prod — :prod is the only env whose runtime config reads DATABASE_URL, so a dev-mode migrate would target the hardcoded local stacks_dev instead"
+
+MIGRATE_URL_LINE="$(grep -E "DATABASE_URL=\"\\$\{NEON_CONNECTION_URI\}\"" <<< "$PREVIEW_BLOCK")"
+[[ -n "$MIGRATE_URL_LINE" ]]
+assert_exit_zero $? "and it is pointed at the preview's own branch rather than an ambient database"
+
+# ⬛ The failure must STOP the deploy. A preview that carries on after its own
+# migrations failed has a schema that is neither staging's nor main's.
+assert_contains "$PREVIEW_BLOCK" "exit 1" "a migration that cannot apply to cloned staging data stops the deploy — that is what a merge would do to production"
+
 summarise
