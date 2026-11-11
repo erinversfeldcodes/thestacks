@@ -155,19 +155,43 @@ PREVIEW_BLOCK="$(sed -n "${PREVIEW_MIGRATE_LINE:-1},${PREVIEW_END:-1}p" "$SCRIPT
 # left it green. The env now lives in a `migrate_env` array, so each variable is
 # asserted inside that array AND the migrate is asserted to run through it —
 # either alone permits an array that nothing passes to mix.
-MIGRATE_ENV_BLOCK="$(sed -n "/migrate_env=(/,/^    )$/p" "$SCRIPT")"
+MIGRATE_ENV_BLOCK="$(sed -n "/^preview_mix_env=(/,/^)$/p" "$SCRIPT")"
 assert_contains "$MIGRATE_ENV_BLOCK" '"MIX_ENV=prod"' \
     "the migrate env declares MIX_ENV=prod — :prod is the only env whose runtime config reads DATABASE_URL"
-assert_contains "$MIGRATE_ENV_BLOCK" 'DATABASE_URL=${NEON_CONNECTION_URI}' \
-    "and points at the preview's own Neon branch rather than an ambient database"
 assert_contains "$MIGRATE_ENV_BLOCK" 'STORAGE_BACKEND=local' \
     "and declares local storage, because a schema migration writes no objects and should not hold production storage credentials"
 
-assert_contains "$PREVIEW_BLOCK" 'env "${migrate_env[@]}" mix ecto.migrate' \
+assert_contains "$PREVIEW_BLOCK" 'env "${preview_mix_env[@]}" mix ecto.migrate' \
     "and the migrate actually RUNS through that env — an array nothing passes to mix would satisfy the assertions above on its own"
+
+# ⛔ THE ARRAY IS DEFINED OUTSIDE THE PREVIEW-ONLY BLOCK, BECAUSE PROD READS IT.
+# The vision eval expands this array too, and the eval runs in every mode. While
+# the declaration sat inside the `if [[ PROD_MODE != 1 ]]` block, a production
+# deploy reached that expansion with the array never defined — and this script
+# runs under `set -u`, so that is an abort, in the one mode CI never exercises.
+# Asserting the ORDER is what keeps a future tidy-up from moving it back in.
+ARRAY_LINE="$(grep -n "^preview_mix_env=(" "$SCRIPT" | head -1 | cut -d: -f1)"
+[[ -n "$ARRAY_LINE" ]]
+assert_exit_zero $? "the preview mix env is declared at column zero, outside any conditional"
+[[ "${ARRAY_LINE:-0}" -lt "${PREVIEW_MIGRATE_LINE:-0}" ]]
+assert_exit_zero $? "it is declared (line ${ARRAY_LINE:-?}) BEFORE the preview-only block that uses it (line ${PREVIEW_MIGRATE_LINE:-?}), so the eval's expansion cannot hit an unset array on the production path"
+
+# ⚠️ And the one expansion that is no longer protected by that block's own
+# emptiness test must carry its own default, or set -u aborts prod.
+assert_contains "$MIGRATE_ENV_BLOCK" 'DATABASE_URL=${NEON_CONNECTION_URI:-}' \
+    "DATABASE_URL is expanded with a default — hoisting the array above the -n test removed the guarantee that made a bare expansion safe"
 
 # ⬛ The failure must STOP the deploy. A preview that carries on after its own
 # migrations failed has a schema that is neither staging's nor main's.
+# ⚠️ ANCHORED ON THE ASSIGNMENT, NOT ON THE TASK NAME. A range ending at the
+# first literal `mix eval.vision` stops inside the COMMENT that explains the
+# invocation, so the window closed before reaching the invocation itself and the
+# assertion failed against prose. Comments above a command are part of the
+# haystack unless the anchor excludes them.
+EVAL_INVOCATION="$(sed -n '/^    EVAL_OUT="\$(cd/,/EVAL_RC=\$?/p' "$SCRIPT")"
+assert_contains "$EVAL_INVOCATION" 'env "${preview_mix_env[@]}"' \
+    "the vision eval runs through the same preview env — without DATABASE_URL it reached the runner's own localhost:5432 and failed before scoring anything"
+
 assert_contains "$PREVIEW_BLOCK" "exit 1" \
     "a migration that cannot apply to cloned staging data stops the deploy — that is what a merge would do to production"
 

@@ -420,6 +420,36 @@ echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 # would silently use the hardcoded local `stacks_dev` and migrate a developer's
 # machine instead of the preview. This is also the earliest point the app can
 # compile: the generated schemas above are its prerequisite.
+# ⛔ DEFINED UNCONDITIONALLY, BECAUSE A CONSUMER OUTSIDE THE BLOCK READS IT.
+# This array was first declared inside the preview-only `if` below while the
+# vision eval further down also expands it. Under this script's `set -u` that
+# is an unbound-variable abort on the PRODUCTION path, where the `if` never
+# runs — a break in the one mode CI never exercises.
+#
+# ⚠️ So it is built here for every mode and merely USED where it applies.
+# DATABASE_URL is empty in prod mode, which leaves the eval exactly as it was
+# rather than pointing it somewhere wrong.
+preview_mix_env=(
+    "MIX_ENV=prod"
+    # ⚠️ GUARDED NOW THAT IT IS OUTSIDE THE if. The `[[ -n ${NEON_CONNECTION_URI:-} ]]`
+    # test below is what used to make a bare expansion safe here; hoisting the
+    # array above that test removed the guarantee, and `set -u` would abort the
+    # production deploy on the unset variable.
+    "DATABASE_URL=${NEON_CONNECTION_URI:-}"
+    "SECRET_KEY_BASE=${SECRET_KEY_BASE:-}"
+    "GUARDIAN_SECRET_KEY=${GUARDIAN_SECRET_KEY:-}"
+    "RESEND_API_KEY=${RESEND_API_KEY:-}"
+    "VISION_SERVICE_URL=${VISION_SERVICE_URL:-http://vision.invalid}"
+    # ⚠️ These two raise in EVERY env, not only :prod — runtime.exs raises
+    # for them before the prod block. They were missing from the first
+    # version of this array because it was enumerated from the prod block
+    # alone, and CLOAK_KEY would have been this block's next failure.
+    "CLOAK_KEY=${CLOAK_KEY:-}"
+    "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}"
+    "STORAGE_BACKEND=local"
+    "UPLOAD_DIR=/tmp/preview-migrate-uploads"
+)
+
 if [[ "${PROD_MODE}" != 1 ]] && [[ -n "${NEON_CONNECTION_URI:-}" ]]; then
     echo ""
     echo "==> Applying this branch's migrations to the preview Neon branch..."
@@ -443,26 +473,10 @@ if [[ "${PROD_MODE}" != 1 ]] && [[ -n "${NEON_CONNECTION_URI:-}" ]]; then
     # ⚠️ Enumerated from `config/runtime.exs`'s prod block rather than
     # discovered one failed run at a time. VISION_SERVICE_URL was absent from
     # the job environment too, so it would have been the next failure.
-    migrate_env=(
-        "MIX_ENV=prod"
-        "DATABASE_URL=${NEON_CONNECTION_URI}"
-        "SECRET_KEY_BASE=${SECRET_KEY_BASE:-}"
-        "GUARDIAN_SECRET_KEY=${GUARDIAN_SECRET_KEY:-}"
-        "RESEND_API_KEY=${RESEND_API_KEY:-}"
-        "VISION_SERVICE_URL=${VISION_SERVICE_URL:-http://vision.invalid}"
-        # ⚠️ These two raise in EVERY env, not only :prod — runtime.exs raises
-        # for them before the prod block. They were missing from the first
-        # version of this array because it was enumerated from the prod block
-        # alone, and CLOAK_KEY would have been this block's next failure.
-        "CLOAK_KEY=${CLOAK_KEY:-}"
-        "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}"
-        "STORAGE_BACKEND=local"
-        "UPLOAD_DIR=/tmp/preview-migrate-uploads"
-    )
     if ! (cd "$REPO_ROOT/apps/core" && \
-            env "${migrate_env[@]}" mix deps.get --only prod >/dev/null && \
-            env "${migrate_env[@]}" mix compile >/dev/null && \
-            env "${migrate_env[@]}" mix ecto.migrate); then
+            env "${preview_mix_env[@]}" mix deps.get --only prod >/dev/null && \
+            env "${preview_mix_env[@]}" mix compile >/dev/null && \
+            env "${preview_mix_env[@]}" mix ecto.migrate); then
         # ⬛ A FAILURE HERE IS THE GATE DOING ITS JOB, not an inconvenience: a
         # migration that cannot apply to cloned staging data is a migration
         # that will not apply to production either. Reporting it as a deploy
@@ -568,7 +582,19 @@ print(urls[0] if urls else '')
     # substitution in an assignment aborts the whole script BEFORE the verdict
     # logic below could run — the gate would die silently instead of speaking.
     EVAL_RC=0
+    # ⛔ THE EVAL READS THE DATABASE, SO IT NEEDS THE PREVIEW'S DATABASE. It was
+    # invoked with VISION_SERVICE_URL alone: no DATABASE_URL and no MIX_ENV, so
+    # dev config sent it to the runner's own `localhost:5432`, and it failed with
+    # `tcp connect (localhost:5432)` long before it could score anything. The
+    # budget check behind `mix eval.vision` reads `op.ai_spend`, which lives on
+    # the preview branch this deploy just migrated.
+    #
+    # ⚖️ The SAME array the migration uses, not a second hand-built list. Both
+    # are "a mix task run against the preview branch in prod mode", and the
+    # five preceding failures in this file were each one variable missing from
+    # one such list. One array means the next task added here cannot be short.
     EVAL_OUT="$(cd "$REPO_ROOT" && \
+            env "${preview_mix_env[@]}" \
             VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
             EVAL_VISION_REQUIRED=1 \
             mix eval.vision 2>&1)" || EVAL_RC=$?
