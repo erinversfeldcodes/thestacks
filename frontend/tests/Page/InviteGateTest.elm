@@ -26,7 +26,7 @@ import Types.RemoteData exposing (RemoteData(..))
 -}
 registerCard : Bool -> Login.Model
 registerCard inviteOnly =
-    Login.init Login.Fresh
+    Login.init Nothing Login.Fresh
         |> Login.withInviteOnly inviteOnly
         |> (\model -> { model | mode = Login.RegisterMode })
 
@@ -89,11 +89,30 @@ suite =
                 \_ ->
                     rendered (refused 404)
                         |> Query.has [ Selector.text "We don't recognise that code. Check it against the message you were sent." ]
-            , test "revoked reads exactly as expired — the reader learns nothing extra" <|
+            , test "revoked says withdrawn, not expired — the two have different remedies" <|
                 \_ ->
+                    -- ⚠️ This test asserted the OPPOSITE until 2026-10-16: that
+                    -- a revoked invitation reads exactly as an expired one. It
+                    -- was pinning deliberate reticence that cost the reader the
+                    -- one fact that decides what they do next — an expired
+                    -- invitation is reissued by asking again, a withdrawn one
+                    -- is not. Telling someone to ask for a fresh code when the
+                    -- sender deliberately withdrew it sends them to ask a
+                    -- question that has already been answered.
                     rendered (refused 403)
-                        |> Query.has
-                            [ Selector.text "That invitation has expired. Ask whoever sent it for a fresh one." ]
+                        |> Expect.all
+                            [ Query.has
+                                [ Selector.text "That invitation was withdrawn. Contact whoever invited you if you think that's wrong." ]
+                            , Query.hasNot [ Selector.text "Ask whoever sent it for a fresh one." ]
+                            ]
+            , test "expired still reads as expired — the two messages stay distinct" <|
+                \_ ->
+                    rendered (refused 410)
+                        |> Expect.all
+                            [ Query.has
+                                [ Selector.text "That invitation has expired. Ask whoever sent it for a fresh one." ]
+                            , Query.hasNot [ Selector.text "withdrawn" ]
+                            ]
             , test "an exhausted code says it has been used" <|
                 \_ ->
                     rendered (refused 409)
@@ -105,6 +124,44 @@ suite =
                             Login.update (Login.InviteCodeChanged "STK-NEW") (refused 404)
                     in
                     Expect.equal model.inviteCheck NotAsked
+            , test "a refusal is ANNOUNCED and bound to the field, not only shown beside it" <|
+                \_ ->
+                    -- The four messages above are worth nothing to a reader who
+                    -- never hears them. Pressing Redeem moves no focus and
+                    -- navigates nowhere, so a span quietly appearing in an inert
+                    -- part of the page is not an event: a screen-reader user got
+                    -- silence, and the field they had just filled in still
+                    -- reported itself as valid.
+                    --
+                    -- Three separate things, for three separate moments — the
+                    -- announcement now, the reason on re-focus, the state for
+                    -- anything walking the form.
+                    rendered (refused 404)
+                        |> Expect.all
+                            [ Query.find [ Selector.attribute (attr "data-testid" "invite-refusal") ]
+                                >> Query.has
+                                    [ Selector.attribute (attr "role" "alert")
+                                    , Selector.id "invite-code-refusal"
+                                    ]
+                            , Query.find [ Selector.attribute (attr "data-testid" "invite-code-input") ]
+                                >> Query.has
+                                    [ Selector.attribute (attr "aria-invalid" "true")
+                                    , Selector.attribute (attr "aria-describedby" "invite-code-refusal")
+                                    ]
+                            ]
+            , test "an un-refused field is not marked invalid, and describes nothing" <|
+                \_ ->
+                    -- The mirror. A permanent `aria-invalid="false"` and a
+                    -- `describedby` pointing at an element that is not rendered
+                    -- would make the assertion above pass while telling every
+                    -- reader the field is broken before they have typed in it.
+                    rendered (registerCard True)
+                        |> Query.find [ Selector.attribute (attr "data-testid" "invite-code-input") ]
+                        |> Expect.all
+                            [ Query.hasNot [ Selector.attribute (attr "aria-invalid" "true") ]
+                            , Query.hasNot
+                                [ Selector.attribute (attr "aria-describedby" "invite-code-refusal") ]
+                            ]
             ]
         , describe "decodeConfig fails CLOSED"
             [ test "an absent inviteOnly field means the gate is ON" <|

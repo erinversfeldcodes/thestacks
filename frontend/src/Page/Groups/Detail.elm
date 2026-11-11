@@ -4,10 +4,12 @@ import Api
 import Components.BlockUserModal as BlockModal
 import Components.FeedItem
 import Dict exposing (Dict)
+import Effect
 import Html exposing (Html, button, div, h1, input, p, span, text)
 import Html.Attributes exposing (class, disabled, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Navigation.Route exposing (Route(..))
 import Types.FeedItem exposing (FeedItem, FeedResponse, feedItemUserDisplayName, feedItemUserId)
 import Types.Group exposing (Group, GroupInvitation)
@@ -32,7 +34,7 @@ type alias Model =
     , inviteInput : String
     , inviteState : InviteState
     , currentUserId : String
-    , token : String
+    , token : Api.Credentials
     , activeTab : Tab
     , feed : RemoteData Http.Error FeedResponse
     , loadingMoreFeed : Bool
@@ -50,6 +52,7 @@ type alias Model =
 
 type Msg
     = GroupLoaded (Result Http.Error Group)
+    | SessionExpiryDetected
     | InviteInputChanged String
     | SubmitInvite
     | InviteSent (Result Http.Error GroupInvitation)
@@ -73,7 +76,7 @@ type OutMsg
     | EscapeUnhandled
 
 
-init : String -> String -> String -> ( Model, Cmd Msg )
+init : String -> String -> Api.Credentials -> ( Model, Cmd Msg )
 init groupId userId token =
     ( { groupId = groupId
       , group = Loading
@@ -90,8 +93,23 @@ init groupId userId token =
       , removeError = Nothing
       }
     , Cmd.batch
-        [ Api.getGroup groupId token GroupLoaded
-        , Api.getGroupMembers groupId token MembersLoaded
+        [ Effect.perform
+            (Effect.authed (Api.groupRequest groupId)
+                token
+                { onExpired = SessionExpiryDetected
+                , onResponse =
+                    Api.resolveJson (Decode.field "group" Types.Group.groupDecoder) >> GroupLoaded
+                }
+            )
+        , Effect.perform
+            (Effect.authed (Api.groupMembersRequest groupId)
+                token
+                { onExpired = SessionExpiryDetected
+                , onResponse =
+                    Api.resolveJson (Decode.field "members" (Decode.list Api.groupMemberDecoder))
+                        >> MembersLoaded
+                }
+            )
         ]
     )
 
@@ -134,6 +152,9 @@ mergeBlockModals currentUserId items dict =
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         GroupLoaded (Ok group) ->
             ( { model | group = Success group }, Cmd.none, NoOut )
 
@@ -149,7 +170,16 @@ update msg model =
 
         SubmitInvite ->
             ( { model | inviteState = InviteSending }
-            , Api.inviteToGroup model.groupId model.inviteInput model.token InviteSent
+            , Effect.perform
+                (Effect.authed (Api.inviteToGroupRequest model.groupId model.inviteInput)
+                    model.token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson
+                            (Decode.field "invitation" Types.Group.groupInvitationDecoder)
+                            >> InviteSent
+                    }
+                )
             , NoOut
             )
 
@@ -168,7 +198,13 @@ update msg model =
 
         LeaveGroup ->
             ( model
-            , Api.leaveGroup model.groupId model.token LeftGroup
+            , Effect.perform
+                (Effect.authed (Api.leaveGroupRequest model.groupId)
+                    model.token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveWhatever >> LeftGroup
+                    }
+                )
             , NoOut
             )
 
@@ -186,7 +222,13 @@ update msg model =
             case model.feed of
                 NotAsked ->
                     ( { model | activeTab = FeedTab, feed = Loading }
-                    , Api.getGroupFeed model.groupId model.token Nothing FeedLoaded
+                    , Effect.perform
+                        (Effect.authed (Api.groupFeedRequest model.groupId Nothing)
+                            model.token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveJson Types.FeedItem.feedResponseDecoder >> FeedLoaded
+                            }
+                        )
                     , NoOut
                     )
 
@@ -208,7 +250,13 @@ update msg model =
 
         RemoveMember memberUserId ->
             ( { model | removingMemberId = Just memberUserId }
-            , Api.removeGroupMember model.groupId memberUserId model.token (MemberRemoved memberUserId)
+            , Effect.perform
+                (Effect.authed (Api.removeGroupMemberRequest model.groupId memberUserId)
+                    model.token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveWhatever >> MemberRemoved memberUserId
+                    }
+                )
             , NoOut
             )
 
@@ -265,7 +313,13 @@ update msg model =
                     case resp.nextCursor of
                         Just _ ->
                             ( { model | loadingMoreFeed = True }
-                            , Api.getGroupFeed model.groupId model.token resp.nextCursor MoreFeedLoaded
+                            , Effect.perform
+                                (Effect.authed (Api.groupFeedRequest model.groupId resp.nextCursor)
+                                    model.token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResponse = Api.resolveJson Types.FeedItem.feedResponseDecoder >> MoreFeedLoaded
+                                    }
+                                )
                             , NoOut
                             )
 
@@ -322,7 +376,13 @@ update msg model =
                               }
                             , Cmd.batch
                                 [ Cmd.map (BlockModalMsg uid) subCmd
-                                , Api.getGroupFeed model.groupId model.token Nothing FeedLoaded
+                                , Effect.perform
+                                    (Effect.authed (Api.groupFeedRequest model.groupId Nothing)
+                                        model.token
+                                        { onExpired = SessionExpiryDetected
+                                        , onResponse = Api.resolveJson Types.FeedItem.feedResponseDecoder >> FeedLoaded
+                                        }
+                                    )
                                 ]
                             , NoOut
                             )

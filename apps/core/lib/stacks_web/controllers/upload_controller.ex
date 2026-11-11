@@ -22,11 +22,22 @@ defmodule StacksWeb.UploadController do
 
       Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
 
-      Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
-      bytes directly to `upload_url` (R2), then calls
-      `POST /api/upload/:id/commit` to signal completion. Phoenix never
-      sees the bytes — the POST here is a lightweight DB insert + local
-      SigV4 signing operation (~50ms typical).
+      Returns: `{image_id, upload_url, expires_in}`, then
+      `POST /api/upload/:id/commit` to signal completion.
+
+      ⛔ **`upload_url` IS A PATH ON OUR OWN ORIGIN**, `/api/upload/:id/data` —
+      not a presigned object-storage link, and the client does not use it: it
+      builds that path from `image_id` itself. This said "Client PUTs the image
+      bytes directly to `upload_url` (R2) … Phoenix never sees the bytes — a
+      lightweight DB insert + local SigV4 signing operation", and every clause
+      of that had been false since July. The bytes travel through this app,
+      which is what makes the request same-origin and therefore able to carry
+      CSRF proof; treating the destination as cross-origin sent no header and
+      every upload was refused once enforcement went on.
+
+      ⚠️ The stale version was not harmless. An E2E spec mocked the presigned
+      URL this described, so the client's real PUT went unmocked and most of
+      that suite failed blaming the client for the mock's error.
   """
   @spec init(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def init(conn, params) do
@@ -89,11 +100,39 @@ defmodule StacksWeb.UploadController do
   """
   @spec upload_data(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def upload_data(conn, %{"image_id" => image_id}) do
+    user = Guardian.Plug.current_resource(conn)
     {:ok, body, conn} = Plug.Conn.read_body(conn, length: 20_971_520)
 
-    case Uploads.store_upload_bytes(image_id, body) do
+    case Uploads.store_upload_bytes(user.id, image_id, body) do
       :ok ->
         send_resp(conn, 200, "")
+
+      # ⛔ ONE STATUS FOR FOUR DIFFERENT REFUSALS, deliberately. Malformed id,
+      # no such row, somebody else's row and a row past `awaiting_upload` all
+      # answer `404`. Distinguishing them would turn this endpoint into an
+      # oracle for which upload ids exist, and the id IS the capability.
+      #
+      # ⚠️ `:already_committed` is collapsed HERE rather than in the context,
+      # because `commit_upload/2` shares the same lookup and genuinely needs to
+      # tell that case apart — it answers `409 already_committed` to a reader
+      # re-committing their own upload, which is useful and leaks nothing. The
+      # two callers want different answers to the same question, so the mapping
+      # belongs at the edge that knows which question was asked.
+      {:error, reason} when reason in [:not_found, :already_committed] ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+
+      # ⚖️ Named separately because it is not an authorisation failure: the
+      # caller holds a valid capability and has already spent it. Telling them
+      # so is useful and leaks nothing they did not already know.
+      {:error, :already_written} ->
+        conn |> put_status(409) |> json(%{error: "already_uploaded"})
+
+      # ⚠️ 503, not 500. Object storage could not say whether bytes are already
+      # there, so this write is refused rather than risking an overwrite — but
+      # the reader's upload was probably fine and retrying is the right advice,
+      # which a 500 does not give.
+      {:error, :storage_unavailable} ->
+        conn |> put_status(503) |> json(%{error: "storage_unavailable"})
 
       {:error, reason} ->
         Logger.error(
@@ -141,6 +180,7 @@ defmodule StacksWeb.UploadController do
     rejected_ids = Map.get(params, "rejected_book_ids", [])
 
     with {:ok, image} <- fetch_owned_image(image_id, user.id),
+         :ok <- refuse_if_photograph_discarded(image),
          excluded when excluded != [] <- resolve_excluded_books(rejected_ids) do
       excluded_isbns = resolve_excluded_isbns(rejected_ids)
       remove_placements_for_books(user.id, rejected_ids)
@@ -183,12 +223,33 @@ defmodule StacksWeb.UploadController do
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 
+      {:error, :photograph_discarded} ->
+        conn |> put_status(410) |> json(%{error: "photograph_discarded"})
+
       [] ->
         conn
         |> put_status(422)
         |> json(%{error: "no_resolvable_books"})
     end
   end
+
+  # ⛔ THE RETRY IS THE ONE THING THAT STILL NEEDS THE PHOTOGRAPH, and
+  # `ImageRetention.cleanup_finished_image_bytes/1` deletes it a day after
+  # identification goes terminal. Past that point the bytes are gone while the
+  # row — and the reader's inbox entry — remain for thirty days, so the button
+  # is still reachable long after the thing it acts on is not.
+  #
+  # ⚖️ Refusing with 410 rather than enqueueing anyway. A retry against a
+  # deleted object does not fail cleanly: `IdentifyBookJob` cannot presign a key
+  # with nothing behind it, burns its three attempts, and the terminal guarantee
+  # writes the row back to `rejected` with `processing_failed` — which tells the
+  # reader their photo was unreadable. It was perfectly readable; we deleted it.
+  # An honest refusal the reader can act on beats a plausible lie.
+  defp refuse_if_photograph_discarded(%UploadedImage{storage_path: path})
+       when is_binary(path) and path != "",
+       do: :ok
+
+  defp refuse_if_photograph_discarded(%UploadedImage{}), do: {:error, :photograph_discarded}
 
   defp fetch_owned_image(image_id, user_id) do
     case Ecto.UUID.cast(image_id) do
@@ -370,7 +431,7 @@ defmodule StacksWeb.UploadController do
     case result do
       nil ->
         Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")
-        conn |> put_status(404) |> json(%{error: "not found"})
+        conn |> put_status(404) |> json(%{error: "not_found"})
 
       %{user_id: owner_id} when not is_nil(owner_id) and owner_id != user.id ->
         Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")

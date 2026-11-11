@@ -68,6 +68,7 @@ bookDetailInit =
     , finishedReadPrompt = False
     , coverFailed = False
     , undoableRemoval = Nothing
+    , myWriting = []
     }
 
 
@@ -182,7 +183,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             BookDetail.update
-                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }))
+                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }))
                                 bookDetailInit
                                 Nothing
                     in

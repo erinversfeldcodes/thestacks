@@ -28,14 +28,7 @@ defmodule Stacks.Events.Registry do
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
     "blog.post_published" => [
-      Stacks.Blog.Handlers.BlogAssociationHandler,
-      Stacks.Workers.DbtRefreshHandler
-    ],
-    "blog.post_updated" => [
-      Stacks.Workers.DbtRefreshHandler
-    ],
-    "blog.post_deleted" => [
-      Stacks.Workers.DbtRefreshHandler
+      Stacks.Blog.Handlers.BlogAssociationHandler
     ],
     "blog.associations_suggested" => [
       Stacks.Books.Handlers.CacheInvalidationHandler
@@ -76,9 +69,6 @@ defmodule Stacks.Events.Registry do
     "enrichment.events_discovered" => [
       Stacks.Workers.DbtRefreshHandler
     ],
-    "source_health.recorded" => [
-      Stacks.Workers.DbtRefreshHandler
-    ],
     "group.invitation_sent" => [
       Stacks.Notifications.GroupInvitationHandler
     ],
@@ -91,6 +81,23 @@ defmodule Stacks.Events.Registry do
   }
 
   @unsubscribed [
+    # ⚠️ Added 2026-10-15. Each of these three was handled ONLY by
+    # DbtRefreshHandler, and every dbt model that handler refreshed for them was
+    # deleted as an orphan — the nine marts whose consumer left with the metrics
+    # dashboard. A handler subscribed to an event it can no longer act on is
+    # worse than no handler: it reads as wiring. So the subscription went and the
+    # event is named here instead.
+    #
+    # `source_health.recorded` is still emitted and still useful: the operational
+    # view reads the `op.source_health_checks` TABLE directly
+    # (`Monitoring.list_source_health/0`), never the deleted `int_source_health`
+    # view, so nothing a person looks at changed.
+    "source_health.recorded",
+    # Blog posts are a built feature and these two are emitted; only their dbt
+    # refresh is gone. `blog.post_published` keeps a real handler
+    # (BlogAssociationHandler) and so stays in @registry.
+    "blog.post_updated",
+    "blog.post_deleted",
     # The confirmation email is enqueued directly at registration; the event
     # remains for audit/replay but no longer carries the email.
     "user.registered",
@@ -98,6 +105,10 @@ defmodule Stacks.Events.Registry do
     "image.rejected",
     "image.resolved",
     "image.expired",
+    # The photograph was deleted while its record remains — a distinct fact from
+    # `image.expired`, which means the whole image is gone. An erasure enquiry
+    # reading the log must be able to tell them apart.
+    "image.bytes_discarded",
     "listing.created",
     "listing.sold",
     "listing.removed",
@@ -167,6 +178,22 @@ defmodule Stacks.Events.Registry do
   ]
 
   @pending %{
+    "book.cover_confirmed" =>
+      "cover verification is deferred to the vision redesign, not abandoned: the " <>
+        "loop that produced this event was deleted on 2026-10-15 because nothing ever " <>
+        "started a verification job, so no result could arrive. The wire contract it " <>
+        "reported through is deliberately kept for the same reason this entry is — the " <>
+        "association request, response and callback messages, and the status enum, all " <>
+        "survive in the vision proto. ⚠️ The reason this entry exists rather than a plain " <>
+        "deletion is that it is GATED and a comment is not: a @pending key absent from " <>
+        "@registry raises a CompileError, and the completeness test fails both if a " <>
+        "catalogued type has no emitter and no entry here, and if an entry here gains one. " <>
+        "So this record cannot quietly go stale, which is the property the kept wire " <>
+        "contract has no equivalent of. CacheInvalidationHandler stays registered on that " <>
+        "basis. (An earlier version claimed the handler clause encodes knowledge a rebuild " <>
+        "would otherwise lose — it does not: the handler's own moduledoc states the rule " <>
+        "generally, four sibling clauses instantiate it, and payload_contract.ex records " <>
+        "this payload's keys. The decision was right and the stated reason was borrowed.)",
     "offer.opened" =>
       "the marketplace offer flow is deferred (owner ruling 2026-08-19): the " <>
         "offer_threads and offer_messages tables, their schemas and their changesets " <>
@@ -174,9 +201,17 @@ defmodule Stacks.Events.Registry do
         "so nothing can emit this yet. OfferNotificationHandler stays registered so " <>
         "the flow lands with its consumer already wired",
     "enrichment.reviews_scraped" =>
-      "reviews are planned, not deleted (owner ruling 2026-08-07): " <>
-        "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
-        "returns; its handler, payload contract and dbt models stay wired"
+      "reviews are planned, not deleted (owner ruling 2026-08-07, reaffirmed 2026-10-15): " <>
+        "a 2026-10-15 cleanup removed the scraper-side emitter but the review vertical " <>
+        "returns. ⚠️ The handler stays SUBSCRIBED and the payload contract stays, but the " <>
+        "handler currently maps NO models and therefore refreshes nothing — see " <>
+        "DbtRefreshHandler's @subscribed_without_models, which is where that is declared and " <>
+        "gated. Restoring the mapping is part of the rebuild, not automatic; the three dbt models " <>
+        "deleted in the 2026-10-15 ruling because they model rows that do not exist yet, " <>
+        "and are rebuilt when there are rows. The return is SCOPED, not merely intended: " <>
+        "the sanctioned-source policy is the story's section 4 and the ordered rebuild is " <>
+        "its section 17, whose step 2 writes to op.review_snapshots — which is why that " <>
+        "table, its proto message, its Ecto schema and this contract are kept"
   }
 
   @overlap Enum.filter(@unsubscribed, &Map.has_key?(@registry, &1))

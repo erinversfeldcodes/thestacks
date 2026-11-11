@@ -37,7 +37,7 @@ type alias BookDetailTest =
 
 start : BookDetailTest
 start =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
 
 
 formatsEndpoint : String
@@ -170,7 +170,7 @@ noPlacementSendsNothing : Test
 noPlacementSendsNothing =
     test "no_placement: a reader without a placement has no picker and sends nothing" <|
         \() ->
-            ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+            ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (TestHelpers.simulateBookDetailResponse "book-test-001" testBook)

@@ -15,6 +15,7 @@ import Page.Upload as Upload exposing (UploadStep(..))
 import Test exposing (Test, describe, fuzz2, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.Book exposing (Book, Edition, VisibilityTier(..), displayTitle, isProvisional, isUnidentified)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -251,7 +252,7 @@ uploadInvariantSuite =
     describe "— the upload flow may not wait for a title it already has"
         [ test "the verify step names the book and does not promise a title it is showing" <|
             \_ ->
-                Upload.view { init_ | step = Verifying reportedRow } (Just "token") Types.RemoteData.NotAsked
+                Upload.view { init_ | step = Verifying reportedRow } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.has [ Selector.text "1Q84" ]
@@ -259,12 +260,12 @@ uploadInvariantSuite =
                         ]
         , test "the shelf picker quotes the title rather than saying 'This book'" <|
             \_ ->
-                Upload.view { init_ | step = ChoosingShelf reportedRow } (Just "token") Types.RemoteData.NotAsked
+                Upload.view { init_ | step = ChoosingShelf reportedRow } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Add \"1Q84\" to a shelf" ]
         , test "the completion card quotes the title rather than saying 'This book'" <|
             \_ ->
-                Upload.view { init_ | step = Complete reportedRow "library" } (Just "token") Types.RemoteData.NotAsked
+                Upload.view { init_ | step = Complete reportedRow "library" } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.has [ Selector.text "\"1Q84\" added to Library" ]
@@ -301,7 +302,7 @@ invariantSuite =
                         [ Query.find [ titleSelector ] >> Query.has [ Selector.exactText title ]
                         , Query.hasNot [ noticeSelector ]
                         ]
-        , fuzz2 standInTitleFuzzer (Fuzz.constant "barcode_unverified") "a book with no name still says so, whatever stand-in the server wrote (#344 holds)" <|
+        , fuzz2 standInTitleFuzzer (Fuzz.constant "barcode_unverified") "a book with no name still says so, whatever stand-in the server wrote" <|
             \title verificationSource ->
                 BookDetail.view (bookDetailModelFor (bookWith title verificationSource))
                     |> Query.fromHtml
@@ -371,24 +372,60 @@ suite =
         , describe "upload verify step"
             [ test "renders the provisional notice, naming the ISBN as an ISBN" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = Verifying provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
                         |> Query.has [ Selector.text provisionalIsbn ]
             , test "does not print the placeholder title as the book's name" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = Verifying provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.text ("ISBN " ++ provisionalIsbn) ]
             , test "an identified book gets no notice" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying identifiedBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = Verifying identifiedBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.hasNot
                             [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
+            , test "the retry button is GONE once the photograph has been discarded" <|
+                \_ ->
+                    -- ⛔ The record outlives the photograph by design: the row
+                    -- keeps its 30-day expiry while the image is deleted a day
+                    -- after identification goes terminal. So for most of an
+                    -- item's life "No, try again" is an action the data cannot
+                    -- support, and the reader should learn that before pressing
+                    -- it rather than from a 410 afterwards.
+                    Upload.view
+                        { init_ | step = Verifying identifiedBook, retryable = False }
+                        (Just (TestHelpers.creds "token"))
+                        Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.hasNot
+                            [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-reject-btn") ]
+            , test "and its absence is EXPLAINED, not silent" <|
+                \_ ->
+                    -- ⚠️ A control that vanishes with no account of itself reads
+                    -- as a bug, and the reader cannot tell that the PHOTOGRAPH
+                    -- is gone rather than the feature.
+                    Upload.view
+                        { init_ | step = Verifying identifiedBook, retryable = False }
+                        (Just (TestHelpers.creds "token"))
+                        Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-retry-unavailable") ]
+            , test "a retryable item still offers it — the gate did not remove the button outright" <|
+                \_ ->
+                    Upload.view
+                        { init_ | step = Verifying identifiedBook, retryable = True }
+                        (Just (TestHelpers.creds "token"))
+                        Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.has
+                            [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-reject-btn") ]
             , test "INFORMS ONLY: both confirm and reject stay on screen and enabled" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = Verifying provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.find
@@ -402,25 +439,25 @@ suite =
         , describe "upload shelf picker"
             [ test "offers every shelf for a provisional book" <|
                 \_ ->
-                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.findAll [ Selector.class "upload-shelf-picker__shelf" ]
                         |> Query.count (Expect.equal 5)
             , test "the heading does not quote a status as if it were a title" <|
                 \_ ->
-                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Add This book to a shelf" ]
             , test "an identified book still gets its title quoted in the heading" <|
                 \_ ->
-                    Upload.view { init_ | step = ChoosingShelf identifiedBook } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = ChoosingShelf identifiedBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Add \"The Great Gatsby\" to a shelf" ]
             ]
         , describe "upload completion card"
             [ test "confirms the placement happened and explains the missing title" <|
                 \_ ->
-                    Upload.view { init_ | step = Complete provisionalBook "library" } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = Complete provisionalBook "library" } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "This book added to Library" ]
@@ -430,7 +467,7 @@ suite =
                             ]
             , test "an identified book keeps the quoted-title heading" <|
                 \_ ->
-                    Upload.view { init_ | step = Complete identifiedBook "library" } (Just "token") Types.RemoteData.NotAsked
+                    Upload.view { init_ | step = Complete identifiedBook "library" } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "\"The Great Gatsby\" added to Library" ]
             ]

@@ -3,7 +3,10 @@ module Components.Syndication exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , initWithEffect
+    , latestSyndication
     , update
+    , updateWithEffect
     , view
     )
 
@@ -21,10 +24,12 @@ not greyed: a greyed button invites a click that will never work.
 -}
 
 import Api exposing (Syndication, SyndicationExport)
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h2, input, label, p, span, text, textarea)
 import Html.Attributes exposing (checked, class, href, readonly, rel, type_, value)
 import Html.Events exposing (onCheck, onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -48,33 +53,88 @@ type alias Model =
     , pendingCopy : Maybe { target : CopyTarget, payload : String }
     , exportState : RemoteData Http.Error SyndicationExport
     , syndicatedUrlInput : String
-    , urlError : Bool
+
+    -- The failure itself, not a flag. A flag could only ever render ONE
+    -- message, and the one it rendered was "that doesn't look like a web
+    -- address" — said to a writer whose session had expired, whose post had
+    -- been deleted in another tab, or who was briefly offline. Each of those is
+    -- a different thing to do next, and the writer was instead invited to
+    -- retype a URL that was never the problem. 422 is the only failure that
+    -- actually means the URL.
+    , urlError : Maybe Http.Error
     , savingUrl : Bool
     , syndications : List Syndication
+
+    -- "Could not ask" is held apart from "none recorded", because the two render
+    -- the same and mean opposite things. An empty list hides the backlink input
+    -- (below), which is the exact defect this read was added to fix — so a
+    -- failed read silently reproducing it, with the panel claiming parity, is
+    -- the one outcome worth being able to see.
+    , readFailed : Bool
     , includeInFeed : Bool
     }
 
 
-init : String -> String -> Bool -> Model
-init postId origin syndicated =
+init : String -> String -> Bool -> Maybe Api.Credentials -> ( Model, Cmd Msg )
+init postId origin syndicated maybeToken =
+    let
+        ( newModel, effect ) =
+            initWithEffect postId origin syndicated maybeToken
+    in
+    ( newModel, Effect.perform effect )
+
+
+{-| The panel starts by asking what has already been syndicated.
+
+It used to start empty and only learn about a syndication performed in THIS
+session, so a recorded backlink was invisible after a reload — and the field for
+entering one disappeared with it, because that field is shown against a recorded
+syndication. The writer's only route back was to export again, writing a
+duplicate row.
+
+-}
+initWithEffect : String -> String -> Bool -> Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect postId origin syndicated maybeToken =
+    ( initialModel postId origin syndicated
+    , case maybeToken of
+        Just token ->
+            Effect.authed (Api.syndicationsRequest postId)
+                token
+                { onExpired = SessionExpiryDetected
+                , onResponse =
+                    Api.resolveJson
+                        (Decode.field "syndications" (Decode.list Api.syndicationDecoder))
+                        >> GotSyndications
+                }
+
+        Nothing ->
+            Effect.None
+    )
+
+
+initialModel : String -> String -> Bool -> Model
+initialModel postId origin syndicated =
     { postId = postId
     , origin = origin
     , copyState = Idle
     , pendingCopy = Nothing
     , exportState = NotAsked
     , syndicatedUrlInput = ""
-    , urlError = False
+    , urlError = Nothing
     , savingUrl = False
     , syndications = []
+    , readFailed = False
     , includeInFeed = syndicated
     }
 
 
 type Msg
     = ClickedCopyCanonical
+    | SessionExpiryDetected
     | ClickedCopyFeedUrl String
     | ClickedCopyExport String
     | GotExport String (Result Http.Error SyndicationExport)
+    | GotSyndications (Result Http.Error (List Syndication))
     | SyndicationRecorded (Result Http.Error Syndication)
     | UrlChanged String
     | UrlSubmitted
@@ -88,7 +148,7 @@ type OutMsg
     = NoOut
     | RequestCopy String
     | SyndicatedChanged Bool
-    | AuthLost
+    | SessionExpired
 
 
 canonicalUrl : Model -> String
@@ -101,9 +161,21 @@ feedUrl model handle =
     model.origin ++ "/api/feeds/u/" ++ handle ++ "/blog"
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Effect.None, SessionExpired )
+
         ClickedCopyCanonical ->
             requestCopy model Canonical (canonicalUrl model)
 
@@ -114,52 +186,83 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | exportState = Loading }
-                    , Api.fetchSyndicationExport token model.postId format (GotExport format)
+                    , Effect.authed (Api.syndicationExportRequest model.postId format)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson Api.syndicationExportDecoder >> GotExport format
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, AuthLost )
+                    ( model, Effect.None, SessionExpired )
 
         GotExport format (Ok export) ->
             ( { model
                 | exportState = Success export
                 , pendingCopy = Just { target = Export format, payload = export.body }
               }
-            , Cmd.none
+            , Effect.None
             , RequestCopy export.body
             )
 
         GotExport _ (Err err) ->
-            ( { model | exportState = Failure err }, Cmd.none, NoOut )
+            ( { model | exportState = Failure err }, Effect.None, NoOut )
+
+        GotSyndications (Ok syndications) ->
+            -- MERGED, not replaced. This read starts on mount and a record can
+            -- land first; the server's snapshot would then predate the POST, drop
+            -- the locally-appended row, and send `latestSyndication` back to an
+            -- older one — so the writer's backlink would be saved against the
+            -- wrong syndication id. A wrong write, not a cosmetic glitch.
+            ( { model
+                | syndications = mergeSyndications syndications model.syndications
+                , readFailed = False
+              }
+            , Effect.None
+            , NoOut
+            )
+
+        GotSyndications (Err _) ->
+            -- Not an error STATE — the panel's job is the export, which still
+            -- works — but recorded, because an empty list is what hides the
+            -- backlink field, and that is the defect this read exists to fix.
+            ( { model | readFailed = True }, Effect.None, NoOut )
 
         SyndicationRecorded (Ok syndication) ->
             ( { model | syndications = model.syndications ++ [ syndication ] }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
         SyndicationRecorded (Err _) ->
-            ( model, Cmd.none, NoOut )
+            ( model, Effect.None, NoOut )
 
         UrlChanged value ->
-            ( { model | syndicatedUrlInput = value, urlError = False }, Cmd.none, NoOut )
+            ( { model | syndicatedUrlInput = value, urlError = Nothing }, Effect.None, NoOut )
 
         UrlSubmitted ->
             case ( maybeToken, latestSyndication model ) of
                 ( Just token, Just syndication ) ->
                     ( { model | savingUrl = True }
-                    , Api.updateSyndicationUrl
+                    , Effect.authed
+                        (Api.updateSyndicationUrlRequest model.postId
+                            syndication.id
+                            model.syndicatedUrlInput
+                        )
                         token
-                        model.postId
-                        syndication.id
-                        model.syndicatedUrlInput
-                        UrlSaved
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson
+                                (Decode.field "syndication" Api.syndicationDecoder)
+                                >> UrlSaved
+                        }
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         UrlSaved (Ok syndication) ->
             ( { model
@@ -167,60 +270,66 @@ update msg model maybeToken =
                 , syndicatedUrlInput = ""
                 , syndications = replaceSyndication syndication model.syndications
               }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
-        UrlSaved (Err _) ->
-            ( { model | savingUrl = False, urlError = True }, Cmd.none, NoOut )
+        UrlSaved (Err err) ->
+            ( { model | savingUrl = False, urlError = Just err }, Effect.None, NoOut )
 
         ToggledIncludeInFeed include ->
             case maybeToken of
                 Just token ->
                     ( { model | includeInFeed = include }
-                    , Api.setPostSyndicated token model.postId include ToggleSaved
+                    , Effect.authed (Api.setPostSyndicatedRequest model.postId include)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson (Decode.at [ "post", "syndicated" ] Decode.bool)
+                                >> ToggleSaved
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, AuthLost )
+                    ( model, Effect.None, SessionExpired )
 
         ToggleSaved (Ok syndicated) ->
-            ( { model | includeInFeed = syndicated }, Cmd.none, SyndicatedChanged syndicated )
+            ( { model | includeInFeed = syndicated }, Effect.None, SyndicatedChanged syndicated )
 
         ToggleSaved (Err _) ->
-            ( { model | includeInFeed = not model.includeInFeed }, Cmd.none, NoOut )
+            ( { model | includeInFeed = not model.includeInFeed }, Effect.None, NoOut )
 
         CopyOutcome True ->
             case model.pendingCopy of
                 Just pending ->
                     ( { model | copyState = Copied pending.target, pendingCopy = Nothing }
-                    , Cmd.none
+                    , Effect.None
                     , NoOut
                     )
                         |> recordIfExport pending maybeToken
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         CopyOutcome False ->
             case model.pendingCopy of
                 Just pending ->
                     ( { model | copyState = CopyUnavailable pending.payload, pendingCopy = Nothing }
-                    , Cmd.none
+                    , Effect.None
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
 
 {-| The view calls this for feed/canonical copies (payload known statically).
 -}
-requestCopy : Model -> CopyTarget -> String -> ( Model, Cmd Msg, OutMsg )
+requestCopy : Model -> CopyTarget -> String -> ( Model, Effect Msg, OutMsg )
 requestCopy model target payload =
     ( { model | pendingCopy = Just { target = target, payload = payload } }
-    , Cmd.none
+    , Effect.None
     , RequestCopy payload
     )
 
@@ -230,14 +339,23 @@ record it now, not at fetch time.
 -}
 recordIfExport :
     { target : CopyTarget, payload : String }
-    -> Maybe String
-    -> ( Model, Cmd Msg, OutMsg )
-    -> ( Model, Cmd Msg, OutMsg )
+    -> Maybe Api.Credentials
+    -> ( Model, Effect Msg, OutMsg )
+    -> ( Model, Effect Msg, OutMsg )
 recordIfExport pending maybeToken ( model, cmd, out ) =
     case ( pending.target, maybeToken ) of
         ( Export _, Just token ) ->
             ( model
-            , Cmd.batch [ cmd, Api.recordSyndication token model.postId "export" SyndicationRecorded ]
+            , Effect.Batch
+                [ cmd
+                , Effect.authed (Api.recordSyndicationRequest model.postId "export")
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson (Decode.field "syndication" Api.syndicationDecoder)
+                            >> SyndicationRecorded
+                    }
+                ]
             , out
             )
 
@@ -245,9 +363,33 @@ recordIfExport pending maybeToken ( model, cmd, out ) =
             ( model, cmd, out )
 
 
+{-| The most recently recorded syndication — the one a pasted backlink belongs
+to.
+
+Sorted by `createdAt` rather than taken from the end of the list. Position only
+meant "newest" because the server happens to return these oldest-first, and
+nothing pinned that; the sibling feedback queue returns its rows the other way
+round. If this one ever flipped, the backlink would be saved against the wrong
+row with no test failing.
+
+-}
 latestSyndication : Model -> Maybe Syndication
 latestSyndication model =
-    List.head (List.reverse model.syndications)
+    model.syndications
+        |> List.sortBy .createdAt
+        |> List.reverse
+        |> List.head
+
+
+{-| The server's list, with any locally-known row it has not caught up with kept.
+-}
+mergeSyndications : List Syndication -> List Syndication -> List Syndication
+mergeSyndications fetched known =
+    let
+        fetchedIds =
+            List.map .id fetched
+    in
+    fetched ++ List.filter (\s -> not (List.member s.id fetchedIds)) known
 
 
 replaceSyndication : Syndication -> List Syndication -> List Syndication
@@ -391,7 +533,17 @@ viewAlsoPublishedAt model =
 
         Nothing ->
             if model.syndications == [] then
-                text ""
+                if model.readFailed then
+                    -- Says so rather than rendering nothing. Nothing is what the
+                    -- never-syndicated case renders, and conflating the two is
+                    -- how a failed read looks exactly like "you have not
+                    -- syndicated this yet" — the field the writer needs, absent
+                    -- with no explanation.
+                    p [ class "post__syndication-note", testId "syndication-read-failed" ]
+                        [ text "Could not check what has already been published. Reload to try again." ]
+
+                else
+                    text ""
 
             else
                 Html.form [ class "post__syndication-backlink", onSubmit UrlSubmitted ]
@@ -414,12 +566,18 @@ viewAlsoPublishedAt model =
                                 "Save"
                             )
                         ]
-                    , if model.urlError then
-                        span [ class "post__syndication-error" ]
-                            [ text "That doesn't look like a web address." ]
+                    , case model.urlError of
+                        Just err ->
+                            span
+                                [ class "post__syndication-error"
+                                , testId "syndication-url-error"
+                                , Html.Attributes.attribute "data-refusal" (urlErrorKind err)
+                                , Html.Attributes.attribute "role" "alert"
+                                ]
+                                [ text (urlErrorMessage err) ]
 
-                      else
-                        text ""
+                        Nothing ->
+                            text ""
                     ]
 
 
@@ -464,6 +622,71 @@ viewCopyFallback model =
 
         _ ->
             text ""
+
+
+{-| Which failure this is, as a stable token on the element — so a test can say
+"this is not the bad-address one" without betting on the wording of either
+message. A negative assertion about copy stops meaning anything as soon as the
+copy changes, and says nothing when it does.
+-}
+urlErrorKind : Http.Error -> String
+urlErrorKind err =
+    case err of
+        Http.BadStatus 422 ->
+            "bad-address"
+
+        Http.BadStatus 401 ->
+            "signed-out"
+
+        Http.BadStatus 403 ->
+            "not-yours"
+
+        Http.BadStatus 404 ->
+            "gone"
+
+        Http.NetworkError ->
+            "unreachable"
+
+        Http.Timeout ->
+            "timed-out"
+
+        _ ->
+            "unknown"
+
+
+{-| Why the backlink didn't save.
+
+Only 422 is the server saying something about the URL — `set_syndicated_url/2`
+rejecting it on the changeset. Everything else is about the request: the session
+(401), the post (403/404), or the network. Each one needs a different action from
+the writer, and all five used to arrive as "that doesn't look like a web
+address", which is both wrong and unfixable by the only thing it invites them to
+do.
+
+-}
+urlErrorMessage : Http.Error -> String
+urlErrorMessage err =
+    case err of
+        Http.BadStatus 422 ->
+            "That doesn't look like a web address."
+
+        Http.BadStatus 401 ->
+            "You've been signed out. Sign in again and the link will save — the text is still here."
+
+        Http.BadStatus 403 ->
+            "This post isn't yours to change."
+
+        Http.BadStatus 404 ->
+            "This post, or the syndication you're linking, is no longer here. Reload the page."
+
+        Http.NetworkError ->
+            "The link didn't reach us. The address is fine — try again in a moment."
+
+        Http.Timeout ->
+            "That took too long to save. Try again — nothing was lost."
+
+        _ ->
+            "The link didn't save. Try again in a moment."
 
 
 backlink : Model -> Maybe String

@@ -6,69 +6,111 @@ Every script here is either invoked by the listed callers or allowlisted as
 a manual tool with a reason. The wiring gate regenerates this file and fails
 on drift, so a script with no caller cannot sit here silently.
 
+**What "called by" measures.** A caller is a file that names this script on a
+line of code — comments are stripped, and in a `.sh` or `.py` source a line that
+is only a quoted string is treated as data rather than an invocation (an
+exemption list, a fixture pairing, a generated-file banner). That is deliberately
+narrower than asking what an invocation *looks like*, which reported 11 live
+scripts as orphans here because this repo dispatches through its own shell
+functions. The residue: a script named inside a longer data string, with code
+around it, still counts as called. So read a single surprising caller as "named
+in code by" and check it before relying on it.
+
 | script | called by | purpose |
 |---|---|---|
-| `scripts/bootstrap-worktree.sh` | `justfile`, `scripts/regen-proto.sh` |  |
-| `scripts/campaign-residue.sh` | `justfile` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
-| `scripts/check-admin-token-routing.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh` | A component that exposes `update` is a component that expects to be driven. |
+| `scripts/bootstrap-worktree.sh` | `justfile` |  |
+| `scripts/campaign-residue.sh` | `justfile`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/characterise/rowless-upload-objects.py` | _manual: A one-off, READ-ONLY characterisation of the production bucket, kept as the record of how a deletion decision was measured rather than as a gate. It lists objects and compares them against uploaded_images rows; it calls list_objects_v2 and nothing else, so it cannot write or delete. Wiring it into CI would hit a production bucket on every run to re-answer a question that was already answered and acted on. The STANDING protection for the same property is ImageRetention.storage_consistency_check/0, which reports both populations as a metric on every sweep._ | Read-only characterisation of objects under `uploads/` that no database row points at. |
+| `scripts/check-api-only-is-skipped.sh` | `scripts/lint-elixir.sh`, `test/platform/api_only_is_skipped_test.sh` | An api_only field must also be skipped by its message's JSON serializer. |
+| `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
+| `scripts/check-breaking-suppressions-are-spent.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh`, `test/platform/guard_unbypassable_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
+| `scripts/check-cli-stub-provenance.sh` | `scripts/lint-elixir.sh`, `test/platform/cli_stub_provenance_test.sh` | A stubbed CLI must say which real tool output it was copied from, and when. |
+| `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
+| `scripts/check-csrf-clients.sh` | `scripts/lint-elixir.sh`, `test/platform/csrf_clients_gate_test.sh` | Every non-browser client that writes to our own API carries the CSRF proof. |
+| `scripts/check-csrf-scope.sh` | `scripts/lint-elixir.sh` | The CSRF counter's declared scope must match the router's actual population. |
+| `scripts/check-css-contrast.sh` | `scripts/lint-elm.sh` | ⛔ THE STYLESHEET HAD NO CONTRAST GATE, AND A 3.81:1 TEXT COLOUR SHIPPED. |
 | `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-css.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented dbt model counts must match the models on disk. |
-| `scripts/check-e2e-vacuous-guards.sh` | `e2e/tests/spine-rendering.spec.ts`, `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
-| `scripts/check-enum-coverage.py` | `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
+| `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
+| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |
+| `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
+| `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
+| `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elixir.sh` |  |
+| `scripts/check-e2e-repeatability.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | A spec that passes must pass again, immediately, against the same stack. |
+| `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
+| `scripts/check-effect-seam.sh` | `scripts/lint-elm.sh`, `test/platform/effect_seam_gate_test.sh` |  |
+| `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
+| `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh`, `test/platform/error_token_spelling_test.sh` | Two spellings of one error token is a client that matches on one of them. |
+| `scripts/check-guard-is-unbypassable.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-elixir.sh`, `test/platform/guard_unbypassable_test.sh` | A declared-count guard must not sit below a path that exits successfully. |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
+| `scripts/check-idor-response.sh` | `.github/workflows/ci.yml`, `test/platform/idor_gate_test.sh` |  |
+| `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/gate_fail_closed_test.sh` |  |
 | `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | A story that describes the system as it stands must cite things that exist. |
+| `scripts/check-never-serialized.sh` | `scripts/lint-elixir.sh`, `test/platform/never_serialized_test.sh` | A credential must not appear in any JSON serializer, generated or hand-written. |
+| `scripts/check-no-stored-session.sh` | `scripts/lint-elm.sh` | The session is never written to, or read from, browser storage. |
 | `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented Oban queues must be the queues that exist. |
+| `scripts/check-one-credential-derivation.sh` | `scripts/lint-elm.sh`, `test/platform/one_credential_derivation_test.sh` | The credential is spelled in exactly one place, and nothing may spell it again. |
 | `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |
-| `scripts/check-outbound-test-default.sh` | `scripts/lint-elixir.sh` |  |
+| `scripts/check-outbound-test-default.sh` | `scripts/lint-elixir.sh`, `test/platform/platform_suites_job_test.sh` |  |
 | `scripts/check-phase-scheme.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Every story's Phase cell must name a phase that exists, and nothing else. |
-| `scripts/check-ports-wired.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-ports-wired.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh`, `test/platform/platform_suites_job_test.sh`, `test/platform/ports_wired_test.sh` |  |
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
+| `scripts/check-protojson-completeness.sh` | `scripts/lint-elixir.sh`, `test/platform/protojson_completeness_test.sh` | A proto field that reaches no surface is a field that was added for nothing. |
 | `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | An anonymously-reachable route must be metered, or say why it is not. |
-| `scripts/check-route-clients.sh` | `justfile`, `scripts/check-prose-assertions.sh`, `scripts/lint-elixir.sh`, `scripts/route-clients-allowlist.txt` |  |
+| `scripts/check-rls-scope.sh` | `scripts/lint-elixir.sh`, `test/platform/rls_scope_gate_test.sh` | scripts/check-rls-scope.sh — every query against a row-level-secured table |
+| `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh` |  |
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
-| `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml` |  |
-| `scripts/check-script-wiring.sh` | `scripts/ci.sh` | Every script has a caller, and the inventory that says so is generated. |
-| `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml` |  |
+| `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml`, `test/platform/schema_diff_test.sh` |  |
+| `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/script_wiring_test.sh` | Every script has a caller, and the inventory that says so is generated. |
+| `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/session_expiry_forms_test.sh` |  |
+| `scripts/check-sigpipe-hazards.sh` | `scripts/lint-elixir.sh`, `scripts/wave-status.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Refuse a pipeline whose exit status is read but can be 141 instead of the |
+| `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/check_slo_gate_test.sh`, `test/platform/deploy_production_workflow_test.sh` … |  |
+| `scripts/check-status-after-substitution.sh` | `scripts/lint-elixir.sh`, `test/platform/status_after_substitution_test.sh` | Refuse a `$?` read in the same command as a substitution that precedes it. |
+| `scripts/check-storage-selection-is-deliberate.sh` | `scripts/lint-elixir.sh`, `test/platform/storage_selection_test.sh` | Holds: object-storage backend selection is a DELIBERATE declaration, never |
+| `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/tracker_refs_gate_test.sh` | Code must not cite tracker artefacts — state the substance instead. |
+| `scripts/check-unbounded-sweeps.sh` | `scripts/lint-elixir.sh`, `test/platform/unbounded_sweeps_test.sh` | A retention sweep whose cost grows with how long it has been failing cannot |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
-| `scripts/ci.sh` | `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push`, `scripts/lib/python-tools.sh` |  |
-| `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` … | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
+| `scripts/check-workflow-health.sh` | `.github/workflows/workflow-health.yml`, `test/platform/workflow_health_test.sh` | A workflow nobody's pull request depends on can stay red indefinitely. |
+| `scripts/ci.sh` | `e2e/tests/rate-limit.spec.ts`, `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` … |  |
+| `scripts/classify-credential-rewrite-equivalence.sh` | _manual: Evidence over three fixed commits, not a gate. It classifies every credential rewrite in the one-builder migration against a table of equivalences; its corpus is historical and the question it answers can only be asked once, so wiring it into CI would re-run a settled measurement forever. ⚠️ The standing protection for the same property WAS check-credential-origin.sh, which is now deleted: every request in the client is a RequestSpec whose url is an Api.Url.SameOriginUrl, so the property that script parsed for is checked by the compiler on every build. frontend/tests/ApiRequestHeadersTest.elm still runs and covers the header half._ | Every credential rewrite in the one-builder migration, classified against a |
+| `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
 | `scripts/dashboard-render-gate.sh` | `.github/workflows/ci.yml`, `justfile` |  |
-| `scripts/deploy-preview.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/cleanup-preview.sh` … |  |
-| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-preview.sh` |  |
-| `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh` | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
+| `scripts/dbt-deployed.sh` | `.github/workflows/scheduled-dbt-refresh.yml`, `scripts/test-deployed.sh`, `test/platform/scheduled_dbt_refresh_test.sh` |  |
+| `scripts/deploy-preview.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/deploy-stack.sh` … |  |
+| `scripts/deploy-stack.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `e2e/tests/rate-limit.spec.ts`, `scripts/deploy-preview.sh` … |  |
+| `scripts/extract-migration-sql.py` | `scripts/lint-migrations.sh`, `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/extract_migration_sql_test.sh` … | Extract squawk-analysable SQL from an Ecto migration (219). squawk |
 | `scripts/format.sh` | `justfile` |  |
-| `scripts/gen-ecto-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml`, `scripts/deploy-stack.sh` … |  |
-| `scripts/gen-elixir-proto.sh` | `.github/workflows/reseed-staging.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
+| `scripts/gen-ecto-proto.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `.github/workflows/reseed-staging.yml` … |  |
+| `scripts/gen-elixir-proto.sh` | `.github/workflows/reseed-staging.yml`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
 | `scripts/gen-elm-proto.py` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-stack.sh` … | Generate Elm JSON decoder/encoder modules from a buf JSON FileDescriptorSet. |
 | `scripts/gen-elm-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `justfile`, `scripts/deploy-stack.sh` … |  |
-| `scripts/gen-python-proto.sh` | `.github/workflows/deploy-production.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
-| `scripts/gen-rust-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/gen_python_proto.py`, `scripts/lint-proto.sh` … |  |
-| `scripts/gen_python_proto.py` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-enum-coverage.py`, `scripts/deploy-stack.sh` … |  |
+| `scripts/gen-python-proto.sh` | `.github/workflows/deploy-production.yml`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
+| `scripts/gen-rust-proto.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/lint-proto.sh`, `scripts/regen-proto.sh` |  |
+| `scripts/gen_python_proto.py` | `.github/actions/rollback-production/action.yml`, `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-enum-coverage.py` … |  |
 | `scripts/generate-textures.py` | `justfile` | Generate cinematic textures and assets for The Stacks WebGL bookshelf. |
 | `scripts/generated-file-class.sh` | `scripts/gen-elm-proto.sh`, `scripts/gen_python_proto.py` |  |
 | `scripts/hooks/lib/check-issue-evidence.sh` | `scripts/hooks/lib/pre-stop-lint.sh` |  |
 | `scripts/hooks/lib/create-issue-and-pr.sh` | `scripts/hooks/pre-push` | shellcheck source=scripts/hooks/lib/issue-file.sh |
 | `scripts/hooks/lib/issue-file.sh` | `scripts/hooks/lib/create-issue-and-pr.sh` |  |
 | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh` | `.github/workflows/ci.yml` |  |
-| `scripts/hooks/lib/pre-stop-lint.sh` | `.claude/settings.json`, `scripts/install-hooks.sh` |  |
+| `scripts/hooks/lib/pre-stop-lint.sh` | `.claude/settings.json` |  |
 | `scripts/hooks/lib/update-pr-ci.sh` | `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` |  |
-| `scripts/hooks/pre-commit` | `e2e/tests/upload.spec.ts`, `scripts/install-hooks.sh` | pre-commit — Git pre-commit hook: lint gate on staged files. |
-| `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `justfile`, `scripts/hooks/lib/create-issue-and-pr.sh`, `scripts/install-hooks.sh` | pre-push hook — runs before every `git push`. |
+| `scripts/hooks/pre-commit` | `scripts/install-hooks.sh` | pre-commit — Git pre-commit hook: lint gate on staged files. |
+| `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh`, `test/platform/ci_gate_reachability_test.sh` | pre-push hook — runs before every `git push`. |
 | `scripts/install-flyctl.sh` | `justfile` |  |
-| `scripts/install-hooks.sh` | `justfile`, `scripts/hooks/pre-commit`, `scripts/hooks/pre-push` |  |
+| `scripts/install-hooks.sh` | `justfile` |  |
+| `scripts/lib/blank-shell-data.py` | `scripts/check-cli-stub-provenance.sh`, `scripts/check-sigpipe-hazards.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Blank out the parts of a shell script that are DATA, keeping line numbers. |
+| `scripts/lib/derive-app-database-url.py` | `scripts/deploy-stack.sh`, `test/platform/app_database_url_derivation_test.sh` | Derive the least-privilege runtime connection URL from the owner's. |
+| `scripts/lib/e2e-handoff.sh` | `e2e/tests/rate-limit.spec.ts`, `scripts/ci.sh`, `scripts/deploy-stack.sh`, `test/platform/e2e_auth_ceiling_handoff_test.sh` | What a preview deploy DECIDES that the E2E step has to be told. |
 | `scripts/lib/postgres.sh` | `scripts/test-dbt.sh`, `scripts/test-e2e.sh`, `scripts/test-elixir.sh` |  |
 | `scripts/lib/preview-names.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `scripts/cleanup-preview.sh`, `scripts/deploy-preview.sh` … |  |
 | `scripts/lib/python-tools.sh` | `scripts/lint-dbt.sh`, `scripts/lint-sql.sh`, `scripts/test-dbt.sh` |  |
+| `scripts/lib/squawk-rules.sh` | `scripts/security-squawk-test-wrapper.sh`, `scripts/security-squawk.sh`, `test/platform/squawk_worktree_selection_test.sh` | Single source of truth for which squawk rules this repo suppresses. |
 | `scripts/lint-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-route-clients.sh`, `scripts/ci.sh` |  |
-| `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/lint-migrations.sh` | `.github/workflows/ci.yml` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
-| `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` |  |
+| `scripts/lint-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/csrf_clients_gate_test.sh` … |  |
+| `scripts/lint-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/one_credential_derivation_test.sh` |  |
+| `scripts/lint-migrations.sh` | `.github/workflows/ci.yml`, `scripts/extract-migration-sql.py`, `test/platform/lint_migrations_test.sh`, `test/platform/migration_gate_syntax_test.sh` | scripts/lint-migrations.sh — enforce @breaking_ok annotation on destructive |
+| `scripts/lint-proto.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/check-enum-coverage.py`, `scripts/ci.sh` … |  |
 | `scripts/lint-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/lint-sql.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
@@ -77,23 +119,24 @@ on drift, so a script with no caller cannot sit here silently.
 | `scripts/mcp/server.sh` | `.mcp.json`, `scripts/mcp/README.md`, `scripts/mcp/project_tools.py` |  |
 | `scripts/mcp/test_project_tools.py` | `scripts/test-mcp.sh` | Tests for project_tools MCP server helpers and tools. |
 | `scripts/parse-fly-image.py` | `.github/workflows/deploy-production.yml` |  |
-| `scripts/parse-rollback-output.sh` | `.github/actions/rollback-production/action.yml` |  |
-| `scripts/preflight-resolver-health.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `e2e/tests/unmerge-edition.spec.ts`, `scripts/deploy-stack.sh` |  |
-| `scripts/probe-production.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-slo-gate.sh` |  |
+| `scripts/parse-rollback-output.sh` | `.github/actions/rollback-production/action.yml`, `test/platform/parse_rollback_output_test.sh` |  |
+| `scripts/preflight-resolver-health.sh` | `.github/workflows/ci.yml`, `.github/workflows/deploy-production.yml`, `scripts/deploy-stack.sh` |  |
+| `scripts/probe-production.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `scripts/check-slo-gate.sh`, `test/platform/deploy_stack_prod_posture_execution_test.sh` … |  |
 | `scripts/push_billing_metrics.py` | `.github/workflows/refresh-billing-metrics.yml` | Compute month-to-date provider costs from the same inputs the providers |
 | `scripts/regen-proto.sh` | `justfile`, `scripts/bootstrap-worktree.sh` |  |
-| `scripts/rollback-production.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/deploy-production.yml` |  |
-| `scripts/security-squawk-test-wrapper.sh` | `justfile` |  |
-| `scripts/security-squawk.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/extract-migration-sql.py` |  |
+| `scripts/rollback-production.sh` | `.github/actions/rollback-production/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/deploy_production_workflow_test.sh`, `test/platform/deploy_stack_eval_prereq_test.sh` … |  |
+| `scripts/run-scheduled-duty.sh` | `.github/workflows/scheduled-core-jobs.yml`, `test/platform/scheduled_duty_runner_test.sh` | scripts/run-scheduled-duty.sh — run one scheduled duty on the deployed node |
+| `scripts/security-squawk-test-wrapper.sh` | `justfile`, `test/platform/migration_gate_syntax_test.sh`, `test/platform/squawk_destructive_test.sh` |  |
+| `scripts/security-squawk.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `scripts/extract-migration-sql.py` … |  |
 | `scripts/security.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/smoke-circuit-breakers.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` |  |
-| `scripts/sweep-preview-orphans.sh` | `.github/workflows/cleanup-preview.yml`, `scripts/cleanup-preview.sh` | scripts/sweep-preview-orphans.sh — destroy preview resources no open PR owns. |
+| `scripts/sweep-preview-orphans.sh` | `.github/workflows/cleanup-preview.yml`, `test/platform/sweep_preview_orphans_test.sh` | scripts/sweep-preview-orphans.sh — destroy preview resources no open PR owns. |
 | `scripts/test-dbt.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/test-deployed.sh` | `justfile` |  |
-| `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `e2e/global-setup.ts`, `e2e/tests/age-gate.spec.ts`, `e2e/tests/rate-limit.spec.ts` … |  |
+| `scripts/test-deployed.sh` | `justfile`, `test/platform/exclusion_tags_have_runners_test.sh` |  |
+| `scripts/test-e2e.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/e2e_auth_ceiling_handoff_test.sh` … |  |
 | `scripts/test-elixir.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-elm.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/test-mcp.sh` | `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
+| `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
 | `scripts/test-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/wave-status.sh` | `justfile` |  |
+| `scripts/wave-status.sh` | `justfile`, `test/platform/tracker_refs_gate_test.sh`, `test/platform/wave_status_stack_guard_test.sh` |  |

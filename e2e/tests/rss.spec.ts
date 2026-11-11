@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, newProvenContext} from "./fixtures";
 import type { Browser, Page } from "@playwright/test";
 import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
@@ -43,7 +43,7 @@ async function setProfileVisibility(
   browser: Browser,
   visibility: string,
 ): Promise<void> {
-  const context = await browser.newContext({
+  const context = await newProvenContext(browser, {
     storageState: suiteAuthFile("bookshelf"),
   });
   try {
@@ -90,35 +90,28 @@ async function setVisibility(
 }
 
 /**
- * The suite user's bearer token, for API calls that must be made AS the reader.
+ * The suite user's own id, asked of the server.
  *
- * A `platform` bookshelf is "any signed-in platform user, NOT logged-out" on the Audience
- * ladder, so its feed requires a viewer (`Stacks.Feeds.feed_requires_auth?/1`, owner
- * decision 2026-07-29). The `request` fixture carries no Authorization header — auth lives
- * in localStorage, not a cookie — so a platform feed read through it is ANONYMOUS and 404s
- * by design. Tests that mean "as a signed-in reader" must say so.
+ * ⛔ It used to be read out of the `stacks-auth` localStorage blob, and that
+ * blob no longer exists — the SPA stores no session. `GET /api/auth/me` is where
+ * identity comes from now, for the harness exactly as for the application, and
+ * `page.request` is the reader because it shares the browser context's cookies.
  */
-async function authHeader(page: Page): Promise<{ Authorization: string }> {
-  const token = await page.evaluate(() => {
-    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    return auth.token as string;
-  });
-  expect(token, "suite user has a token in localStorage").toBeTruthy();
-  return { Authorization: `Bearer ${token}` };
-}
-
 async function currentUserId(page: Page): Promise<string> {
-  const userId = await page.evaluate(() => {
-    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    return auth.userId as string;
-  });
-  expect(userId, "suite user has a userId in localStorage").toBeTruthy();
+  const resp = await page.request.get("/api/auth/me");
+  expect(
+    resp.status(),
+    "the suite user's session must answer /api/auth/me",
+  ).toBe(200);
+  const body = await resp.json();
+  const userId = body.user?.id as string;
+  expect(userId, "/api/auth/me answered without a user id").toBeTruthy();
   return userId;
 }
 
 test.describe("RSS affordance on a bookshelf", () => {
   test.afterAll(async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newProvenContext(browser, {
       storageState: suiteAuthFile("bookshelf"),
     });
     const page = await context.newPage();
@@ -181,7 +174,7 @@ test.describe("RSS affordance on a bookshelf", () => {
 
 test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name", () => {
   test.afterAll(async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newProvenContext(browser, {
       storageState: suiteAuthFile("bookshelf"),
     });
     const page = await context.newPage();
@@ -194,15 +187,19 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name", () => {
 
   test("200 application/atom+xml with valid Atom, ETag and Cache-Control for a platform shelf; 304 on matching If-None-Match", async ({
     page,
-    request,
   }) => {
     await page.goto("/library");
     await setVisibility(page, "library", "platform");
     const userId = await currentUserId(page);
     const feedUrl = `/api/feeds/${userId}/library`;
-    const asReader = await authHeader(page);
 
-    const resp = await request.get(feedUrl, { headers: asReader });
+    // ⛔ `page.request`, NOT the `request` fixture. A `platform` bookshelf is
+    // "any signed-in platform user, NOT logged-out" on the Audience ladder, so
+    // its feed requires a viewer (`Stacks.Feeds.feed_requires_auth?/1`, owner
+    // decision 2026-07-29) — and the `request` fixture deliberately strips the
+    // session cookie so that "anonymous" means anonymous. `page.request` shares
+    // the browser context's cookies, so it is the reader.
+    const resp = await page.request.get(feedUrl);
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("application/atom+xml");
 
@@ -216,8 +213,9 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name", () => {
     expect(body).toContain('<feed xmlns="http://www.w3.org/2005/Atom"');
     expect(body).toContain("<id>urn:stacks:feed:");
 
-    const notModified = await request.get(feedUrl, {
-      headers: { ...asReader, "If-None-Match": etag },
+    // Same reader, same reason: `page.request` carries the session cookie.
+    const notModified = await page.request.get(feedUrl, {
+      headers: { "If-None-Match": etag },
     });
     expect(notModified.status()).toBe(304);
   });

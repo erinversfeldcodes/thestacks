@@ -2,8 +2,9 @@ module Page.AboutTest exposing (suite)
 
 {-| Oracle for the About page copy (sibling;, 8c).
 
-The page now carries the owner's approved launch copy
-(`plans/318-about-page-copy-draft.md`), section by section.
+The page now carries the owner's approved launch copy, section by section.
+This test is the oracle for it: if the copy changes, change it here deliberately
+rather than letting the assertion follow the page.
 
 ⚠️ **Drift oracle.** The pre-8c About was placeholder prose — a single lede
 ("Placeholder copy — the owner will refine this.") plus the transparency links.

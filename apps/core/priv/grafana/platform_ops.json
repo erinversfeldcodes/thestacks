@@ -550,8 +550,8 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Vision call latency p50 / p95 / p99",
-      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call (classify / extract / analyze / associate), at the 50th, 95th and 99th percentile. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response \u2014 success or not. MEANS: the value is milliseconds per call, and an upload makes up to two of these back to back, so the upload's own latency floor is roughly twice p50; the long-standing '~3\u20138s per upload' figure was an estimate in a comment, and the first real measurement put p50 at 8.4s with warm calls under 30s and cold starts under 60s. READ IT WITH THE PANEL BESIDE IT: these quantiles only count calls that got a response, so a call that hits the client's 330s deadline is absent from this panel entirely and appears only as a vision give-up. WATCH: p99 climbing past the 60s (cold-start) edge means something other than a cold start is slow \u2014 most likely uploads queuing on a single A10G, the term Modal's own 300s timeout was sized for; a p50 that jumps while p99 is flat is a container-warmth shift, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading.",
+      "title": "Vision call latency p50 / p95 / p99, by tier",
+      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call, at the 50th, 95th and 99th percentile. The sidecar serves one identification endpoint, /analyze; the panel named classify / extract / associate alongside it until 2026-10-15, when those three were deleted. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response \u2014 success or not. MEANS: the value is milliseconds per call. \u26a0\ufe0f An upload now makes ONE such HTTP call, not two \u2014 this said 'up to two of these back to back, so the upload's own latency floor is roughly twice p50', which stopped being true when /classify and /extract were deleted. Note the fan-out did not go away, it moved: /analyze invokes two Modal METHODS internally, and that cost is inside this single measurement rather than beside it; the long-standing '~3\u20138s per upload' figure was an estimate in a comment, and the first real measurement put p50 at 8.4s with warm calls under 30s and cold starts under 60s. READ IT WITH THE PANEL BESIDE IT: these quantiles only count calls that got a response, so a call that hits the client's 330s deadline is absent from this panel entirely and appears only as a vision give-up. WATCH: p99 climbing past the 60s (cold-start) edge means something other than a cold start is slow \u2014 most likely uploads queuing on a single A10G, the term Modal's own 300s timeout was sized for; a p50 that jumps while p99 is flat is a container-warmth shift, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading. \u26d4 SPLIT BY TIER, BECAUSE A SINGLE PERCENTILE OVER BOTH IS AN ARITHMETIC ARTEFACT. Measured live: a barcode decode totals 7ms against ~21,900ms for a GPU inference \u2014 a factor of ~3,100. A blended p95 therefore moves with the barcode HIT RATE rather than with anything about either path, so sizing a timeout from it sizes it for neither. The tier label was added to the histogram for this and nothing read it until now.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -586,8 +586,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
-          "legendFormat": "vision p50"
+          "expr": "histogram_quantile(0.50, sum by (le, tier) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{tier}}"
         },
         {
           "refId": "B",
@@ -595,8 +595,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
-          "legendFormat": "vision p95"
+          "expr": "histogram_quantile(0.95, sum by (le, tier) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{tier}}"
         },
         {
           "refId": "C",
@@ -604,8 +604,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
-          "legendFormat": "vision p99"
+          "expr": "histogram_quantile(0.99, sum by (le, tier) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{tier}}"
         }
       ]
     },
@@ -620,7 +620,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 24,
         "x": 0,
         "y": 44
       },
@@ -659,6 +659,19 @@
       ]
     },
     {
+      "id": 31,
+      "type": "row",
+      "title": "Service health & delivery",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "panels": []
+    },
+    {
       "id": 15,
       "type": "stat",
       "title": "Database reachable",
@@ -668,10 +681,10 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 6,
-        "w": 6,
+        "h": 8,
+        "w": 12,
         "x": 0,
-        "y": 52
+        "y": 53
       },
       "fieldConfig": {
         "defaults": {
@@ -744,7 +757,7 @@
       "id": 16,
       "type": "timeseries",
       "title": "Transactional emails sent, by template",
-      "description": "WHAT: rate of transactional emails handed to the email provider, split by template. HOW: rate over stacks_email_delivered_count_total{template}, emitted by EmailDeliveryJob on a successful send. MEANS: this is the billable send count and the series the public cost page's free-tier line is derived from. It exists as a metric because the figure used to be counted from oban_jobs rows, which the pruner deletes about a minute after a job completes \u2014 so a month-to-date total only ever saw the last minute. WATCH: password_reset or registration_confirmation spiking is either an incident or enumeration; a drop to zero across all templates while people are registering means delivery is failing upstream of the provider \u2014 check the resend fuse.",
+      "description": "WHAT: rate of transactional emails handed to the email provider, split by template. HOW: rate over stacks_email_delivered_count_total{template}, emitted by EmailDeliveryJob on a successful send. MEANS: this is the billable send count and the series the public cost page's free-tier line is derived from. It exists as a metric because the figure used to be counted from oban_jobs rows, which are pruned \u2014 so a month-to-date total only ever saw the retention window. That window has since gone from sixty seconds to seven days, which does not change the conclusion: seven days is not a month, and a billing figure should not depend on how long a queue table keeps its rows. WATCH: password_reset or registration_confirmation spiking is either an incident or enumeration; a drop to zero across all templates while people are registering means delivery is failing upstream of the provider \u2014 check the resend fuse.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -752,8 +765,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 58
+        "x": 12,
+        "y": 53
       },
       "fieldConfig": {
         "defaults": {
@@ -781,6 +794,796 @@
         {
           "expr": "sum by (template) (rate(stacks_email_delivered_count_total{app=\"$app\"}[5m]))",
           "legendFormat": "{{template}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Circuit-breaker melts and blows",
+      "description": "WHAT: rate of circuit-breaker events per fuse \u2014 a melt is one counted failure against a breaker that is still closed, a blow is the breaker opening. HOW: rate over stacks_fuse_melt_count_total and stacks_fuse_blown_count_total, split by fuse_name. MEANS: melts are the early signal, blows are the consequence; a dependency degrading shows as rising melt before any blow. WATCH: sustained melt with no blow means a dependency is flaky but under threshold \u2014 tune or investigate before it opens; a blow means calls to that dependency are being short-circuited right now, so pair this with the state-timeline above to see which.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 61
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "cps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (fuse_name) (rate(stacks_fuse_melt_count_total[5m]))",
+          "legendFormat": "melt \u2014 {{fuse_name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (fuse_name) (rate(stacks_fuse_blown_count_total[5m]))",
+          "legendFormat": "blown \u2014 {{fuse_name}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "robots.txt fetches",
+      "description": "WHAT: rate of robots.txt fetches served to crawlers. HOW: rate over stacks_crawler_robots_fetch_count_total. MEANS: a coarse signal of crawler interest in the site; it carries no tags deliberately, because a per-crawler label would be an unbounded user-agent string. WATCH: a sudden step change, which usually means a new crawler found the site or an existing one changed its cadence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(stacks_crawler_robots_fetch_count_total[5m])",
+          "legendFormat": "robots.txt fetches",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "row",
+      "title": "Scheduled jobs (pushed from CI, daily)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      },
+      "panels": []
+    },
+    {
+      "id": 28,
+      "title": "Hours since each scheduled job last succeeded",
+      "description": "\u26d4 AGE, NOT A SUCCESS COUNT. A cron that stops running emits no errors anywhere \u2014 a success counter that stops incrementing is indistinguishable from a quiet period, while a timestamp that keeps ageing is unmistakable. Each line is hours since that job last succeeded; compare against its own schedule (backup daily 03:17, costs daily 06:00, dbt daily 04:11, bookstore sweep WEEKLY Mon 07:30 \u2014 the weekly one needs a far wider tolerance before it means anything).",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 70
+      },
+      "targets": [
+        {
+          "expr": "(time() - max(last_over_time(stacks_backup_dump_last_success_timestamp_seconds[48h]))) / 3600",
+          "legendFormat": "backup dump",
+          "refId": "A"
+        },
+        {
+          "expr": "(time() - max(last_over_time(stacks_costs_refresh_last_success_timestamp_seconds[48h]))) / 3600",
+          "legendFormat": "costs refresh",
+          "refId": "B"
+        },
+        {
+          "expr": "(time() - max(last_over_time(stacks_dbt_refresh_last_success_timestamp_seconds[48h]))) / 3600",
+          "legendFormat": "dbt refresh",
+          "refId": "C"
+        },
+        {
+          "expr": "(time() - max(last_over_time(stacks_bookstore_events_sweep_last_success_timestamp_seconds[14d]))) / 3600",
+          "legendFormat": "bookstore sweep (weekly)",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "title": "What the scheduled jobs produced",
+      "description": "What each job actually PRODUCED. \u26d4 A zero or a collapse here is the failure a success signal cannot see: a pipeline that runs, reports success and delivers nothing \u2014 which this project has shipped before. A backup that succeeds and contains almost nothing, a cost refresh that writes fewer line items than there are services, or marts with no rows are each a green job and a broken system. \u26a0\ufe0f The byte series is on the RIGHT axis: a ~10^8 dump size on one axis with ~10 cost line items and ~40 mart rows flattens the two series this panel exists to make visible, which would have defeated its stated purpose.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "backup bytes"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cost line items"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mart rows"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 70
+      },
+      "targets": [
+        {
+          "expr": "max(last_over_time(stacks_backup_dump_size_bytes[48h]))",
+          "legendFormat": "backup bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "max(last_over_time(stacks_costs_refresh_items[48h]))",
+          "legendFormat": "cost line items",
+          "refId": "B"
+        },
+        {
+          "expr": "max(last_over_time(stacks_dbt_refresh_mart_rows[48h]))",
+          "legendFormat": "mart rows",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "title": "Scheduled job duration",
+      "description": "How long each scheduled job took. Watch for growth approaching the workflow timeout \u2014 a job that starts timing out moves straight to the age panel above as a silent stall.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 78
+      },
+      "targets": [
+        {
+          "expr": "max(last_over_time(stacks_backup_dump_duration_seconds[48h]))",
+          "legendFormat": "backup dump",
+          "refId": "A"
+        },
+        {
+          "expr": "max(last_over_time(stacks_costs_refresh_duration_seconds[48h]))",
+          "legendFormat": "costs refresh",
+          "refId": "B"
+        },
+        {
+          "expr": "max(last_over_time(stacks_dbt_refresh_duration_seconds[48h]))",
+          "legendFormat": "dbt refresh",
+          "refId": "C"
+        },
+        {
+          "expr": "max(last_over_time(stacks_bookstore_events_sweep_duration_seconds[14d]))",
+          "legendFormat": "bookstore sweep",
+          "refId": "D"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "row",
+      "title": "Cost & spend \u2014 our own arithmetic",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 86
+      },
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Platform cost recorded, by service",
+      "description": "WHAT: platform operating cost for the CURRENT billing period, in cents, split by service. HOW: max by service over stacks_costs_recorded_amount_cents, a last_value gauge, divided by 100 \u2014 the series is CENTS and the axis unit is currencyUSD, so the conversion happens in the query rather than in the reader's head. MEANS: these are the same figures the public cost page reports. The daily refresh re-upserts each service's month-to-date total, so this is a level that climbs through the month and resets when the period rolls over \u2014 NOT a flow. Do not put rate() on it: an earlier version of this panel did, over a sum, and because each day's event already contained every earlier day's the series was a running total of running totals. The service label is bounded to the ten names the app itself writes; an 'other' series means a new service name was introduced without being declared, not that spending is unattributed. WATCH: an 'other' series appearing at all, and any service stepping to a new plateau.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 87
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (service) (stacks_costs_recorded_amount_cents) / 100",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "AI spend against budget, and refusals",
+      "description": "WHAT: AI API spend the budget guard is accumulating, and the calls it has refused. HOW: spend is increase(stacks_budget_cost_recorded_amount_micro_cents[1h]) by provider, divided by 10,000,000 \u2014 the series is MICRO-CENTS under a currencyUSD axis (1 dollar = 10,000,000 micro-cents), and an operator reading a money panel wants money over the window, not money-per-second. Refusals are rate(stacks_budget_limit_exceeded_count_total[5m]) by provider and type (daily/monthly), and carry their own unit override because one panel unit cannot describe both money and a count. MEANS: the first series is money going out; the second is the guard actively declining AI work because a limit was already reached. A non-zero refusal rate means features that depend on the model are degraded RIGHT NOW. NOTE: this metric is a per-call INCREMENT, so sum is the correct type for it \u2014 unlike the cost series on the panel beside it, which is an idempotent restatement of a running total and is therefore a gauge. The two money metrics have opposite writer semantics; do not 'fix' them the same way. WATCH: any refusal at all is worth knowing about; a provider labelled 'other' means a metered provider was added without being declared at the emit site. THIRD SERIES \u2014 'charge DROPPED' is the meter failing, not the budget working: rate(stacks_budget_charge_dropped_count_total[5m]) counts charges Spend.record/3 could not write because of a database fault. It is swallowed deliberately, so a transient error does not kill a job that has already spent the money \u2014 but the money IS gone, so every count here means the ceiling is being compared against an incomplete ledger. That is the fail-OPEN direction: an under-counting ledger makes the guard permit calls it should refuse. A non-zero rate on this line invalidates the other two while it lasts. \u26a0\ufe0f The two refusal series are COUNTS on the right axis, not money: they shipped under this panel's currencyUSD unit, so a reader saw dollar signs on a rate of refusals. Found by the unit-correspondence rule after it was written for a different defect.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 87
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cps"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^refused/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "refusals/sec"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^charge DROPPED/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "refusals/sec"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (provider) (increase(stacks_budget_cost_recorded_amount_micro_cents[1h])) / 10000000",
+          "legendFormat": "spend \u2014 {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (provider, type) (rate(stacks_budget_limit_exceeded_count_total[5m]))",
+          "legendFormat": "refused \u2014 {{provider}} {{type}}",
+          "refId": "B"
+        },
+        {
+          "expr": "sum by (provider) (rate(stacks_budget_charge_dropped_count_total[5m]))",
+          "legendFormat": "charge DROPPED \u2014 {{provider}}",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Recorded AI spend against its ceiling (from the ledger)",
+      "description": "What the budget guard actually compared against, read from the durable ledger at decision time \u2014 not an accumulation of emitted events. The two drift: a dropped event, a restart mid-charge or a retention sweep moves one and not the other, and the number that matters is the one that refuses a request.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 95
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "max by (provider) (stacks_budget_spend_daily_cents) / 100",
+          "legendFormat": "today \u2014 {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (provider) (stacks_budget_spend_monthly_cents) / 100",
+          "legendFormat": "this month \u2014 {{provider}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Vision identifications by cascade tier (cold vs warm)",
+      "description": "WHAT: which tier answered each identification, split by whether the container was cold. HOW: sum by (tier, cold) of increase(stacks_vision_tier_count_total[1h]). MEANS: this is the breakdown the architecture decision is argued from. A BARCODE tier answer never woke the GPU and costs roughly nothing; a VLM tier did. Before this series existed every identification was charged a flat rate per call, so a CPU barcode decode and a 7B VLM inference were indistinguishable in the ledger \u2014 which made 'should a cover-embedding tier exist?' unanswerable from our own data. WATCH: the barcode share, because it is the cheap path and a fall in it raises the bill without any code changing; and the cold fraction, which is the cold-start cost the scaledown window trades against. A tier labelled 'other' means the sidecar is deployed AHEAD of core and is reporting a tier this build does not know \u2014 not an error, but the signal to come and declare it. A 'cold' value of 'unknown' means the sidecar predates the sidecar_cold field. NOTE: 'cold' is the SIDECAR, not the GPU \u2014 the cheap CPU container. The GPU cold start is not plumbed through yet, so this line is a latency term and not the cost term.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 103
+      },
+      "targets": [
+        {
+          "expr": "sum by (tier, cold) (increase(stacks_vision_tier_count_total[1h]))",
+          "legendFormat": "{{tier}} \u2014 {{cold}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "GPU container cold starts (the unit idle time is billed per)",
+      "description": "GPU container cold starts, de-duplicated by container id. Multiply by the GPU scaledown window (300s) for billed idle seconds. \u26d4 THE SECOND SERIES IS A CEILING ON WHAT THIS PANEL CANNOT SEE: the cold flag rides the /analyze response body, which only exists on a 200. A request that woke a container and then failed \u2014 sidecar 502, model timeout, core-side timeout \u2014 bills its full 300s tail and is counted nowhere. That bias is NOT random: cold inferences are the slow ones, so timeouts and cold starts are correlated, and the miss is worst exactly when the number matters most. Read the two together as 'N counted, at most M uncounted' rather than treating the first line as the count. \u26d4 THE THIRD SERIES INVALIDATES THE FIRST WHILE IT IS NON-ZERO: a VLM tier answered with no GPU dispatch reported means the model ran and the telemetry did not \u2014 an old sidecar or GPU image. That is indistinguishable from an honest barcode answer in the cold-start count, so a deployment that stopped reporting would read as a GPU that stopped costing money.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 103
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(stacks_vision_gpu_cold_start_count_total[$__rate_interval]))",
+          "legendFormat": "cold starts",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(stacks_vision_request_stop_duration_milliseconds_count{app=\"$app\",status!=\"200\"}[$__rate_interval])) + sum(increase(stacks_vision_request_exception_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "at most this many uncounted",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(stacks_vision_gpu_telemetry_gap_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "TELEMETRY GAP (count is a lower bound)",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "title": "GPU seconds actually spent inferring",
+      "description": "Sum of the model's own classify + extract stage times. \u26d4 THIS REPLACED A FLAT 3-CENT-PER-INFERENCE CONSTANT that was ~19x the measured warm cost and ~4x the cold one \u2014 it was really an all-in figure, roughly right at three inferences per container, so charging it beside a separate idle line double-counted the tail. Excludes the sidecar's download and CPU barcode stages, which no A10G ran. An upper bound: wall-clock around each Modal dispatch includes in-Modal queueing. Watch this against the cold-start panel: active seconds rising while cold starts stay flat means containers are being shared, which is the cheap direction.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 111
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(stacks_vision_gpu_active_milliseconds_total{app=\"$app\"}[$__rate_interval])) / 1000",
+          "legendFormat": "gpu seconds",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "row",
+      "title": "Provider billing \u2014 the invoice, pushed daily",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 119
+      },
+      "panels": []
+    },
+    {
+      "id": 24,
+      "title": "Provider spend month-to-date (what the invoice will say)",
+      "description": "Month-to-date cents per provider, pushed daily from each provider's own billing API. \u26d4 THIS IS THE ONLY SERIES ON ANY DASHBOARD THAT IS AN INVOICE RATHER THAN AN ESTIMATE. Every figure on the /costs page is a published price times a quantity we counted; this is what the provider actually intends to charge. Watch for it diverging from the /costs total: that gap is the error in our own rate-card arithmetic, and it is the only way to detect a wrong price constant.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 120
+      },
+      "targets": [
+        {
+          "expr": "(sum by (provider, component) (last_over_time(stacks_billing_mtd_cents[48h]))) / 100",
+          "legendFormat": "{{provider}}/{{component}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "title": "Fly run-rate projected to a month",
+      "description": "Current spend extrapolated to a full month. Watch for a step change with no deploy behind it \u2014 that is usually a machine that stopped auto-stopping, which costs money continuously and produces no errors, so nothing else here would show it.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 120
+      },
+      "targets": [
+        {
+          "expr": "(sum(last_over_time(stacks_billing_run_rate_cents_per_month{provider=\"fly\"}[48h]))) / 100",
+          "legendFormat": "fly run-rate",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Neon free-tier allowance consumed",
+      "description": "Percent of the Neon free tier used this period. \u26a0\ufe0f The /costs page reports Neon at 0 cents BECAUSE of this allowance, not because the database is free \u2014 so this panel is what makes that zero honest. When it approaches 100 the Neon cost line stops being zero and the page's figure changes without any code changing.",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 128
+      },
+      "targets": [
+        {
+          "expr": "max(last_over_time(stacks_billing_allowance_pct[48h]))",
+          "legendFormat": "allowance %",
           "refId": "A"
         }
       ]

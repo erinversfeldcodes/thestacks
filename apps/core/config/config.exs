@@ -16,31 +16,125 @@ config :core, Core.ObanRepo,
 config :core, Oban,
   repo: Core.ObanRepo,
   plugins: [
-    Oban.Plugins.Pruner,
+    # ⚠️ `max_age` is explicit because Oban's DEFAULT is 60 — sixty SECONDS.
+    #
+    # With the default, a completed or discarded job row is deleted a minute
+    # after it finishes, so `oban_jobs` reads empty on every stack and the
+    # question "did the nightly job run?" has no answer in the database. That
+    # is not a theoretical loss: this app's crontab fires 20 jobs on a machine
+    # configured to scale to zero, so whether a given one ran at all is exactly
+    # the thing an operator needs to know — and two runbook steps tell them to
+    # check `oban_jobs`, where they will always find nothing.
+    #
+    # Seven days is chosen to span a weekly entry (the crontab has four) plus a
+    # working week of lag before anyone looks. The pruner only touches
+    # `completed`, `cancelled` and `discarded` rows, so raising this cannot
+    # hide a backlog of `available`/`retryable` work.
+    #
+    # ⚠️ RAISING THIS IS NOT BEHAVIOURALLY FREE, and the reason is easy to miss
+    # because it runs the other way from the usual worry.
+    #
+    # Oban's `unique:` checks READ retained rows — `@unique_defaults` carries
+    # `states: :successful`, which includes `completed` (`deps/oban/lib/oban/
+    # job.ex:228-233, 299`). This app has NINE `unique:` declarations and every
+    # period exceeds sixty seconds: three at 86_400 (the two enrichment
+    # discovery jobs and wishlist-availability), four at 3_600, two at 300.
+    # Under the old window all nine were silently truncated to ~60s, because
+    # the rows they query had already been deleted. They now hold for the
+    # period they declare.
+    #
+    # That is a FIX in every case — the declared period was always the intent —
+    # but it is a real change: wishlist-availability dedupe goes from ~60s to a
+    # genuine 24 hours, and the two discovery jobs stop re-hitting Open Library
+    # and Google Books for a book re-added within the day. If a notification
+    # dedupe or an external-call volume moves after this, this is why.
+    {Oban.Plugins.Pruner, max_age: {7, :days}},
+    # ⛔ WITHOUT THIS, A JOB INTERRUPTED BY A MACHINE SUSPEND IS ORPHANED FOREVER.
+    #
+    # `deploy/fly.core.toml` sets `auto_stop_machines = true` and
+    # `min_machines_running = 0`. A job that is `executing` when the machine goes
+    # away never returns to `available` on its own — Oban has no way to know the
+    # node died — and the Pruner above deliberately touches only `completed`,
+    # `cancelled` and `discarded`, so nothing in the system ever collects it.
+    #
+    # Measured on production before this was added: all 91 `oban_jobs` rows were
+    # in state `executing` and nothing else. `IdentifyBookJob` held 76 of them,
+    # stale between 97 and 180 days, six already at `attempt = 3` of 3 so they
+    # could never be retried and never completed. `ImageRetentionJob` held the
+    # other 15 — which is why the 30-day image-retention promise had gone unmet
+    # for 151 days while every gate stayed green.
+    #
+    # ⚠️ `rescue_after` must exceed the longest legitimate job, or this plugin
+    # becomes a duplicate-work generator: it would return a still-running job to
+    # `available` and a second node would pick it up. The retention sweep is the
+    # longest, bounded by its own two 30s budgets plus the orphan check, and
+    # vision jobs carry their own timeouts well under this. 15 minutes clears
+    # that with room to spare while still being far shorter than the 97 days
+    # these rows actually sat for.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(15)},
+    # ⚠️ EVERY ENTRY BELOW IS UNRELIABLE BY CONSTRUCTION, and the three that are
+    # absent are absent for that reason.
+    #
+    # `deploy/fly.core.toml` sets `min_machines_running = 0`. Oban's `Cron`
+    # plugin computes due jobs on a tick from a RUNNING node and has no
+    # catch-up pass, so an entry fires only if something else happened to wake
+    # the machine in that minute; a machine woken at 06:03 never runs the 06:00
+    # entry. This is not a schedule, it is a lottery weighted by inbound
+    # traffic.
+    #
+    # Three duties have been moved out to GitHub Actions schedules, which run on
+    # a runner that is always awake:
+    #
+    #   * the dbt refresh    -> .github/workflows/scheduled-dbt-refresh.yml
+    #   * the costs refresh  -> .github/workflows/scheduled-core-jobs.yml
+    #   * bookstore events   -> .github/workflows/scheduled-core-jobs.yml
+    #
+    # ⚠️ Each entry was removed TOGETHER WITH its replacement, in the same
+    # change. Deleting an unreliable schedule on its own is not a fix: it turns
+    # "runs when the machine happens to be awake" into "never runs", which is
+    # strictly worse than the defect. If a future change removes an entry below,
+    # it owes the same pairing.
+    #
+    # ⚠️ The remaining SEVENTEEN have the same defect, and EIGHT of them carry
+    # retention or account-lifecycle duties — the 30-day image retention, GDPR
+    # export artefacts, reader free text, the audit log, the session-token
+    # sweep, and three account-expiry sweeps. Do not read their presence here as
+    # evidence that they run. Whether any given one has ever run became
+    # answerable only when the Pruner window above was widened from 60 seconds
+    # to 7 days; before that, `oban_jobs` read empty either way.
+    #
+    # Nothing is added to this list. A new scheduled duty gets a workflow.
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
-       {"15 * * * *", Stacks.Workers.ExportRetentionJob},
-       {"30 2 * * *", Stacks.Workers.LibraryImportRowRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
-       {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
-       {"30 7 * * 1", Stacks.Workers.DiscoverBookstoreEventsJob, args: %{batch: true}},
        {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
        {"0 3 * * 0", Stacks.Workers.RSSLivenessJob},
-       {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}},
        {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}},
        {"30 4 * * *", Stacks.Workers.BuildScraperIndexJob},
        {"0 5 * * 0", Stacks.Workers.MatchStoreCatalogueJob},
        {"0 6 * * 0", Stacks.Workers.GeocodeBookstoresJob},
-       {"30 3 * * *", Stacks.Workers.CacheSweepJob},
-       {"0 0 * * *", Stacks.Workers.GuardianTokenSweepJob},
-       {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob},
-       {"30 9 * * *", Stacks.Workers.ExpiredInvitesSweepJob},
-       {"45 9 * * *", Stacks.Workers.ExpiredEmailChangesJob},
-       {"0 3 * * *", Stacks.Workers.AuditRetentionJob}
+       {"30 3 * * *", Stacks.Workers.CacheSweepJob}
      ]}
   ],
+  # ⚠️ `vision: 20` IS DELIBERATELY TWICE THE GPU CONTAINER CAP, and the other
+  # half of that decision lives in another language in another directory:
+  # `apps/vision/modal_app.py` sets `max_containers=10`. The two numbers are a
+  # single decision and a reader of either one should not have to find the
+  # other by accident — which, until this comment, a reader starting here did.
+  #
+  # ⚖️ The 2:1 oversubscription is intentional. Modal queues the overflow, so
+  # twenty workers against ten containers means ten requests waiting rather
+  # than ten rejected, and at ~20s per inference the second wave starts well
+  # inside Modal's 300s request timeout.
+  #
+  # ⬛ It is also the CHEAPER configuration, which is the non-obvious part. A
+  # GPU container bills for its whole 300s scaledown window after its last
+  # request, and measurement puts that idle tail at roughly 93% of the cost of
+  # an identification when a container serves only one. Keeping requests
+  # arriving back-to-back spreads one tail across many identifications — so
+  # LOWERING this number to match the cap would raise the per-identification
+  # cost, not lower it. See `docs/capacity-model.md` for the arithmetic.
   queues: [default: 10, events: 20, vision: 20, scraper: 5, notifications: 3, dbt_refresh: 1]
 
 config :core, CoreWeb.Endpoint,
@@ -50,6 +144,14 @@ config :core, CoreWeb.Endpoint,
   pubsub_server: Core.PubSub
 
 config :phoenix, :json_library, Jason
+
+# Request logging prints the parameter map at :info, so anything that is itself a
+# credential has to be named here or it lands in the application log — and from
+# there in whatever aggregates it. Substring matching, so "code" also covers
+# `invite_code` and an MFA code, and "token" covers refresh and confirmation
+# tokens. Phoenix's default is `["password"]` alone; setting this REPLACES that
+# default, which is why password is restated.
+config :phoenix, :filter_parameters, ["password", "code", "token", "secret"]
 
 config :core, Stacks.Accounts.Guardian,
   issuer: "stacks",

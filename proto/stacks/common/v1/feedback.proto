@@ -29,8 +29,21 @@ message FeedbackEntry {
   // What the reader wrote.
   string body = 3 [json_name = "body"];
 
-  // Where they were when they wrote it — a short client-supplied label used to
-  // reproduce the problem, not a URL. Never carries another reader's handle.
+  // Where they were when they wrote it — a short route PATTERN (e.g. "/books/:id")
+  // used to reproduce the problem.
+  //
+  // ⚠️ CLIENT-SUPPLIED AND ONLY PARTLY ENFORCED. The SPA sends `Route.toPattern`,
+  // which by construction yields a pattern with `:id`-style placeholders rather
+  // than a concrete URL — but the server cannot confirm that, because a pattern
+  // for a static route ("/about") is indistinguishable in shape from a concrete
+  // path naming a person ("/u/somehandle"). Enumerating the valid set server-side
+  // would duplicate the SPA's route table across the boundary, which is its own
+  // failure mode.
+  //
+  // So the server enforces what it can — a length cap and "not a URL" — and this
+  // field is to be treated as untrusted input by anything that reads it. It
+  // previously claimed to never carry another reader's handle; it could, and the
+  // claim was enforced nowhere.
   string page_context = 4 [json_name = "page_context"];
 
   // When it arrived (ISO 8601 string on the wire).

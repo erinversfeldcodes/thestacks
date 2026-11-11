@@ -10,6 +10,7 @@ module Page.Bookshelf.LookingForHome exposing
 import Api
 import Components.AgeGate exposing (ageGate)
 import Components.EmptyBookshelf exposing (emptyBookshelf)
+import Effect exposing (Effect)
 import Html exposing (Html, div, p, text)
 import Html.Attributes exposing (class)
 import Http
@@ -34,43 +35,76 @@ type OutMsg
 
 type Msg
     = BooksLoaded (Result Http.Error (List Shelf))
+    | SessionExpiryDetected
     | DismissAgeGate
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
-        cmd =
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as data so a harness can answer it.
+-}
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
+    let
+        effect =
             case maybeToken of
                 Just token ->
-                    Api.getBookshelf "looking_for_home" token (BooksLoaded << Result.map .shelves)
+                    Effect.authed (Api.getBookshelfRequest "looking_for_home")
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveJson Types.Shelf.bookshelfResponseDecoder
+                                >> Result.map .shelves
+                                >> BooksLoaded
+                        }
 
                 Nothing ->
-                    Cmd.none
+                    Effect.none
     in
-    ( { books = Loading, showAgeGate = False }, cmd )
+    ( { books = Loading, showAgeGate = False }, effect )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+{-| `update`, with its effects as data.
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Effect.none, SessionExpired )
+
         BooksLoaded result ->
             case result of
                 Ok shelves ->
-                    ( { model | books = Success (List.concatMap .placements shelves) }, Cmd.none, NoOut )
+                    ( { model | books = Success (List.concatMap .placements shelves) }, Effect.none, NoOut )
 
+                -- ⚠️ KEPT, and it is not the expiry case. A 403 here is the
+                -- age gate, which is a thing to SHOW the reader rather than a
+                -- reason to sign them out — the plan claims 401 only.
                 Err (Http.BadStatus 403) ->
-                    ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Cmd.none, NoOut )
+                    ( { model | books = Failure (Http.BadStatus 403), showAgeGate = True }, Effect.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
-
-                    else
-                        ( { model | books = Failure err }, Cmd.none, NoOut )
+                    -- ⛔ The plan claims the 401 first, so no re-test here.
+                    ( { model | books = Failure err }, Effect.none, NoOut )
 
         DismissAgeGate ->
-            ( { model | showAgeGate = False }, Cmd.none, NoOut )
+            ( { model | showAgeGate = False }, Effect.none, NoOut )
 
 
 {-| Looking for a Home is a **real room in the shelf-room family** (,

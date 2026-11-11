@@ -110,11 +110,58 @@ A breach triggers automatic rollback. The endpoint-level targets in the tables a
 
 ### Assumptions
 
-All costs in South African Rand (ZAR). Exchange rates as of 2026-03.
+All costs in South African Rand (ZAR). Exchange rates as of 2026-03 (~R18/USD, consistent with
+the Brave row's `$3/1K ≈ R0.054/query`).
+
+> ⛔ **The Modal row was wrong in its basis, and roughly right in its range by coincidence.**
+> It read "~$0.03–$0.14/min GPU time at 30–60s per call" against a published A10G rate of
+> **$0.0184/min** — so the per-minute figure was **1.6× to 7.6× too high**, most likely by
+> conflating Modal's ~$0.03 *per inference* with a *per minute* rate. The stated call duration
+> was wrong too: identifications measure **5.2s warm and 24s cold**, not 30–60s.
+>
+> ⚖️ Two compensating errors landed the old range (R0.50–R2.50) near the corrected one
+> (R0.19–R1.78), which is exactly why it survived: **a range that looks plausible is not
+> evidence, and nothing here was checkable until the vision response began reporting its own
+> tier, stage timings and container lifetime.**
+>
+> ⚠️ **Both Modal figures under-charge on FAILED requests, and the two errors do not cancel.**
+> The tier, the stage timings and the cold flag all ride the `/analyze` response body, which only
+> exists on a 200. A request that woke a GPU container and then failed — sidecar 502, model
+> timeout, core-side timeout — bills its full 300s tail and is counted nowhere. ⛔ That bias is
+> not random: cold inferences are the slow ones, so **timeouts and cold starts are correlated**
+> and the miss is worst exactly when the number matters most. The dashboard's cold-start panel
+> carries a second series bounding what is uncounted, so the gap is visible rather than assumed
+> away.
+>
+> ⚠️ **And the active figure errs the OTHER way under load, so the sum's direction is unknown
+> rather than conservative.** The GPU-seconds series is wall-clock around each Modal dispatch, so
+> it includes in-Modal queueing — and queue wait on a busy container is time that container is
+> already billing for a different input. Under load the active line over-counts while the idle
+> line under-counts. Neither figure is a bound on the truth; only the provider's invoice is, which
+> is why `stacks_billing_mtd_cents` is the series worth reconciling against.
+
+> ⚠️ **How firm the active figure is: not very, and the control says so.** Three runs of the same
+> eight-image corpus against the same service moved the VLM-classify median by **60%** and its
+> maximum by **6.8×**, while the barcode tier moved **2%**. That control matters: a CPU decode is
+> reproducible to within noise, so the VLM spread is the GPU path itself — almost entirely whether
+> a container happened to be warm. The ~R0.03 active term is therefore an order-of-magnitude
+> figure, not a measurement.
+>
+> ⬛ **The conclusion survives that uncertainty, which is the point of stating it.** The idle tail
+> is 300 seconds by CONFIGURATION, not by measurement, so it dwarfs any plausible active figure:
+> even a 5× error in the active term leaves idle dominating. What the uncertainty does rule out is
+> using these numbers to RANK two architectures — a candidate measuring 20% faster sits inside the
+> incumbent's noise against itself.
+>
+> ⬛ **The correction that matters is not the number but the DRIVER.** The old row attributed the
+> spread to how long a call takes. It is actually **how many identifications share a GPU
+> container**: at one per container, **R1.65 of the R1.78 — about 93% — is the idle tail**, a
+> GPU awake and answering nothing. Tuning model speed moves the ~R0.03 active term; tuning
+> batching or the scaledown window moves the other 93%.
 
 | Service | Unit cost assumption | Basis |
 |---------|---------------------|-------|
-| Modal (vision, A10G) | R0.50–R2.50 per identification | ~$0.03–$0.14/min GPU time at 30–60s per call. Stack: HF Transformers + Qwen2.5-VL-7B-Instruct (bf16) on A10G, single inference per container, `max_containers=10` (see `apps/vision/modal_app.py`; rationale in ADR-001 / ADR-015) |
+| Modal (vision, A10G) | **R0.19–R1.78 per identification** — and ~93% of the top of that range is the GPU doing nothing | **Reconciled against measurement and the published rate.** A10G at $0.000306/sec ($1.10/hour) = **$0.0184/min**. Measured GPU time per identification: **5.2s warm** (classify 1.8s + extract 3.4s), **24s cold**. The dominant term is neither: a container bills its **300s scaledown window** after its last request, which is **$0.0918 = R1.65** per container lifetime. So the cost per identification is `(R1.65 / identifications sharing a container) + ~R0.03 active`: **R1.78 at one per container, R0.19 at ten.** Stack: HF Transformers + Qwen2.5-VL-7B-Instruct (bf16) on A10G, single inference per container, `max_containers=10` (`apps/vision/modal_app.py`; ADR-001 / ADR-015) |
 | Together AI (summarisation) | ~R0.10 per review summary | Per-token pricing at ~R0.002/1K tokens, ~50K tokens/summary |
 | Brave Search API | R0.054/query (free tier: 2K queries/month; paid: $3/1K ≈ R0.054/query) | Brave pricing page |
 | Fly.io (core app, shared-cpu-1x, 2 cpus, 512MB; plus scraper/log-shipper/searxng) | R150–R250/month flat | Fly.io pricing; sizing per `deploy/fly.*.toml` |
@@ -169,7 +216,7 @@ All costs in South African Rand (ZAR). Exchange rates as of 2026-03.
 | `bookshelf_placements` | New books added | ~200 | ~73K | ~50MB |
 | `bookshelf_placement_history` | ~5 moves/user/month | ~5,000 | ~1.8M | ~500MB |
 | `uploaded_images` | Photo uploads | ~500/day peak | ~180K | ~100MB (metadata only) |
-| `oban_jobs` | Job processing | ~10,000/day (mostly cleared) | Steady state ~1M | Manageable |
+| `oban_jobs` | Job processing | ~10,000/day | Steady state ~70K rows (7-day retention × 10K/day) | ~13MB at ~186 bytes/row |
 | `books` (works) | New books added | ~200 | ~73K | ~50MB |
 | `book_editions` | New editions | ~250 | ~91K | ~50MB |
 | `audit_log` | Security events | ~500 | ~180K | ~100MB |
@@ -186,7 +233,7 @@ Neon's free tier includes up to 10GB of storage. At 1,000 users with a full year
 |-------|---------|-------------------|
 | `price_snapshots` | 10M rows (approximately 5–6 months at 1K users) | Partition by month on `scraped_at` |
 | `event_log` | 5M rows (approximately 3 months at 1K users) | Partition by month on `occurred_at` |
-| `oban_jobs` | Oban's built-in pruning handles this — no partitioning needed | Oban prunes completed jobs automatically |
+| `oban_jobs` | Oban's built-in pruning handles this — no partitioning needed | Pruned at `max_age: {7, :days}`, set explicitly in `config.exs`. The library DEFAULT is 60 seconds, which is what the "mostly cleared" figure above used to describe — it also made "did the nightly job run?" unanswerable, so the window is deliberate, not incidental. |
 | `review_snapshots` | No partitioning needed at projected volumes | — |
 | `bookshelf_placement_history` | No partitioning needed at projected volumes | — |
 | `audit_log` | 10M rows | Partition by year on `occurred_at` |
@@ -203,22 +250,35 @@ SELECT
   pg_size_pretty(pg_relation_size(schemaname || '.' || tablename)) AS table_size,
   pg_size_pretty(pg_indexes_size(schemaname || '.' || tablename)) AS index_size
 FROM pg_tables
-WHERE schemaname IN ('op', 'wh', 'audit')
+WHERE schemaname IN ('op', 'audit', 'cache', 'staging', 'intermediate', 'marts')
 ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC;
 ```
 
-### Analytical data growth (wh schema)
+### Analytical data growth (staging / intermediate / marts schemas)
 
-The `wh` schema is written by dbt and grows with the mart refresh cadence. Key marts:
+dbt materialises into `staging`, `intermediate` and `marts`, **not** `wh` — `wh`
+is `profiles.yml`'s default target schema and is deliberately kept empty. The
+table below named `wh` and three marts that do not exist; corrected 2026-10-16
+against the first successful deployed run.
 
-| dbt model | Refresh cadence | Estimated size at 1K users |
-|-----------|----------------|---------------------------|
-| `mart_community_read_count` | Per dbt refresh cycle (~hourly) | ~100K rows |
-| `mart_price_alerts` | Per dbt refresh | ~50K rows |
-| `mart_author_activity` | Per dbt refresh | ~20K rows |
-| `mart_platform_searchable` | Every 5 minutes | ~300K rows |
+The refresh cadence is **daily**, set by `.github/workflows/scheduled-dbt-refresh.yml`
+(`cron: "11 4 * * *"`), not hourly or every five minutes. That cadence is also
+the GDPR warehouse-erasure window — see `docs/runbooks/gdpr-erase-user.md`.
 
-The `wh` schema will remain significantly smaller than `op` throughout Phase 1 and most of Phase 2.
+| dbt model | Measured rows (preview, 2026-10-16) | Estimated at 1K users |
+|-----------|-------------------------------------|----------------------|
+| `marts.mart_community_read_count` | 150 | ~100K rows |
+| `marts.mart_platform_searchable` | 169 | ~300K rows |
+| `marts.mart_book_prices` | 0 (no price snapshots on that branch) | ~50K rows |
+| `marts.mart_cost_tracking` | 5 | ~1K rows |
+
+`mart_price_alerts` and `mart_author_activity` were listed here and have never
+existed; the warehouse holds **40 staging / 8 intermediate / 4 mart** relations,
+gated by `scripts/check-dbt-model-drift.sh`.
+
+The warehouse layers remain significantly smaller than `op` throughout Phase 1
+and most of Phase 2. All three are derived and rebuildable from `op`, so their
+size is a cost question rather than a durability one.
 
 ---
 

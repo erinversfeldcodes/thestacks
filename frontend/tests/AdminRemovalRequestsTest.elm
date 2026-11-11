@@ -15,6 +15,7 @@ import Page.Admin.RemovalRequests as Queue
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -191,7 +192,7 @@ suite =
                     let
                         ( model, _ ) =
                             updateQueue
-                                (Queue.DecisionCompleted "req-truth" (Err (Http.BadStatus 409)))
+                                (Queue.DecisionCompleted "req-truth" (Err (Api.RequestFailed (Http.BadStatus 409))))
                                 (loaded [ request "truth" ])
                     in
                     Expect.equal (Just "That request has already been decided — the queue below is up to date.")
@@ -205,7 +206,7 @@ suite =
                     let
                         ( model, _ ) =
                             updateQueue
-                                (Queue.DecisionCompleted "req-truth" (Err (Http.BadStatus 409)))
+                                (Queue.DecisionCompleted "req-truth" (Err (Api.RequestFailed (Http.BadStatus 409))))
                                 (loaded [ request "truth" ])
                     in
                     Expect.equal (Success [ request "truth" ]) model.requests
@@ -220,6 +221,6 @@ updateQueue : Queue.Msg -> Queue.Model -> ( Queue.Model, Cmd Queue.Msg )
 updateQueue msg model =
     let
         ( newModel, cmd, _ ) =
-            Queue.update msg model (Just "token")
+            Queue.update msg model (Just (TestHelpers.creds "token"))
     in
     ( newModel, cmd )

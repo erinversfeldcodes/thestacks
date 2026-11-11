@@ -130,7 +130,23 @@ Cloudflare R2 credentials for image storage. `R2_ACCOUNT_ID` and `R2_BUCKET_NAME
 5. Once verified, revoke the old key pair in Cloudflare.
 
 ### `STACKS_APP_DB_PASSWORD`, `STACKS_DBT_DB_PASSWORD`
-Passwords for the `stacks_app` and `stacks_dbt` Postgres roles. Used by migrations to (re)create the roles on hosted databases that enforce password strength. Rotate by updating the GH secret and triggering a deploy — the migration is idempotent and resets the password on the next run. Not the same as `STACKS_PROD_DB_PASSWORD`, which is the owner role used by the runtime connection.
+Passwords for the `stacks_app` and `stacks_dbt` Postgres roles. Used by migrations to (re)create the roles on hosted databases that enforce password strength. Rotate by updating the GH secret and triggering a deploy — the migration is idempotent and resets the password on the next run. Not the same as `STACKS_PROD_DB_PASSWORD`, which is the **owner** role: it still runs every release task (migrations need DDL), and it is the runtime connection only on a stack where the role split is not active.
+
+⚠️ `STACKS_APP_DB_PASSWORD` is load-bearing for the runtime connection, not just for role creation. `deploy-stack.sh` derives `APP_DATABASE_URL` from the owner URL by substituting this role and password, and `config/runtime.exs` points the runtime pools at it when set. So a rotation that updates the GH secret without a deploy leaves the pools authenticating with the previous password — and the symptom is `28P01` at the next machine start, not at rotation time.
+
+**Verify the posture after any rotation or deploy that touches this.** It is a read-only catalogue query, and a named function precisely so the invocation survives the shell:
+
+```sh
+fly ssh console -a <app> -C "/app/bin/core rpc 'Stacks.Release.print_connection_posture()'"
+```
+
+One `CONNECTION_POSTURE` line per repo. On a stack with the split **active**, both lines must read:
+
+```
+role=stacks_app  op_write=true  marts_usage=true  audit_insert=true  audit_delete=false  can_rewrite_migrations=false
+```
+
+`role=` naming the owner instead means the split is not in force on that pool — the grants are decorative and the application is one bug away from rewriting migration history. `can_rewrite_migrations=true` alongside `role=stacks_app` means the revoke did not take. A field reading `unknown` means the table did not exist yet, which is expected on a stack mid-first-deploy and a finding on any other.
 
 ### `STACKS_PROBER_EMAIL`, `STACKS_PROBER_PASSWORD`
 Credentials for the dedicated prober user seeded by `Stacks.Release.seed_prober/0`. Same caveat as `PROD_OWNER_PASSWORD` — updating the GH secret alone does not change the live password (seed is insert-if-missing). Rotate via the app's change-password flow or a one-off `mix` task.

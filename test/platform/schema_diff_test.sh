@@ -12,9 +12,17 @@
 #   - exit 0 regardless of diff content when DB_BREAKING_LABEL=true is in the
 #     environment (simulates the `db-breaking` PR label bypass in CI).
 #
-# Will FAIL until Phase 2 implements scripts/check-schema-diff.sh. The stub
-# `exit 0` makes the benign diffs pass trivially but the destructive diffs
-# fail their non-zero assertion.
+# ⚠️ The header used to end "Will FAIL until Phase 2 implements
+# scripts/check-schema-diff.sh. The stub `exit 0` makes the benign diffs pass
+# trivially" — written against a stub that has not existed for a long time. The
+# script is implemented and all twelve cases pass against real
+# `test/fixtures/schema/*.dump` inputs.
+#
+# Corrected because the stale version said the opposite of the truth in the
+# direction that matters: a reader skimming it would conclude this suite is
+# known-red and skip its output, which is how a genuinely failing gate gets
+# ignored. It also made the suite look like it did not drive the script with
+# real arguments, when `run_checker` passes two fixture paths on every case.
 
 set -uo pipefail
 

@@ -57,6 +57,71 @@ defmodule Core.PromEx.Plugins.Stacks do
         # them was emitted, counted by nothing, and on no dashboard: the prose
         # written for them described series that did not exist. The plugin is
         # where a metric becomes observable, so they are declared here too.
+        # ⛔ THE ROLLOUT'S DECIDING INSTRUMENT, not an observability nicety. The
+        # bearer transport is deleted when this counter's `bearer` series reads
+        # zero for a release — so without the series the deletion is a guess,
+        # and this repository has a recorded dual path that became permanent
+        # because nothing measured which half was live.
+        #
+        # ⚠️ Declared HERE as well as emitted, which is the lesson the comment
+        # above this group records: five metrics were emitted, counted by
+        # nothing, and on no dashboard. The plugin is where a metric becomes
+        # observable.
+        # ⛔ THE COMPANION TO THE TRANSPORT SERIES, and a separate series rather
+        # than a tag on it. The transport counter answers "which transport is
+        # carrying sessions" — the bearer-DELETION question — and a present but
+        # undecodable cookie falls through to bearer, so it is counted `:bearer`
+        # exactly like no cookie at all. During a migration that is the expected
+        # initial reading, which means a SYSTEMIC cookie failure (key rotation,
+        # or cookies silently not being sent) looks like "the rollout has not
+        # started". This series is what says otherwise.
+        # ⛔ THE MEASUREMENT A PENDING DECISION TURNS ON, not observability for
+        # its own sake. `SameSite=Lax` is the CSRF defence until a double-submit
+        # token exists, and it blocks the cookie on every cross-site
+        # state-changing method; its one hole (top-level GET navigation) has no
+        # state-changing target here. So the residual threat a token would close
+        # is principally clients that IGNORE SameSite — and whether that is
+        # worth a 77-call-site refactor plus an enforcement step that can reject
+        # writes is a measurement rather than a judgement.
+        #
+        # ⚠️ Nothing recorded an inbound user agent before this, so the question
+        # was unanswerable from existing data. The string is classified into
+        # three atoms and discarded — never stored.
+        counter(
+          [:stacks, :auth, :samesite_support, :count, :total],
+          event_name: [:stacks, :auth, :samesite_support],
+          description:
+            "Authenticated requests by whether the client enforces the SameSite cookie attribute (enforces/does_not_enforce/unknown). Counted on AUTHENTICATED requests only: anonymous traffic has no session to forge, and including it dilutes the figure in the direction of looking riskier than it is. A large unknown bucket is a finding about the classifier rather than an answer about the traffic — it never defaults to enforces.",
+          tags: [:enforces]
+        ),
+        counter(
+          [:stacks, :auth, :session_cookie_rejected, :count, :total],
+          event_name: [:stacks, :auth, :session_cookie_rejected],
+          description:
+            "Requests that presented a session cookie which failed to verify, by bounded reason. A present-but-unusable cookie falls through to the bearer path and is counted as bearer by the transport series, so without this a systemic cookie failure is indistinguishable from the rollout not having started. Non-zero and rising means cookies are being issued and refused — check key rotation and whether Secure cookies are reaching the server at all.",
+          tags: [:reason]
+        ),
+        counter(
+          [:stacks, :auth, :csrf_refused, :count, :total],
+          event_name: [:stacks, :auth, :csrf_refused],
+          description:
+            "State-changing requests REFUSED for failing the double-submit check, by bounded reason (absent_header/absent_cookie/mismatched). Separate from the proof counter because that one counts what arrived and this one counts what was rejected: a rise here is the only signal that enforcement is turning real traffic away, and the reason says whose bug it is — absent_header a client, absent_cookie a server or cookie-attribute problem, mismatched the only one consistent with an attack. Expected to sit at zero; non-zero and rising after a release means a client path was missed.",
+          tags: [:reason]
+        ),
+        counter(
+          [:stacks, :auth, :csrf_proof, :count, :total],
+          event_name: [:stacks, :auth, :csrf_proof],
+          description:
+            "State-changing requests by whether they carried a usable double-submit proof (proven/absent_header/absent_cookie/mismatched), with safe methods counted as `safe` so the series has a denominator. Emitted BEFORE any enforcement exists, so the decision to start rejecting is a reading rather than a judgement: enforcement goes on when absent_header holds at zero over real traffic. The two absent outcomes are separate because they are different bugs — absent_header is a client that did not send the proof, absent_cookie a browser that never received one. SCOPE: the `:api` pipeline only, which is 83 of 93 state-changing routes; the 4 partner_auth routes carry an Argon2 key and no cookie, and the 6 /api/test/* helpers are not reachable in production. A zero here is a statement about those 83, not about all writes.",
+          tags: [:outcome]
+        ),
+        counter(
+          [:stacks, :auth, :session_transport, :count, :total],
+          event_name: [:stacks, :auth, :session_transport],
+          description:
+            "Authenticated requests by the transport that carried the session: cookie, bearer, or untagged. Counts only requests that authenticated — an unauthenticated request offers a transport too, and counting those would let the bearer series read zero on a stream of failures. `bearer` is now a POSITIVE detection of an Authorization header, not a default: it previously caught every request the cookie plug did not tag, so a deployed reading of 187 could not distinguish a bearer token from some other route to authentication. `untagged` is that residue, and should be zero — a non-zero value means something authenticates by a path nobody has described. The bearer path is deleted when its series holds at zero for a release, which a stack that scales to zero cannot show.",
+          tags: [:transport]
+        ),
         counter(
           [:stacks, :auth, :password_reset, :count, :total],
           event_name: [:stacks, :auth, :password_reset],
@@ -158,6 +223,142 @@ defmodule Core.PromEx.Plugins.Stacks do
             "Successful Brave Search API queries — counted against the plan quota on the cost page."
         ),
 
+        # ── Six families that fired into nothing ────────────────────────────
+        # All six were declared ONLY in `CoreWeb.Telemetry.metrics/0`, whose
+        # supervisor holds a `:telemetry_poller` and no reporter — so they were
+        # emitted, covered by firing tests, and reached no store. A declaration
+        # there is not observability; this plugin is where a metric becomes
+        # visible, which is why they are declared here instead.
+        #
+        # ⚠️ Two of them meter MONEY: the spend the budget guard stops AI work
+        # over, and the figures the cost page reports. A deletion of these as
+        # "reporter-less telemetry" was proposed and would have made a
+        # money-metering gap permanent — deleting a declaration is not the same
+        # decision as deciding not to measure something.
+        sum(
+          [:stacks, :budget, :cost_recorded, :amount_micro_cents],
+          event_name: [:stacks, :budget, :cost_recorded],
+          measurement: :amount_micro_cents,
+          description:
+            "AI API spend recorded, in MICRO-CENTS (1 cent = 100,000) — the running total the budget guard compares against its daily and monthly limits. Micro-cents because one LLM call costs a fraction of a cent, so a cents-shaped series would round every call to zero; the money panel divides by 10,000,000 for dollars. ⚠️ The cost-page series beside this one IS in cents — the two money metrics differ in unit as well as in writer semantics.",
+          tags: [:provider]
+        ),
+        # ⚠️ `last_value`, and fed from the LEDGER rather than from the event
+        # stream above. The `sum` series accumulates what the application
+        # emitted; these two report what the budget guard actually compared
+        # against at decision time. They drift — a dropped event, a restart
+        # mid-charge or a retention sweep moves one and not the other — and the
+        # number a dashboard shows should be the one that refuses a request.
+        last_value(
+          [:stacks, :budget, :spend, :daily_cents],
+          event_name: [:stacks, :budget, :spend],
+          measurement: :daily_cents,
+          description:
+            "Today's recorded AI spend for this provider, in cents, as read from the durable ledger the daily limit is compared against.",
+          tags: [:provider]
+        ),
+        last_value(
+          [:stacks, :budget, :spend, :monthly_cents],
+          event_name: [:stacks, :budget, :spend],
+          measurement: :monthly_cents,
+          description:
+            "This month's recorded AI spend for this provider, in cents, as read from the durable ledger the monthly limit is compared against.",
+          tags: [:provider]
+        ),
+        counter(
+          [:stacks, :budget, :limit_exceeded, :count, :total],
+          event_name: [:stacks, :budget, :limit_exceeded],
+          description:
+            "Budget refusals: an AI call the guard declined because the daily or monthly limit was already reached.",
+          tags: [:provider, :type]
+        ),
+        # ⛔ A CHARGE THE LEDGER COULD NOT RECORD — the accepted failure mode of
+        # `Spend.record/3`, made alarmable.
+        #
+        # That function swallows a database fault so a transient error does not
+        # kill a job that has already spent the money. The money is still gone,
+        # so the swallowed path has to be visible: a `Logger.error` alone is
+        # indistinguishable from success to everything that watches, and an
+        # under-counting ledger makes `check_budget/1` answer `:ok` to
+        # everything.
+        #
+        # ⚠️ Any non-zero rate here means the ceiling is being computed from an
+        # incomplete ledger, which is the fail-OPEN direction. It is not a
+        # refusal (that is the counter above) and not a cost (that is the sum);
+        # it is the meter itself failing.
+        # ⛔ PER TIER AND PER TEMPERATURE, which is the whole point of the
+        # vision response carrying a tier. A single call counter cannot answer
+        # "should a cover-embedding tier exist?" — it cannot tell a CPU barcode
+        # decode from a 7B VLM inference, and those differ by roughly the cost
+        # of the GPU.
+        #
+        # ⚠️ Both labels are bounded AT THE EMIT SITE: `tier` arrives as a
+        # string off the wire from a sidecar that may be deployed ahead of this
+        # build, and `cold` has an "unknown" arm for a response that predates
+        # the field. Neither is caller-trusted.
+        counter(
+          [:stacks, :vision, :tier, :count, :total],
+          event_name: [:stacks, :vision, :tier],
+          description:
+            "Vision identifications by cascade tier and container temperature — the breakdown the architecture decision is argued from. A barcode hit never woke the GPU; a VLM tier did.",
+          tags: [:tier, :cold]
+        ),
+        counter(
+          [:stacks, :budget, :charge_dropped, :count, :total],
+          event_name: [:stacks, :budget, :charge_dropped],
+          description:
+            "Charges the ledger could not record: a database fault swallowed by Spend.record/3, which means the budget ceiling is being compared against an incomplete total.",
+          tags: [:provider]
+        ),
+        # ⚠️ `last_value`, NOT `sum`, and the difference is the whole meaning of
+        # this series.
+        #
+        # `Costs.upsert_cost/1` is idempotent: it replaces the row for
+        # `{service, period_start, period_end}` and fires this event on every
+        # success, replaces included. `RefreshCostsJob` runs daily and re-upserts
+        # all ten items for the CURRENT MONTH, so each day's event carries the
+        # month-to-date total, which already contains every earlier day's.
+        #
+        # Summed, the series would hold Σ(MTD₁ … MTD_N) — a figure that is not a
+        # cost in any sense, and because `Telemetry.Metrics.Sum` renders as a
+        # Prometheus counter it is monotonic and never resets at the month
+        # boundary, so the error compounds forever instead of self-healing.
+        #
+        # The datum is a LEVEL (what the period has cost so far), not an event
+        # (money moving), and `last_value` says exactly that. Read it with
+        # `max by (service)`, never `rate()`.
+        last_value(
+          [:stacks, :costs, :recorded, :amount_cents],
+          event_name: [:stacks, :costs, :recorded],
+          measurement: :amount_cents,
+          description:
+            "Platform operating cost for the current billing period, in cents, by category and service — the figures the public cost page reports.",
+          tags: [:category, :service]
+        ),
+        # The circuit breakers. These matter as much as the cost three: blow and
+        # melt are what an operator reaches for when a dependency is failing,
+        # and they were as invisible as the rest.
+        counter(
+          [:stacks, :fuse, :melt, :count, :total],
+          event_name: [:stacks, :fuse, :melt],
+          description:
+            "A failure was counted against a circuit breaker, which is still closed. Rising melt with no blow is a dependency degrading rather than down.",
+          tags: [:fuse_name]
+        ),
+        counter(
+          [:stacks, :fuse, :blown, :count, :total],
+          event_name: [:stacks, :fuse, :blown],
+          description:
+            "A circuit breaker opened: calls to that dependency now fail fast until it probes healthy again.",
+          tags: [:fuse_name]
+        ),
+        counter(
+          [:stacks, :crawler, :robots_fetch, :count, :total],
+          event_name: [:stacks, :crawler, :robots_fetch],
+          description:
+            "robots.txt fetches served to crawlers. Carries no tags deliberately — a per-crawler label would be an unbounded user-agent string."
+        ),
+
         # ── Vision request latency () ───────────────────────
         # Wall-clock for ONE Modal vision HTTP call. Emitted by
         # `Stacks.AI.Client.make_vision_request/2` on both the 200 and the
@@ -165,9 +366,11 @@ defmodule Core.PromEx.Plugins.Stacks do
         # measured and never left the BEAM, so every timeout in the upload path
         # was sized from an estimate in a comment.
         #
-        # `endpoint` ∈ is_book|extract_isbn|analyze|associate (the fixed set
+        # `endpoint` ∈ is_book|analyze (the fixed set
         # `Stacks.AI.Client.endpoint_path/1` accepts — an unknown value raises
-        # there, so this label cannot be widened by user input) and `status` is
+        # there, so this label cannot be widened by user input; it listed
+        # extract_isbn and associate until those two operations were deleted on
+        # 2026-10-15) and `status` is
         # the HTTP status integer. Both are bounded and neither is derived from
         # an upload: no ISBN, title, filename, image or user id reaches a label
         # (GDPR: telemetry is warehouse-adjacent).
@@ -186,8 +389,63 @@ defmodule Core.PromEx.Plugins.Stacks do
           unit: {:native, :millisecond},
           description:
             "Per-call Modal vision request latency (ms), by endpoint and HTTP status — the distribution timeouts are sized from.",
-          tags: [:endpoint, :status],
+          # ⛔ `:tier` is here because a percentile over both tiers is an
+          # arithmetic artefact, not a latency. Live: 7ms for a barcode decode
+          # against 21,903ms for a GPU inference — so a blended p95 moves with
+          # the barcode hit rate rather than with anything about either path,
+          # and sizing a timeout from it would size it for neither.
+          tags: [:endpoint, :status, :tier],
           reporter_options: [buckets: @vision_duration_buckets]
+        ),
+
+        # ⛔ THE ONLY BOUNDED SIGNAL FOR A PER-CONTAINER COST. The idle tail
+        # Modal bills after a container's last request is charged once per
+        # container, not once per request, so costing it needs a count of
+        # CONTAINERS — and `gpu_cold` is true for exactly the first inference
+        # on each one.
+        #
+        # ⚠️ Without this the idle seconds were uncountable: the container age
+        # on a response is sampled only when a request runs, and the idle
+        # seconds are precisely the ones with no request attached. A sum of
+        # observed ages under-counts, in the direction that makes the GPU look
+        # cheap — the direction that would wrongly settle the architecture
+        # question this figure exists to inform.
+        # ⛔ MEASURED GPU TIME, REPLACING A CONSTANT THAT WAS 18.9x WRONG. The
+        # inference cost line charged a flat 3 cents, which is ~19x the warm
+        # active cost and ~4x the cold one — it was really an ALL-IN figure
+        # (roughly right at three inferences per container), so charging it
+        # beside a separate idle line double-counted the tail.
+        sum(
+          [:stacks, :vision, :gpu_active, :milliseconds, :total],
+          event_name: [:stacks, :vision, :gpu_active],
+          description:
+            "Milliseconds of GPU-stage time (classify + extract) the vision model reported. " <>
+              "Excludes the sidecar's download and CPU barcode stages, which no A10G ran. " <>
+              "An upper bound: wall-clock around each Modal dispatch includes in-Modal queueing.",
+          measurement: :milliseconds
+        ),
+        # ⛔ THE COLD-START COUNT IS UNTRUSTWORTHY WHILE THIS IS NON-ZERO. A VLM
+        # tier answered with no GPU dispatch reported means the model ran and
+        # the telemetry did not — a sidecar or GPU image older than these
+        # fields. It is indistinguishable from an honest barcode answer in the
+        # cold-start series, so without this a deployment that stopped
+        # reporting reads as a GPU that stopped costing money.
+        counter(
+          [:stacks, :vision, :gpu_telemetry_gap, :count, :total],
+          event_name: [:stacks, :vision, :gpu_telemetry_gap],
+          description:
+            "Responses where a VLM tier answered but no GPU dispatch was reported — provably " <>
+              "missing telemetry, not absent GPU work. Read the cold-start count as a lower " <>
+              "bound whenever this is above zero.",
+          measurement: :count
+        ),
+        counter(
+          [:stacks, :vision, :gpu_cold_start, :count, :total],
+          event_name: [:stacks, :vision, :gpu_cold_start],
+          description:
+            "GPU container cold starts — one per container lifetime, which is what the idle " <>
+              "tail is billed per. Multiply by the GPU scaledown window for billed idle seconds.",
+          measurement: :count
         ),
         counter(
           [:stacks, :vision, :request, :exception, :count, :total],
@@ -222,6 +480,18 @@ defmodule Core.PromEx.Plugins.Stacks do
           [:stacks, :auth, :registration, :count, :total],
           event_name: [:stacks, :auth, :registration],
           description: "User registration outcomes (right-to-account creation).",
+          tags: [:result]
+        ),
+        # The invite gate's own outcomes. Refusals were deliberately moved OFF the
+        # registration counter above so they would not drown its signal — but no
+        # reporter was declared for the event they moved to, so the launch gate went
+        # from counted-but-noisy to not counted at all. `result` is bounded by
+        # `invite_telemetry_label/1`: ok, required, invalid, expired, revoked,
+        # exhausted, email_mismatch.
+        counter(
+          [:stacks, :auth, :invite, :count, :total],
+          event_name: [:stacks, :auth, :invite],
+          description: "Invite-gate outcomes at registration (closed-beta admission).",
           tags: [:result]
         ),
         counter(
@@ -357,15 +627,30 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :gdpr, :image, :expired],
           measurement: :count,
           description:
-            "Images purged past their 30-day deadline, BY :reason (expired=TTL sweep, stuck=safety-net). Query split by reason; do not sum with the stuck metric.",
+            "Image bytes removed by the retention machinery, BY :reason (finished=the photograph discarded once identification had been terminal for the reader's retry window, ROW KEPT; expired=TTL sweep past the 30-day deadline; stuck=safety-net for wedged pending uploads; rowless=objects no uploaded_images row points at). Query split by reason; do not sum with the stuck metric. NOTE finished removes bytes only — the uploaded_images row survives, so this reason does NOT mean the image is gone. NOTE rowless is NOT the :orphan metric below — that one alarms on rows past expiry still in the DB, this one counts objects with no row at all.",
           tags: [:reason]
         ),
         sum(
           [:stacks, :gdpr, :image, :stuck, :count, :total],
           event_name: [:stacks, :gdpr, :image, :stuck],
           measurement: :count,
-          description: "Images cleaned by the stuck-pending safety net.",
+          description:
+            "Images the never-finished safety net collected, BY :reason — stuck=a `pending` row whose identification job wedged or never ran; unredeemed=an `awaiting_upload` reservation whose bytes never arrived, so there was no job and nothing failed. Counted apart because a rise in abandoned uploads and a rise in broken ones are opposite problems with opposite fixes, and reporting both as \"stuck\" hides which is happening. NOTE `awaiting_upload` was invisible to this sweep until 2026-11-05 and such rows survived to their 30-day expiry, where they were counted as expired images — which is not what happened to them.",
           tags: [:reason]
+        ),
+        counter(
+          [:stacks, :insights, :deanonymisation_unavailable, :count, :total],
+          event_name: [:stacks, :insights, :deanonymisation_unavailable],
+          description:
+            "Times the de-anonymisation insight could not answer how identifiable a reader is, so the page showed \"could not compute\". NOT fatal: the rest of the payload renders. But this surface's whole failure character is that nobody becomes suspicious — it reported a non-answer to EVERY reader on every deployed stack for weeks while the suite was green, because the suite connects as a superuser that bypasses the policy that was refusing the query. A green suite says nothing about this number. ANY non-zero value is alert-worthy."
+        ),
+        last_value(
+          [:stacks, :gdpr, :image, :standing],
+          event_name: [:stacks, :gdpr, :image, :standing],
+          measurement: :count,
+          description:
+            "STANDING population on each side of the uploads/ prefix, BY :population (rowless_objects = objects no uploaded_images row points at; rows_without_object = rows whose storage_path resolves to nothing). A gauge, not a collection counter: the sweep counters next to it emit zero both when they found nothing and when they never ran, which is how 4,234 row-less objects accumulated on production behind a clean dashboard. Either being non-zero is alert-worthy. NOTE a NULL storage_path is excluded from rows_without_object — since the finished-image sweep a row legitimately has no path.",
+          tags: [:population]
         ),
         sum(
           [:stacks, :gdpr, :image, :orphan, :count, :total],
@@ -390,6 +675,17 @@ defmodule Core.PromEx.Plugins.Stacks do
           measurement: :count,
           description:
             "Export archives past expiry that could NOT be deleted — a copy of a reader's personal data outliving its deadline (retention-gap alarm)."
+        ),
+        # The third of this module's alarms, and the one that was still
+        # log-only. An export object whose key carries no parseable deadline
+        # can never be selected by the sweep, so it is not late — it is
+        # permanent. That makes it the retention gap most worth a number.
+        sum(
+          [:stacks, :gdpr, :export, :undated, :count, :total],
+          event_name: [:stacks, :gdpr, :export, :undated],
+          measurement: :count,
+          description:
+            "Export archives whose key carries no deadline, so the TTL sweep can never select them — a permanent retention gap, not a late one."
         ),
         counter(
           [:stacks, :gdpr, :audit, :write, :count, :total],
@@ -467,6 +763,21 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Failed block attempts, by reason (already_blocked vs invalid).",
           tags: [:reason]
         ),
+        # ⚠️ Expected to stay at zero, and that is the point. The feed decorates
+        # placements with map lookups where it once INNER JOINed, and a row
+        # missing its book or owner is dropped to keep that rewrite
+        # behaviour-preserving. The drop is believed unreachable (FK on book_id,
+        # erasure removes a user's placements with the user) — registered so
+        # that belief is measured rather than asserted. An emitted event with no
+        # registered metric is a no-op, which would leave the counter looking
+        # present and reporting nothing.
+        sum(
+          [:stacks, :social, :feed_row_undecorated, :total],
+          event_name: [:stacks, :social, :feed_row_undecorated],
+          measurement: :count,
+          description:
+            "Feed rows dropped for incomplete decoration (missing book title or owner name). Expected zero."
+        ),
         counter(
           [:stacks, :view_as, :usage, :count, :total],
           event_name: [:stacks, :view_as, :usage],
@@ -508,7 +819,7 @@ defmodule Core.PromEx.Plugins.Stacks do
         counter(
           [:stacks, :shelf, :browse_capped, :count, :total],
           event_name: [:stacks, :shelf, :browse_capped],
-          description: "Public shelf-browse responses truncated by the public_shelf_cap (#221)."
+          description: "Public shelf-browse responses truncated by the public_shelf_cap."
         ),
         counter(
           [:stacks, :handle, :claimed, :count, :total],

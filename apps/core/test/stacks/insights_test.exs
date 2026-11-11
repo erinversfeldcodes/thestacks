@@ -9,7 +9,9 @@ defmodule Stacks.InsightsTest do
   import Ecto.Query
   import Stacks.Factory
 
+  alias Core.AppRole
   alias Core.Repo
+  alias Ecto.Adapters.SQL
   alias Stacks.Insights
 
   defp shelve(user, opts \\ []) do
@@ -133,6 +135,17 @@ defmodule Stacks.InsightsTest do
   end
 
   describe "de-anonymisation rarity" do
+    # ⛔ THESE TWO TESTS COULD NOT FAIL, and the surface they cover reported
+    # "could not compute" to every reader on every deployed stack for weeks
+    # while they stayed green. The test connection is a SUPERUSER, so it
+    # bypassed the row-level policy that refused the real query — the assertions
+    # were about a code path no deployed reader ever reached.
+    #
+    # The `as_app_role` variants below drive the same question as `stacks_app`,
+    # which is what a deployed stack actually is. They are kept ALONGSIDE the
+    # superuser ones rather than replacing them: the pair is what shows the
+    # answer no longer depends on who is asking.
+
     test "unique shelf → others_sharing_all == 0, uniqueness \"unique\"" do
       user = insert(:user)
       bs = insert(:bookshelf, user: user)
@@ -161,6 +174,91 @@ defmodule Stacks.InsightsTest do
       assert d.sample_size == 5
       assert d.others_sharing_all == 1
       assert d.uniqueness == "rare"
+    end
+
+    test "as the DEPLOYED role, a unique shelf still answers 0 and not nil" do
+      # ⛔ The test this issue turns on. Before the definer, this exact question
+      # as `stacks_app` hit the owner policy's refusal (42501, "query on a
+      # row-level-secured table with no request scope set") and the caller's
+      # rescue turned it into `nil` → uniqueness "unknown" → the reader told
+      # "Could not compute how many others share your N rarest books right now."
+      user = insert(:user)
+      bs = insert(:bookshelf, user: user)
+      for _ <- 1..5, do: shelve(user, bookshelf: bs)
+
+      %{deanonymisation: d} = AppRole.as_app_role(fn -> Insights.personal_inferences(user) end)
+
+      refute d.others_sharing_all == nil,
+             "nil here is the deployed defect: the reader is told the number could not be computed"
+
+      assert d.others_sharing_all == 0
+      assert d.uniqueness == "unique"
+    end
+
+    test "as the DEPLOYED role, one other sharer is counted — not excluded to 0" do
+      # ⚖️ The anti-vacuity half. A definer that returned a confident ZERO
+      # would satisfy the test above while being the OTHER failure this issue
+      # describes: scoped, the owner policy admits only this reader's rows and
+      # the `<>` excludes them, so every reader is told they are maximally
+      # identifiable. This case can only pass if other readers' rows are
+      # genuinely visible to the count.
+      user = insert(:user)
+      bs = insert(:bookshelf, user: user)
+      books = for _ <- 1..5, do: shelve(user, bookshelf: bs)
+
+      other = insert(:user)
+      other_bs = insert(:bookshelf, user: other)
+      for book <- books, do: insert(:placement, bookshelf: other_bs, book: book)
+
+      %{deanonymisation: d} = AppRole.as_app_role(fn -> Insights.personal_inferences(user) end)
+
+      assert d.others_sharing_all == 1
+      assert d.uniqueness == "rare"
+    end
+
+    test "the definer refuses to tell a reader how identifiable SOMEBODY ELSE is" do
+      # A definer runs as its owner, so its arguments are the whole attack
+      # surface. Asking about another user while scoped must refuse, not answer.
+      subject = insert(:user)
+      nosy = insert(:user)
+
+      # ⛔ The code is asserted, not merely that SOMETHING raised. `Postgrex.Error`
+      # alone is satisfied by `42883 undefined_function` — so this case passed
+      # against a definer that had been deleted outright, which is the one
+      # mutation it most needs to catch.
+      error =
+        assert_raise Postgrex.Error, fn ->
+          AppRole.as_app_role(fn ->
+            Stacks.Scope.with_user(nosy.id, fn ->
+              SQL.query!(
+                Repo,
+                "SELECT * FROM op.count_others_sharing_all($1::uuid, $2::integer)",
+                [Ecto.UUID.dump!(subject.id), 5]
+              )
+            end)
+          end)
+        end
+
+      assert error.postgres.code == :insufficient_privilege
+    end
+
+    test "the definer refuses a NULL subject rather than counting the reader against themselves" do
+      # ⚠️ A NULL subject excludes nobody, so the reader's own shelvings would
+      # count as other people's — a confident number, wrong in the alarming
+      # direction. That is the failure this function exists to end, one argument
+      # lower down.
+      error =
+        assert_raise Postgrex.Error, fn ->
+          AppRole.as_app_role(fn ->
+            SQL.query!(
+              Repo,
+              "SELECT * FROM op.count_others_sharing_all($1::uuid, $2::integer)",
+              [nil, 5]
+            )
+          end)
+        end
+
+      assert error.postgres.code == :insufficient_privilege
     end
 
     test "fewer than 2 shelved books → graceful insufficient_data shape" do

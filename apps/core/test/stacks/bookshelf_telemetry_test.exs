@@ -96,7 +96,7 @@ defmodule Stacks.BookshelfTelemetryTest do
         path = "/api/bookshelves/#{name}"
         attach_for_path([:stacks, :router_dispatch, :stop], path)
 
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(token)
         |> get(path)
         |> json_response(200)

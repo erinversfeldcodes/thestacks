@@ -9,14 +9,14 @@ defmodule Stacks.AI.MockClientTest do
       assert result["classification"] == "CLASSIFICATION_RESULT_BOOK"
     end
 
-    test "extract_isbn with default isbn" do
-      assert {:ok, result} = MockClient.call_vision("extract_isbn", %{})
+    test "analyze with default isbn" do
+      assert {:ok, result} = MockClient.call_vision("analyze", %{})
       [book] = result["books"]
       assert "9780743273565" in book["potential_isbns"]
     end
 
-    test "extract_isbn uses provided isbn from payload" do
-      assert {:ok, result} = MockClient.call_vision("extract_isbn", %{isbn: "9780306406157"})
+    test "analyze uses provided isbn from payload" do
+      assert {:ok, result} = MockClient.call_vision("analyze", %{isbn: "9780306406157"})
       [book] = result["books"]
       assert "9780306406157" in book["potential_isbns"]
     end

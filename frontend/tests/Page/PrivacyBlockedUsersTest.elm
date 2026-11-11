@@ -13,6 +13,7 @@ import Page.Settings.Privacy as Privacy exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -30,7 +31,7 @@ noConsent =
 
 baseModel : Privacy.Model
 baseModel =
-    Tuple.first (Privacy.initWithToken (Just "tok") noConsent)
+    Tuple.first (Privacy.initWithToken (Just (TestHelpers.creds "tok")) noConsent)
 
 
 suite : Test
@@ -51,7 +52,7 @@ suite =
                         Privacy.update
                             (GotBlockedUsers (Ok { blockedUsers = blocked, total = 2, page = 1 }))
                             baseModel
-                            (Just "tok")
+                            (Just (TestHelpers.creds "tok"))
                 in
                 m.blockedUsers |> Expect.equal (Success blocked)
         , test "view lists each blocked reader with an Unblock button" <|
@@ -70,7 +71,7 @@ suite =
                     ( m, _, _ ) =
                         Privacy.update (UserClicksUnblock "u-2")
                             { baseModel | blockedUsers = Success blocked }
-                            (Just "tok")
+                            (Just (TestHelpers.creds "tok"))
                 in
                 m.unblocking |> Expect.equal (Just "u-2")
         , test "GotUnblockResponse Ok removes the reader from the list" <|
@@ -80,7 +81,7 @@ suite =
                         { baseModel | blockedUsers = Success blocked, unblocking = Just "u-2" }
 
                     ( m, _, _ ) =
-                        Privacy.update (GotUnblockResponse "u-2" (Ok ())) started (Just "tok")
+                        Privacy.update (GotUnblockResponse "u-2" (Ok ())) started (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \x -> x.unblocking |> Expect.equal Nothing
@@ -96,7 +97,7 @@ suite =
                         { baseModel | blockedUsers = Success blocked, unblocking = Just "u-2" }
 
                     ( m, _, out ) =
-                        Privacy.update (GotUnblockResponse "u-2" (Err (Http.BadStatus 404))) started (Just "tok")
+                        Privacy.update (GotUnblockResponse "u-2" (Err (Http.BadStatus 404))) started (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.unblocking |> Expect.equal Nothing
@@ -111,7 +112,7 @@ suite =
                         { baseModel | blockedUsers = Success blocked, unblocking = Just "u-2" }
 
                     ( m, _, out ) =
-                        Privacy.update (GotUnblockResponse "u-2" (Err (Http.BadStatus 500))) started (Just "tok")
+                        Privacy.update (GotUnblockResponse "u-2" (Err (Http.BadStatus 500))) started (Just (TestHelpers.creds "tok"))
                 in
                 Expect.all
                     [ \_ -> m.unblocking |> Expect.equal Nothing
@@ -127,7 +128,7 @@ suite =
             \_ ->
                 let
                     ( _, _, out ) =
-                        Privacy.update (GotBlockedUsers (Err (Http.BadStatus 401))) baseModel (Just "tok")
+                        Privacy.update (GotBlockedUsers (Err (Http.BadStatus 401))) baseModel (Just (TestHelpers.creds "tok"))
                 in
                 out |> Expect.equal Privacy.SessionExpired
         , test "an empty list shows a friendly empty state" <|
@@ -152,7 +153,7 @@ suite =
                         { baseModel | blockedUsers = Success blocked, blockedTotal = 25, blockedPage = 1 }
 
                     ( m, _, _ ) =
-                        Privacy.update LoadMoreBlocked started (Just "tok")
+                        Privacy.update LoadMoreBlocked started (Just (TestHelpers.creds "tok"))
                 in
                 m.loadingMore |> Expect.equal True
         , test "GotBlockedUsers page 2 appends to the readers already loaded" <|
@@ -168,7 +169,7 @@ suite =
                         Privacy.update
                             (GotBlockedUsers (Ok { blockedUsers = more, total = 3, page = 2 }))
                             started
-                            (Just "tok")
+                            (Just (TestHelpers.creds "tok"))
                 in
                 m.blockedUsers |> Expect.equal (Success (blocked ++ more))
         ]

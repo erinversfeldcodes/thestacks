@@ -7,18 +7,23 @@ progress in place. Covers the mount predicate, the request lifecycle,
 and the completed-read bridge into the Reading Pile flow.
 -}
 
+import Components.PlacementCard as Card
 import Dict
+import Expect
 import Html.Attributes
 import Http
 import Page.BookDetail as BookDetail
 import ProgramTest exposing (ProgramTest, SimulatedEffect)
+import ProgressSaveContract
 import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
     exposing
-        ( bookDetailProgram
+        ( BookDetailTestModel
+        , bookDetailProgram
+        , bookDetailProgramWithOut
         , simulateBookDetailResponseWithPlacement
         , testBook
         , testPlacement
@@ -48,7 +53,7 @@ pilePlacement =
 
 startDetailWith : Placement -> ProgramTest BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 startDetailWith placement =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponseWithPlacement "book-test-001" testBook placement)
@@ -82,8 +87,15 @@ badProgress status body =
 
 
 {-| Walk the whole affordance the way a reader does: click the status badge
-(which reads "To Read" on load — the server sends no status here), pick
-"Reading" from the select, type a page, and Save.
+(which reads "Not recorded" on load — this fixture's payload carries no
+`reading_status`), pick "Reading" from the select, type a page, and Save.
+
+⚠️ It used to read "To Read", and that was the defect rather than the contract:
+the card defaulted an absent status to a specific one, so a reader mid-book saw
+"To Read" and pressing Save wrote `to_read` over the real value. The badge now
+distinguishes "not recorded" from "to read", and Save is disabled until a status
+is chosen — which is why this walkthrough must pick one from the select before
+clicking Save, as a reader would.
 
 The `<select>` is labelled implicitly (nested inside its `<label>`, no id), so
 `ProgramTest.selectOption` — which requires a `for`/`id` pair — cannot reach it;
@@ -93,7 +105,7 @@ the `input` event is simulated directly on the test-id'd node instead.
 openAndSave : ProgramTest BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg) -> ProgramTest BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 openAndSave program =
     program
-        |> ProgramTest.clickButton "To Read"
+        |> ProgramTest.clickButton "Not recorded"
         |> ProgramTest.simulateDomEvent
             (Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ])
             (Event.input "reading")
@@ -109,17 +121,213 @@ suite =
         , errorResponseKeepsFormOpen
         , finishedOnPileSurfacesBridge
         , finishedOnLibraryHasNoBridge
+        , saveWithNoChosenStatusIssuesNoRequest
+        , progressSaveContract
         ]
+
+
+{-| The shared CLASSIFICATION table from `ProgressSaveContract`, driven through this
+host's own UI. The Reading Pile runs the same list.
+
+⛔ Written as a `List.map` over `ProgressSaveContract.classifications` rather than as
+hand-listed cases, so a new classification cannot be added to one host and forgotten in
+the other — and `expectedOut` below stops compiling until this host says what
+the new classification should produce.
+
+-}
+progressSaveContract : Test
+progressSaveContract =
+    describe "progress_save_contract: every classification clears the in-flight flag"
+        (ProgressSaveContract.fixtureDecodes progressEndpoint completedBody
+            :: describesItsTarget
+            :: List.map contractCase ProgressSaveContract.classifications
+        )
+
+
+{-| The card's `aria-describedby` and the element it names, asserted TOGETHER.
+
+⛔ THIS IS THE ASSERTION A CARD-LEVEL TEST STRUCTURALLY CANNOT MAKE. The card
+renders the reference; this host renders the target. Only here do both halves
+exist, so only here can a dangling reference be distinguished from a live one —
+and `PlacementCardTest`'s comment used to claim this pairing while asserting
+only the attribute.
+
+⚠️ What is reachable now is PREDICATE drift rather than spelling drift: the
+single authority closed the spelling half. The attribute is gated on this host's
+failure predicate and the element on its own `case state of Failure`, two
+expressions over one state. They agree by construction today and nothing would
+fail if someone widened either — which is what this case is for.
+
+-}
+describesItsTarget : Test
+describesItsTarget =
+    test "a failed save renders the error AND the input that references it" <|
+        \() ->
+            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook libraryPlacement)
+                |> openAndSaveWithOut
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    progressEndpoint
+                    (ProgressSaveContract.refusedResponse progressEndpoint completedBody)
+                |> ProgramTest.expectViewHas
+                    [ Selector.id Card.progressErrorId
+                    , Selector.attribute
+                        (Html.Attributes.attribute "aria-describedby" Card.progressErrorId)
+                    ]
+
+
+{-| This host's spelling of the shared out-message decision.
+
+⛔ The DECISION lives in `ProgressSaveContract.expectedOut`; what remains here is
+only the translation into this host's own `OutMsg` type, which is genuinely
+per-host. This used to be a three-case fixture owned by the host, so the shared
+table fixed which CASES exist while each host decided what it owed in them — and
+a host that stopped emitting its session-expiry message could be made green by
+editing its own fixture, with the compiler's blessing.
+
+⚠️ NARROWED, NOT CLOSED — stated so nobody believes it is airtight. A host can
+still map BOTH constructors to `BookDetail.NoOut` and the compiler will accept
+it. What changed is the shape of the lie: it used to be a plausible per-page
+decision spread over three cases, and is now one visibly nonsensical line saying
+the session-expiry out-message is no out-message. That is the minimum
+achievable, because `BookDetail.OutMsg`'s constructors are not derivable from
+anything the shared table knows.
+
+-}
+toOutMsg : ProgressSaveContract.ExpectedOut -> BookDetail.OutMsg
+toOutMsg expected =
+    case expected of
+        ProgressSaveContract.NoOutMsg ->
+            BookDetail.NoOut
+
+        ProgressSaveContract.SessionExpiryOut ->
+            BookDetail.SessionExpired
+
+
+contractCase : ProgressSaveContract.Classification -> Test
+contractCase classification =
+    test (ProgressSaveContract.label classification) <|
+        \() ->
+            ProgramTest.start () (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook libraryPlacement)
+                |> openAndSaveWithOut
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    progressEndpoint
+                    (ProgressSaveContract.response progressEndpoint completedBody classification)
+                -- The in-flight flag, asserted through the button a reader sees.
+                -- A host that leaves it set shows "Saving…" with Save disabled
+                -- and no response ever coming.
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Saving…" ]
+                -- ⛔ "Not stuck" is not "says why". Asserting only the absence of
+                -- "Saving…" let the minimal wrong fix through — settle the flag,
+                -- surface nothing — which leaves a re-enabled button and a save
+                -- that silently vanished.
+                -- ⛔ The branch is on the ASSERTION, not on the selector list.
+                -- `ensureViewHas []` is a no-op, so putting the branch on the
+                -- list made the `Saved` case claim nothing about the error's
+                -- ABSENCE — a host that rendered `progress-error` on success
+                -- would have passed.
+                |> (if ProgressSaveContract.reportsAnError progressEndpoint completedBody classification then
+                        ProgramTest.ensureViewHas [ ProgressSaveContract.errorSelector ]
+
+                    else
+                        ProgramTest.ensureViewHasNot [ ProgressSaveContract.errorSelector ]
+                   )
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.equal
+                            (toOutMsg (ProgressSaveContract.expectedOut classification))
+                            model.lastOut
+                    )
+
+
+{-| `openAndSave`, against the out-recording harness.
+-}
+openAndSaveWithOut :
+    ProgramTest BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+    -> ProgramTest BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+openAndSaveWithOut program =
+    program
+        |> ProgramTest.clickButton "Not recorded"
+        |> ProgramTest.simulateDomEvent
+            (Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ])
+            (Event.input "reading")
+        |> ProgramTest.fillIn "" "Current page" "142"
+        |> ProgramTest.clickButton "Save"
+
+
+{-| ⛔ Saving a card whose status was never recorded must issue NO request.
+
+This is the destructive half of the original defect, asserted at the host rather
+than at the screen. The card seeded an absent status with `ToRead`, so opening
+the card and pressing Save wrote `to_read` over whatever the server held —
+including over a status this build could not parse.
+
+⚠️ Why this test exists even though Save is disabled: a `disabled` attribute is
+the screen, not the write. **Measured** — defeating both host guards while
+keeping `draftStatus : Maybe ReadingStatus` (so the type still looks protective)
+reintroduced the destructive write with **zero** of the then-2150 tests failing.
+The `disabled` assertion was the whole of the suite's protection, and it does
+not cover the path a `SaveClicked` message takes.
+
+So this drives `SaveClicked` directly instead of clicking the rendered button:
+going through the button would assert the `disabled` attribute again rather than
+the guard behind it, and would pass against a host with no guard at all.
+
+-}
+saveWithNoChosenStatusIssuesNoRequest : Test
+saveWithNoChosenStatusIssuesNoRequest =
+    test "save_guard: Save on a card with NO recorded status issues no PUT at all" <|
+        \() ->
+            startDetailWith libraryPlacement
+                -- Open the card without choosing a status, so draftStatus is
+                -- Nothing — the state the fixture's payload actually describes.
+                |> ProgramTest.clickButton "Not recorded"
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ]
+                -- ⛔ Driven as the card's own SaveClicked, routed through the
+                -- host's ProgressCardMsg — the exact path a click takes once
+                -- the button is enabled. Clicking the rendered button instead
+                -- would assert the `disabled` attribute, which is the half
+                -- already covered and the half that is not the write.
+                |> ProgramTest.update (BookDetail.ProgressCardMsg Card.SaveClicked)
+                |> ProgramTest.ensureHttpRequests "PUT"
+                    progressEndpoint
+                    (List.length >> Expect.equal 0)
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "status-select") ]
+                -- ⛔ Not redundant with the open form, and the sibling host
+                -- proves why: `SaveClicked` sets `saving = True` before the
+                -- guard refuses, so a host that forgets `Card.stopSaving`
+                -- leaves the card on "Saving…" with Save disabled and no
+                -- response ever arriving. That stuck state satisfies every
+                -- form-is-open assertion. ReadingPile had exactly this bug
+                -- while its guard test passed.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "save-progress-btn")
+                    , Selector.text "Save"
+                    ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "Saving…" ]
 
 
 cardRendersForReadableShelf : Test
 cardRendersForReadableShelf =
-    test "card_mounts: the progress card renders at its To Read default, because the book-detail contract carries no progress" <|
+    test "card_mounts: an absent reading status renders as NOT RECORDED, never as To Read" <|
         \() ->
             startDetailWith libraryPlacement
                 |> ProgramTest.ensureViewHas [ Selector.class "book-detail__progress" ]
                 |> ProgramTest.ensureViewHas [ Selector.text "Reading Progress" ]
                 |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-status-badge")
+                    , Selector.text "Not recorded"
+                    ]
+                -- ⛔ The assertion that would have been RED before this change:
+                -- the badge must not claim a status the server never sent.
+                |> ProgramTest.ensureViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-status-badge")
                     , Selector.text "To Read"
                     ]

@@ -12,7 +12,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
       The worker emits a `costs.refreshed` event on success.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 
@@ -44,6 +44,18 @@ defmodule Stacks.Workers.RefreshCostsJob do
         fly_services_cents: fly_services_cents,
         neon_cents: neon_cents,
         together_completions: metric_count("stacks_ai_together_completion_count_total"),
+        gpu_cold_starts: metric_count("stacks_vision_gpu_cold_start_count_total"),
+
+        # ⚖️ Seconds, from a millisecond counter — the inference line is priced
+        # per GPU-second and converting at the read keeps one unit in the
+        # builder rather than two that could be confused there.
+        gpu_active_seconds: gpu_active_seconds(),
+        # ⛔ WITHOUT THIS LINE THE IDLE COST IS BUILT AND UNREACHABLE. The
+        # builder, the model, the rate and the panel all existed and the page
+        # still rendered "not yet measured", because nothing supplied the
+        # count — the defect class where every piece is present and no caller
+        # joins them.
+
         brave_searches: metric_count("stacks_discovery_brave_search_count_total"),
         isbn_lookups: metric_count("stacks_moderation_isbn_resolution_count_total"),
         emails_sent: unwrap(Costs.emails_this_month())
@@ -111,5 +123,16 @@ defmodule Stacks.Workers.RefreshCostsJob do
   defp end_of_month(%DateTime{} = dt) do
     days = Calendar.ISO.days_in_month(dt.year, dt.month)
     %{dt | day: days, hour: 23, minute: 59, second: 59, microsecond: {999_999, 6}}
+  end
+
+  # ⚠️ Returns nil rather than 0 when the meter says nothing. A zero here would
+  # price a month of inferences at nothing and render as a real "$0.00" on a
+  # public page — the exact conflation the cost basis vocabulary was added to
+  # remove, and the reason `metric_count/1`'s nil path exists.
+  defp gpu_active_seconds do
+    case metric_count("stacks_vision_gpu_active_milliseconds_total") do
+      ms when is_integer(ms) and ms > 0 -> ms / 1000
+      _ -> nil
+    end
   end
 end

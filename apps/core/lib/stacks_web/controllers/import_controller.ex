@@ -84,6 +84,14 @@ defmodule StacksWeb.ImportController do
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 
+      {:error, :unknown_outcome} ->
+        # Names the roster rather than just refusing. The caller asked for a
+        # filter by spelling, and the only thing that fixes a misspelling is
+        # knowing the spellings.
+        conn
+        |> put_status(422)
+        |> json(%{error: "unknown_outcome", valid_outcomes: Imports.row_outcomes()})
+
       {:ok, rows} ->
         json(conn, %{rows: Enum.map(rows, &row_json/1)})
     end
@@ -93,7 +101,10 @@ defmodule StacksWeb.ImportController do
     %{
       id: import.id,
       source: import.source,
-      filename: import.filename,
+      # Coalesced for the same reason the four row columns below are: the
+      # column is nullable, the client's decoder requires a string, and a
+      # failed decode here takes the whole import page rather than one label.
+      filename: import.filename || "",
       status: import.status,
       row_count: import.row_count,
       processed_count: import.processed_count,
@@ -107,12 +118,19 @@ defmodule StacksWeb.ImportController do
   end
 
   defp row_json(row) do
+    # An UNREADABLE row never had these parsed — `GoodreadsCsv` emits only
+    # `row_number`/`outcome`/`reason` for it, and `insert_all` applies no changeset or
+    # schema default, so the columns are NULL. They are coalesced here because the
+    # client's decoder requires all four as strings, and `Decode.list` fails the WHOLE
+    # report for one bad row: a single malformed line made the entire import report
+    # unreadable, permanently. The row still says what happened — `outcome` and
+    # `reason` carry that, and both are already nullable on the wire.
     %{
       row_number: row.row_number,
-      title: row.raw_title,
-      author: row.raw_author,
-      isbn13: row.raw_isbn13,
-      goodreads_shelf: row.goodreads_shelf,
+      title: row.raw_title || "",
+      author: row.raw_author || "",
+      isbn13: row.raw_isbn13 || "",
+      goodreads_shelf: row.goodreads_shelf || "",
       outcome: row.outcome,
       reason: row.reason,
       book_id: row.book_id

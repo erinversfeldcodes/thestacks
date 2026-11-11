@@ -1,4 +1,4 @@
-import { test, expect, Page, Route } from "@playwright/test";
+import { test, expect, Page, Route, newProvenContext } from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("upload") });
@@ -71,7 +71,19 @@ function fakePlacement(bookId: string = FAKE_BOOK_ID) {
   };
 }
 
-const MOCK_R2_PUT_PATH = `/__mock_r2_put__/${FAKE_IMAGE_ID}`;
+// ⛔ THE BYTES GO TO OUR OWN ORIGIN, NOT TO OBJECT STORAGE.
+//
+// This was `/__mock_r2_put__/<id>`, mocked on the belief that the client PUT to
+// the presigned `upload_url` the init step returned. It has not since July:
+// `Uploads.init_upload/2` returns `/api/upload/<id>/data`, a route on our own
+// origin, and `Api.putUploadBytes` takes an imageId and builds that path itself
+// — deliberately, because treating the destination as cross-origin sent no CSRF
+// header and every upload was refused once enforcement went on.
+//
+// So the old mock was wrong twice over: it described a destination the server
+// does not return, and it routed a path the client never requests. The client's
+// real PUT went unmocked, which is why most of this file reported `not-sent`.
+const UPLOAD_PUT_PATH = `/api/upload/${FAKE_IMAGE_ID}/data`;
 
 /**
  * Mock the 3-step presigned-URL upload flow:
@@ -91,7 +103,7 @@ async function mockUploadAccept(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({
           image_id: FAKE_IMAGE_ID,
-          upload_url: MOCK_R2_PUT_PATH,
+          upload_url: UPLOAD_PUT_PATH,
           expires_in: 3600,
         }),
       });
@@ -99,7 +111,7 @@ async function mockUploadAccept(page: Page) {
       route.continue();
     }
   });
-  await page.route(`**${MOCK_R2_PUT_PATH}`, (route) => {
+  await page.route(`**${UPLOAD_PUT_PATH}`, (route) => {
     if (route.request().method() === "PUT") {
       route.fulfill({ status: 200, body: "" });
     } else {
@@ -147,7 +159,7 @@ async function mockUploadFailure(page: Page) {
  */
 async function injectEventSourceMock(
   page: Page,
-  config: { payload?: object; type?: "error" | "pending" }
+  config: { payload?: object; type?: "error" | "pending" },
 ) {
   await page.addInitScript((cfg) => {
     (window as any).__mockSSEConfig = cfg;
@@ -159,6 +171,15 @@ async function injectEventSourceMock(
 
       constructor(url: string) {
         this.url = url;
+        // ⛔ EVERY url this page opens, recorded on the window — and the RESET is
+        // what makes it useful. A reload builds a fresh `window`, so this array
+        // starts empty again; anything in it afterwards was opened by the
+        // reloaded page, which is exactly the claim "a reader who reloaded still
+        // gets live progress" needs. `addInitScript` re-runs on every
+        // navigation, so the mock is in place before Elm boots either time.
+        const seen = ((window as any).__sseUrls =
+          (window as any).__sseUrls || []);
+        seen.push(url);
         const config = (window as any).__mockSSEConfig;
         if (!config) return;
 
@@ -178,7 +199,9 @@ async function injectEventSourceMock(
         }
       }
 
-      close() { this.readyState = 2; }
+      close() {
+        this.readyState = 2;
+      }
       addEventListener() {}
       removeEventListener() {}
     };
@@ -192,7 +215,7 @@ async function mockPollResolved(
     bookId?: string;
     bookIds?: string[];
     isDuplicate?: boolean;
-  } = {}
+  } = {},
 ) {
   const bookId = opts.bookId ?? FAKE_BOOK_ID;
   const bookIds = opts.bookIds ?? [bookId];
@@ -283,7 +306,7 @@ async function mockPollNotABook(page: Page) {
 async function mockGetBook(
   page: Page,
   bookId: string = FAKE_BOOK_ID,
-  book?: Record<string, unknown>
+  book?: Record<string, unknown>,
 ) {
   await page.route(`**/api/books/${bookId}`, (route) => {
     if (route.request().method() === "GET") {
@@ -334,7 +357,7 @@ async function mockPlacementFailure(page: Page) {
 /** Mock POST /api/books/:id/merge-format to succeed. */
 async function mockMergeFormatSuccess(
   page: Page,
-  bookId: string = FAKE_BOOK_ID
+  bookId: string = FAKE_BOOK_ID,
 ) {
   await page.route(`**/api/books/${bookId}/merge-format`, (route) => {
     route.fulfill({
@@ -359,7 +382,7 @@ async function mockMergeFormatSuccess(
 /** Mock POST /api/books/:id/merge-format to fail. */
 async function mockMergeFormatFailure(
   page: Page,
-  bookId: string = FAKE_BOOK_ID
+  bookId: string = FAKE_BOOK_ID,
 ) {
   await page.route(`**/api/books/${bookId}/merge-format`, (route) => {
     route.fulfill({
@@ -380,7 +403,7 @@ async function triggerFileUpload(page: Page) {
   const fileChooser = await fileChooserPromise;
   const pngBuffer = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    "base64"
+    "base64",
   );
   await fileChooser.setFiles({
     name: "test-book.png",
@@ -396,23 +419,20 @@ async function triggerDragAndDrop(page: Page) {
   const dropZone = page.getByTestId("upload-drop-zone");
   const pngBuffer = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    "base64"
+    "base64",
   );
 
-  const dataTransfer = await page.evaluateHandle(
-    async (b64) => {
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      const file = new File([bytes], "test-book.png", { type: "image/png" });
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      return dt;
-    },
-    pngBuffer.toString("base64")
-  );
+  const dataTransfer = await page.evaluateHandle(async (b64) => {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const file = new File([bytes], "test-book.png", { type: "image/png" });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    return dt;
+  }, pngBuffer.toString("base64"));
 
   await dropZone.dispatchEvent("dragover", { dataTransfer });
   await dropZone.dispatchEvent("drop", { dataTransfer });
@@ -434,17 +454,17 @@ test.describe("Happy paths", () => {
     await expect(page.getByTestId("upload-loading")).toBeVisible();
     await expect(page.getByTestId("upload-loading")).toHaveAttribute(
       "role",
-      "status"
+      "status",
     );
 
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.getByTestId("upload-verify")).toContainText(
-      "We think this is"
+      "We think this is",
     );
     await expect(page.getByTestId("upload-verify")).toContainText(
-      "The Name of the Rose"
+      "The Name of the Rose",
     );
     await expect(page.getByTestId("upload-verify")).toContainText("Eco");
 
@@ -452,28 +472,26 @@ test.describe("Happy paths", () => {
 
     await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
 
-    await page
-      .getByRole("button", { name: /Add to Wish List/ })
-      .click();
+    await page.getByRole("button", { name: /Add to Wish List/ }).click();
 
     await expect(page.getByTestId("upload-complete")).toBeVisible();
     await expect(page.getByTestId("upload-complete")).toContainText(
-      "The Name of the Rose"
+      "The Name of the Rose",
     );
     await expect(page.getByTestId("upload-complete")).toContainText(
-      "Wish List"
+      "Wish List",
     );
     await expect(page.getByTestId("upload-complete")).toHaveAttribute(
       "role",
-      "status"
+      "status",
     );
 
     await expect(
-      page.getByRole("button", { name: "View on shelf" })
+      page.getByRole("button", { name: "View on shelf" }),
     ).toBeVisible();
 
     await expect(
-      page.getByRole("button", { name: "Add another" })
+      page.getByRole("button", { name: "Add another" }),
     ).toBeVisible();
   });
 
@@ -493,14 +511,12 @@ test.describe("Happy paths", () => {
       timeout: 10_000,
     });
     await expect(page.getByTestId("upload-verify")).toContainText(
-      "The Name of the Rose"
+      "The Name of the Rose",
     );
 
     await page.getByTestId("upload-confirm-btn").click();
     await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
-    await page
-      .getByRole("button", { name: /Add to Wish List/ })
-      .click();
+    await page.getByRole("button", { name: /Add to Wish List/ }).click();
     await expect(page.getByTestId("upload-complete")).toBeVisible();
   });
 
@@ -524,23 +540,26 @@ test.describe("Happy paths", () => {
     await expect(shelfPicker).toBeVisible();
 
     await expect(
-      shelfPicker.getByRole("button", { name: "Library", exact: true })
+      shelfPicker.getByRole("button", { name: "Library", exact: true }),
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Antilibrary", exact: true })
+      shelfPicker.getByRole("button", { name: "Antilibrary", exact: true }),
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Wish List", exact: true })
+      shelfPicker.getByRole("button", { name: "Wish List", exact: true }),
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Reading Pile", exact: true })
+      shelfPicker.getByRole("button", { name: "Reading Pile", exact: true }),
     ).toBeVisible();
     await expect(
-      shelfPicker.getByRole("button", { name: "Looking for a Home", exact: true })
+      shelfPicker.getByRole("button", {
+        name: "Looking for a Home",
+        exact: true,
+      }),
     ).toBeVisible();
 
     await expect(
-      shelfPicker.getByRole("button", { name: /Add to Wish List/ })
+      shelfPicker.getByRole("button", { name: /Add to Wish List/ }),
     ).toBeVisible();
 
     await shelfPicker
@@ -548,12 +567,10 @@ test.describe("Happy paths", () => {
       .click();
 
     await expect(
-      shelfPicker.getByRole("button", { name: /Add to Library/ })
+      shelfPicker.getByRole("button", { name: /Add to Library/ }),
     ).toBeVisible();
 
-    await shelfPicker
-      .getByRole("button", { name: /Add to Library/ })
-      .click();
+    await shelfPicker.getByRole("button", { name: /Add to Library/ }).click();
 
     await expect(page.getByTestId("upload-complete")).toBeVisible();
     await expect(page.getByTestId("upload-complete")).toContainText("Library");
@@ -574,9 +591,7 @@ test.describe("Happy paths", () => {
       timeout: 10_000,
     });
     await page.getByTestId("upload-confirm-btn").click();
-    await page
-      .getByRole("button", { name: /Add to Wish List/ })
-      .click();
+    await page.getByRole("button", { name: /Add to Wish List/ }).click();
     await expect(page.getByTestId("upload-complete")).toBeVisible();
 
     await page.getByRole("button", { name: "View on shelf" }).click();
@@ -596,15 +611,13 @@ test.describe("Sad paths", () => {
     });
     await expect(page.getByTestId("upload-error")).toHaveAttribute(
       "data-failure-cause",
-      "not-sent"
+      "not-sent",
     );
     await expect(page.getByTestId("upload-error")).toContainText(
-      "we cannot say why"
+      "we cannot say why",
     );
 
-    await expect(
-      page.getByRole("button", { name: "Try Again" })
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try Again" })).toBeVisible();
 
     await page.unroute("**/api/upload/init");
     await mockUploadAccept(page);
@@ -631,18 +644,18 @@ test.describe("Sad paths", () => {
     });
     await expect(page.getByTestId("upload-error")).toHaveAttribute(
       "data-failure-cause",
-      "connection-lost"
+      "connection-lost",
     );
     await expect(page.getByTestId("upload-error")).toContainText(
-      "The Library Is Unreachable"
+      "The Library Is Unreachable",
     );
 
     await expect(
-      page.getByRole("button", { name: /Enter ISBN Manually/ })
+      page.getByRole("button", { name: /Enter ISBN Manually/ }),
     ).toBeVisible();
 
     await expect(
-      page.getByRole("button", { name: /Try Another Photo/ })
+      page.getByRole("button", { name: /Try Another Photo/ }),
     ).toBeVisible();
   });
 
@@ -660,17 +673,17 @@ test.describe("Sad paths", () => {
     });
     await expect(page.getByTestId("upload-error")).toHaveAttribute(
       "data-failure-cause",
-      "isbn-unreadable"
+      "isbn-unreadable",
     );
     await expect(page.getByTestId("upload-error")).toContainText(
-      "Could Not Read the ISBN"
+      "Could Not Read the ISBN",
     );
 
     await expect(
-      page.getByRole("button", { name: /Enter ISBN Manually/ })
+      page.getByRole("button", { name: /Enter ISBN Manually/ }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /Try Another Photo/ })
+      page.getByRole("button", { name: /Try Another Photo/ }),
     ).toBeVisible();
   });
 
@@ -687,12 +700,10 @@ test.describe("Sad paths", () => {
       timeout: 10_000,
     });
     await expect(page.getByTestId("upload-error")).toContainText(
-      "Doesn't Look Like a Book"
+      "Doesn't Look Like a Book",
     );
 
-    await expect(
-      page.getByRole("button", { name: "Try Again" })
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try Again" })).toBeVisible();
   });
 
   test("placement API failure (422) -> error -> retry", async ({ page }) => {
@@ -712,16 +723,14 @@ test.describe("Sad paths", () => {
     const shelfPicker = page.getByTestId("upload-shelf-picker");
     await expect(shelfPicker).toBeVisible();
 
-    await page
-      .getByRole("button", { name: /Add to Wish List/ })
-      .click();
+    await page.getByRole("button", { name: /Add to Wish List/ }).click();
 
     await expect(shelfPicker).toContainText("Failed to add book", {
       timeout: 10_000,
     });
 
     await expect(
-      shelfPicker.getByRole("button", { name: /Add to/ })
+      shelfPicker.getByRole("button", { name: /Add to/ }),
     ).toBeVisible();
 
     await page.unroute("**/api/bookshelves/*/placements");
@@ -747,13 +756,13 @@ test.describe("Sad paths", () => {
     });
     await expect(page.getByTestId("upload-error")).toHaveAttribute(
       "data-failure-cause",
-      "connection-lost"
+      "connection-lost",
     );
 
     await expect(
       page
         .getByRole("button", { name: /Try Another Photo/ })
-        .or(page.getByRole("button", { name: /Try Again/ }))
+        .or(page.getByRole("button", { name: /Try Again/ })),
     ).toBeVisible();
   });
 
@@ -761,7 +770,7 @@ test.describe("Sad paths", () => {
     browser,
     baseURL,
   }) => {
-    const context = await browser.newContext({ baseURL });
+    const context = await newProvenContext(browser, { baseURL });
     const page = await context.newPage();
 
     await page.goto("/upload", { waitUntil: "networkidle" });
@@ -771,7 +780,7 @@ test.describe("Sad paths", () => {
       page
         .locator('input[id="email"]')
         .or(page.getByTestId("upload-auth-required"))
-        .or(page.getByTestId("upload-drop-zone"))
+        .or(page.getByTestId("upload-drop-zone")),
     ).toBeVisible({ timeout: 15000 });
 
     await context.close();
@@ -798,17 +807,13 @@ test.describe("Duplicate detection", () => {
     });
 
     await expect(
-      page.getByRole("button", { name: "Yes, merge" })
+      page.getByRole("button", { name: "Yes, merge" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "No, add as separate" })
+      page.getByRole("button", { name: "No, add as separate" }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "View Book" })
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Go Back" })
-    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "View Book" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Go Back" })).toBeVisible();
   });
 
   test("'No, add as separate' proceeds to shelf picker", async ({ page }) => {
@@ -819,13 +824,11 @@ test.describe("Duplicate detection", () => {
       timeout: 10_000,
     });
 
-    await page
-      .getByRole("button", { name: "No, add as separate" })
-      .click();
+    await page.getByRole("button", { name: "No, add as separate" }).click();
 
     await expect(page.getByTestId("upload-verify")).toBeVisible();
     await expect(page.getByTestId("upload-verify")).toContainText(
-      "The Name of the Rose"
+      "The Name of the Rose",
     );
   });
 
@@ -854,9 +857,7 @@ test.describe("Duplicate detection", () => {
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(
-      page.getByText("Already in Your Library")
-    ).not.toBeVisible();
+    await expect(page.getByText("Already in Your Library")).not.toBeVisible();
   });
 
   test("'View Book' links to book detail", async ({ page }) => {
@@ -890,17 +891,17 @@ test.describe("Multi-format merge", () => {
 
     await expect(
       page.getByText(
-        /The Paperback edition \(ISBN 9780151446476\) is now listed/
-      )
+        /The Paperback edition \(ISBN 9780151446476\) is now listed/,
+      ),
     ).toBeVisible({
       timeout: 10_000,
     });
 
     await expect(
-      page.getByRole("link", { name: "View book details" })
+      page.getByRole("link", { name: "View book details" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Add another" })
+      page.getByRole("button", { name: "Add another" }),
     ).toBeVisible();
   });
 
@@ -930,8 +931,8 @@ test.describe("Multi-format merge", () => {
 
     await expect(
       page.getByText(
-        /The Paperback edition \(ISBN 9780151446476\) is now listed/
-      )
+        /The Paperback edition \(ISBN 9780151446476\) is now listed/,
+      ),
     ).toBeVisible({
       timeout: 10_000,
     });
@@ -1006,10 +1007,10 @@ test.describe("Age-gated content", () => {
       timeout: 10_000,
     });
     await expect(page.getByTestId("upload-verify")).toContainText(
-      "We think this is"
+      "We think this is",
     );
     await expect(page.getByTestId("upload-verify")).toContainText(
-      "The Name of the Rose"
+      "The Name of the Rose",
     );
     await expect(page.getByTestId("upload-verify")).toContainText("Eco");
 
@@ -1017,25 +1018,175 @@ test.describe("Age-gated content", () => {
 
     await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
 
-    await page
-      .getByRole("button", { name: /Add to Wish List/ })
-      .click();
+    await page.getByRole("button", { name: /Add to Wish List/ }).click();
 
     await expect(page.getByTestId("upload-complete")).toBeVisible();
     await expect(page.getByTestId("upload-complete")).toContainText(
-      "The Name of the Rose"
+      "The Name of the Rose",
     );
     await expect(page.getByTestId("upload-complete")).toContainText(
-      "Wish List"
+      "Wish List",
     );
 
     await expect(
-      page.getByRole("button", { name: "View on shelf" })
+      page.getByRole("button", { name: "View on shelf" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Add another" })
+      page.getByRole("button", { name: "Add another" }),
     ).toBeVisible();
+  });
+});
 
+test.describe("the upload PUT carries the proof its route requires", () => {
+  /**
+   * ⛔ THE DEFECT THIS GUARDS, AND IT KILLED EVERY UPLOAD. The byte PUT goes to
+   * `/api/upload/:id/data` — a route on our OWN origin, chosen so the browser
+   * never needs an object-storage CORS allowlist. The client declared it
+   * cross-origin anyway, on the strength of a docstring that said "Bytes never
+   * touch Phoenix — the client PUTs straight to R2", which had outlived the
+   * design by three months. A cross-origin declaration sends no CSRF header, and
+   * CSRF enforcement refuses a state-changing request without one. Every photo
+   * upload was rejected.
+   *
+   * ⚠️ NOTHING ASSERTED THIS. The mock fulfils the PUT at status 200 without
+   * looking at a single header, so the request could carry no proof at all — or
+   * a credential it should not — and every case in this file would stay green.
+   * `grep csrf` over this spec returned nothing before these cases.
+   *
+   * ⚖️ Asserted on the REQUEST the browser actually made, captured through the
+   * route handler, rather than on the Elm source that builds it. The whole defect
+   * was a gap between what the source said and what went on the wire.
+   */
+  test("the byte PUT sends the CSRF proof, and the mock cannot hide its absence", async ({
+    page,
+  }) => {
+    const putHeaders: Array<Record<string, string>> = [];
+
+    await page.route("**/api/upload/init", (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          image_id: FAKE_IMAGE_ID,
+          upload_url: UPLOAD_PUT_PATH,
+          expires_in: 3600,
+        }),
+      }),
+    );
+
+    // ⛔ Capture BEFORE fulfilling. A handler that answers 200 and discards the
+    // request is exactly what let this defect live behind green tests.
+    await page.route(`**${UPLOAD_PUT_PATH}`, (route) => {
+      if (route.request().method() === "PUT") {
+        putHeaders.push(route.request().headers());
+        route.fulfill({ status: 200, body: "" });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.route("**/api/upload/*/commit", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ image_id: FAKE_IMAGE_ID }),
+      }),
+    );
+
+    await mockPollPending(page);
+
+    await page.goto("/upload");
+    await triggerFileUpload(page);
+
+    await expect
+      .poll(() => putHeaders.length, {
+        message: "the byte PUT must actually be sent",
+      })
+      .toBeGreaterThan(0);
+
+    const headers = putHeaders[0];
+    const names = Object.keys(headers).map((n) => n.toLowerCase());
+
+    expect(
+      names,
+      "the PUT must carry an X-CSRF-Token — without it the server refuses the " +
+        "upload, which is what a cross-origin declaration caused",
+    ).toContain("x-csrf-token");
+
+    expect(
+      headers["x-csrf-token"],
+      "the header must carry the token's value, not an empty placeholder",
+    ).toBeTruthy();
+  });
+});
+
+test.describe("live progress after a reload", () => {
+  /**
+   * ⛔ THE REGRESSION THE STORED-SESSION DELETION LEFT BEHIND. The progress
+   * stream used to carry a bearer token in its QUERY STRING, because
+   * `EventSource` cannot set an `Authorization` header — a live credential in
+   * request logs, in `Referer` and in browser history. Its no-bearer branch
+   * answered `NoOut`, and once the SPA stopped storing a session that was EVERY
+   * reader who had not just signed in: reload the upload page and you got no
+   * live progress at all.
+   *
+   * The stream takes no credential now and relies on the session cookie, which a
+   * same-origin `EventSource` sends like any other request. ⚠️ So the claim worth
+   * testing is not that the url is clean — a grep shows that, and a stream which
+   * opened and delivered nothing would satisfy it — but that **a reloaded page
+   * still receives frames**.
+   *
+   * ⚖️ RELOAD FIRST, THEN UPLOAD, which is the order the requirement states and
+   * is the case the defect was in. (Reloading MID-upload is a different claim —
+   * resuming an in-flight identification — which nothing specifies and which the
+   * page does not do: it returns to the drop zone and the upload appears in the
+   * inbox instead.)
+   */
+  test("a reader who reloaded can upload and still receives progress frames", async ({
+    page,
+  }) => {
+    await mockUploadAccept(page);
+    await mockPollResolved(page);
+    await mockGetBook(page);
+
+    await page.goto("/upload");
+
+    // ⛔ The reload is the precondition, not the subject. After it the Elm model
+    // is rebuilt from nothing and the only credential in the browser is the
+    // HttpOnly cookie — the exact state the deleted stored session used to hide.
+    await page.reload();
+    await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
+
+    await triggerFileUpload(page);
+
+    // Frames arrived: the stream opened AND delivered, which is the half a
+    // url-only assertion cannot see.
+    //
+    // ⚠️ `mockPollResolved` resolves ONE book, which renders "We think this is…"
+    // and the title. This first asserted `"Books Identified!"` — the MULTI-book
+    // heading — and failed against a page that had identified the book perfectly
+    // well. The assertion was wrong, not the product.
+    await expect(page.getByText("We think this is")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText("The Name of the Rose")).toBeVisible();
+
+    const urls = await page.evaluate(
+      () => ((window as any).__sseUrls || []) as string[],
+    );
+    expect(
+      urls.length,
+      "the reloaded page must open the stream",
+    ).toBeGreaterThan(0);
+
+    // ⛔ And it must still be a bare path. A regression that reintroduced the
+    // credential would open the stream and deliver frames exactly as above.
+    for (const url of urls) {
+      expect(url, "the stream url must carry no query string").not.toContain(
+        "?",
+      );
+      expect(url.toLowerCase()).not.toContain("token");
+    }
   });
 });
 
@@ -1072,18 +1223,14 @@ test.describe("ARIA and accessibility", () => {
       timeout: 10_000,
     });
     await page.getByTestId("upload-confirm-btn").click();
-    await page
-      .getByRole("button", { name: /Add to Wish List/ })
-      .click();
+    await page.getByRole("button", { name: /Add to Wish List/ }).click();
 
     const complete = page.getByTestId("upload-complete");
     await expect(complete).toBeVisible({ timeout: 10_000 });
     await expect(complete).toHaveAttribute("role", "status");
   });
 
-  test("drop zone is keyboard-accessible via file picker", async ({
-    page,
-  }) => {
+  test("drop zone is keyboard-accessible via file picker", async ({ page }) => {
     await page.goto("/upload");
 
     const chooseBtn = page.getByRole("button", { name: "Choose Photo" });
@@ -1124,94 +1271,44 @@ async function mockPollTimedOut(page: Page) {
 
 const FAILURE_BUDGET_MS = 5_000;
 
-test.describe(
-  "Failure copy names its cause, quickly",
-  () => {
-    const cases = [
-      {
-        name: "an image the service could not decode",
-        reason: "undecodable_image",
-        cause: "image-unreadable",
-        says: "That Photo Could Not Be Opened",
-        doesNotSay: "could not make out its ISBN",
-      },
-      {
-        name: "a photo with no book in it",
-        reason: "not_a_book",
-        cause: "not-a-book",
-        says: "That Doesn't Look Like a Book",
-        doesNotSay: "could not make out its ISBN",
-      },
-      {
-        name: "the vision service being down",
-        reason: "vision_unavailable",
-        cause: "service-unavailable",
-        says: "There is nothing wrong with your photo.",
-        doesNotSay: "Try a clearer image",
-      },
-      {
-        name: "a token this client has never seen",
-        reason: "shelf_gremlins",
-        cause: "unknown",
-        says: "we cannot say why",
-        doesNotSay: "could not make out its ISBN",
-      },
-    ];
+test.describe("Failure copy names its cause, quickly", () => {
+  const cases = [
+    {
+      name: "an image the service could not decode",
+      reason: "undecodable_image",
+      cause: "image-unreadable",
+      says: "That Photo Could Not Be Opened",
+      doesNotSay: "could not make out its ISBN",
+    },
+    {
+      name: "a photo with no book in it",
+      reason: "not_a_book",
+      cause: "not-a-book",
+      says: "That Doesn't Look Like a Book",
+      doesNotSay: "could not make out its ISBN",
+    },
+    {
+      name: "the vision service being down",
+      reason: "vision_unavailable",
+      cause: "service-unavailable",
+      says: "There is nothing wrong with your photo.",
+      doesNotSay: "Try a clearer image",
+    },
+    {
+      name: "a token this client has never seen",
+      reason: "shelf_gremlins",
+      cause: "unknown",
+      says: "we cannot say why",
+      doesNotSay: "could not make out its ISBN",
+    },
+  ];
 
-    for (const c of cases) {
-      test(`${c.name} says so, within ${FAILURE_BUDGET_MS / 1000}s`, async ({
-        page,
-      }) => {
-        await mockUploadAccept(page);
-        await mockPollRejectedWith(page, c.reason);
-
-        await page.goto("/upload");
-        const startedAt = Date.now();
-        await triggerFileUpload(page);
-
-        const error = page.getByTestId("upload-error");
-        await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
-        expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
-
-        await expect(error).toHaveAttribute("data-failure-cause", c.cause);
-        await expect(error).toContainText(c.says);
-        await expect(error).not.toContainText(c.doesNotSay);
-      });
-    }
-
-    test(`a stream that times out reports no verdict, within ${
-      FAILURE_BUDGET_MS / 1000
-    }s`, async ({ page }) => {
-      await mockUploadAccept(page);
-      await mockPollTimedOut(page);
-
-      await page.goto("/upload");
-      const startedAt = Date.now();
-      await triggerFileUpload(page);
-
-      const error = page.getByTestId("upload-error");
-      await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
-      expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
-
-      await expect(error).toHaveAttribute("data-failure-cause", "timed-out");
-      await expect(error).toContainText("No Answer Came Back");
-      await expect(error).toContainText(
-        "Nothing has been added to your shelves."
-      );
-      await expect(error).not.toContainText("could not make out its ISBN");
-    });
-
-    test("a 429 on the upload names the wait rather than urging a retry", async ({
+  for (const c of cases) {
+    test(`${c.name} says so, within ${FAILURE_BUDGET_MS / 1000}s`, async ({
       page,
     }) => {
-      await page.route("**/api/upload/init", (route) =>
-        route.fulfill({
-          status: 429,
-          headers: { "retry-after": "60" },
-          contentType: "application/json",
-          body: JSON.stringify({ error: "rate_limit_exceeded" }),
-        })
-      );
+      await mockUploadAccept(page);
+      await mockPollRejectedWith(page, c.reason);
 
       await page.goto("/upload");
       const startedAt = Date.now();
@@ -1221,9 +1318,56 @@ test.describe(
       await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
       expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
 
-      await expect(error).toHaveAttribute("data-failure-cause", "not-sent");
-      await expect(error).toContainText("Too many attempts from here just now.");
-      await expect(error).not.toContainText("Upload failed. Please try again.");
+      await expect(error).toHaveAttribute("data-failure-cause", c.cause);
+      await expect(error).toContainText(c.says);
+      await expect(error).not.toContainText(c.doesNotSay);
     });
   }
-);
+
+  test(`a stream that times out reports no verdict, within ${
+    FAILURE_BUDGET_MS / 1000
+  }s`, async ({ page }) => {
+    await mockUploadAccept(page);
+    await mockPollTimedOut(page);
+
+    await page.goto("/upload");
+    const startedAt = Date.now();
+    await triggerFileUpload(page);
+
+    const error = page.getByTestId("upload-error");
+    await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
+    expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
+
+    await expect(error).toHaveAttribute("data-failure-cause", "timed-out");
+    await expect(error).toContainText("No Answer Came Back");
+    await expect(error).toContainText(
+      "Nothing has been added to your shelves.",
+    );
+    await expect(error).not.toContainText("could not make out its ISBN");
+  });
+
+  test("a 429 on the upload names the wait rather than urging a retry", async ({
+    page,
+  }) => {
+    await page.route("**/api/upload/init", (route) =>
+      route.fulfill({
+        status: 429,
+        headers: { "retry-after": "60" },
+        contentType: "application/json",
+        body: JSON.stringify({ error: "rate_limit_exceeded" }),
+      }),
+    );
+
+    await page.goto("/upload");
+    const startedAt = Date.now();
+    await triggerFileUpload(page);
+
+    const error = page.getByTestId("upload-error");
+    await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
+    expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
+
+    await expect(error).toHaveAttribute("data-failure-cause", "not-sent");
+    await expect(error).toContainText("Too many attempts from here just now.");
+    await expect(error).not.toContainText("Upload failed. Please try again.");
+  });
+});

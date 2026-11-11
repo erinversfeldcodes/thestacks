@@ -10,6 +10,7 @@ defmodule StacksWeb.GDPRController do
   alias Stacks.GDPR.Consent
   alias Stacks.Workers.AccountDeletionJob
   alias Stacks.Workers.DataExportJob
+  alias StacksWeb.SessionTeardown
 
   @doc "POST /api/gdpr/export — enqueue a data export job."
   def export(conn, _params) do
@@ -39,7 +40,16 @@ defmodule StacksWeb.GDPRController do
       |> AccountDeletionJob.new()
       |> Oban.insert()
 
+    # ⛔ THE SESSION ENDS ON THE 202, not when the Oban job happens to run. Until
+    # this was here the browser held a working credential for the account it had
+    # just asked to erase, for as long as the queue took.
+    #
+    # ⚖️ The erasure's own `:revoke_sessions` step is what GUARANTEES the token is
+    # gone — it re-counts `op.guardian_tokens` after the delete and fails the job
+    # if any row survives. This closes the window before that runs, and clears
+    # the reader's cookie so they are not left holding one that looks live.
     conn
+    |> SessionTeardown.end_session(:everywhere)
     |> put_status(202)
     |> json(%{status: "accepted", message: "Account deletion has been queued."})
   end

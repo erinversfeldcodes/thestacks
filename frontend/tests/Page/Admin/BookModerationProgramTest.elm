@@ -20,7 +20,7 @@ import Test.Html.Selector as Selector
 import TestHelpers
 
 
-bmInitEffect : BM.Model -> Maybe String -> SimulatedEffect BM.Msg
+bmInitEffect : BM.Model -> Maybe Api.Credentials -> SimulatedEffect BM.Msg
 bmInitEffect model maybeToken =
     case maybeToken of
         Just token ->
@@ -32,7 +32,7 @@ bmInitEffect model maybeToken =
             SimulatedEffect.Cmd.none
 
 
-bmEffects : BM.Msg -> Maybe String -> SimulatedEffect BM.Msg
+bmEffects : BM.Msg -> Maybe Api.Credentials -> SimulatedEffect BM.Msg
 bmEffects msg maybeToken =
     case ( msg, maybeToken ) of
         ( BM.ToggleAgeGate bookId newAgeGated, Just token ) ->
@@ -47,7 +47,7 @@ bmEffects msg maybeToken =
             SimulatedEffect.Cmd.none
 
 
-program : Maybe String -> ProgramDefinition () BM.Model BM.Msg (SimulatedEffect BM.Msg)
+program : Maybe Api.Credentials -> ProgramDefinition () BM.Model BM.Msg (SimulatedEffect BM.Msg)
 program maybeToken =
     ProgramTest.createElement
         { init =
@@ -123,7 +123,7 @@ loadsList : Test
 loadsList =
     test "loads and renders the book list with tiers" <|
         \() ->
-            ProgramTest.start () (program (Just "admin-token"))
+            ProgramTest.start () (program (Just (TestHelpers.creds "admin-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/admin/books?page=1"
                     (booksListResponse
@@ -140,7 +140,7 @@ togglesRow : Test
 togglesRow =
     test "toggling a public book fires the admin PUT and flips the tier to age_gated" <|
         \() ->
-            ProgramTest.start () (program (Just "admin-token"))
+            ProgramTest.start () (program (Just (TestHelpers.creds "admin-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/admin/books?page=1"
                     (booksListResponse

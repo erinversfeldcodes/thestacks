@@ -160,7 +160,7 @@ type alias Model =
     , rssLink : RSSLink.Model
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
-    , token : Maybe String
+    , token : Maybe Api.Credentials
     , organiser : ShelfOrganiser.State
     , organiserBusy : Bool
     , organiserError : Maybe String
@@ -243,12 +243,12 @@ browsing, tagged with the profile's `requestKey` so nothing downstream can tell.
 
 -}
 type ShelvesSource
-    = OwnShelf String String
-    | ProfileShelf (Maybe String) String String
+    = OwnShelf Api.Credentials String
+    | ProfileShelf (Maybe Api.Credentials) String String
     | NoShelvesRequest
 
 
-shelvesSource : Config -> Maybe String -> ShelvesSource
+shelvesSource : Config -> Maybe Api.Credentials -> ShelvesSource
 shelvesSource config maybeToken =
     case ( config.readOnly, config.profileHandle ) of
         ( True, Just handle ) ->
@@ -266,12 +266,13 @@ shelvesSource config maybeToken =
 {-| The one shelf read in this module. `init` and every refetch go through it,
 so there is no second place for the read-only dispatch above to be got wrong.
 -}
-fetchShelves : Config -> Maybe String -> Effect Msg
+fetchShelves : Config -> Maybe Api.Credentials -> Effect Msg
 fetchShelves config maybeToken =
     case shelvesSource config maybeToken of
         ProfileShelf token handle bookshelfName ->
             Effect.public (Api.getProfileShelfRequest handle bookshelfName)
                 token
+                Nothing
                 (Api.resolveJson shelvesResponseDecoder
                     >> Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
                     >> ShelvesLoaded (requestKey config)
@@ -280,7 +281,11 @@ fetchShelves config maybeToken =
         OwnShelf token bookshelfName ->
             Effect.authed (Api.getBookshelfRequest bookshelfName)
                 token
-                (Api.resolveJson bookshelfResponseDecoder >> ShelvesLoaded (requestKey config))
+                { onExpired = SessionGone
+                , onResponse =
+                    Api.resolveJson bookshelfResponseDecoder
+                        >> ShelvesLoaded (requestKey config)
+                }
 
         NoShelvesRequest ->
             Effect.none
@@ -301,9 +306,10 @@ type Msg
     | ToastExpired
     | SpineNavKey String GridNav.Key
     | SpineFocusAttempted
+    | SessionGone
 
 
-init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
+init : Config -> Maybe Api.Credentials -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
         ( model, effect ) =
@@ -314,7 +320,7 @@ init config maybeToken userId =
 
 {-| `init`, with its effect as data — see `updateWithEffect`.
 -}
-initWithEffect : Config -> Maybe String -> String -> ( Model, Effect Msg )
+initWithEffect : Config -> Maybe Api.Credentials -> String -> ( Model, Effect Msg )
 initWithEffect config maybeToken userId =
     let
         apiEffect =
@@ -489,7 +495,9 @@ updateWithEffect msg model =
                     ( { model | undoToast = ToastRestoring removal }
                     , Effect.authed (Api.restoreBookRequest removal.placementId)
                         token
-                        (Api.resolveWhatever >> UndoCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> UndoCompleted
+                        }
                     , NoOut
                     )
 
@@ -542,6 +550,13 @@ updateWithEffect msg model =
         SpineFocusAttempted ->
             ( model, Effect.none, NoOut )
 
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401. The
+            -- shelf is left exactly as it was: `Main` decides whether the
+            -- reader is bounced to the login or kept here on a token another
+            -- tab renewed, and a half-cleared shelf would be wrong either way.
+            ( model, Effect.none, SessionExpired )
+
 
 {-| The packed rows as `GridNav` reasons about them: the SAME grouping the
 SpineView renders, each spine as ( book id, the width the packer gave it).
@@ -571,7 +586,7 @@ and mutating someone else's shelf. `read_only_undo_is_inert_SECURITY`
 pins it.
 
 -}
-mutationToken : Model -> Maybe String
+mutationToken : Model -> Maybe Api.Credentials
 mutationToken model =
     if model.config.readOnly then
         Nothing
@@ -600,7 +615,9 @@ handleOrganiser subMsg model =
             ( { model | organiserBusy = True }
             , Effect.authed (Api.createShelfRequest model.config.apiName)
                 token
-                (Api.resolveWhatever >> ShelfMutated)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> ShelfMutated
+                }
             , NoOut
             )
 
@@ -608,7 +625,9 @@ handleOrganiser subMsg model =
             ( { model | organiserBusy = True }
             , Effect.authed (Api.deleteShelfRequest id)
                 token
-                (Api.resolveWhatever >> ShelfMutated)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> ShelfMutated
+                }
             , NoOut
             )
 
@@ -644,13 +663,15 @@ handleOrganiser subMsg model =
 
 {-| Apply an already-computed order locally and persist the whole list.
 -}
-persistOrder : List Shelf -> String -> Model -> ( Model, Effect Msg, OutMsg )
+persistOrder : List Shelf -> Api.Credentials -> Model -> ( Model, Effect Msg, OutMsg )
 persistOrder reordered token model =
     ( { model | shelves = Success reordered, organiserBusy = True, organiserError = Nothing }
     , Effect.authed
         (Api.reorderShelvesRequest model.config.apiName (ShelfOrganiser.orderedIds reordered))
         token
-        (Api.resolveWhatever >> ShelfMutated)
+        { onExpired = SessionGone
+        , onResponse = Api.resolveWhatever >> ShelfMutated
+        }
     , NoOut
     )
 

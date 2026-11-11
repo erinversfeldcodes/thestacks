@@ -1,8 +1,9 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, provenHeaders } from "./fixtures";
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
   ensureBookOnLibrary,
+  hasSessionCookie,
   signInViaForm,
 } from "./helpers";
 
@@ -11,10 +12,10 @@ const LISTING_DRAFT_KEY = "stacks-listing-draft";
 const DRAFT_PRICE = "247";
 const DRAFT_CONTACT = "e2e-182-draft@thestacks.test";
 const DRAFT_DESCRIPTION =
-  "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry #182";
+  "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry";
 
-test.describe("Marketplace listing draft []", () => {
-  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login []", async ({
+test.describe("Marketplace listing draft", () => {
+  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
@@ -40,12 +41,14 @@ test.describe("Marketplace listing draft []", () => {
     await page.fill("#contact-input", DRAFT_CONTACT);
     await page.fill("#description-input", DRAFT_DESCRIPTION);
 
-    const liveToken = await page.evaluate(
-      () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
-    );
-    expect(liveToken).toBeTruthy();
+    // ⛔ `page.request` IS the reader: it shares the browser context's cookie
+    // jar, so the session travels without a header. The proof still has to be
+    // spelled out, because `page.request` is not the `request` fixture and so
+    // does not get the fixture's CSRF header.
     const revokeResp = await page.request.delete("/api/auth/logout", {
-      headers: { Authorization: `Bearer ${liveToken}` },
+      headers: {
+        ...(await provenHeaders(page)),
+      },
     });
     expect(revokeResp.status()).toBe(204);
 
@@ -63,10 +66,10 @@ test.describe("Marketplace listing draft []", () => {
 
     await expect(page.getByTestId("login-error")).toHaveCount(0);
 
-    const clearedAuth = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(clearedAuth).toBeFalsy();
+    expect(
+      await hasSessionCookie(page),
+      "the revoked session must be cleared from the browser, not just forgotten"
+    ).toBe(false);
 
     const persistedDraft = await page.evaluate(
       (key) => localStorage.getItem(key),

@@ -299,7 +299,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Image retention purges (expired \u00b7 stuck \u00b7 orphan)",
-      "description": "WHAT: rate of images removed under the 30-day image-retention promise, as THREE SEPARATE series \u2014 expired (natural-TTL sweep, split by reason), stuck (safety-net sweep of pending uploads), and orphan (images past expiry still in the DB \u2014 a retention-gap alarm). HOW: rate over stacks_gdpr_image_expired_count_total{reason}, stacks_gdpr_image_stuck_count_total and stacks_gdpr_image_orphan_count_total. CAVEAT: the expired metric's reason=\"stuck\" series MIRRORS the stuck metric \u2014 these are kept as distinct series and MUST NOT be summed into one number (doing so double-counts the stuck cleanups; see the note in Core.PromEx.Plugins.Stacks). MEANS: expired is the routine purge cadence; a steady low baseline is healthy. WATCH: a climbing stuck series means uploads are getting wedged in pending and only the safety net is clearing them; ANY non-zero orphan is alert-worthy \u2014 images past their deadline are still stored (a retention-gap the 30-day promise forbids).",
+      "description": "WHAT: rate of images removed under the 30-day image-retention promise, as THREE SEPARATE series \u2014 expired (natural-TTL sweep, split by reason: expired=TTL, stuck=safety-net, rowless=objects no DB row points at), stuck (safety-net sweep of pending uploads), and orphan (images past expiry still in the DB \u2014 a retention-gap alarm). WARNING 'rowless' and 'orphan' are DIFFERENT defects despite both sounding like leftovers: rowless is an OBJECT with no row (routine collection, non-zero after any erasure), orphan is a ROW past its deadline never collected (an alarm). HOW: rate over stacks_gdpr_image_expired_count_total{reason}, stacks_gdpr_image_stuck_count_total and stacks_gdpr_image_orphan_count_total. CAVEAT: the expired metric's reason=\"stuck\" series MIRRORS the stuck metric \u2014 these are kept as distinct series and MUST NOT be summed into one number (doing so double-counts the stuck cleanups; see the note in Core.PromEx.Plugins.Stacks). MEANS: expired is the routine purge cadence; a steady low baseline is healthy. WATCH: a climbing stuck series means uploads are getting wedged in pending and only the safety net is clearing them; ANY non-zero orphan is alert-worthy \u2014 images past their deadline are still stored (a retention-gap the 30-day promise forbids).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -549,6 +549,144 @@
           },
           "expr": "sum by (outcome) (rate(stacks_blog_association_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Export archives with NO deadline \u2014 never sweepable (ALARM)",
+      "description": "An export key carrying no parseable deadline. The sweep selects by deadline, so these objects are not late \u2014 they can never be selected at all, and the copy of the reader's personal data stays in the bucket permanently. Distinct from the orphan panel beside it, where deletion was attempted and failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_gdpr_export_undated_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "orphan"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Uploads out of step with their rows \u2014 BOTH directions (ALARM)",
+      "description": "WHAT: the STANDING population on each side of the uploads/ prefix, as a gauge. rowless_objects = objects in storage that no op.uploaded_images row points at \u2014 unreachable by erasure, attributable to nobody. rows_without_object = rows whose storage_path resolves to nothing \u2014 any read of them fails. WARNING this is NOT the sweep counters beside it. Those report what a run DELETED, so they emit zero both when a sweep found nothing and when it never ran; that is how 4,234 row-less objects accumulated on production (measured 2026-11-05) behind a clean dashboard. This one reports what is standing right now. WARNING both series are needed and the difference between the totals is NOT a substitute: measured on production the populations were 4,234 and 2,374 while the arithmetic difference was 1,860 \u2014 neither number \u2014 and it shrinks toward zero as the two grow in step. HOW: stacks_gdpr_image_standing{population}. MEANS: both at zero is the correct state. WATCH: ANY non-zero value is alert-worthy. A NULL storage_path is excluded from rows_without_object \u2014 since the finished-image sweep a row legitimately has no path and no object, and counting those would alarm on the normal case.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (population) (stacks_gdpr_image_standing{app=\"$app\"})",
+          "legendFormat": "{{population}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "De-anonymisation insight returning a non-answer (ALARM)",
+      "description": "WHAT: times GET /api/me/inferences could not compute how identifiable a reader is, so the page showed \"could not compute\" instead of a number. WARNING this is the surface whose whole failure character is that nobody becomes suspicious: it reported a non-answer to EVERY reader on every deployed stack for weeks while the test suite was green, because the suite connects as a superuser that bypasses the row-level-security policy that was refusing the query. A green suite says nothing about this number. HOW: rate over stacks_insights_deanonymisation_unavailable_count_total. MEANS: zero is the correct state. WATCH: ANY non-zero value \u2014 readers are being shown a non-answer on the one page whose subject is their own exposure, and the page will not look broken while it happens.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_insights_deanonymisation_unavailable_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "could not compute"
         }
       ]
     }

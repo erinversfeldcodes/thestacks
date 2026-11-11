@@ -37,10 +37,9 @@ suite =
         , describe "Scenario 2 — login 401 stays LOCAL (exclusion regression guard)"
             [ loginPage401StaysLocalInvalidCredentials
             ]
-        , describe "Scenario 3 — silent renewal success renews the token"
-            [ renewalSuccessAdoptsNewToken
-            , renewalSuccessKeepsUserLoggedIn
-            , renewAuthTokenSwapsTokenKeepsUser
+        , describe "Scenario 3 — silent renewal keeps the session without taking a credential"
+            [ renewalSuccessKeepsTheReaderSignedIn
+            , renewalSuccessTakesNoBearerFromTheResponse
             , loginArmsRenewal
             ]
         , describe "Scenario 4 — silent renewal failure falls through to the interceptor"
@@ -77,7 +76,7 @@ bookshelf401BubblesOutMsg =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "auth-token")) "user-1"
 
                 ( _, _, outMsg ) =
                     Bookshelf.update
@@ -98,13 +97,13 @@ bookDetail401BubblesOutMsg =
         \() ->
             let
                 ( model, _ ) =
-                    BookDetail.init "book-1" (Just "auth-token") Nothing
+                    BookDetail.init "book-1" (Just (TestHelpers.creds "auth-token")) Nothing
 
                 ( _, _, outMsg ) =
                     BookDetail.update
                         (BookDetail.BookLoaded (Err (Http.BadStatus 401)))
                         model
-                        (Just "auth-token")
+                        (Just (TestHelpers.creds "auth-token"))
             in
             outMsg |> Expect.notEqual BookDetail.NoOut
 
@@ -118,7 +117,7 @@ bookshelfSuccessStaysLocal =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "auth-token")) "user-1"
 
                 ( _, _, outMsg ) =
                     Bookshelf.update (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Ok { shelves = [], visibility = "owner" })) model
@@ -136,7 +135,7 @@ bookshelf403StaysLocal =
         \() ->
             let
                 ( model, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "auth-token") "user-1"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "auth-token")) "user-1"
 
                 ( _, _, outMsg ) =
                     Bookshelf.update
@@ -187,9 +186,14 @@ startingUser =
     }
 
 
+{-| ⚠️ A cookie-only credential, because that is what a reader who reloaded
+actually holds — the renewal tick is armed at boot, and boot no longer produces
+a bearer. A fixture built with one would let the "takes no bearer" assertion
+pass by starting from a state the running app cannot reach.
+-}
 startingAuth : Main.Auth
 startingAuth =
-    { user = startingUser, token = "old.token" }
+    { user = startingUser, token = Api.cookieSession (Just "proof") }
 
 
 {-| Drivers for the renewal harness.
@@ -219,9 +223,15 @@ renewEffects msg model =
             SimulatedEffect.Cmd.none
 
 
-{-| Harness update. The success path calls the REAL `Main.renewAuthToken`; the
-failure path mirrors `Main.sessionExpired`'s auth-clearing (the interceptor
-fall-through).
+{-| Harness update, mirroring `Main`'s two renewal branches: a 200 changes
+NOTHING about the session the SPA holds, and a failure falls through to the
+interceptor's auth-clearing.
+
+⛔ `RefreshResult (Ok _)` dropping the response is the behaviour under test,
+not a shortcut. Renewal rotates a cookie the SPA cannot read; the body still
+carries a bearer for the transport being retired, and taking it would put a
+credential back in the SPA's hands.
+
 -}
 renewUpdate : RenewMsg -> Maybe Main.Auth -> Maybe Main.Auth
 renewUpdate msg model =
@@ -229,8 +239,8 @@ renewUpdate msg model =
         TriggerRenewal ->
             model
 
-        RefreshResult (Ok authResponse) ->
-            Maybe.map (Main.renewAuthToken authResponse) model
+        RefreshResult (Ok _) ->
+            model
 
         RefreshResult (Err _) ->
             Nothing
@@ -248,7 +258,24 @@ renewProgram =
             \model ->
                 case model of
                     Just auth ->
-                        Html.text ("token:" ++ auth.token)
+                        -- ⛔ Rendered from the HEADERS the credential would send,
+                        -- not from an accessor on it. The question this suite
+                        -- asks is whether a renewal puts a bearer back in the
+                        -- SPA's hands, and the only form of that question worth
+                        -- answering is "does one reach the wire".
+                        -- ⚠️ A POST, not a GET, and that is not incidental: the
+                        -- CSRF proof is attached to UNSAFE methods only, so a
+                        -- GET with a cookie-only credential sends no headers at
+                        -- all and the rendering could not tell "no bearer" from
+                        -- "no credential". A write distinguishes them.
+                        Html.text
+                            ("headers:"
+                                ++ String.join
+                                    ","
+                                    (List.map Tuple.first
+                                        (Api.requestHeaders "POST" (Api.Session auth.token))
+                                    )
+                            )
 
                     Nothing ->
                         Html.text "signed-out"
@@ -256,20 +283,8 @@ renewProgram =
         |> ProgramTest.withSimulatedEffects identity
 
 
-renewalSuccessAdoptsNewToken : Test
-renewalSuccessAdoptsNewToken =
-    test "renewal_success_adopts_new_token: a 200 from /api/auth/refresh swaps in the new token" <|
-        \() ->
-            ProgramTest.start () renewProgram
-                |> ProgramTest.update TriggerRenewal
-                |> ProgramTest.simulateHttpResponse "POST"
-                    "/api/auth/refresh"
-                    (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.expectViewHas [ Selector.text "token:new.token" ]
-
-
-renewalSuccessKeepsUserLoggedIn : Test
-renewalSuccessKeepsUserLoggedIn =
+renewalSuccessKeepsTheReaderSignedIn : Test
+renewalSuccessKeepsTheReaderSignedIn =
     test "renewal_success_keeps_user_logged_in: a successful renewal does NOT sign the user out" <|
         \() ->
             ProgramTest.start () renewProgram
@@ -277,7 +292,27 @@ renewalSuccessKeepsUserLoggedIn =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
                     (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.expectViewHasNot [ Selector.text "closed your session" ]
+                |> ProgramTest.expectViewHasNot [ Selector.text "signed-out" ]
+
+
+{-| The renewal response carries a bearer, and the SPA must not take it.
+
+⛔ The assertion is on the SESSION AFTER a 200 that offered one. A test that
+only checked "still signed in" would pass just as well if the token had been
+adopted, which is the state this wave exists to remove: a credential in the
+SPA's hands is a credential a script on the page can read.
+
+-}
+renewalSuccessTakesNoBearerFromTheResponse : Test
+renewalSuccessTakesNoBearerFromTheResponse =
+    test "renewal_success_takes_no_bearer: the session is still carried by the cookie alone" <|
+        \() ->
+            ProgramTest.start () renewProgram
+                |> ProgramTest.update TriggerRenewal
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/auth/refresh"
+                    (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
+                |> ProgramTest.expectViewHas [ Selector.text "headers:X-CSRF-Token" ]
 
 
 renewalFailureClearsAuth : Test
@@ -290,34 +325,6 @@ renewalFailureClearsAuth =
                     "/api/auth/refresh"
                     (simulateAuthErrorResponse 401)
                 |> ProgramTest.expectViewHas [ Selector.text "signed-out" ]
-
-
-{-| Unit test of the real key-free renewal transform: it swaps in the refreshed
-token while preserving the authenticated user (identity/role unchanged).
--}
-renewAuthTokenSwapsTokenKeepsUser : Test
-renewAuthTokenSwapsTokenKeepsUser =
-    test "renew_auth_token_swaps_token_keeps_user" <|
-        \() ->
-            let
-                refreshed =
-                    Main.renewAuthToken
-                        { token = "new.token"
-                        , userId = "ignored"
-                        , email = "ignored@example.com"
-                        , displayName = "Ignored"
-                        , handle = "ignored"
-                        , role = "owner"
-                        , consentAnalytics = False
-                        , consentWritingAssistant = False
-                        }
-                        startingAuth
-            in
-            Expect.all
-                [ \r -> r.token |> Expect.equal "new.token"
-                , \r -> r.user |> Expect.equal startingUser
-                ]
-                refreshed
 
 
 {-| Renewal is armed on login: `loginEffects` (fired for every completed login)
@@ -338,7 +345,7 @@ expiredInitRendersDistinctNotice : Test
 expiredInitRendersDistinctNotice =
     test "expired_init_renders_distinct_notice: the expired-notice login state shows the session-expired message" <|
         \() ->
-            ProgramTest.start () (loginModelProgram (Login.init (Login.SessionExpired { draftSaved = False })))
+            ProgramTest.start () (loginModelProgram (Login.init Nothing (Login.SessionExpired { draftSaved = False })))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 
@@ -349,7 +356,7 @@ freshInitHasNoNotice : Test
 freshInitHasNoNotice =
     test "fresh_init_has_no_notice: an ordinary login has no session-expired notice" <|
         \() ->
-            ProgramTest.start () (loginModelProgram (Login.init Login.Fresh))
+            ProgramTest.start () (loginModelProgram (Login.init Nothing Login.Fresh))
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 

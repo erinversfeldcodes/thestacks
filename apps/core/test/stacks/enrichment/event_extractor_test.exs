@@ -45,6 +45,23 @@ defmodule Stacks.Enrichment.EventExtractorTest do
       assert DateTime.compare(event.event_date, ~U[2027-01-05 00:00:00Z]) == :eq
     end
 
+    test "a NAIVE local startDate keeps its day rather than being discarded" do
+      # The common real-world schema.org form: a local datetime with no offset.
+      # Both parsing tiers used to decline it — `DateTime.from_iso8601/1` returns
+      # `:missing_offset`, and the bare-date fallback rejects the time portion — so
+      # an event with an unambiguous DAY was dropped over an unknown timezone.
+      body =
+        page_with("""
+        {"@type":"Event","name":"Naive evening","startDate":"2027-03-14T18:00:00"}
+        """)
+
+      assert [event] = EventExtractor.events(body)
+      assert event.title == "Naive evening"
+
+      assert DateTime.compare(event.event_date, ~U[2027-03-14 00:00:00Z]) == :eq,
+             "the day is kept at midnight; the offset is still not guessed"
+    end
+
     test "a bare-date startDate parses; an unreadable one is nil, never a guess" do
       body =
         page_with("""

@@ -19,6 +19,7 @@ root unlinkable.
 
 import Api
 import Components.Spine exposing (WearLevel(..))
+import Effect exposing (Effect)
 import Html exposing (Html, a, div, h1, p, section, text)
 import Html.Attributes exposing (class, href)
 import Http
@@ -45,44 +46,82 @@ type OutMsg
 
 type Msg
     = PreviewLoaded (Result Http.Error (List Shelf))
+    | SessionExpiryDetected
 
 
 {-| Signed out (`Nothing`) → the static `Landing`, no request. Signed in → the
 `Collection` face with the Library shelf-preview read in flight, reusing the same
 `GET /api/bookshelves/:name` every bookshelf page already uses.
 -}
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as data so a harness can answer it.
+-}
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
     case maybeToken of
         Nothing ->
-            ( Landing, Cmd.none )
+            ( Landing, Effect.none )
 
         Just token ->
             ( Collection { preview = Loading }
-            , Api.getBookshelf "library" token (PreviewLoaded << Result.map .shelves)
+            , Effect.authed (Api.getBookshelfRequest "library")
+                token
+                { onExpired = SessionExpiryDetected
+                , onResponse =
+                    Api.resolveJson Types.Shelf.bookshelfResponseDecoder
+                        >> Result.map .shelves
+                        >> PreviewLoaded
+                }
             )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
-    case ( msg, model ) of
-        ( PreviewLoaded result, Collection data ) ->
-            case result of
-                Ok shelves ->
-                    ( Collection { data | preview = Success (List.concatMap .placements shelves) }
-                    , Cmd.none
-                    , NoOut
-                    )
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
 
-                Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
 
-                    else
-                        ( Collection { data | preview = Failure err }, Cmd.none, NoOut )
+{-| `update`, with its effects as data.
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
+    -- ⚠️ DISPATCHES ON THE MSG FIRST, then on the model, rather than on the pair.
+    -- A `case ( msg, model ) of` reads more naturally here and was how this page
+    -- was written — but `check-session-expiry-coverage.sh` matches an expiry
+    -- branch as `^\s+Constructor ->$`, so `( SessionExpiryDetected, _ ) ->` is
+    -- invisible to it and the page reports as dropping its 401. The gate is right
+    -- that the routing must be greppable per-msg; this shape makes it so.
+    case msg of
+        SessionExpiryDetected ->
+            ( model, Effect.none, SessionExpired )
 
-        ( PreviewLoaded _, Landing ) ->
-            ( model, Cmd.none, NoOut )
+        PreviewLoaded result ->
+            case model of
+                Collection data ->
+                    case result of
+                        Ok shelves ->
+                            ( Collection { data | preview = Success (List.concatMap .placements shelves) }
+                            , Effect.none
+                            , NoOut
+                            )
+
+                        Err err ->
+                            -- ⛔ The plan claims the 401 first, so no re-test here.
+                            ( Collection { data | preview = Failure err }, Effect.none, NoOut )
+
+                Landing ->
+                    ( model, Effect.none, NoOut )
 
 
 {-| How many preview spines the glimpse shows. A glimpse, not the whole shelf —

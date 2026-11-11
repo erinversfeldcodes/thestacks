@@ -11,6 +11,7 @@ select
     currency,
     period_start,
     period_end,
+    basis,
     created_at,
     updated_at
 from {{ source('op', 'platform_costs') }}

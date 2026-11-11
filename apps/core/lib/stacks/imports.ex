@@ -27,12 +27,28 @@ defmodule Stacks.Imports do
   alias Stacks.Workers.GoodreadsImportJob
 
   @active_statuses ~w(enqueued running)
+
+  # Every outcome a row can be given, matching the column's CHECK constraint.
+  @row_outcomes ~w(shelved duplicate unverified unreadable)
   @row_retention_days 30
   @insert_chunk 500
 
   @doc "How long raw import rows are kept before the retention sweep deletes them."
   @spec row_retention_days() :: pos_integer()
   def row_retention_days, do: @row_retention_days
+
+  @doc """
+      Every outcome a row can carry.
+
+      Exposed because the READ side needs the same roster the write side
+      validates against. `list_rows/3`'s `:outcome` filter was applied straight
+      to the query, so `?outcome=shelve` matched nothing and answered `200` with
+      an empty list — a typo rendering as "this import has no shelved rows",
+      which is a different and entirely plausible fact. One roster, checked at
+      both ends.
+  """
+  @spec row_outcomes() :: [String.t()]
+  def row_outcomes, do: @row_outcomes
 
   @doc """
       Parses a Goodreads CSV export and creates the import with all its rows,
@@ -129,27 +145,36 @@ defmodule Stacks.Imports do
       empty list against a non-zero `row_count` means expired, not lost.
   """
   @spec list_rows(binary(), binary(), keyword()) ::
-          {:ok, [LibraryImportRow.t()]} | {:error, :not_found}
+          {:ok, [LibraryImportRow.t()]} | {:error, :not_found} | {:error, :unknown_outcome}
   def list_rows(user_id, import_id, opts \\ []) do
-    case get_import(user_id, import_id) do
-      nil ->
-        {:error, :not_found}
+    # Checked BEFORE the lookup, and reported rather than ignored. An unknown
+    # outcome used to be pasted into the WHERE clause, where it matched nothing
+    # and the caller got `200 []` — so `?outcome=shelve` was indistinguishable
+    # from an import in which nothing was shelved. Parameterised, so never an
+    # injection; wrong, because silence is an answer here.
+    with :ok <- validate_outcome(Keyword.get(opts, :outcome)),
+         import when not is_nil(import) <- get_import(user_id, import_id) do
+      query =
+        LibraryImportRow
+        |> where([r], r.import_id == ^import.id)
+        |> order_by([r], asc: r.row_number)
 
-      import ->
-        query =
-          LibraryImportRow
-          |> where([r], r.import_id == ^import.id)
-          |> order_by([r], asc: r.row_number)
+      query =
+        case Keyword.get(opts, :outcome) do
+          nil -> query
+          outcome -> where(query, [r], r.outcome == ^outcome)
+        end
 
-        query =
-          case Keyword.get(opts, :outcome) do
-            nil -> query
-            outcome -> where(query, [r], r.outcome == ^outcome)
-          end
-
-        {:ok, Repo.all(query)}
+      {:ok, Repo.all(query)}
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
+
+  defp validate_outcome(nil), do: :ok
+  defp validate_outcome(outcome) when outcome in @row_outcomes, do: :ok
+  defp validate_outcome(_), do: {:error, :unknown_outcome}
 
   @doc "Marks an import running and stamps `started_at` (first batch only)."
   @spec mark_running(LibraryImport.t()) :: LibraryImport.t()
@@ -161,7 +186,16 @@ defmodule Stacks.Imports do
 
   def mark_running(import), do: import
 
-  @doc "Writes a row's outcome (and any resolved book/placement ids)."
+  @doc """
+      Writes a row's outcome (and any resolved book/placement ids).
+
+      `outcome` is validated here because this is the ONLY path that writes it,
+      it is called exclusively from inside an Oban job, and `change/2` casts
+      without checking — so before this the value was validated nowhere, and the
+      column's own CHECK constraint was the first thing to see it. Failing on the
+      changeset puts the error where the caller is rather than three frames down
+      in a database driver.
+  """
   @spec record_outcome(LibraryImportRow.t(), String.t(), keyword()) :: LibraryImportRow.t()
   def record_outcome(%LibraryImportRow{} = row, outcome, opts \\ []) do
     row
@@ -170,6 +204,11 @@ defmodule Stacks.Imports do
       reason: Keyword.get(opts, :reason),
       book_id: Keyword.get(opts, :book_id),
       placement_id: Keyword.get(opts, :placement_id)
+    )
+    |> Ecto.Changeset.validate_inclusion(:outcome, @row_outcomes)
+    |> Ecto.Changeset.check_constraint(:outcome,
+      name: :library_import_rows_outcome_known,
+      message: "is not a recognised outcome"
     )
     |> Repo.update!()
   end
@@ -255,13 +294,24 @@ defmodule Stacks.Imports do
   """
   @spec delete_expired_rows() :: non_neg_integer()
   def delete_expired_rows do
-    cutoff = DateTime.add(DateTime.utc_now(), -@row_retention_days, :day)
-
-    {deleted, _} =
-      LibraryImportRow
-      |> where([r], r.created_at < ^cutoff)
-      |> Repo.delete_all()
-
+    {deleted, _} = Repo.delete_all(expired_rows())
     deleted
+  end
+
+  @doc """
+      How many raw import rows are past the retention window — the far-end
+      check for the retention sweep, zero when it is caught up.
+
+      ⚠️ Shares `expired_rows/0` with `delete_expired_rows/0` on purpose. These
+      rows are reader free text, so a count that drifted from the sweep's own
+      predicate would under-report a data-minimisation gap rather than a tidy-up
+      backlog.
+  """
+  @spec expired_row_count() :: non_neg_integer()
+  def expired_row_count, do: Repo.aggregate(expired_rows(), :count)
+
+  defp expired_rows do
+    cutoff = DateTime.add(DateTime.utc_now(), -@row_retention_days, :day)
+    where(LibraryImportRow, [r], r.created_at < ^cutoff)
   end
 end

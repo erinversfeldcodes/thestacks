@@ -22,13 +22,16 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
       rather than only as a line in the log.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.CallLog
+  alias Stacks.AI.Structured
+  alias Stacks.AI.TogetherClient
   alias Stacks.Blog
   alias Stacks.Books.Book
   alias Stacks.Events
@@ -77,9 +80,30 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     else
       prompt = build_prompt(post.body, books)
 
-      case together_client().complete(prompt, max_tokens: 1024, temperature: 0.2) do
+      opts = [max_tokens: 1024, temperature: 0.2, schema: Structured.association_schema()]
+
+      started = System.monotonic_time(:millisecond)
+      result = together_client().complete(prompt, opts)
+      latency_ms = System.monotonic_time(:millisecond) - started
+
+      case result do
+        # ⚖️ CANCELLED, NOT RETRIED. A spent budget will not move until the
+        # period does, so retrying burns every attempt against a ceiling — and
+        # `{:error, _}` is what Oban retries. This is the caller that had no
+        # budget reference at all, at `max_tokens: 1024` over up to 200
+        # candidate books; the check now lives in the client beside the charge.
+        {:error, {:budget_exceeded, limit}} ->
+          Logger.warning(
+            "PostBookAssociationWorker: not associating for #{post.id} — " <>
+              "the together budget is spent (#{limit})"
+          )
+
+          {:cancel, limit}
+
         {:ok, response} ->
-          handle_response(post, response)
+          outcome = handle_response(post, response)
+          record_call(post, prompt, outcome, response, latency_ms)
+          :ok
 
         {:error, reason} ->
           Logger.warning(
@@ -87,10 +111,69 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
           )
 
           emit_outcome(:llm_error)
+          # ⚠️ No response to record — the field stays NULL rather than "", so
+          # "the model said nothing" and "the model was never reached" remain
+          # distinguishable in the log.
+          record_call(post, prompt, :llm_error, nil, latency_ms)
           {:error, reason}
       end
     end
   end
+
+  # ⛔ RECORDS EVERY CALL, INCLUDING THE SUCCESSFUL ONES. A log of failures only
+  # answers "what went wrong" and not "what does this model usually do", and the
+  # eval harness this feeds needs the second. ⚖️ `emit_safe`-style: a logging
+  # failure must never fail the job, because the job's work is already done by
+  # the time this runs.
+  defp record_call(post, prompt, outcome, response, latency_ms) do
+    %CallLog{}
+    |> CallLog.changeset(%{
+      post_id: post.id,
+      model: together_model(),
+      prompt_sha256: CallLog.hash_prompt(prompt),
+      outcome: to_string(outcome),
+      latency_ms: latency_ms,
+      raw_response: response
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _} ->
+        :ok
+
+      {:error, changeset} ->
+        log_write_failed(:invalid, inspect(changeset.errors), post)
+    end
+  rescue
+    error ->
+      log_write_failed(:raised, inspect(error), post)
+  end
+
+  # ⛔ SWALLOWED, BUT NOT SILENT — AND THE DIFFERENCE IS THE WHOLE POINT.
+  #
+  # Swallowing is right: the association work is already done by the time this
+  # runs, and a diagnostic write must never fail a job whose real work
+  # succeeded. But a `Logger.warning` and `:ok` is indistinguishable from
+  # success to everything that watches, so a log that silently stopped being
+  # written would be discovered by whoever goes looking for the eval corpus
+  # weeks later and finds it empty.
+  #
+  # ⚖️ The counter makes the failure a thing that can be alarmed on, which is
+  # what separates "we accepted this failure mode" from "we did not notice it".
+  defp log_write_failed(reason, detail, post) do
+    Logger.warning(
+      "PostBookAssociationWorker: could not record the LLM call for post " <>
+        "#{post.id} (#{reason}): #{detail}"
+    )
+
+    :telemetry.execute([:stacks, :ai, :call_log_write_failed], %{count: 1}, %{reason: reason})
+
+    :ok
+  end
+
+  # ⚖️ Asks the client what it sent rather than re-deriving it from config. The
+  # two used to agree only because the default string matched, which is not
+  # agreement — it is a coincidence that a deploy could end.
+  defp together_model, do: TogetherClient.model()
 
   defp emit_outcome(outcome) do
     :telemetry.execute([:stacks, :blog, :association], %{count: 1}, %{outcome: outcome})
@@ -119,31 +202,55 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
     """
   end
 
+  # ⛔ THROUGH `Stacks.AI.Structured`, NOT `Jason.decode/1` DIRECTLY. MEASURED
+  # against the live model: 3 of 3 responses came back FENCED — ```json … ``` —
+  # and `Jason.decode/1` fails on the first character of every one. The
+  # associations were dropped, a warning was logged, and the text that would
+  # have explained it was discarded.
+  #
+  # ⚖️ The two failures are kept apart on purpose. `:unparseable` is the model
+  # answering in a shape nothing can read; `:unexpected_shape` is valid JSON
+  # that is not a list, i.e. the model understood the format and not the task.
+  # They want different fixes — a parsing change versus a prompt change — and
+  # one outcome atom for both would hide which is happening.
   defp handle_response(post, response) do
-    case Jason.decode(response) do
-      {:ok, associations} when is_list(associations) ->
+    case Structured.decode(response) do
+      {:ok, associations} ->
         persist_associations(post, associations)
 
-      {:ok, _other} ->
-        Logger.warning("PostBookAssociationWorker: unexpected JSON shape for post #{post.id}")
-
-        emit_outcome(:unreadable_response)
-        :ok
-
-      {:error, _reason} ->
+      {:error, {:unexpected_shape, raw}} ->
         Logger.warning(
-          "PostBookAssociationWorker: failed to parse LLM response for post #{post.id}"
+          "PostBookAssociationWorker: unexpected JSON shape for post #{post.id}: " <>
+            String.slice(raw, 0, 200)
+        )
+
+        # ⛔ `:unexpected_shape` IN BOTH PLACES. The metric used to emit
+        # `:unreadable_response` here while the call log recorded
+        # `:unexpected_shape` — so the two atoms were separated precisely
+        # because "one atom for both would hide which is happening", and then
+        # the metric, which is where anyone looks first, hid it anyway. The
+        # vocabulary already carries `unexpected_shape` (`call_log.ex:44`);
+        # nothing was blocking it but the word.
+        emit_outcome(:unexpected_shape)
+        :unexpected_shape
+
+      {:error, {:unparseable, raw}} ->
+        # ⚠️ The raw text is logged, bounded, rather than thrown away. Until
+        # `op.llm_call_log` lands this is the only record of what the model
+        # actually said, and "failed to parse" without it is unactionable.
+        Logger.warning(
+          "PostBookAssociationWorker: could not read the LLM response for post #{post.id}: " <>
+            String.slice(raw, 0, 200)
         )
 
         emit_outcome(:unreadable_response)
-        :ok
+        :unreadable_response
     end
   end
 
   defp persist_associations(post, associations) do
     book_ids =
       associations
-      |> Enum.filter(&Map.get(&1, "book_id"))
       |> Enum.reduce([], fn assoc, acc -> associate_single(post, assoc, acc) end)
 
     Events.emit_safe(%{
@@ -153,14 +260,30 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
       payload: %{book_ids: book_ids, count: length(book_ids)}
     })
 
-    emit_outcome(:associated)
-    :ok
+    # ⛔ A PASS THAT FOUND NOTHING IS ITS OWN OUTCOME, AND USED TO BE
+    # INDISTINGUISHABLE FROM ONE THAT FOUND BOOKS.
+    #
+    # Both recorded `:associated`, so neither the dashboard nor the author could
+    # tell a working pass over a post with no books in it from a pass that
+    # linked three — and the author-facing difference is the whole point: "no
+    # books from your shelves came up in this post" is a result, while silence
+    # is a question.
+    #
+    # ⚖️ Counted separately rather than inferred from `count: 0` on the event:
+    # an aggregate that has to be reconstructed from a measurement is not a
+    # label, and the outcome vocabulary is what both the call log and the metric
+    # are keyed on.
+    outcome = if book_ids == [], do: :no_books_found, else: :associated
+
+    emit_outcome(outcome)
+    outcome
   end
 
+  # ⚠️ Atom keys, because `Structured.decode/2` has already normalised them and
+  # filtered the entries it could not read. The string-keyed `Map.get` that was
+  # here trusted the model's spelling of its own field names.
   defp associate_single(post, assoc, acc) do
-    book_id = Map.get(assoc, "book_id")
-    confidence = Map.get(assoc, "confidence", 0.5)
-    reasoning = Map.get(assoc, "reasoning")
+    %{book_id: book_id, confidence: confidence, reasoning: reasoning} = assoc
     attrs = %{source: "llm", confidence: confidence, reasoning: reasoning, visible: true}
 
     case Blog.associate_book(post, book_id, attrs) do

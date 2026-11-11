@@ -186,7 +186,7 @@ controlStateAfterSend : String -> ( Bool, RemoteData RequestError () )
 controlStateAfterSend email =
     let
         ( withMode, _, _ ) =
-            Login.update (Login.ModeSwitched Login.ForgotPasswordMode) (Login.init Login.Fresh)
+            Login.update (Login.ModeSwitched Login.ForgotPasswordMode) (Login.init Nothing Login.Fresh)
 
         ( withEmail, _, _ ) =
             Login.update (Login.EmailChanged email) withMode

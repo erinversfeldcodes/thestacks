@@ -9,23 +9,26 @@ module Page.ResetPassword exposing
     )
 
 import Api
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, input, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled, for, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Navigation.Route as Route
-import Process
-import Task
 import Types.PasswordRule as PasswordRule
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
 
 type alias Model =
-    { token : String
+    { -- ⚠️ The same-origin proof. This page performs a state-changing request
+      -- with NO session behind it, so the proof cannot come from a credential —
+      -- it comes from the document, via the boot config.
+      proof : Maybe String
+    , token : String
     , password : String
     , confirmPassword : String
-    , submitting : RemoteData Http.Error ()
+    , submitting : RemoteData Api.RequestError ()
     }
 
 
@@ -33,7 +36,7 @@ type Msg
     = SetPassword String
     | SetConfirmPassword String
     | Submit
-    | Completed (Result Http.Error ())
+    | Completed (Result Api.RequestError ())
     | AdvanceToSignIn
 
 
@@ -64,9 +67,10 @@ advanceDelayMs =
     2000
 
 
-init : String -> Model
-init token =
-    { token = token
+init : Maybe String -> String -> Model
+init proof token =
+    { proof = proof
+    , token = token
     , password = ""
     , confirmPassword = ""
     , submitting = NotAsked
@@ -89,59 +93,72 @@ validate model =
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model =
     case msg of
         SetPassword val ->
             ( { model | password = val, submitting = clearStaleError model.submitting }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
         SetConfirmPassword val ->
             ( { model | confirmPassword = val, submitting = clearStaleError model.submitting }
-            , Cmd.none
+            , Effect.None
             , NoOut
             )
 
         Submit ->
             case ( model.submitting, validate model ) of
                 ( Loading, _ ) ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
                 ( Success _, _ ) ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
                 ( _, Just _ ) ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
                 ( _, Nothing ) ->
                     ( { model | submitting = Loading }
-                    , Api.resetPassword
-                        { token = model.token, password = model.password }
-                        Completed
+                    , Effect.public
+                        (Api.resetPasswordRequest
+                            { token = model.token, password = model.password }
+                        )
+                        Nothing
+                        model.proof
+                        (Api.resolveNoContent >> Completed)
                     , NoOut
                     )
 
         Completed result ->
             case ( model.submitting, result ) of
                 ( Success _, _ ) ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
                 ( _, Ok _ ) ->
                     ( { model | submitting = Success () }
-                    , Process.sleep advanceDelayMs |> Task.perform (\_ -> AdvanceToSignIn)
+                    , Effect.sleepThen advanceDelayMs AdvanceToSignIn
                     , NoOut
                     )
 
                 ( _, Err err ) ->
-                    ( { model | submitting = Failure err }, Cmd.none, NoOut )
+                    ( { model | submitting = Failure err }, Effect.None, NoOut )
 
         AdvanceToSignIn ->
             case model.submitting of
                 Success _ ->
-                    ( model, Cmd.none, AdvanceToLogin )
+                    ( model, Effect.None, AdvanceToLogin )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
 
 {-| Typing in a field clears a STALE ERROR and nothing else.
@@ -153,7 +170,7 @@ request was about to consume. Only `Failure` resets; `Loading` and
 `Success` are immune to keystrokes.
 
 -}
-clearStaleError : RemoteData Http.Error () -> RemoteData Http.Error ()
+clearStaleError : RemoteData Api.RequestError () -> RemoteData Api.RequestError ()
 clearStaleError submitting =
     case submitting of
         Failure _ ->
@@ -252,11 +269,11 @@ viewForm model =
                 button [ class "login-card__submit", onClick Submit, testId "reset-submit" ]
                     [ text "Reset password" ]
         , case model.submitting of
-            Failure (Http.BadStatus 400) ->
+            Failure (Api.RequestFailed (Http.BadStatus 400)) ->
                 p [ class "login-card__error", testId "reset-error" ]
                     [ text "This reset link is invalid or has expired. Request a new one." ]
 
-            Failure (Http.BadStatus 422) ->
+            Failure (Api.RequestFailed (Http.BadStatus 422)) ->
                 p [ class "login-card__error", testId "reset-error" ]
                     [ text PasswordRule.tooShort ]
 

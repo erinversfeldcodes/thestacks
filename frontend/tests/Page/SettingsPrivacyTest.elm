@@ -9,14 +9,15 @@ import Page.Settings.Privacy as Privacy exposing (Msg(..), OutMsg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
 {-| No token means Save messages short-circuit; most tests supply one.
 -}
-token : Maybe String
+token : Maybe Api.Credentials
 token =
-    Just "tok"
+    Just (TestHelpers.creds "tok")
 
 
 suite : Test
@@ -170,7 +171,7 @@ suite =
                         |> Privacy.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "and we cannot say why" ]
-            , -- ⛔ #374. The 422 here is the ceiling rule this module documents
+            , -- ⛔ The 422 here is the ceiling rule this module documents
               test "a 422 names the ceiling rule rather than saying 'try again'" <|
                 \_ ->
                     { init0 | savingShelf = Failure (Http.BadStatus 422) }
@@ -255,7 +256,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            Privacy.initWithToken (Just "tok")
+                            Privacy.initWithToken (Just (TestHelpers.creds "tok"))
                                 { analytics = True, writingAssistant = True }
                     in
                     Expect.all

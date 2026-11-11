@@ -13,7 +13,11 @@ defmodule Stacks.CircuitBreakersTest do
       the circuit — keeping test loops short without hitting the production threshold.
   """
 
-  use ExUnit.Case, async: false
+  # ⚠️ DataCase rather than ExUnit.Case: the budget check this module drives
+  # now reads a durable ledger instead of GenServer state, so these tests need
+  # a sandboxed connection. Without one they fail on ownership, which looks
+  # like a flake and is really a missing sandbox.
+  use Core.DataCase, async: false
 
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.TogetherClient
@@ -267,25 +271,25 @@ defmodule Stacks.CircuitBreakersTest do
     end
 
     test "circuit blows after repeated connection failures and returns {:error, :circuit_open}" do
+      # `complete/2` since `summarize_reviews/2` was deleted 2026-10-15. The
+      # fuse mechanics are unchanged: the same `:fuse.ask` guard and the same
+      # `handle_response` melt path, reached through the one remaining
+      # operation.
       for _ <- 1..3 do
-        TogetherClient.summarize_reviews("some review text", %{
-          title: "Test",
-          author: "Author"
-        })
+        TogetherClient.complete("some prompt", max_tokens: 1)
       end
 
-      assert {:error, :circuit_open} =
-               TogetherClient.summarize_reviews("text", %{title: "T", author: "A"})
+      assert {:error, :circuit_open} = TogetherClient.complete("prompt", max_tokens: 1)
     end
 
     test "[:stacks, :fuse, :blown] telemetry fires when :together_ai_fuse blows" do
       for _ <- 1..2 do
-        TogetherClient.summarize_reviews("text", %{title: "T", author: "A"})
+        TogetherClient.complete("prompt", max_tokens: 1)
       end
 
       events =
         with_telemetry_capture([[:stacks, :fuse, :blown]], fn ->
-          TogetherClient.summarize_reviews("text", %{title: "T", author: "A"})
+          TogetherClient.complete("prompt", max_tokens: 1)
         end)
 
       assert Enum.any?(events, fn {event, _m, meta} ->

@@ -28,26 +28,105 @@ def read(path):
         return handle.read()
 
 def blank_comments(text):
-    """Strip `#`-comments so prose about Finch is not read as a call to it."""
-    return re.sub(r"#[^\n]*", "", text)
+    """Strip `#`-comments so prose about Finch is not read as a call to it.
+
+    The `(?!\\{)` is load-bearing and was missing. `#[^\\n]*` treats `#{` as the
+    start of a comment, so everything after an interpolation on the same line
+    was erased -- and this gate FAILED OPEN as a result. A module whose only
+    outbound call sits after an interpolation, for instance
+
+        "#{base}/b/#{isbn}" |> then(&Finch.build(:get, &1)) |> Finch.request(name)
+
+    had its `Finch.request(` eaten and dropped out of scope entirely: planted
+    unseamed and with no test default, the gate printed `OK: all 11 outbound
+    transports are seam-selected` and exited 0. Interpolation before a call is
+    ordinary Elixir, so this was not an exotic shape.
+    """
+    return re.sub(r"#(?!\{)[^\n]*", "", text)
 
 sources = {}
 for path in sorted(glob.glob(LIB_GLOB, recursive=True)):
     sources[path] = read(path)
 
-transports = {}  # module name -> defining path
+# Outbound calls this gate KNOWS how to reason about. `Finch.request` was the
+# only shape when this was written, and the header claimed Finch was the app's
+# only HTTP client — which was already false on disk: the object-storage module
+# calls `Req.get`, and it never appeared in the roster at all. It happens to be
+# seamed correctly, so the gate was silently right about a module it was not
+# checking, which is the worst way to be right.
+#
+# `Finch.stream` is included for the same reason, though no caller exists today:
+# a streaming client is an outbound call, and the roster should not have to be
+# extended at the moment somebody adds one under deadline.
+OUTBOUND = re.compile(
+    r"\b(?:Finch\.(?:request|stream)!?|Req\.(?:get|post|put|patch|delete|request)!?)\("
+)
+
+# Anything that LOOKS like an HTTP call, whether this gate understands it or
+# not. A module matching this but not OUTBOUND is a transport the gate cannot
+# see, and it fails below rather than dropping quietly out of scope — which is
+# how the next library gets in. Same property the stale-exemption check already
+# gives the roster from the other direction.
+HTTP_ISH = re.compile(
+    r"\b(?:Finch\.|Req\.|HTTPoison\.|Tesla\.|:hackney\.|:httpc\.|Mint\.HTTP\.)\w+!?\("
+)
+
+# Calls that LOOK like HTTP to HTTP_ISH and touch no socket. `Finch.build/3`
+# allocates a request struct; `Req.new/1` and `Tesla.client/2` build a client.
+# A module that only ever does these makes no outbound call.
+#
+# ⚠️ Why this is subtracted rather than left to trip the check: without it, a
+# build-only module FAILED with "extend OUTBOUND to cover the call shape", whose
+# remedy would have put a non-transport on the roster and demanded it prove a
+# seam it does not need. That is the cry-wolf failure this file's own comment
+# names sixty lines below — and a gate that cries wolf gets edited until it is
+# quiet.
+#
+# ⚠️ And why the ORDER of the two fixes mattered: before `blank_comments` stopped
+# eating `#{}` interpolation, subtracting these would have turned
+# `Finch.build(:get, "#{u}/x") |> Finch.request(name)` from a loud failure into
+# an invisible one — the interpolation ate the `Finch.request(`, and only the
+# surviving `Finch.build(` was tripping HTTP_ISH. The accidental catch was the
+# only thing covering that shape. Removing it before fixing the cause would have
+# opened a hole while closing a nuisance.
+NON_EXECUTING = re.compile(r"\b(?:Finch\.build|Req\.new|Tesla\.client)!?\(")
+
+def http_ish_beyond_building(code):
+    """Does this module make an HTTP-ish call that is not merely building one?"""
+    return any(
+        not NON_EXECUTING.match(match.group(0))
+        for match in HTTP_ISH.finditer(code)
+    )
+
+transports = {}   # module name -> defining path
+unrecognised = []  # (module, path) making an HTTP call this gate cannot parse
 for path, text in sources.items():
     code = blank_comments(text)
-    if "Finch.request(" not in code:
-        continue
     match = re.search(r"^defmodule\s+([A-Za-z0-9_.]+)\s+do", code, re.M)
-    if match:
-        transports[match.group(1)] = path
+    if not match:
+        continue
+    module = match.group(1)
+
+    if OUTBOUND.search(code):
+        transports[module] = path
+    elif http_ish_beyond_building(code):
+        unrecognised.append((module, path))
 
 if not transports:
-    print("FAIL: found no module calling Finch.request under apps/core/lib.")
+    print("FAIL: found no module making an outbound HTTP call under apps/core/lib.")
     print("That cannot be right, so the scan has drifted from the source rather than the")
     print("app having stopped making HTTP requests. Fix this script before trusting it.")
+    sys.exit(1)
+
+if unrecognised:
+    print("FAIL: these modules make an outbound HTTP call this gate does not recognise:")
+    for module, path in sorted(unrecognised):
+        print(f"  {module}  ({path})")
+    print("")
+    print("A transport the gate cannot see is a transport with no asserted test floor —")
+    print("it drops out of scope silently, which is how the previous one got in. Extend")
+    print("OUTBOUND to cover the call shape, then this module joins the roster and has")
+    print("to prove its seam like every other.")
     sys.exit(1)
 
 SEAM = re.compile(
@@ -65,6 +144,30 @@ for path, text in sources.items():
         module = this_module if default == "__MODULE__" else default
         if module in transports:
             seams.setdefault(module, set()).add(key)
+
+# A seam does not have to live in the module that makes the call. The
+# object-storage client is selected by a FACADE — `Application.get_env(:core,
+# :storage, Stacks.Storage.Local)` in the parent module — so the harvest above
+# attributes that key to the DEFAULT it names and never to the production
+# implementation, which is the module that actually calls out.
+#
+# So also attribute a key to every module CONFIG ASSIGNS to it. That module can
+# be selected for that key, which is exactly what being behind a seam means. The
+# `:test` default check below is unchanged and still has to pass, so this widens
+# who is recognised as seamed without weakening what seamed requires.
+#
+# Without this, bringing the storage client into the roster reported it as
+# unseamed when it is seamed — and a gate that cries wolf gets edited until it
+# is quiet, which is worse than the gap it was closing.
+CONFIG_GLOBS = ["apps/core/config/*.exs", "config/*.exs"]
+CONFIG_ASSIGN = re.compile(
+    r"^\s*config\s+:core,\s*:([a-z0-9_]+),\s*([A-Za-z0-9_.]+)\s*$", re.M
+)
+for pattern in CONFIG_GLOBS:
+    for path in sorted(glob.glob(pattern)):
+        for key, module in CONFIG_ASSIGN.findall(read(path)):
+            if module in transports:
+                seams.setdefault(module, set()).add(key)
 
 test_config = read(TEST_CONFIG)
 
@@ -105,7 +208,7 @@ for module, path in sorted(transports.items()):
                 "seam key(s) with no `:test` default in " + TEST_CONFIG + ": "
                 + ", ".join(":" + k for k in floorless)
                 + ". Without the compile-time floor, a runtime delete_env restores the LIVE "
-                "client — the exact mechanics of #379.",
+                "client — the exact mechanics of the live-client leak this gate exists for.",
             )
         )
         continue
@@ -152,7 +255,8 @@ if stale:
 if findings:
     print("")
     print("FAIL: " + str(len(findings)) + " outbound transport(s) the test suite can reach the")
-    print("public internet through. This class produced #377, #379 and the five #381 sites;")
+    print("public internet through. This class has produced seven separate live-client")
+    print("leaks in this codebase so far;")
     print("each presented as a flaky test until someone chased it instead of re-running.")
     print("")
     for module, path, reason in findings:

@@ -90,7 +90,10 @@ defmodule StacksWeb.SearchControllerTest do
     test "answers an anonymous caller instead of walling them out" do
       insert_book_with_edition(title: "Open Stack Primer", isbn: "9780000000255")
 
-      response = build_conn() |> get("/api/search", q: "Open Stack Primer") |> json_response(200)
+      response =
+        CoreWeb.ConnCase.proven_conn()
+        |> get("/api/search", q: "Open Stack Primer")
+        |> json_response(200)
 
       titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
       assert "Open Stack Primer" in titles
@@ -365,7 +368,11 @@ defmodule StacksWeb.SearchControllerTest do
         editions: [build(:primary_book_edition, isbn: "9780000000279")]
       )
 
-      response = build_conn() |> get("/api/search", q: "Cellar Ledger") |> json_response(200)
+      response =
+        CoreWeb.ConnCase.proven_conn()
+        |> get("/api/search", q: "Cellar Ledger")
+        |> json_response(200)
+
       titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
 
       assert "Cellar Ledger" in titles
@@ -381,7 +388,9 @@ defmodule StacksWeb.SearchControllerTest do
         conn |> get("/api/search", q: "Reading Room Register") |> json_response(200)
 
       anon_response =
-        build_conn() |> get("/api/search", q: "Reading Room Register") |> json_response(200)
+        CoreWeb.ConnCase.proven_conn()
+        |> get("/api/search", q: "Reading Room Register")
+        |> json_response(200)
 
       assert Enum.map(owner_response["collection"], & &1["book"]["id"]) == [book.id]
       assert anon_response["collection"] == []
@@ -397,7 +406,9 @@ defmodule StacksWeb.SearchControllerTest do
       listed = insert_book_with_edition(title: "Foxed Marginalia", isbn: "9780000000309")
       insert(:listing, book: listed, seller: seller, status: "active", price_cents: 9_500)
 
-      anon_response = build_conn() |> get("/api/search", q: "Foxed") |> json_response(200)
+      anon_response =
+        CoreWeb.ConnCase.proven_conn() |> get("/api/search", q: "Foxed") |> json_response(200)
+
       hits = anon_response["platform_hits"]
       hit_ids = hits |> Enum.map(& &1["book"]["id"]) |> Enum.sort()
 

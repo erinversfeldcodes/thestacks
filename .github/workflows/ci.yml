@@ -12,7 +12,27 @@ permissions:
 
 jobs:
   gate-pre-push-report:
-    if: github.event_name == 'pull_request'
+    # ⛔ BOT ACTORS ARE ADMITTED, because they cannot satisfy this gate and the
+    # result was that an entire PR category received ZERO CI jobs and reported
+    # GREEN. Measured on run 39308930602 (a dependabot action-SHA bump): this
+    # gate ran and SUCCEEDED, `proceed` was false, `changes` skipped, all 22
+    # dependent jobs skipped, and the run's own conclusion was "success".
+    #
+    # The gate reads a `ci-summary` sentinel out of the PR description, which the
+    # local pre-push hook writes. Dependabot authors its own body and has no such
+    # block, so `block_is_green` could never pass for it — a standing condition
+    # rather than an occasional slip.
+    #
+    # ⚠️ Why this is the dangerous category to lose rather than a generic gap:
+    # dependabot's job HERE is bumping pinned action SHAs, which is precisely the
+    # change class that silently breaks a workflow — and the lane that would
+    # notice was the skipped one. First execution was therefore post-merge, with
+    # the breakage already on the default branch.
+    #
+    # Skipping this gate hands those PRs the full suite, because `changes` admits
+    # `result == 'skipped'` on its first arm. The precedent for naming the actor
+    # is already in this file on the vision-lock-drift job.
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
@@ -60,14 +80,30 @@ jobs:
           proceed=true
           block_is_green "ci-summary" "$ci_block" || proceed=false
 
+          echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
+
           if [[ "$proceed" == "true" ]]; then
               echo "Gate: pre-push report is fully green; CI will proceed."
-          else
-              echo "Gate: pre-push report not all green; CI will skip remaining jobs."
-              echo "Push without skipping the local hook (don't pass --no-verify) and"
-              echo "ensure ci-summary lands green to trigger a CI run."
+              exit 0
           fi
-          echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
+
+          # ⛔ FAIL, rather than succeeding with a false output. This job used to
+          # exit 0 either way and let 22 downstream jobs resolve to `skipped`,
+          # which is how a whole PR category went un-tested while its run
+          # reported "success" — twenty grey skips say nothing on a PR page.
+          #
+          # ⚠️ The behaviour that matters has NOT changed: CI still does not run
+          # when the pre-push report is not green, which is the point of the
+          # sentinel. What changes is that the PR now says so in red instead of
+          # looking passed. "CI did not run" and "CI ran and was fine" must not
+          # render identically.
+          echo "::error title=CI did not run::The ci-summary block in this PR's" \
+               "description is missing, empty, or not green, so every dependent job" \
+               "was skipped. This is NOT a passing CI run."
+          echo "Gate: pre-push report not all green; CI skipped remaining jobs."
+          echo "Push without skipping the local hook (don't pass --no-verify) and"
+          echo "ensure ci-summary lands green to trigger a CI run."
+          exit 1
 
   versions:
     needs: gate-pre-push-report
@@ -133,8 +169,55 @@ jobs:
               - 'apps/core/**'
               - 'mix.exs'
               - 'mix.lock'
+              # The ROOT config tree, because the Elixir lint lane runs the
+              # outbound-transport gate and that gate reads `config/*.exs` as
+              # well as `apps/core/config/*.exs`. `config/runtime.exs` holds the
+              # ONLY assignment that puts the production object-storage client
+              # on that gate's seam roster — the facade's own default names the
+              # local implementation, so without this line deleting that
+              # assignment leaves the production client unaccounted for with PR
+              # CI fully green.
+              - 'config/**'
+              # The gate scripts themselves, because the lane that RUNS them is
+              # this one. `doc_gates` also matches `scripts/check-*.sh`, which
+              # made editing a gate look covered — but that job runs six gates
+              # and not the outbound, route-client or ports ones, so a change to
+              # a gate was never exercised by the lane that executes it.
+              - 'scripts/check-*.sh'
+              - 'scripts/lint-elixir.sh'
+              # ⚠️ The CONTRACT tree, because one of this lane's gates reads a
+              # GENERATED, GITIGNORED file: the serializer-completeness gate
+              # compares `apps/core/lib/stacks/gen/proto_json.ex` (produced by
+              # `mix proto.sync`, untracked) against the hand-written
+              # serializers that narrow it. So adding a field to a `.proto`
+              # message changes that gate's input while changing NO tracked file
+              # under `apps/core/**` — and the lane that runs the gate was
+              # skipped on exactly the diff the gate exists to catch.
+              #
+              # This is a different hole from the two above, and the
+              # roots-from-the-gate assertion that found those would not have
+              # found it: the gate's declared inputs ARE covered by
+              # `apps/core/**`. What is not covered is their PROVENANCE. Nine of
+              # the last 112 proto-touching commits have their whole diff under
+              # `proto/`, and they include field additions to existing messages
+              # — the modal shape of the defect, since a diff that remembered to
+              # carry the field would have touched the serializer too.
+              - 'proto/**'
             elm:
               - 'frontend/**'
+              # The Elm lint lane also runs the ports gate, which compares Elm
+              # port DECLARATIONS against the JavaScript that SUBSCRIBES to them
+              # — and that JavaScript lives here, not under frontend/. Without
+              # this path, deleting a subscription from app.js is a
+              # JavaScript-only change: the Elm lane is skipped, the gate never
+              # runs, and the regression it was written for (finishing
+              # onboarding never persisting) comes back with CI fully green.
+              - 'apps/core/assets/**'
+              # And the gate itself, for the same reason it is listed on the
+              # Elixir lane: the job that runs it has to be triggered by a
+              # change to it.
+              - 'scripts/check-ports-wired.sh'
+              - 'scripts/lint-elm.sh'
             rust:
               - 'apps/scraper/**'
             python:
@@ -155,6 +238,15 @@ jobs:
               - 'scripts/**'
               - 'deploy/**'
               - '.github/actions/**'
+              # The workflows themselves, because four of the platform suites
+              # assert ON this file and the composite actions beside it — the
+              # IDOR step, the migration-safety job, the production deploy and
+              # the rollback composite. Without this line, reverting or deleting
+              # one of those steps is a workflows-only edit, so `platform` is
+              # false, `platform-suites` is skipped, and the assertions written
+              # to catch exactly that regression never run. The gate was
+              # unreachable by the change class it exists to guard.
+              - '.github/workflows/**'
             licenses:
               - 'mix.lock'
               - 'frontend/package-lock.json'
@@ -201,6 +293,14 @@ jobs:
               - 'dbt/models/**'
               - 'apps/core/config/config.exs'
               - 'apps/core/lib/core_web/router.ex'
+              # The dbt model-drift gate reads this handler's @model_mapping and
+              # fails when it names a model that is not on disk. dbt exits 0 on a
+              # selector matching nothing, so that mismatch is otherwise a green
+              # run that refreshes nothing. A handler-only change does reach the
+              # gate via the `elixir` filter and lint-elixir.sh, but naming the
+              # file the gate READS keeps the dependency visible here rather than
+              # resting on another lane's path list.
+              - 'apps/core/lib/stacks/workers/dbt_refresh_handler.ex'
               - 'frontend/src/**'
               - 'scripts/check-*.sh'
 
@@ -260,6 +360,7 @@ jobs:
       - run: scripts/check-dbt-model-drift.sh
       - run: scripts/check-phase-scheme.sh
       - run: scripts/check-route-reachability.sh
+      - run: scripts/check-tracker-refs.sh
 
   test-elixir:
     needs: [changes, versions]
@@ -282,8 +383,18 @@ jobs:
           --health-retries 5
     env:
       MIX_ENV: test
-      STACKS_APP_DB_PASSWORD: ci-stacks-app-password
-      STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password
+      # ⛔ 24 CHARACTERS MINIMUM, AND THESE WERE 22. The warehouse-roles
+      # migration validates the shape — 24-128 chars of [A-Za-z0-9._~-] —
+      # because `CREATE ROLE ... PASSWORD` cannot be parameterised, so the
+      # value is interpolated into DDL that runs as the database owner. These
+      # CI literals failed that check, so `test-elixir` died in migrations
+      # before running a single test, on a branch whose tests pass locally.
+      #
+      # ⚠️ Not secrets — they are plaintext in a public workflow by design, for
+      # an ephemeral CI Postgres. The suffix says so, which is why lengthening
+      # them is the right fix rather than shortening the requirement.
+      STACKS_APP_DB_PASSWORD: ci-stacks-app-password-not-a-secret
+      STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password-not-a-secret
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -315,6 +426,20 @@ jobs:
           npm ci
           npm run deploy
       - run: scripts/test-elixir.sh
+      # ⛔ THE ASSOCIATION EVAL RUNS ON EVERY PR, BECAUSE IT CAN.
+      #
+      # Replay only: the corpus holds a recorded model response per post, so
+      # there is no provider, no GPU and no network in the loop. What it scores
+      # is this repository's half of the pass — the decoder, the id mapping, the
+      # de-duplication, the refusal of books outside the catalogue — which is
+      # the half that broke in production twice. Both of those were found by a
+      # reader, after shipping; this is the gate that would have caught them.
+      #
+      # ⚠️ Its floor is 100%, and that is not optimism. Every expectation is a
+      # fact about code in this repository applied to a fixed string, so a drop
+      # is a regression here rather than a model having an off day.
+      - name: Score the association corpus (replay, no provider)
+        run: cd apps/core && mix eval.associations
 
   test-elm:
     needs: [changes, versions]
@@ -396,7 +521,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # fetch-depth: 0 is REQUIRED, not tidy. `buf breaking` compares against
+      # origin/main, and the default shallow checkout creates no such ref — so
+      # the breaking-change gate silently did not run here at all. The script
+      # now fails loudly in that state rather than falling through, which is
+      # what surfaced it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
@@ -563,7 +695,7 @@ jobs:
           apt-get update && apt-get install -y --no-install-recommends git \
             && rm -rf /var/lib/apt/lists/*
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Regenerate vision locks and fail on drift
+      - name: Regenerate the vision lockfiles
         run: |
           set -euo pipefail
           # Hash-pinned (scorecard pinned-dependencies): the requirements file
@@ -577,10 +709,43 @@ jobs:
             --output-file apps/vision/requirements-dev.lock \
             apps/vision/requirements.txt apps/vision/requirements-dev.txt
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # ⛔ THIS JOB COMPUTED THE CORRECT LOCKFILES AND THREW THEM AWAY. It
+      # regenerates them in the canonical container, prints a diff, and exits —
+      # so the only artefact of a 40-second job that already did the work was
+      # an instruction to do it again locally. And "run 'just lock-vision'"
+      # needs Docker: on a machine where the local container runtime will not
+      # start, a correct lockfile became unobtainable even though CI was
+      # holding one.
+      #
+      # ⚖️ Uploaded on drift so the regenerated files can be downloaded and
+      # committed directly. The environment that produced them is the one the
+      # gate compares against, which makes this artefact MORE trustworthy than
+      # a locally generated lock: resolving on another platform can change the
+      # transitive set through environment markers, and for a hash-pinned
+      # install a missing hash is a hard failure rather than a drift warning.
+      - name: Fail on drift
+        id: drift
+        run: |
+          set -euo pipefail
           if ! git diff --exit-code apps/vision/requirements.lock apps/vision/requirements-dev.lock; then
-            echo "::error::vision lockfiles are stale — run 'just lock-vision' and commit the result"
+            echo "::error::vision lockfiles are stale — download the 'vision-lockfiles' artifact from this run and commit it, or run 'just lock-vision' locally"
             exit 1
           fi
+
+      # ⚠️ `failure()`, not `always()`: on a green run the uploaded files would
+      # be byte-identical to the committed ones, and an artefact that is
+      # usually redundant is one nobody checks when it is not.
+      - name: Upload the regenerated lockfiles
+        if: failure() && steps.drift.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vision-lockfiles
+          path: |
+            apps/vision/requirements.lock
+            apps/vision/requirements-dev.lock
+          if-no-files-found: error
+          retention-days: 7
 
   checkov:
     needs: changes
@@ -654,20 +819,170 @@ jobs:
         run: scripts/check-licenses.sh
 
   platform-suites:
-    needs: changes
+    # ⚖️ `versions` joins the needs because this job now installs Elixir, and
+    # the toolchain pins live there — a second copy of the version numbers is
+    # how two jobs come to build against different compilers.
+    needs: [changes, versions]
     if: needs.changes.outputs.platform == 'true'
     runs-on: ubuntu-latest
+    # ⛔ `deployed_posture_test.sh` PLANTS FIXTURES INTO A REAL DATABASE. It
+    # hardcodes `postgres://postgres:postgres@localhost:5432/stacks_dev` and
+    # mutates it — a past-expiry image, a relaxed NOT NULL, a flipped SECURITY
+    # DEFINER — because the gate it tests reads a live schema. Without a
+    # database 7 of its 42 cases fail with "could not plant the fixture", which
+    # is the suite refusing to report on something it could not set up.
+    #
+    # ⚖️ The database comes to the job rather than the suite moving out, for the
+    # reason `run_all.sh` states in its own header: "a suite present on disk
+    # but absent from the list is a suite nothing runs." Splitting one suite
+    # into another job would either duplicate the runner or re-create exactly
+    # the orphan that file exists to prevent.
+    #
+    # ⚠️ This is the THIRD dependency this job gained in one session — Elixir,
+    # buf, now Postgres — which means it is no longer the lightweight shell
+    # runner its name suggests. Said out loud rather than discovered again: if
+    # a fourth arrives, the split is the thing to revisit, not the dependency.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg${{ needs.versions.outputs.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stacks_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
     timeout-minutes: 15
     steps:
+      # fetch-depth: 0 is REQUIRED, not tidy, and this is the SECOND instance of
+      # the same defect in this file. `test/platform/workflow_health_test.sh`
+      # builds its population from `git ls-tree -r origin/main .github/workflows`
+      # — at the default shallow depth that ref does not exist, the listing is
+      # empty, and the suite's own floor refuses rather than asserting over
+      # nothing. Measured locally: 13 workflows with the ref, 0 without, against
+      # a floor of 5.
+      #
+      # ⚠️ Note the asymmetry that made this easy to miss: the GATE
+      # (`check-workflow-health.sh`) tolerates a missing default-branch ref via
+      # WORKFLOW_HEALTH_DEFAULT_BRANCH and falls back, while its FIXTURE has no
+      # override and refuses. Reading the gate suggests the job is fine.
+      #
+      # ⛔ And CI history could not settle whether this was already red: every
+      # recent run SKIPPED this job (`needs.changes.outputs.platform`), so it has
+      # not executed since that suite joined run_all.sh. "No red run on record"
+      # meant "never ran", not "passed".
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # ⛔ BEFORE "Install suite dependencies", WHICH PIP-INSTALLS INTO IT.
+      # That step runs `pip3 install pyyaml`, and the suites' own extractors
+      # `import yaml`. With setup-python AFTER it, the pip install landed in
+      # the runner's system interpreter and setup-python then shadowed it with
+      # a clean one: `ModuleNotFoundError: No module named 'yaml'`, which
+      # failed ci_gate_reachability_test.sh at its own anti-vacuity check.
+      #
+      # ⚠️ PINNED, NOT THE RUNNER DEFAULT. `gen_python_proto.py` uses
+      # `zip(strict=)`, which is a 3.10+ construct, so the codegen below
+      # breaks on an older interpreter — the same failure this repo already
+      # hits when `deploy-preview.sh` runs on a system python 3.9. Every other
+      # job that runs this script pins the version; this one was relying on
+      # whatever ubuntu-latest happens to ship.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
       - name: Install suite dependencies
         run: |
           pip3 install --quiet pyyaml
           mkdir -p "$HOME/.local/bin"
           bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/5db9d9cde2f3deb5035dea3e45f0a9fff2f29448/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # ⛔ TWO OF THESE SUITES READ A GENERATED FILE THIS JOB NEVER PRODUCED.
+      # `protojson_completeness_test.sh` and `never_serialized_test.sh` both
+      # read `apps/core/lib/stacks/gen/proto_json.ex`, which is gitignored and
+      # written by `mix proto.sync` — so they could only pass on a machine
+      # where someone had already generated it, which means locally. In CI they
+      # failed on their own `inputs_exist` precondition, which is the gate
+      # working: a suite that cannot read its subject must not report on it.
+      #
+      # ⚖️ The toolchain comes to the job rather than the suites moving out of
+      # it. `run_all.sh` is the single entry point the local `just ci` also
+      # uses, and splitting it would leave two runners where there is one. The
+      # cost is an Elixir setup this job did not need before; the alternative
+      # is two suites that can never run in CI.
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      # ⚠️ `buf` TOO, NOT JUST ELIXIR. `mix proto.sync` shells out to
+      # `buf build proto/ --as-file-descriptor-set` (descriptor.ex:7), so a
+      # job with Elixir and no buf fails the codegen with a bare
+      # `** (ErlangError) :enoent` — the error for a command that is not on
+      # PATH, which names neither the command nor the step's real need.
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
+        with:
+          github_token: ${{ github.token }}
+      - name: Install mix deps
+        run: mix deps.get
+      # ⛔ BOTH ELIXIR TARGETS, NOT JUST THE ECTO ONE. `gen-ecto-proto.sh`
+      # produces the Ecto schemas; `Stacks.Proto.*` comes from
+      # `gen_python_proto.py --language elixir`, and `scraper_client.ex:404`
+      # builds a `Stacks.Proto.Scraper.ScrapeRequest` struct. With only the
+      # first, the app fails to compile on a module that has nothing to do
+      # with this job's suites:
+      #   error: Stacks.Proto.Scraper.ScrapeRequest.__struct__/1 is undefined
+      #
+      # ⚖️ This is the pair every other compiling job runs — test-elixir,
+      # migration-safety and lint-elixir all run exactly these two — so the
+      # fix is to match them rather than to invent a narrower subset. There
+      # are five codegen targets in total; a job that compiles core needs
+      # these two of them.
+      - name: Generate the proto artefacts two suites read
+        run: |
+          bash scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
+
+      # ⚖️ `stacks_dev` specifically, because that is the database name the
+      # posture suite hardcodes. MIX_ENV=dev so `dev.exs`'s own Repo config
+      # applies rather than a URL this job would have to compose.
+      - name: Migrate the database the posture suite plants into
+        run: mix ecto.create --quiet && mix ecto.migrate
+        working-directory: apps/core
+        env:
+          MIX_ENV: dev
+          STACKS_APP_DB_PASSWORD: ci-stacks-app-password-not-a-secret
+          STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password-not-a-secret
+          # ⛔ THREE VARIABLES RAISE IN *EVERY* ENV, NOT JUST :prod.
+          # `config/runtime.exs` raises for CLOAK_KEY at line 6 —  before the
+          # `if config_env() == :prod` block — and the same for
+          # VISION_HMAC_SECRET and GUARDIAN_SECRET_KEY. An enumeration of the
+          # prod block alone misses all three, which is how this step failed
+          # with `environment variable CLOAK_KEY is missing` after the codegen
+          # fix landed.
+          #
+          # ⚖️ Test values, not the real secrets: this step creates a schema
+          # and applies migrations. It decrypts nothing, signs nothing and
+          # authenticates no one, so a real CLOAK_KEY here would be a
+          # production credential held by a job that has no use for it.
+          # CLOAK_KEY must still be 32 bytes once base64-decoded or Cloak
+          # rejects it, so this is a decodable literal rather than a word.
+          CLOAK_KEY: Y2ktcGxhdGZvcm0tc3VpdGVzLWNsb2FrLWtleS0zMmI=
+          VISION_HMAC_SECRET: ci-vision-hmac-not-a-secret
+          GUARDIAN_SECRET_KEY: ci-guardian-secret-not-a-secret
+
       - name: Platform shell suites
         run: bash test/platform/run_all.sh
+      # The other two thirds of the local gate runner's platform group. PR CI
+      # ran only the suites above, so a gate that reddens a local full run could
+      # pass here — which is the same shape as a gate that cannot fail at all,
+      # and it bit once already: a new script left the script inventory stale,
+      # failing locally while every PR check stayed green.
+      # A platform suite asserts that these stay in step with the local group.
+      - name: Script wiring and inventory
+        run: bash scripts/check-script-wiring.sh
+      - name: MCP server tests
+        run: bash scripts/test-mcp.sh
 
   trufflehog:
     needs: changes
@@ -715,9 +1030,21 @@ jobs:
           python3 scripts/gen_python_proto.py --language python
       - name: Build images for CIS benchmark
         run: |
-          docker build -q -t stacks-dockle-core    -f deploy/Dockerfile.core    .
-          docker build -q -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
-          docker build -q -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
+          # ⛔ NOT `-q`. These are the only full image builds in PR CI, so when
+          # one fails this step is the only place the reason exists — and `-q`
+          # discarded it, leaving `process "/bin/sh -c bash
+          # scripts/gen-ecto-proto.sh && ..." did not complete successfully`
+          # as the entire diagnosis. A real failure took three separate log
+          # reads to attribute, and was ultimately only identified by
+          # reproducing the build's MIX_ENV locally.
+          #
+          # ⚖️ The quiet flag buys a shorter log on the runs that pass, and
+          # costs the diagnosis on the ones that do not. `--progress=plain`
+          # also drops the TTY redraws, so a failing RUN step's own stdout and
+          # stderr appear in order rather than being overwritten.
+          docker build --progress=plain -t stacks-dockle-core    -f deploy/Dockerfile.core    .
+          docker build --progress=plain -t stacks-dockle-vision  -f deploy/Dockerfile.vision  .
+          docker build --progress=plain -t stacks-dockle-scraper -f deploy/Dockerfile.scraper .
       - name: Scan images with dockle
         env:
           DOCKLE_IGNORES: DKL-DI-0006,CIS-DI-0010,DKL-DI-0005
@@ -848,10 +1175,47 @@ jobs:
         run: bash scripts/dashboard-render-gate.sh
 
   deploy-preview:
-    # TODO: restore full dependency list after deploy-preview is stable:
-    # needs: [versions, test-elixir, test-elm, test-rust, test-python, lint-proto, test-dbt, check-licenses, gitleaks, hadolint, semgrep, checkov, trivy, trufflehog, syft-grype, dockle]
-    needs: [versions, changes]
+    # The preview stack is what the IDOR gate and the deployed E2E run against,
+    # so a preview built from code whose tests have not passed makes those runs
+    # mean less than they appear to. This used to read
+    # `needs: [versions, changes]` with the real list commented out behind a
+    # "restore after deploy-preview is stable" TODO.
+    #
+    # ⚠️ RESTORING THAT LIST NAIVELY DISABLES PREVIEW DEPLOYS, which is almost
+    # certainly why it was commented out rather than fixed. Every correctness
+    # job below is itself gated on a paths-filter (`test-elixir` on
+    # `changes.outputs.elixir`, and so on), and in GitHub Actions a SKIPPED
+    # dependency skips the dependent job unless its `if:` overrides the implicit
+    # `success()`. So on a PR touching only Elm, `test-elixir` is skipped and
+    # `deploy-preview` would have been skipped with it — silently, on nearly
+    # every PR.
+    #
+    # Hence the two leading clauses: `!cancelled()` lets the job run when a
+    # dependency was skipped for not being relevant, and
+    # `!contains(needs.*.result, 'failure')` is what actually blocks — a real
+    # failure in any dependency stops the deploy.
+    #
+    # ⚠️ Scope is deliberate: the CORRECTNESS suites gate the preview, the
+    # supply-chain scanners do not. `check-licenses`, `gitleaks`, `hadolint`,
+    # `semgrep`, `checkov`, `trivy`, `trufflehog`, `syft-grype` and `dockle`
+    # were in the commented list; they gate the MERGE, and blocking an ephemeral
+    # preview on a licence scan adds latency without making the preview's E2E
+    # results more trustworthy. If that trade is ever revisited, the reason to
+    # change it is a finding about previews, not tidiness.
+    needs:
+      [
+        versions,
+        changes,
+        test-elixir,
+        test-elm,
+        test-rust,
+        test-python,
+        lint-proto,
+        test-dbt,
+      ]
     if: |
+      !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
       github.event_name == 'pull_request' && (
         needs.changes.outputs.source == 'true' ||
         needs.changes.outputs.docker == 'true' ||
@@ -884,7 +1248,7 @@ jobs:
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
-      - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)
+      - name: Derive PREVIEW_SUFFIX (run-unique preview names, so concurrent runs cannot collide)
         run: |
           echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}" >> "$GITHUB_ENV"
           echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}"
@@ -974,14 +1338,23 @@ jobs:
           for _ in {1..10}; do
             curl -sf --max-time 10 "${CORE_URL}/login" >/dev/null 2>&1 &
           done
+          # ⛔ The proof a browser would have. Every login below is refused
+          # without it, and a refused login here does not fail loudly — it
+          # yields an empty token and the lane SKIPS, which is how two security
+          # scans went dark while reporting nothing wrong.
+          CSRF_JAR="$(mktemp)"
+          curl -sf -o /dev/null --cookie-jar "${CSRF_JAR}" --max-time 15 "${CORE_URL}/" || true
+          CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${CSRF_JAR}" | tail -1)"
           for _ in {1..5}; do
             curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+              -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
               -H "Content-Type: application/json" \
               -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
               >/dev/null 2>&1 &
           done
           for _ in {1..3}; do
             DB_TOKEN="$(curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
+              -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
               -H "Content-Type: application/json" \
               -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' \
               2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
@@ -998,9 +1371,18 @@ jobs:
           # /api/auth/login until it returns a non-502 (200/401 both mean the app
           # served the request) so the setup project doesn't race the wake.
           login_warm=0
+          # A CSRF rejection halts before the password is hashed, so an unproven
+          # poke would report the path warm while never touching the Argon2 pool
+          # it exists to warm. The loop only checks for a non-502, so nothing
+          # else here would notice.
+          csrf_jar="$(mktemp)"
+          curl -s -o /dev/null --cookie-jar "${csrf_jar}" --max-time 10 "${CORE_URL}/" || true
+          csrf_proof="$(awk '$6 == "stacks_csrf" { print $7 }' "${csrf_jar}" 2>/dev/null | tail -1)"
           for _ in {1..20}; do
             code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
               -X POST "${CORE_URL}/api/auth/login" \
+              -b "${csrf_jar}" \
+              -H "X-CSRF-Token: ${csrf_proof}" \
               -H "Content-Type: application/json" \
               -d '{"email":"warmup@thestacks.test","password":"warmup"}' 2>/dev/null || true)"
             if [[ -n "${code}" && "${code}" != "502" && "${code}" != "000" ]]; then
@@ -1041,9 +1423,44 @@ jobs:
             done ) &
           KEEPALIVE_PID=$!
           trap 'kill "${KEEPALIVE_PID}" 2>/dev/null || true' EXIT
+          # ⛔ E2E_EXPECT_EMAIL_DELIVERY turns the email-budget SKIP into a hard
+          # failure. Without it the gate is a permanent silent skip here — the
+          # shape this repository has already recorded once, where a guard was
+          # built, proven to work, and left uncalled. A CI preview is freshly
+          # deployed, so its send budget is intact and a 429 is a real signal;
+          # the exhaustion that motivated the gate came from repeated local runs
+          # against one reused stack.
+          # ⚖️ E2E_EXPECT_ABSENT_COST_LINE: SET DELIBERATELY. The cost page's
+          # unmeasured-line rendering is only exercised when some metric family
+          # has no samples for the period, and on a preview — fresh Neon branch,
+          # fresh metrics store, no real provider billing — several never do.
+          # Measured on a live preview: 4 of 10 cost lines were absent.
+          #
+          # If that ever stops being true the case would SILENTLY SKIP and the
+          # unmeasured-line rendering would go unexercised in CI forever. With
+          # the flag set, the precondition disappearing is a loud failure, which
+          # is information rather than noise — and an opt-in flag nothing sets
+          # is indistinguishable from a forgotten one.
           CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 E2E_EXPECT_FULL_SEEDS=1 \
-            E2E_EXPECT_RATE_LIMITING=1 \
+            E2E_EXPECT_RATE_LIMITING=1 E2E_EXPECT_EMAIL_DELIVERY=1 \
+            E2E_EXPECT_ABSENT_COST_LINE=1 \
             GRAFANA_URL="${GRAFANA_URL}" BASE_URL="${CORE_URL}" scripts/test-e2e.sh
+      - name: E2E repeatability (two identical runs must agree)
+        if: ${{ !cancelled() }}
+        run: |
+          # ⛔ HERE AS WELL AS IN scripts/ci.sh, because this workflow does not
+          # invoke that script — it runs its own steps. A gate wired only into
+          # the local integration runner does not gate a pull request, and
+          # `check-script-wiring.sh` cannot see the difference: it finds *a*
+          # caller and has no way to know which one CI actually uses.
+          #
+          # ⚠️ Why it earns two extra runs of two spec files: without it a
+          # failure COUNT is not a measurement. This suite reported 44, 34, 18,
+          # 13 and 15 failures across one session, part real improvement and
+          # part residue from the run before, and the two cannot be separated
+          # afterwards. The standing rule that every failure gets fixed assumes
+          # a stable denominator.
+          CI=1 BASE_URL="${CORE_URL}" bash scripts/check-e2e-repeatability.sh
       - name: Dashboard emission gate (preview VictoriaMetrics)
         if: ${{ !cancelled() }}
         run: |
@@ -1094,11 +1511,20 @@ jobs:
         if: always()
         # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
+          # ⛔ The proof a browser would have. Every login below is refused
+          # without it, and a refused login here does not fail loudly — it
+          # yields an empty token and the lane SKIPS, which is how two security
+          # scans went dark while reporting nothing wrong.
+          CSRF_JAR="$(mktemp)"
+          curl -sf -o /dev/null --cookie-jar "${CSRF_JAR}" --max-time 15 "${CORE_URL}/" || true
+          CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${CSRF_JAR}" | tail -1)"
           U1="$(curl -sf "${CORE_URL}/api/auth/login" \
+            -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
             -H "Content-Type: application/json" \
             -d '{"email":"owner@thestacks.app","password":"dev-password-123"}' 2>/dev/null \
             | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
           U2="$(curl -sf "${CORE_URL}/api/auth/login" \
+            -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
             -H "Content-Type: application/json" \
             -d '{"email":"user@thestacks.app","password":"dev-password-456"}' 2>/dev/null \
             | python3 -c "import json,sys; print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)"
@@ -1129,15 +1555,24 @@ jobs:
             exit 1
           fi
           echo "Using placement ${PLACEMENT} from bookshelf '${USED_BOOKSHELF}'"
+          # ⛔ THE PROOF IS WHAT KEEPS THIS TEST MEANINGFUL. The check below
+          # treats 403 and 404 as "denied", and a request with no CSRF proof is
+          # refused with 403 — so an unproven DELETE would report the IDOR
+          # blocked over a stack whose row-level checks had been removed
+          # entirely. The proof makes the 403 mean authorization again.
+          idor_jar="$(mktemp)"
+          curl -s -o /dev/null --cookie-jar "${idor_jar}" --max-time 10 "${CORE_URL}/" || true
+          idor_proof="$(awk '$6 == "stacks_csrf" { print $7 }' "${idor_jar}" 2>/dev/null | tail -1)"
+          if [[ -z "${idor_proof}" ]]; then
+            echo "FAIL: IDOR — no stacks_csrf cookie, so a 403 below would not mean denied"
+            exit 1
+          fi
           IDOR_CODE="$(curl -o /dev/null -s -w "%{http_code}" \
             -X DELETE "${CORE_URL}/api/placements/${PLACEMENT}" \
+            -b "${idor_jar}" \
+            -H "X-CSRF-Token: ${idor_proof}" \
             -H "Authorization: Bearer ${U2}")"
-          if [[ "${IDOR_CODE}" == "200" ]]; then
-            echo "FAIL: IDOR — user2 deleted user1's placement (HTTP 200)"
-            exit 1
-          else
-            echo "PASS: IDOR cross-user DELETE blocked (HTTP ${IDOR_CODE})"
-          fi
+          bash scripts/check-idor-response.sh "${IDOR_CODE}"
       - name: Cleanup preview stack
         if: always()
         run: |

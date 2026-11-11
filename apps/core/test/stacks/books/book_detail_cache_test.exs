@@ -1,5 +1,25 @@
 defmodule Stacks.Books.BookDetailCacheTest do
-  use ExUnit.Case, async: true
+  @moduledoc """
+      ⚠️ `async: false`, and it must stay that way: the `setup` below calls
+      `invalidate_all/0`, which is `:ets.delete_all_objects` on a `:named_table,
+      :public` cache shared by the whole run.
+
+      Run async, this file wipes that table out from under any concurrent test
+      that put something in it. That was the cause of a genuine race in
+      `CacheInvalidationHandlerTest` "ignores unrelated events" — it failed once
+      under seed 564411 and then passed on a re-run of the SAME seed, which is
+      the signature of concurrency rather than ordering. Everything that
+      investigation ruled out was correctly ruled out: the handler test's ids are
+      uniquified so it was never a key collision, and the cache's 300s TTL and
+      60s sweep are both longer than a whole suite run so it was never expiry.
+      It was this `delete_all_objects`.
+
+      Every one of the eleven sibling tests that clears a shared cache is
+      already `async: false` — the convention existed and this file was the one
+      exception. `test/platform/async_cache_clearing_test.sh` now holds the rule
+      so the exception cannot come back.
+  """
+  use ExUnit.Case, async: false
 
   alias Stacks.Books.BookDetailCache
 

@@ -24,7 +24,7 @@ defmodule Stacks.Workers.RegenerateFeedJob do
   # something else triggers a regeneration. Any dedup must therefore exclude
   # `:executing` (and accept the warning), or debounce rather than deduplicate.
   # Not worth it for a batch path; revisit only with that analysis in hand.
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :user, queue: :default, max_attempts: 3
 
   require Logger
 
@@ -56,7 +56,7 @@ defmodule Stacks.Workers.RegenerateFeedJob do
           "RegenerateFeedJob: bookshelf #{bookshelf_name} for user=#{user_id} not found"
         )
 
-        {:cancel, "bookshelf not found"}
+        {:cancel, "bookshelf_not_found"}
 
       {:error, {:cache_write_failed, changeset}} ->
         Logger.error(

@@ -39,14 +39,14 @@ import TestHelpers
 -}
 startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
-    ProgramTest.start () (libraryProgram (Just "test-token"))
+    ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
 
 
 {-| Start any owner-mode bookshelf under the given config.
 -}
 startShelf : Bookshelf.Config -> ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startShelf config =
-    ProgramTest.start () (bookshelfProgram config (Just "test-token"))
+    ProgramTest.start () (bookshelfProgram config (Just (TestHelpers.creds "test-token")))
 
 
 suite : Test

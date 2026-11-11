@@ -7,9 +7,11 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.Blog.Post as Post exposing (Msg(..))
+import Stacks.Api.V1.BlogResponses as Envelope
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -220,7 +222,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Post.update SubmitComment testModel (Just "token")
+                            Post.update SubmitComment testModel (Just (TestHelpers.creds "token"))
                     in
                     Expect.equal False model.commentSubmitting
             , test "non-empty draft with token sets submitting" <|
@@ -230,7 +232,7 @@ suite =
                             { testModel | commentDraft = "hello" }
 
                         ( model, _, _ ) =
-                            Post.update SubmitComment draftModel (Just "token")
+                            Post.update SubmitComment draftModel (Just (TestHelpers.creds "token"))
                     in
                     Expect.equal True model.commentSubmitting
             , test "non-empty draft without token does not submit" <|
@@ -274,6 +276,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
+                            , associationOutcome = Envelope.AssociationOutcomeUnspecified
                             }
 
                         model =
@@ -312,6 +315,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
+                            , associationOutcome = Envelope.AssociationOutcomeUnspecified
                             }
 
                         model =
@@ -368,6 +372,7 @@ postView { displayName, handle } =
             , authorDisplayName = displayName
             , authorHandle = handle
             , syndicated = True
+            , associationOutcome = Envelope.AssociationOutcomeUnspecified
             }
 
         model =
@@ -395,6 +400,7 @@ blockMenuView { authorName } =
             , authorDisplayName = authorName
             , authorHandle = "fable_quill"
             , syndicated = True
+            , associationOutcome = Envelope.AssociationOutcomeUnspecified
             }
 
         viewerModel =

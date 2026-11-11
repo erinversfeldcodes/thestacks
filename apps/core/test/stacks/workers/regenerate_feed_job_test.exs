@@ -117,7 +117,7 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
 
   describe "perform/1 — non-existent user" do
     test "returns {:cancel, _} when user/bookshelf not found" do
-      assert {:cancel, "bookshelf not found"} =
+      assert {:cancel, "bookshelf_not_found"} =
                perform_job(RegenerateFeedJob, %{
                  "user_id" => Ecto.UUID.generate(),
                  "bookshelf_name" => "library"

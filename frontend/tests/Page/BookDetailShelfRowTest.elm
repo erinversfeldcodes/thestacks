@@ -56,7 +56,7 @@ bookshelfEndpoint =
 start : ShelfRowTest
 start =
     ProgramTest.start ()
-        (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+        (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing)
 
 
 {-| A book open on the detail page, sitting on a placement in the Library.
@@ -316,7 +316,7 @@ removingTheDescribedPlacementRereadsTheBookcase =
     test "remove_rereads_rows: removing the described copy re-reads the bookcase" <|
         \() ->
             ProgramTest.start ()
-                (bookDetailProgramWithOut "book-test-001" (Just "test-token") Nothing)
+                (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing)
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacements "book-test-001"

@@ -18,18 +18,23 @@ Develop and maintain the Python/FastAPI vision service: image-to-text extraction
 
 ### Endpoints (in `apps/vision/app/main.py`)
 - `GET /health` — Health check (no HMAC required)
-- `POST /classify` — Single image; returns `is_book` verdict, confidence, and subjects
-- `POST /extract` — Single image; returns extracted text (title, author, ISBN barcode, publisher)
-- `POST /analyze` — Orchestrates `classify` → (on positive) `extract` in one call; short-circuits on confident `not_book` / `ambiguous`
-- `POST /associate` — 202 Accepted; queues association work
+- `POST /analyze` — **the only identification endpoint.** Orchestrates classification → (on a
+  positive verdict) extraction in one call; short-circuits on a confident `not_book` / `ambiguous`.
+  Takes a single `image` OR `image_url` (a proto `oneof` — exactly one must be set).
 - All non-health endpoints require HMAC via `Depends(verify_hmac)`
+
+⚠️ `POST /classify`, `POST /extract` and `POST /associate` were deleted on 2026-10-15. The first
+two were superseded by `/analyze` for measured reasons (a second HTTP round-trip and a second cold
+container cost 2-4s of the p95); `/associate` queued cover-verification work that nothing ever
+requested. Note the name collision that outlives them: `classify` and `extract` still exist as
+**methods on the Modal `VisionModel` class** (`modal_app.py`), which is what `/analyze` calls
+internally — do not delete those.
 
 ### Modules
 - `app/main.py` — FastAPI app, routes, middleware, and inline Pydantic v2 request/response models (no separate `app/models/` package)
 - `app/services/vision_client.py` — Modal client (calls `VisionModel` class on Modal)
 - `app/services/hmac_auth.py` — HMAC token validation (shared secret with Elixir core)
 - `app/services/local_ocr.py` — Local pyzbar barcode pre-pass (avoids a GPU round-trip when a barcode is visible)
-- `app/services/image_download.py` — Fetches uploaded images for processing
 - `app/services/url_validator.py` — SSRF-safe URL validation
 - `app/config.py` — Environment-based config (model name, budget limits)
 - `app/proto/gen/` — Generated proto types (do not hand-edit)
@@ -147,7 +152,7 @@ A missing or empty Self-Review section is a reviewer blocker.
 
    | Item | Implemented | Tested (happy + error path) | Notes |
    |------|-------------|----------------------------|-------|
-   | POST /classify | ✅ | ❌ | deferred — reason here |
+   | POST /analyze | ✅ | ❌ | deferred — reason here |
 
    Any row with ❌ in either column **must** have an explicit justification. A row with ❌ and
    no justification is a blocker — do not submit.

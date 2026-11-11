@@ -31,10 +31,10 @@ suite =
 
 start : ProgramTest.ProgramTest AuditLog.Model AuditLog.Msg (SimulatedEffect AuditLog.Msg)
 start =
-    ProgramTest.start () (program (Just "test-token"))
+    ProgramTest.start () (program (Just (TestHelpers.creds "test-token")))
 
 
-program : Maybe String -> ProgramDefinition () AuditLog.Model AuditLog.Msg (SimulatedEffect AuditLog.Msg)
+program : Maybe Api.Credentials -> ProgramDefinition () AuditLog.Model AuditLog.Msg (SimulatedEffect AuditLog.Msg)
 program maybeToken =
     ProgramTest.createElement
         { init =
@@ -56,7 +56,7 @@ program maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-initEffects : Maybe String -> SimulatedEffect AuditLog.Msg
+initEffects : Maybe Api.Credentials -> SimulatedEffect AuditLog.Msg
 initEffects maybeToken =
     case maybeToken of
         Just token ->

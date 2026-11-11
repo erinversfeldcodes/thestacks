@@ -7,6 +7,11 @@ defmodule StacksWeb.GroupControllerTest do
 
   alias Stacks.Accounts.Guardian
 
+  # The proto-generated base serializers. Named here because one test below
+  # derives the roster's contract field set from the generated shape rather than
+  # re-typing it.
+  alias StacksWeb.ProtoJSON.Gen
+
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     put_req_header(conn, "authorization", "Bearer #{token}")
@@ -343,6 +348,59 @@ defmodule StacksWeb.GroupControllerTest do
       # every membership this path creates has role "member".
       assert Enum.all?(members, &(&1["role"] == "member"))
       assert group.owner_id == owner.id
+    end
+
+    test "the roster's wire shape is the one the contract declares", %{conn: conn} do
+      # ⛔ This endpoint sent a hand-rolled map for months while matching NO proto
+      # message. `.proto` is this project's single source of truth for structured
+      # data on the wire, and `StacksWeb.ProtoJSON`'s own moduledoc promises that
+      # every function there emits "the exact map shape of its `.proto` message" —
+      # but the roster was assembled in a private `member_json/1` in the
+      # controller, outside both. So nothing connected the fields the server sends
+      # to the fields the client requires, and the one defect that actually
+      # occurred here (a null `display_name` failing the whole roster) lived in
+      # precisely that gap.
+      #
+      # ⚠️ The chain this closes has two links, and each is gated separately:
+      # `mix proto.sync --check` pins `Gen.group_member_summary/1` to
+      # `GroupMemberSummary` in social.proto, and this test pins the response to
+      # `Gen`. Re-introducing a hand-written payload — adding a field, dropping
+      # one, renaming one — fails here rather than silently drifting.
+      owner = insert(:user, display_name: "Ada")
+
+      {:ok, group} =
+        Stacks.Social.create_group(owner.id, %{
+          name: "Circle",
+          type: "close_friends",
+          visibility: "platform"
+        })
+
+      conn =
+        conn
+        |> auth_conn(owner)
+        |> get("/api/groups/#{group.id}/members")
+
+      assert %{"members" => [member | _]} = json_response(conn, 200)
+
+      {:ok, [row | _]} = Stacks.Social.list_group_members(group.id, owner.id)
+
+      declared =
+        row
+        |> Gen.group_member_summary()
+        |> Map.keys()
+        |> Enum.map(&Atom.to_string/1)
+        |> Enum.sort()
+
+      # Anti-vacuity: both sides are key sets, and comparing two empty ones
+      # passes. The contract has four fields, so fewer means the derivation broke
+      # and the comparison below is being made over nothing.
+      assert length(declared) >= 4,
+             "derived only #{length(declared)} contract field(s), so this comparison proves nothing"
+
+      assert Enum.sort(Map.keys(member)) == declared,
+             "the roster's wire shape has drifted from GroupMemberSummary. A payload assembled " <>
+               "outside the contract is one nothing ties to the client's decoder, which is how a " <>
+               "null display_name came to fail the entire roster."
     end
 
     test "an invite-only group is not readable by a non-member", %{conn: conn} do

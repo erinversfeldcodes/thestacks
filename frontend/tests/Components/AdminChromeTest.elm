@@ -36,7 +36,7 @@ logoutEndpoint =
 
 start : ProgramTest.ProgramTest TestHelpers.AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
 start =
-    ProgramTest.start () (TestHelpers.adminChromeProgram (Just adminToken))
+    ProgramTest.start () (TestHelpers.adminChromeProgram (Just (TestHelpers.creds adminToken)))
 
 
 {-| The chrome as it appears to someone who arrived without an admin token —
@@ -109,6 +109,24 @@ clickRevokesServerSide =
 {-| `/api/admin/*` 401s the ordinary Guardian token. A sign-out that sent it
 would look like it worked (the operator is re-gated either way) while the
 session stayed open for the rest of its window.
+
+⛔ **DO NOT REWRITE THE EXPECTED VALUE AS A BUILDER CALL.** `Api.requestHeaders`
+is now the one credential derivation and `EffectHeaderParityTest` argues that an
+expected header should come from the builder rather than from a literal. That
+argument does not reach here, and applying it would delete a guarantee.
+
+⚖️ This literal is an ORACLE, not a second derivation. The parity test compares
+the harness's output to the builder's output — two things that now move
+together — so if the builder emitted `Token …` instead of `Bearer …`, the parity
+test would still pass. Measured: breaking the builder that way reds exactly
+three assertions, the two literals in `ApiRequestHeadersTest` and this one, and
+leaves every parity assertion green.
+
+⚠️ So the division is deliberate: literals pin the builder, builder calls pin
+the two runtimes against each other. "Tidying up the last hand-written header"
+would take the independent checks on the scheme from three to two, in the one
+file that also pins WHICH token an admin request carries.
+
 -}
 clickCarriesTheAdminToken : Test
 clickCarriesTheAdminToken =

@@ -36,37 +36,168 @@ defmodule StacksWeb.ProtoJSON do
                         :website_url,
                         :onboarding_completed,
                         :pending_email,
-                        :pending_email_sent_at
+                        :pending_email_sent_at,
+                        # ⛔ HERE and not in the core list, for exactly the
+                        # reason stated above: `@user_embed_fields` is built
+                        # from the core list, so putting a consent flag there
+                        # would publish it on other people's pages. It is the
+                        # reader's own consent and belongs only in the reader's
+                        # own record.
+                        #
+                        # ⛔ `consent_analytics` sits in the core list and has
+                        # the SAME problem — stated plainly rather than hedged,
+                        # because by the principle one line above there is no
+                        # ambiguity about it, only a change that had not been
+                        # made yet. It has since been made: the embed path now
+                        # takes `@listing_seller_fields`, so neither consent
+                        # flag leaves the owner's own record.
+                        #
+                        # ⚠️ Added because its ABSENCE lost data, not for
+                        # completeness. `Api.elm` decodes
+                        # `proto.user.consentWritingAssistant` from this payload
+                        # already, and a proto3 `bool` has IMPLICIT PRESENCE —
+                        # so an omitted field arrived as `false` with nothing to
+                        # distinguish it from a stored `false`. No literal
+                        # default appears in the source, which is why this hid
+                        # where the equivalent reading-status defect did not.
+                        #
+                        # ⚠️ NOT a live data-loss bug, and the first version
+                        # of this comment overstated it. Traced end to end: the
+                        # writing toggle is not saved by the privacy page's Save
+                        # button at all — it issues its own request on click, so
+                        # the only value ever written comes from the model at
+                        # click time, and the control is disabled while the
+                        # settings fetch is Loading OR Failed. So the window in
+                        # which the model holds this payload's `false` is a
+                        # window in which the control cannot be clicked.
+                        #
+                        # `Main.elm` is the sole reader of the field in the whole
+                        # SPA, and its seed is replaced before the control it
+                        # seeds becomes usable. So the field was DEAD — decoded
+                        # as a lie no live path could act on. Carried anyway,
+                        # because a dead field that decodes as a confident
+                        # `false` is a loaded gun for the next consumer, and the
+                        # asymmetry with `consent_analytics` had no reason.
+                        :consent_writing_assistant
                       ]
-  @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
+  # ⛔ `@user_embed_fields` lived here and is DELETED rather than left unused.
+  # It was `@user_core_fields ++ [:created_at, :updated_at]` and had exactly one
+  # caller — `listing_seller/1`, below — which now has its own narrow list. A
+  # take-list that inherits the owner's fields and is named for somebody else's
+  # view is the defect itself, so leaving it in place for a future caller would
+  # leave the trap armed and the next person would reach for it by name.
+  #
+  # ⛔ A SELLER ON A PUBLIC LISTING, and a separate list because reusing
+  # `@user_embed_fields` served personal data to anonymous callers.
+  #
+  # MEASURED before changing it, through the controller rather than the
+  # serializer, as an unauthenticated `GET /api/listings`:
+  #
+  #     seller keys: age_verified, consent_analytics, created_at, display_name,
+  #                  email, id, profile_visibility, role, updated_at
+  #     seller.email == the real account address  -> true
+  #     profile_visibility                        -> "owner"
+  #
+  # So a seller's ACCOUNT EMAIL reached unauthenticated callers on a paginated,
+  # enumerable index — together with their consent flag, their age-verification
+  # state and their role — including for a seller whose profile visibility is
+  # `owner`, i.e. who chose the most private setting available.
+  #
+  # ⚠️ The cause is a list reused across a trust boundary rather than a missing
+  # redaction. `@user_embed_fields` derives from `@user_core_fields`, which is
+  # the CALLER'S OWN record (login / refresh / me) — a set where `email` is
+  # correct. Inheriting it for "how a user appears inside somebody else's view"
+  # carried the owner's fields outward, and the comment protecting
+  # `pending_email` as "a private address" sat three lines below `:email` in the
+  # list it was protecting.
+  #
+  # `Gen.listing` already carries `contact_info` as the deliberate way to reach
+  # a seller, so nothing is lost: no Elm consumer read the embedded email, and
+  # none existed anywhere in `frontend/` or `e2e/`.
+  # ⛔ DO NOT COALESCE `display_name` TO `handle` HERE. `display_name` is
+  # nullable (`add :display_name, :text`, no `null: false`), and this repo's
+  # established fix for a null name on the wire is
+  # `coalesce(display_name, handle)` — used in `list_blocked_users/2` and the
+  # group-feed decoration. Applying that idiom to this list would put a
+  # seller's handle on an anonymous payload, and
+  # `e2e/tests/search.spec.ts` drives a test named
+  # "a seller's handle and asking price never reach an anonymous caller".
+  #
+  # So the house pattern is WRONG on this one endpoint, and nothing but this
+  # comment marks it. A null display name on a public listing renders as blank;
+  # that is the correct outcome, not a bug to paper over with the handle.
+  @listing_seller_fields [:id, :display_name]
 
   @doc """
       Serializes a book (work) into the proto `Book` shape — the richest book
-      representation. Option `:community_read_count` (integer, default 0).
+      representation.
+
+      Option `:community_read_count` (integer). ⚠️ **Omit it rather than passing
+      0 when the count could not be read.** `Books.community_read_count/1`
+      answers `{:ok, n} | :error`, and `:error` is not zero — a missing mart, a
+      revoked `marts` grant and a genuine query error all used to arrive here as
+      a confident 0, which is what a reader then saw.
+
+      Omitting leaves the key out of the map entirely. That is the honest
+      payload, though the wire cannot carry the distinction today: the field is
+      a proto3 `int32` with implicit presence, so an absent key and a real 0
+      both decode to 0. The limit is recorded at the call site in
+      `book_controller.ex`.
   """
   @spec book(map(), keyword()) :: map()
   def book(book, opts \\ []) do
-    community_read_count = Keyword.get(opts, :community_read_count, 0)
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
+    # ⛔ `:language` and `:bisac_codes` were REMOVED from this take, and the
+    # reason in each case is a measurement rather than a design preference.
+    #
+    # Both were serialised here, decoded correctly by the generated proto
+    # decoder, and then dropped by `Types.Book.fromProtoBook` — a hand-written
+    # adapter that builds the app record field by field and does not mention
+    # them. So no view could reference either one: there was no record field to
+    # reference. This is the only payload that carried them; search, catalogue
+    # and bookshelf already omit all three of the wide fields.
+    #
+    # `:language` — the ONLY writer in the tree is `seeds.exs`. The ISBN
+    # resolver caches a language from Open Library but never passes it into book
+    # creation, so: 169 of 169 local rows say "en" because the seed set it, and
+    # 55 of 55 production rows are NULL. There is nothing to render. Recorded as
+    # its own finding; re-adding this key is one line once something populates
+    # the column.
+    #
+    # `:bisac_codes` — real production data (12 of 55 rows) and empty locally,
+    # which is the opposite way round. It already reaches its consumer: the
+    # insights profile reads `b.bisac_codes` on a different endpoint. The
+    # reader-facing form of this information on a book page is `subjects`, which
+    # is carried below. So the detail payload does not need it.
+    #
+    # ⚠️ `:community_read_count` stays, and is still unread by the adapter — it
+    # has a per-request warehouse query behind it and a separate owner. The
+    # adapter gate names it as the one declared exception, so it is a decision
+    # on record rather than the same silence.
     Gen.book(book)
     |> Map.take([
       :id,
       :title,
       :description,
-      :language,
       :subjects,
-      :bisac_codes,
       :visibility_tier
     ])
     |> Map.merge(%{
       author: author(book.author),
       editions: editions,
       edition_count: length(editions),
-      primary_edition: edition_or_nil(primary),
-      community_read_count: community_read_count
+      primary_edition: edition_or_nil(primary)
     })
+    |> maybe_put_read_count(opts)
+  end
+
+  defp maybe_put_read_count(payload, opts) do
+    case Keyword.fetch(opts, :community_read_count) do
+      {:ok, count} -> Map.put(payload, :community_read_count, count)
+      :error -> payload
+    end
   end
 
   @doc """
@@ -261,8 +392,15 @@ defmodule StacksWeb.ProtoJSON do
   def book_placement(placement) do
     bookshelf = loaded_bookshelf(placement.bookshelf)
 
+    # ⚠️ `reading_status` and `current_page` are in this list because leaving
+    # them out LOST DATA rather than merely omitting it. `Gen.placement/1`
+    # already emits both — the row is loaded in full — so this `Map.take` was
+    # the only thing dropping them. The book-detail progress card is built from
+    # this payload, so without them it showed "To Read" for a book the reader
+    # was partway through, and saving that card wrote `to_read` back over the
+    # real status.
     Gen.placement(placement)
-    |> Map.take([:id, :book_id, :personal_rating, :notes])
+    |> Map.take([:id, :book_id, :personal_rating, :notes, :reading_status, :current_page])
     |> Map.merge(%{
       bookshelf_name: bookshelf && bookshelf.name,
       formats: placement.formats || [],
@@ -317,6 +455,15 @@ defmodule StacksWeb.ProtoJSON do
       Serializes a blog post. `author_display_name`/`author_handle` are
       denormalised projections of the author row (nil when `:user` isn't loaded;
       the frontend falls back to a generic label).
+
+      ⚖️ `association_outcome` is NOT here. It shipped as a projected field on
+      this message and moved to `BlogPostShowResponse`, because it is not an
+      attribute of the post but the result of the most recent pass OVER it, with
+      a different lifetime and a different source table. Putting it here forced
+      an `api_only` override, a `skip_fields` entry, a declared-count bump, a
+      `KeyError` at runtime and a defaulted argument on this function — five
+      costs that the envelope does not have. It rides beside `associations`,
+      which is the other thing that endpoint knows and the post does not.
   """
   @spec blog_post(map()) :: map()
   def blog_post(post) do
@@ -397,6 +544,21 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
+      Serializes one row of a group's member roster.
+
+      Carries the whole message — the narrowing this module usually does is
+      already in the contract, because `GroupMemberSummary` was written to be
+      exactly what the roster endpoint sends.
+
+      ⚠️ The input is a join projection from `Social.list_group_members/2`, not an
+      Ecto struct, so `display_name` is already coalesced to the member's handle
+      before it arrives here. Serialising a raw `GroupMember` through this would
+      compile and then emit `nil` for a field the client requires.
+  """
+  @spec group_member_summary(map()) :: map()
+  def group_member_summary(member), do: Gen.group_member_summary(member)
+
+  @doc """
       Serializes a group invitation struct.
   """
   @spec group_invitation(map()) :: map()
@@ -468,7 +630,8 @@ defmodule StacksWeb.ProtoJSON do
       kind: get_field(item, :kind),
       book_ids: get_field(item, :book_ids, []),
       rejection_reason: get_field(item, :rejection_reason),
-      uploaded_at: get_field(item, :uploaded_at)
+      uploaded_at: get_field(item, :uploaded_at),
+      retryable: get_field(item, :retryable, false)
     }
   end
 
@@ -714,6 +877,6 @@ defmodule StacksWeb.ProtoJSON do
 
   defp listing_seller(seller) do
     Gen.user(seller)
-    |> Map.take(@user_embed_fields)
+    |> Map.take(@listing_seller_fields)
   end
 end

@@ -8,6 +8,7 @@ import Json.Encode as Encode
 import Navigation.Route
 import Page.Upload as Upload exposing (Msg(..), OutMsg(..), UploadFailure(..), UploadResult(..), UploadStep(..))
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
@@ -159,14 +160,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (UploadAccepted (Ok "img-1")) Upload.init (Just "tok")
+                            Upload.update (UploadAccepted (Ok "img-1")) Upload.init (Just (TestHelpers.creds "tok"))
                     in
                     model.uploadState |> Expect.equal (Success "img-1")
             , test "Err sets uploadState to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (UploadAccepted (Err Http.NetworkError)) Upload.init (Just "tok")
+                            Upload.update (UploadAccepted (Err Http.NetworkError)) Upload.init (Just (TestHelpers.creds "tok"))
                     in
                     model.uploadState |> Expect.equal (Failure Http.NetworkError)
             ]
@@ -178,7 +179,7 @@ suite =
                             serverFrame "resolved" (Just "some-uuid") [ "some-uuid" ] Nothing
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal NoResult
             , test "rejected payload sets result to IdentificationFailed" <|
@@ -188,7 +189,7 @@ suite =
                             serverFrame "rejected" Nothing [] (Just "not_a_book")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal NotABook
             , test "heartbeat payload leaves model unchanged" <|
@@ -198,7 +199,7 @@ suite =
                             "{\"type\":\"heartbeat\"}"
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal NoResult
@@ -212,7 +213,7 @@ suite =
                             serverFrame "resolved" Nothing [] (Just "not_a_book")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal NotABook
             , test "isbn_not_found rejection reason sets result to IdentificationFailed" <|
@@ -222,7 +223,7 @@ suite =
                             serverFrame "rejected" Nothing [] (Just "isbn_not_found")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
             , test "isbn_not_found rejection clears pendingBookIds and collectedBooks" <|
@@ -242,7 +243,7 @@ suite =
                             serverFrame "rejected" Nothing [] (Just "isbn_not_found")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelInFlight (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelInFlight (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
@@ -256,14 +257,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update StreamError modelWithImage (Just "tok")
+                            Upload.update StreamError modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal (IdentificationFailed ConnectionLost)
             , test "StreamError leaves uploadState unchanged" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update StreamError modelWithImage (Just "tok")
+                            Upload.update StreamError modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.uploadState |> Expect.equal (Success "img-1")
             ]
@@ -272,7 +273,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok timeoutPoll)) modelWithImage (Just "tok")
+                            Upload.update (StatusReceived (Ok timeoutPoll)) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal (IdentificationFailed TookTooLong)
             ]
@@ -287,7 +288,7 @@ suite =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
@@ -302,7 +303,7 @@ suite =
                             { init_ | pendingBookIds = [ "book-1", "book-2" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.pendingBookIds |> Expect.equal [ "book-2" ]
@@ -329,7 +330,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) Upload.init Nothing
+                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , test "Err sets result to IdentificationFailed" <|
@@ -470,14 +471,14 @@ suite =
                             { init_ | step = ChoosingShelf dummyBook }
 
                         ( model, _, _ ) =
-                            Upload.update ConfirmPlacement choosing (Just "tok")
+                            Upload.update ConfirmPlacement choosing (Just (TestHelpers.creds "tok"))
                     in
                     model.placementState |> Expect.equal Loading
             , test "no-ops when not in ChoosingShelf" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update ConfirmPlacement Upload.init (Just "tok")
+                            Upload.update ConfirmPlacement Upload.init (Just (TestHelpers.creds "tok"))
                     in
                     model.placementState |> Expect.equal NotAsked
             , test "no-ops when token absent" <|
@@ -582,7 +583,7 @@ suite =
                             { init_ | manualIsbn = "9780306406157" }
 
                         ( model, _, _ ) =
-                            Upload.update SubmitManualIsbn withIsbn (Just "tok")
+                            Upload.update SubmitManualIsbn withIsbn (Just (TestHelpers.creds "tok"))
                     in
                     model.confirmState |> Expect.equal Loading
             , test "SubmitManualIsbn with invalid ISBN sets showIsbnError" <|
@@ -592,7 +593,7 @@ suite =
                             { init_ | manualIsbn = "1234567890" }
 
                         ( model, _, _ ) =
-                            Upload.update SubmitManualIsbn withBadIsbn (Just "tok")
+                            Upload.update SubmitManualIsbn withBadIsbn (Just (TestHelpers.creds "tok"))
                     in
                     model.showIsbnError |> Expect.equal True
             , test "SubmitManualIsbn without token does nothing" <|
@@ -637,7 +638,7 @@ suite =
                                 Nothing
                     in
                     model.existingShelves |> Expect.equal [ "library" ]
-            , -- #333 — inform, NEVER block: an already-owned book still
+            , -- Inform, NEVER block: an already-owned book still
               test "ConfirmCompleted Ok on an already-owned book still reaches Complete" <|
                 \_ ->
                     let
@@ -659,7 +660,7 @@ suite =
                         , \m -> m.confirmState |> Expect.equal (Success ())
                         ]
                         model
-            , -- #333 — a book the reader does not already own leaves the
+            , -- A book the reader does not already own leaves the
               test "ConfirmCompleted Ok with only the used shelf records no existing shelves" <|
                 \_ ->
                     let
@@ -689,7 +690,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update
@@ -725,7 +726,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -735,7 +736,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -773,7 +774,7 @@ suite =
                             }
 
                         ( model, _, _ ) =
-                            Upload.update (ConfirmMergeFormat "book-1") dup (Just "tok")
+                            Upload.update (ConfirmMergeFormat "book-1") dup (Just (TestHelpers.creds "tok"))
                     in
                     model.mergeFormatState |> Expect.equal Loading
             , test "ConfirmMergeFormat no-ops when token absent" <|

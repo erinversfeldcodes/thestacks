@@ -1,0 +1,179 @@
+# Daily rebuild of the analytics warehouse.
+#
+# WHY THIS EXISTS  The refresh used to fire from an Oban crontab entry inside
+# the core application, and it could not have worked: the machine it runs on is
+# configured to scale to zero, and the runtime image does not contain the `dbt`
+# binary it shells. Nothing in the warehouse had ever been materialised on a
+# deployed stack — the `wh` schema held zero tables and the schemas the models
+# actually target did not exist at all. Owner ruling 2026-10-13: run it from a
+# workflow, and do not bundle dbt into the core image.
+#
+# THE CADENCE IS A GDPR COMMITMENT, NOT A PREFERENCE  Warehouse copies of an
+# erased user's data disappear when the models are rebuilt from the (already
+# scrubbed) operational tables. So this schedule IS the erasure SLA that
+# docs/runbooks/gdpr-erase-user.md quotes to a data subject. Changing `cron`
+# below changes that number, and the runbook has to change with it. The daily
+# schedule is what makes "within 24 hours" true.
+#
+# THE METRIC IS PART OF THE REFRESH  Every successful build pushes
+# `stacks_dbt_refresh_last_success_timestamp_seconds`. `now() - that gauge` is
+# the answer to "is the warehouse current?", and to "has erasure propagated?".
+# A green cron with no gauge movement is exactly the failure this project
+# learned to surface as a far-end value rather than infer from a workflow badge:
+# the observability stack itself once shipped structurally complete and blank.
+#
+# All secrets used here already exist in the repository configuration.
+name: scheduled-dbt-refresh
+
+on:
+  schedule:
+    # Daily at 04:11 UTC — offset from the nightly dump at 03:17 so the two do
+    # not contend for the same Neon compute, and after it so a dump captures
+    # the operational tables rather than a half-built warehouse.
+    - cron: "11 4 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which database to build (production or staging)"
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+# A second run must not start while one is in flight. dbt's own locking does
+# not cover `run-operation drop_orphan_relations`, so two overlapping runs could
+# have one dropping relations the other is building.
+concurrency:
+  group: scheduled-dbt-refresh-${{ github.event.inputs.target || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      TARGET_BRANCH: ${{ github.event.inputs.target || 'production' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dbt
+        run: |
+          set -euo pipefail
+          # From the same file setup.sh installs from, so the version building
+          # the production warehouse overnight is the version the models were
+          # developed against. An unpinned adapter upgrade is a silent change to
+          # what gets materialised, and this is the one place where that would
+          # surface as rows rather than as an error on someone's laptop.
+          pip install --quiet -r dbt/requirements.txt
+          dbt --version
+
+      # Resolve, build AND assert in ONE step, so the connection URI lives and
+      # dies as a process-local shell variable: never GITHUB_ENV, never echoed,
+      # nothing to mask. (The masking workflow command is itself a leak vector —
+      # a copied workflow can stop command processing and print the value —
+      # which is why semgrep blocks that pattern outright.)
+      #
+      # Keeping it to one step is also what stops the branch resolution being
+      # written twice and drifting; the first draft of this workflow had two
+      # copies of it.
+      - name: Build the warehouse and assert the marts hold rows
+        run: |
+          set -euo pipefail
+          BRANCHES_JSON=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches")
+          BRANCH_ID=$(python3 -c "
+          import json,sys
+          want = sys.argv[2]
+          for b in json.loads(sys.argv[1]).get('branches',[]):
+              if b.get('name')==want: print(b['id']); break" "$BRANCHES_JSON" "$TARGET_BRANCH")
+          if [[ -z "$BRANCH_ID" ]]; then
+            echo "ERROR: no Neon branch named '${TARGET_BRANCH}'" >&2
+            exit 1
+          fi
+          URI_JSON=$(curl -sf -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${BRANCH_ID}&database_name=neondb&role_name=neondb_owner")
+          DATABASE_URL=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('uri',''))" "$URI_JSON")
+          test -n "$DATABASE_URL"
+
+          T0=$(date +%s)
+          DATABASE_URL="$DATABASE_URL" bash scripts/dbt-deployed.sh
+          T1=$(date +%s)
+          echo "REFRESH_SECONDS=$((T1 - T0))" >> "$GITHUB_ENV"
+
+          # ⛔ The box this workflow exists for. A green build that writes no
+          # rows does not count: the previous arrangement was green for months
+          # while the warehouse stayed empty, and the application's mart read
+          # has a rescue-to-zero fallback that absorbs a missing mart silently —
+          # every book showing zero community reads, forever, with no error.
+          #
+          # So assert at the far end, against the database.
+          #
+          # Both counts in ONE container run, with the URI passed as an env var
+          # and expanded by the container's own shell via `sh -c`. Interpolating
+          # it into the `psql` argv would put it on the HOST command line where
+          # `ps` can read it — and, as first written, would have expanded an
+          # unset host variable to the empty string and queried nothing.
+          COUNTS=$(docker run --rm -e PGURL="$DATABASE_URL" postgres:17-alpine \
+            sh -c 'psql "$PGURL" -At -F"|" -c "
+              SELECT
+                (SELECT count(*) FROM information_schema.tables
+                  WHERE table_schema = '"'"'marts'"'"'),
+                (SELECT count(*) FROM marts.mart_community_read_count)"')
+          MART_COUNT="${COUNTS%%|*}"
+          MART_ROWS="${COUNTS##*|}"
+          echo "marts relations: ${MART_COUNT}"
+          echo "mart_community_read_count rows: ${MART_ROWS}"
+          echo "MART_ROWS=${MART_ROWS}" >> "$GITHUB_ENV"
+
+          if [[ "${MART_COUNT}" -lt 1 ]]; then
+            echo "ERROR: the marts schema holds no relations after a successful build." >&2
+            exit 1
+          fi
+
+          # Zero rows is reported, not failed. The mart is a count over
+          # placements, so an empty operational table legitimately yields an
+          # empty mart, and failing here would make the workflow depend on there
+          # being reader activity. The gauge below is what makes a persistent
+          # zero visible.
+          if [[ "${MART_ROWS}" -eq 0 ]]; then
+            echo "NOTE: the mart built but is empty — legitimate when no placements exist."
+          fi
+
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: 0.4.67
+
+      # The metrics store is 6PN-internal; expose it locally for the push — the
+      # same mechanism backup-dump.yml and refresh-billing-metrics.yml use.
+      - name: Push the freshness metrics
+        run: |
+          set -euo pipefail
+          flyctl proxy 18428:8428 thestacks-victoriametrics.flycast \
+            --app thestacks-victoriametrics &
+          proxy_pid=$!
+          trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -sf --max-time 2 "http://localhost:18428/health" >/dev/null 2>&1 && break
+            sleep 1
+          done
+          NOW=$(date +%s)
+          cat > metrics.prom <<EOF
+          stacks_dbt_refresh_last_success_timestamp_seconds{app="thestacks-core",target="${TARGET_BRANCH}"} ${NOW}
+          stacks_dbt_refresh_duration_seconds{app="thestacks-core",target="${TARGET_BRANCH}"} ${REFRESH_SECONDS}
+          stacks_dbt_refresh_mart_rows{app="thestacks-core",target="${TARGET_BRANCH}",mart="mart_community_read_count"} ${MART_ROWS}
+          EOF
+          curl -sf --max-time 10 --data-binary @metrics.prom \
+            "http://localhost:18428/api/v1/import/prometheus"
+          echo "pushed: last_success=${NOW} duration=${REFRESH_SECONDS}s mart_rows=${MART_ROWS}"

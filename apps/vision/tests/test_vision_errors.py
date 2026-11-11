@@ -88,36 +88,46 @@ def test_the_unspecified_sentinel_is_never_a_constant() -> None:
     assert "VISION_ERROR_CODE_UNSPECIFIED" not in _sidecar_error_constants()
 
 
+# ⚠️ These cases targeted `/extract` until 2026-10-15. `/analyze` supersedes it
+# and takes a single `image`/`image_url` oneof rather than `images: list`, so the
+# re-point is not purely mechanical:
+#
+#   - `undecodable-base64`, `image-too-large` and `mutually-exclusive-inputs`
+#     carry over unchanged in meaning. The last one now rejects via
+#     `AnalyzeRequest`'s oneof validator instead of an inline check, and still
+#     returns MALFORMED_REQUEST — confirmed by probing the endpoint.
+#   - `no-image-supplied` changes its expected CODE. On `/extract`, `{"images": []}`
+#     reached an inline `_ERR_NO_IMAGE_SUPPLIED` raise. On `/analyze`, "neither
+#     field set" is caught by the oneof validator first, which reports
+#     MALFORMED_REQUEST. `_ERR_NO_IMAGE_SUPPLIED` therefore has no reachable
+#     raiser any more; see the note at its definition in `main.py`.
+#   - `too-many-images` is DROPPED, not re-pointed. `/analyze` accepts one image,
+#     so there is no "too many" state to construct. Removed rather than kept as a
+#     test asserting a limit that cannot be exceeded.
 _DETERMINISTIC_CASES = [
     pytest.param(
-        "/extract",
-        {"images": ["!!!not base64!!!"]},
+        "/analyze",
+        {"image": "!!!not base64!!!"},
         "VISION_ERROR_CODE_UNDECODABLE_IMAGE",
         id="undecodable-base64",
     ),
     pytest.param(
-        "/extract",
-        {"images": [base64.b64encode(b"x" * (settings.max_image_size_bytes + 1)).decode()]},
+        "/analyze",
+        {"image": base64.b64encode(b"x" * (settings.max_image_size_bytes + 1)).decode()},
         "VISION_ERROR_CODE_IMAGE_TOO_LARGE",
         id="image-too-large",
     ),
     pytest.param(
-        "/extract",
-        {"images": []},
-        "VISION_ERROR_CODE_NO_IMAGE_SUPPLIED",
-        id="no-image-supplied",
+        "/analyze",
+        {},
+        "VISION_ERROR_CODE_MALFORMED_REQUEST",
+        id="no-input-supplied",
     ),
     pytest.param(
-        "/extract",
-        {"images": [base64.b64encode(b"a").decode()], "image_url": "https://x.test/a.jpg"},
+        "/analyze",
+        {"image": base64.b64encode(b"a").decode(), "image_url": "https://x.test/a.jpg"},
         "VISION_ERROR_CODE_MALFORMED_REQUEST",
         id="mutually-exclusive-inputs",
-    ),
-    pytest.param(
-        "/extract",
-        {"images": [base64.b64encode(b"a").decode()] * 4},
-        "VISION_ERROR_CODE_MALFORMED_REQUEST",
-        id="too-many-images",
     ),
 ]
 
@@ -155,14 +165,14 @@ def test_unreachable_image_url_is_labelled_unreachable(client: TestClient) -> No
             "VISION_ERROR_CODE_IMAGE_UNREACHABLE", "Failed to download image from URL: HTTP 404"
         ),
     ):
-        response = _post(client, "/extract", {"image_url": "https://storage.test/gone.jpg"})
+        response = _post(client, "/analyze", {"image_url": "https://storage.test/gone.jpg"})
 
     assert response.status_code == 422
     assert response.json()["code"] == "VISION_ERROR_CODE_IMAGE_UNREACHABLE"
 
 
 def test_auth_failure_carries_no_code(client: TestClient) -> None:
-    response = client.post("/extract", json={"images": [base64.b64encode(b"a").decode()]})
+    response = client.post("/analyze", json={"image": base64.b64encode(b"a").decode()})
 
     assert response.status_code in (401, 403)
     assert "code" not in response.json(), (

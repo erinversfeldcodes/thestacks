@@ -1,9 +1,39 @@
 defmodule StacksWeb.Plugs.RateLimiter do
   @moduledoc """
-      ETS-backed sliding-window rate limiter. Buckets: global 1000/60s per
-      IP; `:auth` 60/60s per IP; `:upload` 120/60s per user; `:social` 20/60s
-      per user; `:public` 200/60s per IP (`RATE_LIMIT_PUBLIC`);
-      `:password_change` 20/60s per IP; `:feedback` 10/60s per user.
+      ETS-backed sliding-window rate limiter. Buckets: `:auth` 60/60s per IP;
+      `:password_change` 20/60s per IP; `:public` 200/60s per IP; `:admin`
+      30/60s per IP; `:e2e_helper` 10/60s per IP; `:upload` 120/60s per user;
+      `:social` 20/60s per user; `:feedback` 10/60s per user.
+
+      ⛔ There is no default bucket, and no limit that applies to everything.
+      `init/1` refuses a plug site that names no `:bucket`, or names one with no
+      limit, so a new pipeline cannot inherit another's budget by omitting it.
+      The default removed here was a `global` 1000/60s: all eight plug sites
+      passed an explicit bucket, so it governed no request in this limiter's
+      lifetime while this docstring advertised it first. A route is limited only
+      by opting into one of the `rate_limit_*` pipelines; `:api` and `:spa`
+      carry none, so there is no floor underneath the rest.
+
+      Overrides, and there are two mechanisms rather than one:
+      `RATE_LIMIT_AUTH`, `RATE_LIMIT_PUBLIC` and `RATE_LIMIT_E2E_HELPER` are
+      applied in the umbrella's ROOT `config/runtime.exs` for every non-test
+      environment, and `RATE_LIMIT_AUTH` plus `RATE_LIMIT_PASSWORD_CHANGE` are
+      applied again by `Server.init/1` at boot. ⚠️ `:admin` and `:feedback`
+      read an `Application` key that no runtime configuration writes, so the
+      figures above are the only ones they take in a running system — a reader
+      with no writer, which is the mirror image of the bucket this docstring
+      used to advertise.
+
+      ⚖️ The two are not symmetric, and the difference is worth a line for
+      whoever makes them configurable: nothing anywhere writes
+      `:rate_limit_admin`, while `:rate_limit_feedback` IS written by two test
+      files (`rate_limiter_test.exs` and `feedback_controller_test.exs`) to
+      exercise the ceiling. So a grep for the feedback key finds writers and
+      they are not a config mechanism.
+
+      ⚠️ `apps/core/config/` is NOT the whole config tree. The root
+      `config/` is what a release evaluates, and reading only the inner one
+      says these overrides are unwired when they are wired.
 
       Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
       rotate IPs; NATs share them), so auth values slow naive scripts without
@@ -20,7 +50,6 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   @table :rate_limiter
   @window_ms 60_000
-  @global_limit 1_000
   @auth_limit 60
   @upload_limit 120
   @password_change_limit 20
@@ -30,7 +59,35 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @e2e_helper_limit 10
   @feedback_limit 10
 
-  def init(opts), do: opts
+  # ⛔ The bucket is resolved here, at the plug site, not per request. `init/1`
+  # runs at compile time under the default plug init mode, so a pipeline that
+  # names no bucket — or names one with no limit — fails the BUILD rather than
+  # the first request that reaches it. `get_limit/1` is the single source of
+  # truth for which buckets exist; calling it here is the whole validation, so
+  # the two cannot disagree.
+  #
+  # ⚠️ WHICH BUILD, precisely — `dev` is the exception and it is the environment
+  # you are probably in. `apps/core/config/dev.exs` sets
+  # `plug_init_mode: :runtime`, so in dev this runs per request and a typo'd
+  # bucket 500s on first contact exactly as it would have before. MEASURED: a
+  # planted `bucket: :uploads` left `mix compile` at RC=0 and
+  # `MIX_ENV=test mix compile` at RC=1 with the ArgumentError. So `mix test` is
+  # what catches it before a push, and prod builds cannot ship it.
+  def init(opts) do
+    bucket =
+      Keyword.get(opts, :bucket) ||
+        raise ArgumentError, """
+        StacksWeb.Plugs.RateLimiter requires an explicit `bucket:`.
+
+        There is no default: a bucket omitted here used to mean a 1000/60s
+        budget that nothing else shared, which read as a floor and was not one.
+        Name the bucket this pipeline should spend from, and give it a
+        `get_limit/1` clause if it does not have one yet.
+        """
+
+    _ = get_limit(bucket)
+    opts
+  end
 
   def call(conn, opts) do
     if Application.get_env(:core, :rate_limiting_enabled, true) do
@@ -41,7 +98,7 @@ defmodule StacksWeb.Plugs.RateLimiter do
   end
 
   defp do_rate_check(conn, opts) do
-    bucket = Keyword.get(opts, :bucket, :global)
+    bucket = Keyword.fetch!(opts, :bucket)
     key = get_key(conn, bucket)
     limit = get_limit(bucket)
 
@@ -82,10 +139,33 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(:feedback), do: Application.get_env(:core, :rate_limit_feedback, @feedback_limit)
 
-  defp get_limit(_), do: @global_limit
+  defp get_limit(bucket) do
+    raise ArgumentError,
+          "StacksWeb.Plugs.RateLimiter has no limit for bucket #{inspect(bucket)}. " <>
+            "Add a get_limit/1 clause for it — there is deliberately no catch-all, " <>
+            "because the catch-all that used to be here answered for every bucket " <>
+            "nobody had defined and made the mistake invisible."
+  end
 
+  # ⛔ `Guardian.Plug.current_resource/1`, NOT `conn.assigns[:guardian_default_resource]`.
+  #
+  # Guardian keeps its pipeline state in `conn.private`, so reading the same name
+  # out of `conn.assigns` returned `nil` on EVERY request and these three buckets
+  # silently fell back to the IP — against a moduledoc two screens up that says
+  # "per user" for all three. Signed-in readers behind one NAT or corporate proxy
+  # therefore shared a single budget: ten feedback submissions a minute, twenty
+  # social actions and a hundred and twenty uploads between all of them.
+  #
+  # ⚠️ The tests agreed with the bug because they built the world the code
+  # expected — `assign(:guardian_default_resource, user)` is not what the real
+  # pipeline does, so "blocks the 121st upload for the same authenticated user"
+  # passed while keyed on the fixed IP those conns also carried. The assertion
+  # that finds this is two DIFFERENT users on ONE IP, which is below.
+  #
+  # The IP fallback stays for an unauthenticated request. All three of these
+  # routes are authenticated, so it is defence rather than a path.
   defp get_key(conn, bucket) when bucket in [:upload, :social, :feedback] do
-    case conn.assigns[:guardian_default_resource] do
+    case Guardian.Plug.current_resource(conn) do
       nil -> get_ip(conn)
       user -> "user:#{user.id}"
     end

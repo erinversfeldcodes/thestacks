@@ -25,7 +25,7 @@ import Types.Book exposing (Book)
 -}
 startSearch : ProgramTest.ProgramTest Search.Model Search.Msg (ProgramTest.SimulatedEffect Search.Msg)
 startSearch =
-    ProgramTest.start () (searchProgram (Just "test-token"))
+    ProgramTest.start () (searchProgram (Just (TestHelpers.creds "test-token")))
 
 
 {-| Helper to start a search program for an anonymous visitor (no token). Both
@@ -152,7 +152,7 @@ readers401RaisesSessionExpired =
                     Search.update
                         (ReadersCompleted (Err (Http.BadStatus 401)))
                         Search.init
-                        (Just "test-token")
+                        (Just (TestHelpers.creds "test-token"))
             in
             Expect.equal outMsg Search.SessionExpired
 
@@ -560,7 +560,7 @@ resultClickEmitsOpenOverlay =
                     Search.update
                         (BookClicked "book-Zebra Tales")
                         Search.init
-                        (Just "test-token")
+                        (Just (TestHelpers.creds "test-token"))
             in
             Expect.equal outMsg (Search.OpenOverlay "book-Zebra Tales")
 

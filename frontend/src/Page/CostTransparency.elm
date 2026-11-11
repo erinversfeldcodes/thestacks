@@ -15,10 +15,11 @@ usage metrics, sustainability footer.
 
 import Api
 import Html exposing (Html, div, h1, h2, h3, p, span, text)
-import Html.Attributes exposing (class)
+import Html.Attributes exposing (class, title)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Stacks.Api.V1.Admin as ProtoAdmin
+import Stacks.Common.V1.Costs as ProtoCosts
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -28,12 +29,28 @@ type alias CostItem =
     { service : String
     , description : Maybe String
     , amountCents : Int
+
+    -- ⛔ `basis` IS WHAT STOPS THIS PAGE LYING. `amountCents` alone cannot say
+    -- whether a 0 is a measurement, a free tier's published price, or a figure
+    -- nobody has — and five cost-item builders answered an unavailable
+    -- measurement with 0, so this page rendered "$0.00" for services it had no
+    -- measurement of, under a closing line claiming every number was real.
+    --
+    -- ⚖️ A rate-card ZERO is honest; only `CostBasisAbsent` means the amount
+    -- must not be rendered as money.
+    , basis : ProtoCosts.CostBasis
+    , refreshedAt : String
     }
 
 
 type alias CostCategory =
     { category : String
     , totalCents : Int
+
+    -- ⛔ How many lines in this category have NO figure. The total above
+    -- excludes them, so without this the header would quietly under-report and
+    -- look complete — which is the same shape as the $0.00 it replaces.
+    , unmeasuredCount : Int
     , items : List CostItem
     }
 
@@ -126,6 +143,7 @@ fromProtoCostCategory : ProtoAdmin.CostCategory -> CostCategory
 fromProtoCostCategory proto =
     { category = proto.category
     , totalCents = proto.totalCents
+    , unmeasuredCount = proto.unmeasuredCount
     , items = List.map fromProtoCostItem proto.items
     }
 
@@ -135,6 +153,8 @@ fromProtoCostItem proto =
     { service = proto.service
     , description = emptyToNothing proto.description
     , amountCents = proto.amountCents
+    , basis = proto.basis
+    , refreshedAt = proto.refreshedAt
     }
 
 
@@ -199,15 +219,27 @@ viewTotalBanner : CostBreakdown -> Html Msg
 viewTotalBanner breakdown =
     div [ class "costs__banner" ]
         [ div [ class "costs__banner-total" ]
-            [ span [ class "costs__banner-label" ] [ text "Total monthly cost" ]
+            [ span [ class "costs__banner-label" ] [ text (bannerLabel breakdown) ]
             , span [ class "costs__banner-amount" ] [ text (formatCents breakdown.totalCents) ]
+            , span [ class "costs__banner-caveat" ] [ text (totalCaveat breakdown) ]
+            , span [ class "costs__banner-asof" ] [ text (asOfText breakdown.generatedAt) ]
             ]
         , div [ class "costs__banner-formula" ]
             (breakdown.categories
                 |> List.map
                     (\cat ->
                         span [ class "costs__banner-term" ]
-                            [ text (formatCategoryName cat.category ++ " " ++ formatCents cat.totalCents) ]
+                            -- ⛔ THE THIRD PRESENTATION SITE, AND IT WAS MISSED.
+                            -- `costs.ex` fixed four aggregation sites and this
+                            -- module fixed two of three display sites: the
+                            -- category CARD said "$4.88 + 2 unmeasured" while
+                            -- this banner, directly above it, said "$0.00" for
+                            -- a category whose every line was unmeasured. That
+                            -- is exactly the "$0.00 for something we did not
+                            -- measure" this whole change exists to delete,
+                            -- printed in the largest type on the page above
+                            -- the copy that contradicts it.
+                            [ text (formatCategoryName cat.category ++ " " ++ categoryTotalText cat) ]
                     )
                 |> List.intersperse (span [ class "costs__banner-plus" ] [ text " + " ])
             )
@@ -229,7 +261,7 @@ viewStorySection breakdown =
                     ++ String.fromInt m.visionJobsThisMonth
                     ++ " identifications this month."
                 )
-                (categoryTotal "compute" breakdown.categories)
+                (categoryFor "compute" breakdown.categories)
             , viewStoryCard "Store & Shelve"
                 ("Each book has metadata — title, author, ISBN, cover URL — plus your "
                     ++ "placement on a shelf. "
@@ -240,23 +272,30 @@ viewStorySection breakdown =
                     ++ formatBytes m.dbSizeBytes
                     ++ "."
                 )
-                (categoryTotal "database" breakdown.categories)
+                (categoryFor "database" breakdown.categories)
             , viewStoryCard "Serve & Browse"
                 ("The app runs on a small VM in Virginia (IAD). Every page load, "
                     ++ "API call, and shelf browse is served from here. The vision "
                     ++ "sidecar proxies GPU requests via HMAC-authenticated HTTPS."
                 )
-                (categoryTotal "hosting" breakdown.categories)
+                (categoryFor "hosting" breakdown.categories)
             ]
         ]
 
 
-viewStoryCard : String -> String -> Int -> Html Msg
-viewStoryCard title narrative cents =
+{-| ⛔ TAKES THE RENDERED TEXT, NOT AN INT, because an int cannot say "and one
+line we could not measure". These three cards are the most prominent figures on
+the page, and they were printing `$0.00/mo` for categories whose lines are
+unmeasured — the same false claim as the header, on the cards a reader sees
+first.
+-}
+viewStoryCard : String -> String -> CostCategory -> Html Msg
+viewStoryCard title narrative cat =
     div [ class "costs__story-card" ]
         [ h3 [ class "costs__story-title" ] [ text title ]
         , p [ class "costs__story-text" ] [ text narrative ]
-        , span [ class "costs__story-cost" ] [ text (formatCents cents ++ "/mo") ]
+        , span [ class "costs__story-cost" ]
+            [ text (categoryMoneyText cat ++ "/mo" ++ unmeasuredSuffix cat) ]
         ]
 
 
@@ -274,7 +313,7 @@ viewCategoryCard cat =
     div [ class "costs__category-card", testId "costs-category-card" ]
         [ div [ class "costs__category-header" ]
             [ h3 [ class "costs__category-name" ] [ text (formatCategoryName cat.category) ]
-            , span [ class "costs__category-total" ] [ text (formatCents cat.totalCents) ]
+            , span [ class "costs__category-total" ] [ text (categoryTotalText cat) ]
             ]
         , div [ class "costs__category-items" ]
             (List.map viewServiceItem cat.items)
@@ -287,7 +326,7 @@ viewServiceItem item =
         [ div [ class "costs__service-name" ] [ text item.service ]
         , div [ class "costs__service-desc" ]
             [ text (Maybe.withDefault "" item.description) ]
-        , div [ class "costs__service-amount" ] [ text (formatCents item.amountCents) ]
+        , div [ class (amountClass item) ] [ amountText item ]
         ]
 
 
@@ -331,19 +370,123 @@ viewTrendBar maxCents total =
         ]
 
 
+{-| The page's closing statement about its own honesty.
+
+⛔ IT USED TO SAY "EVERY NUMBER ON THIS PAGE IS REAL … NOT ESTIMATES OR
+PROJECTIONS", AND THAT WAS FALSE IN TWO DIRECTIONS AT ONCE. Most lines are
+computed from a published rate card times an observed quantity — which is
+honest arithmetic and _is_ an estimate of spend, since a provider's invoice may
+differ. And five cost-item builders answered an unavailable measurement with
+zero, so the page rendered "$0.00" for services it had no measurement of, under
+that very sentence.
+
+⚖️ Replaced rather than removed, because the page's purpose is the claim. What
+it can honestly say is now true per line and verifiable by the reader against
+the basis shown beside each figure — which is a stronger statement than the
+blanket one, not a weaker one: a claim you can check beats a claim you must
+take on trust.
+
+-}
 viewPhilosophy : Html Msg
 viewPhilosophy =
     div [ class "costs__philosophy" ]
         [ p [ class "costs__philosophy-text" ]
             [ text
-                ("Every number on this page is real. Costs are computed from "
-                    ++ "published rate cards and actual database metrics — not estimates "
-                    ++ "or projections. The Stacks is source-available and maintainer-funded; "
-                    ++ "this page exists because we believe you should know exactly "
-                    ++ "what it costs run this platform."
+                ("Each line above says how its figure was arrived at: measured "
+                    ++ "from a meter, computed from a published price, or not yet "
+                    ++ "measured this period. The Stacks is source-available and "
+                    ++ "maintainer-funded; this page exists because we believe you "
+                    ++ "should know exactly what it costs to run this platform."
                 )
             ]
         ]
+
+
+{-| The amount cell's class, marking the unmeasured case.
+
+⚖️ A sentence explaining why there is no figure should not be dressed as a
+figure. The modifier drops the mono face and the emphasis so a reader can tell
+at a glance which lines carry a number — which is the whole point of the basis
+field, carried into the visual register rather than left to the words alone.
+
+-}
+amountClass : CostItem -> String
+amountClass item =
+    case item.basis of
+        ProtoCosts.CostBasisAbsent ->
+            "costs__service-amount costs__service-amount--unmeasured"
+
+        ProtoCosts.CostBasisUnspecified ->
+            "costs__service-amount costs__service-amount--unmeasured"
+
+        ProtoCosts.CostBasisMeasured ->
+            "costs__service-amount"
+
+        ProtoCosts.CostBasisRateCard ->
+            "costs__service-amount"
+
+
+{-| The amount, or a sentence saying there is none.
+
+⛔ A figure the page does not have must not look like money. `CostBasisAbsent`
+means the meter returned no samples or the store could not be read, and the
+caller's own nil path already said so ("a measurement we could not take is nil,
+never 0 … a transparency page printing '0' would be claiming the service went
+unused") — this is that sentence reaching the reader instead of a $0.00.
+
+⚖️ `Unspecified` is treated as absent rather than as a measurement: an unset
+basis on a line carrying a number is exactly the ambiguity the field removes, so
+the safe reading is the one that does not assert a figure.
+
+⚠️ The refresh date is shown only when there IS one. A date beside "not yet
+measured" would imply the absence itself was measured then.
+
+-}
+amountText : CostItem -> Html msg
+amountText item =
+    case item.basis of
+        ProtoCosts.CostBasisAbsent ->
+            text (absentCopy item.refreshedAt)
+
+        ProtoCosts.CostBasisUnspecified ->
+            text (absentCopy item.refreshedAt)
+
+        -- ⛔ THESE TWO BRANCHES WERE IDENTICAL, WHICH MADE THE PAGE'S CLOSING
+        -- SENTENCE FALSE FOR TWO OF ITS THREE CASES. It promises "each line
+        -- says how its figure was arrived at: measured from a meter, computed
+        -- from a published price, or not yet measured" — and only the third was
+        -- distinguishable. The backend reasons carefully in a vocabulary the
+        -- page collapsed.
+        --
+        -- ⚖️ A dotted underline with a title rather than a badge or an icon: it
+        -- adds nothing to the scan line of a figure a reader is comparing, and
+        -- the distinction is a footnote about PROVENANCE rather than part of
+        -- the number. ⚠️ `title` alone would be unreachable on touch, so the
+        -- marker also carries visible text in the row's description, which is
+        -- where the rate-card lines already say "published rate, not an
+        -- invoice".
+        ProtoCosts.CostBasisMeasured ->
+            span
+                [ class "costs__service-amount-basis costs__service-amount-basis--measured"
+                , title "Measured: read from a meter for this period."
+                ]
+                [ text (formatCents item.amountCents) ]
+
+        ProtoCosts.CostBasisRateCard ->
+            span
+                [ class "costs__service-amount-basis costs__service-amount-basis--rate-card"
+                , title "Computed from a published price and a quantity we counted — not an invoice."
+                ]
+                [ text (formatCents item.amountCents) ]
+
+
+absentCopy : String -> String
+absentCopy refreshedAt =
+    if String.isEmpty refreshedAt then
+        "not yet measured this period"
+
+    else
+        "not yet measured this period — last refresh " ++ String.left 10 refreshedAt
 
 
 formatCents : Int -> String
@@ -389,6 +532,235 @@ roundTo places value =
     toFloat (round (value * factor)) / factor
 
 
+{-| A category's subtotal, saying when it is incomplete.
+
+⛔ THE HEADER USED TO SUM ABSENT LINES AS MONEY. The per-line fix landed and
+this did not, so on a live stack "Compute" printed `$0.00` over one measured
+line and one unmeasured one — the same false claim the basis field removes at
+the line, at the altitude most readers stop at.
+
+⚖️ The subtotal is still shown rather than withheld: a category with two
+measured lines and one absent one has a defensible figure, it is merely
+incomplete. Saying "this much, and one line we could not measure" tells the
+reader more than either a bare number or nothing.
+
+-}
+categoryTotalText : CostCategory -> String
+categoryTotalText cat =
+    categoryMoneyText cat ++ unmeasuredSuffix cat
+
+
+{-| The label, naming the period the figure covers.
+
+⛔ THE PAGE SAID "THIS PERIOD" FIVE TIMES AND NEVER DEFINED IT. Every absent
+line reads "not yet measured this period" and the total was labelled "Total
+monthly cost", with no date anywhere — so a reader could not tell whether they
+were looking at the current month, the last complete one, or something cached.
+On a page whose whole claim is that each figure says how it was arrived at,
+omitting _when_ leaves the claim half-made.
+
+⚖️ Taken from the items the page already decodes rather than from the client's
+clock: `periodStart` is a fact the server asserted about these figures, and a
+locally-computed month would silently disagree with them whenever the two
+differed — which is exactly the case a reader needs the date for.
+
+-}
+bannerLabel : CostBreakdown -> String
+bannerLabel breakdown =
+    case currentPeriodStart breakdown of
+        Just start ->
+            "Total cost for " ++ periodMonthLabel start
+
+        Nothing ->
+            "Total monthly cost"
+
+
+{-| ⛔ THIS READ `.periodStart` OFF EACH COST ITEM, A FIELD THAT DOES NOT EXIST.
+`CostItem` carries five fields — service, description, amount\_cents, basis,
+refreshed\_at — and `serialize_cost/1` sends exactly those. So `periodStart`
+decoded as `""` for every item, the filter dropped them all, this returned
+`Nothing`, and the label fell back to the old "Total monthly cost".
+
+⚠️ **The page was unchanged and the fix read as landed**, because the fallback
+is graceful. A reviewer caught it minutes after I reported it done. The lesson
+is not the wrong field name: it is that a tolerant default turns a broken
+feature into an invisible one, so a fallback path needs a test that proves the
+PRIMARY path was taken.
+
+⚖️ `monthlyTotals` is the right source and was already decoded and already
+rendered by the trend chart — the period was on the page all along, just never
+beside the figure it describes. The LAST entry is the current period.
+
+-}
+currentPeriodStart : CostBreakdown -> Maybe String
+currentPeriodStart breakdown =
+    breakdown.monthlyTotals
+        |> List.map .periodStart
+        |> List.filter (\s -> s /= "")
+        |> List.reverse
+        |> List.head
+
+
+{-| When these figures were computed.
+
+⚖️ A separate question from WHICH PERIOD they cover, and the page left both
+open. "November 2026" says what is being measured; "as of 10 November" says how
+stale the answer is — and with a daily refresh job behind some of these lines,
+a reader needs the second to know whether a zero means "free" or "not yet run".
+
+-}
+asOfText : String -> String
+asOfText generatedAt =
+    case String.split "-" (String.left 10 generatedAt) of
+        [ _, month, day ] ->
+            case monthName month of
+                Just name ->
+                    "figures as of " ++ stripLeadingZero day ++ " " ++ name
+
+                Nothing ->
+                    ""
+
+        _ ->
+            ""
+
+
+stripLeadingZero : String -> String
+stripLeadingZero s =
+    if String.startsWith "0" s then
+        String.dropLeft 1 s
+
+    else
+        s
+
+
+{-| `2026-11-01T00:00:00Z` -> `November 2026`. ⚖️ Falls back to the raw string
+rather than guessing: a format this does not recognise is better shown verbatim
+than rendered as a confidently wrong month.
+-}
+periodMonthLabel : String -> String
+periodMonthLabel iso =
+    case String.split "-" (String.left 7 iso) of
+        [ year, month ] ->
+            case monthName month of
+                Just name ->
+                    name ++ " " ++ year
+
+                Nothing ->
+                    iso
+
+        _ ->
+            iso
+
+
+monthName : String -> Maybe String
+monthName month =
+    case month of
+        "01" ->
+            Just "January"
+
+        "02" ->
+            Just "February"
+
+        "03" ->
+            Just "March"
+
+        "04" ->
+            Just "April"
+
+        "05" ->
+            Just "May"
+
+        "06" ->
+            Just "June"
+
+        "07" ->
+            Just "July"
+
+        "08" ->
+            Just "August"
+
+        "09" ->
+            Just "September"
+
+        "10" ->
+            Just "October"
+
+        "11" ->
+            Just "November"
+
+        "12" ->
+            Just "December"
+
+        _ ->
+            Nothing
+
+
+{-| What the headline figure leaves out, said beside the headline figure.
+
+⛔ THE NUMBER A READER QUOTES WAS THE ONE THAT SILENTLY OMITTED MOST SERVICES.
+`TOTAL MONTHLY COST $21.56` was rendered with five of eleven lines excluded and
+nothing on the page saying so — so the page's most prominent claim was its least
+complete one, under a closing sentence promising that each line says how its
+figure was arrived at.
+
+⚖️ Phrased as a count of services rather than a hedge, because "approximately"
+tells a reader nothing they can act on while "6 of 11 services measured" tells
+them exactly how much of the total they are looking at.
+
+-}
+totalCaveat : CostBreakdown -> String
+totalCaveat breakdown =
+    let
+        unmeasured =
+            breakdown.categories |> List.map .unmeasuredCount |> List.sum
+
+        lines =
+            breakdown.categories |> List.map (.items >> List.length) |> List.sum
+    in
+    if unmeasured == 0 then
+        " — all " ++ String.fromInt lines ++ " services measured"
+
+    else
+        " — "
+            ++ String.fromInt (lines - unmeasured)
+            ++ " of "
+            ++ String.fromInt lines
+            ++ " services measured; the rest are not yet counted"
+
+
+{-| Just the money part of a category's figure.
+
+⛔ SEPARATED BECAUSE A UNIT BELONGS TO A NUMBER, NOT TO A SENTENCE. The story
+cards render `costText ++ "/mo"`, which was correct while `costText` was a
+currency figure — and the moment the aggregate fix made it a sentence, the card
+shipped **"$X.XX + 1 unmeasured/mo"** on the most prominent figure on the page.
+The `Int -> String` change was the right fix for the aggregate and carried this
+with it.
+
+⚖️ So the suffix is composed per-part: the card appends "/mo" to the money and
+the unmeasured note trails it, instead of "/mo" landing on whatever the last
+word happens to be.
+
+-}
+categoryMoneyText : CostCategory -> String
+categoryMoneyText cat =
+    formatCents cat.totalCents
+
+
+{-| The trailing note when a category has lines with no figure, or "".
+-}
+unmeasuredSuffix : CostCategory -> String
+unmeasuredSuffix cat =
+    if cat.unmeasuredCount == 0 then
+        ""
+
+    else if cat.unmeasuredCount == 1 then
+        " + 1 unmeasured"
+
+    else
+        " + " ++ String.fromInt cat.unmeasuredCount ++ " unmeasured"
+
+
 formatCategoryName : String -> String
 formatCategoryName category =
     case category of
@@ -411,9 +783,22 @@ formatCategoryName category =
             other
 
 
-categoryTotal : String -> List CostCategory -> Int
-categoryTotal name categories =
-    categories
-        |> List.filter (\c -> c.category == name)
-        |> List.map .totalCents
-        |> List.sum
+{-| The category by name, collapsed to one record.
+
+⚖️ Returns a record rather than an Int so callers can report incompleteness.
+The previous `categoryTotal` summed `.totalCents` and discarded the unmeasured
+count, which is how the story cards kept printing a bare `$0.00/mo` after the
+header had learned not to.
+
+-}
+categoryFor : String -> List CostCategory -> CostCategory
+categoryFor name categories =
+    let
+        matching =
+            List.filter (\c -> c.category == name) categories
+    in
+    { category = name
+    , totalCents = matching |> List.map .totalCents |> List.sum
+    , unmeasuredCount = matching |> List.map .unmeasuredCount |> List.sum
+    , items = List.concatMap .items matching
+    }

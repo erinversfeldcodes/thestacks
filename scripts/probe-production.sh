@@ -14,6 +14,27 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WINDOW="${PROBE_WINDOW_SECONDS:-600}"
 INTERVAL="${PROBE_INTERVAL_SECONDS:-15}"
 SEED_EMAIL="${PROBE_SEED_EMAIL:-owner@thestacks.app}"
+
+# ⛔ THE PROOF A BROWSER WOULD HAVE. Every state-changing API request is refused
+# without a double-submit proof: the readable `stacks_csrf` cookie echoed in an
+# `X-CSRF-Token` header. This probe is not a browser, so it fetches a page to be
+# issued the cookie and then sends the matching header on every write.
+#
+# ⚠️ A helper rather than three inline copies, because the failure is silent in
+# the wrong direction: a missing proof returns 403, and this probe CLASSIFIES
+# response codes — so an unproven write would be recorded as a genuine
+# server-side failure and page somebody about a healthy stack.
+CSRF_JAR=""
+CSRF_PROOF=""
+_csrf_proof() {
+    CSRF_JAR="$WORK_DIR/csrf.jar"
+    curl -4 -s -o /dev/null --cookie-jar "$CSRF_JAR" --max-time 15 "$BASE_URL/" || true
+    CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "$CSRF_JAR" 2>/dev/null | tail -1)"
+    if [ -z "$CSRF_PROOF" ]; then
+        echo "WARN: no stacks_csrf cookie from ${BASE_URL}/ — every write below will be" >&2
+        echo "      refused with 403 and recorded as a server failure rather than a harness one." >&2
+    fi
+}
 SEED_PASSWORD="${PROBE_SEED_PASSWORD:-dev-password-123}"
 BARCODE_CANARY="${REPO_ROOT}/images/barcode_isbn_clean.jpg|barcode"
 
@@ -114,10 +135,13 @@ probe_catalogue() {
 probe_login() {
     local t0 t1 http_code exit_code kind body_file body token
     body_file="$WORK_DIR/login.body"
+
     t0="$(_now_ms)"
     http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}' \
         --max-time "$LOGIN_TIMEOUT" \
         "$BASE_URL/api/auth/login" \
+        -b "$CSRF_JAR" \
+        -H "X-CSRF-Token: ${CSRF_PROOF}" \
         -H "Content-Type: application/json" \
         -d "{\"email\":\"${SEED_EMAIL}\",\"password\":\"${SEED_PASSWORD}\"}" \
         2>/dev/null)" || true
@@ -168,7 +192,7 @@ probe_bookshelf() {
 _probe_upload_canary() {
     local canary="$1"
     local canary_name="$2"
-    local t0 t1 http_code exit_code kind body_file body token image_id upload_url
+    local t0 t1 http_code exit_code kind body_file body token image_id upload_url upload_is_ours
     token=""
     if [[ -f "$WORK_DIR/last_token" ]]; then
         token="$(cat "$WORK_DIR/last_token")"
@@ -187,6 +211,7 @@ _probe_upload_canary() {
     http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}' \
         --max-time "$UPLOAD_POST_TIMEOUT" \
         -X POST "$BASE_URL/api/upload/init" \
+        -b "$CSRF_JAR" -H "X-CSRF-Token: ${CSRF_PROOF}" \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
         -d '{"content_type":"image/jpeg"}' \
@@ -215,17 +240,39 @@ except: pass" 2>/dev/null || true)"
     # init returns the upload_url RELATIVE (`/api/upload/:id/data` — the
     # app-mediated PUT); resolve it against the base like the SPA does. An
     # absolute URL (a future direct-to-storage presign) passes through.
+    upload_is_ours=0
     if [[ "$upload_url" == /* ]]; then
         upload_url="${BASE_URL}${upload_url}"
+        upload_is_ours=1
+    elif [[ "$upload_url" == "${BASE_URL}"* ]]; then
+        upload_is_ours=1
     fi
 
     # Content-Type must match init's or a presigned target rejects the PUT.
-    http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
-        --max-time "$UPLOAD_POST_TIMEOUT" \
-        -X PUT "$upload_url" \
-        -H "Content-Type: image/jpeg" \
-        --data-binary "@${canary}" \
-        2>/dev/null)" || true
+    #
+    # ⛔ The proof goes ONLY on the app-mediated arm. As the comment above says,
+    # this `upload_url` is relative today and resolves to our own API, so the
+    # PUT is a state-changing request to us and is refused without a proof. A
+    # future direct-to-storage presign must NOT receive one: an unsigned header
+    # on a signed request breaks the signature, and it would hand our CSRF token
+    # to a third party.
+    if [[ ${upload_is_ours} -eq 1 ]]; then
+        http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+            --max-time "$UPLOAD_POST_TIMEOUT" \
+            -X PUT "$upload_url" \
+            -b "$CSRF_JAR" \
+            -H "X-CSRF-Token: ${CSRF_PROOF}" \
+            -H "Content-Type: image/jpeg" \
+            --data-binary "@${canary}" \
+            2>/dev/null)" || true
+    else
+        http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+            --max-time "$UPLOAD_POST_TIMEOUT" \
+            -X PUT "$upload_url" \
+            -H "Content-Type: image/jpeg" \
+            --data-binary "@${canary}" \
+            2>/dev/null)" || true
+    fi
     exit_code=$?
     kind="$(_classify "$exit_code" "${http_code:-000}")"
 
@@ -239,6 +286,7 @@ except: pass" 2>/dev/null || true)"
     http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
         --max-time "$UPLOAD_POST_TIMEOUT" \
         -X POST "$BASE_URL/api/upload/${image_id}/commit" \
+        -b "$CSRF_JAR" -H "X-CSRF-Token: ${CSRF_PROOF}" \
         -H "Authorization: Bearer ${token}" \
         2>/dev/null)" || true
     exit_code=$?
@@ -323,12 +371,19 @@ probe_deps_check() {
 # gate state is a fact, not a distribution.
 assert_invite_gate() {
     local http_code body_file body
+
+    # ⛔ THE PROOF, because this assertion reads a 403 as its SUCCESS signal and
+    # an unproven POST is also refused 403. Without it the check sees the right
+    # status with the wrong body, concludes the invite gate is OFF, and raises a
+    # false alarm about a security control that is working.
+    _csrf_proof
     body_file="$WORK_DIR/invite_gate.body"
-    http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}'         --max-time "$HEALTH_TIMEOUT"         "$BASE_URL/api/auth/register"         -H "Content-Type: application/json"         -d '{"email":"invite-gate-probe@thestacks.test","password":"probe-never-lands"}'         2>/dev/null)" || true
+    http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}'         --max-time "$HEALTH_TIMEOUT"         "$BASE_URL/api/auth/register" \
+        -b "$CSRF_JAR" -H "X-CSRF-Token: ${CSRF_PROOF}"         -H "Content-Type: application/json"         -d '{"email":"invite-gate-probe@thestacks.test","password":"probe-never-lands"}'         2>/dev/null)" || true
     body="$(cat "$body_file" 2>/dev/null || true)"
     rm -f "$body_file"
 
-    if [[ "$http_code" == "403" ]] && printf '%s' "$body" | grep -q "invite_required"; then
+    if [[ "$http_code" == "403" ]] && grep -q "invite_required" <<< "$body"; then
         echo "PASS assert: invite gate is ON (codeless register -> 403 invite_required)"
         return 0
     fi
@@ -360,6 +415,17 @@ ITERATION_NUM=0
 while :; do
     ITERATION_NUM=$(( ITERATION_NUM + 1 ))
     iter_start="$(date +%s)"
+
+    # ⛔ OBTAINED IN THE PARENT SHELL, BEFORE THE FAN-OUT, and the placement is
+    # the whole point. Every probe below runs as a background job, so each is a
+    # subshell: a proof fetched inside `probe_login` would set these variables
+    # in that subshell only, and the upload canaries — themselves subshells of
+    # `probe_upload` — would send an empty header and be refused. Fetched here,
+    # the values are inherited by all of them.
+    #
+    # ⚠️ Once per iteration rather than once per run, so a long-lived probe
+    # re-reads the cookie if it is ever rotated.
+    _csrf_proof
 
     probe_health &
     pid_h=$!
@@ -446,6 +512,21 @@ http_5xx_count = sum(1 for _, _, k in all_samples if k == "http_5xx")
 http_4xx_count = sum(1 for _, _, k in all_samples if k == "http_4xx")
 timeout_count = sum(1 for _, _, k in all_samples if k == "timeout")
 
+# ⛔ THE FIFTH KIND, which the summary used to omit entirely.
+#
+# `_classify` emits five: ok, http_4xx, http_5xx, timeout, and `error` — any
+# non-zero curl exit that is not 28. Only the first four were counted, so every
+# `error` sample reduced availability and then appeared in NO counter. Against a
+# mock that accepts and never replies, the summary read
+# `availability=0.0 4xx=0 5xx=0 timeouts=0`: six failures, all invisible, and an
+# operator with no way to tell a refused connection from a slow one.
+#
+# ⚠️ It also made the suite's own assertion vacuous. The test checked that the
+# word "timeout" appeared in the summary, and `timeouts=0` contains it — so the
+# assertion passed on a run where the count was zero, which is every run. Its
+# one observed failure was the summary happening not to contain the word at all.
+error_count = sum(1 for _, _, k in all_samples if k == "error")
+
 availability = (succeeded / total) if total else 0.0
 
 p95_per_probe = {
@@ -473,6 +554,7 @@ summary = {
         "http_4xx_count": http_4xx_count,
         "http_5xx_count": http_5xx_count,
         "timeout_count": timeout_count,
+        "error_count": error_count,
     },
     "upload_outcome": upload_outcome,
 }
@@ -480,7 +562,7 @@ summary = {
 print(
     f"probe summary: availability={availability * 100:.1f}% "
     f"total={total} 4xx={http_4xx_count} 5xx={http_5xx_count} "
-    f"timeouts={timeout_count} upload_outcome={upload_outcome}"
+    f"timeouts={timeout_count} errors={error_count} upload_outcome={upload_outcome}"
 )
 print("probe-summary-json:", json.dumps(summary))
 
@@ -503,6 +585,12 @@ flat = {
     ],
     "synthetic_probes_timeout_count": summary["synthetic_probes"][
         "timeout_count"
+    ],
+    # Carried into the flat metrics too, so the dashboards can see the bucket
+    # that used to be dropped — a failure counted nowhere is a failure nobody
+    # alerts on.
+    "synthetic_probes_error_count": summary["synthetic_probes"][
+        "error_count"
     ],
     "upload_outcome": summary["upload_outcome"],
 }

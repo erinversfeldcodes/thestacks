@@ -15,8 +15,35 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_ai_together_completion_count_total" => :public,
     "stacks_discovery_brave_search_count_total" => :public,
     "stacks_auth_jwt_issued_count_total" => :public,
+    # Session transport during the cookie rollout. `:public` like its auth
+    # siblings: the series is an aggregate keyed only by `cookie`/`bearer` and
+    # names no reader, session or token. It is the reading the bearer-path
+    # deletion is decided on, so it needs to be visible rather than break-glass.
+    "stacks_auth_session_transport_count_total" => :public,
+    # SameSite enforcement of authenticated clients. `:public` like its auth
+    # siblings: the series is keyed only by a three-valued atom and names no
+    # reader, session or user agent. It is the evidence a pending CSRF decision
+    # rests on, so it needs to be visible rather than break-glass.
+    "stacks_auth_samesite_support_count_total" => :public,
+    # Cookie rejections during the rollout. `:public` like its sibling: the
+    # series is keyed only by a bounded rejection atom and names no reader,
+    # token or session. It is the only thing that distinguishes a systemic
+    # cookie failure from the rollout not having begun.
+    "stacks_auth_session_cookie_rejected_count_total" => :public,
+
+    # ⚠️ Both are aggregate counts with BOUNDED labels — four outcomes and
+    # three refusal reasons, all atoms chosen in code. Neither carries a token
+    # value, a user id, or anything from the request: a CSRF proof is a
+    # per-document value, and labelling by it would turn a counter into a
+    # session tracker with unbounded cardinality.
+    "stacks_auth_csrf_proof_count_total" => :public,
+    "stacks_auth_csrf_refused_count_total" => :public,
     "stacks_auth_login_failure_count_total" => :public,
     "stacks_auth_mfa_verify_count_total" => :public,
+    # Invite-gate outcomes. `:public` like its registration sibling: the counter is an
+    # aggregate keyed only by a bounded result atom (ok / required / invalid / expired
+    # / revoked / exhausted / email_mismatch) and names no invite, code or person.
+    "stacks_auth_invite_count_total" => :public,
     "stacks_auth_refresh_reuse_detected_count_total" => :public,
     "stacks_auth_refresh_revoke_failed_count_total" => :public,
     "stacks_auth_registration_count_total" => :public,
@@ -27,6 +54,96 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_events_handler_error_count_total" => :public,
     "stacks_events_handler_invoked_count_total" => :public,
     "stacks_fuse_state_state" => :public,
+    # ── The six families that gained a reporter ──────────────────────────────
+    # Classified consciously rather than inherited, since an unlisted metric is
+    # :unclassified and reaches no public surface by default.
+    #
+    # The two circuit-breaker counters are :public for the same reason
+    # `stacks_fuse_state_state` already is — a breaker name and a count say that
+    # a dependency is unwell, which is exactly what a transparency page is for,
+    # and they name no person.
+    "stacks_fuse_blown_count_total" => :public,
+    "stacks_fuse_melt_count_total" => :public,
+    # robots.txt fetches: an aggregate count with no tags at all. Nothing to
+    # attribute to anyone.
+    "stacks_crawler_robots_fetch_count_total" => :public,
+    # Platform operating cost by category and service. :public because the cost
+    # page already publishes these figures by design — this is the metric behind
+    # a surface that is deliberately open, and `service` is bounded to a
+    # ten-name vocabulary the app itself writes.
+    "stacks_costs_recorded_amount_cents" => :public,
+    # ⚠️ The two AI-spend metrics, and the one classification here that was
+    # genuinely arguable — recorded with the alternative so it can be overturned
+    # without re-deriving the argument.
+    #
+    # AGAINST :public — live spend against a budget limit is an operational
+    # control signal, not a published figure. Continuously exposed it tells an
+    # observer how close the platform is to refusing AI work, which is an
+    # invitation to push it there; the cost page reports spend in ARREARS, while
+    # this reports headroom in REAL TIME. Those are different disclosures.
+    #
+    # FOR :public, which is what was chosen — this project's transparency
+    # posture already publishes platform spend, and a reader discovering that
+    # image identification has stopped working deserves to see the reason was a
+    # budget ceiling rather than a fault. Hiding a refusal count makes a
+    # degradation look like a bug. The amounts are aggregates by provider,
+    # naming no person and no request.
+    #
+    # The DoS concern is real but weak here: the limit is a cost ceiling, not a
+    # capacity one, and anyone can already infer it by watching identification
+    # fail. If that changes — a per-user limit, say — revisit this first.
+    "stacks_budget_cost_recorded_amount_micro_cents" => :public,
+    "stacks_budget_limit_exceeded_count_total" => :public,
+    # ⚖️ Public like the rest of the budget family: this is the honesty figure
+    # behind the published spend numbers. A reader of the cost page is entitled
+    # to know the meter dropped a charge, because it means the published total
+    # is low rather than merely imprecise.
+    "stacks_budget_charge_dropped_count_total" => :public,
+    # ⚖️ Public: the cost page's figures derive from this breakdown, and a
+    # reader entitled to the total is entitled to know which tier incurred it.
+    "stacks_vision_tier_count_total" => :public,
+    # A count of GPU container lifetimes. Aggregate, no user dimension, and it
+    # is the multiplicand of the public cost page's idle figure — so it is as
+    # public as the number it produces.
+    "stacks_vision_gpu_cold_start_count_total" => :public,
+    # The honesty check on the cold-start count; as public as the figure it qualifies.
+    "stacks_vision_gpu_telemetry_gap_count_total" => :public,
+    # Aggregate GPU seconds, no user dimension, and the multiplicand of the
+    # public inference cost line — as public as the figure it produces.
+    "stacks_vision_gpu_active_milliseconds_total" => :public,
+    # ⛔ EXTERNALLY PUSHED, AND THE OMISSION HERE IS WHAT KEPT THE HOLE OPEN.
+    # Widening the dashboard gates' universe was not enough: the completeness
+    # test filters to families classified `:public`, so an unclassified family
+    # is still skipped — a probe removing the billing panel left the gate GREEN
+    # even after the universe included it. Two layers had to agree before the
+    # money series could be required to be visible.
+    #
+    # ⚖️ `:public` because these are the figures the cost page's honesty rests
+    # on: aggregate provider spend, no user dimension, and the only numbers in
+    # the system that come from an invoice rather than our own arithmetic.
+    # ⚖️ Scheduled-job health, all `:public`. These say whether a cron ran, how
+    # long it took and how much it produced — aggregate, no user dimension, and
+    # nothing about them is sensitive. ⛔ `:own` would have been the easy call
+    # and the wrong one: it exempts a family from needing a panel, which is
+    # exactly the state these eleven were already in when a reviewer found them.
+    "stacks_backup_dump_last_success_timestamp_seconds" => :public,
+    "stacks_backup_dump_size_bytes" => :public,
+    "stacks_backup_dump_duration_seconds" => :public,
+    "stacks_costs_refresh_last_success_timestamp_seconds" => :public,
+    "stacks_costs_refresh_duration_seconds" => :public,
+    "stacks_costs_refresh_items" => :public,
+    "stacks_bookstore_events_sweep_last_success_timestamp_seconds" => :public,
+    "stacks_bookstore_events_sweep_duration_seconds" => :public,
+    "stacks_dbt_refresh_last_success_timestamp_seconds" => :public,
+    "stacks_dbt_refresh_duration_seconds" => :public,
+    "stacks_dbt_refresh_mart_rows" => :public,
+    "stacks_billing_mtd_cents" => :public,
+    "stacks_billing_run_rate_cents_per_month" => :public,
+    "stacks_billing_allowance_pct" => :public,
+    # Aggregate spend per provider, no user in it — the same audience as the
+    # cost series beside them.
+    "stacks_budget_spend_daily_cents" => :public,
+    "stacks_budget_spend_monthly_cents" => :public,
     "stacks_gdpr_audit_read_count_total" => :public,
     "stacks_gdpr_audit_write_count_total" => :public,
     "stacks_gdpr_consent_grant_count_total" => :public,
@@ -42,8 +159,11 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_blog_association_count_total" => :public,
     "stacks_gdpr_export_expired_count_total" => :public,
     "stacks_gdpr_export_orphan_count_total" => :public,
+    "stacks_gdpr_export_undated_count_total" => :public,
     "stacks_gdpr_image_expired_count_total" => :public,
     "stacks_gdpr_image_orphan_count_total" => :public,
+    "stacks_gdpr_image_standing" => :public,
+    "stacks_insights_deanonymisation_unavailable_count_total" => :public,
     "stacks_gdpr_image_stuck_count_total" => :public,
     "stacks_handle_claimed_count_total" => :public,
     "stacks_moderation_classification_count_total" => :public,
@@ -59,6 +179,11 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_shelf_browse_capped_count_total" => :public,
     "stacks_social_block_count_total" => :public,
     "stacks_social_block_error_count_total" => :public,
+    # An aggregate count of feed rows dropped for incomplete decoration, with no
+    # tags and no per-user dimension — so :public on the same basis as its
+    # siblings. Expected to stay at zero; it exists so that expectation is
+    # measured rather than asserted.
+    "stacks_social_feed_row_undecorated_total" => :public,
     "stacks_social_unblock_count_total" => :public,
     "stacks_upload_terminal_count_total" => :public,
     "stacks_view_as_error_count_total" => :public,

@@ -157,8 +157,32 @@ defmodule Stacks.ShelvingQueryTest do
 
       assert placement_count(shelves) == 40
 
-      assert queries <= 8,
-             "expected <= 8 queries for the shelf browse read path, got #{queries}"
+      # ⚠️ Raised from 8 to 10 when per-request row-level-security scoping
+      # landed, and the two extra queries are named rather than absorbed: a
+      # `BEGIN` and the `set_config` that sets the scope. `SET LOCAL` only takes
+      # effect inside a transaction, so a scoped READ now costs a transaction it
+      # did not need before. That is the price of the mechanism and it is
+      # CONSTANT — it does not grow with shelves or placements, which is the
+      # property this file exists to protect and which the neighbouring
+      # "query count does not grow with the number of shelves" test pins
+      # directly by comparing two fixture sizes.
+      #
+      # ⛔ A bound raised without naming what filled it is how an N+1 gets
+      # absorbed one query at a time. If this number moves again, find the
+      # query before changing the figure.
+      #
+      # ⚠️ It stays 10, and the scope restore the test environment adds is
+      # SUBTRACTED by `with_query_count/1` rather than covered by a larger
+      # bound. Briefly raising it to 11 was the wrong move for a reason worth
+      # keeping: a bound containing a test-only term stops measuring
+      # production, and an *explained* raise is worse than an unexplained one —
+      # the next person to see the number already accounted for stops looking,
+      # so the slot is handed to a future production query with an alibi.
+      # Measuring the artifact means that if the restore ever stops firing the
+      # arithmetic changes visibly instead of quietly freeing a query.
+      assert queries <= 10,
+             "expected <= 10 production queries for the shelf browse read path, got #{queries} " <>
+               "(sandbox-only scope restores are already excluded from this count)"
     end
 
     test "every association the serializer touches is preloaded (no lazy fetch)" do
@@ -225,8 +249,13 @@ defmodule Stacks.ShelvingQueryTest do
     :telemetry.attach(
       handler_id,
       [:core, :repo, :query],
-      fn _event, _measurements, _meta, _config ->
-        if self() == test_pid, do: send(test_pid, {ref, :query})
+      fn _event, _measurements, meta, _config ->
+        # ⚠️ The SQL is carried through so the caller can SUBTRACT the
+        # sandbox-only scope restore rather than inflate its bound to cover it.
+        # A bound that silently includes a test artifact stops measuring
+        # production, and — worse — hands the next production query that fills
+        # the slot a documented alibi.
+        if self() == test_pid, do: send(test_pid, {ref, :query, meta[:query]})
       end,
       nil
     )
@@ -241,9 +270,20 @@ defmodule Stacks.ShelvingQueryTest do
     {result, drain_query_count(ref, 0)}
   end
 
+  # Counts only queries that would also run in production: the scope restore
+  # exists solely because the sandbox holds the connection inside a transaction
+  # that never commits, so it is subtracted here instead of being absorbed into
+  # every bound in this file.
+  @restore_sql "set_config('app.current_user_id', ''"
+
   defp drain_query_count(ref, acc) do
     receive do
-      {^ref, :query} -> drain_query_count(ref, acc + 1)
+      {^ref, :query, sql} ->
+        if is_binary(sql) and String.contains?(sql, @restore_sql) do
+          drain_query_count(ref, acc)
+        else
+          drain_query_count(ref, acc + 1)
+        end
     after
       0 -> acc
     end

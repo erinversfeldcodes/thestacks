@@ -1,6 +1,7 @@
 defmodule Stacks.DegradedAccountRecoveryTest do
   use Core.DataCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import Stacks.Factory
 
   alias Stacks.Accounts
@@ -128,6 +129,78 @@ defmodule Stacks.DegradedAccountRecoveryTest do
       assert {:ok, _} = Accounts.restore_degraded_account(degraded.id)
       assert Accounts.list_degraded_accounts() == []
     end
+  end
+
+  describe "who reverted the email change" do
+    # ⛔ The two reverts emit the SAME event type, and for a while they emitted
+    # the same empty payload too. A consumer counting reader-initiated undos
+    # silently included operator interventions, and the only attribution lived
+    # in an `admin.account_restored` audit row — a different table that no event
+    # consumer reads.
+    #
+    # ⚠️ Asserted as a PAIR, deliberately. Checking only the operator path would
+    # pass against a payload that tagged every revert `"operator"`, which is the
+    # same defect inverted: a reader's undo attributed to staff. The property is
+    # that the two paths are DISTINGUISHABLE, so both halves have to be read.
+    test "an operator restore and a reader undo are distinguishable in the payload" do
+      operator_user = degraded_user()
+      assert {:ok, _} = Accounts.restore_degraded_account(operator_user.id)
+
+      # ⚠️ A SIGNED token, not the factory's opaque `"rev-N"` placeholder.
+      # `revert_email_change/1` verifies the token before it does anything, so
+      # the placeholder yields `{:error, :invalid}` and the reader half of this
+      # assertion would never run — the test would have passed while reading
+      # only the operator path, which is precisely the one-sided check the note
+      # above warns against.
+      reader_user = degraded_user(pending_email_revert_token: nil)
+
+      {:ok, reader_user} =
+        reader_user
+        |> Accounts.pending_email_changeset(%{
+          pending_email_revert_token: Accounts.sign_email_revert_token(reader_user.id)
+        })
+        |> Core.Repo.update()
+
+      assert {:ok, _} =
+               Stacks.Email.revert_email_change(reader_user.pending_email_revert_token)
+
+      assert revert_initiators(operator_user.id) == ["operator"],
+             "the operator restore did not record itself as operator-initiated"
+
+      assert revert_initiators(reader_user.id) == ["reader"],
+             "the reader's own undo was not recorded as reader-initiated — if this says " <>
+               "\"operator\", every revert is now attributed to staff, which is the original " <>
+               "defect inverted rather than fixed"
+    end
+
+    test "the payload carries the contract's version, so a v1 consumer is not misled" do
+      user = degraded_user()
+      assert {:ok, _} = Accounts.restore_degraded_account(user.id)
+
+      # v1 of this event had no `initiated_by` at all. A v2 payload arriving
+      # labelled v1 would tell a consumer the key cannot be there when it is.
+      assert revert_versions(user.id) == [2]
+    end
+  end
+
+  defp revert_initiators(user_id) do
+    Core.Repo.all(
+      from(e in "event_log",
+        prefix: "op",
+        where: e.event_type == "user.email_change_reverted" and e.aggregate_id == ^user_id,
+        select: fragment("?->>'initiated_by'", e.payload)
+      )
+    )
+  end
+
+  defp revert_versions(user_id) do
+    Core.Repo.all(
+      from(e in "event_log",
+        prefix: "op",
+        where: e.event_type == "user.email_change_reverted" and e.aggregate_id == ^user_id,
+        select: e.schema_version
+      )
+    )
   end
 
   defp live_family_count(user_id) do

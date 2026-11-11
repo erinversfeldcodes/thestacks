@@ -8,6 +8,7 @@ module Page.Settings.Notifications exposing
     )
 
 import Api exposing (NotificationPreferences)
+import Effect
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
@@ -55,15 +56,17 @@ type OutMsg
 {-| `init` keeps its 2-tuple: the load's 401 arrives as `SessionExpiryDetected`
 in `update`, which is the only place an `OutMsg` can be raised anyway.
 -}
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
         Just token ->
             ( { prefs = Loading, saving = NotAsked }
-            , Api.getNotifications
-                (Api.authed token
+            , Effect.perform
+                (Effect.authed Api.notificationsRequest
+                    token
                     { onExpired = SessionExpiryDetected
-                    , onResult = Loaded
+                    , onResponse =
+                        Api.resolveJson Api.notificationPreferencesDecoder >> Loaded
                     }
                 )
             )
@@ -72,7 +75,7 @@ init maybeToken =
             ( { prefs = NotAsked, saving = NotAsked }, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         Loaded (Ok prefs) ->
@@ -108,7 +111,7 @@ update msg model maybeToken =
 {-| Flip one preference on the loaded values and immediately auto-save. A toggle
 is a no-op until the preferences have loaded — there is nothing to flip yet.
 -}
-flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg, OutMsg )
+flipAndSave : Model -> Maybe Api.Credentials -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg, OutMsg )
 flipAndSave model maybeToken flip =
     case model.prefs of
         Success prefs ->
@@ -125,14 +128,15 @@ flipAndSave model maybeToken flip =
             ( model, Cmd.none, NoOut )
 
 
-savePreferences : NotificationPreferences -> Maybe String -> Cmd Msg
+savePreferences : NotificationPreferences -> Maybe Api.Credentials -> Cmd Msg
 savePreferences prefs maybeToken =
     case maybeToken of
         Just token ->
-            Api.updateNotifications prefs
-                (Api.authed token
+            Effect.perform
+                (Effect.authed (Api.updateNotificationsRequest prefs)
+                    token
                     { onExpired = SessionExpiryDetected
-                    , onResult = SaveCompleted
+                    , onResponse = Api.resolveWhatever >> SaveCompleted
                     }
                 )
 

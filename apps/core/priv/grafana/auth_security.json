@@ -66,7 +66,7 @@
   "timezone": "",
   "title": "The Stacks \u2014 Auth & Session Security",
   "uid": "stacks-auth-security",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "id": 1,
@@ -177,7 +177,7 @@
     {
       "id": 4,
       "type": "row",
-      "title": "Auth lifecycle (login \u00b7 registration \u00b7 JWT \u00b7 MFA)",
+      "title": "Auth lifecycle (login \u00b7 registration \u00b7 invite \u00b7 JWT \u00b7 MFA)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -428,6 +428,55 @@
       ]
     },
     {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Invite-gate outcomes (closed-beta admission)",
+      "description": "WHAT: rate of invite-gate decisions at registration, split by result (ok / required / invalid / expired / revoked / exhausted / email_mismatch). HOW: rate over stacks_auth_invite_count_total, emitted by AuthController.register/2 with a bounded result atom \u2014 an aggregate that names no invite, code or person. MEANS: who is getting into the closed beta and who is being turned away. `ok` is only emitted while invite-only registration is switched on, so a flat zero line across every series means the gate is OFF and registration is open to anyone. WATCH: `invalid` dominating means codes are being guessed \u2014 the gate is being brute-forced, and the codes are short enough for that to matter; a rise in `required` means people are arriving at signup without a code at all (a link shared past its audience, or an invite email that did not land); `expired` or `exhausted` climbing while `ok` falls means the invites in circulation have run out and real guests are being refused.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(stacks_auth_invite_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
       "id": 10,
       "type": "timeseries",
       "title": "Password reset requests by outcome",
@@ -620,6 +669,239 @@
           },
           "expr": "stacks_accounts_email_change_lapsed_degraded{app=\"$app\"}",
           "legendFormat": "degraded"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Session transport rollout",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Session transport (cookie vs bearer) \u2014 the bearer deletion gate",
+      "description": "WHAT: rate of AUTHENTICATED requests by the transport that carried the session. HOW: rate over stacks_auth_session_transport_count_total by transport, emitted from StacksWeb.Plugs.SessionCookie in register_before_send, and only when the request actually authenticated \u2014 an unauthenticated request offers a transport too, and counting those would let the bearer series read zero on a stream of failures. MEANS: during the rollout both series are live; `cookie` should climb as clients update and `bearer` should fall toward zero. WATCH: this panel is the DECIDING instrument for deleting the bearer path \u2014 delete it when `bearer` holds at zero for a full release, and not before. A `bearer` series that stops falling means a client is still on the old transport; find it before removing the path it depends on. SCOPE \u2014 read before deleting: this series covers the user-session pipeline ONLY. AdminAuthPipeline (Bearer, admin_session), OptionalAuthPipeline (Bearer) and SseAuthPipeline (JWT in the ?token= query parameter) all authenticate and emit NOTHING here, so a zero does not license deleting bearer support repository-wide \u2014 it would break the admin console, every optional-auth page and the SSE stream. AND: zero authenticated bearer requests is not zero bearer ATTEMPTS. A client whose tokens all fail is invisible in this series, so the zero can coexist with something still reaching for bearer (a token-rotation window, say).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_auth_session_transport_count_total{app=\"$app\"}[$__rate_interval])) by (transport)",
+          "legendFormat": "{{transport}}/s"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Session cookie rejections (is the cookie transport working?)",
+      "description": "WHAT: rate of requests that presented a session cookie which FAILED to verify, by bounded reason. HOW: rate over stacks_auth_session_cookie_rejected_count_total by reason, emitted from StacksWeb.Plugs.SessionCookie when decode_and_verify refuses a cookie that was present. MEANS: a present-but-unusable cookie falls through to the bearer path and is counted as BEARER by the transport panel beside this one \u2014 so without this series a systemic cookie failure is indistinguishable from 'the rollout has not started yet'. WATCH: this is the companion instrument to the transport panel. Non-zero and rising means cookies are being issued and then refused \u2014 check key rotation, and check whether Secure cookies are reaching the server at all. Reading the transport panel's bearer series WITHOUT this one is how a broken cookie transport gets mistaken for an un-started migration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_auth_session_cookie_rejected_count_total{app=\"$app\"}[$__rate_interval])) by (reason)",
+          "legendFormat": "{{reason}}/s"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "SameSite enforcement of authenticated clients (the CSRF sizing question)",
+      "description": "WHAT: authenticated requests by whether the client enforces the SameSite cookie attribute. HOW: rate over stacks_auth_samesite_support_count_total by `enforces` (enforces / does_not_enforce / unknown), classified from the User-Agent in Stacks.UserAgent and the string then DISCARDED \u2014 nothing retains a user agent. MEANS: SameSite=Lax is the CSRF defence until a double-submit token exists, and it blocks the cookie on every cross-site state-changing method; its only hole, top-level GET navigation, has no state-changing target here. So `does_not_enforce` IS the residual population a CSRF token would protect. WATCH: this panel is the evidence for whether a 77-call-site refactor plus an enforcement step that can reject writes is warranted. Read `does_not_enforce` as the threat population and `unknown` as the classifier's own limit \u2014 a large unknown bucket is a finding about the classifier, NOT a safe default, because it never guesses `enforces`. Counted on authenticated requests only: anonymous traffic has no session to forge and would dilute the figure toward looking riskier than it is.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(stacks_auth_samesite_support_count_total{app=\"$app\"}[$__rate_interval])) by (enforces)",
+          "legendFormat": "{{enforces}}/s"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "CSRF proof on state-changing requests \u2014 the enforcement gate",
+      "description": "WHAT: rate of state-changing requests by whether they carried a usable double-submit proof. HOW: rate over stacks_auth_csrf_proof_count_total by outcome, emitted from StacksWeb.Plugs.CsrfCounter on the :api pipeline; safe methods are counted as `safe` so the series has a denominator \u2014 without it, zero unproven writes and a plug that never ran are the same empty result. MEANS: `proven` should be the whole of the write traffic. The two absences are DIFFERENT BUGS: absent_header is a client that did not send the proof, absent_cookie a browser that never received one. WATCH: SCOPE is the :api pipeline, 83 of 91 state-changing routes \u2014 the 4 partner_auth routes carry an Argon2 key and no cookie, and the 4 /api/test/* helpers are unreachable in production. A zero here is a statement about those 83, not about all writes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (rate(stacks_auth_csrf_proof_count_total[5m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "CSRF refusals \u2014 expected to sit at zero",
+      "description": "WHAT: rate of state-changing requests REFUSED for failing the double-submit check. HOW: rate over stacks_auth_csrf_refused_count_total by reason, emitted from StacksWeb.Plugs.CsrfEnforce, which runs AFTER the counter so a refused request is counted before it is turned away. MEANS: this is the only signal that enforcement is turning REAL traffic away, and the reason says whose bug it is \u2014 absent_header a client, absent_cookie a server or cookie-attribute problem, mismatched the only one consistent with an attack. WATCH: non-zero and rising after a release means a client path was missed; compare against the proof panel above, where the same request will show as the same reason.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (rate(stacks_auth_csrf_refused_count_total[5m]))",
+          "legendFormat": "{{reason}}"
         }
       ]
     }

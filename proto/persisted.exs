@@ -369,6 +369,15 @@
         %{
           name: "library_import_rows_import_id_outcome_index",
           columns: [:import_id, :outcome]
+        },
+        # ⚠️ Declared because the DATABASE already has it and nothing said so.
+        # It was added by a later migration by hand; `persisted.exs` did not
+        # carry it, so a regeneration would have dropped it — the other half of
+        # the same divergence `no_index` fixes above, pointing the opposite way.
+        # Serves the retention sweep's age scan.
+        %{
+          name: "library_import_rows_created_at_index",
+          columns: [:created_at]
         }
       ],
       field_overrides: %{
@@ -376,7 +385,20 @@
           belongs_to: Stacks.Imports.LibraryImport,
           references_table: :library_imports,
           on_delete: :delete_all,
-          null: false
+          null: false,
+          # No single-column index on this FK: the composite
+          # `library_import_rows_import_id_row_number_index` above LEADS with
+          # `import_id`, and Postgres serves a leading-column lookup from a
+          # multi-column index. A separate one would be dead weight on every
+          # write for a read that is already covered.
+          #
+          # ⚠️ Declared rather than hand-dropped. The index was previously
+          # removed from the migration by hand, which `mix proto.sync --check`
+          # cannot see — it diffs generated output, and an existing create-table
+          # migration is not regenerated — so the manifest claimed an index the
+          # database did not have, and the next regeneration would have
+          # reinstated it while dropping the hand-added `created_at` one.
+          no_index: true
         },
         row_number: %{null: false},
         raw_rating: %{default: 0, null: false},
@@ -818,7 +840,8 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        currency: %{default: "USD"}
+        currency: %{default: "USD"},
+        basis: %{null: false, default: "rate_card"}
       }
     },
     %{
@@ -984,7 +1007,19 @@
         listed_at: %{ecto_type: :utc_datetime_usec},
         expires_at: %{ecto_type: :utc_datetime_usec},
         sold_at: %{ecto_type: :utc_datetime_usec},
-        book: %{api_only: true}
+        book: %{api_only: true},
+        # ⛔ `api_only` for the same reason as `book` above, and it is REQUIRED
+        # rather than tidy: `seller_id`'s `belongs_to` already defines a
+        # `:seller` association on this schema, so generating a `seller` field
+        # too makes Ecto refuse the module — "field/association :seller already
+        # exists" — and the whole app stops compiling.
+        #
+        # ⚠️ Worth knowing because `bash scripts/lint-proto.sh` passes while that
+        # is broken: it checks the five codegen targets agree, and the Ecto
+        # schema comes from `mix proto.sync`, which it does not run. The failure
+        # surfaced in `mix dialyzer` with the test suite producing no output at
+        # all, because compilation never finished.
+        seller: %{api_only: true}
       }
     },
     %{
@@ -1111,10 +1146,38 @@
       schema_prefix: "op",
       ecto_module: Stacks.Enrichment.ReviewSnapshot,
       ecto_path: "lib/stacks/gen/enrichment/review_snapshot.ex",
+      # `dbt_path` stays declared even though generation is off: the manifest
+      # requires the key, and the sibling skip_dbt tables keep theirs the same
+      # way. It is the path the model returns to, not a claim that it exists.
       dbt_path: "stg_review_snapshots.sql",
       timestamps: false,
       migration_exists: true,
+      # Left TRUE deliberately. `dbt_grant` is read only by the migration
+      # generator's `grant_block/1`, and `migration_exists: true` means no
+      # migration is generated here — so setting it false would emit no SQL,
+      # revoke nothing, and leave `stacks_dbt`'s existing grant in place while
+      # claiming in the manifest that the table has none. It would also be the
+      # wrong value the day this table's migration IS regenerated, silently
+      # dropping a grant the table should keep. `skip_dbt` below is the single
+      # carrier of "no model is generated".
       dbt_grant: true,
+      # ⚠️ Opted out of dbt generation on 2026-10-15, when the three review dbt
+      # models were deleted. They modelled a table holding zero rows: the
+      # scraping implementation was removed by owner ruling and its sanctioned
+      # replacement is not built yet.
+      #
+      # The TABLE, this proto message and the generated Ecto schema are
+      # deliberately KEPT — the returning review vertical writes to them, and
+      # its ordered rebuild makes that write its second step. So the row stays
+      # in this manifest with its Ecto half intact and its dbt half off, rather
+      # than being removed entirely.
+      #
+      # Flip `skip_dbt` back in the same change that produces the first
+      # sanctioned review rows — and only that: `dbt_path` and `dbt_grant` above
+      # were never removed, so there is nothing to restore. Until then a
+      # staging model here would be a view over an empty table, and the warehouse
+      # has no erasure path for the reader free text it would eventually carry.
+      skip_dbt: true,
       indexes: [],
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book}
@@ -1238,7 +1301,6 @@
           null: false
         },
         status: %{default: "active", null: false},
-        started_at: %{ecto_type: :utc_datetime_usec},
         topic: %{dbt_exclude: true}
       }
     },
@@ -1315,8 +1377,7 @@
           on_delete: :delete_all,
           null: false
         },
-        access_type: %{default: "granted", null: false},
-        granted_at: %{ecto_type: :utc_datetime_usec}
+        access_type: %{default: "granted", null: false}
       }
     },
     %{
@@ -1332,6 +1393,17 @@
       skip_ecto: true,
       skip_dbt: true,
       indexes: [],
+      # ⚠️ EVERY OVERRIDE BELOW IS INERT, and that is not obvious from reading it.
+      # This entry carries `skip_ecto: true` AND `skip_dbt: true`, its
+      # `ecto_path` is a hand-written module outside `gen/`, and it has no
+      # `json_serializers` entry — so none of the four routes that consume
+      # `field_overrides` reaches this map. It is a record of INTENT for the
+      # hand-maintained schema, not a thing the codegen applies.
+      #
+      # ⛔ The hazard is the flip, not the present state: setting `skip_ecto:
+      # false` would make all of these live AT ONCE, none of them ever having
+      # been validated against a generated schema. Check them individually
+      # before flipping, rather than trusting that they have been working.
       field_overrides: %{
         user_id: %{
           belongs_to: Stacks.Accounts.User,
@@ -1340,8 +1412,7 @@
           null: false
         },
         source_type: %{null: false},
-        source_id: %{ecto_type: :binary_id},
-        content_date: %{ecto_type: :utc_datetime_usec}
+        source_id: %{ecto_type: :binary_id}
       }
     },
     %{
@@ -1357,6 +1428,17 @@
       skip_ecto: true,
       skip_dbt: true,
       indexes: [],
+      # ⚠️ EVERY OVERRIDE BELOW IS INERT, and that is not obvious from reading it.
+      # This entry carries `skip_ecto: true` AND `skip_dbt: true`, its
+      # `ecto_path` is a hand-written module outside `gen/`, and it has no
+      # `json_serializers` entry — so none of the four routes that consume
+      # `field_overrides` reaches this map. It is a record of INTENT for the
+      # hand-maintained schema, not a thing the codegen applies.
+      #
+      # ⛔ The hazard is the flip, not the present state: setting `skip_ecto:
+      # false` would make all of these live AT ONCE, none of them ever having
+      # been validated against a generated schema. Check them individually
+      # before flipping, rather than trusting that they have been working.
       field_overrides: %{
         book_id: %{
           belongs_to: Stacks.Books.Book,
@@ -1388,7 +1470,16 @@
       proto_file: "stacks/common/v1/book.proto",
       proto_message: "Edition",
       function_name: :edition,
-      skip_fields: [:book_id],
+      # ⚠️ NOT skipped any more. Skipping removes a field from the GENERATED
+      # shape, which is the left-hand side of the completeness gate's set
+      # difference — so a declared proto field reaching no client became
+      # invisible to the gate built to find exactly that. Same class as
+      # `seller_id`, found by the same query. Nothing consumes `edition.book_id`
+      # (the `book_id` that Api.elm decodes is the upload payload's, not this
+      # one) and an edition is always nested under its book, so the parent id is
+      # already known — but "dropped on purpose" is now recorded in that gate's
+      # BASELINE rather than achieved by making the field unobservable.
+      skip_fields: [],
       field_overrides: %{}
     },
     %{
@@ -1427,14 +1518,56 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BookAssociation",
       function_name: :book_association,
-      skip_fields: [:post_id, :book_title, :status, :created_at],
+      # ⚠️ `post_id` and `created_at` unskipped for the same reason as
+      # `edition.book_id` above: skipping hid them from the completeness gate.
+      # `book_title` and `status` stay skipped because they are NOT in that
+      # class: both are `api_only: true`, so they have no column at all
+      # (`op.post_book_associations` is book_id, confidence, created_at, id,
+      # post_id, reasoning, source, visible) and the hand-written serializer
+      # computes `book_title` itself via `association_book_title/1`.
+      #
+      # Their pairing is ENFORCED rather than conventional —
+      # `check-api-only-is-skipped.sh` requires every api_only field to appear
+      # in its message's skip_fields, so removing either entry is a failing
+      # diff. An earlier version of this comment called them "derived values",
+      # which is true of `book_title` but implied no gate watches them.
+      skip_fields: [:book_title, :status],
       field_overrides: %{}
     },
     %{
       proto_file: "stacks/common/v1/listing.proto",
       proto_message: "Listing",
       function_name: :listing,
-      skip_fields: [:book, :seller_id],
+      # `seller` is skipped for the same reason as `book`: the hand-written
+      # serializer replaces both with its own narrow projection, and codegen
+      # cannot know about those. Left unskipped, codegen emitted
+      # `seller: struct.seller` — the RAW `%User{}` association, every column of
+      # it — which is the exact shape whose exposure the projection exists to
+      # end. Nothing calls this function except the hand-written serializer,
+      # which `Map.take`s immediately, so that raw value never reached a client;
+      # it is skipped because the next caller would not be so lucky.
+      #
+      # ⚠️ Skipping also takes `seller` out of the completeness gate's view, so
+      # that gate is NOT what notices if the projection stops being carried.
+      # The anonymous-payload boundary test is — it asserts the seller object's
+      # exact key set over a real HTTP response.
+      # ⚠️ `seller_id` is NOT skipped, and the asymmetry with `book_id` was the
+      # finding. Skipping it took it out of the generated shape, which is the
+      # left-hand side of the completeness gate's set difference — so a declared
+      # proto field reaching no client became invisible to the gate built to
+      # find exactly that. `book_id` was never skipped, is therefore compared,
+      # and sits in that gate's BASELINE as a recorded decision. `seller_id` now
+      # does too. Nothing consumes it (no Elm or e2e reference), and it is
+      # redundant with `seller.id` on the projection, but "dropped on purpose"
+      # and "invisible" should not look the same.
+      skip_fields: [:book, :seller],
+      field_overrides: %{}
+    },
+    %{
+      proto_file: "stacks/common/v1/social.proto",
+      proto_message: "GroupMemberSummary",
+      function_name: :group_member_summary,
+      skip_fields: [],
       field_overrides: %{}
     }
   ]

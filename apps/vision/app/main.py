@@ -1,16 +1,13 @@
 import base64
-import hashlib
-import hmac
 import io
 import logging
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
 import structlog
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from PIL import Image
@@ -20,14 +17,9 @@ from app.config import settings
 from app.proto.gen.vision import (
     AnalyzeRequest,
     AnalyzeResponse,
-    AssociateCallback,
-    AssociateRequest,
-    AssociateResponse,
-    ClassifyRequest,
-    ClassifyResponse,
     ExtractedBook,
-    ExtractRequest,
-    ExtractResponse,
+    GpuDispatch,
+    StageTimings,
 )
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
@@ -47,10 +39,6 @@ _DOWNLOAD_TIMEOUT = 10.0  # seconds
 
 _VLM_MAX_SIDE = 672
 _VLM_JPEG_QUALITY = 85
-
-_associate_jobs: dict[str, str] = {}
-
-_ASSOCIATE_CALLBACK_PATH = "/api/internal/vision/associate"
 
 
 def _resize_for_vlm(image_b64: str) -> str:
@@ -80,6 +68,54 @@ def _resize_for_vlm(image_b64: str) -> str:
 
 
 _CLF_BOOK = "CLASSIFICATION_RESULT_BOOK"
+
+# The cascade tiers, as the contract names them.
+#
+# ⛔ These are IDENTITY, NOT SEQUENCE. The cascade runs barcode → embedding →
+# OCR → VLM, and it is tempting to let the enum's numbers carry that order.
+# They must not: a consumer comparing them numerically breaks the moment a tier
+# is inserted out of order, and `buf` would never flag it because the numbers
+# stayed valid. The order lives in the code below, not in these values.
+_TIER_BARCODE = "ANALYSIS_TIER_BARCODE"
+_TIER_VLM_CLASSIFY = "ANALYSIS_TIER_VLM_CLASSIFY"
+_TIER_VLM_EXTRACT = "ANALYSIS_TIER_VLM_EXTRACT"
+
+
+def _gpu_dispatch(parsed: dict[str, object]) -> GpuDispatch | None:
+    """One GPU dispatch's container reading, or None if it reported none.
+
+    ⚠️ Tolerant by design: a GPU image deployed before these fields existed
+    sends no `_container`, and the honest answer is "no reading" rather than a
+    fabricated one.
+
+    ⛔ Each value is type-checked individually rather than the dict cast
+    wholesale. This crosses a process boundary from a separately deployed
+    image, so "it is a dict" says nothing about what is inside it.
+    """
+    container = parsed.get("_container")
+    if not isinstance(container, dict):
+        return None
+
+    cold = container.get("cold")
+    cid = container.get("container_id")
+
+    if not isinstance(cold, bool) or not isinstance(cid, str) or cid == "":
+        return None
+
+    return GpuDispatch(cold=cold, container_id=cid)
+
+
+def _elapsed_ms(started: float) -> int:
+    """Whole milliseconds since `started`, measured on the monotonic clock.
+
+    ⚖️ `time.monotonic` rather than wall-clock: these figures feed a cost and
+    latency decision, and a wall-clock step (NTP, a leap second) would show up
+    as a negative or absurd duration in exactly the data the redesign argues
+    from.
+    """
+    return int((time.monotonic() - started) * 1000)
+
+
 _CLF_NOT_BOOK = "CLASSIFICATION_RESULT_NOT_BOOK"
 _CLF_AMBIGUOUS = "CLASSIFICATION_RESULT_AMBIGUOUS"
 
@@ -88,15 +124,21 @@ _ML_TO_CLASSIFICATION: dict[str, str] = {
     "not_book": _CLF_NOT_BOOK,
     "ambiguous": _CLF_AMBIGUOUS,
 }
-_VALID_CLASSIFICATIONS = set(_ML_TO_CLASSIFICATION.values())
-
-_STATUS_CONFIRMED = "ASSOCIATION_STATUS_CONFIRMED"
-_STATUS_REJECTED = "ASSOCIATION_STATUS_REJECTED"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.vision_client = VisionClient()
+
+    # ⚖️ The FIRST request after a process starts is the cold one. `lifespan`
+    # runs once per container, so a flag set here and cleared by the first
+    # handler is exactly "was this container cold when the request arrived" —
+    # which is the question, rather than how long the container has lived.
+    #
+    # ⛔ A boolean, not an age: the decision it feeds is binary, and an age
+    # would invite a threshold nobody agreed on.
+    app.state.container_cold = True
+
     yield
     await app.state.vision_client.close()
 
@@ -106,6 +148,15 @@ app = FastAPI(title="The Stacks Vision Service", version="0.1.0", lifespan=lifes
 _ERR_UNDECODABLE_IMAGE = "VISION_ERROR_CODE_UNDECODABLE_IMAGE"
 _ERR_IMAGE_TOO_LARGE = "VISION_ERROR_CODE_IMAGE_TOO_LARGE"
 _ERR_IMAGE_UNREACHABLE = "VISION_ERROR_CODE_IMAGE_UNREACHABLE"
+#   ⚠️ NO_IMAGE_SUPPLIED has no reachable raiser as of 2026-10-15, and is kept
+#   deliberately. `AnalyzeRequest` declares `image`/`image_url` as a protobuf
+#   `oneof`, so Pydantic rejects "neither field set" before any handler body
+#   runs and the caller gets MALFORMED_REQUEST instead. The one raise site below
+#   is therefore defensive only. It stays because
+#   `test_error_constants_are_exactly_the_proto_enums_non_zero_values` pins this
+#   module's constant set to the proto enum, and the enum value must not be
+#   deleted: that is a wire-contract change, and `Stacks.AI.VisionError` maps
+#   every value to a cancel. `/extract` was its only live path.
 _ERR_NO_IMAGE_SUPPLIED = "VISION_ERROR_CODE_NO_IMAGE_SUPPLIED"
 _ERR_MALFORMED_REQUEST = "VISION_ERROR_CODE_MALFORMED_REQUEST"
 
@@ -150,9 +201,8 @@ async def _validation_exception_handler(
     become valid by being sent again.
 
     The summary deliberately drops Pydantic's `input` key. That field echoes the
-    offending request body, which for these endpoints is base64 image bytes and,
-    on `/associate`, user-linked identifiers — none of which belongs in an error
-    body the caller logs.
+    offending request body, which for this endpoint is base64 image bytes —
+    which does not belong in an error body the caller logs.
     """
     problems = "; ".join(
         f"{'.'.join(str(part) for part in error.get('loc', []))}: {error.get('msg', '')}"
@@ -203,227 +253,15 @@ async def _download_image(image_url: str) -> bytes:
     return b"".join(chunks)
 
 
-def _sign_callback() -> str:
-    """Compute X-Vision-Signature for a vision → core callback.
-
-    Format: "<unix_ts>.<HMAC-SHA256(secret, ts.POST.path)>" — matches InternalController.
-    """
-    ts = str(int(time.time()))
-    message = f"{ts}.POST.{_ASSOCIATE_CALLBACK_PATH}"
-    sig = hmac.new(
-        settings.hmac_secret.encode(),
-        message.encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"{ts}.{sig}"
-
-
-async def _run_associate(
-    job_id: str,
-    body: AssociateRequest,
-    client: VisionClient,
-) -> None:
-    """Background task: classify cover, POST result to core callback."""
-    log = logger.bind(job_id=job_id, edition_id=body.edition_id, isbn=body.isbn)
-
-    reason: str | None = None
-    try:
-        image_bytes = await _download_image(body.cover_image_url)
-        image_b64 = base64.b64encode(image_bytes).decode()
-        parsed = await client.classify(image_b64)
-        raw_ml = str(parsed.get("classification", "ambiguous"))
-        clf = _ML_TO_CLASSIFICATION.get(raw_ml, _CLF_AMBIGUOUS)
-        is_book = clf == _CLF_BOOK
-        status = _STATUS_CONFIRMED if is_book else _STATUS_REJECTED
-        if is_book:
-            reason = None
-        elif clf == _CLF_AMBIGUOUS:
-            reason = "ambiguous_classification"
-        else:
-            reason = "not_a_book_cover"
-        log.info(
-            "associate: classification done",
-            classification=clf,
-            status=status,
-            reasoning=parsed.get("reasoning"),
-        )
-    except HTTPException as exc:
-        log.warning("associate: cover download failed", detail=exc.detail)
-        status = _STATUS_REJECTED
-        reason = "cover_download_failed"
-    except Exception as exc:
-        log.error("associate: unexpected error", error=str(exc))
-        status = _STATUS_REJECTED
-        reason = "internal_error"
-
-    callback = AssociateCallback(
-        isbn=body.isbn,
-        book_id=body.book_id,
-        edition_id=body.edition_id,
-        status=status,
-        job_id=job_id,
-        reason=reason,
-        cover_image_url=body.cover_image_url,
-    )
-    payload_bytes = callback.model_dump_json().encode()
-    signature = _sign_callback()
-
-    callback_url = f"{settings.effective_core_api_url}{_ASSOCIATE_CALLBACK_PATH}"
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as http:
-            resp = await http.post(
-                callback_url,
-                content=payload_bytes,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Vision-Signature": signature,
-                },
-            )
-        log.info("associate: callback sent", status_code=resp.status_code)
-    except Exception as exc:
-        log.error("associate: callback failed", error=str(exc))
-
-
-@app.post(
-    "/extract",
-    response_model=ExtractResponse,
-    status_code=200,
-    dependencies=[Depends(verify_hmac)],
-)
-async def extract(request: Request, body: ExtractRequest) -> ExtractResponse:
-    log = logger.bind(endpoint="/extract")
-
-    if body.images and body.image_url is not None:
-        raise _vision_error(
-            _ERR_MALFORMED_REQUEST, "Provide either 'images' or 'image_url', not both"
-        )
-    if len(body.images) > 3:
-        raise _vision_error(_ERR_MALFORMED_REQUEST, "'images' must contain at most 3 items")
-
-    if body.image_url is not None:
-        log = log.bind(image_url=body.image_url)
-        image_bytes = await _download_image(body.image_url)
-        image_b64 = base64.b64encode(image_bytes).decode()
-
-        if settings.local_ocr_enabled:
-            isbn = local_isbn_scan(image_bytes)
-            if isbn is not None:
-                log.info("local OCR pre-pass hit (url path)", isbn=isbn)
-                return ExtractResponse(
-                    books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
-                    model_used="local_ocr",
-                )
-
-        client: VisionClient = request.app.state.vision_client
-        log.info("calling vision model for extraction (url path)")
-        parsed = await client.extract([image_b64])
-    else:
-        if not body.images:
-            raise _vision_error(
-                _ERR_NO_IMAGE_SUPPLIED, "Either 'images' or 'image_url' must be provided"
-            )
-        log = log.bind(image_count=len(body.images))
-
-        for idx, img in enumerate(body.images):
-            try:
-                decoded = base64.b64decode(img, validate=True)
-            except Exception as exc:
-                raise _vision_error(
-                    _ERR_UNDECODABLE_IMAGE, f"Image at index {idx} is not valid base64"
-                ) from exc
-            if len(decoded) > settings.max_image_size_bytes:
-                raise _vision_error(
-                    _ERR_IMAGE_TOO_LARGE,
-                    f"Image at index {idx} exceeds max size of {settings.max_image_size_bytes} bytes",  # noqa: E501
-                )
-
-        if settings.local_ocr_enabled:
-            first_decoded = base64.b64decode(body.images[0], validate=True)
-            isbn = local_isbn_scan(first_decoded)
-            if isbn is not None:
-                log.info("local OCR pre-pass hit", isbn=isbn)
-                return ExtractResponse(
-                    books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
-                    model_used="local_ocr",
-                )
-
-        client = request.app.state.vision_client
-        images_for_model = body.images
-        log.info("calling vision model for extraction")
-        parsed = await client.extract(images_for_model)
-
-    if not parsed:
-        log.warning("extraction: empty result from vision model")
-
-    books: list[ExtractedBook] = []
-    raw_books = parsed.get("books")
-    if isinstance(raw_books, list):
-        for item in raw_books:
-            if not isinstance(item, dict):
-                continue
-            title = item.get("title")
-            author = item.get("author")
-            isbns = item.get("potential_isbns")
-            raw_text = item.get("raw_text")
-            conf = item.get("confidence")
-            books.append(
-                ExtractedBook(
-                    title=title if isinstance(title, str) else None,
-                    author=author if isinstance(author, str) else None,
-                    potential_isbns=isbns if isinstance(isbns, list) else [],
-                    raw_text=raw_text if isinstance(raw_text, str) else None,
-                    confidence=float(conf) if isinstance(conf, int | float) else None,
-                )
-            )
-
-    log.info("extraction complete", book_count=len(books))
-    return ExtractResponse(books=books, model_used=settings.model_name)
-
-
-@app.post(
-    "/associate",
-    response_model=AssociateResponse,
-    status_code=202,
-    dependencies=[Depends(verify_hmac)],
-)
-async def associate(
-    request: Request,
-    body: AssociateRequest,
-    background_tasks: BackgroundTasks,
-) -> AssociateResponse:
-    """Async: classify a cover image and callback to core with the result.
-
-    Idempotent per edition_id — repeat calls return the same job_id.
-    """
-    if not body.isbn or not body.book_id or not body.edition_id or not body.cover_image_url:
-        raise _vision_error(
-            _ERR_MALFORMED_REQUEST,
-            "isbn, book_id, edition_id, and cover_image_url are required",
-        )
-    await validate_image_url(body.cover_image_url)
-
-    edition_id = body.edition_id
-    if edition_id in _associate_jobs:
-        return AssociateResponse(job_id=_associate_jobs[edition_id])
-
-    job_id = str(uuid.uuid4())
-    _associate_jobs[edition_id] = job_id
-
-    client: VisionClient = request.app.state.vision_client
-    background_tasks.add_task(_run_associate, job_id, body, client)
-
-    logger.bind(job_id=job_id, edition_id=edition_id).info("associate: job queued")
-    return AssociateResponse(job_id=job_id)
-
-
 async def _load_image_b64(
     image: str | None,
     image_url: str | None,
 ) -> str:
     """Resolve `image` (already base64) OR `image_url` (downloaded and re-encoded)
     into a single base64-encoded string. Raises HTTPException(422) for invalid
-    input — identical validation semantics to the /classify endpoint's inline
-    logic, factored out so /analyze can reuse it without duplication.
+    input — carrying forward the validation semantics the removed /classify
+    endpoint applied inline, factored out so /analyze can reuse them without
+    duplication.
     """
     if image_url is not None:
         image_bytes = await _download_image(image_url)
@@ -446,7 +284,7 @@ async def _load_image_b64(
 
 def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
     """Normalise the ML model's classify payload into a (proto-enum, confidence)
-    pair. Identical to /classify's inline parsing."""
+    pair. Carried over from the removed /classify endpoint's inline parsing."""
     raw_ml = str(parsed.get("classification", "ambiguous"))
     classification = _ML_TO_CLASSIFICATION.get(raw_ml, _CLF_AMBIGUOUS)
     raw_confidence = parsed.get("confidence", 0.0)
@@ -457,7 +295,7 @@ def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
 
 def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
     """Normalise the ML model's extract payload into a list of ExtractedBook.
-    Identical to /extract's inline parsing."""
+    Carried over from the removed /extract endpoint's inline parsing."""
     books: list[ExtractedBook] = []
     raw_books = parsed.get("books")
     if not isinstance(raw_books, list):
@@ -501,14 +339,26 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     """
     log = logger.bind(endpoint="/analyze")
 
+    # ⚖️ Read and clear in one step, so concurrent requests on a cold container
+    # cannot all claim to be the cold one. The first request that gets here owns
+    # the flag; every later request on this container reports warm.
+    cold = getattr(request.app.state, "container_cold", False)
+    request.app.state.container_cold = False
+
+    download_started = time.monotonic()
     image_b64 = await _load_image_b64(body.image, body.image_url)
+    download_ms = _elapsed_ms(download_started)
+
     if body.image_url is not None:
         log = log.bind(image_url=body.image_url)
 
     decoded_bytes = base64.b64decode(image_b64, validate=True)
 
     if settings.local_ocr_enabled:
+        barcode_started = time.monotonic()
         isbn = local_isbn_scan(decoded_bytes)
+        barcode_ms = _elapsed_ms(barcode_started)
+
         if isbn is not None:
             log.info("local OCR pre-pass hit", isbn=isbn)
             return AnalyzeResponse(
@@ -516,14 +366,28 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
                 confidence=1.0,
                 books=[ExtractedBook(potential_isbns=[isbn], confidence=1.0)],
                 model_used="local_ocr",
+                tier=_TIER_BARCODE,
+                timings_ms=StageTimings(download=download_ms, barcode=barcode_ms),
+                sidecar_cold=cold,
             )
+    else:
+        barcode_ms = None
 
     client: VisionClient = request.app.state.vision_client
 
     vlm_b64 = _resize_for_vlm(image_b64)
 
     log.info("calling vision model for classify")
+    classify_started = time.monotonic()
     classify_parsed = await client.classify(vlm_b64)
+    classify_ms = _elapsed_ms(classify_started)
+    # ⛔ A LIST, COLLECTED ACROSS EVERY DISPATCH. This read only the classify
+    # call, so a request whose EXTRACT woke a cold container reported no cold
+    # start — under-counting billed container lifetimes by up to half, in the
+    # direction that makes the GPU look cheap.
+    gpu_dispatches: list[GpuDispatch] = []
+    if (d := _gpu_dispatch(classify_parsed)) is not None:
+        gpu_dispatches.append(d)
     classification, confidence = _parse_classification(classify_parsed)
 
     if classification != _CLF_BOOK:
@@ -537,16 +401,32 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             confidence=confidence,
             books=[],
             model_used=settings.model_name,
+            tier=_TIER_VLM_CLASSIFY,
+            gpu_dispatches=gpu_dispatches,
+            timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, classify=classify_ms),
+            sidecar_cold=cold,
         )
 
     log.info(
         "calling vision model for extract",
         excluded_books_count=len(body.excluded_books),
     )
+    extract_started = time.monotonic()
     extract_parsed = await client.extract(
         [vlm_b64],
         excluded_books=list(body.excluded_books),
     )
+
+    # ⛔ THE DISPATCH THAT WAS BEING THROWN AWAY. `extract_parsed`'s `_container`
+    # block was already in hand and discarded, on the reasoning that "the
+    # extract runs on a container the classify just proved warm". Nothing
+    # enforces that: these are two independent `.remote.aio` dispatches against
+    # `max_containers=10`, and under this project's own documented load profile
+    # — the vision Oban queue at concurrency 20 against that cap, a batch
+    # arriving back-to-back — landing on different containers is the NORMAL
+    # case for a batch, not a corner.
+    if (d := _gpu_dispatch(extract_parsed)) is not None:
+        gpu_dispatches.append(d)
     books = _parse_extracted_books(extract_parsed)
     log.info(
         "analyze complete",
@@ -560,57 +440,13 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         confidence=confidence,
         books=books,
         model_used=settings.model_name,
-    )
-
-
-@app.post(
-    "/classify",
-    response_model=ClassifyResponse,
-    status_code=200,
-    dependencies=[Depends(verify_hmac)],
-)
-async def classify(request: Request, body: ClassifyRequest) -> ClassifyResponse:
-    log = logger.bind(endpoint="/classify")
-
-    if body.image_url is not None:
-        log = log.bind(image_url=body.image_url)
-        image_bytes = await _download_image(body.image_url)
-        image_b64 = base64.b64encode(image_bytes).decode()
-    else:
-        if body.image is None:
-            raise _vision_error(
-                _ERR_NO_IMAGE_SUPPLIED, "Either 'image' or 'image_url' must be provided"
-            )
-        try:
-            decoded = base64.b64decode(body.image, validate=True)
-        except Exception as exc:
-            raise _vision_error(_ERR_UNDECODABLE_IMAGE, "Image is not valid base64") from exc
-        if len(decoded) > settings.max_image_size_bytes:
-            raise _vision_error(
-                _ERR_IMAGE_TOO_LARGE,
-                f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
-            )
-        image_b64 = body.image
-
-    client: VisionClient = request.app.state.vision_client
-    log.info("calling vision model for classification")
-    parsed: dict[str, object] = await client.classify(image_b64)
-
-    raw_ml = str(parsed.get("classification", "ambiguous"))
-    classification = _ML_TO_CLASSIFICATION.get(raw_ml, _CLF_AMBIGUOUS)
-
-    raw_confidence = parsed.get("confidence", 0.0)
-    confidence = float(raw_confidence) if isinstance(raw_confidence, int | float) else 0.0
-    confidence = max(0.0, min(1.0, confidence))
-
-    reasoning = parsed.get("reasoning")
-    log.info(
-        "classification complete",
-        classification=classification,
-        reasoning=reasoning,
-    )
-    return ClassifyResponse(
-        classification=classification,
-        confidence=confidence,
-        model_used=settings.model_name,
+        tier=_TIER_VLM_EXTRACT,
+        gpu_dispatches=gpu_dispatches,
+        timings_ms=StageTimings(
+            download=download_ms,
+            barcode=barcode_ms,
+            classify=classify_ms,
+            extract=_elapsed_ms(extract_started),
+        ),
+        sidecar_cold=cold,
     )

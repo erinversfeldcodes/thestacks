@@ -1,0 +1,193 @@
+defmodule Stacks.AI.Spend do
+  @moduledoc """
+      What an AI provider has cost us this period, as a durable fact.
+
+      ⛔ THIS EXISTS BECAUSE THE BUDGET USED TO RESET WHENEVER THE MACHINE
+      IDLED. `Stacks.AI.Budget` holds its totals in GenServer state and
+      references `Repo` nowhere — so on a node that scales to zero, the ceiling
+      was restored by going quiet, the restore was invisible, and the only way
+      to exceed a daily cap was to stay busy enough to keep the node alive.
+
+      ⚠️ Its daily reset had the same shape: `schedule_midnight_reset/0` sends
+      itself a message at midnight, which arrives only if the process is there
+      at midnight. A machine asleep from 23:00 never resets, and never needed
+      to, having already lost the count.
+
+      ⚖️ READING IS A QUERY WITH A DATE IN IT. "Today's spend" asks the
+      database what today holds, which is correct whether the node has been up
+      for a month or ten seconds — rather than asking a counter whose accuracy
+      depends on an uptime nobody promised.
+  """
+  use Ecto.Schema
+
+  import Ecto.Query
+
+  require Logger
+
+  alias Core.Repo
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+  @schema_prefix "op"
+  @timestamps_opts [type: :utc_datetime_usec, inserted_at: :created_at]
+  @type t :: %__MODULE__{}
+
+  schema "ai_spend" do
+    field :provider, :string
+    field :period, :string
+    field :period_start, :date
+    field :spend_micro_cents, :integer
+
+    timestamps()
+  end
+
+  @doc """
+      Add a cost, IN MICRO-CENTS, to this provider's running totals.
+
+      ⛔ MICRO-CENTS, NOT CENTS, AND THE UNIT IS THE POINT. Token pricing is
+      quoted per million, so a 400-token completion costs ~0.035¢ — a quantity a
+      cent cannot express. Charging it in cents meant rounding up to one, which
+      over-charged an ordinary call by roughly 28× while a large call was
+      under-charged by up to 4.4× at the old rate. Micro-cents removes the
+      rounding by construction; there is nothing left to round.
+
+      ⛔ ONE STATEMENT PER PERIOD, UPSERTED, AND THE ATOMICITY IS THE POINT. A
+      read-then-write would lose a concurrent charge — two jobs billing at once
+      would each read the same total and each write their own, and the cheaper
+      of the two would vanish. `ON CONFLICT … spend_micro_cents =
+      ai_spend.spend_micro_cents + EXCLUDED.spend_micro_cents` adds inside the database, where the unique index
+      serialises it.
+
+      ⚠️ METERING MUST NOT FAIL THE WORK IT METERS, AND NOW IT CANNOT. The
+      caller has already spent the money by the time this runs, so a failure to
+      record it is a reporting problem — not a reason to discard the result the
+      reader is waiting for.
+
+      ⛔ This used to be a promise the code did not keep. There was no `rescue`,
+      so a `Repo` error raised out of `TogetherClient.parse_success_response/1`,
+      crashed the worker, and Oban retried the job — **calling and paying for
+      the completion a second time**. A metering failure costing a second
+      charge is the exact opposite of what this docstring claimed.
+
+      ⚖️ The cost of catching it is stated rather than hidden: during a database
+      outage the budget UNDER-COUNTS, so the ceiling is too generous for as long
+      as the outage lasts. That is the better of the two failures — the
+      alternative bills twice for the same answer.
+  """
+  @spec record(String.t() | atom(), non_neg_integer(), Date.t()) :: :ok | :dropped
+  def record(provider, micro_cents, today \\ Date.utc_today())
+
+  def record(_provider, 0, _today), do: :ok
+
+  def record(provider, micro_cents, today) when is_integer(micro_cents) and micro_cents > 0 do
+    provider = to_string(provider)
+
+    upsert_both_periods(provider, micro_cents, today)
+    :ok
+  rescue
+    # ⛔ NARROWED FROM A BLANKET RESCUE, WHICH MADE THIS FUNCTION FAIL OPEN.
+    #
+    # It used to rescue everything. A renamed column, a dropped unique index or
+    # a wrong `conflict_target` raises on EVERY insert — so every charge is
+    # swallowed, the ledger reads 0, and `check_budget/1` therefore answers
+    # `:ok` to everything. The ceiling disappears and the only trace is a log
+    # line.
+    #
+    # ⚠️ That is this module's founding defect arriving by another route. The
+    # moduledoc above says the budget "was restored by going quiet, and the
+    # restore was invisible". A blanket rescue restores it by swallowing every
+    # write rather than by the node sleeping — invisible in exactly the same
+    # way, on the one function whose job is to refuse.
+    #
+    # ⚖️ So a transient database fault is survivable and a schema mistake is
+    # not: these two clauses let the first through and let the second crash,
+    # where the caller's own supervision can surface it.
+    # ⚖️ `DBConnection.EncodeError` belongs here with the other two: it is the
+    # driver refusing a value the column cannot hold, which is a database fault
+    # arriving before the wire rather than a mistake in this module's logic.
+    error in [Postgrex.Error, DBConnection.ConnectionError, DBConnection.EncodeError] ->
+      Logger.error(
+        "Spend.record: could not record #{micro_cents} micro-cents for #{provider}: " <>
+          Exception.message(error)
+      )
+
+      # ⛔ THE COUNTER IS EMITTED BY `Budget.record_cost/2`, NOT HERE, AND THE
+      # REASON IS THE LABEL.
+      #
+      # It was emitted here on raw `to_string(provider)` while all four
+      # pre-existing `provider`-tagged budget emits go through
+      # `bounded_provider/1` — and that bounding rule is written down verbatim
+      # in the label gate's own justification for the tag. A public series with
+      # an unbounded label, and arbitrary atoms demonstrably reach this function
+      # from tests.
+      #
+      # ⚖️ The cause was a module boundary, so the fix respects it rather than
+      # importing the vocabulary across: the ledger owns the WRITE and reports
+      # whether it happened; the policy module owns the LABEL and the emit.
+      # Returning `:dropped` is how that travels.
+      :dropped
+  end
+
+  defp upsert_both_periods(provider, micro_cents, today) do
+    for {period, start} <- [{"daily", today}, {"monthly", Date.beginning_of_month(today)}] do
+      Repo.insert_all(
+        __MODULE__,
+        [
+          %{
+            id: Ecto.UUID.generate(),
+            provider: provider,
+            period: period,
+            period_start: start,
+            spend_micro_cents: micro_cents,
+            created_at: DateTime.utc_now(),
+            updated_at: DateTime.utc_now()
+          }
+        ],
+        # ⛔ `updated_at` IS SET ON CONFLICT TOO, OR IT RECORDS CREATION UNDER
+        # A NAME THAT PROMISES OTHERWISE. With `inc:` alone, two charges in one
+        # period took the balance from 1,000 to 3,000 micro-cents while
+        # `updated_at` stayed byte-identical — a column named `updated_at`
+        # silently holding the row's birthday.
+        #
+        # ⚖️ It matters here beyond tidiness: this row IS the budget, and
+        # "when was this provider last charged" is the first question anyone
+        # asks of a ledger that looks wrong. `created_at` is deliberately NOT
+        # touched, so the pair stays answerable — first charge and latest.
+        on_conflict: [
+          inc: [spend_micro_cents: micro_cents],
+          set: [updated_at: DateTime.utc_now()]
+        ],
+        conflict_target: [:provider, :period, :period_start]
+      )
+    end
+  end
+
+  @doc """
+      What this provider has cost in the named period, in MICRO-CENTS.
+
+      ⚖️ Answers 0 for a period with no row, which is the same answer as a
+      period with no spend — correctly, because they are the same thing. The
+      distinction that matters is kept elsewhere: a row exists once money has
+      been spent, and `#{inspect(__MODULE__)}` never writes a zero.
+  """
+  @spec spent(String.t() | atom(), :daily | :monthly, Date.t()) :: non_neg_integer()
+  def spent(provider, period, today \\ Date.utc_today())
+
+  def spent(provider, :daily, today), do: lookup(provider, "daily", today)
+
+  def spent(provider, :monthly, today),
+    do: lookup(provider, "monthly", Date.beginning_of_month(today))
+
+  defp lookup(provider, period, start) do
+    provider = to_string(provider)
+
+    __MODULE__
+    |> where([s], s.provider == ^provider and s.period == ^period and s.period_start == ^start)
+    |> select([s], s.spend_micro_cents)
+    |> Repo.one()
+    |> case do
+      nil -> 0
+      micro_cents -> micro_cents
+    end
+  end
+end

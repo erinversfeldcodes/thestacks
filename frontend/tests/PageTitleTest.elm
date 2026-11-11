@@ -7,6 +7,7 @@ signed-out reader at /upload sat in a tab titled "Add a Book". One case
 per divergence site, each failing if title derivation reverts to route.
 -}
 
+import Api
 import Expect
 import Http
 import Main exposing (Page(..))
@@ -19,6 +20,7 @@ import Page.Home as Home
 import Page.Login as Login
 import Page.Profile as ProfilePage
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Book exposing (Book, VisibilityTier(..))
 import Types.RemoteData
 import Types.User exposing (User)
@@ -71,28 +73,28 @@ readerUser =
 
 ownerAuth : Main.Auth
 ownerAuth =
-    { user = ownerUser, token = "tok" }
+    { user = ownerUser, token = TestHelpers.creds "tok" }
 
 
 readerAuth : Main.Auth
 readerAuth =
-    { user = readerUser, token = "tok" }
+    { user = readerUser, token = TestHelpers.creds "tok" }
 
 
 ageGatingOff : Main.AppConfig
 ageGatingOff =
-    { ageGatingEnabled = False, inviteOnly = False }
+    { ageGatingEnabled = False, inviteOnly = False, proof = Nothing }
 
 
 ageGatingOn : Main.AppConfig
 ageGatingOn =
-    { ageGatingEnabled = True, inviteOnly = False }
+    { ageGatingEnabled = True, inviteOnly = False, proof = Nothing }
 
 
 {-| Build a page exactly the way the shell does, so a test cannot assert about a
 page arrangement production never produces.
 -}
-pageFor : Main.AppConfig -> Route -> Maybe Main.Auth -> Maybe String -> Page
+pageFor : Main.AppConfig -> Route -> Maybe Main.Auth -> Maybe Api.Credentials -> Page
 pageFor config route maybeAuth adminToken =
     Main.initPage config route "https://thestacks.test" maybeAuth adminToken Nothing Login.Fresh
         |> Tuple.first
@@ -118,8 +120,14 @@ driftAdminGate =
     test "drift_2_admin_gate: the MFA challenge is not titled with the surface behind it" <|
         \() ->
             let
+                -- ⚠️ Built from `adminGateAfterEnding`, not `initPage`. The gate
+                -- is no longer produced at boot — elevation is the server's
+                -- answer, so the page renders and swaps to the gate when the
+                -- request is refused. This still asserts the drift it was
+                -- written for: the challenge must not wear the title of the
+                -- surface behind it.
                 title =
-                    pageTitleOf (pageFor ageGatingOff Route.AdminSourceApproval (Just ownerAuth) Nothing)
+                    pageTitleOf (Main.adminGateAfterEnding Nothing Route.AdminSourceApproval)
             in
             Expect.all
                 [ \t -> Expect.equal "Admin Sign-In — The Stacks" t
@@ -134,7 +142,7 @@ driftOwnerRefusal =
         \() ->
             let
                 title =
-                    pageTitleOf (pageFor ageGatingOff Route.AdminRemovalRequests (Just readerAuth) (Just "admin-tok"))
+                    pageTitleOf (pageFor ageGatingOff Route.AdminRemovalRequests (Just readerAuth) (Just (TestHelpers.creds "admin-tok")))
             in
             Expect.all
                 [ \t -> Expect.equal "Not Found — The Stacks" t
@@ -153,10 +161,10 @@ driftAgeGatingRefusal =
         \() ->
             Expect.all
                 [ \() ->
-                    pageTitleOf (pageFor ageGatingOff Route.AdminBookModeration (Just ownerAuth) (Just "admin-tok"))
+                    pageTitleOf (pageFor ageGatingOff Route.AdminBookModeration (Just ownerAuth) (Just (TestHelpers.creds "admin-tok")))
                         |> Expect.equal "Not Found — The Stacks"
                 , \() ->
-                    pageTitleOf (pageFor ageGatingOn Route.AdminBookModeration (Just ownerAuth) (Just "admin-tok"))
+                    pageTitleOf (pageFor ageGatingOn Route.AdminBookModeration (Just ownerAuth) (Just (TestHelpers.creds "admin-tok")))
                         |> Expect.equal "Book Moderation — The Stacks"
                 ]
                 ()
@@ -174,7 +182,7 @@ driftSignOut =
         \() ->
             let
                 signedOutCard =
-                    Login.init Login.Fresh
+                    Login.init Nothing Login.Fresh
 
                 ( registering, _, _ ) =
                     Login.update (Login.ModeSwitched Login.RegisterMode) signedOutCard
@@ -201,10 +209,10 @@ driftAdminReauth =
         \() ->
             let
                 onSources =
-                    pageTitleOf (PageAdminGate Route.AdminSourceApproval AdminSession.init)
+                    pageTitleOf (PageAdminGate Route.AdminSourceApproval (AdminSession.init Nothing))
 
                 onScrapers =
-                    pageTitleOf (PageAdminGate Route.AdminScraperConfig AdminSession.init)
+                    pageTitleOf (PageAdminGate Route.AdminScraperConfig (AdminSession.init Nothing))
             in
             Expect.all
                 [ \() -> Expect.equal onSources onScrapers
@@ -216,7 +224,7 @@ driftAdminReauth =
 
 bookshelfPage : Bookshelf.Config -> Page
 bookshelfPage config =
-    Bookshelf.init config (Just "tok") "u1"
+    Bookshelf.init config (Just (TestHelpers.creds "tok")) "u1"
         |> Tuple.first
         |> PageBookshelf
 
@@ -274,7 +282,7 @@ bookDetailModel : Types.RemoteData.RemoteData Http.Error Book -> BookDetail.Mode
 bookDetailModel bookState =
     let
         base =
-            BookDetail.init "b1" (Just "tok") Nothing |> Tuple.first
+            BookDetail.init "b1" (Just (TestHelpers.creds "tok")) Nothing |> Tuple.first
     in
     { base | book = bookState }
 
@@ -308,7 +316,7 @@ blogEditorDistinguishesNewFromEdit =
         \() ->
             let
                 editorFor mode =
-                    BlogEditor.init mode (Just "tok")
+                    BlogEditor.init mode (Just (TestHelpers.creds "tok"))
                         |> Tuple.first
                         |> PageBlogEditor
                         |> pageTitleOf
@@ -324,7 +332,7 @@ publicProfileNamesTheReader =
         \() ->
             let
                 title =
-                    ProfilePage.init (Just "tok") "ada"
+                    ProfilePage.init (Just (TestHelpers.creds "tok")) "ada"
                         |> Tuple.first
                         |> PageProfile
                         |> pageTitleOf
@@ -341,11 +349,11 @@ publicProfileNamesTheReader =
 -}
 representativePages : List Page
 representativePages =
-    [ PageLogin (Login.init Login.Fresh)
+    [ PageLogin (Login.init Nothing Login.Fresh)
     , bookshelfPage Bookshelf.libraryConfig
     , PageBookDetail (bookDetailModel Types.RemoteData.Loading)
     , PageAbout
-    , PageAdminGate Route.AdminSourceApproval AdminSession.init
+    , PageAdminGate Route.AdminSourceApproval (AdminSession.init Nothing)
     , PageConfirmEmail EmailConfirmed
     , PageConfirmEmail EmailConfirmFailed
     , PageNotFound

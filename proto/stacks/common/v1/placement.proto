@@ -139,6 +139,91 @@ message BookPlacement {
   // greying (mirrors the server validate_visibility_ceiling/3 422). Denormalised
   // onto the placement payload from op.bookshelves.visibility.
   string bookshelf_visibility = 8 [json_name = "bookshelf_visibility"];
+
+  // Where the reader is in this book: "to_read", "reading", "completed" or
+  // "abandoned". ReadingStatus below documents that set; it is NOT this field's
+  // type, and protobuf cannot enforce a string's membership either way.
+  //
+  // ⛔ ENFORCEMENT DOES NOT CROSS THE WIRE BOUNDARY. The set is enforced where
+  // the value is written and stored — ultimately by a column CHECK, which no
+  // application path can go around — and separately by whichever client wrote
+  // its own parse. None of that travels with the payload. So a new consumer
+  // inherits nothing: validate against this enum yourself rather than assuming
+  // deserialisation rejects an out-of-set value.
+  //
+  // ⚠️ Stated as the invariant rather than as a roster of layers, deliberately.
+  // An earlier version counted them ("four layers do enforce it") and named
+  // which side each sat on — and that rots in the DANGEROUS direction: if a
+  // layer is ever removed the sentence still asserts the count, and two of them
+  // are removable without anyone noticing (the dbt test is generated output and
+  // its drift check currently crashes; nothing at all guards the client parse).
+  // The invariant above stays true however many layers there are.
+  //
+  // ⛔ That column constraint settles what absence MEANS: the column can never
+  // hold NULL, so a `Nothing` on the client is only ever "this payload omitted
+  // the field" and never "the reader has no status". Treating the two as the
+  // same reads a serialiser gap as a user state.
+  //
+  // ⚠️ Stays a string rather than becoming `ReadingStatus reading_status = 9`.
+  // Enum-typing works here, but it moves the wire spellings onto a DERIVATION
+  // (the Elm generator strips the enum-name prefix), so renaming the enum would
+  // silently change every wire value in every language with no `buf breaking`
+  // signal — renaming an enum type is not a field change. For the one field
+  // whose defect was a manufactured value overwriting a reader's real status,
+  // the spellings stay written down. Revisiting it costs a `FIELD_SAME_TYPE`
+  // break once the field is on the default branch; check that rather than
+  // trusting a sentence about when this was written.
+  //
+  // ⛔ Added because its ABSENCE lost data: without it the progress card could
+  // only show "To Read" for a book the reader was 150 pages into, and saving
+  // that card wrote "to_read" over the real status.
+  optional string reading_status = 9 [json_name = "reading_status"];
+
+  // How far through the book the reader is, in pages.
+  //
+  // ⛔ `optional` is load-bearing here and is not stylistic. A proto3 scalar has
+  // no field presence, so an absent current_page would arrive as 0 — which is
+  // indistinguishable from a reader who really is on page 0, and would show a
+  // confident "page 0 of N" for every book whose progress the server did not
+  // send. Presence makes "the server did not say" expressible, which is the
+  // same correction this contract made for a publication date that could not
+  // distinguish absent from empty.
+  optional int32 current_page = 10 [json_name = "current_page"];
+}
+
+// ReadingStatus documents the closed set `reading_status` carries on the wire.
+//
+// ⚠️ Declared as an enum but NOT used as the field's type, which is the pattern
+// this contract already applies to listing condition, pricing mode and status:
+// the controller serialises Ecto atoms as plain strings, so the field stays a
+// string and the enum exists to give Elm and Python a closed set to validate
+// against instead of a comment. Declaring nothing is the outlier — two test
+// fixtures carried reading-status and visibility values the server cannot emit,
+// and nothing caught them.
+//
+// ⚠️ It cannot SOURCE a fixture gate — worth stating, because that was the
+// hope. The wire spellings live only in the per-value prose below, so such a
+// check would have to carry its own copy. This narrows the gap from "a comment
+// somewhere" to "a named set in the contract"; it does not close it.
+enum ReadingStatus {
+  // ⛔ Never emitted — the server cannot produce it, so this value is reachable
+  // only through the absence path. Presence is carried by the field's
+  // `optional`, not by this; the constant exists because proto3 requires a zero
+  // value, not because anything means it.
+  READING_STATUS_UNSPECIFIED = 0;
+
+  // Shelved but not started. Wire value "to_read".
+  READING_STATUS_TO_READ = 1;
+
+  // In progress; `current_page` is meaningful. Wire value "reading".
+  READING_STATUS_READING = 2;
+
+  // Finished. Wire value "completed" — ⚠️ NOT "finished", which is the
+  // spelling two test fixtures invented and which the server cannot emit.
+  READING_STATUS_COMPLETED = 3;
+
+  // Given up on. Wire value "abandoned".
+  READING_STATUS_ABANDONED = 4;
 }
 
 // Shelf represents a physical horizontal shelf within a bookshelf.

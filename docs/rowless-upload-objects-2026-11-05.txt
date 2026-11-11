@@ -1,0 +1,43 @@
+objects under uploads/: 8624
+
+-- LastModified by month ----------------------------------------
+   2026-03      597
+   2026-04     2152
+   2026-05     1257
+   2026-06       53
+   2026-07     3537
+   2026-08      659
+   2026-09       78
+   2026-10      291
+
+-- distinct sizes -----------------------------------------------
+   distinct sizes: 20 across 8624 objects
+        7661 bytes  x 2368  ( 27.5%)
+      106428 bytes  x 1234  ( 14.3%)
+       20361 bytes  x 1208  ( 14.0%)
+      108373 bytes  x 1197  ( 13.9%)
+       97014 bytes  x 1170  ( 13.6%)
+       99041 bytes  x 1151  ( 13.3%)
+          16 bytes  x  117  (  1.4%)
+          18 bytes  x   76  (  0.9%)
+   top 8 cover 98.8% of all objects
+   sizes occurring EXACTLY ONCE: 6
+   -> an upper bound on how many objects can be unique photographs
+
+-- key shapes ---------------------------------------------------
+   keys that are not uploads/<uuid>: 3
+      uploads/NONE
+      uploads/img-abc-123
+      uploads/probe-1793184812-readback
+   -> a non-uuid key was never reserved by init_upload/2, so it
+      cannot have had a row at any point
+
+   zero-byte objects: 3
+
+-- 2-hex-prefix buckets -----------------------------------------
+   Compare against the database's own per-prefix counts:
+     select substr(storage_path,9,2) p, count(*) from op.uploaded_images group by 1;
+   Summing max(0, objects-rows) over prefixes is an exact LOWER BOUND
+   on row-less objects; summing max(0, rows-objects) counts rows
+   pointing at objects that are already gone.
+   00:32,01:32,02:27,03:36,04:33,05:37,06:48,07:31,08:34,09:29,0a:42,0b:44,0c:24,0d:30,0e:33,0f:26,10:34,11:36,12:39,13:36,14:40,15:37,16:31,17:39,18:30,19:30,1a:32,1b:32,1c:35,1d:30,1e:32,1f:36,20:36,21:28,22:39,23:27,24:31,25:28,26:42,27:32,28:28,29:42,2a:33,2b:38,2c:27,2d:32,2e:39,2f:23,30:37,31:31,32:38,33:36,34:38,35:41,36:36,37:35,38:25,39:26,3a:36,3b:37,3c:39,3d:47,3e:30,3f:37,40:34,41:31,42:23,43:24,44:37,45:29,46:32,47:36,48:26,49:31,4a:34,4b:37,4c:39,4d:32,4e:33,4f:34,50:39,51:29,52:30,53:26,54:46,55:24,56:41,57:30,58:25,59:32,5a:30,5b:36,5c:31,5d:32,5e:35,5f:22,60:21,61:28,62:33,63:29,64:33,65:32,66:34,67:31,68:30,69:30,6a:33,6b:31,6c:31,6d:43,6e:38,6f:47,70:39,71:37,72:29,73:18,74:38,75:37,76:33,77:29,78:34,79:19,7a:28,7b:28,7c:32,7d:37,7e:29,7f:39,80:32,81:40,82:31,83:31,84:35,85:31,86:41,87:36,88:20,89:31,8a:31,8b:35,8c:31,8d:33,8e:35,8f:35,90:33,91:28,92:34,93:33,94:37,95:42,96:40,97:41,98:30,99:32,9a:43,9b:37,9c:24,9d:39,9e:31,9f:29,NO:1,a0:39,a1:45,a2:35,a3:41,a4:47,a5:26,a6:30,a7:27,a8:25,a9:27,aa:37,ab:41,ac:34,ad:42,ae:34,af:39,b0:30,b1:26,b2:34,b3:31,b4:25,b5:37,b6:27,b7:46,b8:34,b9:34,ba:32,bb:35,bc:35,bd:43,be:34,bf:33,c0:30,c1:39,c2:35,c3:36,c4:36,c5:47,c6:29,c7:35,c8:33,c9:43,ca:40,cb:30,cc:36,cd:27,ce:35,cf:52,d0:28,d1:35,d2:30,d3:28,d4:30,d5:31,d6:33,d7:33,d8:32,d9:30,da:36,db:42,dc:31,dd:44,de:40,df:24,e0:28,e1:36,e2:46,e3:34,e4:39,e5:30,e6:28,e7:33,e8:33,e9:23,ea:37,eb:29,ec:31,ed:36,ee:42,ef:32,f0:32,f1:28,f2:41,f3:40,f4:30,f5:29,f6:35,f7:34,f8:33,f9:37,fa:37,fb:27,fc:33,fd:42,fe:42,ff:37,im:1,pr:1

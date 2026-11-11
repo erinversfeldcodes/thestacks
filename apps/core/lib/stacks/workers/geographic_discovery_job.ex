@@ -10,7 +10,7 @@ defmodule Stacks.Workers.GeographicDiscoveryJob do
       `Stacks.Discovery.Handlers.LocationUpdatedHandler`.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

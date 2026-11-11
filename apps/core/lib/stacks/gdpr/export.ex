@@ -12,6 +12,7 @@ defmodule Stacks.GDPR.Export do
   alias Stacks.Books.UploadedImage
   alias Stacks.Feedback.Entry, as: FeedbackEntry
   alias Stacks.Marketplace.{Listing, OfferMessage, OfferThread, Transaction}
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
@@ -22,176 +23,178 @@ defmodule Stacks.GDPR.Export do
   """
   @spec export_user_data(binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def export_user_data(user_id, _opts \\ []) do
-    user = Accounts.get_user!(user_id)
+    Scope.with_user(user_id, fn ->
+      user = Accounts.get_user!(user_id)
 
-    bookshelves =
-      Bookshelf
-      |> where([bs], bs.user_id == ^user_id)
-      |> Repo.all()
+      bookshelves =
+        Bookshelf
+        |> where([bs], bs.user_id == ^user_id)
+        |> Repo.all()
 
-    bookshelf_ids = Enum.map(bookshelves, & &1.id)
+      bookshelf_ids = Enum.map(bookshelves, & &1.id)
 
-    placements =
-      Placement
-      |> where([p], p.bookshelf_id in ^bookshelf_ids)
-      |> preload([:book_edition, book: :editions])
-      |> Repo.all()
+      placements =
+        Placement
+        |> where([p], p.bookshelf_id in ^bookshelf_ids)
+        |> preload([:book_edition, book: :editions])
+        |> Repo.all()
 
-    histories =
-      PlacementHistory
-      |> where([h], h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids)
-      |> Repo.all()
+      histories =
+        PlacementHistory
+        |> where([h], h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids)
+        |> Repo.all()
 
-    sessions =
-      Session
-      |> where([s], s.user_id == ^user_id)
-      |> Repo.all()
+      sessions =
+        Session
+        |> where([s], s.user_id == ^user_id)
+        |> Repo.all()
 
-    feedback =
-      TurnFeedback
-      |> join(:inner, [f], s in Session, on: f.session_id == s.id)
-      |> where([_f, s], s.user_id == ^user_id)
-      |> Repo.all()
+      feedback =
+        TurnFeedback
+        |> join(:inner, [f], s in Session, on: f.session_id == s.id)
+        |> where([_f, s], s.user_id == ^user_id)
+        |> Repo.all()
 
-    embeddings_summary =
-      Embedding
-      |> where([e], e.user_id == ^user_id)
-      |> select([e], %{
-        source_type: e.source_type,
-        source_title: e.title,
-        shelf: e.shelf,
-        date_embedded: e.content_date
-      })
-      |> Repo.all()
+      embeddings_summary =
+        Embedding
+        |> where([e], e.user_id == ^user_id)
+        |> select([e], %{
+          source_type: e.source_type,
+          source_title: e.title,
+          shelf: e.shelf,
+          date_embedded: e.content_date
+        })
+        |> Repo.all()
 
-    uploaded_images =
-      UploadedImage
-      |> where([i], i.user_id == ^user_id)
-      |> select([i], %{id: i.id, uploaded_at: i.uploaded_at, status: i.status})
-      |> Repo.all()
+      uploaded_images =
+        UploadedImage
+        |> where([i], i.user_id == ^user_id)
+        |> select([i], %{id: i.id, uploaded_at: i.uploaded_at, status: i.status})
+        |> Repo.all()
 
-    blog_posts =
-      Post
-      |> where([p], p.user_id == ^user_id)
-      |> Repo.all()
+      blog_posts =
+        Post
+        |> where([p], p.user_id == ^user_id)
+        |> Repo.all()
 
-    blog_comments =
-      PostComment
-      |> where([c], c.author_id == ^user_id)
-      |> Repo.all()
+      blog_comments =
+        PostComment
+        |> where([c], c.author_id == ^user_id)
+        |> Repo.all()
 
-    blog_syndications =
-      Stacks.Blog.PostSyndication
-      |> join(:inner, [s], p in Post, on: s.post_id == p.id)
-      |> where([_s, p], p.user_id == ^user_id)
-      |> Repo.all()
-      |> Enum.map(
-        &%{
-          post_id: &1.post_id,
-          target: &1.target,
-          method: &1.method,
-          canonical_url: &1.canonical_url,
-          syndicated_url: &1.syndicated_url,
-          created_at: &1.created_at
-        }
-      )
+      blog_syndications =
+        Stacks.Blog.PostSyndication
+        |> join(:inner, [s], p in Post, on: s.post_id == p.id)
+        |> where([_s, p], p.user_id == ^user_id)
+        |> Repo.all()
+        |> Enum.map(
+          &%{
+            post_id: &1.post_id,
+            target: &1.target,
+            method: &1.method,
+            canonical_url: &1.canonical_url,
+            syndicated_url: &1.syndicated_url,
+            created_at: &1.created_at
+          }
+        )
 
-    invitations =
-      Stacks.Accounts.InviteCode
-      |> where([i], i.redeemed_by_id == ^user_id)
-      |> select([i], %{
-        code_prefix: i.code_prefix,
-        redeemed_at: i.redeemed_at,
-        expires_at: i.expires_at
-      })
-      |> Repo.all()
+      invitations =
+        Stacks.Accounts.InviteCode
+        |> where([i], i.redeemed_by_id == ^user_id)
+        |> select([i], %{
+          code_prefix: i.code_prefix,
+          redeemed_at: i.redeemed_at,
+          expires_at: i.expires_at
+        })
+        |> Repo.all()
 
-    # The reader's own words are theirs, so the body goes out in full.
-    feedback_entries =
-      FeedbackEntry
-      |> where([f], f.user_id == ^user_id)
-      |> order_by([f], desc: f.created_at)
-      |> select([f], %{body: f.body, page_context: f.page_context, created_at: f.created_at})
-      |> Repo.all()
+      # The reader's own words are theirs, so the body goes out in full.
+      feedback_entries =
+        FeedbackEntry
+        |> where([f], f.user_id == ^user_id)
+        |> order_by([f], desc: f.created_at)
+        |> select([f], %{body: f.body, page_context: f.page_context, created_at: f.created_at})
+        |> Repo.all()
 
-    library_imports =
-      Stacks.Imports.LibraryImport
-      |> where([li], li.user_id == ^user_id)
-      |> order_by([li], desc: li.created_at)
-      |> Repo.all()
-      |> Enum.map(&library_import_to_map/1)
+      library_imports =
+        Stacks.Imports.LibraryImport
+        |> where([li], li.user_id == ^user_id)
+        |> order_by([li], desc: li.created_at)
+        |> Repo.all()
+        |> Enum.map(&library_import_to_map/1)
 
-    export = %{
-      exported_at: DateTime.utc_now(),
-      # Every personal / user-provided column on op.users is exported here.
-      # Columns deliberately EXCLUDED (see the schema-sweep guard in
-      # test/stacks/gdpr_test.exs, whose exclusion list mirrors this rationale):
-      #   Secrets — exporting them would defeat their purpose / leak credentials:
-      #     password_hash, email_confirmation_token, password_reset_token,
-      #     pending_email_token, pending_email_revert_token,
-      #     password (virtual, never persisted).
-      #   Account-security mechanics — internal auth state, not user-provided
-      #     personal data:
-      #     email_confirmed, password_reset_sent_at, failed_login_count,
-      #     failed_login_first_at, locked_until, lockout_duration_seconds.
-      #   Internal UX progress flags — app state, not personal data:
-      #     onboarding_completed, onboarding_steps.
-      user: %{
-        id: user.id,
-        email: user.email,
-        # An address the reader typed, and the moment they typed it. Personal data
-        # even though the account does not answer on it (yet, or ever) — a change
-        # in flight is a fact about the reader that the platform is holding.
-        pending_email: user.pending_email,
-        pending_email_sent_at: user.pending_email_sent_at,
-        display_name: user.display_name,
-        handle: user.handle,
-        role: user.role,
-        profile_visibility: user.profile_visibility,
-        website_url: user.website_url,
-        country_code: user.country_code,
-        city: user.city,
-        notify_wishlist_availability: user.notify_wishlist_availability,
-        notify_marketplace: user.notify_marketplace,
-        notify_group_invitations: user.notify_group_invitations,
-        notify_event_matches: user.notify_event_matches,
-        syndication_default: user.syndication_default,
-        age_verified: user.age_verified,
-        age_verified_at: user.age_verified_at,
-        age_verification_provider: user.age_verification_provider,
-        consent_analytics: user.consent_analytics,
-        consent_analytics_at: user.consent_analytics_at,
-        consent_writing_assistant: user.consent_writing_assistant,
-        consent_writing_assistant_at: user.consent_writing_assistant_at,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      },
-      bookshelves: Enum.map(bookshelves, &bookshelf_to_map/1),
-      placements: Enum.map(placements, &placement_to_map/1),
-      placement_history: Enum.map(histories, &history_to_map/1),
-      writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
-      writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
-      embeddings_summary: embeddings_summary,
-      uploaded_images: uploaded_images,
-      blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
-      blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
-      invitations: invitations,
-      library_imports: library_imports,
-      blog_syndications: blog_syndications,
-      feedback: feedback_entries,
-      marketplace_listings: marketplace_listings(user_id),
-      marketplace_offer_threads: marketplace_offer_threads(user_id),
-      marketplace_offer_messages: marketplace_offer_messages(user_id),
-      marketplace_transactions: marketplace_transactions(user_id),
-      reading_groups: reading_groups(user_id),
-      reading_group_memberships: reading_group_memberships(user_id),
-      reading_group_invitations: reading_group_invitations(user_id),
-      blocked_users: blocked_users(user_id),
-      visibility_grants: visibility_grants(user_id),
-      audit_trail: audit_trail(user_id)
-    }
+      export = %{
+        exported_at: DateTime.utc_now(),
+        # Every personal / user-provided column on op.users is exported here.
+        # Columns deliberately EXCLUDED (see the schema-sweep guard in
+        # test/stacks/gdpr_test.exs, whose exclusion list mirrors this rationale):
+        #   Secrets — exporting them would defeat their purpose / leak credentials:
+        #     password_hash, email_confirmation_token, password_reset_token,
+        #     pending_email_token, pending_email_revert_token,
+        #     password (virtual, never persisted).
+        #   Account-security mechanics — internal auth state, not user-provided
+        #     personal data:
+        #     email_confirmed, password_reset_sent_at, failed_login_count,
+        #     failed_login_first_at, locked_until, lockout_duration_seconds.
+        #   Internal UX progress flags — app state, not personal data:
+        #     onboarding_completed, onboarding_steps.
+        user: %{
+          id: user.id,
+          email: user.email,
+          # An address the reader typed, and the moment they typed it. Personal data
+          # even though the account does not answer on it (yet, or ever) — a change
+          # in flight is a fact about the reader that the platform is holding.
+          pending_email: user.pending_email,
+          pending_email_sent_at: user.pending_email_sent_at,
+          display_name: user.display_name,
+          handle: user.handle,
+          role: user.role,
+          profile_visibility: user.profile_visibility,
+          website_url: user.website_url,
+          country_code: user.country_code,
+          city: user.city,
+          notify_wishlist_availability: user.notify_wishlist_availability,
+          notify_marketplace: user.notify_marketplace,
+          notify_group_invitations: user.notify_group_invitations,
+          notify_event_matches: user.notify_event_matches,
+          syndication_default: user.syndication_default,
+          age_verified: user.age_verified,
+          age_verified_at: user.age_verified_at,
+          age_verification_provider: user.age_verification_provider,
+          consent_analytics: user.consent_analytics,
+          consent_analytics_at: user.consent_analytics_at,
+          consent_writing_assistant: user.consent_writing_assistant,
+          consent_writing_assistant_at: user.consent_writing_assistant_at,
+          created_at: user.created_at,
+          updated_at: user.updated_at
+        },
+        bookshelves: Enum.map(bookshelves, &bookshelf_to_map/1),
+        placements: Enum.map(placements, &placement_to_map/1),
+        placement_history: Enum.map(histories, &history_to_map/1),
+        writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
+        writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
+        embeddings_summary: embeddings_summary,
+        uploaded_images: uploaded_images,
+        blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
+        blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
+        invitations: invitations,
+        library_imports: library_imports,
+        blog_syndications: blog_syndications,
+        feedback: feedback_entries,
+        marketplace_listings: marketplace_listings(user_id),
+        marketplace_offer_threads: marketplace_offer_threads(user_id),
+        marketplace_offer_messages: marketplace_offer_messages(user_id),
+        marketplace_transactions: marketplace_transactions(user_id),
+        reading_groups: reading_groups(user_id),
+        reading_group_memberships: reading_group_memberships(user_id),
+        reading_group_invitations: reading_group_invitations(user_id),
+        blocked_users: blocked_users(user_id),
+        visibility_grants: visibility_grants(user_id),
+        audit_trail: audit_trail(user_id)
+      }
 
-    {:ok, export}
+      {:ok, export}
+    end)
   rescue
     error -> {:error, error}
   end

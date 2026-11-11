@@ -12,7 +12,7 @@
 # to VictoriaMetrics. `now() - that gauge` IS the recoverability statement:
 # everything since the timestamp is protected only by the 6h PITR window. A
 # stale gauge means the safety net has quietly stopped — which is exactly the
-# failure mode #248 taught this project to surface as a far-end value rather
+# failure mode this project learned to surface as a far-end value rather
 # than infer from a green cron.
 #
 # All secrets used here already exist in the repository configuration.

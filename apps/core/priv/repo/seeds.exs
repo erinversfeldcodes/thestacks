@@ -591,7 +591,52 @@ bookshelf_rows =
     end)
   end)
 
-Repo.insert_all("bookshelves", bookshelf_rows,
+# ⛔ Bookshelves and placements are row-level secured, and their policies carry
+# `WITH CHECK (user_id = op.current_scope())` — so a single `insert_all`
+# spanning several users cannot satisfy them: whichever user the scope names,
+# every other user's rows are rejected. The fixtures are therefore grouped by
+# owner and each group inserted inside that owner's scope.
+#
+# ⚠️ Harmless where it is not required. In development the seed connects as a
+# superuser, which bypasses row-level security entirely, so the grouping only
+# costs a few extra statements; on a deployed stack, where the application
+# connects as the least-privilege role, it is the difference between a seeded
+# preview and a failed one.
+# ⛔ Returns the ids the statement REPORTED, which is neither the rows handed in
+# nor everything in the table — and the difference is a defect this seed shipped.
+# The three `on_conflict: :nothing` callers drop a colliding row silently, so
+# emitting a `placement.created` for the intended list wrote creation events for
+# rows that do not exist. Measured: 231 intended, 220 present, and **11 distinct
+# aggregate_ids in op.event_log with no placement row behind them**.
+#
+# ⚠️ "INSERTED" is the wrong word for one of the four callers, and saying so
+# here rather than one layer up: the first `bookshelves` call passes
+# `on_conflict: {:replace, …}`, which is DO UPDATE, and `RETURNING` reports
+# UPDATED rows as well as inserted ones. So that call's result is "rows the
+# statement touched", not "rows that are new". Latent today only because that
+# result is discarded — nothing emits events for bookshelves. A future caller
+# that emits a `*.created` per returned id from a DO UPDATE site would
+# reintroduce exactly this defect with the opposite sign: an event for a row
+# that already existed.
+#
+# ⚠️ `returning: [:id]` reports what the statement actually did, per owner,
+# inside the scope that was already being opened. The alternative — reading the
+# table back — is what this replaced, and it was wrong in the other direction:
+# it emitted for every placement on every run, including ones seeded previously.
+insert_owned = fn table, rows, owner_of, opts ->
+  rows
+  |> Enum.group_by(owner_of)
+  |> Enum.flat_map(fn {owner_id, group} ->
+    Stacks.Scope.with_user(owner_id, fn ->
+      {_count, returned} =
+        Repo.insert_all(table, group, Keyword.put(opts, :returning, [:id]))
+
+      Enum.map(returned || [], & &1.id)
+    end)
+  end)
+end
+
+insert_owned.("bookshelves", bookshelf_rows, & &1.user_id,
   prefix: "op",
   on_conflict: {:replace, [:visibility, :updated_at]},
   conflict_target: :id
@@ -613,7 +658,18 @@ e2e_bookshelf_rows =
     end)
   end)
 
-Repo.insert_all("bookshelves", e2e_bookshelf_rows, prefix: "op", on_conflict: :nothing)
+insert_owned.("bookshelves", e2e_bookshelf_rows, & &1.user_id,
+  prefix: "op",
+  on_conflict: :nothing
+)
+
+# The owner of every seeded bookshelf, so placements — which carry only a
+# `bookshelf_id` — can be grouped by the user whose scope the policy will check.
+# ⚠️ `fetch!` on purpose: a placement pointing at a bookshelf this map does not
+# know is a seed defect, and failing here names it rather than letting the
+# insert be refused later by a policy for reasons that look unrelated.
+bookshelf_owner = Map.new(bookshelf_rows ++ e2e_bookshelf_rows, &{&1.id, &1.user_id})
+placement_owner = fn row -> Map.fetch!(bookshelf_owner, row.bookshelf_id) end
 
 shelf_rows =
   Enum.flat_map([{1, 301}, {2, 306}], fn {_user_n, start_idx} ->
@@ -737,10 +793,11 @@ e2e_placement_rows =
     library_placements ++ antilibrary_placements ++ reading_pile_placements
   end)
 
-Repo.insert_all("bookshelf_placements", e2e_placement_rows,
-  prefix: "op",
-  on_conflict: :nothing
-)
+inserted_e2e_placement_ids =
+  insert_owned.("bookshelf_placements", e2e_placement_rows, placement_owner,
+    prefix: "op",
+    on_conflict: :nothing
+  )
 
 placement_groups = [
   {302, 0..19, jan_10, "library"},
@@ -867,35 +924,115 @@ user2_placements =
 
 all_placements = user1_placements ++ user2_placements
 
-Repo.insert_all("bookshelf_placements", all_placements, prefix: "op", on_conflict: :nothing)
-
-seeded_placements =
-  Repo.all(
-    from p in Stacks.Shelving.Placement,
-      join: b in Stacks.Shelving.Bookshelf,
-      on: b.id == p.bookshelf_id,
-      select: %{
-        id: p.id,
-        book_id: p.book_id,
-        bookshelf: b.name,
-        visibility: p.visibility
-      }
+inserted_dev_placement_ids =
+  insert_owned.("bookshelf_placements", all_placements, placement_owner,
+    prefix: "op",
+    on_conflict: :nothing
   )
 
-Enum.each(seeded_placements, fn p ->
-  Stacks.Events.emit_safe(%{
-    event_type: "placement.created",
-    aggregate_type: "placement",
-    aggregate_id: p.id,
-    payload: %{
-      book_id: p.book_id,
-      bookshelf: p.bookshelf,
-      visibility_tier: p.visibility
-    }
-  })
-end)
+# ⛔ Emitted from the rows this file just built, with NO read-back. The previous
+# version re-read them with an unscoped `Repo.all` joining both row-level-secured
+# tables — one line after the scoped inserts that exist because the app role
+# cannot touch those tables unscoped. On a deployed stack `seed_live/0` runs in
+# the live node as the least-privilege role, so that query raises `42501` and
+# the seed dies after inserting placements and before emitting a single event:
+# the file's own comment states the premise and the next statement broke it.
+#
+# ⚠️ Not merely scoped-instead-of-unscoped — removed. The seed already knows
+# every row it inserted, so reading them back was asking the database to confirm
+# what this file had just told it. It was also less accurate: the read returned
+# EVERY placement in the table, so a re-run emitted `placement.created` again for
+# rows seeded by a previous run.
+bookshelf_name_by_id =
+  Map.new(bookshelf_rows ++ e2e_bookshelf_rows, &{&1.id, &1.name})
 
-IO.puts("  emitted placement.created for #{length(seeded_placements)} seeded placements")
+# ⛔ `Seeds.uuid/1` returns a RAW 16-byte uuid, not the textual form, so every id
+# built in this file has to be cast before it crosses into a changeset. The
+# read-back this replaced returned already-cast values and hid that.
+#
+# ⚠️ Found by running the seed rather than by reading it, and the failure shape
+# is the reason: `emit_safe/1` logs and continues, so all 24 emissions failed
+# with a `ChangeError`, the seed exited 0, and the count below still printed the
+# number of placements it had INTENDED to emit for. A success-shaped run that
+# emitted nothing — exactly what the count was added to catch, defeated by
+# counting the wrong thing.
+# ⛔ `emit/1`, not `emit_safe/1`. `emit_safe/1` returns `{:ok, _}` on success AND
+# `{:ok, event}` after logging a failure — by design, so a seed does not die on a
+# non-critical emission, but it means **no caller can tell the two apart**. The
+# count below was therefore unmeasurable through it, which is how 81 failed
+# emissions read as a successful seed.
+# ⛔ The E2E fixtures are included, and leaving them out was a regression the
+# read-back had not had. That query selected EVERY placement in the table;
+# `all_placements` is only `user1 ++ user2`, so `e2e_placement_rows` were
+# inserted and then received no `placement.created` event at all. Measured on
+# the deployed run: 81 of 81 emitted against 220 placements in the table.
+#
+# ⚠️ The read-back was less accurate for a re-run AND wider in coverage, and
+# only the first of those was a reason to remove it. Anything that depends on a
+# feed or activity entry for a seeded E2E placement would have found zero rows
+# — which in a spec reads as a pass.
+#
+# `bookshelf_name_by_id` is already built from both row sets, so it covers these.
+# ⛔ Only the rows that ACTUALLY LANDED. `on_conflict: :nothing` drops a row
+# that collides, so the intended list over-counts — measured at 231 intended
+# against 220 present, leaving 11 ids with a creation event and no row.
+#
+# ⚠️ An event for a row that does not exist is worse than a missing event, and
+# in an append-only log it cannot be taken back: anything joining event_log to
+# op.bookshelf_placements silently drops those rows, and anything that does not
+# join reports activity for a placement nobody can open.
+inserted_placement_ids =
+  MapSet.new(inserted_dev_placement_ids ++ inserted_e2e_placement_ids)
+
+emittable_placements =
+  Enum.filter(
+    all_placements ++ e2e_placement_rows,
+    &MapSet.member?(inserted_placement_ids, &1.id)
+  )
+
+emitted =
+  Enum.count(emittable_placements, fn p ->
+    result =
+      Stacks.Events.emit(%{
+        event_type: "placement.created",
+        aggregate_type: "placement",
+        aggregate_id: Ecto.UUID.cast!(p.id),
+        payload: %{
+          book_id: Ecto.UUID.cast!(p.book_id),
+          bookshelf: Map.fetch!(bookshelf_name_by_id, p.bookshelf_id),
+          visibility_tier: p.visibility
+        }
+      })
+
+    case result do
+      {:ok, _} ->
+        true
+
+      {:error, reason} ->
+        IO.puts("  WARN placement.created not emitted for #{inspect(p.id)}: #{inspect(reason)}")
+        false
+    end
+  end)
+
+# ⚠️ Counts emissions that SUCCEEDED, not rows attempted. The preview seed is
+# checked against this figure, and a silent zero reads exactly like a success.
+IO.puts(
+  "  emitted placement.created for #{emitted} of #{length(emittable_placements)} placements"
+)
+
+# ⛔ Raises on ANY shortfall, not only on zero. The failure that prompted this
+# guard was systematic — a raw-uuid cast error hit every row identically — so a
+# zero-check would have caught it. A DATA-dependent failure would not: 80 of 81
+# leaves `emitted = 1`, no raise, and the per-row WARN scrolls past in a deploy
+# log that exits 0. The per-row `{:error, _}` branch above exists precisely
+# because `emit/1` can fail per row, so the code already anticipates partial
+# failure; the guard has to anticipate it too, or the printed figure and the
+# guard disagree about what counts as success.
+if emitted < length(emittable_placements) do
+  raise "the seed emitted #{emitted} of #{length(emittable_placements)} placement.created " <>
+          "events. Every placement must get one: a shortfall means some rows have no event " <>
+          "and anything reading the feed for them will find zero rows, which reads as a pass."
+end
 
 Repo.insert_all(
   "bookshelf_placement_history",

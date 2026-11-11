@@ -73,7 +73,7 @@ opened and a move confirmed — the PUT in flight.
 overlayMidMove : ProgramTest.ProgramTest TestHelpers.BookDetailTestModel BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 overlayMidMove =
     ProgramTest.start ()
-        (bookDetailOverlayProgramWithOut "book-test-001" (Just "test-token") (Just Route.Library))
+        (bookDetailOverlayProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.Library))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -97,7 +97,7 @@ overlayFormatsReportsAMutation =
     test "overlay_formats_reports_a_mutation: a stored formats change tells the host the placement changed" <|
         \() ->
             ProgramTest.start ()
-                (bookDetailOverlayProgramWithOut "book-test-001" (Just "test-token") (Just Route.Library))
+                (bookDetailOverlayProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.Library))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -156,7 +156,7 @@ shelfAnswersAReloadRequest : Test
 shelfAnswersAReloadRequest =
     test "shelf_answers_a_reload_request: the owner's shelf re-reads its own bookshelf" <|
         \() ->
-            ProgramTest.start () (bookshelfProgram Bookshelf.libraryConfig (Just "owner-token"))
+            ProgramTest.start () (bookshelfProgram Bookshelf.libraryConfig (Just (TestHelpers.creds "owner-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [ testPlacement ])
@@ -176,7 +176,7 @@ profileShelfReloadReadsTheProfileShelf : Test
 profileShelfReloadReadsTheProfileShelf =
     test "profile_shelf_reload_reads_the_profile_shelf: a refetch while browsing stays on that reader's shelf" <|
         \() ->
-            ProgramTest.start () (profileShelfProgram (Just "viewer-token") "alice" "library")
+            ProgramTest.start () (profileShelfProgram (Just (TestHelpers.creds "viewer-token")) "alice" "library")
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/u/alice/bookshelves/library"
                     (simulateBookshelfResponse [ testPlacement ])
@@ -199,7 +199,7 @@ readingPileAnswersAReloadRequest : Test
 readingPileAnswersAReloadRequest =
     test "reading_pile_answers_a_reload_request: the pile re-reads itself" <|
         \() ->
-            ProgramTest.start () (readingPileProgram (Just "owner-token"))
+            ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "owner-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/reading_pile"
                     (simulateBookshelfResponse [ testPlacement ])
@@ -213,16 +213,16 @@ shelvesSourceNamesTheProfileRead : Test
 shelvesSourceNamesTheProfileRead =
     test "shelves_source_profile: browsing a profile shelf reads the profile endpoint" <|
         \() ->
-            Bookshelf.shelvesSource (Bookshelf.profileConfig "alice" "library") (Just "viewer-token")
-                |> Expect.equal (Bookshelf.ProfileShelf (Just "viewer-token") "alice" "library")
+            Bookshelf.shelvesSource (Bookshelf.profileConfig "alice" "library") (Just (TestHelpers.creds "viewer-token"))
+                |> Expect.equal (Bookshelf.ProfileShelf (Just (TestHelpers.creds "viewer-token")) "alice" "library")
 
 
 shelvesSourceNamesTheOwnersRead : Test
 shelvesSourceNamesTheOwnersRead =
     test "shelves_source_own: a reader's own shelf reads their own bookshelf" <|
         \() ->
-            Bookshelf.shelvesSource Bookshelf.libraryConfig (Just "owner-token")
-                |> Expect.equal (Bookshelf.OwnShelf "owner-token" "library")
+            Bookshelf.shelvesSource Bookshelf.libraryConfig (Just (TestHelpers.creds "owner-token"))
+                |> Expect.equal (Bookshelf.OwnShelf (TestHelpers.creds "owner-token") "library")
 
 
 {-| A signed-out reader on their own shelf route has nothing to read, and asking
@@ -250,7 +250,7 @@ loadedShelf config =
     , rssLink = { showUrl = False }
     , viewMode = ListView
     , sortState = { column = BookList.Author, direction = BookList.Desc }
-    , token = Just "owner-token"
+    , token = Just (TestHelpers.creds "owner-token")
     , organiser = { dragging = Nothing }
     , organiserBusy = False
     , organiserError = Nothing
@@ -294,7 +294,7 @@ refreshReachesTheReadingPile =
         \() ->
             let
                 ( pile, _ ) =
-                    ReadingPile.init (Just "owner-token")
+                    ReadingPile.init (Just (TestHelpers.creds "owner-token"))
             in
             case Main.refreshShelfBehindOverlay (Main.PageReadingPile { pile | books = Success [ testPlacement ] }) of
                 Just ( Main.PageReadingPile refreshed, _ ) ->

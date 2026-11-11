@@ -13,11 +13,14 @@ union forces a compile error here until it is classified, and every route in
 
 -}
 
+import Api
 import Expect
+import Http
 import Main
 import Navigation.Route exposing (ConfirmStatus(..), Route(..))
 import Page.Login as Login
 import Test exposing (Test, describe, test)
+import TestHelpers
 
 
 {-| The intended auth policy, declared independently of `Main.requiresAuth` and
@@ -232,7 +235,7 @@ allRoutes =
 
 config : Main.AppConfig
 config =
-    { ageGatingEnabled = False, inviteOnly = False }
+    { ageGatingEnabled = False, inviteOnly = False, proof = Nothing }
 
 
 matrixTest : ( String, Route ) -> Test
@@ -298,7 +301,7 @@ ownerAuth =
         , consentAnalytics = False
         , consentWritingAssistant = False
         }
-    , token = "ordinary-guardian-token"
+    , token = TestHelpers.creds "ordinary-guardian-token"
     }
 
 
@@ -315,30 +318,44 @@ suite =
                     )
                         |> Expect.equal ( 22, 24 )
             ]
-        , describe "admin routes are gated on an ADMIN token, not the ordinary one"
-            [ test "an owner with no admin token gets the sign-in gate, not the page" <|
+        , describe "admin elevation is the SERVER's answer, not the presence of a credential"
+            [ -- ⛔ THESE REPLACE THREE TESTS THAT ASSERTED THE OPPOSITE, and the
+              -- reason they could assert it was a bug. `initPage` used to show
+              -- the gate whenever `adminToken == Nothing` — but every caller
+              -- passes the ORDINARY session, so that condition reads "am I
+              -- signed in?", not "am I elevated?". It only ever fired because
+              -- `bootPage` handed it a stale pre-boot model where the
+              -- credential was still absent. Fixing that staleness alone made
+              -- the gate vanish entirely; the two defects were cancelling.
+              --
+              -- So the gate is now REACTIVE: the page renders, the request is
+              -- refused, and `Main.endAdminSession` swaps to the gate. A pure
+              -- `initPage` test cannot see that round trip, so the guarantee is
+              -- asserted at the two points that are pure — the predicate that
+              -- recognises a refusal, and the page produced in response.
+              test "a 401 from an admin route means elevation is needed" <|
                 \() ->
-                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
-                        |> Tuple.first
+                    Api.needsAdminElevation (Http.BadStatus 401)
+                        |> Expect.equal True
+            , test "a 403 ALSO means elevation is needed — RequireMFA refuses with it" <|
+                \() ->
+                    -- The window-lapsed case. `Api.isUnauthorized` is 401-only,
+                    -- so before this an operator whose 30 minutes ran out saw a
+                    -- generic "Action failed" on a page that could never
+                    -- succeed again, with no way back to the gate but a reload.
+                    Api.needsAdminElevation (Http.BadStatus 403)
+                        |> Expect.equal True
+            , test "an ordinary failure does NOT send the operator to the gate" <|
+                \() ->
+                    [ Http.BadStatus 404, Http.BadStatus 500, Http.Timeout, Http.NetworkError ]
+                        |> List.map Api.needsAdminElevation
+                        |> Expect.equal [ False, False, False, False ]
+            , test "a refused admin route lands on the gate, carrying the route behind it" <|
+                \() ->
+                    Main.adminGateAfterEnding Nothing AdminRemovalRequests
                         |> isPageAdminGate
                         |> Expect.equal True
-            , test "with an admin token the real page loads" <|
-                \() ->
-                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) (Just "admin-tok") Nothing Login.Fresh
-                        |> Tuple.first
-                        |> isPageAdminGate
-                        |> Expect.equal False
-            , test "every admin route is gated, not just the new one" <|
-                \() ->
-                    [ AdminSourceApproval, AdminScraperConfig, AdminBookModeration, AdminRemovalRequests ]
-                        |> List.map
-                            (\r ->
-                                Main.initPage config r "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
-                                    |> Tuple.first
-                                    |> isPageAdminGate
-                            )
-                        |> Expect.equal [ True, True, True, True ]
-            , test "a non-admin route is unaffected by the admin token being absent" <|
+            , test "a non-admin route never resolves to the admin gate" <|
                 \() ->
                     Main.initPage config Library "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
                         |> Tuple.first

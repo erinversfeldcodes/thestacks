@@ -17,6 +17,7 @@ import Components.FilterPanel exposing (SortOrder(..), defaultFilterState)
 import Expect
 import Page.Search as Search exposing (Msg(..), SnippetSegment(..))
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -66,7 +67,7 @@ sortChangedVariants =
                     \() ->
                         let
                             ( model, _, _ ) =
-                                Search.update (SortChanged input) Search.init (Just "test-token")
+                                Search.update (SortChanged input) Search.init (Just (TestHelpers.creds "test-token"))
                         in
                         Expect.equal expected model.sort
             )
@@ -104,14 +105,14 @@ yearFromChanged =
             \() ->
                 let
                     ( model, _, _ ) =
-                        Search.update (YearFromChanged "1990") Search.init (Just "test-token")
+                        Search.update (YearFromChanged "1990") Search.init (Just (TestHelpers.creds "test-token"))
                 in
                 Expect.equal (Just 1990) model.filters.yearFrom
         , test "non-numeric clears to Nothing" <|
             \() ->
                 let
                     ( model, _, _ ) =
-                        Search.update (YearFromChanged "notayear") Search.init (Just "test-token")
+                        Search.update (YearFromChanged "notayear") Search.init (Just (TestHelpers.creds "test-token"))
                 in
                 Expect.equal Nothing model.filters.yearFrom
         ]
@@ -126,14 +127,14 @@ yearToChanged =
             \() ->
                 let
                     ( model, _, _ ) =
-                        Search.update (YearToChanged "2020") Search.init (Just "test-token")
+                        Search.update (YearToChanged "2020") Search.init (Just (TestHelpers.creds "test-token"))
                 in
                 Expect.equal (Just 2020) model.filters.yearTo
         , test "non-numeric clears to Nothing" <|
             \() ->
                 let
                     ( model, _, _ ) =
-                        Search.update (YearToChanged "") Search.init (Just "test-token")
+                        Search.update (YearToChanged "") Search.init (Just (TestHelpers.creds "test-token"))
                 in
                 Expect.equal Nothing model.filters.yearTo
         ]
@@ -148,13 +149,13 @@ clearFilters =
         \() ->
             let
                 ( withYears, _, _ ) =
-                    Search.update (YearFromChanged "1990") Search.init (Just "test-token")
+                    Search.update (YearFromChanged "1990") Search.init (Just (TestHelpers.creds "test-token"))
 
                 ( withBoth, _, _ ) =
-                    Search.update (YearToChanged "2020") withYears (Just "test-token")
+                    Search.update (YearToChanged "2020") withYears (Just (TestHelpers.creds "test-token"))
 
                 ( cleared, _, _ ) =
-                    Search.update ClearFilters withBoth (Just "test-token")
+                    Search.update ClearFilters withBoth (Just (TestHelpers.creds "test-token"))
             in
             Expect.equal defaultFilterState cleared.filters
 
@@ -172,17 +173,17 @@ deepSearchToggledSetsFlag =
             \() ->
                 let
                     ( model, _, _ ) =
-                        Search.update (DeepSearchToggled True) Search.init (Just "test-token")
+                        Search.update (DeepSearchToggled True) Search.init (Just (TestHelpers.creds "test-token"))
                 in
                 Expect.equal True model.deepSearch
         , test "toggling off sets deepSearch False" <|
             \() ->
                 let
                     ( on, _, _ ) =
-                        Search.update (DeepSearchToggled True) Search.init (Just "test-token")
+                        Search.update (DeepSearchToggled True) Search.init (Just (TestHelpers.creds "test-token"))
 
                     ( off, _, _ ) =
-                        Search.update (DeepSearchToggled False) on (Just "test-token")
+                        Search.update (DeepSearchToggled False) on (Just (TestHelpers.creds "test-token"))
                 in
                 Expect.equal False off.deepSearch
         ]

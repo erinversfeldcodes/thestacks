@@ -11,11 +11,14 @@ is the layer where that was lost.
 
 -}
 
+import Api
 import Expect
+import Http
 import Json.Decode as Decode
 import Page.Blog.Archive as Archive
 import Test exposing (Test, describe, test)
-import Types.BlogPost exposing (blogPostSummaryDecoder)
+import Types.BlogPost exposing (BlogPostSummary, Visibility(..), blogPostSummaryDecoder)
+import Types.RemoteData exposing (RemoteData(..))
 
 
 summaryJson : String
@@ -113,4 +116,117 @@ suite =
                     Archive.previewOf "First paragraph.\n\nSecond paragraph."
                         |> Expect.equal "First paragraph. Second paragraph."
             ]
+        , describe "paging the feed"
+            -- ⛔ The feed used to read the newest window and stop, with no cursor
+            -- at all, so a reader who could not see the newest posts had no way
+            -- to reach the older ones they were welcome to read. The server side
+            -- is fixed; this is the client half, and its failure mode is the one
+            -- that makes a cursor useless — a later page REPLACING the archive
+            -- instead of extending it, so the reader paginates in place.
+            [ test "the cursor is read off the page, present" <|
+                \_ ->
+                    Decode.decodeString Api.blogPostPageDecoder
+                        """{"posts": [], "next_cursor": "abc123"}"""
+                        |> Result.map .nextCursor
+                        |> Expect.equal (Ok (Just "abc123"))
+            , test "a null cursor is the end of the feed" <|
+                \_ ->
+                    Decode.decodeString Api.blogPostPageDecoder
+                        """{"posts": [], "next_cursor": null}"""
+                        |> Result.map .nextCursor
+                        |> Expect.equal (Ok Nothing)
+            , test "an absent cursor decodes, because the author archive sends none" <|
+                \_ ->
+                    -- `GET /api/blog/posts?user_id=` is one author's archive and
+                    -- does not page, so it omits the field entirely. A decoder
+                    -- requiring it would fail that whole response.
+                    Decode.decodeString Api.blogPostPageDecoder """{"posts": []}"""
+                        |> Result.map .nextCursor
+                        |> Expect.equal (Ok Nothing)
+            , test "a second page extends the archive rather than replacing it" <|
+                \_ ->
+                    let
+                        ( afterFirst, _ ) =
+                            Archive.update
+                                (Archive.PostsLoaded (Ok { posts = [ postSummary "a" ], nextCursor = Just "c1" }))
+                                initialModel
+
+                        ( afterSecond, _ ) =
+                            Archive.update
+                                (Archive.PostsLoaded (Ok { posts = [ postSummary "b" ], nextCursor = Nothing }))
+                                afterFirst
+                    in
+                    case afterSecond.posts of
+                        Success posts ->
+                            Expect.equal [ "a", "b" ] (List.map .id posts)
+
+                        _ ->
+                            Expect.fail "the archive is not loaded after two pages"
+            , test "the load-more affordance disappears once the cursor does" <|
+                \_ ->
+                    let
+                        ( loaded, _ ) =
+                            Archive.update
+                                (Archive.PostsLoaded (Ok { posts = [ postSummary "a" ], nextCursor = Nothing }))
+                                initialModel
+                    in
+                    Expect.equal Nothing loaded.nextCursor
+            , test "a failed later page keeps the pages already read" <|
+                \_ ->
+                    -- Collapsing to Failure here would throw away everything the
+                    -- reader had scrolled, which is a worse answer than a page
+                    -- that simply did not arrive.
+                    let
+                        ( afterFirst, _ ) =
+                            Archive.update
+                                (Archive.PostsLoaded (Ok { posts = [ postSummary "a" ], nextCursor = Just "c1" }))
+                                initialModel
+
+                        ( afterFailure, _ ) =
+                            Archive.update
+                                (Archive.PostsLoaded (Err Http.NetworkError))
+                                afterFirst
+                    in
+                    case afterFailure.posts of
+                        Success posts ->
+                            Expect.equal [ "a" ] (List.map .id posts)
+
+                        _ ->
+                            Expect.fail "a failed second page erased the first"
+            , test "a failed FIRST page is still a failure" <|
+                \_ ->
+                    -- Anti-vacuity for the test above: without this, preserving
+                    -- state would be satisfied by a page that never reports an
+                    -- error at all.
+                    let
+                        ( failed, _ ) =
+                            Archive.update
+                                (Archive.PostsLoaded (Err Http.NetworkError))
+                                initialModel
+                    in
+                    case failed.posts of
+                        Failure _ ->
+                            Expect.pass
+
+                        _ ->
+                            Expect.fail "the first page failed and the archive did not say so"
+            ]
         ]
+
+
+initialModel : Archive.Model
+initialModel =
+    Tuple.first (Archive.init Nothing)
+
+
+postSummary : String -> BlogPostSummary
+postSummary id =
+    { id = id
+    , title = "Title"
+    , body = "Body"
+    , visibility = Public
+    , published = True
+    , insertedAt = "2026-08-01T09:00:00Z"
+    , authorDisplayName = Just "Ada Reader"
+    , authorHandle = Just "ada"
+    }

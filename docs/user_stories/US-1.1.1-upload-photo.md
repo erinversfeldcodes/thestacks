@@ -25,7 +25,7 @@
 1. User navigates to `/upload`.
 2. User sees the drop zone with "Drag a photo of a book cover here" prompt and a "Choose Photo" button. Below the drop zone, an "Enter ISBN manually instead" link is visible.
 3. User drops or selects an image file (`image/*` MIME type).
-4. The drop zone shows a spinner with "Processing image..." while the three-step presigned-URL upload is in flight (`uploadState = Loading` through `UploadInitialised` → `R2PutCompleted` → `UploadAccepted`), then continues showing the spinner while the SSE stream is open (`uploadState = Success imageId`).
+4. The drop zone shows a spinner with "Processing image..." while the three-step upload handshake is in flight (`uploadState = Loading` through `UploadInitialised` → `UploadBytesSent` → `UploadAccepted`), then continues showing the spinner while the SSE stream is open (`uploadState = Success imageId`).
 5. The SSE stream delivers a terminal `Resolved` event. The system fetches the identified book via `Api.getBook`.
 6. **Verification view** (`step = Verifying book`): "We think this is..." heading, book cover image (or "No cover" placeholder), title, author. Two buttons: "Yes, that's it" and "No, try again".
 7. User clicks "Yes, that's it" (`ConfirmIdentification`). State transitions to `step = ChoosingShelf book`.
@@ -47,9 +47,9 @@
 - **Model fields involved**: `file`, `uploadState`, `result`, `step`, `selectedShelf`, `placementState`, `pendingBookIds`, `collectedBooks`, `failedBookIds`, `sseTerminalReceived`, `isDragging`, `manualIsbn`
 - **Msg flow**:
   - `GotFile file` -> sets `uploadState = Loading`, calls `Api.initUpload`
-  - `UploadInitialised _ _ (Ok init_)` -> calls `Api.putFileToR2 init_.uploadUrl file ...`
-  - `R2PutCompleted imageId token (Ok ())` -> calls `Api.commitUpload imageId token UploadAccepted`
-  - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`; emits `OpenStream "/api/upload/<id>/stream?token=..."` OutMsg so Main subscribes to SSE
+  - `UploadInitialised _ _ (Ok init_)` -> calls `Api.putUploadBytes init_.imageId file ...` — ⚠️ it was `putFileToR2 init_.uploadUrl`, and BOTH halves of that name were wrong: the bytes go to a route on our OWN origin, and taking the URL from the server's response is what let the call site declare an origin it could not prove. It builds the path from the `image_id` now, so the compiler can see the origin.
+  - `UploadBytesSent imageId token (Ok ())` -> calls `Api.commitUpload imageId token UploadAccepted`
+  - `UploadAccepted (Ok imageId)` -> sets `uploadState = Success imageId`; emits `OpenStream "/api/upload/<id>/stream"` OutMsg so Main subscribes to SSE (no credential in the URL — `EventSource` sends the session cookie)
   - `StreamEvent rawJson` -> decodes via `Api.streamEventDecoder` and recurses into `StatusReceived (Ok pollResponse)`
   - `StreamError` -> if `sseTerminalReceived` then no-op, else `result = IdentificationFailed`
   - `StatusReceived (Ok {status: Resolved, bookIds, isDuplicate})` -> calls `Api.getBook` for each ID (single id with `isDuplicate == Just True` routes to `GotDuplicateBook` instead)
@@ -65,7 +65,9 @@
 
 ## 3. API Calls
 
-The canonical upload flow is a three-step presigned-URL handshake followed by an SSE stream for identification progress. (`POST /api/upload` still exists as a deprecated multipart fallback and rollback target — see `UploadController.create/2`.)
+The canonical upload flow is a three-step handshake — init, PUT the bytes, commit — followed by an SSE stream for identification progress. (`POST /api/upload` still exists as a deprecated multipart fallback and rollback target — see `UploadController.create/2`.)
+
+⚠️ **It is NOT a presigned-URL handshake, and calling it one is the premise that broke every photo upload.** `upload_url` is `/api/upload/:image_id/data` — a route on our own origin, chosen so the browser never needs an object-storage CORS allowlist — and `expires_in` is advisory because there is no signature to expire (`Stacks.Uploads.init_upload/2`). A client that read "presigned" as "object storage" declared the PUT cross-origin, therefore sent it without the CSRF proof, and had it refused. ⚖️ The word survives below in a DIFFERENT and still-true sense: `Storage.get_image_url/1` really does mint a presigned URL, for the vision service to READ the image.
 
 ### `POST /api/upload/init`
 - **Auth**: Required (Bearer token)
@@ -92,8 +94,8 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **Response (error)**: `{ error: "not_found" }` -- HTTP 404; `{ error: "not_yet_uploaded" }` -- HTTP 409; `{ error: "already_committed" }` -- HTTP 409; `{ error: "commit_failed" }` -- HTTP 500
 
 ### `GET /api/upload/:image_id/stream`
-- **Auth**: Required (Bearer token; passed as `?token=` query param so EventSource can authenticate).
-- **Pipeline**: `:sse_api` -> `:sse_auth`
+- **Auth**: Required — the **session cookie**, which `EventSource` sends on a same-origin request. ⚠️ It used to be a Bearer token in a `?token=` query parameter, because `EventSource` cannot set headers; that put a live credential into request logs, into `Referer` and into browser history. The cookie removes it from all three without the client doing anything.
+- **Pipeline**: `:sse_api` -> `:authenticated` — the same pipeline as every other authenticated route. The bespoke `:sse_auth` pipeline and `StacksWeb.Plugs.SSEAuthPipeline` are **deleted**: reading the query parameter was the only thing they did differently.
 - **Controller**: `StacksWeb.UploadController.stream/2`
 - **Response**: `text/event-stream`. Emits the current image status immediately, then streams pubsub updates until the row reaches `resolved` or `rejected` (or `:sse_max_timeout_ms` elapses, default 60s). Each `message` event payload is the same shape the Elm client decodes via `Api.streamEventDecoder`: `{ image_id, status: "pending"|"resolved"|"rejected", book_id, book_ids, rejection_reason, is_duplicate }`.
 
@@ -119,7 +121,7 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 
 - **Plugs fired** (init / commit): `SecurityHeaders` -> `AuthPipeline` -> `RateLimiter (bucket: :upload)`
 - **Plugs fired** (raw PUT to `/upload/:image_id/data`): `SecurityHeaders` only — no auth (the unguessable `image_id` is the bearer; commit re-verifies ownership)
-- **Plugs fired** (SSE stream): `:sse_api` -> `:sse_auth` (token passed as `?token=` query param)
+- **Plugs fired** (SSE stream): `SecurityHeaders` -> `AuthPipeline` (the session cookie; no credential in the URL)
 - **Plugs fired** (book detail): `SecurityHeaders` -> `OptionalAuthPipeline`
 - **Plugs fired** (placement): `SecurityHeaders` -> `AuthPipeline`
 - **Visibility checks**: `Visibility.resolve_visibility/2` is called in `BookController.show/2` -- returns `:hidden` for books the viewer cannot see.
@@ -215,8 +217,11 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **What it does**:
   1. Fetches a presigned URL for the image from `Stacks.Storage.get_image_url/1`
   2. Calls `Stacks.Moderation.run_pipeline/1` which:
-     a. Calls vision sidecar `POST /classify` to check if the image is a book
-     b. Calls vision sidecar `POST /extract` to extract book candidates
+     a. Calls vision sidecar `POST /analyze` ONCE — it both decides whether the
+        image is a book and extracts candidates, short-circuiting on a confident
+        `not_book`/`ambiguous`. (This read as two calls, `/classify` then
+        `/extract`, until those endpoints were deleted on 2026-10-15; the
+        pipeline had already been using the single fused call.)
      c. Expands compound candidates (titles joined by " OR ")
      d. For each candidate, resolves ISBN directly or via `ISBNResolver.search_by_title/3`
      e. For each resolved ISBN, calls `Books.resolve_isbn/1` for metadata
@@ -232,22 +237,27 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 
 ## 8. External Service Calls
 
-### Vision Sidecar -- Classification
+### Vision Sidecar -- Classification and Extraction (one call)
 - **Service**: Modal vision sidecar (Qwen2.5-VL-7B-Instruct)
-- **Endpoint**: `POST /classify`
-- **Client module**: `Stacks.AI.Client` via `call_vision("is_book", payload)`
+- **Endpoint**: `POST /analyze` — the sidecar's only identification endpoint
+- **Client module**: `Stacks.AI.Client` via `call_vision("analyze", payload)`
 - **Auth**: HMAC (`X-Internal-Token` header: `<timestamp>.<HMAC-SHA256>`)
-- **Circuit breaker**: `:vision_service` fuse
-- **Response**: `%{"classification" => "book"|"not_book"|"ambiguous", "confidence" => float, "model_used" => str}`
+- **Circuit breaker**: `:vision_fuse`
+- **Request**: a single `image` (base64) OR `image_url` — a proto `oneof`; sending both or
+  neither returns `VISION_ERROR_CODE_MALFORMED_REQUEST`
+- **Response**: `%{"classification" => "CLASSIFICATION_RESULT_BOOK"|"..._NOT_BOOK"|"..._AMBIGUOUS",
+  "confidence" => float, "books" => [%{"title" => str, "author" => str,
+  "potential_isbns" => [str], "raw_text" => str, "confidence" => float}], "model_used" => str}`
 - **Fallback**: Returns `{:error, :circuit_open}` when fuse is blown
 - **Mock in test**: `Stacks.AI.MockClient` (configured via `config :core, :vision_client`)
 
-### Vision Sidecar -- Extraction
-- **Service**: Modal vision sidecar
-- **Endpoint**: `POST /extract`
-- **Client module**: `Stacks.AI.Client` via `call_vision("extract_isbn", payload)`
-- **Auth**: Same HMAC scheme
-- **Response**: `%{"books" => [%{"title" => str, "author" => str, "potential_isbns" => [str], "raw_text" => str, "confidence" => float}]}`
+> ⚠️ **Two sections stood here — Classification via `POST /classify` and Extraction via
+> `POST /extract` — until 2026-10-15.** Both endpoints were deleted; `/analyze` answers both
+> questions in one call, which is the point of it. Two details in the old text were already wrong
+> and are corrected above rather than carried over: the fuse is `:vision_fuse`, not
+> `:vision_service`, and the classification values are the full `CLASSIFICATION_RESULT_*` enum
+> strings, not `"book"`/`"not_book"`/`"ambiguous"` — `Moderation.classification_outcome/1` matches
+> on the enum form.
 
 ### Open Library API
 - **Service**: Open Library
@@ -340,11 +350,11 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 | `DragOver` | `isDragging = True` | None | `NoOut` |
 | `DragLeave` | `isDragging = False` | None | `NoOut` |
 | `FilepickerRequested` | (none) | `Select.files ["image/*"]` | `NoOut` |
-| `UploadInitialised _ _ (Ok init_)` | (none) | `Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token)` | `NoOut` |
+| `UploadInitialised _ _ (Ok init_)` | (none) | `Api.putUploadBytes init_.imageId file token (UploadBytesSent init_.imageId token)` | `NoOut` |
 | `UploadInitialised _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
-| `R2PutCompleted imageId token (Ok ())` | (none) | `Api.commitUpload imageId token UploadAccepted` | `NoOut` |
-| `R2PutCompleted _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
-| `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | None | `OpenStream "/api/upload/<id>/stream?token=..."` |
+| `UploadBytesSent imageId token (Ok ())` | (none) | `Api.commitUpload imageId token UploadAccepted` | `NoOut` |
+| `UploadBytesSent _ _ (Err _)` | `uploadState = Failure NetworkError` | None | `NoOut` |
+| `UploadAccepted (Ok imageId)` | `uploadState = Success imageId` | None | `OpenStream "/api/upload/<id>/stream"` |
 | `UploadAccepted (Err err)` | `uploadState = Failure err` | None | `NoOut` |
 | `StreamEvent rawJson` | (decoded payload re-dispatched as `StatusReceived (Ok pollResponse)`; malformed events are ignored) | None | `NoOut` |
 | `StreamError` | If `sseTerminalReceived` then no-op; else `result = IdentificationFailed` | None | `NoOut` |
@@ -487,7 +497,7 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **Dashboard**: Vision pipeline section
 
 - **Metric name**: Vision extraction time
-- **How measured**: Same as classification — `call_vision("extract_isbn", ...)` duration. Not yet instrumented separately.
+- **How measured**: Same as classification — `call_vision("analyze", ...)` duration. Extraction is not separately instrumented, and since 2026-10-15 it cannot be: it shares one call with classification.
 - **Target/SLA**: p50 < 5s, p95 < 15s
 - **Dashboard**: Vision pipeline section
 
@@ -561,11 +571,15 @@ The canonical upload flow is a three-step presigned-URL handshake followed by an
 - **Tracked by**: `Stacks.AI.BudgetTracker` (GenServer, daily limit R5, monthly limit R100), `op.platform_costs` table (via `Stacks.Costs.upsert_cost/1`), `mart_cost_tracking` dbt mart
 
 ### Vision Extraction (Modal GPU)
-- **Service**: Modal (same GPU instance as classification)
-- **Trigger**: `IdentifyBookJob` calls `Stacks.AI.Client.call_vision("extract_isbn", ...)` — one extraction per upload that passes classification
-- **Unit cost**: Included in the classification call cost above (same Modal container session, 3-8s additional)
-- **Volume estimate**: ~95% of uploads pass classification, so nearly 1:1 with uploads
-- **Tracked by**: `Stacks.AI.BudgetTracker` (combined with classification under `:modal` provider)
+- **Service**: Modal (same GPU instance, same call as classification)
+- **Trigger**: no separate trigger. ⚠️ This read `call_vision("extract_isbn", ...)` — "one
+  extraction per upload that passes classification" — until 2026-10-15. There is no second call:
+  `IdentifyBookJob` makes one `call_vision("analyze", ...)`, and the sidecar runs extraction
+  internally only when classification is positive. The short-circuit still exists; it just happens
+  inside the sidecar rather than between two HTTP requests, which is why `/extract` was deleted.
+- **Unit cost**: not separable from the classification call — it is the same call
+- **Volume estimate**: ~95% of uploads pass classification, so extraction runs on nearly 1:1 with uploads
+- **Tracked by**: `Stacks.AI.BudgetTracker` (one `:modal` charge per upload, not two)
 
 ### Open Library API
 - **Service**: Open Library

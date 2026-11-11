@@ -99,6 +99,27 @@ message UploadInboxItem {
   // When the reader submitted the photo. Ordering only — the client never
   // computes a deadline from it.
   google.protobuf.Timestamp uploaded_at = 5 [json_name = "uploaded_at"];
+
+  // Whether "No, try again" can still work for this item.
+  //
+  // The retry re-reads the original photograph, and the photograph is deleted
+  // once identification has been terminal for the reader's retry window — while
+  // THIS record survives to its own 30-day expiry. So for most of an item's
+  // life the retry is an action the data can no longer support, and the client
+  // needs to know that before it renders the button rather than after the
+  // server refuses it with 410.
+  //
+  // Derived from whether the row still has a storage path — the same fact the
+  // server refuses on. It is deliberately NOT a recomputed deadline: the
+  // retention window would then be expressed twice and the two would drift the
+  // first time it changed.
+  //
+  // ⚠️ It says "the record still claims a photograph", not "the bytes are
+  // there". A row pointing at an object that has been deleted reports true and
+  // the retry then answers 410 — measured at 2,374 rows in production, not yet
+  // remediated. The client is told first in the ordinary case; the refusal
+  // remains the backstop for the rest.
+  bool retryable = 6 [json_name = "retryable"];
 }
 
 // UploadInbox is the whole of GET /api/uploads/inbox.

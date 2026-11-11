@@ -25,6 +25,7 @@ defmodule Stacks.Books do
   alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
+  alias Stacks.Scope
   alias Stacks.Shelving
 
   @book_required_fields [:title]
@@ -71,26 +72,67 @@ defmodule Stacks.Books do
   end
 
   @doc """
-      Returns the community read count for a book from the marts.mart_community_read_count
-      analytics view. Returns 0 if the mart does not yet exist or the book has no entry.
-  """
-  @spec community_read_count(binary()) :: non_neg_integer()
-  def community_read_count(book_id) do
-    result =
-      Repo.query(
-        "SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1",
-        [book_id]
-      )
+      The community read count for a book, from `marts.mart_community_read_count`.
 
-    case result do
-      {:ok, %{rows: [[count]]}} -> count
-      _ -> 0
+      `{:ok, n}` for a real answer — including a genuine `{:ok, 0}` for a book
+      nobody has read. `:error` when the question could not be answered.
+
+      ⚠️ **Those were the same value until 2026-10-17, and that is the defect.**
+      This had a `_ -> 0` catch-all AND a `rescue … 0`, so a missing mart, a
+      revoked `marts` grant, and a genuine query error all returned the same
+      confident zero as "nobody has read this book". A reader saw 0; so did
+      every test, which is what made the original `assert is_integer(count)`
+      vacuous — it held for every one of those states.
+
+      ⛔ **Moving the refresh to a scheduled workflow made this sharper, not
+      milder.** The mart's existence now depends on
+      `.github/workflows/scheduled-dbt-refresh.yml` running. If that stops,
+      every book reports zero community reads, forever, with nothing anywhere
+      saying so. That workflow asserts mart rows at its own far end precisely
+      because a silent zero is unacceptable there; this is the same hole at the
+      read end.
+
+      The shape is `Costs.metric_count_this_month/1`'s, which took it
+      deliberately for the same reason: a measurement you could not take is not
+      a measurement of zero.
+
+      Telemetry on the failure path, not just a log line. A log line is read
+      when somebody is already suspicious; this failure's whole character is
+      that nobody becomes suspicious.
+  """
+  @spec community_read_count(binary()) :: {:ok, non_neg_integer()} | :error
+  def community_read_count(book_id) do
+    case Repo.query(
+           "SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1",
+           [book_id]
+         ) do
+      {:ok, %{rows: [[count]]}} ->
+        {:ok, count}
+
+      # The mart exists and holds no row for this book — a real, knowable zero.
+      {:ok, %{rows: []}} ->
+        {:ok, 0}
+
+      {:error, reason} ->
+        read_count_unavailable(book_id, reason)
     end
   rescue
-    e ->
-      require Logger
-      Logger.warning("community_read_count: unexpected error for book #{book_id}: #{inspect(e)}")
-      0
+    e -> read_count_unavailable(book_id, e)
+  end
+
+  defp read_count_unavailable(book_id, reason) do
+    require Logger
+
+    Logger.warning(
+      "community_read_count: unavailable for book #{book_id} — #{inspect(reason)}. " <>
+        "A missing mart means the scheduled dbt refresh has not run."
+    )
+
+    :telemetry.execute([:stacks, :marts, :read_unavailable], %{count: 1}, %{
+      mart: "mart_community_read_count"
+    })
+
+    :error
   end
 
   @doc """
@@ -597,60 +639,6 @@ defmodule Stacks.Books do
   end
 
   @doc """
-      Update cover_image_url on a book edition after the vision sidecar confirms the association.
-      Emits a book.cover_confirmed event.
-      Returns {:ok, edition} or {:error, reason}.
-  """
-  @spec confirm_cover_association(String.t(), String.t()) ::
-          {:ok, BookEdition.t()} | {:error, :not_found} | {:error, Ecto.Changeset.t()}
-  def confirm_cover_association(edition_id, cover_url) do
-    case Repo.get(BookEdition, edition_id) do
-      nil ->
-        {:error, :not_found}
-
-      edition ->
-        final_url = maybe_store_cover_in_r2(edition.isbn, cover_url)
-        changeset = book_edition_changeset(edition, %{cover_image_url: final_url})
-
-        case Repo.update(changeset) do
-          {:ok, updated} ->
-            Events.emit_safe(%{
-              event_type: "book.cover_confirmed",
-              aggregate_type: "book_edition",
-              aggregate_id: updated.id,
-              payload: %{book_id: updated.book_id, cover_image_url: final_url},
-              metadata: %{actor: "vision_sidecar"}
-            })
-
-            {:ok, updated}
-
-          {:error, changeset} ->
-            {:error, changeset}
-        end
-    end
-  end
-
-  defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
-    with {:ok, image_data} <- download_cover(cover_url),
-         {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
-         {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
-      r2_url
-    else
-      _ -> cover_url
-    end
-  end
-
-  defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
-
-  defp download_cover(url) when is_binary(url) do
-    books_http_client().get_binary(url)
-  end
-
-  defp books_http_client do
-    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
-  end
-
-  @doc """
       Finds books in the platform that are likely the same work as the given title
       and author, using Jaro-Winkler string similarity on both fields combined.
 
@@ -754,7 +742,13 @@ defmodule Stacks.Books do
   defp create_placement_for_existing(user_id, book, shelf_name, existing, book_edition_id) do
     case Shelving.place_book(user_id, book.id, shelf_name, book_edition_id) do
       {:ok, placement} ->
-        placement = Repo.preload(placement, :bookshelf)
+        # ⚠️ Scoped even though it reads as a plain association load. `:bookshelf`
+        # resolves to `op.bookshelves`, which is row-level secured, so this is a
+        # secured read that names no schema module anywhere at the call site —
+        # the reason a grep over schema aliases cannot find it, and the reason it
+        # survived the scoping sweep. `place_book/4` scopes internally and has
+        # already committed by the time this runs.
+        placement = Scope.with_user(user_id, fn -> Repo.preload(placement, :bookshelf) end)
         {:ok, :existing, book, placement, existing ++ [placement]}
 
       {:error, reason} ->

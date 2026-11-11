@@ -205,17 +205,54 @@ defmodule StacksWeb.BookController do
 
       true ->
         placements = lookup_placements(conn, id)
-        count = Books.community_read_count(book.id)
         my_writing = my_writing_for(conn, id)
 
+        # ⚠️ `:error` means the count could not be read — a missing mart, a
+        # revoked grant, a query error — and is NOT zero. Passing no option
+        # omits the key rather than asserting a number nobody measured, which is
+        # this project's standing preference: an absent key beats a lying one.
+        #
+        # ⛔ Stated plainly because the wire cannot currently carry the
+        # distinction: `community_read_count` is a proto3 `int32` with implicit
+        # presence, so an omitted key and a real 0 BOTH decode to 0 on the
+        # client. Omitting is therefore honest about the payload and invisible
+        # to the SPA — the same limit `published_at` hit, which needed a
+        # separate `publication_state` field to express "the server does not
+        # know". Nothing renders this field yet, so the decision of how to show
+        # "unknown" belongs to the issue that builds the display rather than
+        # being pre-empted here. The failure is observable meanwhile through
+        # `[:stacks, :marts, :read_unavailable]`.
+        count_opts =
+          case Books.community_read_count(book.id) do
+            {:ok, count} -> [community_read_count: count]
+            :error -> []
+          end
+
         json(conn, %{
-          book: ProtoJSON.book(book, community_read_count: count),
+          book: ProtoJSON.book(book, count_opts),
           placement: ProtoJSON.book_placement(List.first(placements)),
           placements: Enum.map(placements, &ProtoJSON.book_placement/1),
-          my_writing:
-            Enum.map(my_writing, &%{id: &1.id, title: &1.title, published_at: &1.published_at})
+          my_writing: Enum.map(my_writing, &my_writing_summary/1)
         })
     end
+  end
+
+  # `publication_state` is derived from `published_at` here, which is not the
+  # circularity it looks like. The server holds a real `nil`; the wire cannot
+  # carry one through a proto3 scalar, so a draft reaches the client as `""` and
+  # is indistinguishable from a post published at an unknown time. This field is
+  # where that fact survives the crossing — the client reads the state and never
+  # has to interpret an empty string.
+  #
+  # `published_at IS NULL` is this domain's definition of a draft, not a
+  # heuristic: `Blog.publish/1` publishes precisely by setting it.
+  defp my_writing_summary(post) do
+    %{
+      id: post.id,
+      title: post.title,
+      published_at: post.published_at,
+      publication_state: if(is_nil(post.published_at), do: "draft", else: "published")
+    }
   end
 
   defp my_writing_for(conn, book_id) do

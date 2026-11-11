@@ -57,20 +57,107 @@ else
     config :core, :rate_limit_e2e_helper, String.to_integer(e2e_helper_limit)
   end
 
-  if r2_account_id = System.get_env("R2_ACCOUNT_ID") do
-    config :core, :storage, Stacks.Storage.R2
+  # ⛔ THE BACKEND IS A DELIBERATE STATEMENT, NEVER INFERRED FROM A CREDENTIAL.
+  # The reasoning, the two measured failures it prevents, and why `Local` stays
+  # a legitimate production choice all live in `Stacks.Storage.Selection` —
+  # along with a test per branch, including the two that refuse to boot. A
+  # config file is the one place where "it looked right" is the only available
+  # check, and this one had been wrong in production for seven months.
+  # ⛔ THE BOOTSTRAP EVALUATES THIS FILE BEFORE THE APP EXISTS, and this line
+  # assumed otherwise. `scripts/gen-ecto-proto.sh` falls back to script mode
+  # when `core` cannot compile yet — which is the NORMAL state on a cold
+  # checkout, because the schemas it is about to generate are what `core`
+  # needs to compile. In that mode `mix` still loads this file, and
+  # `Stacks.Storage.Selection` has not been compiled, so CI died with
+  # "module is not available" on a line that works on every warm machine.
+  #
+  # ⚖️ The module stays the home of the decision — the comment above is right
+  # that a config file is the one place where "it looked right" is the only
+  # available check. What changes is that this file now tolerates being read
+  # before the app is loadable, which the bootstrap already does for secrets
+  # by exporting dummies. A module is the one thing an env var cannot stand in
+  # for.
+  #
+  # ⚠️ AND THE SKIP IS LOUD IN THE ONE PLACE IT MUST NEVER HAPPEN. Silently
+  # leaving storage unconfigured is how a tolerant default turns a broken
+  # deployment into an invisible one, so prod refuses to boot instead.
+  # ⚖️ True only inside a started release. `:application.get_key/2` answers from
+  # the loaded application controller, which a release has and a `mix run`
+  # bootstrap does not — so this separates "the app is up and something is
+  # wrong" from "the app does not exist yet".
+  # ⚠️ AND THE SECOND CONDITION THIS USED TO CARRY WAS A TAUTOLOGY. It also
+  # asked `:code.is_loaded(Stacks.Storage.Selection) != false` — but this
+  # predicate is only consulted on the branch where `Code.ensure_loaded?/1`
+  # has already returned false, so that conjunct was always false and the
+  # raise below was unreachable. A guard that cannot fire is the shape this
+  # whole session has been finding; it does not stop being one because I wrote
+  # it while fixing another.
+  release_is_running? = fn ->
+    match?({:ok, _}, :application.get_key(:core, :vsn))
+  end
 
-    config :ex_aws,
-      access_key_id: System.fetch_env!("R2_ACCESS_KEY_ID"),
-      secret_access_key: System.fetch_env!("R2_SECRET_ACCESS_KEY"),
-      region: "auto"
+  storage_decision =
+    if Code.ensure_loaded?(Stacks.Storage.Selection) do
+      Stacks.Storage.Selection.choose(System.get_env(), config_env() == :prod)
+    else
+      # ⛔ `config_env() == :prod` IS NOT THE QUESTION, AND ASKING IT BROKE THE
+      # PRODUCTION IMAGE BUILD. `deploy/Dockerfile.core` sets `MIX_ENV=prod`
+      # and then runs the proto bootstrap, so the release BUILD reads this file
+      # in :prod before `core` has compiled — the exact state this branch
+      # exists for. Raising there failed `docker build`, and `-q` hid the
+      # reason, so it surfaced only as "process /bin/sh -c ... did not
+      # complete successfully".
+      #
+      # ⚖️ The distinguishing fact is not the environment but whether the
+      # RELEASE IS RUNNING. `:code.is_loaded/1` on a module every release
+      # carries answers that: at boot the application is loaded and
+      # `Selection` resolves, so this branch is unreachable; during a build
+      # nothing is loaded yet. A boot that genuinely cannot see the module will
+      # fail at the first storage call rather than here, which is worse than a
+      # raise and is why the check is kept at all — it is just keyed on
+      # something true.
+      if release_is_running?.() do
+        raise """
+        Stacks.Storage.Selection is not loadable while a release is running.
 
-    config :ex_aws, :s3,
-      scheme: "https://",
-      host: "#{r2_account_id}.r2.cloudflarestorage.com",
-      region: "auto"
+        A running release is fully compiled, so an unloadable module here means the
+        release is broken rather than bootstrapping. Refusing to continue instead of
+        defaulting the storage backend, because the default would be silent and wrong.
+        """
+      end
 
-    config :core, :r2_bucket, System.get_env("R2_BUCKET_NAME", "stacks-images")
+      :bootstrap
+    end
+
+  case storage_decision do
+    # The proto-codegen bootstrap: no storage is configured because none is
+    # used — it generates schemas and exits.
+    :bootstrap ->
+      :ok
+
+    {:ok, {:r2, r2}} ->
+      config :core, :storage, Stacks.Storage.R2
+      config :core, :r2_bucket, r2[:bucket]
+
+      config :ex_aws,
+        access_key_id: r2[:access_key_id],
+        secret_access_key: r2[:secret_access_key],
+        region: "auto"
+
+      config :ex_aws, :s3,
+        scheme: "https://",
+        host: "#{r2[:account_id]}.r2.cloudflarestorage.com",
+        region: "auto"
+
+    {:ok, {:local, local}} ->
+      config :core, :storage, Stacks.Storage.Local
+
+      if dir = local[:upload_dir] do
+        config :core, :upload_dir, dir
+      end
+
+    {:error, message} ->
+      raise message
   end
 
   # How long a mailed GDPR export link — and the stored copy behind it — lives.
@@ -137,6 +224,26 @@ if real_send? do
 end
 
 if config_env() == :prod do
+  # ⛔ FAIL CLOSED ON THE SESSION SIGNING KEY. The override above is written as
+  # `if guardian_secret = System.get_env(...)`, so an absent variable is not an
+  # error there — it silently leaves the compile-time default in place, and that
+  # default is a literal committed to this repository. A production node booted
+  # that way would sign and accept session tokens under a publicly known key,
+  # which is forgeable by anyone who can read the source.
+  #
+  # ⚠️ The permissive form is CORRECT for dev and must stay: dev deliberately
+  # runs on the committed default so a fresh clone works. What was missing is
+  # the half that makes prod different, and the two secrets immediately above
+  # (`CLOAK_KEY`, `VISION_HMAC_SECRET`) already have it — they raise. This is
+  # the same ruling applied to the third one.
+  System.get_env("GUARDIAN_SECRET_KEY") ||
+    raise """
+    environment variable GUARDIAN_SECRET_KEY is missing.
+    It signs session tokens. Without it the node falls back to the default
+    committed in config.exs, which is public, so every session token would be
+    forgeable. Generate with: openssl rand -base64 48
+    """
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """
@@ -146,20 +253,47 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # ⚠️ TWO ROLES, deliberately, and the split is the point.
+  #
+  # `DATABASE_URL` keeps its existing meaning: the OWNER connection. Migrations
+  # need it (DDL requires ownership), `Stacks.Release` uses it explicitly, and
+  # every script and workflow that already composes it is unaffected.
+  #
+  # `APP_DATABASE_URL` is the least-privilege RUNTIME connection — the
+  # `stacks_app` role `docs/rls-design.md` specifies, which holds CRUD on `op`,
+  # SELECT on `marts` and INSERT-only on `audit`, and against which the RLS
+  # policies are evaluated. Until it exists, every one of those grants is
+  # decorative, because nothing connects as the role that has them.
+  #
+  # ⚠️ **The fallback is what makes this safe to merge.** Unset, the runtime
+  # pools use the owner URL and behaviour is byte-identical to before — so the
+  # change is inert on arrival and switching is an operator action (set one Fly
+  # secret), not a deploy. Reverting is unsetting it. That matters because this
+  # campaign merges in one go: a change that only takes effect when a secret is
+  # added cannot be the thing that breaks the merge.
+  #
+  # ⚠️ Before setting it, `stacks_app` must actually be able to serve. Verified
+  # on the development database: 49 of 49 `op` base tables grant it
+  # SELECT/INSERT/UPDATE/DELETE, `ALTER DEFAULT PRIVILEGES` covers future tables
+  # (`stacks_app=arwd`), and there are zero sequences needing USAGE. The
+  # `:deployed_only` role suite asserts the same against a real stack — run it
+  # against the target before flipping the secret, not after.
+  app_database_url = System.get_env("APP_DATABASE_URL") || database_url
+
   # Pool sizes are dimensioned for the real workload (a handful of users +
   # probe traffic on a scale-to-zero app), and their sum must stay under the
   # database's connection cap at the smallest compute size — Neon allows
   # ~112 connections at 0.25 CU, and every boot opens all pools at once
   # against a just-woken database.
   config :core, Core.Repo,
-    url: database_url,
+    url: app_database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     socket_options: maybe_ipv6
 
   config :core, Core.ObanRepo,
-    url: database_url,
+    url: app_database_url,
     ssl: true,
     parameters: [search_path: "public,op"],
     pool_size: String.to_integer(System.get_env("OBAN_POOL_SIZE") || "20"),
@@ -190,7 +324,27 @@ if config_env() == :prod do
       ],
       secret_key_base: secret_key_base
 
-    config :core, upload_dir: "/tmp/uploads"
+    # ⛔ `upload_dir` IS NOT SET HERE, AND THAT IS THE WHOLE POINT.
+    #
+    # This line used to read `config :core, upload_dir: "/tmp/uploads"`, which
+    # ran on every released server and threw away the directory
+    # `Stacks.Storage.Selection` had just derived from `UPLOAD_DIR`, ~190 lines
+    # above. MEASURED on a preview, 2026-11-07: `deploy-stack.sh` declared
+    # `UPLOAD_DIR=/app/uploads`, the selector accepted it, and the booting node
+    # announced `upload_dir: /tmp/uploads`.
+    #
+    # ⚠️ That is the exact failure the selector exists to prevent, reinstated
+    # one screen later by a literal. The selector refuses to boot a deployed
+    # build whose local backend names no durable location — and then this line
+    # silently redirected the bytes to a path that is NOT a volume (`df` reports
+    # `/tmp` and `/app` both on the container's overlay root), so an operator who
+    # attached a volume and declared it correctly would still have lost every
+    # upload on the next machine replacement, with a successful boot and a
+    # satisfied guard either side of the loss.
+    #
+    # ⚖️ The directory now has exactly one source: whatever the reader of
+    # `UPLOAD_DIR` decided, honoured by the selector. A released server that
+    # names no durable location does not start.
 
     if System.get_env("EMAIL_PROVIDER") == "resend" do
       config :core, Stacks.Email.Mailer,

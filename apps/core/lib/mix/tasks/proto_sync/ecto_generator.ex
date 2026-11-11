@@ -33,15 +33,19 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
       - `associations: [{:has_many, name, module, opts}]` in table entry for has_many
       - Standard field generation with type mapping and defaults
   """
+
+  alias Mix.Tasks.ProtoSync.FieldOverrides
+
   def generate(table, fields) do
     overrides = Map.get(table, :field_overrides, %{})
     module_name = inspect(table.ecto_module)
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
 
     {belongs_to_lines, field_lines} =
       fields
       |> Enum.reject(fn field ->
-        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or
+          FieldOverrides.api_only?(field, overrides)
       end)
       |> Enum.reduce({[], []}, fn field, {bt_acc, f_acc} ->
         field_name = String.to_atom(field.name)
@@ -162,12 +166,6 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
 
   defp timestamps_block(_), do: ""
 
-  defp api_only_field?(field, overrides) do
-    field_name = String.to_atom(field.name)
-    override = Map.get(overrides, field_name, %{})
-    Map.get(override, :api_only, false)
-  end
-
   defp derive_jason_line(%{derive_jason: fields}) when is_list(fields) do
     field_list = Enum.map_join(fields, ", ", &":#{&1}")
     "\n  @derive {Jason.Encoder, only: [#{field_list}]}"
@@ -191,9 +189,4 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
         "\n#{lines}"
     end
   end
-
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 end

@@ -194,7 +194,7 @@ productionWidthDrivenThroughThePage : Test
 productionWidthDrivenThroughThePage =
     test "page_packs_rows_at_production_width: the rendered bookcase breaks after 26 minimum-width books" <|
         \() ->
-            ProgramTest.start () (libraryProgram (Just "test-token"))
+            ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse (thinBooks 27))

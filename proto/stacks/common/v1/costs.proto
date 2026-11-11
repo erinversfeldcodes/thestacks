@@ -59,4 +59,54 @@ message PlatformCost {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 10 [json_name = "updated_at"];
+
+  // How this figure was arrived at. See CostBasis.
+  //
+  // ⛔ AN ENUM, NOT A STRING, AND THE STRING'S STATED RATIONALE WAS WRONG. It
+  // read "a bare string because this is the PERSISTED message, whose vocabulary
+  // is closed by a database CHECK". A contract review audited that against the
+  // buf descriptor: SIX enum-typed fields across five persisted messages, and
+  // `type_mapper.ex` maps TYPE_STRING and TYPE_ENUM to the SAME Ecto type and
+  // the SAME migration type — so the generated schema is byte-for-byte
+  // identical either way. Persisted-means-string was not a convention here;
+  // the convention ran the other way.
+  //
+  // ⚖️ And the arithmetic was inverted. I counted the enum as a third copy of
+  // the vocabulary. It is not: CostBasis already exists, so referencing it
+  // SUBTRACTS the hand-maintained prose list this comment used to carry — which
+  // is exactly the artefact that was wrong-when-shipped for the association
+  // outcome, a comment enumerating a closed vocabulary with nothing keeping it
+  // true.
+  CostBasis basis = 11 [json_name = "basis"];
+}
+
+// CostBasis says how a cost figure was arrived at.
+//
+// ⛔ ABSENT IS NOT ZERO, AND CONFLATING THEM WAS THE DEFECT THIS ENUM EXISTS
+// FOR. `Costs.metric_count_this_month/1` mapped a metric family with no samples
+// to a real 0, so the transparency page printed "$0.00" for a service it had no
+// measurement of — on a page whose own closing line claimed every number on it
+// was real. A reader seeing zero concludes the thing is free.
+//
+// The caller's nil path already existed and already said the right thing: "a
+// measurement we could not take is nil, never 0". This vocabulary is that
+// distinction made explicit on the wire rather than left to a convention one
+// layer down.
+enum CostBasis {
+  // Unset. A client should treat this as ABSENT rather than as a measurement,
+  // because an unset basis on a line that carries a number is exactly the
+  // ambiguity this enum removes.
+  COST_BASIS_UNSPECIFIED = 0;
+
+  // Read from a meter: the figure is what was observed for this period.
+  COST_BASIS_MEASURED = 1;
+
+  // Computed from a published price and an observed quantity. Honest
+  // arithmetic, not an observation of spend — a provider's invoice may differ.
+  COST_BASIS_RATE_CARD = 2;
+
+  // No figure for this period. The meter returned no samples, or the store
+  // could not be read. `amount_cents` is not meaningful and must not be
+  // rendered as money.
+  COST_BASIS_ABSENT = 3;
 }

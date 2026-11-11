@@ -10,6 +10,29 @@ fi
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
+# ⛔ READS THE VALUE, NOT THE PRESENCE — and the bug this replaces inverted a
+# deploy. Four sites tested `SKIP_VISION` with `-n`/`-z`, so ANY non-empty value
+# meant "skip": `SKIP_VISION=0`, the obvious way to write "do not skip", turned
+# the skip ON and silently dropped the vision deploy. A flag whose natural
+# off-switch is its on-switch is worse than no flag.
+#
+# ⚠️ An unrecognised value REFUSES rather than guessing. Defaulting it either way
+# is how the original defect reads to whoever writes `SKIP_VISION=off`, and this
+# runs during a deploy where the wrong guess is a missing service.
+vision_skipped() {
+    case "$(printf '%s' "${SKIP_VISION:-}" | tr '[:upper:]' '[:lower:]')" in
+        1 | true | yes) return 0 ;;
+        "" | 0 | false | no) return 1 ;;
+        *)
+            echo "FAIL deploy: SKIP_VISION is set to '${SKIP_VISION}', which is neither true nor false." >&2
+            echo "       Use 1/true/yes to skip the vision deploy, or 0/false/no (or unset) to run it." >&2
+            echo "       Refusing rather than guessing: the wrong guess here either spends on Modal" >&2
+            echo "       unexpectedly or ships a stack with no vision service." >&2
+            exit 1
+            ;;
+    esac
+}
+
 deploy_with_retry() {
     local name="$1"; shift
     if "$@"; then return 0; fi
@@ -157,6 +180,27 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # shell/.env export can promote it onto the prod app — production must launch with
     # age-gating invisible and inert.
     AGE_GATING_ENABLED=""
+    # ⛔ Pinned empty on BOTH branches, which is the lesson the paragraph above
+    # records rather than a new one. Production takes its backend from its own
+    # R2_* secrets; a stale `STORAGE_BACKEND=local` exported in a deploying
+    # shell would otherwise put production's reader photos on a container
+    # filesystem, and `UPLOAD_DIR` would make that choice pass its own check.
+    STORAGE_BACKEND=""
+    UPLOAD_DIR=""
+    # Invite-only registration is the LAUNCH posture, so unlike the dark flags
+    # above this is set ON rather than forced empty — but it is set HERE, which
+    # is the point. Every other posture flag is pinned on BOTH branches, and
+    # this one was pinned only on the preview branch, so the staging line's
+    # `${VAR:+...}` expansion dropped it entirely whenever the variable was
+    # unset: fly was told nothing, and the prod app kept whatever was last
+    # staged. The flag's state became a function of deploy history rather than
+    # of this script, in both directions — a clean shell could leave
+    # registration OPEN, and a stale .env export could promote closed beta.
+    #
+    # Reading this branch now tells you the flag's production value. When the
+    # closed beta is lifted this line becomes `""` and the lift is a reviewable
+    # diff rather than an environment change nobody can see.
+    INVITE_ONLY_REGISTRATION="true"
     RATE_LIMIT_PUBLIC=""
     RATE_LIMIT_E2E_HELPER=""
     RATE_LIMIT_AUTH=""
@@ -172,6 +216,34 @@ else
     STACKS_E2E_TEST_HELPERS="1"
     AGE_GATING_ENABLED="true"
     INVITE_ONLY_REGISTRATION="true"
+
+    # ⛔ A PREVIEW MUST NEVER SHARE PRODUCTION'S OBJECT STORAGE BUCKET.
+    #
+    # The R2_* forwarding below is unconditional on presence, so sourcing .env
+    # before a preview deploy hands the preview production's credentials AND
+    # production's bucket name. Nothing had noticed because the one live
+    # preview predates that forwarding and had no storage secrets at all — it
+    # was silently writing to the container filesystem instead.
+    #
+    # So the bucket is overridden here rather than inherited. R2_PREVIEW_BUCKET_NAME
+    # upgrades a preview to real object storage; without it the preview uses
+    # local storage DELIBERATELY, which is the only other honest option.
+    if [ -n "${R2_PREVIEW_BUCKET_NAME:-}" ]; then
+        R2_BUCKET_NAME="${R2_PREVIEW_BUCKET_NAME}"
+    else
+        # ⚠️ /app/uploads is NOT durable: deploy/fly.core.toml mounts no volume,
+        # and preview machines stop when idle. So preview uploads survive within
+        # a drive and not across a restart. That is a STATED limitation, not a
+        # hidden one — which is the whole difference from what this replaced.
+        # It also means a deployed stack still has not exercised the R2 backend;
+        # set R2_PREVIEW_BUCKET_NAME to a preview-only bucket to do that.
+        R2_ACCOUNT_ID=""
+        R2_ACCESS_KEY_ID=""
+        R2_SECRET_ACCESS_KEY=""
+        R2_BUCKET_NAME=""
+        STORAGE_BACKEND="local"
+        UPLOAD_DIR="/app/uploads"
+    fi
     RATE_LIMIT_PUBLIC="5000"
     RATE_LIMIT_E2E_HELPER="5000"
     # The :auth ceiling serves two masters on a preview, and the number lives
@@ -183,15 +255,33 @@ else
     # that spec is the only E2E proof the bucket limits at all, and at a
     # ceiling of 5000 it could never see a 429 — brute-force protection
     # unprovable by construction. 200 clears the burst (~100/min peak) with
-    # 2x headroom and is floodable in ~30s by the spec, which runs LAST and
-    # serially so its own flood cannot starve a concurrent login. The spec
-    # reads the value via E2E_AUTH_RATE_LIMIT (exported below) so the two
-    # cannot drift apart. Prod keeps the config default.
+    # 2x headroom.
+    #
+    # ⛔ "FLOODABLE IN ~30s BY THE SPEC, WHICH RUNS SERIALLY" USED TO STAND
+    # HERE AND WAS FALSE, which is how a reachable-looking ceiling became
+    # unreachable. A serial flood measured 3.0 req/s against this preview
+    # (210 attempts in 70s), because each failed login costs an Argon2 hash
+    # through ArgonPool's two workers and a serial client leaves one idle. 200
+    # per 60s needs 3.34/s sustained, so the sliding window dropped entries
+    # faster than the flood added them and the spec reported brute-force
+    # protection ABSENT about a bucket it could not reach. The number was
+    # checked against the suite's burst and merely asserted against the flood.
+    #
+    # ⚖️ The spec now floods concurrently and MEASURES whether it reached the
+    # ceiling, so this ceiling is held honest from the other side: raising it
+    # again produces "this probe never reached the ceiling" with the arithmetic,
+    # not a security verdict. The spec reads the value via E2E_AUTH_RATE_LIMIT
+    # (handed over below) so the two cannot drift apart. Prod keeps the config
+    # default of 60, which a serial client reaches comfortably.
     RATE_LIMIT_AUTH="200"
-    # Hand the ceiling to the E2E step (same job) so the spec floods past it.
-    if [[ -n "${GITHUB_ENV:-}" ]]; then
-        echo "E2E_AUTH_RATE_LIMIT=${RATE_LIMIT_AUTH}" >> "${GITHUB_ENV}"
-    fi
+    # Hand the ceiling to the E2E step. ⛔ Through a file rather than
+    # `$GITHUB_ENV`, which exists only inside a GitHub Actions job — and this
+    # project's integration gate is `just ci`, which deploys this same stack
+    # with no such variable. The library carries what that cost.
+    # shellcheck source=scripts/lib/e2e-handoff.sh
+    source "${REPO_ROOT}/scripts/lib/e2e-handoff.sh"
+    e2e_handoff_reset
+    e2e_handoff_write E2E_AUTH_RATE_LIMIT "${RATE_LIMIT_AUTH}"
     SMOKE_TESTS_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
@@ -247,11 +337,40 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
 
     if [[ "$neon_branch_name" != "${PREVIEW_NEON_BRANCH}" ]]; then
         echo "FAIL deploy: Neon branch creation failed" >&2
-        echo "$neon_response" | head -5 >&2
+        # `echo … | head -5` under `set -euo pipefail` aborts the script here:
+        # head ALWAYS closes early, so echo takes SIGPIPE and the pipeline
+        # returns 141 — losing the diagnostic this line exists to print, on the
+        # one path that most needs it. Truncate without a pipe.
+        printf '%s\n' "${neon_response:0:2000}" >&2
         exit 1
     fi
     NEON_BRANCH_NAME="${PREVIEW_NEON_BRANCH}"
     echo "    Neon branch created: ${NEON_BRANCH_NAME}"
+
+    # ⛔ FALL BACK TO THE DEDICATED ENDPOINT WHEN THE CREATE RESPONSE OMITS THE
+    # URI. `POST /branches?include_passwords=true` usually returns
+    # `connection_uris`, but not always — a 2026-11-11 local run created the
+    # branch successfully and returned none, and the `|| true` above turned that
+    # into an empty string. Everything downstream then degraded QUIETLY: the
+    # self-migration skipped, the preview silently kept staging's schema, and
+    # the eval received an empty DATABASE_URL.
+    #
+    # ⚖️ `GET /connection_uri` asks the one question we actually need and is
+    # already how `reseed-staging.yml` resolves staging, so this is the project's
+    # existing answer rather than a new mechanism.
+    if [[ -z "$NEON_CONNECTION_URI" ]]; then
+        echo "    No URI in the create response; asking for one directly..."
+        neon_branch_id="$(printf '%s' "$neon_response" | python3 -c "import json,sys; print(json.load(sys.stdin)['branch']['id'])" 2>/dev/null || true)"
+        if [[ -n "$neon_branch_id" ]]; then
+            NEON_CONNECTION_URI="$(curl -sfL \
+                -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+                "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/connection_uri?branch_id=${neon_branch_id}&database_name=neondb&role_name=neondb_owner" \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('uri',''))" 2>/dev/null || true)"
+            if [[ -n "$NEON_CONNECTION_URI" ]]; then
+                echo "    Resolved a connection URI for ${neon_branch_id}."
+            fi
+        fi
+    fi
 
     if [[ -n "$NEON_CONNECTION_URI" ]]; then
         if command -v psql > /dev/null 2>&1; then
@@ -306,7 +425,112 @@ if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROO
 fi
 echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 
-if [[ -z "${SKIP_VISION:-}" ]] && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
+# ── Apply THIS branch's migrations to the preview's own Neon branch ──────────
+#
+# ⛔ A PREVIEW USED TO INHERIT ITS SCHEMA AND NEVER ADVANCE IT, which made every
+# preview a representation of STAGING rather than of post-merge production. The
+# branch is a copy-on-write clone of `staging`, so it starts at whatever
+# migrations staging has applied; nothing here moved it forward, and the only
+# thing that ever did was `release_command` -> `Stacks.Release.deploy()` during
+# the core deploy — after every gate that reads the schema.
+#
+# ⚖️ Migrating here is what makes a preview an accurate rehearsal of the merge:
+# the data shape a reader exercises is the one `main` will have, and a migration
+# that fails against real cloned data fails HERE, before anything is deployed,
+# which is the whole value of cutting the branch from staging in the first
+# place.
+#
+# ⚠️ It runs in `MIX_ENV=prod` with `DATABASE_URL` pointed at the branch,
+# because `config/runtime.exs` reads `DATABASE_URL` only in `:prod` — in dev it
+# would silently use the hardcoded local `stacks_dev` and migrate a developer's
+# machine instead of the preview. This is also the earliest point the app can
+# compile: the generated schemas above are its prerequisite.
+# ⛔ DEFINED UNCONDITIONALLY, BECAUSE A CONSUMER OUTSIDE THE BLOCK READS IT.
+# This array was first declared inside the preview-only `if` below while the
+# vision eval further down also expands it. Under this script's `set -u` that
+# is an unbound-variable abort on the PRODUCTION path, where the `if` never
+# runs — a break in the one mode CI never exercises.
+#
+# ⚠️ So it is built here for every mode and merely USED where it applies.
+# DATABASE_URL is empty in prod mode, which leaves the eval exactly as it was
+# rather than pointing it somewhere wrong.
+preview_mix_env=(
+    "MIX_ENV=prod"
+    # ⚠️ GUARDED NOW THAT IT IS OUTSIDE THE if. The `[[ -n ${NEON_CONNECTION_URI:-} ]]`
+    # test below is what used to make a bare expansion safe here; hoisting the
+    # array above that test removed the guarantee, and `set -u` would abort the
+    # production deploy on the unset variable.
+    "DATABASE_URL=${NEON_CONNECTION_URI:-}"
+    "SECRET_KEY_BASE=${SECRET_KEY_BASE:-}"
+    "GUARDIAN_SECRET_KEY=${GUARDIAN_SECRET_KEY:-}"
+    "RESEND_API_KEY=${RESEND_API_KEY:-}"
+    "VISION_SERVICE_URL=${VISION_SERVICE_URL:-http://vision.invalid}"
+    # ⚠️ These two raise in EVERY env, not only :prod — runtime.exs raises
+    # for them before the prod block. They were missing from the first
+    # version of this array because it was enumerated from the prod block
+    # alone, and CLOAK_KEY would have been this block's next failure.
+    "CLOAK_KEY=${CLOAK_KEY:-}"
+    "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}"
+    # ⛔ THE DB ROLE PASSWORDS, OR THE ROLES ARE CREATED UNUSABLE. The role
+    # migration takes a `nil` password to mean "create it NOLOGIN", which is
+    # correct for a machine that has no secrets — but a migration runs ONCE.
+    # Applying it here without these two recorded it as done, so the proper run
+    # during the release's own migrate skipped it, and the app then failed with
+    # `28P01 invalid_password ... for user 'stacks_app'` against roles left
+    # rolcanlogin=false, rolpassword=null.
+    #
+    # ⚠️ This is the cost of migrating earlier than the release does: every
+    # variable a migration READS has to be here, not just the ones the runtime
+    # config demands to boot. The two are different lists.
+    "STACKS_APP_DB_PASSWORD=${STACKS_APP_DB_PASSWORD:-}"
+    "STACKS_DBT_DB_PASSWORD=${STACKS_DBT_DB_PASSWORD:-}"
+    "STORAGE_BACKEND=local"
+    "UPLOAD_DIR=/tmp/preview-migrate-uploads"
+)
+
+if [[ "${PROD_MODE}" != 1 ]] && [[ -n "${NEON_CONNECTION_URI:-}" ]]; then
+    echo ""
+    echo "==> Applying this branch's migrations to the preview Neon branch..."
+    # ⛔ EVERY VARIABLE PROD RUNTIME CONFIG DEMANDS, SUPPLIED EXPLICITLY.
+    # `MIX_ENV=prod` buys the only env whose runtime config reads DATABASE_URL,
+    # and it also buys that config's whole production surface: five required
+    # variables plus a storage decision. Inheriting them from the job
+    # environment does not work — the first run of this block raised
+    # "No object storage is configured for a deployed build" with all four R2
+    # secrets present at job level — so they are named here rather than hoped
+    # for.
+    #
+    # ⚖️ Storage is declared LOCAL because a migration writes no objects. That
+    # is the truthful answer and it also removes the dependency rather than
+    # satisfying it: pointing a schema migration at production object storage
+    # would hand it credentials it has no use for. VISION_SERVICE_URL is a
+    # placeholder for the same reason — prod config requires it to exist, and
+    # a migration never calls vision. Both are deliberate statements, which is
+    # exactly what `Stacks.Storage.Selection` exists to insist on.
+    #
+    # ⚠️ Enumerated from `config/runtime.exs`'s prod block rather than
+    # discovered one failed run at a time. VISION_SERVICE_URL was absent from
+    # the job environment too, so it would have been the next failure.
+    if ! (cd "$REPO_ROOT/apps/core" && \
+            env "${preview_mix_env[@]}" mix deps.get --only prod >/dev/null && \
+            env "${preview_mix_env[@]}" mix compile >/dev/null && \
+            env "${preview_mix_env[@]}" mix ecto.migrate); then
+        # ⬛ A FAILURE HERE IS THE GATE DOING ITS JOB, not an inconvenience: a
+        # migration that cannot apply to cloned staging data is a migration
+        # that will not apply to production either. Reporting it as a deploy
+        # failure before anything ships is the outcome this block exists for.
+        echo "FAIL deploy: the preview's migrations did not apply to its own Neon branch." >&2
+        echo "  This is what a merge to main would do to production data. Fix the migration" >&2
+        echo "  rather than the preview." >&2
+        exit 1
+    fi
+    echo "PASS deploy: preview branch migrated — its schema is now what main would have"
+elif [[ "${PROD_MODE}" != 1 ]]; then
+    echo "WARN: no Neon connection URI, so the preview keeps staging's schema and any"
+    echo "      gate that reads a newer table will fail rather than being misled."
+fi
+
+if ! vision_skipped && [[ -n "${MODAL_TOKEN_ID:-}" ]] && [[ -n "${MODAL_TOKEN_SECRET:-}" ]]; then
     MODAL_PYTHON=""
     if [[ -x "${REPO_ROOT}/apps/vision/.venv/bin/python3" ]] \
         && "${REPO_ROOT}/apps/vision/.venv/bin/python3" -c "import modal" 2>/dev/null; then
@@ -396,7 +620,19 @@ print(urls[0] if urls else '')
     # substitution in an assignment aborts the whole script BEFORE the verdict
     # logic below could run — the gate would die silently instead of speaking.
     EVAL_RC=0
+    # ⛔ THE EVAL READS THE DATABASE, SO IT NEEDS THE PREVIEW'S DATABASE. It was
+    # invoked with VISION_SERVICE_URL alone: no DATABASE_URL and no MIX_ENV, so
+    # dev config sent it to the runner's own `localhost:5432`, and it failed with
+    # `tcp connect (localhost:5432)` long before it could score anything. The
+    # budget check behind `mix eval.vision` reads `op.ai_spend`, which lives on
+    # the preview branch this deploy just migrated.
+    #
+    # ⚖️ The SAME array the migration uses, not a second hand-built list. Both
+    # are "a mix task run against the preview branch in prod mode", and the
+    # five preceding failures in this file were each one variable missing from
+    # one such list. One array means the next task added here cannot be short.
     EVAL_OUT="$(cd "$REPO_ROOT" && \
+            env "${preview_mix_env[@]}" \
             VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
             EVAL_VISION_REQUIRED=1 \
             mix eval.vision 2>&1)" || EVAL_RC=$?
@@ -407,7 +643,12 @@ print(urls[0] if urls else '')
         # runner (missing generated schemas) was once reported as "model
         # regressed", pointing the investigation at Modal when the defect was
         # the checkout. Claim regression only when the eval itself said so.
-        if printf '%s' "$EVAL_OUT" | grep -q "REGRESSION"; then
+        # ⛔ A here-string, not a pipe: as `printf … | grep -q`, an early
+        # "REGRESSION" in a large eval log returns 141 under `pipefail`, so a
+        # real regression took the else branch and was reported as "the eval
+        # COULD NOT RUN" — exactly the misattribution the comment above exists
+        # to prevent, arriving by a different route.
+        if grep -q "REGRESSION" <<< "$EVAL_OUT"; then
             echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
         else
             echo "FAIL deploy: the vision eval COULD NOT RUN (exit $EVAL_RC) — that is a broken gate, not a scored regression; see the output above. Stopping, because an unscored model must not roll forward under EVAL_VISION_REQUIRED." >&2
@@ -415,7 +656,7 @@ print(urls[0] if urls else '')
         exit 1
     fi
     echo "PASS deploy: vision model scored, no regression"
-elif [[ -n "${SKIP_VISION:-}" ]]; then
+elif vision_skipped; then
     echo "SKIP: SKIP_VISION set — skipping Modal vision deploy (no Modal spend). VISION_SERVICE_URL left empty."
 else
     echo "WARN: MODAL_TOKEN_ID/MODAL_TOKEN_SECRET not set — skipping Modal vision deploy."
@@ -574,7 +815,11 @@ ensure_fly_app "${VM_APP}"
 # Both environments need this.
 fly ips allocate-v6 --private --app "${VM_APP}" 2>&1 | grep -v "^Error" || true
 
-if ! fly volumes list --app "${VM_APP}" --json 2>/dev/null | grep -q '"name"[: ]*"vm_data"'; then
+# Captured first rather than piped: `fly … | grep -q` returns 141 under
+# `pipefail` when grep exits before fly finishes writing, which inverts this
+# test into "the volume does not exist" and re-runs the create on every deploy.
+_fly_volumes="$(fly volumes list --app "${VM_APP}" --json 2>/dev/null || true)"
+if ! grep -q '"name"[: ]*"vm_data"' <<< "${_fly_volumes}"; then
     fly volumes create vm_data --app "${VM_APP}" --region iad --size 1 --yes 2>&1 \
         | grep -v "^Error" || true
 fi
@@ -678,6 +923,44 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 # is never committed here. Runbook: docs/runbooks/email-delivery-failure.md.
 EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
 
+# ── The least-privilege runtime connection ───────────────────────────────────
+#
+# `config/runtime.exs` points both runtime pools at `APP_DATABASE_URL` when it is
+# set, falling back to `DATABASE_URL` when it is not. The fallback is what makes
+# the whole split inert until this secret exists, so setting it here is the
+# operator action that turns the grants on.
+#
+# ⛔ DERIVED, never a literal. The host and database differ per environment — a
+# preview gets its own Neon branch — so a fixed value in `.env` would point every
+# preview at whichever branch it was written for, which is a worse failure than
+# not setting it at all: the app would serve, against the wrong database.
+#
+# So it is the owner URL with the role and password substituted. Same host, same
+# database, same query string (`sslmode`, channel binding and friends survive),
+# different credentials.
+#
+# ⚠️ Gated on the password being present, because `CREATE ROLE … PASSWORD` is
+# what gave `stacks_app` a password in the first place (migration
+# 20261016150000 RAISES without it). No password, no role worth connecting as,
+# no secret — and the fallback keeps the stack byte-identical to before.
+APP_DATABASE_URL_VALUE=""
+if [[ -n "${STACKS_APP_DB_PASSWORD:-}" && -n "${EFFECTIVE_DATABASE_URL}" ]]; then
+    APP_DATABASE_URL_VALUE="$(
+        EFFECTIVE_DATABASE_URL="$EFFECTIVE_DATABASE_URL" \
+        STACKS_APP_DB_PASSWORD="$STACKS_APP_DB_PASSWORD" \
+        python3 "${REPO_ROOT}/scripts/lib/derive-app-database-url.py"
+    )" || APP_DATABASE_URL_VALUE=""
+
+    if [[ -n "$APP_DATABASE_URL_VALUE" ]]; then
+        echo "==> APP_DATABASE_URL will be set (runtime pools connect as stacks_app)"
+    else
+        echo "WARN: STACKS_APP_DB_PASSWORD is set but the owner URL could not be rewritten —"
+        echo "      APP_DATABASE_URL will NOT be set, so the runtime pools keep the owner role."
+    fi
+else
+    echo "==> APP_DATABASE_URL not set — runtime pools use the owner role (the documented fallback)"
+fi
+
 # The telemetry keepalive that wakes the log shipper (prod only — previews
 # don't ship logs). Set only when the shipper will actually be deployed, so
 # a shipper-less stack doesn't ping a nonexistent Flycast name every 10s.
@@ -706,6 +989,8 @@ fly secrets set \
     ${R2_ACCESS_KEY_ID:+R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}"} \
     ${R2_SECRET_ACCESS_KEY:+R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}"} \
     ${R2_BUCKET_NAME:+R2_BUCKET_NAME="${R2_BUCKET_NAME}"} \
+    ${STORAGE_BACKEND:+STORAGE_BACKEND="${STORAGE_BACKEND}"} \
+    ${UPLOAD_DIR:+UPLOAD_DIR="${UPLOAD_DIR}"} \
     ${VISION_TOGETHER_API_KEY:+VISION_TOGETHER_API_KEY="${VISION_TOGETHER_API_KEY}"} \
     ${SCRAPER_HMAC_SECRET:+SCRAPER_HMAC_SECRET="${SCRAPER_HMAC_SECRET}"} \
     ${SCRAPER_INTERNAL_URL:+SCRAPER_SERVICE_URL="${SCRAPER_INTERNAL_URL}"} \
@@ -713,6 +998,7 @@ fly secrets set \
     ${BRAVE_SEARCH_API_KEY:+BRAVE_SEARCH_API_KEY="${BRAVE_SEARCH_API_KEY}"} \
     ${GOOGLE_BOOKS_API_KEY:+GOOGLE_BOOKS_API_KEY="${GOOGLE_BOOKS_API_KEY}"} \
     ${RESEND_API_KEY:+RESEND_API_KEY="${RESEND_API_KEY}" EMAIL_PROVIDER="resend"} \
+    ${APP_DATABASE_URL_VALUE:+APP_DATABASE_URL="${APP_DATABASE_URL_VALUE}"} \
     ${STACKS_APP_DB_PASSWORD:+STACKS_APP_DB_PASSWORD="${STACKS_APP_DB_PASSWORD}"} \
     ${STACKS_DBT_DB_PASSWORD:+STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD}"} \
     ${METRICS_SCRAPE_TOKEN:+METRICS_SCRAPE_TOKEN="${METRICS_SCRAPE_TOKEN}"} \
@@ -1055,7 +1341,7 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     fi
 fi
 
-if [[ -n "${SKIP_VISION:-}" ]]; then
+if vision_skipped; then
     echo "SKIP warmup: SKIP_VISION set — vision not deployed, skipping warmup"
 else
 
@@ -1096,6 +1382,29 @@ if [[ $edge_ready -ne 1 ]]; then
     exit 0
 fi
 
+# ⛔ THE PROOF A BROWSER WOULD HAVE. State-changing API requests are refused
+# without a double-submit proof: the readable `stacks_csrf` cookie echoed in an
+# `X-CSRF-Token` header. This script is not a browser, so it has to do by hand
+# what a browser does for free — fetch a page to be issued the cookie, then send
+# the matching header on every write below.
+#
+# ⚠️ Login is deliberately NOT exempt from that check. Login CSRF is a real
+# attack (an attacker forcing a victim's browser to sign in as the attacker, so
+# subsequent activity lands in an account they control), so the route that
+# starts a session is exactly the wrong one to carve out.
+WARMUP_JAR="$(mktemp)"
+curl -4 -s -o /dev/null --cookie-jar "${WARMUP_JAR}" --max-time 15 "${CORE_URL}/" || true
+WARMUP_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${WARMUP_JAR}" | tail -1)"
+# The jar holds a live session proof, so it does not outlive the script.
+trap 'rm -f "${WARMUP_JAR}"' EXIT
+if [[ -z "${WARMUP_PROOF}" ]]; then
+    echo "FAIL warmup: the page response issued no stacks_csrf cookie, so every write below"
+    echo "     would be refused with 403 csrf_check_failed and read as a credentials problem."
+    echo "     Check that StacksWeb.Plugs.CsrfCookie is on the :spa pipeline."
+    rm -f "${WARMUP_JAR}"
+    exit 1
+fi
+
 login_body_file="$(mktemp)"
 login_payload_file="$(mktemp)"
 python3 -c "import json,sys; json.dump({'email':sys.argv[1],'password':sys.argv[2]}, sys.stdout)" \
@@ -1103,6 +1412,8 @@ python3 -c "import json,sys; json.dump({'email':sys.argv[1],'password':sys.argv[
 smoke_login_code="$(curl -4 -s -o "${login_body_file}" -w "%{http_code}" \
     --max-time 30 \
     "${CORE_URL}/api/auth/login" \
+    -b "${WARMUP_JAR}" \
+    -H "X-CSRF-Token: ${WARMUP_PROOF}" \
     -H "Content-Type: application/json" \
     --data-binary @"${login_payload_file}" \
     || true)"
@@ -1114,7 +1425,12 @@ smoke_token="$(echo "${smoke_login}" | python3 -c \
 
 if [[ -z "${smoke_token}" ]]; then
     echo "FAIL warmup: could not authenticate as warmup user (HTTP ${smoke_login_code})"
-    echo "    Check PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD."
+    if [[ "${smoke_login_code}" == "403" ]]; then
+        echo "    A 403 here is the CSRF check, NOT the credentials: the body names the reason"
+        echo "    (absent_header / absent_cookie / mismatched). Response: ${smoke_login}"
+    else
+        echo "    Check PROBE_SEED_EMAIL / PROBE_SEED_PASSWORD."
+    fi
     exit 1
 fi
 
@@ -1129,6 +1445,7 @@ for img in "${warmup_canaries[@]}"; do
         init_code="$(curl -4 -s -o "${init_body}" -w "%{http_code}" \
             --max-time 15 \
             -X POST "${CORE_URL}/api/upload/init" \
+            -b "${WARMUP_JAR}" -H "X-CSRF-Token: ${WARMUP_PROOF}" \
             -H "Authorization: Bearer ${smoke_token}" \
             -H "Content-Type: application/json" \
             -d '{"content_type":"image/jpeg"}' 2>/dev/null || true)"
@@ -1150,15 +1467,42 @@ for img in "${warmup_canaries[@]}"; do
             exit 0
         fi
 
+        # ⛔ `upload_url` MAY BE OUR OWN API, and whether it is cannot be known
+        # until runtime. `/api/upload/init` returns a RELATIVE url on this stack
+        # — measured: `upload_url` starts with `/` — which resolves to
+        # `${CORE_URL}` below and is therefore a state-changing request to us,
+        # needing the proof like any other. Against a real object store the same
+        # field is an absolute presigned URL, where the proof must NOT be sent:
+        # it would be an unsigned header on a signed request (breaking the
+        # signature) and would hand our CSRF token to a third party.
+        #
+        # ⚠️ So the branch is the point, not the duplication. A single call that
+        # always sent the proof would break real presigned uploads; one that
+        # never did fails here with 403 — which is what happened, reported as
+        # "PUT to upload_url returned 403" and read as a broken object store.
+        upload_is_ours=0
         if [[ "${upload_url}" == /* ]]; then
             upload_url="${CORE_URL}${upload_url}"
+            upload_is_ours=1
+        elif [[ "${upload_url}" == "${CORE_URL}"* ]]; then
+            upload_is_ours=1
         fi
 
-        put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
-            --max-time 30 \
-            -X PUT "${upload_url}" \
-            -H "Content-Type: image/jpeg" \
-            --data-binary "@${img}" 2>/dev/null || true)"
+        if [[ ${upload_is_ours} -eq 1 ]]; then
+            put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+                --max-time 30 \
+                -X PUT "${upload_url}" \
+                -b "${WARMUP_JAR}" \
+                -H "X-CSRF-Token: ${WARMUP_PROOF}" \
+                -H "Content-Type: image/jpeg" \
+                --data-binary "@${img}" 2>/dev/null || true)"
+        else
+            put_code="$(curl -4 -s -o /dev/null -w "%{http_code}" \
+                --max-time 30 \
+                -X PUT "${upload_url}" \
+                -H "Content-Type: image/jpeg" \
+                --data-binary "@${img}" 2>/dev/null || true)"
+        fi
 
         if [[ "${put_code}" != "200" ]]; then
             echo "    ${img_name}: PUT to upload_url returned ${put_code} — skipping"
@@ -1169,6 +1513,7 @@ for img in "${warmup_canaries[@]}"; do
         commit_code="$(curl -4 -s -o "${commit_body}" -w "%{http_code}" \
             --max-time 15 \
             -X POST "${CORE_URL}/api/upload/${img_id}/commit" \
+            -b "${WARMUP_JAR}" -H "X-CSRF-Token: ${WARMUP_PROOF}" \
             -H "Authorization: Bearer ${smoke_token}" 2>/dev/null || true)"
 
         if [[ "${commit_code}" == "202" ]]; then
@@ -1204,7 +1549,7 @@ else
 fi
 fi
 
-if [[ -n "${SKIP_VISION:-}" ]]; then
+if vision_skipped; then
     echo "SKIP probe: SKIP_VISION set — skipping vision completion probe"
 elif [[ ${#warmup_ids[@]} -gt 0 ]]; then
     probe_id="${warmup_ids[0]}"

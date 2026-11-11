@@ -1,0 +1,194 @@
+defmodule Stacks.SwallowToSafeDefaultTest do
+  @moduledoc """
+      Two rescue clauses, neither of which had ever been executed by a test.
+
+      Both are on a READ path and both exist so that one unreadable thing does
+      not take down the request that happened to touch it. That makes them the
+      kind of code where a regression is invisible: delete the rescue and
+      everything stays green until the day the bad input actually arrives,
+      which is the day you least want to discover it.
+
+      The two are together because they share that shape, not a subject.
+
+      ## Both rescues are now the mechanism, after a correction
+
+      An earlier version of this file claimed to execute both rescues and only
+      executed one. `Transparency.Cache` guarded with `table_exists?()` BEFORE
+      its rescue, so a terminated child reached the `else: []` and the rescue was
+      unreachable from any test — deleting both rescues left every test here
+      green. A reviewer's probe found it.
+
+      The fix was to the CODE, not just the claim, and the reasoning is worth
+      keeping because the conclusion is counter-intuitive. The race the rescue
+      exists for is real: these functions run in the calling web-request process,
+      not in the table's owner, and `:ets.lookup/2` takes the table NAME, so the
+      owner dying between a `whereis` check and the lookup makes the lookup
+      raise. A guard therefore *cannot* close that window — which means the
+      guard was never the safety mechanism, only an optimisation, and keeping it
+      bought a second route to one outcome of which only the unimportant one was
+      testable.
+
+      So the guard is gone and the rescue is the single mechanism, which makes
+      the terminate-child tests below a guarantee about the code that actually
+      ships rather than about a branch in front of it. Nothing here is hedged any
+      more: deleting either rescue now fails.
+
+      ## Why `transparency_test.exs`'s "graceful degradation" does not cover either
+
+      That describe degrades the **Prometheus client** —
+      `MockPrometheusClient.put_response({:error, …})` — which exercises the
+      error path *through* the cache and never removes the ETS table, so it
+      never reaches the rescue at all.
+  """
+  use Core.DataCase, async: false
+
+  import Stacks.Factory
+
+  alias Stacks.Audit
+  alias Stacks.Transparency.Cache
+
+  describe "an audit row whose metadata cannot be read still lists" do
+    # `decrypt_metadata/1` is private and reached only through
+    # `list_for_user/2`, which is the honest way to drive it: the invariant is
+    # about what a reader sees, not about the helper in isolation.
+    defp insert_audit_row(user_id, metadata) do
+      Core.Repo.insert_all(
+        "audit_log",
+        [
+          %{
+            id: Ecto.UUID.dump!(Ecto.UUID.generate()),
+            user_id: Ecto.UUID.dump!(user_id),
+            action: "user.login",
+            resource_type: "user",
+            resource_id: Ecto.UUID.dump!(user_id),
+            ip_address: nil,
+            metadata: metadata,
+            occurred_at: DateTime.utc_now()
+          }
+        ],
+        prefix: "audit"
+      )
+    end
+
+    test "nil, undecryptable, and valid-ciphertext-over-non-JSON all read as an empty map" do
+      user = insert(:user)
+
+      # A good row alongside the bad ones. Without it a listing that returned
+      # nothing at all would satisfy every "reads as %{}" assertion below by
+      # vacuously having no rows to check — and that is the actual failure this
+      # guards: one unreadable row taking the whole listing with it.
+      good = %{"ok" => true}
+      insert_audit_row(user.id, good |> Jason.encode!() |> Stacks.Vault.encrypt!())
+
+      insert_audit_row(user.id, nil)
+      insert_audit_row(user.id, :crypto.strong_rand_bytes(48))
+      insert_audit_row(user.id, Stacks.Vault.encrypt!("this is not json at all"))
+
+      {entries, total, _page, _per_page} = Audit.list_for_user(user.id)
+
+      assert total == 4,
+             "expected all four rows to be listed; got #{total}. A row whose metadata " <>
+               "cannot be decoded must still appear — it is the record that something " <>
+               "happened, and the metadata is the least important part of it."
+
+      metadatas = Enum.map(entries, & &1.metadata)
+
+      assert good in metadatas,
+             "the readable row's metadata did not survive the listing, so this test is " <>
+               "asserting that everything decodes to %{} — including the row that should " <>
+               "have decoded properly"
+
+      assert Enum.count(metadatas, &(&1 == %{})) == 3,
+             "expected exactly three unreadable rows to read as %{}; got " <>
+               "#{inspect(metadatas)}. Either a bad row raised, or one of them decoded to " <>
+               "something that is not the documented empty value."
+    end
+  end
+
+  describe "a transparency cache lookup with no table is a miss, not a crash" do
+    setup do
+      # Deterministically absent, rather than deleting the table underneath its
+      # owner: terminate_child stops the GenServer (taking its ETS table with
+      # it, as tables die with their owner) and does NOT restart it, so the
+      # assertions run against a genuinely absent table. restart_child puts it
+      # back for everything that follows.
+      #
+      # async: false on this module for exactly this reason — the table is
+      # process-global, so a concurrent test reading the cache during this one
+      # would see the absence too.
+      #
+      # With the guard removed this now reaches the rescue, which is the whole
+      # mechanism: `:ets.lookup/2` on an absent named table raises ArgumentError
+      # and the rescue turns it into the documented miss.
+      :ok = Supervisor.terminate_child(Core.Supervisor, Cache)
+
+      on_exit(fn ->
+        {:ok, _pid} = Supervisor.restart_child(Core.Supervisor, Cache)
+      end)
+
+      :ok
+    end
+
+    test "get, get_stale and invalidate_all are inert while the table is gone" do
+      assert :ets.whereis(:transparency_cache) == :undefined,
+             "precondition: the cache table is still present, so the rescue below cannot " <>
+               "be reached and this test proves nothing"
+
+      assert Cache.get(:live_signals, 45_000) == :miss,
+             "a lookup against an absent table did not report a miss. If it raised, every " <>
+               "request touching the transparency page during a cache restart becomes a 500."
+
+      assert Cache.get_stale(:live_signals) == :miss,
+             "a stale-read against an absent table did not report a miss"
+
+      assert Cache.invalidate_all() == :ok,
+             "invalidating an absent table did not return :ok"
+    end
+
+    test "put against an absent table does not raise and does not resurrect it" do
+      # ⛔ This used to assert `== :ok`, and that assertion WAS the defect. The
+      # write was swallowed and reported success, so a cache that had stopped
+      # accepting anything was indistinguishable from one that was working — on
+      # the one code path where "it silently did nothing" is also what a correct
+      # cache miss looks like from the outside.
+      #
+      # It must still not raise: the write path is reached from the same request
+      # as the read, so a raise here is the 500 the rescue exists to avoid. The
+      # fix is that it is now inert AND says so.
+      assert Cache.put(:live_signals, [%{key: :whatever}]) ==
+               {:error, :cache_unavailable},
+             "writing to an absent table either raised, or reported success for a write that " <>
+               "did not happen. Reporting success is the worse of the two: a cache that " <>
+               "accepts nothing then looks exactly like a cache that is working."
+
+      assert :ets.whereis(:transparency_cache) == :undefined,
+             "the put recreated the ETS table from the calling process. That would make the " <>
+               "table owned by whoever happened to write first and die with them, which is " <>
+               "a worse failure than the miss it was avoiding."
+    end
+  end
+
+  describe "the cache's write access is a precondition, not a detail" do
+    test "the table is :public, because writes run in the request process" do
+      # ⛔ The other half of the same finding. `:ets.insert/2` raises
+      # `ArgumentError` both when the table is GONE and when it exists and
+      # refuses the caller, and the rescue used to treat those as one thing.
+      #
+      # Only the first is a race. The second is what narrowing `init/1`'s
+      # `:public` to `:protected` would produce — and because `put/2` and
+      # `get/2` run in the calling web-request process rather than in the
+      # GenServer that owns the table, EVERY write would be refused, forever,
+      # while every page-load silently recomputed from Prometheus.
+      #
+      # So the access mode is pinned here. `put/2` now distinguishes the two
+      # causes and shouts about the second, but a narrowing should fail a test
+      # rather than rely on somebody reading a log line from a surface whose
+      # only symptom is being slower than it used to be.
+      assert :ets.info(:transparency_cache, :protection) == :public,
+             "the transparency cache table is no longer :public. Writes happen in the " <>
+               "calling request process, not in the table's owner, so a narrower access " <>
+               "mode means no request can ever write to the cache again — and the page " <>
+               "keeps working, just by recomputing everything on every load."
+    end
+  end
+end

@@ -152,7 +152,8 @@ formValidationTests =
             \() ->
                 let
                     model =
-                        { email = "reader@stacks.dev"
+                        { proof = Nothing
+                        , email = "reader@stacks.dev"
                         , password = "secret123"
                         , passwordConfirm = "secret123"
                         , displayName = "Reader"
@@ -190,7 +191,8 @@ formValidationTests =
             \() ->
                 let
                     model =
-                        { email = "reader@stacks.dev"
+                        { proof = Nothing
+                        , email = "reader@stacks.dev"
                         , password = "secret123"
                         , passwordConfirm = ""
                         , displayName = ""
@@ -282,7 +284,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init Login.Fresh
+                        Login.init Nothing Login.Fresh
 
                     html =
                         Login.view model
@@ -299,7 +301,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init Login.Fresh
+                        Login.init Nothing Login.Fresh
 
                     html =
                         Login.view model

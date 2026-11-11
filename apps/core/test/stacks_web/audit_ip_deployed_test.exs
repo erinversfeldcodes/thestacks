@@ -56,6 +56,18 @@ defmodule StacksWeb.AuditIpDeployedTest do
   end
 
   setup do
+    # ⛔ Refuses a LOCAL target rather than failing somewhere downstream. The
+    # module tag above skips only when the variable is UNSET, and this
+    # repository's `.env` sets DATABASE_URL to localhost.
+    #
+    # ⚠️ Without this the run was fail-closed only by accident: the DB
+    # connection forces SSL and a default local Postgres rejects it, so this
+    # died on a Postgrex error rather than on the real mistake. BASE_URL is
+    # checked too because it is the half that WOULD have connected — a local
+    # Phoenix answers `http://localhost:4000` perfectly well.
+    Core.DeployedTarget.require_deployed!("BASE_URL")
+    Core.DeployedTarget.require_deployed!("DATABASE_URL")
+
     db_url = System.get_env("DATABASE_URL")
     uri = URI.parse(db_url)
     [user, pass] = String.split(uri.userinfo || "", ":", parts: 2)

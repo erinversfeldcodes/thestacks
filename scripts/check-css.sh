@@ -248,7 +248,7 @@ def _defeats(bdecls, mdecls):
     `.b{position:relative}`), and a gate that fires on correct code is one someone switches off — the
     lesson check A already learned. So a same-NAMED property counts only when the values DIFFER. But
     shorthand-vs-longhand (base `background`/`margin` beating modifier `background-color`/`margin-bottom`)
-    counts ALWAYS: it is the fragile pattern #365 calls out, and the shorthand resets components the
+    counts ALWAYS: it is the fragile pattern this gate calls out, and the shorthand resets components the
     modifier never mentioned regardless of the visible value.
     """
     hits = set()

@@ -31,7 +31,8 @@ defmodule Stacks.DataCorrection.StaleSeedEditionIsbn do
 
   @impl true
   def scope,
-    do: "the three enumerated seed-fixture editions still holding their pre-#335 ISBN literal"
+    do:
+      "the three enumerated seed-fixture editions still holding their pre-correction ISBN literal"
 
   @impl true
   def reversibility,
@@ -49,7 +50,7 @@ defmodule Stacks.DataCorrection.StaleSeedEditionIsbn do
         id: id,
         from: from,
         to: to,
-        because: "seed fixture predating the seeds.exs ISBN correction in #335"
+        because: "seed fixture predating the seeds.exs ISBN correction"
       }
     end
   end

@@ -85,4 +85,137 @@ defmodule Stacks.Books.HttpClientTest do
       end)
     end
   end
+
+  describe "credentials never reach the log" do
+    @google "https://www.googleapis.com/books/v1/volumes?q=isbn:9780156001311&key=SECRET-KEY-VALUE"
+
+    test "a failing request logs the URL without its key" do
+      log =
+        capture_log(fn ->
+          HttpClient.map_error(%Finch.TransportError{reason: :timeout}, @google)
+        end)
+
+      refute log =~ "SECRET-KEY-VALUE"
+      assert log =~ "key=REDACTED"
+      # The diagnosable part survives: which provider, and which ISBN.
+      assert log =~ "googleapis.com"
+      assert log =~ "9780156001311"
+    end
+
+    test "redact/1 replaces every credential-bearing parameter" do
+      for name <- ~w(key api_key apikey access_token token secret password) do
+        redacted = HttpClient.redact("https://example.test/x?#{name}=hunter2&q=keepme")
+
+        refute redacted =~ "hunter2", "#{name} was left in the URL"
+        assert redacted =~ "#{name}=REDACTED"
+        assert redacted =~ "keepme"
+      end
+    end
+
+    test "an unknown parameter is redacted by default, not passed through" do
+      # The denylist this replaced let `client_secret` through, because it was a
+      # bet that no provider invents a credential name nobody listed. These are
+      # the names that bet lost on.
+      for name <- ~w(client_secret signature sig auth refresh_token api-key pwd
+                     oauth_token session_id private_key) do
+        redacted = HttpClient.redact("https://example.test/x?#{name}=hunter2")
+
+        refute redacted =~ "hunter2", "#{name} leaked — the allowlist let it through"
+        assert redacted =~ "REDACTED"
+      end
+    end
+
+    test "the parameters that make a failure diagnosable survive" do
+      # Open Library's shape and Google Books' shape; if these were redacted the
+      # log would say a request failed without saying which book or which query.
+      ol =
+        HttpClient.redact(
+          "https://openlibrary.org/api/books?bibkeys=ISBN:9780156001311&format=json&jscmd=data"
+        )
+
+      assert ol =~ "bibkeys=ISBN%3A9780156001311"
+      assert ol =~ "format=json"
+      assert ol =~ "jscmd=data"
+      refute ol =~ "REDACTED"
+
+      gb =
+        HttpClient.redact(
+          "https://www.googleapis.com/books/v1/volumes?q=isbn:9780156001311&key=SECRET&maxResults=5"
+        )
+
+      assert gb =~ "q=isbn%3A9780156001311"
+      assert gb =~ "maxResults=5"
+      assert gb =~ "key=REDACTED"
+      refute gb =~ "SECRET"
+    end
+
+    test "every map_error/2 clause redacts, not just the one a probe happened to hit" do
+      # Six of the seven log sites were unguarded when this module had seven
+      # separate Logger calls. These cover the four public ones.
+      errors = [
+        %Finch.TransportError{reason: :timeout},
+        %Finch.Error{reason: :request_timeout},
+        %Finch.TransportError{reason: :econnrefused},
+        :some_future_error
+      ]
+
+      for error <- errors do
+        log = capture_log(fn -> HttpClient.map_error(error, @google) end)
+
+        refute log =~ "SECRET-KEY-VALUE", "#{inspect(error)}'s branch leaked the key"
+        assert log =~ "key=REDACTED"
+      end
+    end
+
+    test "the title search keeps what identifies it — the path with no ISBN" do
+      # The one resolver path where title and author ARE the identifier. An
+      # allowlist that redacted them would leave a line saying a request failed
+      # without saying which book, which is the loss this redaction exists to
+      # avoid. Not new exposure: isbn_resolver.ex:186, :564 and :570 already log
+      # both in the clear.
+      search =
+        HttpClient.redact(
+          "https://openlibrary.org/search.json?title=The+Name+of+the+Rose&author=Umberto+Eco" <>
+            "&fields=key,title&limit=5"
+        )
+
+      assert search =~ "title=The+Name+of+the+Rose"
+      assert search =~ "author=Umberto+Eco"
+      assert search =~ "limit=5"
+      refute search =~ "REDACTED"
+    end
+
+    test "a third-party cover URL now has its id redacted like any other unknown param" do
+      # ⚠️ This test asserted the OPPOSITE until 2026-10-15, and the inversion is
+      # the point. `id` was in `@loggable_params` for exactly one reason: the
+      # module's second entry point, `get_binary/1`, fetched a cover URL a THIRD
+      # PARTY gave us (`imageLinks.thumbnail`) whose parameters were not ours to
+      # enumerate, and `id` was the only one naming which cover had failed.
+      #
+      # That entry point is gone, and no URL `get/1` constructs carries an `id`.
+      # So the allowlist entry would have been justified by a function that no
+      # longer exists. For a redaction list the safe direction is to drop an
+      # entry whose reason is gone — this test pins that it was dropped, rather
+      # than leaving the change to be noticed by whoever next reads a log.
+      cover =
+        HttpClient.redact(
+          "http://books.google.com/books/content?id=hLZXDwAAQBAJ&printsec=frontcover" <>
+            "&img=1&zoom=1&edge=curl&source=gbs_api"
+        )
+
+      refute cover =~ "hLZXDwAAQBAJ"
+      assert cover =~ "id=REDACTED"
+    end
+
+    test "an Open Library cover URL has no query to redact" do
+      path_based = "https://covers.openlibrary.org/b/id/8739161-L.jpg"
+
+      assert HttpClient.redact(path_based) == path_based
+    end
+
+    test "a URL with no query string is returned unchanged" do
+      assert HttpClient.redact("https://openlibrary.org/isbn/9780156001311.json") ==
+               "https://openlibrary.org/isbn/9780156001311.json"
+    end
+  end
 end

@@ -46,6 +46,7 @@ type UploadFailure
     | ServiceUnavailable
     | TookTooLong
     | ConnectionLost
+    | PhotoDiscarded
     | CauseUnknown
 
 
@@ -112,6 +113,7 @@ type alias Model =
     , rejectedBookIds : List String
     , waitedSeconds : Int
     , silentSeconds : Int
+    , retryable : Bool
     }
 
 
@@ -123,13 +125,35 @@ type OutMsg
     | RefreshInbox
 
 
+{-| The live progress stream for an upload.
+
+⛔ **No credential in the URL, and none needed.** `EventSource` cannot set an
+`Authorization` header, which is why this used to carry the bearer in a QUERY
+STRING — putting a live credential into request logs, into `Referer` and into
+browser history. It does send cookies on a same-origin request, and every
+request this SPA makes is same-origin, so the session now travels the way it
+does for everything else.
+
+⚠️ **It no longer takes a credential at all**, and that is the shape worth
+noticing rather than the deletion. The previous version answered `NoOut` for a
+reader with no bearer — and after the stored session was deleted, that was
+every reader who had not just signed in, so reloading the upload page cost you
+live progress. The stream opens for all of them now, and the server decides
+whether to serve it.
+
+-}
+streamFor : String -> OutMsg
+streamFor imageId =
+    OpenStream ("/api/upload/" ++ imageId ++ "/stream")
+
+
 type Msg
     = GotFile File
     | DragOver
     | DragLeave
     | FilepickerRequested
-    | UploadInitialised File String (Result Http.Error Api.UploadInit)
-    | R2PutCompleted String String (Result Http.Error ())
+    | UploadInitialised File Api.Credentials (Result Http.Error Api.UploadInit)
+    | UploadBytesSent String Api.Credentials (Result Http.Error ())
     | UploadAccepted (Result Http.Error String)
     | StatusReceived (Result Http.Error PollResponse)
     | StreamEvent String
@@ -151,6 +175,7 @@ type Msg
     | ConfirmPlacement
     | PlacementCompleted (Result Api.PlaceError Placement)
     | AgeGateSet (Result Http.Error ())
+    | SessionGone
     | ConfirmCompleted (Result Api.ConfirmError Api.ConfirmResponse)
     | GotSameWorkBook (Result Http.Error BookDetailResponse)
     | GoToShelf String
@@ -188,6 +213,11 @@ init =
     , rejectedBookIds = []
     , waitedSeconds = 0
     , silentSeconds = 0
+
+    -- ⛔ TRUE for a live upload, because the photograph was just sent and the
+    -- retry can re-read it. Only a RESUMED item can be otherwise, and it says
+    -- so on the wire — see `ResumeInboxItem`.
+    , retryable = True
     }
 
 
@@ -248,6 +278,13 @@ failureFromHttpError err =
 
         Http.NetworkError ->
             ConnectionLost
+
+        -- 410 is the one status with a meaning this page must not flatten into
+        -- "something went wrong": the photograph was deleted after it had done
+        -- its job, so "No, try again" is no longer a thing that can happen. A
+        -- reader told only that it failed would keep pressing it.
+        Http.BadStatus 410 ->
+            PhotoDiscarded
 
         _ ->
             CauseUnknown
@@ -353,7 +390,7 @@ terminal model result =
     }
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     let
         ( newModel, effect, out ) =
@@ -370,7 +407,7 @@ the same value. `update` is this composed with `Effect.perform`; nothing else
 differs between them.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model maybeToken =
     case msg of
         GotFile file ->
@@ -390,7 +427,11 @@ updateWithEffect msg model maybeToken =
                       }
                     , Effect.authed (Api.initUploadRequest (File.mime file))
                         token
-                        (Api.resolveJson Api.decodeUploadInit >> UploadInitialised file token)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.decodeUploadInit
+                                >> UploadInitialised file token
+                        }
                     , NoOut
                     )
 
@@ -405,18 +446,29 @@ updateWithEffect msg model maybeToken =
             -- A file body cannot be described as an `Api.RequestSpec` (JSON only),
             -- so this one request stays opaque to the simulated runtime.
             ( model
-            , Effect.Custom (Api.putFileToR2 init_.uploadUrl file (R2PutCompleted init_.imageId token))
+            , -- ⛔ WAS `Effect.Custom`, which `Effect`'s own docs forbid for this:
+              -- "a request smuggled inside one is invisible to it". The bytes
+              -- could not be a plan until `RequestSpec.body` could hold a file,
+              -- so this was the one request in the app hiding inside the escape
+              -- hatch meant for effects that contain no request at all.
+              Effect.authed (Api.putUploadBytesRequest init_.imageId file)
+                token
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> UploadBytesSent init_.imageId token
+                }
             , NoOut
             )
 
-        R2PutCompleted _ _ (Err err) ->
+        UploadBytesSent _ _ (Err err) ->
             ( { model | uploadState = Failure err }, Effect.none, NoOut )
 
-        R2PutCompleted imageId token (Ok ()) ->
+        UploadBytesSent imageId token (Ok ()) ->
             ( model
             , Effect.authed (Api.commitUploadRequest imageId)
                 token
-                (Api.resolveJson Api.commitUploadDecoder >> UploadAccepted)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveJson Api.commitUploadDecoder >> UploadAccepted
+                }
             , NoOut
             )
 
@@ -431,16 +483,17 @@ updateWithEffect msg model maybeToken =
 
         UploadAccepted result ->
             case result of
+                -- ⛔ The stream opens unconditionally now. This used to branch
+                -- on whether the page held a credential, because the stream URL
+                -- was BUILT from one — so a reader without a bearer got
+                -- `uploadState = Success` and no progress. The stream carries no
+                -- credential any more; an accepted upload has a stream to watch,
+                -- and the server decides whether to serve it.
                 Ok imageId ->
-                    case maybeToken of
-                        Just token ->
-                            ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
-                            , Effect.none
-                            , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
-                            )
-
-                        Nothing ->
-                            ( { model | uploadState = Success imageId }, Effect.none, NoOut )
+                    ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
+                    , Effect.none
+                    , streamFor imageId
+                    )
 
                 Err err ->
                     ( { model | uploadState = Failure err }, Effect.none, NoOut )
@@ -624,7 +677,9 @@ updateWithEffect msg model maybeToken =
                                 { isbn = model.manualIsbn, shelfName = model.selectedShelf }
                             )
                             token
-                            (Api.confirmResponseToResult >> ConfirmCompleted)
+                            { onExpired = SessionGone
+                            , onResponse = Api.confirmResponseToResult >> ConfirmCompleted
+                            }
                         , NoOut
                         )
 
@@ -657,7 +712,11 @@ updateWithEffect msg model maybeToken =
                 Just token ->
                     Effect.authed (Api.getBookRequest workId)
                         token
-                        (Api.resolveJson Api.bookDetailResponseDecoder >> GotSameWorkBook)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.bookDetailResponseDecoder
+                                >> GotSameWorkBook
+                        }
 
                 Nothing ->
                     Effect.none
@@ -697,7 +756,11 @@ updateWithEffect msg model maybeToken =
                             { isbn = model.mergeIsbn, formatLabel = model.mergeFormatLabel }
                         )
                         token
-                        (Api.resolveJson Api.mergeFormatResponseDecoder >> MergeFormatCompleted)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.mergeFormatResponseDecoder
+                                >> MergeFormatCompleted
+                        }
                     , NoOut
                     )
 
@@ -769,8 +832,10 @@ updateWithEffect msg model maybeToken =
                             { imageId = imageId, rejectedBookIds = newRejected }
                         )
                         token
-                        (Api.resolveWhatever >> RejectIdentificationCompleted)
-                    , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> RejectIdentificationCompleted
+                        }
+                    , streamFor imageId
                     )
 
                 _ ->
@@ -798,7 +863,9 @@ updateWithEffect msg model maybeToken =
                             if model.ageGatingEnabled && model.markAdultsOnly then
                                 [ Effect.authed (Api.setBookAgeGateRequest book.id)
                                     token
-                                    (Api.resolveWhatever >> AgeGateSet)
+                                    { onExpired = SessionGone
+                                    , onResponse = Api.resolveWhatever >> AgeGateSet
+                                    }
                                 ]
 
                             else
@@ -808,7 +875,9 @@ updateWithEffect msg model maybeToken =
                     , Effect.batch
                         (Effect.authed (Api.placeBookRequest model.selectedShelf book.id)
                             token
-                            (Api.placeResponseToResult >> PlacementCompleted)
+                            { onExpired = SessionGone
+                            , onResponse = Api.placeResponseToResult >> PlacementCompleted
+                            }
                             :: ageGateEffect
                         )
                     , NoOut
@@ -816,6 +885,20 @@ updateWithEffect msg model maybeToken =
 
                 _ ->
                     ( model, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401.
+            --
+            -- ⚠️ FOUR of this page's nine authenticated requests did not route
+            -- their 401 at all before the plan demanded a msg for it: a commit,
+            -- a book read, a rejected identification and the adults-only mark
+            -- each turned an expired session into "we couldn't do that" copy on
+            -- a page that could not have done it. They all arrive here now.
+            --
+            -- The model is left alone. An upload mid-flight has a stream and a
+            -- poll behind it, and tearing those down locally would be wrong if
+            -- the deferred expiry net adopts a token another tab renewed.
+            ( model, Effect.none, SessionExpired )
 
         AgeGateSet result ->
             case result of
@@ -875,6 +958,7 @@ updateWithEffect msg model maybeToken =
                 { init
                     | ageGatingEnabled = model.ageGatingEnabled
                     , uploadState = Success item.imageId
+                    , retryable = item.retryable
                 }
                 maybeToken
 
@@ -925,14 +1009,16 @@ resolvedBookReads response =
             List.map (\bid -> ( bid, GotIdentifiedBook bid )) ids
 
 
-bookReadEffect : String -> PollResponse -> Effect Msg
+bookReadEffect : Api.Credentials -> PollResponse -> Effect Msg
 bookReadEffect token response =
     Effect.batch
         (List.map
             (\( bookId, toMsg ) ->
                 Effect.authed (Api.getBookRequest bookId)
                     token
-                    (Api.resolveJson Api.bookDetailResponseDecoder >> toMsg)
+                    { onExpired = SessionGone
+                    , onResponse = Api.resolveJson Api.bookDetailResponseDecoder >> toMsg
+                    }
             )
             (resolvedBookReads response)
         )
@@ -959,7 +1045,7 @@ placementStub =
     }
 
 
-view : Model -> Maybe String -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+view : Model -> Maybe Api.Credentials -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
 view model maybeToken inbox =
     div [ class "page page--upload" ]
         [ h1 [ class "page__title" ] [ text "Add a Book" ]
@@ -971,7 +1057,7 @@ view model maybeToken inbox =
                 Just _ ->
                     case model.step of
                         Verifying book ->
-                            viewVerifying model.ageGatingEnabled model.existingShelves book
+                            viewVerifying model.retryable model.ageGatingEnabled model.existingShelves book
 
                         ChoosingShelf book ->
                             viewChoosingShelf model book
@@ -1390,6 +1476,9 @@ failureCause cause =
         ConnectionLost ->
             "connection-lost"
 
+        PhotoDiscarded ->
+            "photo-discarded"
+
         CauseUnknown ->
             "unknown"
 
@@ -1412,6 +1501,9 @@ failureHeading cause =
         ConnectionLost ->
             "The Library Is Unreachable"
 
+        PhotoDiscarded ->
+            "That Photograph Is Gone"
+
         CauseUnknown ->
             "Something Went Wrong"
 
@@ -1433,6 +1525,9 @@ failureBody cause =
 
         ConnectionLost ->
             "We lost the connection before hearing how your photo went. Check your connection, then try again."
+
+        PhotoDiscarded ->
+            "We keep a photograph only as long as you might want another attempt at it, then delete it — so there is nothing left to read again. If a book here is wrong, take it off your shelf; a fresh photo will do the rest."
 
         CauseUnknown ->
             "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in."
@@ -1719,8 +1814,8 @@ joinWithAnd labels =
 
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
-viewVerifying : Bool -> List String -> Book -> Html Msg
-viewVerifying ageGatingEnabled existingShelves book =
+viewVerifying : Bool -> Bool -> List String -> Book -> Html Msg
+viewVerifying retryable ageGatingEnabled existingShelves book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
         , viewExistingShelvesNotice existingShelves
@@ -1753,13 +1848,46 @@ viewVerifying ageGatingEnabled existingShelves book =
                 , onClick ConfirmIdentification
                 ]
                 [ text "Yes, that's it" ]
-            , button
-                [ class "btn btn--secondary"
-                , testId "upload-reject-btn"
-                , onClick RejectIdentification
-                ]
-                [ text "No, try again" ]
+            , if retryable then
+                button
+                    [ class "btn btn--secondary"
+                    , testId "upload-reject-btn"
+                    , onClick RejectIdentification
+                    ]
+                    [ text "No, try again" ]
+
+              else
+                text ""
             ]
+
+        -- ⛔ OUTSIDE THE ACTIONS ROW, and the first attempt had it inside.
+        --
+        -- `upload-verify__actions` is a wrapping flex row, so the line sat
+        -- immediately beside "Yes, that's it" and read as that button's helper
+        -- text rather than as an account of a missing one. `flex-basis: 100%`
+        -- did not fix it: the computed style said 100% and the line still did
+        -- not wrap, because `max-width: 32rem` clamps the hypothetical main
+        -- size below the width that would force a new row. A sibling is the
+        -- structure that was wanted; the flex property was an attempt to argue
+        -- the layout out of a shape it should not have had.
+        --
+        -- ⚠️ Found by DRIVING the page. The view tests assert the DOM Elm
+        -- produces, and both the inline placement and the wrong instruction
+        -- below were invisible to them.
+        , if retryable then
+            text ""
+
+          else
+            -- SAID, NOT SILENTLY DROPPED. A control that vanishes with no
+            -- account of itself reads as a bug, and the reader cannot tell that
+            -- the photograph is what is gone rather than the feature. The
+            -- server still answers 410 if this is stale between load and click;
+            -- this is so the reader is told before pressing rather than after.
+            p
+                [ class "upload-verify__retry-unavailable"
+                , testId "upload-retry-unavailable"
+                ]
+                [ text "We no longer have the photograph, so there is nothing left to read a second time. If this is not your book, add a fresh photo rather than confirming this one." ]
         ]
 
 

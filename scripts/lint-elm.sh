@@ -93,16 +93,32 @@ step() {
 
 gate gen-elm-proto.sh
 gate check-e2e-vacuous-guards.sh
+# ⛔ `check-e2e-mock-routes.sh` MOVED TO lint-elixir.sh. Its subject is the E2E
+# specs, which is why it lived here — but its DEPENDENCY is `mix`, because it
+# enumerates the application's real routes to compare them against the mocked
+# ones. The Elm CI job has no Elixir toolchain, so the gate failed there with
+# "no mix on PATH" while passing on every developer machine, which runs it
+# inside the pinned shell. A gate that can only pass locally is worse than no
+# gate: it reports on the one machine that was never in doubt.
+#
+# ⚖️ The gate itself was RIGHT to fail rather than skip — a silent skip would
+# have turned "the toolchain was missing" into "the mocks are fine". What was
+# wrong was where it ran.
 gate check-prose-assertions.sh
 gate check-orphan-classes.sh
-gate check-admin-token-routing.sh
 gate check-session-expiry-coverage.sh
+gate check-effect-seam.sh
+gate check-one-credential-derivation.sh
+gate check-no-stored-session.sh
 gate check-component-dispatch.sh
 gate check-route-reachability.sh
 gate check-http-timeouts.sh
 gate check-ports-wired.sh
+gate check-decoder-coverage.sh
+gate check-book-adapter-coverage.sh
 gate check-css.sh
 gate check-css-values.sh
+gate check-css-contrast.sh
 
 step "elm-format --validate" npx elm-format --validate src/
 step "npm audit" npm audit

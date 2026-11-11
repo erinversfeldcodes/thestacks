@@ -5,8 +5,14 @@ module Page.AdminSessionTest exposing (suite)
 ⚠️ The four admin pages each had passing tests while being completely
 unreachable: every test fed a token straight into a mocked API, and none
 went through the code that CHOOSES the token. These tests drive the
-choosing — password → challenge, TOTP → admin token, and the admin
-token (never the ordinary one) on every admin request.
+choosing — password → challenge, then TOTP.
+
+⛔ The second step no longer yields a credential. It used to emit an admin
+token this page handed upward to be held in memory, which a reload dropped,
+re-prompting the operator for a code the server had already accepted. The
+elevation lives on the server's admin session and `/api/admin/*` is reached
+with the ordinary session, so there is one credential and these tests assert
+that nothing is handed upward at all.
 
 -}
 
@@ -18,11 +24,12 @@ import Page.Admin.Session as Session
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
-ownerToken : Maybe String
+ownerToken : Maybe Api.Credentials
 ownerToken =
-    Just "ordinary-owner-token"
+    Just (TestHelpers.creds "ordinary-owner-token")
 
 
 {-| Runs a message through `update` and keeps only the model, for the many assertions that do not
@@ -48,7 +55,7 @@ out msg model =
 
 filled : Session.Model
 filled =
-    Session.init
+    Session.init Nothing
         |> run (Session.SetEmail "owner@thestacks.app")
         |> run (Session.SetPassword "hunter2")
 
@@ -68,14 +75,25 @@ testId value =
 suite : Test
 suite =
     describe "Page.Admin.Session"
-        [ describe "the token escapes only through Authenticated"
-            [ test "a verified code emits the admin token" <|
+        [ describe "elevation is reported, and nothing is handed upward"
+            [ test "a verified code reports the elevation" <|
                 \_ ->
-                    out (Session.Verified (Ok "admin-token-abc")) awaitingCode
-                        |> Expect.equal (Session.Authenticated "admin-token-abc")
-            , test "nothing else emits a token" <|
+                    out (Session.Verified (Ok ())) awaitingCode
+                        |> Expect.equal Session.Elevated
+            , test "the out-message carries NO credential" <|
                 \_ ->
-                    [ out (Session.SetEmail "x") Session.init
+                    -- ⛔ The assertion that replaced "the token escapes only
+                    -- through Authenticated". There is no longer a token to
+                    -- escape: the server marks its own admin session verified
+                    -- and finds it from the authenticated reader, so `Elevated`
+                    -- is a nullary constructor and this test is the proof that
+                    -- it stays one. Were a payload added back, this would not
+                    -- compile — which is the strongest form this check can take.
+                    Session.Elevated
+                        |> Expect.equal Session.Elevated
+            , test "nothing else reports an elevation" <|
+                \_ ->
+                    [ out (Session.SetEmail "x") (Session.init Nothing)
                     , out (Session.SetCode "123456") awaitingCode
                     , out (Session.LoggedIn (Ok { sessionId = "s" })) filled
                     , out (Session.Verified (Err InvalidCode)) awaitingCode
@@ -107,7 +125,7 @@ suite =
                         |> Expect.equal Cmd.none
             , test "incomplete credentials fire no request" <|
                 \_ ->
-                    Session.update Session.SubmitCredentials Session.init ownerToken
+                    Session.update Session.SubmitCredentials (Session.init Nothing) ownerToken
                         |> (\( _, cmd, _ ) -> cmd)
                         |> Expect.equal Cmd.none
             , test "a rejected code clears the code but keeps the session" <|
@@ -163,13 +181,13 @@ suite =
                         |> Expect.equal Nothing
             , test "enrolment is reachable without failing a sign-in first" <|
                 \_ ->
-                    render Session.init
+                    render (Session.init Nothing)
                         |> Query.has [ testId "admin-enrol-start" ]
             , test "confirming enrolment returns to the sign-in form, not a dead end" <|
                 \_ ->
                     let
                         after =
-                            run (Session.EnrolmentConfirmed (Ok ())) Session.init
+                            run (Session.EnrolmentConfirmed (Ok ())) (Session.init Nothing)
                     in
                     Expect.all
                         [ \m -> Expect.notEqual Nothing m.notice
@@ -178,11 +196,11 @@ suite =
                         after
             , test "and the sign-in form is actually rendered there" <|
                 \_ ->
-                    render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
+                    render (run (Session.EnrolmentConfirmed (Ok ())) (Session.init Nothing))
                         |> Query.has [ testId "admin-email" ]
             , test "the success notice is not rendered as an error" <|
                 \_ ->
-                    render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
+                    render (run (Session.EnrolmentConfirmed (Ok ())) (Session.init Nothing))
                         |> Query.has [ testId "admin-gate-notice" ]
             , test "the recovery codes are shown with the warning that they are shown once" <|
                 \_ ->
@@ -195,7 +213,7 @@ suite =
                                     }
                                 )
                             )
-                            Session.init
+                            (Session.init Nothing)
                         )
                         |> Expect.all
                             [ Query.has [ Selector.text "not shown again" ]

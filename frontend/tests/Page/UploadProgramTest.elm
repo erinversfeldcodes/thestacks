@@ -39,7 +39,7 @@ covered explicitly by `uploadAdultsOnlyHiddenWhenFlagOff`.
 -}
 startUpload : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startUpload =
-    ProgramTest.start () (uploadProgram True (Just "test-token"))
+    ProgramTest.start () (uploadProgram True (Just (TestHelpers.creds "test-token")))
 
 
 {-| Helper to start an upload program with age-gating OFF (the production
@@ -47,7 +47,7 @@ default), used to prove age UI is hidden.
 -}
 startUploadAgeGatingOff : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startUploadAgeGatingOff =
-    ProgramTest.start () (uploadProgram False (Just "test-token"))
+    ProgramTest.start () (uploadProgram False (Just (TestHelpers.creds "test-token")))
 
 
 {-| Build an SSE frame exactly as the server emits it — the one wire shape
@@ -328,7 +328,7 @@ outMsgOf : Upload.Msg -> Upload.Model -> Upload.OutMsg
 outMsgOf msg model =
     let
         ( _, _, out ) =
-            Upload.update msg model (Just "test-token")
+            Upload.update msg model (Just (TestHelpers.creds "test-token"))
     in
     out
 
@@ -341,6 +341,7 @@ awaitingItem imageId bookId =
     , kind = Api.AwaitingConfirmation
     , bookIds = [ bookId ]
     , rejectionReason = Nothing
+    , retryable = True
     }
 
 
@@ -350,6 +351,7 @@ failedItem imageId reason =
     , kind = Api.Failed
     , bookIds = []
     , rejectionReason = reason
+    , retryable = True
     }
 
 
@@ -358,7 +360,7 @@ startWithInbox :
     -> ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startWithInbox items =
     ProgramTest.start ()
-        (uploadProgramWithInbox True (Just "test-token") (Types.RemoteData.Success items))
+        (uploadProgramWithInbox True (Just (TestHelpers.creds "test-token")) (Types.RemoteData.Success items))
 
 
 testIdSelector : String -> Selector.Selector
@@ -1137,11 +1139,11 @@ uploadSendFailures =
                     |> List.map (\err -> Upload.sendError err)
                     |> distinctCount
                     |> Expect.equal 3
-        , -- ⛔ Added because a probe found nothing (#374).
+        , -- ⛔ Added because a probe found nothing.
           test "a 429 on the R2 PUT keeps its status instead of becoming a network error" <|
             \() ->
                 startUpload
-                    |> ProgramTest.update (Upload.R2PutCompleted "img-test-001" "test-token" (Err (Http.BadStatus 429)))
+                    |> ProgramTest.update (Upload.UploadBytesSent "img-test-001" (TestHelpers.creds "test-token") (Err (Http.BadStatus 429)))
                     |> ProgramTest.expectViewHas
                         [ Selector.text "Too many attempts from here just now. Please wait a little while before trying again." ]
         ]

@@ -10,6 +10,7 @@ defmodule Stacks.Blog do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.CallLog
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Events
   alias Stacks.Social
@@ -216,38 +217,109 @@ defmodule Stacks.Blog do
       filter, so a reader can receive fewer than `limit` posts. That is honest for a
       feed — the alternative, over-fetching until the page is full, makes the cost
       of a request depend on how much of the corpus the reader is excluded from.
-  """
-  @spec list_public_posts(term(), keyword()) :: [Post.t()]
-  def list_public_posts(viewer, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
 
+      ⛔ What makes that honest rather than broken is the cursor, and for a long
+      time there wasn't one. A short page is fine; a short page you cannot page
+      past is a corpus with an unreachable tail. The feed read the newest 50 rows
+      and stopped there forever, so a reader blocked by the authors of those 50
+      saw an EMPTY feed with older posts they were welcome to read sitting behind
+      it, and no request could reach them.
+
+      ⚠️ `next_cursor` is therefore taken from the last row SCANNED, not the last
+      row returned. That distinction is the whole fix: a cursor derived from the
+      last VISIBLE post cannot advance past a window the reader sees none of — the
+      next request re-reads the same hidden rows and comes back empty again, which
+      is the same dead end one page further in.
+
+      The cursor is a keyset on `(published_at, id)`, not an offset: a post
+      published between two requests shifts every offset by one and makes a reader
+      see a duplicate or miss a post, whereas a keyset is stable under insertion.
+      `id` is there only as a tie-break, because `published_at` collides when posts
+      are published in the same transaction and a keyset needs a total order.
+
+      It is opaque on purpose (base64url) — clients echo it back, they do not build
+      one — and an unparseable cursor is `{:error, :invalid_cursor}` rather than a
+      silent restart from the top, which an infinite scroll would turn into a loop.
+  """
+  @feed_limit 50
+  @feed_max_limit 100
+
+  @spec page_public_posts(term(), keyword()) ::
+          {:ok, %{posts: [Post.t()], next_cursor: String.t() | nil}}
+          | {:error, :invalid_cursor}
+  def page_public_posts(viewer, opts \\ []) do
+    limit =
+      opts
+      |> Keyword.get(:limit, @feed_limit)
+      |> max(1)
+      |> min(@feed_max_limit)
+
+    with {:ok, cursor} <- decode_cursor(Keyword.get(opts, :after)) do
+      scanned =
+        feed_query()
+        |> seek_past(cursor)
+        |> limit(^limit)
+        |> Repo.all()
+        |> Repo.preload(:user)
+
+      {:ok,
+       %{
+         posts: Visibility.filter_visible(scanned, viewer),
+         next_cursor: next_cursor(scanned, limit)
+       }}
+    end
+  end
+
+  defp feed_query do
     from(p in Post,
       where: not is_nil(p.published_at) and p.visibility in ["public", "platform"],
-      order_by: [desc: p.published_at],
-      limit: ^limit
+      order_by: [desc: p.published_at, desc: p.id]
     )
-    |> Repo.all()
-    |> Repo.preload(:user)
-    |> Visibility.filter_visible(viewer)
   end
 
-  @doc """
-      Lists posts associated with a given book (by book_id), visible to the viewer.
+  defp seek_past(query, nil), do: query
 
-      Only returns published posts with visible associations.
-  """
-  @spec list_posts_for_book(String.t(), term()) :: [Post.t()]
-  def list_posts_for_book(book_id, viewer) do
-    from(p in Post,
-      join: a in PostBookAssociation,
-      on: a.post_id == p.id,
-      where: a.book_id == ^book_id and a.visible == true and not is_nil(p.published_at),
-      order_by: [desc: p.published_at],
-      distinct: true
+  defp seek_past(query, {at, id}) do
+    # A row-value comparison, so the two columns are one keyset rather than two
+    # independent predicates — `published_at <= ? AND id < ?` would drop every
+    # older post whose id happens to sort high.
+    from(p in query,
+      where:
+        fragment(
+          "(?, ?) < (?, ?)",
+          p.published_at,
+          p.id,
+          type(^at, :utc_datetime_usec),
+          type(^id, Ecto.UUID)
+        )
     )
-    |> Repo.all()
-    |> Visibility.filter_visible(viewer)
   end
+
+  # A full window means there may be more; a short one means the scan reached the
+  # end of the corpus, and a cursor then would invite one more empty request.
+  defp next_cursor(scanned, limit) when length(scanned) < limit, do: nil
+
+  defp next_cursor(scanned, _limit) do
+    last = List.last(scanned)
+    raw = "#{DateTime.to_unix(last.published_at, :microsecond)}:#{last.id}"
+    Base.url_encode64(raw, padding: false)
+  end
+
+  defp decode_cursor(blank) when blank in [nil, ""], do: {:ok, nil}
+
+  defp decode_cursor(cursor) when is_binary(cursor) do
+    with {:ok, raw} <- Base.url_decode64(cursor, padding: false),
+         [unix, id] <- String.split(raw, ":", parts: 2),
+         {micro, ""} <- Integer.parse(unix),
+         {:ok, at} <- DateTime.from_unix(micro, :microsecond),
+         {:ok, id} <- Ecto.UUID.cast(id) do
+      {:ok, {at, id}}
+    else
+      _ -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_cursor(_), do: {:error, :invalid_cursor}
 
   @doc """
       Re-evaluates all of a user's published posts against a new profile visibility ceiling.
@@ -308,10 +380,49 @@ defmodule Stacks.Blog do
   def list_associations(post_id) do
     from(a in PostBookAssociation,
       where: a.post_id == ^post_id,
-      order_by: [desc: a.confidence],
+      # ⛔ SECONDARY KEYS, or what the reader sees on a tie is undetermined.
+      # This ordered by `confidence` alone, so two rows at equal confidence
+      # came back in whatever order the plan produced — and the dedup
+      # migration's comment claimed the survivor was "the one a reader has
+      # been seeing", a determinism neither place had.
+      #
+      # ⚠️ The confidence clamp made ties the normal case for the hallucinating
+      # answer it exists to handle: every out-of-range value becomes exactly
+      # `1.0`. The same keys as the dedup, so the row that survives a collapse
+      # is the row that was on top before it.
+      order_by: [desc: a.confidence, desc: a.visible, desc: a.created_at, asc: a.id],
       preload: [:book]
     )
     |> Repo.all()
+  end
+
+  @doc """
+      How the most recent finished book-association pass for this post ended.
+
+      ⛔ **The author was never told.** Every terminal path in the association
+      worker counts itself under telemetry, which reaches a dashboard and
+      reaches the author not at all — so a post whose pass failed renders
+      exactly like one that was never tried, and the writer is left to guess
+      whether the feature is broken or their post simply has no books in it.
+
+      ⚖️ Returns `nil` when no pass has finished, which is deliberately
+      distinct from `"no_books_found"`. A draft nobody has scanned yet and a
+      completed scan that found nothing are different facts, and a reader told
+      the second when the first is true has been told something false.
+
+      ⚠️ Reads the LATEST row by creation, because the worker is retryable: an
+      earlier `llm_error` followed by a successful retry must not keep
+      reporting the failure.
+  """
+  @spec latest_association_outcome(Ecto.UUID.t()) :: String.t() | nil
+  def latest_association_outcome(post_id) do
+    from(l in CallLog,
+      where: l.post_id == ^post_id,
+      order_by: [desc: l.created_at],
+      limit: 1,
+      select: l.outcome
+    )
+    |> Repo.one()
   end
 
   @doc """
@@ -515,7 +626,75 @@ defmodule Stacks.Blog do
     assoc
     |> cast(attrs, @assoc_required_fields ++ @assoc_optional_fields)
     |> validate_required(@assoc_required_fields)
+    |> validate_uuid(:book_id)
+    # ⛔ A MALFORMED `book_id` MUST BE A CHANGESET ERROR, NOT A RAISE, AND IT
+    # WAS A RAISE.
+    #
+    # `cast/3` leaves a non-UUID string on a `:binary_id` field untouched —
+    # the type check happens at dump time — so `Repo.insert/1` raised
+    # `Ecto.ChangeError: value "the one about the house" ... does not match type
+    # :binary_id`. The worker catches `{:error, reason}` and carries on to the
+    # next association; it cannot catch that, so **one malformed id from the
+    # model took the whole job down and every other association in the same
+    # response with it.** The same failure the FK constraint below was added to
+    # prevent, arriving one layer earlier.
+    #
+    # ⚠️ Found by moving the association eval off a copy of these rules and
+    # onto the real path. The eval had been scoring a candidate-list filter in
+    # its own code, which dropped the malformed id before it could ever reach a
+    # changeset.
+
     |> validate_inclusion(:source, @assoc_valid_sources)
+    # ⛔ A CONFIDENCE OF 12.0 WOULD HAVE BEEN STORED AND SHOWN TO THE AUTHOR.
+    #
+    # The sibling column `discovered_sources.confidence` has had exactly this
+    # validation since it was added; this one, added later, did not — so the
+    # only bound was a clamp inside the JSON parser, which is correct for the
+    # model's answer and silent about every other writer. The range is a fact
+    # about the column, so it is also a CHECK at the database now.
+    |> validate_number(:confidence, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
+    |> check_constraint(:confidence,
+      name: :post_book_associations_confidence_in_range,
+      message: "must be between 0 and 1"
+    )
+    # ⛔ A BOOK THAT DOES NOT EXIST IS AN ANSWER, NOT A CRASH.
+    #
+    # Without these the FK violation RAISES `Ecto.ConstraintError`, and the
+    # likeliest failure of an LLM association is exactly this: the model names
+    # a book id that is not in the catalogue. The association worker catches
+    # `{:error, reason}` and carries on to the next association — it cannot
+    # catch a raise, so one hallucinated id took the whole job down and the
+    # other associations in the same response with it.
+    #
+    # ⚖️ `post_id` is here for symmetry rather than because it is reachable
+    # today: a post deleted between the worker reading it and writing the
+    # association is the same shape of race, and leaving one side unguarded
+    # invites the question of why.
+    |> foreign_key_constraint(:book_id)
+    |> foreign_key_constraint(:post_id)
+    |> unique_constraint([:post_id, :book_id],
+      name: :post_book_associations_post_id_book_id_index,
+      message: "already associated with this post"
+    )
+
+    # ⛔ THE SAME LESSON AS THE FK ABOVE, ONE CONSTRAINT ALONG. A model naming
+    # the same book twice is as likely as one naming a book that does not
+    # exist — likelier, for a post that discusses one book in two registers —
+    # and without this the unique index RAISES, taking the whole job down and
+    # the other associations in the same response with it. The worker handles
+    # `{:error, changeset}` and carries on; it cannot handle a raise.
+  end
+
+  # ⚖️ Validates rather than casts, so the failure is a readable message on the
+  # field instead of a dump-time raise. `Ecto.UUID.cast/1` is the same check
+  # Ecto would eventually apply; doing it here is what makes it catchable.
+  defp validate_uuid(changeset, field) do
+    validate_change(changeset, field, fn ^field, value ->
+      case Ecto.UUID.cast(value) do
+        {:ok, _} -> []
+        :error -> [{field, "is not a valid identifier"}]
+      end
+    end)
   end
 
   defp check_ownership(%Post{user_id: owner_id}, %{id: user_id})

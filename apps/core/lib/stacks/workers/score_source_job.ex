@@ -10,10 +10,11 @@ defmodule Stacks.Workers.ScoreSourceJob do
       Sources scoring above 0.8 are logged for platform owner review.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 
+  alias Stacks.AI.Budget
   alias Stacks.Discovery
 
   @impl true
@@ -28,7 +29,36 @@ defmodule Stacks.Workers.ScoreSourceJob do
     end
   end
 
+  # ⛔ THIS PATH SPENT REAL MONEY AND WAS METERED NOWHERE.
+  #
+  # `Budget` had exactly one caller — `Stacks.AI.Client` passing
+  # `:modal` — so the Together completions ran with no ceiling and no record.
+  # A runaway queue could bill without limit, and nothing afterwards could say
+  # how much it had cost, because nothing was counting.
+  #
+  # ⚠️ The CHECK lives here; the CHARGE lives in the client, which is where the
+  # response and its token usage are. Charging from the caller would mean
+  # charging a guess — and meant every other caller of the same client went
+  # unmetered.
   defp score_source(source) do
+    case Budget.check_budget(:together) do
+      {:error, limit} ->
+        # ⚖️ Discarded rather than retried, deliberately. A budget ceiling is
+        # not a transient fault: retrying it burns attempts against a limit
+        # that will not move until the period does, and `{:error, …}` from a
+        # worker is what Oban retries.
+        Logger.warning(
+          "ScoreSourceJob: not scoring #{source.id} — the together budget is spent (#{limit})"
+        )
+
+        {:cancel, limit}
+
+      :ok ->
+        call_and_meter(source)
+    end
+  end
+
+  defp call_and_meter(source) do
     client = together_client()
 
     prompt = build_scoring_prompt(source)
@@ -37,6 +67,16 @@ defmodule Stacks.Workers.ScoreSourceJob do
       {:ok, response} ->
         confidence = parse_confidence(response)
         persist_confidence(source, confidence)
+
+      # ⚖️ The client refuses a spent budget too, now that the check sits beside
+      # the charge. Mapping it here as well keeps the Oban outcome right
+      # whichever layer notices first.
+      {:error, {:budget_exceeded, limit}} ->
+        Logger.warning(
+          "ScoreSourceJob: not scoring #{source.id} — the together budget is spent (#{limit})"
+        )
+
+        {:cancel, limit}
 
       {:error, reason} ->
         Logger.warning("ScoreSourceJob: LLM scoring failed for #{source.id}: #{inspect(reason)}")

@@ -41,7 +41,7 @@ pileEndpoint =
 
 startPile : ProgramTest.ProgramTest TestHelpers.ReadingPileTestModel ReadingPile.Msg (ProgramTest.SimulatedEffect ReadingPile.Msg)
 startPile =
-    ProgramTest.start () (readingPileProgram (Just "test-token"))
+    ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "test-token")))
 
 
 {-| A piled book, addressable in the DOM by the title it renders.

@@ -27,6 +27,7 @@ Completion persists server-side, so a reload does not re-run the flow.
 
 import Api exposing (OnboardingStatus)
 import Browser.Dom
+import Effect
 import Html exposing (Html, button, div, h2, p, span, text)
 import Html.Attributes exposing (attribute, class, id, tabindex)
 import Html.Events exposing (onClick, preventDefaultOn)
@@ -88,6 +89,7 @@ type OutMsg
 
 type Msg
     = StatusLoaded (Result Http.Error OnboardingStatus)
+    | SessionExpiryDetected
     | StepCompleted
     | NextStep
     | SkipOnboarding
@@ -140,9 +142,15 @@ init =
 the right step rather than always from Welcome. Call from the parent's init when
 a token is available.
 -}
-initCmd : String -> Cmd Msg
+initCmd : Api.Credentials -> Cmd Msg
 initCmd token =
-    Api.getOnboardingStatus token StatusLoaded
+    Effect.perform
+        (Effect.authed Api.onboardingStatusRequest
+            token
+            { onExpired = SessionExpiryDetected
+            , onResponse = Api.resolveJson Api.onboardingStatusDecoder >> StatusLoaded
+            }
+        )
 
 
 {-| Whether the overlay wants to render. `Main` combines this with its own
@@ -197,9 +205,12 @@ isLastIndex model =
     model.currentIndex >= List.length model.steps - 1
 
 
-update : Maybe String -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+update : Maybe Api.Credentials -> Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update token msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         StatusLoaded (Ok status) ->
             if status.completed then
                 ( { model | visible = False }, Cmd.none, NoOut )
@@ -294,7 +305,7 @@ update token msg model =
 the identical finish path Skip/Escape use. Records the step being LEFT if it has
 a server counterpart.
 -}
-advance : Maybe String -> Model -> ( Model, Cmd Msg, OutMsg )
+advance : Maybe Api.Credentials -> Model -> ( Model, Cmd Msg, OutMsg )
 advance token model =
     let
         recordCmd =
@@ -310,7 +321,7 @@ advance token model =
         )
 
 
-finishNow : Maybe String -> Model -> ( Model, Cmd Msg, OutMsg )
+finishNow : Maybe Api.Credentials -> Model -> ( Model, Cmd Msg, OutMsg )
 finishNow token model =
     ( { model | visible = False }, recordCurrentStep token model, OnboardingFinished )
 
@@ -329,11 +340,17 @@ focusElementCmd elementId =
     Task.attempt (\_ -> FocusResult) (Browser.Dom.focus elementId)
 
 
-recordCurrentStep : Maybe String -> Model -> Cmd Msg
+recordCurrentStep : Maybe Api.Credentials -> Model -> Cmd Msg
 recordCurrentStep maybeToken model =
     case ( maybeToken, Maybe.andThen backendStepName (currentStep model) ) of
         ( Just token, Just name ) ->
-            Api.completeOnboardingStep name token (\_ -> StepCompleted)
+            Effect.perform
+                (Effect.authed (Api.completeOnboardingStepRequest name)
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = \_ -> StepCompleted
+                    }
+                )
 
         _ ->
             Cmd.none
@@ -410,7 +427,7 @@ mapUploadOut upOut =
             SessionExpired
 
 
-view : Model -> Maybe String -> Html Msg
+view : Model -> Maybe Api.Credentials -> Html Msg
 view model maybeToken =
     if not model.visible then
         text ""
@@ -505,7 +522,7 @@ ariaLabelFor maybeStep =
 list. NO per-step transition logic — this is a pure render of whichever
 descriptor the index points at.
 -}
-viewStep : Model -> Maybe String -> Html Msg
+viewStep : Model -> Maybe Api.Credentials -> Html Msg
 viewStep model maybeToken =
     case currentStep model of
         Just Welcome ->
@@ -537,7 +554,7 @@ viewWelcome =
         ]
 
 
-viewUpload : Model -> Maybe String -> Html Msg
+viewUpload : Model -> Maybe Api.Credentials -> Html Msg
 viewUpload model maybeToken =
     div [ class "onboarding-overlay__step" ]
         [ h2 [ class "onboarding-overlay__title" ] [ text "Add your first book" ]

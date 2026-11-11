@@ -103,7 +103,7 @@ install-python-dev:
 # Run all tests
 test: test-elixir test-elm test-rust test-python test-dbt
 
-# Fail if the flake's Elixir/OTP has drifted from .versions (Issue #300).
+# Fail if the flake's Elixir/OTP has drifted from .versions.
 version-drift:
     scripts/check-version-drift.sh
 
@@ -207,7 +207,7 @@ db-reset:
 # Run this in the MAIN checkout after merging anything that touched a .proto file.
 # Most generated artefacts are gitignored, so a stale tree looks clean in `git status`
 # and only announces itself as a gate failure — in three groups at once, since the
-# Elixir and Python suites compile against the stale code (Issue #354).
+# Elixir and Python suites compile against the stale code.
 #
 # `just bootstrap-worktree` does this for a worktree; this is the main-checkout door.
 regen-proto:
@@ -221,7 +221,7 @@ regen-proto:
 #
 # The codegen itself is `regen-proto` — one list of generators, so this recipe cannot
 # fall behind it. (It did: this used to run four of the five, omitting the Python
-# target, which is exactly the artefact Wave 5 tripped over.)
+# target — and the Python target is the one that then failed a `just ci` run.)
 proto-sync-all: regen-proto
     #!/usr/bin/env bash
     set -euo pipefail
@@ -298,7 +298,28 @@ check-route-clients *ARGS:
 #   just eval-vision <url>            # score against the baseline
 #   just eval-vision <url> --record   # pin today's score as the new baseline
 eval-vision URL="" *ARGS:
-    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" mix eval.vision {{ARGS}}
+    # ⛔ Through `just run`, never bare. A non-interactive shell gets neither
+    # direnv nor nix on PATH, so a bare `mix` silently falls back to a SYSTEM
+    # Elixir — and compiling `_build` with one toolchain then loading those
+    # beams under the pinned one corrupts it (`corrupt atom table` on core
+    # modules). This recipe is the one place a reader would copy the
+    # invocation from.
+    @VISION_SERVICE_URL="{{ if URL == "" { env_var_or_default("VISION_SERVICE_URL", "") } else { URL } }}" just run mix eval.vision {{ARGS}}
+
+# Score the blog post-book association pass against its labelled corpus.
+#
+# ⛔ REPLAY BY DEFAULT — no provider, no GPU, no network. The corpus holds a
+# recorded model response per post, so this scores OUR half: the decoder, the id
+# mapping, the de-duplication, the refusal of books that are not in the
+# catalogue. That is the half that broke in production twice (an unstripped
+# Markdown fence, and a 500-character cap cutting the JSON mid-object) and
+# neither needed a model to find.
+#
+#   just eval-associations                    # the whole corpus
+#   just eval-associations --stratum fence    # one stratum
+#   just eval-associations --verbose          # every item
+eval-associations *ARGS:
+    @just run mix eval.associations {{ARGS}}
 
 # Lint changed migrations with squawk
 squawk:
@@ -479,7 +500,7 @@ lock-vision:
     '
     echo "Regenerated apps/vision/requirements.lock + requirements-dev.lock"
 
-# Local observability stack (ADR-021 / Epic #249): VictoriaMetrics + anonymous
+# Local observability stack: VictoriaMetrics + anonymous
 # Grafana so you can SEE the public dashboards populate with real data. Run
 # alongside Phoenix started with METRICS_SCRAPE_TOKEN=local-dev-metrics-token.
 # Grafana (no login): http://localhost:3010 · VictoriaMetrics: http://localhost:8428
@@ -519,7 +540,7 @@ local-stack-up:
 local-stack-down:
     docker compose -f deploy/local/docker-compose.yml down
 
-# Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement): evaluates
+# Dashboard RENDER gate: evaluates
 # EVERY dashboard panel's real PromQL against a live VictoriaMetrics (seeded with
 # synthesized well-formed data) and fails on any blank panel or malformed query.
 # Deterministic; complements the CI preview VM emission smoke (real emission fidelity).
@@ -532,8 +553,8 @@ render-gate:
 # items). Exists because campaign-level completion used to be prose an agent asserted
 # and a human had to challenge — twice, wrongly. Ask the tree, not the agent.
 #   just wave-status                          # newest campaign
-#   just wave-status staff-campaign-2026-07-27
-#   just wave-status staff-campaign-2026-07-27 --next
+#   just wave-status <campaign-slug>
+#   just wave-status <campaign-slug> --next
 wave-status *ARGS:
     @bash scripts/wave-status.sh {{ARGS}}
 
@@ -548,7 +569,11 @@ campaign-residue:
 # Run the project-tools MCP server's own test suite. These tests existed for
 # months with NO caller anywhere — green by definition, catching nothing.
 test-mcp:
-    @bash scripts/test-mcp.sh 2>&1 | tail -3
+    # NOT piped. A just recipe line runs under `sh -cu` with no `pipefail`, so
+    # piping to `tail` made the recipe exit with tail's status: the suite printed
+    # its failure and `just test-mcp` reported success. Trimming the output was
+    # never worth reporting the opposite of the result.
+    @bash scripts/test-mcp.sh
 
 # Lint ONE migration file through squawk with the project's config — the
 # manual sibling of the security-squawk CI gate, for trying a migration

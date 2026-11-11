@@ -35,7 +35,7 @@ data *can* be public.
     (e.g. "isbn_not_found rate this hour"). Prometheus — not app-side ETS — because it already does
     multi-machine global aggregation + retention; ETS would be per-machine and reset on deploy
     (wrong, flickering numbers). See Alternatives.
-  - **durable totals / ratios** — from **public-safe dbt marts** (`wh.mart_public_transparency`):
+  - **durable totals / ratios** — from **public-safe dbt marts** (`marts.mart_public_transparency`):
     total books, % age-gated, aggregate cost, exports/deletions, etc. Prometheus counters reset and
     can't total; marts are the durable source.
 - Delivered by a **public transparency API** (#241): `GET /api/transparency/metrics` → `{live, durable}`.

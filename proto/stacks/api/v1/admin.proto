@@ -7,6 +7,8 @@ syntax = "proto3";
 
 package stacks.api.v1;
 
+import "stacks/common/v1/costs.proto";
+
 // ─── Admin Metrics Dashboard (GET /api/metrics) ─────────────────────────
 
 // SystemHealth mirrors Stacks.Admin.Metrics.system_health/0 fallback shape.
@@ -57,8 +59,12 @@ message GdprCompliance {
   string generated_at = 3 [json_name = "generated_at"];
 }
 
-// QualityTrendRow is one row from wh.mart_data_quality_trend.
-// Columns match the dbt mart: snapshot_date, counts, and percentages.
+// QualityTrendRow is one row from a daily data-quality snapshot.
+// ⚠️ The mart this described (`wh.mart_data_quality_trend`) was DELETED on
+// 2026-10-15 as an orphan: nothing read it. This message therefore has no
+// backing table, and the field numbers below are reserved forever whether or
+// not it is ever repopulated. Do not implement against it expecting the mart to
+// exist — rebuild the mart first, or delete this message.
 message QualityTrendRow {
   // Date of the daily quality snapshot (YYYY-MM-DD).
   string snapshot_date = 1 [json_name = "snapshot_date"];
@@ -171,7 +177,23 @@ message CostItem {
   string description = 2 [json_name = "description"];
 
   // Cost amount in US cents.
+  //
+  // Meaningful only when basis is MEASURED or RATE_CARD. When basis is
+  // COST_BASIS_ABSENT this carries no figure and a client must not render it —
+  // see the enum.
   int32 amount_cents = 3 [json_name = "amount_cents"];
+
+  // How this figure was arrived at.
+  //
+  // A page that shows a number without saying where it came from invites the
+  // reader to assume it was measured. This field is what lets the page say
+  // which lines are measurements and which are rate-card arithmetic, per line
+  // rather than in one blanket claim at the bottom.
+  stacks.common.v1.CostBasis basis = 4 [json_name = "basis"];
+
+  // When the figure was last refreshed, RFC3339. Empty when basis is
+  // COST_BASIS_ABSENT, because there is no refresh to report.
+  string refreshed_at = 5 [json_name = "refreshed_at"];
 }
 
 // CostCategory groups cost items by category.
@@ -180,8 +202,22 @@ message CostCategory {
   // Category name (e.g. "hosting", "compute", "database").
   string category = 1 [json_name = "category"];
 
-  // Sum of amount_cents for all items in this category.
+  // Sum of amount_cents for the items in this category that HAVE a figure —
+  // lines whose basis is COST_BASIS_ABSENT are excluded.
+  //
+  // ⛔ Summing an absent line would reintroduce, at the header, the defect the
+  // basis field removes at the line: on a live stack the Compute category held
+  // one measured line and one unmeasured one and printed "$0.00", which is the
+  // same false claim a reader who never scrolls would take away.
   int32 total_cents = 2 [json_name = "total_cents"];
+
+  // How many lines in this category have no figure for the period.
+  //
+  // ⚖️ A count rather than a nullable total: a category with two measured lines
+  // and one absent one DOES have a defensible subtotal, it is merely
+  // incomplete. Withholding it would tell the reader less than saying "this
+  // much, and one line we could not measure".
+  int32 unmeasured_count = 4 [json_name = "unmeasured_count"];
 
   // Individual cost line items in this category.
   repeated CostItem items = 3 [json_name = "items"];

@@ -32,13 +32,25 @@ defmodule StacksWeb.ProtoJSONTest do
 
       result = ProtoJSON.book(book, community_read_count: 42)
 
+      # ⛔ `language` and `bisac_codes` are NOT here, and this golden assertion is
+      # the test that caught their removal — which is what a golden snapshot is
+      # for. Both were serialised, decoded by the generated proto decoder, and
+      # then dropped by `Types.Book.fromProtoBook`, so no client ever held
+      # either one. Removed on a measurement rather than a preference: the only
+      # writer of `books.language` in the tree is `seeds.exs` (169 of 169 local
+      # rows "en", 55 of 55 production rows NULL), and `bisac_codes` already
+      # reaches its only consumer through the insights endpoint while the
+      # reader-facing form on a book page is `subjects`.
+      #
+      # ⚠️ `community_read_count` IS still here and is still unread by the
+      # adapter — it has a per-request warehouse query behind it and a separate
+      # owner. `scripts/check-book-adapter-coverage.sh` names it as the one
+      # declared exception, so it is a decision on record rather than a silence.
       assert result == %{
                id: book.id,
                title: book.title,
                description: book.description,
-               language: book.language,
                subjects: ["fiction", "philosophy"],
-               bisac_codes: book.bisac_codes,
                visibility_tier: "public",
                author: %{
                  id: author.id,
@@ -75,11 +87,37 @@ defmodule StacksWeb.ProtoJSONTest do
              }
     end
 
-    test "defaults community_read_count to 0" do
+    test "OMITS community_read_count when no count was measured" do
+      # ⚠️ This asserted `== 0` and was asserting the defect.
+      #
+      # `Books.community_read_count/1` answers `{:ok, n} | :error`, and `:error`
+      # — a missing mart, a revoked `marts` grant, a query error — is
+      # NOT zero. Defaulting the option to 0 here turned every one of those
+      # states into the same confident number a reader would see for a book
+      # nobody has read.
+      #
+      # The key is left out instead, which is this project's standing
+      # preference: an absent key beats a lying one.
       book = insert(:book, author: nil)
       book = %{book | editions: []}
 
       result = ProtoJSON.book(book)
+
+      refute Map.has_key?(result, :community_read_count),
+             "no count was supplied, so the key must be absent rather than 0 — 0 is a " <>
+               "measurement, and this is the absence of one"
+    end
+
+    test "carries community_read_count when a real count WAS measured" do
+      # The positive control. Without it the refute above is satisfied by a
+      # serializer that has stopped emitting the field at all.
+      book = insert(:book, author: nil)
+      book = %{book | editions: []}
+
+      result = ProtoJSON.book(book, community_read_count: 0)
+
+      assert Map.has_key?(result, :community_read_count),
+             "a measured count must reach the payload, including a genuine zero"
 
       assert result.community_read_count == 0
     end
@@ -465,8 +503,39 @@ defmodule StacksWeb.ProtoJSONTest do
                personal_rating: 4,
                notes: placement.notes,
                visibility: "owner",
-               bookshelf_visibility: "owner"
+               bookshelf_visibility: "owner",
+               reading_status: placement.reading_status,
+               current_page: placement.current_page
              }
+    end
+
+    test "⛔ carries the reading progress the book-detail card is built from" do
+      # ⛔ Asserted on its own rather than only as part of the shape above,
+      # because the absence of these two keys was not a cosmetic omission: the
+      # progress card is built from this payload, so it rendered "To Read" for a
+      # reader partway through a book, and saving the card wrote `to_read` back
+      # over the real status. The row was loaded and serialised all along — the
+      # response shape dropped it.
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          reading_status: "reading",
+          current_page: 150
+        )
+        |> Core.Repo.preload(:bookshelf)
+
+      result = ProtoJSON.book_placement(placement)
+
+      assert result.reading_status == "reading",
+             "the payload must carry the real reading status, not let the client default it"
+
+      assert result.current_page == 150,
+             "the payload must carry how far through the book the reader is"
     end
 
     test "emits placement visibility and parent bookshelf visibility independently" do
@@ -559,6 +628,7 @@ defmodule StacksWeb.ProtoJSONTest do
                profile_visibility: "platform",
                age_verified: true,
                consent_analytics: true,
+               consent_writing_assistant: false,
                country_code: "ZA",
                city: "Cape Town",
                website_url: "https://alice.example",
@@ -567,6 +637,56 @@ defmodule StacksWeb.ProtoJSONTest do
                pending_email_sent_at: nil,
                next_onboarding_step: "profile"
              }
+    end
+
+    test "⛔ carries consent_writing_assistant, whose ABSENCE withdrew a consent" do
+      # ⛔ The field was omitted from this payload while the client decoded it
+      # anyway, and a proto3 `bool` has IMPLICIT PRESENCE — so the omission
+      # arrived as `false`, indistinguishable from a stored `false`. There is no
+      # literal default in the source to notice, which is why this hid where the
+      # equivalent reading-status defect did not.
+      #
+      # ⚠️ Not a display bug. `Main.elm` seeds the privacy toggles from THIS
+      # payload and the settings fetch corrects them only once it resolves, so a
+      # save inside that window — or after a failed fetch — submitted `false`
+      # and withdrew a GDPR consent the reader had granted.
+      #
+      # ⛔ Asserted TRUE, not merely present. A presence check passes against the
+      # bug: the key would be there with the wrong value, which is the whole
+      # defect. The granted consent has to survive the round trip.
+      granted = insert(:user, consent_writing_assistant: true)
+
+      assert ProtoJSON.user(granted).consent_writing_assistant == true,
+             "a granted writing-assistant consent did not survive serialisation, so the " <>
+               "privacy toggles will seed from `false` and a save will withdraw it"
+
+      withheld = insert(:user, consent_writing_assistant: false)
+      assert ProtoJSON.user(withheld).consent_writing_assistant == false
+    end
+
+    test "⛔ a user EMBEDDED as a listing's seller does NOT carry the consent flag" do
+      # ⛔ The direction the fix had to avoid, pinned through the only public
+      # path that reaches the embed shape. `@user_embed_fields` is built from
+      # `@user_core_fields`, so adding the consent flag to the core list — the
+      # convenient place, right next to `consent_analytics` — would have
+      # published it on every listing page. It went into `@user_auth_fields`
+      # instead, which is the caller's OWN record.
+      #
+      # ⚠️ This is the assertion that would have caught my first attempt: I did
+      # add it to the core list, and only the comment two lines above it said
+      # why that was wrong. A comment is not a gate.
+      seller = insert(:user, consent_writing_assistant: true)
+      listing = insert(:listing, seller: seller)
+
+      embedded = ProtoJSON.listing(Core.Repo.preload(listing, :seller)).seller
+
+      refute Map.has_key?(embedded, :consent_writing_assistant),
+             "a listing's seller carries their writing-assistant consent, which puts a " <>
+               "consent flag on somebody else's page"
+
+      refute Map.has_key?(embedded, :pending_email),
+             "the embed shape widened — if this fails, something was added to the CORE list " <>
+               "that belongs in the auth list"
     end
 
     test "carries a pending email change but neither of its credentials" do
@@ -622,6 +742,14 @@ defmodule StacksWeb.ProtoJSONTest do
                syndicated: true
              }
     end
+
+    # ⚖️ `association_outcome` IS DELIBERATELY ABSENT FROM THIS SERIALIZER, and
+    # the exact-shape assertion above is what holds it out. It shipped here as a
+    # projected field and moved to `BlogPostShowResponse`, because it is the
+    # result of the most recent pass OVER a post rather than an attribute of it.
+    # Its behaviour is asserted where it now lives — in the controller's
+    # envelope cases — and a regression that put it back on the post would red
+    # the shape test rather than pass quietly.
 
     test "carries the syndicated flag — the take-list drops what it does not name" do
       user = insert(:user)
@@ -832,11 +960,39 @@ defmodule StacksWeb.ProtoJSONTest do
       refute Map.has_key?(result.book, :editions)
 
       assert result.seller.id == seller.id
-      assert result.seller.email == seller.email
       assert result.seller.display_name == "Alice"
-      assert result.seller.role == seller.role
-      assert Map.has_key?(result.seller, :created_at)
-      assert Map.has_key?(result.seller, :updated_at)
+
+      # ⛔ These assertions were INVERTED, and the originals are why the
+      # exposure survived: they pinned a seller's account email, role,
+      # consent flag and timestamps as the contract of a payload served to
+      # ANONYMOUS callers. `GET /api/listings` and `/listings/:id` sit in the
+      # router's "Anonymous reads" scope, so this is what an unauthenticated
+      # request received — measured through the controller before the change:
+      #
+      #     seller.email == the real account address  -> true
+      #     profile_visibility                        -> "owner"
+      #
+      # i.e. the email was served even for a seller who had chosen the most
+      # private profile setting available. `Gen.listing` carries `contact_info`
+      # as the deliberate way to reach a seller, and nothing in `frontend/` or
+      # `e2e/` read the embedded email.
+      #
+      # ⚠️ A test pinning a defect as contract is the hardest kind to notice,
+      # because changing it looks like breaking something.
+      refute Map.has_key?(result.seller, :email),
+             "a seller's account email is served to anonymous callers on an enumerable index"
+
+      refute Map.has_key?(result.seller, :consent_analytics),
+             "a seller's analytics consent flag is nobody else's business"
+
+      refute Map.has_key?(result.seller, :age_verified),
+             "whether a seller verified their age is not part of a listing"
+
+      refute Map.has_key?(result.seller, :profile_visibility),
+             "a seller's own privacy setting is not part of a listing"
+
+      refute Map.has_key?(result.seller, :role),
+             "the embed should not disclose which accounts are privileged"
     end
 
     test "listing/1 includes all expected scalar fields and embedded book/seller" do
@@ -980,7 +1136,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert Enum.map(result.bookshelves, & &1.name) == ["library", "wishlist"]
     end
 
-    test "coalesces a nil display_name to \"\" (guards the #210 null-decode bug)" do
+    test "coalesces a nil display_name to \"\" (guards the null-decode bug)" do
       user = insert(:user, handle: "nameless", display_name: nil)
 
       result = ProtoJSON.public_profile(user, [])

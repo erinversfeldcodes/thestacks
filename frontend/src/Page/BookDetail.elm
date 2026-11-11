@@ -16,6 +16,7 @@ module Page.BookDetail exposing
     )
 
 import Api
+import Api.Url
 import Browser.Dom
 import Components.AgeGate exposing (ageGate)
 import Components.AuthorCard as AuthorCard
@@ -92,6 +93,7 @@ type alias Model =
     , finishedReadPrompt : Bool
     , coverFailed : Bool
     , undoableRemoval : Maybe { placementId : String, bookTitle : String }
+    , myWriting : List Api.MyWriting
     }
 
 
@@ -154,9 +156,11 @@ type Msg
     | FocusWrapToLast
     | FocusOn String
     | FocusWrapNoOp
+    | SessionGone
+    | SessionGoneMidSave
 
 
-init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
+init : String -> Maybe Api.Credentials -> Maybe Route -> ( Model, Cmd Msg )
 init bookId maybeToken maybePreviousRoute =
     let
         ( model, effect ) =
@@ -167,7 +171,7 @@ init bookId maybeToken maybePreviousRoute =
 
 {-| `init`, with its effects as data — see `updateWithEffect`.
 -}
-initWithEffect : String -> Maybe String -> Maybe Route -> ( Model, Effect Msg )
+initWithEffect : String -> Maybe Api.Credentials -> Maybe Route -> ( Model, Effect Msg )
 initWithEffect bookId maybeToken maybePreviousRoute =
     ( { book = Loading
       , placement = Nothing
@@ -208,16 +212,20 @@ initWithEffect bookId maybeToken maybePreviousRoute =
       , finishedReadPrompt = False
       , coverFailed = False
       , undoableRemoval = Nothing
+      , myWriting = []
       }
     , Effect.batch
         [ Effect.public (Api.getBookRequest bookId)
             maybeToken
+            Nothing
             (Api.resolveJson Api.bookDetailResponseDecoder >> BookLoaded)
         , Effect.public (availabilityRequest bookId)
             maybeToken
+            Nothing
             (Api.resolveJson availabilityDecoder >> AvailabilityLoaded)
         , Effect.public (pricesRequest bookId)
             maybeToken
+            Nothing
             (Api.resolveJson pricesDecoder >> PricesLoaded)
         ]
     )
@@ -228,8 +236,8 @@ initWithEffect bookId maybeToken maybePreviousRoute =
 availabilityRequest : String -> Api.RequestSpec
 availabilityRequest bookId =
     { method = "GET"
-    , url = "/api/books/" ++ bookId ++ "/availability"
-    , body = Nothing
+    , url = Api.Url.path [ "api", "books", bookId, "availability" ] []
+    , body = Api.NoBody
     }
 
 
@@ -252,8 +260,8 @@ availabilityDecoder =
 pricesRequest : String -> Api.RequestSpec
 pricesRequest bookId =
     { method = "GET"
-    , url = "/api/books/" ++ bookId ++ "/prices"
-    , body = Nothing
+    , url = Api.Url.path [ "api", "books", bookId, "prices" ] []
+    , body = Api.NoBody
     }
 
 
@@ -268,7 +276,7 @@ A book with no placement is on no shelf at all, and a signed-out reader cannot
 be shown their own rows, so both send nothing rather than an unusable request.
 
 -}
-fetchShelfRows : Maybe Placement -> String -> Maybe String -> Effect Msg
+fetchShelfRows : Maybe Placement -> String -> Maybe Api.Credentials -> Effect Msg
 fetchShelfRows maybePlacement bookshelfName maybeToken =
     case ( maybePlacement, maybeToken ) of
         ( Just _, Just token ) ->
@@ -278,7 +286,9 @@ fetchShelfRows maybePlacement bookshelfName maybeToken =
             else
                 Effect.authed (Api.getBookshelfRequest bookshelfName)
                     token
-                    (Api.resolveJson bookshelfResponseDecoder >> ShelfRowsLoaded)
+                    { onExpired = SessionGone
+                    , onResponse = Api.resolveJson bookshelfResponseDecoder >> ShelfRowsLoaded
+                    }
 
         _ ->
             Effect.none
@@ -448,7 +458,7 @@ firstAvailableBookshelf current =
         |> Maybe.withDefault "antilibrary"
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     let
         ( newModel, effect, out ) =
@@ -465,7 +475,7 @@ the same value. `update` is this composed with `Effect.perform`; nothing else
 differs between them.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model maybeToken =
     case msg of
         BookLoaded result ->
@@ -525,11 +535,13 @@ updateWithEffect msg model maybeToken =
                         , previousVisibility = placementVisibility
                         , shelfCeiling = shelfCeiling
                         , progressCard = progressCard
+                        , myWriting = response.myWriting
                       }
                     , Effect.batch
                         [ case response.book.author of
                             Just author ->
                                 Effect.public (Api.getAuthorEventsRequest author.id)
+                                    Nothing
                                     Nothing
                                     (Api.resolveJson Api.authorEventsDecoder >> GotAuthorEvents)
 
@@ -612,7 +624,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | bookshelfMoverOpen = False, moveState = Loading }
                     , Effect.authed (Api.moveBookRequest placement.id model.selectedBookshelf)
                         token
-                        (Api.moveResponseToResult >> MoveCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.moveResponseToResult >> MoveCompleted
+                        }
                     , NoOut
                     )
 
@@ -658,7 +672,11 @@ updateWithEffect msg model maybeToken =
                     ( { model | bookshelfMoverOpen = False, moveState = Loading }
                     , Effect.authed (Api.placeBookRequest model.selectedBookshelf book.id)
                         token
-                        (Api.placeResponseToResult >> PlaceCompleted model.selectedBookshelf)
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.placeResponseToResult
+                                >> PlaceCompleted model.selectedBookshelf
+                        }
                     , NoOut
                     )
 
@@ -702,7 +720,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | removeModalOpen = False, removeState = Loading }
                     , Effect.authed (Api.removeBookRequest placement.id)
                         token
-                        (Api.resolveWhatever >> RemoveCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> RemoveCompleted
+                        }
                     , NoOut
                     )
 
@@ -733,7 +753,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | removingPlacementId = Just placementId }
                     , Effect.authed (Api.removeBookRequest placementId)
                         token
-                        (Api.resolveWhatever >> PlacementRemoved placementId)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> PlacementRemoved placementId
+                        }
                     , NoOut
                     )
 
@@ -845,7 +867,9 @@ updateWithEffect msg model maybeToken =
                         ( { model | shelfMoveState = Loading }
                         , Effect.authed (Api.movePlacementToShelfRequest placement.id model.selectedShelfId)
                             token
-                            (Api.shelfMoveResponseToResult >> ShelfMoveCompleted)
+                            { onExpired = SessionGone
+                            , onResponse = Api.shelfMoveResponseToResult >> ShelfMoveCompleted
+                            }
                         , NoOut
                         )
 
@@ -900,7 +924,10 @@ updateWithEffect msg model maybeToken =
                                 (List.map formatToString newFormats)
                             )
                             token
-                            (Api.resolveJson Api.placementFormatsDecoder >> FormatsUpdated)
+                            { onExpired = SessionGone
+                            , onResponse =
+                                Api.resolveJson Api.placementFormatsDecoder >> FormatsUpdated
+                            }
                         , NoOut
                         )
 
@@ -954,7 +981,11 @@ updateWithEffect msg model maybeToken =
                         , Effect.authed
                             (Api.updatePlacementVisibilityRequest placement.id (Visibility.toString vis))
                             token
-                            (Api.resolveJson Api.storedVisibilityDecoder >> PlacementVisibilityUpdated)
+                            { onExpired = SessionGone
+                            , onResponse =
+                                Api.resolveJson Api.storedVisibilityDecoder
+                                    >> PlacementVisibilityUpdated
+                            }
                         , NoOut
                         )
 
@@ -1000,20 +1031,63 @@ updateWithEffect msg model maybeToken =
                     in
                     case ( out, maybeToken ) of
                         ( Card.ProgressUpdateRequested, Just token ) ->
-                            ( { model | progressCard = Just newCard, progressSaveState = Loading }
-                            , Effect.authed
-                                (Api.updateProgressRequest newCard.placement.id
-                                    { readingStatus = readingStatusToString newCard.draftStatus
-                                    , currentPage = String.toInt newCard.draftPage
-                                    }
-                                )
-                                token
-                                (Api.progressResponseToResult >> ProgressSaved)
-                            , NoOut
-                            )
+                            -- ⛔ Only sent when the reader has actually chosen a
+                            -- status. `draftStatus` is a Maybe precisely so an
+                            -- unrecorded one cannot be invented here: the card
+                            -- used to seed it with `ToRead`, so opening the card
+                            -- and pressing Save wrote `to_read` over whatever
+                            -- the server held. The card disables Save while this
+                            -- is Nothing, and this clause is the second half of
+                            -- that guarantee — the server requires the field
+                            -- (422 without it), so there is nothing safe to send.
+                            case newCard.draftStatus of
+                                Just chosen ->
+                                    ( { model | progressCard = Just newCard, progressSaveState = Loading }
+                                    , Effect.authed
+                                        (Api.updateProgressRequest newCard.placement.id
+                                            { readingStatus = readingStatusToString chosen
+                                            , currentPage = String.toInt newCard.draftPage
+                                            }
+                                        )
+                                        token
+                                        { onExpired = SessionGoneMidSave
+                                        , onResponse =
+                                            Api.progressResponseToResult >> ProgressSaved
+                                        }
+                                    , NoOut
+                                    )
+
+                                Nothing ->
+                                    ( { model | progressCard = Just (Card.stopSaving newCard) }
+                                    , Effect.none
+                                    , NoOut
+                                    )
 
                         ( Card.EditClosed, _ ) ->
                             ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )
+
+                        ( Card.ProgressUpdateRequested, Nothing ) ->
+                            -- ⛔ An EXPLICIT branch, because the catch-all below
+                            -- matched this and returned `Just newCard` with
+                            -- `saving = True`. `Card.update SaveClicked` has
+                            -- already set that flag, so with no token no request
+                            -- goes out, no response ever arrives to clear it, and
+                            -- the card sits on "Saving…" with Save disabled until
+                            -- the page is reloaded.
+                            --
+                            -- ⚠️ This host had the bug the sibling host had just
+                            -- been fixed for: the fix was applied to ReadingPile's
+                            -- no-token path and not to this one, so a defect was
+                            -- moved rather than removed.
+                            --
+                            -- `SessionExpired` rather than a silent clear, because
+                            -- no token on a save means the session is gone — and
+                            -- clearing the flag without saying so leaves the
+                            -- reader pressing a button that will never work.
+                            ( { model | progressCard = Just (Card.stopSaving newCard) }
+                            , Effect.none
+                            , SessionExpired
+                            )
 
                         _ ->
                             ( { model | progressCard = Just newCard }, Effect.none, NoOut )
@@ -1038,17 +1112,35 @@ updateWithEffect msg model maybeToken =
                     )
 
                 Err (Api.ProgressRequestFailed err) ->
+                    let
+                        -- ⛔ STOPPED BEFORE the error is classified, so the 401
+                        -- and the 500 cannot disagree about it.
+                        --
+                        -- The 401 branch used to return `model` untouched, which
+                        -- left the card on "Saving…" with Save disabled and no
+                        -- response ever coming. That is not hidden behind a
+                        -- redirect: `SessionExpired` enters the DEFERRED expiry
+                        -- net, which asks JS for the stored auth and ADOPTS a
+                        -- token another tab refreshed — cancelling the logout and
+                        -- leaving the reader on this page, which is exactly when
+                        -- the stuck flag becomes permanent.
+                        --
+                        -- ⚠️ `Page.Bookshelf.ReadingPile` had the same defect, not
+                        -- a different one. Both hosts are driven by the shared
+                        -- case list in `tests/ProgressSaveContract.elm`, because
+                        -- checking the sibling host cannot find a defect they
+                        -- share.
+                        stopped =
+                            { model
+                                | progressCard = Maybe.map Card.stopSaving model.progressCard
+                                , progressSaveState = Failure (Api.ProgressRequestFailed err)
+                            }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Effect.none, SessionExpired )
+                        ( stopped, Effect.none, SessionExpired )
 
                     else
-                        ( { model
-                            | progressCard = Maybe.map Card.stopSaving model.progressCard
-                            , progressSaveState = Failure (Api.ProgressRequestFailed err)
-                          }
-                        , Effect.none
-                        , NoOut
-                        )
+                        ( stopped, Effect.none, NoOut )
 
                 Err other ->
                     ( { model
@@ -1075,7 +1167,9 @@ updateWithEffect msg model maybeToken =
                     ( { model | finishedReadPrompt = False, selectedBookshelf = "library", moveState = Loading }
                     , Effect.authed (Api.moveBookRequest placement.id "library")
                         token
-                        (Api.moveResponseToResult >> MoveCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.moveResponseToResult >> MoveCompleted
+                        }
                     , NoOut
                     )
 
@@ -1096,6 +1190,39 @@ updateWithEffect msg model maybeToken =
 
         FocusWrapNoOp ->
             ( model, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401,
+            -- except the progress save below. Nothing local to repair: the page
+            -- keeps what it was showing while `Main` decides whether the reader
+            -- is bounced to the login or kept here on a token another tab
+            -- renewed.
+            ( model, Effect.none, SessionExpired )
+
+        SessionGoneMidSave ->
+            -- ⛔ The progress save needs its OWN expiry branch, and the reason
+            -- is the same one its result handler carries: `Card.update
+            -- SaveClicked` has already set `saving = True`, and `SessionExpired`
+            -- does not guarantee a redirect — the deferred expiry net may adopt
+            -- a token another tab refreshed and leave the reader on this page,
+            -- which is exactly when a stuck "Saving…" becomes permanent.
+            --
+            -- ⚠️ `Page.Bookshelf.ReadingPile` has the matching branch, not a
+            -- different one. The two hosts share a card and have diverged four
+            -- times; `tests/ProgressSaveContract.elm` drives this case through
+            -- both, because checking the sibling by hand cannot find a defect
+            -- they share.
+            --
+            -- The error carries the status the plan claimed, so the reader is
+            -- told what they would have been told had the 401 arrived through
+            -- `ProgressSaved`.
+            ( { model
+                | progressCard = Maybe.map Card.stopSaving model.progressCard
+                , progressSaveState = Failure (Api.ProgressRequestFailed (Http.BadStatus 401))
+              }
+            , Effect.none
+            , SessionExpired
+            )
 
 
 focusProgressBadge : Card.Model -> Effect Msg
@@ -1281,7 +1408,7 @@ viewBook model book =
          , viewPricesSection model
          , viewAvailabilitySection model
          , viewAuthorSection model book
-         , viewWritingSection
+         , viewWritingSection model
          ]
             ++ (case ( model.placement, model.isAuthenticated ) of
                     ( Just _, _ ) ->
@@ -1500,7 +1627,13 @@ viewProgressSection model =
                 , attribute "aria-labelledby" "section-progress"
                 ]
                 [ h3 [ class "book-detail__section-title", id "section-progress" ] [ text "Reading Progress" ]
-                , Html.map ProgressCardMsg (Card.view card)
+
+                -- ⚠️ `errorShowing` must agree with whether the next line
+                -- actually renders the error element: the card's
+                -- `aria-describedby` points at an id only that line creates.
+                -- Asked here, beside it, rather than tracked as card state.
+                , Html.map ProgressCardMsg
+                    (Card.view { errorShowing = isProgressFailure model.progressSaveState } card)
                 , viewProgressSaveState model.progressSaveState
                 , if model.finishedReadPrompt then
                     viewFinishedReadPrompt
@@ -1513,6 +1646,16 @@ viewProgressSection model =
             text ""
 
 
+isProgressFailure : RemoteData Api.ProgressError () -> Bool
+isProgressFailure state =
+    case state of
+        Failure _ ->
+            True
+
+        _ ->
+            False
+
+
 viewProgressSaveState : RemoteData Api.ProgressError () -> Html Msg
 viewProgressSaveState state =
     case state of
@@ -1520,8 +1663,8 @@ viewProgressSaveState state =
             p
                 [ class "book-detail__status book-detail__status--error"
                 , attribute "role" "alert"
-                , id "progress-error"
-                , testId "progress-error"
+                , id Card.progressErrorId
+                , testId Card.progressErrorId
                 ]
                 [ text (Api.progressErrorMessage err) ]
 
@@ -1850,18 +1993,94 @@ viewAuthorSection model book =
         )
 
 
-viewWritingSection : Html Msg
-viewWritingSection =
-    section [ class "book-detail__section book-detail__writing", attribute "role" "region", attribute "aria-labelledby" "section-writing" ]
-        [ h3 [ class "book-detail__section-title", id "section-writing" ] [ text "My Writing" ]
-        , div [ class "book-detail__writing-body" ]
-            [ div [ class "book-detail__writing-list" ] []
-            , p [ class "stub-notice" ]
-                [ text "Link your blog posts about this book" ]
-            , button [ class "btn btn--secondary btn--sm", attribute "aria-label" "Add a blog post about this book" ]
-                [ text "Add Post" ]
+{-| The viewer's own posts about this book.
+
+⚠️ This took NO ARGUMENTS until 2026-10-16, so nothing could reach it: it
+rendered a heading, an empty list, a stub notice and an `Add Post` button with
+no handler, to everyone, signed in or not. The server had been sending the posts
+all along.
+
+Three things it now gets right that the stub got wrong:
+
+  - A signed-out reader sees nothing at all, rather than a "My Writing" heading
+    over an affordance they cannot use. The server sends `[]` to anonymous
+    callers, so the empty list is the same for "signed out" and "signed in with
+    nothing written" — `isAuthenticated` is what tells them apart.
+  - A DRAFT is labelled. The query deliberately includes unpublished posts, and
+    `published_at DESC` is NULLS FIRST in Postgres, so drafts sort to the top.
+    Rendering a blank date there would read as a bug.
+  - There is no `Add Post` button. Associations are created by an asynchronous
+    worker when a post is published, so there is no affordance for this page to
+    invoke — and a button that does nothing is worse than no button. The empty
+    state says where writing comes from instead.
+
+-}
+viewWritingSection : Model -> Html Msg
+viewWritingSection model =
+    if not model.isAuthenticated then
+        text ""
+
+    else
+        section [ class "book-detail__section book-detail__writing", attribute "role" "region", attribute "aria-labelledby" "section-writing" ]
+            [ h3 [ class "book-detail__section-title", id "section-writing" ] [ text "My Writing" ]
+            , div [ class "book-detail__writing-body" ]
+                (case model.myWriting of
+                    [] ->
+                        [ p [ class "book-detail__writing-empty" ]
+                            [ text "You haven't written about this book yet. Posts you publish that mention it will appear here." ]
+                        ]
+
+                    posts ->
+                        [ ul [ class "book-detail__writing-list" ]
+                            (List.map viewWritingEntry posts)
+                        ]
+                )
             ]
+
+
+viewWritingEntry : Api.MyWriting -> Html Msg
+viewWritingEntry post =
+    li [ class "book-detail__writing-entry" ]
+        [ a [ href (Route.toPath (Route.BlogPost post.id)), class "book-detail__writing-link" ]
+            [ text post.title ]
+        , viewWritingStatus post
         ]
+
+
+{-| The status beside a post's title.
+
+Driven by `publicationState`, which the server states, rather than by whether
+`publishedAt` happens to be absent. Those agree today; the difference is that
+the absence of a date is also what a decoder produces when a field is missing or
+unparseable, so inferring from it cannot tell "this is a draft" from "something
+went wrong on the way here".
+
+-}
+viewWritingStatus : Api.MyWriting -> Html Msg
+viewWritingStatus post =
+    case ( post.publicationState, post.publishedAt ) of
+        ( Api.Draft, _ ) ->
+            span [ class "book-detail__writing-draft" ] [ text "Draft" ]
+
+        ( Api.Published, Just published ) ->
+            -- `String.left 10` is this project's existing convention for an
+            -- ISO timestamp (AuthorCard, BookList, RemovalRequests all do it);
+            -- there is no date utility to reach for yet.
+            span [ class "book-detail__writing-date" ] [ text (String.left 10 published) ]
+
+        ( Api.Published, Nothing ) ->
+            -- Published with no date is a server contradiction, not a draft.
+            -- Labelling it "Draft" would hide a real defect behind a plausible
+            -- word; saying the date is missing points at the right place.
+            span [ class "book-detail__writing-date" ] [ text "Date unavailable" ]
+
+        ( Api.StateUnknown, Just published ) ->
+            span [ class "book-detail__writing-date" ] [ text (String.left 10 published) ]
+
+        ( Api.StateUnknown, Nothing ) ->
+            -- The server did not say and there is no date either. Both guesses
+            -- are wrong in a way the reader cannot see, so neither is made.
+            span [ class "book-detail__writing-date" ] [ text "Status unknown" ]
 
 
 viewSignupPrompt : Html Msg

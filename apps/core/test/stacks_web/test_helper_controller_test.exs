@@ -14,6 +14,7 @@ defmodule StacksWeb.TestHelperControllerTest do
 
   import Stacks.Factory
 
+  alias Stacks.Blog
   alias Stacks.Books.ISBN
   alias Swoosh.Adapters.Local.Storage.Memory
 
@@ -30,6 +31,94 @@ defmodule StacksWeb.TestHelperControllerTest do
     end)
 
     :ok
+  end
+
+  describe "EVERY gated helper route refuses with the flag off" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    # ⛔ THE WHOLE SET, NOT ONE ROUTE. The gate was covered by the
+    # `confirmation-token` cases below and nothing else, so seven of the eight
+    # routes behind `StacksWeb.Plugs.E2ETestHelper` had no test that they are
+    # gated at all. A change that loosened the pipeline for one of them — or a
+    # route added to the scope without the plug — would have left this file green.
+    #
+    # ⚠️ The list is derived from `router.ex`'s `/api/test` scope and must move
+    # with it. The count assertion below is what makes that true rather than
+    # hoped: a route added to the scope and not to this list fails here, which is
+    # the only way a per-route table stays honest.
+    @gated_routes [
+      {:get, "/api/test/confirmation-token"},
+      {:get, "/api/test/sent-emails"},
+      {:get, "/api/test/email-budget"},
+      {:put, "/api/test/age-verification"},
+      {:delete, "/api/test/admin-sessions"},
+      {:post, "/api/test/session"},
+      {:post, "/api/test/book-writing"},
+      {:post, "/api/test/book-description"},
+      {:post, "/api/test/association-outcome"}
+    ]
+
+    test "the route list matches the router's gated scope" do
+      router = File.read!("lib/core_web/router.ex")
+
+      # ⚠️ BOUNDED TO THE SCOPE BLOCK. Splitting on the plug name and reading to
+      # the end of the file swept in the `/api` catch-all below it and reported a
+      # divergence that was the scraper's, not the router's. The block ends at
+      # the first line that is exactly two spaces and `end`.
+      scope =
+        router
+        |> String.split(~s(scope "/api/test", StacksWeb do))
+        |> Enum.at(1)
+        |> String.split(~r/^  end$/m)
+        |> List.first()
+
+      assert scope =~ "StacksWeb.Plugs.E2ETestHelper",
+             "the /api/test scope no longer pipes through the gate"
+
+      declared =
+        Regex.scan(~r/^\s*(get|post|put|delete)\s+"([^"]+)"/m, scope)
+        |> Enum.map(fn [_, verb, path] -> {String.to_atom(verb), "/api/test" <> path} end)
+
+      # ⛔ Compared as SETS and counted, so a route added to the scope without
+      # being added here is a failure rather than a silent omission.
+      assert Enum.sort(declared) == Enum.sort(@gated_routes),
+             "the router's gated scope and this suite's list have diverged: " <>
+               "router has #{inspect(Enum.sort(declared) -- Enum.sort(@gated_routes))}, " <>
+               "suite has #{inspect(Enum.sort(@gated_routes) -- Enum.sort(declared))}"
+
+      assert length(@gated_routes) == 9
+    end
+
+    for {verb, path} <- [
+          {:get, "/api/test/confirmation-token"},
+          {:get, "/api/test/sent-emails"},
+          {:get, "/api/test/email-budget"},
+          {:put, "/api/test/age-verification"},
+          {:delete, "/api/test/admin-sessions"},
+          {:post, "/api/test/session"},
+          {:post, "/api/test/book-writing"},
+          {:post, "/api/test/book-description"},
+          {:post, "/api/test/association-outcome"}
+        ] do
+      test "#{verb} #{path} is 404 with the flag absent", %{conn: conn} do
+        conn = dispatch(conn, @endpoint, unquote(verb), unquote(path), %{})
+        assert conn.status == 404
+      end
+
+      # ⚠️ `"true"` specifically: it is what the neighbouring `ALLOW_SEEDS` gate
+      # accepts, so an operator who knows that one would reasonably try it here.
+      # The plug accepts only `"1"`.
+      test "#{verb} #{path} is 404 with the flag set to something other than \"1\"", %{
+        conn: conn
+      } do
+        System.put_env(@flag, "true")
+        conn = dispatch(conn, @endpoint, unquote(verb), unquote(path), %{})
+        assert conn.status == 404
+      end
+    end
   end
 
   describe "GET /api/test/confirmation-token with the flag OFF (production posture)" do
@@ -314,6 +403,98 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
+  describe "GET /api/test/email-budget" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    # ⛔ THE POINT OF THIS ENDPOINT IS ATTRIBUTION, so the test that matters is
+    # that the numbers it reports are the ones the refusal is made of — not that
+    # the shape parses. A budget report that can disagree with the decision would
+    # be worse than none: it would make the suite confident and wrong.
+    test "reports the global count and limit, and counts a queued send", %{conn: conn} do
+      before = json_response(get(conn, "/api/test/email-budget"), 200)
+
+      assert before["global_limit"] == 100
+      assert before["per_user_limit"] == 10
+      assert is_integer(before["global_count"])
+
+      user =
+        insert(:user,
+          email: "e2e-budget-global@thestacks.test",
+          email_confirmed: false,
+          email_confirmation_token: "budget-probe-token-global"
+        )
+
+      {:ok, _} = Stacks.Email.send_registration_confirmation(user)
+
+      after_send =
+        json_response(get(CoreWeb.ConnCase.proven_conn(), "/api/test/email-budget"), 200)
+
+      assert after_send["global_count"] == before["global_count"] + 1
+    end
+
+    test "scopes the per-user count to the address asked about", %{conn: conn} do
+      user =
+        insert(:user,
+          email: "e2e-budget-mine@thestacks.test",
+          email_confirmed: false,
+          email_confirmation_token: "budget-probe-token-mine"
+        )
+
+      insert(:user, email: "e2e-budget-theirs@thestacks.test")
+      {:ok, _} = Stacks.Email.send_registration_confirmation(user)
+
+      mine =
+        json_response(
+          get(conn, "/api/test/email-budget", %{email: "e2e-budget-mine@thestacks.test"}),
+          200
+        )
+
+      theirs =
+        json_response(
+          get(CoreWeb.ConnCase.proven_conn(), "/api/test/email-budget", %{
+            email: "e2e-budget-theirs@thestacks.test"
+          }),
+          200
+        )
+
+      assert mine["per_user_count"] == 1
+      assert theirs["per_user_count"] == 0
+    end
+
+    # ⚠️ The address rule is the same one every other helper here is held to, and
+    # it matters more than it looks: without it, a caller could ask about any
+    # address and read "does this account exist" off the 200/404.
+    test "returns 404 for a NON-e2e-domain email even when that user exists", %{conn: conn} do
+      insert(:user, email: "real-person@gmail.com")
+
+      conn = get(conn, "/api/test/email-budget", %{email: "real-person@gmail.com"})
+
+      assert conn.status == 404
+    end
+
+    test "returns 404 for an unknown (but e2e-domain) email", %{conn: conn} do
+      conn = get(conn, "/api/test/email-budget", %{email: "nobody-here@thestacks.test"})
+
+      assert conn.status == 404
+    end
+  end
+
+  describe "GET /api/test/email-budget with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404", %{conn: conn} do
+      conn = get(conn, "/api/test/email-budget")
+
+      assert conn.status == 404
+    end
+  end
+
   describe "POST /api/test/session with the flag ON" do
     setup do
       System.put_env(@flag, "1")
@@ -334,16 +515,52 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert Core.Repo.get_by(Stacks.Accounts.AuthTokenFamily, user_id: user.id)
 
       authed =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> put_req_header("authorization", "Bearer " <> token)
         |> get("/api/placements/mine")
 
       assert json_response(authed, 200)
     end
 
+    # ⛔ THE MINT MUST NOT LOG ITS CALLER IN, and this is a regression test for
+    # a defect that read as a product fault in groups. The helper used to set
+    # the session cookie through the real login's own helper — defensible, since
+    # a helper that issues a session differently from production is a harness
+    # that passes while production is broken.
+    #
+    # ⚠️ But `AuthPipeline` installs the cookie plug before `VerifyHeader`, so
+    # the cookie WINS when a request carries both. A harness that needs two
+    # identities mints them down ONE HTTP client, so the second mint overwrote
+    # the first and every later request acted as whoever was minted last —
+    # whatever bearer token it passed. An owner inviting a member became that
+    # member inviting themselves, which the server refuses, and the refusal
+    # looked like broken group invitations.
+    #
+    # ⚖️ Asserted on the SENT header rather than on `resp_cookies`, for the same
+    # reason the attribute test in `session_cookie_test.exs` does: the header is
+    # what a client acts on.
+    test "sets no session cookie, so minting twice does not reassign the caller", %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{})
+
+      assert json_response(conn, 201)
+
+      # ⚠️ Counted, not quoted. The header's value IS a live session token, and a
+      # failure message that echoes it writes a working credential into CI logs.
+      session_cookies =
+        conn
+        |> Plug.Conn.get_resp_header("set-cookie")
+        |> Enum.count(&String.starts_with?(&1, "stacks_session="))
+
+      assert session_cookies == 0,
+             "the mint response must leave the caller's identity alone; " <>
+               "it set #{session_cookies} stacks_session cookie(s)"
+
+      refute Map.has_key?(conn.resp_cookies, "stacks_session")
+    end
+
     test "each call mints a distinct user (unique default email)", %{conn: conn} do
       first = json_response(post(conn, "/api/test/session", %{}), 201)
-      second = json_response(post(build_conn(), "/api/test/session", %{}), 201)
+      second = json_response(post(CoreWeb.ConnCase.proven_conn(), "/api/test/session", %{}), 201)
 
       assert first["email"] != second["email"]
     end
@@ -445,7 +662,10 @@ defmodule StacksWeb.TestHelperControllerTest do
 
       second =
         json_response(
-          post(build_conn(), "/api/test/book-description", %{title: "B", description: "y"}),
+          post(CoreWeb.ConnCase.proven_conn(), "/api/test/book-description", %{
+            title: "B",
+            description: "y"
+          }),
           201
         )
 
@@ -568,6 +788,149 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert resp.status == 429
       assert Jason.decode!(resp.resp_body)["error"] == "rate_limit_exceeded"
       assert get_resp_header(resp, "retry-after") == ["60"]
+    end
+  end
+
+  # ⚠️ This endpoint had NO test of any kind. Five of the six gated helpers carried
+  # an ungated-404 case; this one carried none, so its gate was the only one in the
+  # family asserted nowhere — found by checking each route against the tests rather
+  # than assuming the family was covered because its siblings were.
+  # The author's own view of their posts — drafts included, which is what a
+  # "nothing was written" assertion has to be able to see.
+  defp own_posts(user_id), do: Stacks.Blog.list_user_posts(user_id, {:platform_user, user_id})
+
+  describe "POST /api/test/book-writing with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404 and writes nothing", %{conn: conn} do
+      user = insert(:user, email: "e2e-writing-off@thestacks.test")
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/test/book-writing", %{
+          email: user.email,
+          book_id: book.id,
+          title: "Should never exist"
+        })
+
+      assert conn.status == 404
+      assert own_posts(user.id) == []
+    end
+
+    test "returns 404 even when the flag is present but not exactly \"1\"", %{conn: conn} do
+      System.put_env(@flag, "true")
+      user = insert(:user, email: "e2e-writing-notone@thestacks.test")
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/test/book-writing", %{email: user.email, book_id: book.id})
+
+      assert conn.status == 404
+      assert own_posts(user.id) == []
+    end
+  end
+
+  describe "POST /api/test/book-writing with the flag ON" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    test "seeds a post associated with the book", %{conn: conn} do
+      user = insert(:user, email: "e2e-writing-on@thestacks.test")
+      book = insert(:book)
+
+      conn =
+        post(conn, "/api/test/book-writing", %{
+          email: user.email,
+          book_id: book.id,
+          title: "Seeded writing"
+        })
+
+      assert %{"ok" => true, "post_id" => post_id} = json_response(conn, 201)
+      assert Enum.any?(own_posts(user.id), &(&1.id == post_id))
+    end
+
+    test "refuses an email outside the test domain, so it cannot touch a real account", %{
+      conn: conn
+    } do
+      user = insert(:user, email: "a-real-person@example.com")
+      book = insert(:book)
+
+      conn = post(conn, "/api/test/book-writing", %{email: user.email, book_id: book.id})
+
+      assert conn.status == 404
+      assert own_posts(user.id) == []
+    end
+  end
+
+  describe "POST /api/test/association-outcome" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    # ⛔ THE FAILING HALF HAD NO DRIVABLE ROUTE. `seed_book_writing` writes the
+    # happy path, and production reaches the failure outcomes only through an
+    # async LLM worker whose result a browser test cannot steer — so the surface
+    # that tells an author "we couldn't link books to this post" had never been
+    # seen rendered.
+    test "it seeds a post whose pass finished with no associations", %{conn: conn} do
+      user = insert(:user, email: "e2e-outcome@thestacks.test")
+
+      body =
+        conn
+        |> post("/api/test/association-outcome", %{email: user.email, outcome: "llm_error"})
+        |> json_response(201)
+
+      assert body["ok"] == true
+
+      assert Blog.latest_association_outcome(body["post_id"]) == "llm_error"
+    end
+
+    # ⬛ ANTI-VACUITY: the outcome it RECORDS must be the outcome it was ASKED
+    # for. A helper that always wrote the same value would satisfy the case
+    # above and make every spec built on it assert one state.
+    test "it records the outcome it was asked for", %{conn: conn} do
+      user = insert(:user, email: "e2e-outcome2@thestacks.test")
+
+      for outcome <- ~w(no_books_found unreadable_response associated) do
+        body =
+          conn
+          |> post("/api/test/association-outcome", %{email: user.email, outcome: outcome})
+          |> json_response(201)
+
+        assert Blog.latest_association_outcome(body["post_id"]) == outcome
+      end
+    end
+
+    # ⚠️ IT WEAKENS NO INVARIANT, and this is the case that proves it. The
+    # outcome is validated against the worker's own closed vocabulary rather
+    # than taken as given, so the helper cannot create a row production could
+    # not — a fixture in a state the system never reaches would prove something
+    # untrue about the surface built on it.
+    test "an outcome production cannot produce is refused", %{conn: conn} do
+      user = insert(:user, email: "e2e-outcome3@thestacks.test")
+
+      body =
+        conn
+        |> post("/api/test/association-outcome", %{email: user.email, outcome: "exploded"})
+        |> json_response(422)
+
+      assert body["errors"]["outcome"] =~ "must be one of"
+    end
+
+    # ⚠️ `.test` emails only, like every helper beside it — a gated endpoint
+    # that would act on a real account is a production-reachable write.
+    test "a non-test email is out of scope", %{conn: conn} do
+      user = insert(:user, email: "someone@example.com")
+
+      conn
+      |> post("/api/test/association-outcome", %{email: user.email, outcome: "llm_error"})
+      |> json_response(404)
     end
   end
 end

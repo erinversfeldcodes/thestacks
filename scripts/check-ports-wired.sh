@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# ⚠️ The `|| echo .` below is why the vacuity guards further down are not
+# hypothetical. With git absent or the tree not a repository, REPO_ROOT becomes
+# `.`, the cd is a no-op, and every glob resolves against whatever directory the
+# caller happened to be in — matching nothing. Ways in: a source tarball or a
+# Docker build context that excludes `.git` (this repo's .dockerignore does), git
+# missing from PATH in a minimal container or hook environment, or any future move
+# of the Elm source root. The `2>/dev/null` swallows the only signal, so without
+# those guards the gate reports a clean pass in every one of those cases.
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
 MODE="${1:-check}"
@@ -15,6 +23,36 @@ mode = sys.argv[1]
 ELM_GLOBS = ["frontend/src/**/*.elm", "frontend/src/*.elm"]
 JS_GLOBS = ["apps/core/assets/**/*.js", "apps/core/assets/*.js"]
 
+# ⛔ COMMENTS ARE NOT CODE, and both halves of this gate used to read them as
+# such. A platform review demonstrated each direction:
+#
+#   * JS false PASS, on the gate's primary rule — a `//`-commented
+#     `app.ports.saveOnboardingCompleted.subscribe(...)` satisfied the outbound
+#     requirement. Comment a wiring block out while debugging, ship it, and the
+#     gate reports "every Cmd subscribed" while the Cmd is dropped. That is the
+#     exact outcome this gate was written to prevent.
+#   * Elm false PASS on rule 2 — a commented-out `port foo : ... -> Cmd msg`
+#     landed in `ports`, absolving a JS `app.ports.foo.send` naming a port Elm
+#     no longer declares.
+#   * Elm false FAIL on rule 1 — `^port\s+NAME\s*:` is matched against raw
+#     lines, and three doc-comment lines in this repository already BEGIN with
+#     the word `port` (Main.elm, Page/Search.elm, Components/OnboardingOverlay.elm).
+#     One of them gaining a colon turns the gate red on prose, and an
+#     unreadable signature is fail-closed.
+#
+# Two sibling gates already strip comments first and say why. This one did not.
+def _strip_js_comments(text):
+    """Blank out // and /* */ comments, preserving line structure."""
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def _strip_elm_comments(text):
+    """Blank out -- and {- -} comments, preserving line structure."""
+    text = re.sub(r"\{-.*?-\}", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    return re.sub(r"--[^\n]*", "", text)
+
+
 ports = {}          # name -> "out" | "in"
 unparseable = []
 seen_files = set()
@@ -24,7 +62,8 @@ for pattern in ELM_GLOBS:
             continue
         seen_files.add(path)
         with open(path, encoding="utf-8") as handle:
-            for line in handle:
+            elm_text = _strip_elm_comments(handle.read())
+            for line in elm_text.split("\n"):
                 m = re.match(r"^port\s+([a-zA-Z0-9_]+)\s*:", line)
                 if not m:
                     continue
@@ -36,6 +75,36 @@ for pattern in ELM_GLOBS:
                 else:
                     unparseable.append((name, line.strip()))
 
+# Anti-vacuity, both halves. Without this the gate reports "OK — 0 ports" and
+# exits 0 when its globs match nothing — which is indistinguishable from a clean
+# run and is exactly how a gate stops being a gate. The sibling transport check
+# has had this guard since it was written; this one did not, and a platform
+# review found it by deleting the frontend tree and watching the gate pass.
+#
+# Both directions matter: no Elm files means the port DECLARATIONS are missing,
+# and no JS files means the SUBSCRIPTIONS are, and either way every comparison
+# below becomes trivially satisfied.
+if not seen_files:
+    print("FAIL: found no Elm sources under frontend/src.")
+    print("That cannot be right, so the scan has drifted from the source rather than")
+    print("the app having stopped declaring ports. Fix this script before trusting it.")
+    sys.exit(1)
+
+# And the ROSTER, not just the files — a strictly stronger check than the one
+# above, because it also catches the case where the files are found and nothing
+# is harvested from them: a drifted `port` regex, a moved `port module`, an Elm
+# syntax change. Files present with zero ports parsed would satisfy the check
+# above and still compare two empty sets.
+#
+# Zero ports is always drift, never an achievement: this SPA is a port module
+# and carries 21 of them.
+if not ports:
+    print("FAIL: found no `port` declarations under frontend/src.")
+    print("The SPA is a `port module`, so zero ports means this scan stopped")
+    print("matching the source, not that the app stopped using ports.")
+    print("Fix this script before trusting it.")
+    sys.exit(1)
+
 subscribes = set()   # app.ports.X.subscribe
 sends = set()        # app.ports.X.send
 js_refs = set()      # every app.ports.X referenced
@@ -46,11 +115,36 @@ for pattern in JS_GLOBS:
             continue
         seen_js.add(path)
         with open(path, encoding="utf-8") as handle:
-            text = handle.read()
+            text = _strip_js_comments(handle.read())
         for name in re.findall(r"app\.ports\.([A-Za-z0-9_]+)\.subscribe", text):
             subscribes.add(name); js_refs.add(name)
         for name in re.findall(r"app\.ports\.([A-Za-z0-9_]+)\.send", text):
             sends.add(name); js_refs.add(name)
+        # ⛔ EVERY `app.ports.X`, not just the two method calls — because the
+        # reference that decides whether the wiring RUNS is neither.
+        #
+        # All 17 wiring blocks in app.js are wrapped in
+        # `if (app.ports && app.ports.X) { ... }`. Harvesting only
+        # `.subscribe`/`.send` left the guard expression unread, so:
+        #
+        #     if (app.ports && app.ports.saveOnboardingCompletd) {   // typo
+        #       app.ports.saveOnboardingCompleted.subscribe(...);
+        #     }
+        #
+        # harvested the correct name from the `.subscribe`, reported OK, and at
+        # runtime the guard was falsy, the subscribe never executed, and the Cmd
+        # was dropped silently. A one-character edit the gate could not see,
+        # producing exactly the failure it exists to catch. Collecting the bare
+        # reference makes the typo an undeclared port, which rule 2 already
+        # fails on.
+        for name in re.findall(r"app\.ports\.([A-Za-z0-9_]+)", text):
+            js_refs.add(name)
+
+if not seen_js:
+    print("FAIL: found no JavaScript under apps/core/assets.")
+    print("That cannot be right, so the scan has drifted from the source rather than")
+    print("the app having stopped subscribing to ports. Fix this script before trusting it.")
+    sys.exit(1)
 
 failures = []
 warnings = []
@@ -58,7 +152,8 @@ warnings = []
 for name, direction in sorted(ports.items()):
     if direction == "out" and name not in subscribes:
         failures.append(f"OUTBOUND port `{name}` (Cmd) has no `app.ports.{name}.subscribe` — "
-                        f"its Cmd is dropped silently (the #395 shape).")
+                        f"its Cmd is dropped silently — the shape where a port is declared and "
+                        f"sent to, and nothing is listening.")
     if direction == "in" and name not in sends:
         warnings.append(f"INBOUND port `{name}` (Sub) is never fed by `app.ports.{name}.send` "
                         f"— inert; reserved hook or dead. Not gating.")

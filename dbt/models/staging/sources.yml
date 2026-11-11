@@ -147,7 +147,7 @@ sources:
           - name: personal_rating
             description: User's personal rating for the book.
           - name: notes
-            description: User's private notes about this placement. Present in the DB but deliberately EXCLUDED from the staging model (#338 — user free-text never enters the warehouse; the wh schema has no erasure path).
+            description: User's private notes about this placement. Present in the DB but deliberately EXCLUDED from the staging model — user free-text never enters the warehouse; the wh schema has no erasure path.
           - name: visibility
             description: Per-placement visibility override.
           - name: listing_mode
@@ -190,14 +190,22 @@ sources:
             description: Timestamp of the movement.
 
       - name: uploaded_images
-        description: User-uploaded images (book covers, spine photos) with 30-day GDPR retention.
+        description: >-
+          User-uploaded images (book covers, spine photos). TWO retention deadlines,
+          not one: the PHOTOGRAPH is deleted ~24h after identification reaches a
+          terminal state (the reader's retry window), and this RECORD at 30 days.
+          Every column here outlives the image it describes.
         columns:
           - name: id
             description: Primary key (UUID).
           - name: book_id
             description: Legacy FK to books (single-book uploads).
           - name: storage_path
-            description: Object storage path for the image file. Present in the DB but deliberately EXCLUDED from the staging model (#386 — a sensitive per-user pointer never enters the warehouse; the wh schema has no erasure path).
+            description: >-
+              Object storage path for the image file, NULL once the photograph has
+              been discarded. Present in the DB but deliberately EXCLUDED from the
+              staging model — a sensitive per-user pointer never enters the
+              warehouse; the wh schema has no erasure path.
           - name: status
             description: Processing status (pending, classified, rejected, expired).
           - name: rejection_reason
@@ -205,7 +213,10 @@ sources:
           - name: uploaded_at
             description: Timestamp when the user uploaded the image.
           - name: expires_at
-            description: GDPR retention expiry (uploaded_at + 30 days).
+            description: >-
+              Retention expiry for the RECORD (uploaded_at + 30 days) — not for the
+              photograph, which goes ~24h after identification finishes. A row
+              inside its expires_at routinely has no image behind it any more.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -428,7 +439,15 @@ sources:
             description: Timestamp when the price was observed.
 
       - name: review_snapshots
-        description: Aggregated review data scraped from external sources.
+        description: >
+          Aggregated review data scraped from external sources. DELIBERATELY HAS NO
+          CONSUMING MODEL as of 2026-10-15: the staging view, the sentiment
+          intermediate and the reviews mart were deleted because the table holds zero
+          rows and nothing read them, but the table and this declaration are KEPT
+          because the review vertical is scheduled to return on sanctioned sources
+          only, and the rebuild's second step writes here. This is the one source in
+          this file with no referencing model — that is a recorded decision, not drift,
+          so do not delete it as an orphan.
         freshness: null
         columns:
           - name: id
@@ -972,6 +991,15 @@ sources:
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
+          - name: basis
+            description: >
+              How the figure was arrived at: measured (read from a meter),
+              rate_card (a published price times an observed quantity), or
+              absent (no figure for this period). ABSENT means amount_cents
+              carries no figure and must not be aggregated as money — a
+              transparency page printing $0.00 for an unmeasured service is the
+              defect this column exists to prevent, and summing an absent row
+              into a total would reintroduce it downstream.
 
       - name: blog_assistant_sessions
         description: Writing-assistant chat sessions (user-scoped).

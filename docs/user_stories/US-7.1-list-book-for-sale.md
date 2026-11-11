@@ -221,9 +221,9 @@ N/A
 - **Model**: `stg_listings`
 - **Trigger**: Manual/periodic dbt run
 - **Materialisation**: Staging view
-- **Consumer**: `mart_marketplace_activity`
+- **Consumer**: ⚠️ none — `mart_marketplace_activity` was deleted 2026-10-15 (no reader).
 
-### `mart_marketplace_activity`
+### `mart_marketplace_activity` — DELETED 2026-10-15 (no reader)
 - **Model**: `mart_marketplace_activity` (view)
 - **Trigger**: Periodic dbt run
 - **Materialisation**: View — `SELECT status, COUNT(*) AS listing_count FROM stg_listings GROUP BY status`
@@ -306,5 +306,5 @@ N/A
 - **Fly.io compute**: core app machine time for listing CRUD endpoints and `ListingExpiryJob` Oban worker. All operations are database-bound (no external API calls). Fly.io shared-cpu-1x: ~$1.94/month base.
 - **Neon compute**: listing operations use `Ecto.Multi` transactions with `SELECT FOR UPDATE` locks (activate/deactivate/sold/expire). Each transaction involves 3-4 database operations. Placement verification joins across two tables. Neon free tier: 191.9 compute hours/month; paid: $0.16/compute-hour.
 - **R2 storage** (future — condition photos): 1-3 photos per listing. At ~2MB per photo: ~6MB per listing. 100 active listings: ~600MB. Cloudflare R2 free tier: 10GB storage; paid: $0.015/GB/month.
-- **dbt model rebuild**: `stg_listings` and `mart_marketplace_activity` refreshed on periodic dbt runs (not event-triggered for listings). Neon compute cost per refresh is minimal for the simple `GROUP BY status` aggregation.
+- **dbt model rebuild**: `stg_listings` refreshed on periodic dbt runs (`mart_marketplace_activity` deleted 2026-10-15) (not event-triggered for listings). Neon compute cost per refresh is minimal for the simple `GROUP BY status` aggregation.
 - **No external API costs**: marketplace is entirely local — no Brave, Together AI, scraper, or vision calls.

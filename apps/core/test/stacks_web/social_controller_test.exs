@@ -159,7 +159,7 @@ defmodule StacksWeb.SocialControllerTest do
 
       for target <- Enum.take(targets, 20) do
         conn =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(blocker)
           |> post("/api/users/#{target.id}/block")
 
@@ -167,7 +167,7 @@ defmodule StacksWeb.SocialControllerTest do
       end
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(blocker)
         |> post("/api/users/#{Enum.at(targets, 20).id}/block")
 

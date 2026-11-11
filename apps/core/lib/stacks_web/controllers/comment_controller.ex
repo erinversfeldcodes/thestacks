@@ -25,10 +25,10 @@ defmodule StacksWeb.CommentController do
         |> json(%{comment: ProtoJSON.comment(comment)})
 
       {:error, :post_not_found} ->
-        conn |> put_status(:not_found) |> json(%{error: "post not found"})
+        conn |> put_status(:not_found) |> json(%{error: "post_not_found"})
 
       {:error, :parent_not_found} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "parent comment not found"})
+        conn |> put_status(:unprocessable_entity) |> json(%{error: "parent_comment_not_found"})
 
       {:error, changeset} ->
         conn |> put_status(:unprocessable_entity) |> json(%{errors: format_errors(changeset)})
@@ -40,7 +40,7 @@ defmodule StacksWeb.CommentController do
 
     case Blog.delete_comment(comment_id, user.id) do
       :ok -> send_resp(conn, :no_content, "")
-      {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "not found"})
+      {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
       {:error, :unauthorized} -> conn |> put_status(:forbidden) |> json(%{error: "forbidden"})
     end
   end

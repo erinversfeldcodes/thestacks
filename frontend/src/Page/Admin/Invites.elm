@@ -19,10 +19,12 @@ the server for it again, and this page must not pretend otherwise.
 -}
 
 import Api exposing (AdminInvite)
+import Effect
 import Html exposing (Html, button, code, div, h1, h2, input, label, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -42,6 +44,7 @@ type alias Model =
 
 type Msg
     = InvitesReceived (Result Http.Error (List AdminInvite))
+    | SessionExpiryDetected
     | NoteChanged String
     | InvitedEmailChanged String
     | MaxUsesChanged String
@@ -49,7 +52,7 @@ type Msg
     | CreateClicked
     | CreateCompleted (Result Http.Error ( AdminInvite, String ))
     | RevokeClicked String
-    | RevokeCompleted (Result Http.Error ())
+    | RevokeCompleted (Result Api.RequestError ())
 
 
 type OutMsg
@@ -57,7 +60,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { invites = Loading
       , note = ""
@@ -73,24 +76,35 @@ init maybeToken =
     )
 
 
-fetch : Maybe String -> Cmd Msg
+fetch : Maybe Api.Credentials -> Cmd Msg
 fetch maybeToken =
     case maybeToken of
         Just token ->
-            Api.getAdminInvites token InvitesReceived
+            Effect.perform
+                (Effect.authed Api.adminInvitesRequest
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse =
+                        Api.resolveJson (Decode.field "invites" (Decode.list Api.adminInviteDecoder))
+                            >> InvitesReceived
+                    }
+                )
 
         Nothing ->
             Cmd.none
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         InvitesReceived (Ok invites) ->
             ( { model | invites = Success invites }, Cmd.none, NoOut )
 
         InvitesReceived (Err err) ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else
@@ -109,20 +123,51 @@ update msg model maybeToken =
             ( { model | expiresInDays = value }, Cmd.none, NoOut )
 
         CreateClicked ->
-            case maybeToken of
-                Just token ->
+            -- ⚠️ Both numeric fields used to be coerced SILENTLY here:
+            -- `String.toInt |> Maybe.withDefault 1` for uses, and a bare
+            -- `String.toInt` for expiry which sends `Nothing` and lets the
+            -- server pick. So an operator who typed "3O" (letter O) got a
+            -- one-use invite expiring on the server default, with the form
+            -- still showing what they typed and no indication anything was
+            -- disregarded.
+            --
+            -- This is legibility, not security — `Api.elm` omits the field on
+            -- `Nothing` rather than sending null, and the server's own default
+            -- applies. But an expiry field that quietly ignores its input is a
+            -- bad shape wherever it lives, and the admin surface is where the
+            -- consequences are least visible.
+            case ( maybeToken, fieldErrors model ) of
+                ( Just token, [] ) ->
                     ( { model | creating = True, error = Nothing }
-                    , Api.createAdminInvite token
-                        { note = model.note
-                        , invitedEmail = model.invitedEmail
-                        , maxUses = model.maxUses |> String.toInt |> Maybe.withDefault 1
-                        , expiresInDays = String.toInt model.expiresInDays
-                        }
-                        CreateCompleted
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.createAdminInviteRequest
+                                { note = model.note
+                                , invitedEmail = model.invitedEmail
+                                , maxUses = model.maxUses |> String.toInt |> Maybe.withDefault 1
+                                , expiresInDays = String.toInt model.expiresInDays
+                                }
+                            )
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "invite"
+                                        (Decode.map2 Tuple.pair
+                                            Api.adminInviteDecoder
+                                            (Decode.field "code" Decode.string)
+                                        )
+                                    )
+                                    >> CreateCompleted
+                            }
+                        )
                     , NoOut
                     )
 
-                Nothing ->
+                ( Just _, errors ) ->
+                    ( { model | error = Just (String.join " " errors) }, Cmd.none, NoOut )
+
+                ( Nothing, _ ) ->
                     ( model, Cmd.none, NoOut )
 
         CreateCompleted (Ok ( invite, fullCode )) ->
@@ -138,7 +183,7 @@ update msg model maybeToken =
             )
 
         CreateCompleted (Err err) ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else
@@ -151,7 +196,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | revoking = Just inviteId, error = Nothing }
-                    , Api.revokeAdminInvite token inviteId RevokeCompleted
+                    , Effect.perform
+                        (Effect.authed (Api.revokeAdminInviteRequest inviteId)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveNoContent >> RevokeCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -162,7 +213,7 @@ update msg model maybeToken =
             ( { model | revoking = Nothing }, fetch maybeToken, NoOut )
 
         RevokeCompleted (Err err) ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevationOf err then
                 ( model, Cmd.none, SessionExpired )
 
             else
@@ -170,6 +221,47 @@ update msg model maybeToken =
                 , Cmd.none
                 , NoOut
                 )
+
+
+{-| Which of the two numeric fields the operator has made unusable.
+
+Returns a list so both can be reported at once rather than one at a time, and
+so `[]` is the "safe to submit" signal the update branch reads.
+
+A BLANK field is deliberately not an error: blank means "use the default",
+which is a real intent and what the server does with an omitted value. What is
+an error is a field with something in it that is not a positive whole number,
+because that is someone who meant something and did not get it.
+
+-}
+fieldErrors : Model -> List String
+fieldErrors model =
+    List.filterMap identity
+        [ numericFieldError "Uses" model.maxUses
+        , numericFieldError "Expires in (days)" model.expiresInDays
+        ]
+
+
+numericFieldError : String -> String -> Maybe String
+numericFieldError label raw =
+    let
+        trimmed =
+            String.trim raw
+    in
+    if trimmed == "" then
+        Nothing
+
+    else
+        case String.toInt trimmed of
+            Just n ->
+                if n >= 1 then
+                    Nothing
+
+                else
+                    Just (label ++ " must be at least 1.")
+
+            Nothing ->
+                Just (label ++ " must be a whole number — \"" ++ trimmed ++ "\" is not.")
 
 
 view : Model -> Html Msg

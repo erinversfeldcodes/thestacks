@@ -47,19 +47,33 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
     end
   end
 
-  describe "call/2 global bucket" do
-    test "allows first request", %{conn: conn} do
-      conn = %{conn | remote_ip: {10, 0, 0, 2}}
-      result = RateLimiter.call(conn, [])
-      refute result.halted
+  describe "init/1 refuses a plug site with no usable bucket" do
+    test "a missing bucket is refused rather than defaulted" do
+      assert_raise ArgumentError, ~r/requires an explicit `bucket:`/, fn ->
+        RateLimiter.init([])
+      end
     end
 
-    test "allows multiple requests below the global limit", %{conn: conn} do
-      conn = %{conn | remote_ip: {10, 0, 0, 3}}
+    test "a bucket with no limit is refused at the plug site" do
+      assert_raise ArgumentError, ~r/no limit for bucket :nowhere/, fn ->
+        RateLimiter.init(bucket: :nowhere)
+      end
+    end
 
-      for _ <- 1..10 do
-        result = RateLimiter.call(conn, [])
-        refute result.halted
+    # ⚠️ The router's pipelines are the other half of this, and the compiler
+    # enforces them: `init/1` runs at compile time under the default plug init
+    # mode, so a `bucket:` with no `get_limit/1` clause cannot reach a request
+    # because the suite would not compile. This case covers a direct caller,
+    # which is the only way the old `:global` default was ever reached.
+    test "call/2 with no bucket raises instead of choosing one", %{conn: conn} do
+      conn = %{conn | remote_ip: {10, 0, 0, 4}}
+
+      # ⚠️ The key is pinned, not just the exception type. A bare
+      # `assert_raise KeyError` passed when the fetched key was swapped to one
+      # nothing passes either — it asserted that SOMETHING was missing, which is
+      # a weaker claim than the two cases above make.
+      assert_raise KeyError, ~r/key :bucket not found/, fn ->
+        RateLimiter.call(conn, [])
       end
     end
   end
@@ -130,13 +144,23 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
   end
 
   describe "call/2 upload bucket" do
+    # ⛔ `Guardian.Plug.put_current_resource/2`, not `assign/3`. Guardian keeps its
+    # pipeline state in `conn.private`, and an earlier version of this file set the
+    # same name in `conn.assigns` — which is where the plug used to read it.
+    #
+    # So the test built the world the code expected and both were wrong together:
+    # the resource was never found, all three "per user" buckets keyed on the IP,
+    # and the limit assertions below still passed because the conns they built
+    # also carried a fixed IP. Using the real writer is what makes these tests
+    # claims about the pipeline rather than about each other.
+    defp as_user(conn, user, ip) do
+      conn |> Guardian.Plug.put_current_resource(user) |> Map.put(:remote_ip, ip)
+    end
+
     test "allows first upload for authenticated user", %{conn: conn} do
       user = insert(:user)
 
-      conn =
-        conn |> assign(:guardian_default_resource, user) |> Map.put(:remote_ip, {10, 2, 0, 1})
-
-      result = RateLimiter.call(conn, bucket: :upload)
+      result = RateLimiter.call(as_user(conn, user, {10, 2, 0, 1}), bucket: :upload)
       refute result.halted
     end
 
@@ -149,15 +173,75 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
 
     test "blocks the 121st upload for the same authenticated user", %{conn: conn} do
       user = insert(:user)
-
-      conn =
-        conn |> assign(:guardian_default_resource, user) |> Map.put(:remote_ip, {10, 2, 0, 3})
+      conn = as_user(conn, user, {10, 2, 0, 3})
 
       for _ <- 1..120, do: RateLimiter.call(conn, bucket: :upload)
 
       result = RateLimiter.call(conn, bucket: :upload)
       assert result.halted
       assert result.status == 429
+    end
+
+    test "two readers behind ONE IP do not share an upload budget", %{conn: conn} do
+      # ⛔ The assertion that finds the defect, and the one no test here made.
+      #
+      # Every per-user test above also fixes the IP, so each passes just as
+      # happily against a plug keyed on the IP — which is what this plug did. The
+      # consequence was not theoretical: signed-in readers sharing a NAT or a
+      # corporate proxy shared one budget, so a hundred and twenty uploads, twenty
+      # social actions or ten feedback submissions a minute were the total for
+      # everyone behind that address.
+      ip = {10, 2, 0, 9}
+      one = insert(:user)
+      two = insert(:user)
+
+      for _ <- 1..120, do: RateLimiter.call(as_user(conn, one, ip), bucket: :upload)
+
+      exhausted = RateLimiter.call(as_user(conn, one, ip), bucket: :upload)
+
+      assert exhausted.halted,
+             "the first reader's own budget did not run out, so the next assertion " <>
+               "cannot distinguish a per-user key from a per-IP one"
+
+      fresh = RateLimiter.call(as_user(conn, two, ip), bucket: :upload)
+
+      refute fresh.halted,
+             "a second reader on the same IP was refused on their FIRST upload — the bucket " <>
+               "is keyed on the address, not the reader, so everyone behind one NAT shares " <>
+               "a single budget"
+    end
+
+    test "one reader across two IPs shares one budget", %{conn: conn} do
+      # The other direction, and the reason the test above is not satisfied by
+      # keying on the pair. A reader who changes network mid-session — a phone
+      # leaving wifi — must not be handed a fresh allowance by doing so.
+      user = insert(:user)
+
+      for _ <- 1..120, do: RateLimiter.call(as_user(conn, user, {10, 2, 1, 1}), bucket: :upload)
+
+      moved = RateLimiter.call(as_user(conn, user, {10, 2, 2, 2}), bucket: :upload)
+
+      assert moved.halted,
+             "the same reader got a fresh budget by arriving from a different address"
+    end
+
+    test "the feedback bucket is keyed the same way", %{conn: conn} do
+      # ⚠️ Asserted for `:feedback` specifically because that is the bucket where
+      # the shared-key behaviour was first observed, driving the admin feedback
+      # queue against a deployed stack: three freshly minted users submitting
+      # from one address were refused as though they were one reader.
+      Application.put_env(:core, :rate_limit_feedback, 2)
+      on_exit(fn -> Application.delete_env(:core, :rate_limit_feedback) end)
+
+      ip = {10, 2, 3, 3}
+      one = insert(:user)
+      two = insert(:user)
+
+      for _ <- 1..2, do: RateLimiter.call(as_user(conn, one, ip), bucket: :feedback)
+      assert RateLimiter.call(as_user(conn, one, ip), bucket: :feedback).halted
+
+      refute RateLimiter.call(as_user(conn, two, ip), bucket: :feedback).halted,
+             "a second reader on the same IP could not submit feedback because the first had"
     end
   end
 
@@ -270,7 +354,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
         %{conn | remote_ip: {10, 9, 0, 1}}
         |> put_req_header("fly-client-ip", "198.51.100.77")
 
-      refute RateLimiter.call(conn, []).halted
+      refute RateLimiter.call(conn, bucket: :auth).halted
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
       assert metadata == %{source: :trusted_proxy}
@@ -280,7 +364,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
          %{conn: conn} do
       conn = %{conn | remote_ip: {10, 9, 0, 2}}
 
-      refute RateLimiter.call(conn, []).halted
+      refute RateLimiter.call(conn, bucket: :auth).halted
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
       assert metadata == %{source: :remote_ip}
@@ -291,7 +375,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
         %{conn | remote_ip: {10, 9, 0, 3}}
         |> put_req_header("fly-client-ip", "")
 
-      refute RateLimiter.call(conn, []).halted
+      refute RateLimiter.call(conn, bucket: :auth).halted
 
       assert_receive {:telemetry_event, [:stacks, :rate_limit, :client_ip], %{count: 1}, metadata}
       assert metadata == %{source: :remote_ip}
@@ -315,7 +399,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
 
       Process.exit(pid, :kill)
 
-      result = RateLimiter.call(conn, [])
+      result = RateLimiter.call(conn, bucket: :auth)
       refute result.halted
     end
   end

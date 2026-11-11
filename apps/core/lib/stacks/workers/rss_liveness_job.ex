@@ -12,7 +12,7 @@ defmodule Stacks.Workers.RSSLivenessJob do
       at 03:00 UTC).
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

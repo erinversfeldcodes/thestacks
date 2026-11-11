@@ -3,6 +3,7 @@ module Page.Settings.AuditLog exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , initWithEffect
     , update
     , view
     )
@@ -16,6 +17,7 @@ server-side; hashed IPs are never sent to the client.
 -}
 
 import Api exposing (AuditLogEntry, AuditLogResponse)
+import Effect exposing (Effect)
 import Html exposing (Html, div, h1, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class)
 import Http
@@ -29,6 +31,7 @@ type alias Model =
 
 type Msg
     = AuditLogReceived (Result Http.Error AuditLogResponse)
+    | SessionExpiryDetected
 
 
 type OutMsg
@@ -36,32 +39,64 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
+    let
+        ( model, effect ) =
+            initWithEffect maybeToken
+    in
+    ( model, Effect.perform effect )
+
+
+{-| `init`, with its request as DATA rather than as a `Cmd`.
+
+⛔ This is the half a test can drive. A `Cmd` is opaque — a test can see that the
+page asked for something and not what it asked for, nor what it will do with the
+answer. The plan carries both, so a `ProgramTest` can feed this page a 401 and
+watch where it goes.
+
+⚠️ `onExpired` is not optional on `Effect.authed`, which is the point: the page
+cannot ask an authenticated endpoint without saying what an ended session means
+to it. That obligation used to be a `Api.isUnauthorized` re-test inside the
+result handler, and a page that forgot it simply showed a generic error.
+
+-}
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
+initWithEffect maybeToken =
     case maybeToken of
         Just token ->
             ( { entries = Loading }
-            , Api.getAuditLog token AuditLogReceived
+            , Effect.authed Api.getAuditLogRequest
+                token
+                { onExpired = SessionExpiryDetected
+                , onResponse =
+                    Api.resolveJson Api.auditLogResponseDecoder >> AuditLogReceived
+                }
             )
 
         Nothing ->
-            ( { entries = NotAsked }, Cmd.none )
+            ( { entries = NotAsked }, Effect.none )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         AuditLogReceived result ->
             case result of
                 Ok response ->
                     ( { model | entries = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
-
-                    else
-                        ( { model | entries = Failure err }, Cmd.none, NoOut )
+                    -- ⛔ NO `Api.isUnauthorized` RE-TEST HERE, and its absence is the
+                    -- migration's point rather than an oversight. The plan claims the 401
+                    -- before this handler sees it and routes it to `SessionExpiryDetected`,
+                    -- so a branch here would be unreachable — and an unreachable branch
+                    -- that looks like a safety check is worse than none, because the next
+                    -- reader trusts it.
+                    ( { model | entries = Failure err }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg

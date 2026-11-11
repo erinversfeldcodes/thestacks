@@ -13,10 +13,15 @@ _latest_version() {
 }
 
 _current_version() {
+    # ⛔ The version string is extracted WITHOUT a pipe into `head`. As a bare
+    # pipeline ending a function, under `set -e` the shell takes its status —
+    # and `head` always closes early, so a SIGPIPE'd `grep` yields 141 and
+    # aborts the installer while reporting nothing about why. `grep -m1` stops
+    # at the first match on its own, so nothing downstream has to close the pipe.
     if command -v flyctl &>/dev/null; then
-        flyctl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+        flyctl version 2>/dev/null | grep -oE -m1 '[0-9]+\.[0-9]+\.[0-9]+' || true
     elif [[ -x "${BINARY}" ]]; then
-        "${BINARY}" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+        "${BINARY}" version 2>/dev/null | grep -oE -m1 '[0-9]+\.[0-9]+\.[0-9]+' || true
     else
         echo "not installed"
     fi

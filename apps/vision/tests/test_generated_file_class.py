@@ -1,9 +1,12 @@
-"""The proto drift check must split local staleness from real drift
-(354): a GITIGNORED generated artefact can only be locally stale (CI
-regenerates from scratch) and must be regenerated-and-passed, while a
-TRACKED artefact diverging from its .proto is the real defect and must
-still fail. Wave 4/5 burned two full `just ci` re-runs on the former
-being treated as the latter.
+"""The proto drift check must split local staleness from real drift.
+
+A GITIGNORED generated artefact can only be locally stale — CI regenerates it
+from scratch — so it must be regenerated and passed. A TRACKED artefact that
+diverges from its `.proto` is the real defect and must still fail.
+
+Conflating the two is expensive rather than merely untidy: it cost two full
+`just ci` re-runs, because a locally stale gitignored file was reported as
+drift and the only way to clear it was a full rebuild that proved nothing.
 """
 
 import os

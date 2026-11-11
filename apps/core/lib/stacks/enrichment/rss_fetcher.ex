@@ -87,14 +87,45 @@ defmodule Stacks.Enrichment.RssFetcher do
       {:ok, %Finch.Response{status: status}} when status in 200..299 ->
         {:ok, url}
 
-      _ ->
-        {:error, :not_found}
+      # ⛔ These two used to be ONE catch-all returning `{:error, :not_found}`,
+      # and collapsing them cost more than legibility.
+      #
+      # Every outcome landed on the same atom: a 404, a 500, a refused
+      # connection, a DNS failure, and a request_timeout. `RSSLivenessJob` passes
+      # this reason straight into `Monitoring.record_failure/3` as
+      # `inspect(reason)`, so every RSS failure on every author feed recorded
+      # `:not_found` — a feed that is merely slow was indistinguishable from one
+      # that does not exist, which is the difference between "retry" and "stop
+      # asking".
+      #
+      # ⚠️ It also left this module's own transport-bound tests with nothing
+      # structural to assert. "Did the 1s request_timeout fire?" had no answer in
+      # the return value, so the test fell back to a WALL CLOCK — and a wall
+      # clock cannot tell a missing bound from a busy machine. That test failed
+      # at 11,821ms against a 10,000ms ceiling under load while being 3/3 green
+      # idle, exactly as this module's moduledoc had predicted in prose.
+      {:ok, %Finch.Response{status: status}} ->
+        {:error, {:unexpected_status, status}}
+
+      {:error, reason} ->
+        {:error, {:transport, transport_reason(reason)}}
     end
   rescue
     e ->
       Logger.warning("RssFetcher: feed probe failed for #{url}: #{Exception.message(e)}")
       {:error, :request_failed}
   end
+
+  # The reason a transport error carries, so a caller can tell a timeout from a
+  # refusal. Finch wraps both in a struct and only this field separates them.
+  #
+  # ⚠️ ONE CLAUSE, because dialyzer proved a second one dead. A defensive
+  # pass-through fallback was written here first; `Finch.request/3` can only fail
+  # with `Finch.Error`, `Finch.HTTPError` or `Finch.TransportError`, every one of
+  # which has `:reason`, so the fallback could never match
+  # (`pattern_match_cov`). Deleted rather than silenced: an unreachable clause
+  # reads as a handled case and is the opposite of handling it.
+  defp transport_reason(%{reason: reason}), do: reason
 
   @spec parse_feed(String.t()) :: {:ok, map()} | {:error, term()}
   defp parse_feed(xml_body) do

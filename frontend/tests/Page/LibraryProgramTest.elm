@@ -30,7 +30,7 @@ import TestHelpers
 
 startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
-    ProgramTest.start () (libraryProgram (Just "test-token"))
+    ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
 
 
 suite : Test

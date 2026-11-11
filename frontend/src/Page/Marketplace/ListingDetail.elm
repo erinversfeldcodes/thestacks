@@ -35,7 +35,7 @@ type Msg
     = ListingReceived (Result Http.Error Listing)
 
 
-init : String -> Maybe String -> ( Model, Cmd Msg )
+init : String -> Maybe Api.Credentials -> ( Model, Cmd Msg )
 init listingId maybeToken =
     ( { listingId = listingId
       , listing = Loading
@@ -44,17 +44,25 @@ init listingId maybeToken =
     )
 
 
-fetchListing : String -> Maybe String -> Cmd Msg
+fetchListing : String -> Maybe Api.Credentials -> Cmd Msg
 fetchListing listingId maybeToken =
     Http.request
         { method = "GET"
-        , headers =
-            case maybeToken of
-                Just token ->
-                    [ Http.header "Authorization" ("Bearer " ++ token) ]
 
-                Nothing ->
-                    []
+        -- ⛔ The credential comes from `Api.requestHeaders`, which is the ONLY
+        -- derivation. This module used to build the header itself — the 71st
+        -- such site, and the only one outside `Api.elm`.
+        --
+        -- ⚠️ `Api.Optional` rather than `Api.Session`, deliberately: this
+        -- listing is readable without a session, so the endpoint is
+        -- optionally-authenticated. The distinction is not cosmetic —
+        -- `check-session-expiry-coverage.sh` reads which credential a call site
+        -- names to decide whether the page must route a 401 to the
+        -- session-expiry interceptor, so naming `Session` here would demand
+        -- 401-routing for a request that legitimately succeeds anonymously.
+        , headers =
+            Api.requestHeaders "GET" (Api.Optional maybeToken)
+                |> List.map (\( name, value ) -> Http.header name value)
         , url = "/api/listings/" ++ listingId
         , body = Http.emptyBody
         , expect = Http.expectJson ListingReceived (Json.Decode.field "listing" Types.Listing.listingDecoder)

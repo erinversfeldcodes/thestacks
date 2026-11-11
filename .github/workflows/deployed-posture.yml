@@ -1,0 +1,79 @@
+name: Deployed posture
+
+# Asserts, against the real production database, the invariants no pull request
+# can observe.
+#
+# ⚠️ WHY A SCHEDULE AND NOT A GATE. Every one of these is a statement about a
+# deployed system drifting from its intent, not about a diff. Measured by hand on
+# 2026-10-19, production held 6,655 images past their expiry (oldest overdue by
+# 151 days, against a stated 30-day retention promise), all 91 `oban_jobs` rows
+# orphaned in `executing` with the oldest 180 days old, and none of the three dbt
+# warehouse schemas — so every mart-backed query had always errored. All of it
+# had been true for months with every existing gate green, because no gate reads
+# a database it did not create.
+#
+# ⛔ The instrument is not new. This project already has the zero-row sweep; what
+# it did was run it BY HAND, during a campaign, every few months. A sweep
+# performed by a human occasionally is how a 151-day retention breach goes
+# unnoticed for 151 days. This is the same sweep, on a clock.
+#
+# ⚠️ This workflow is itself outside PR CI, so `check-workflow-health.sh` is what
+# notices if it goes quietly red — the same reasoning that produced that check.
+
+on:
+  schedule:
+    # Daily, after the nightly maintenance jobs have had their chance to run. A
+    # breach is then at most a day old rather than at most a campaign old.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployed-posture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # ⚠️ COMPOSED, not read from a `DATABASE_URL` secret — because there is no
+      # such secret. Production's URL is assembled at deploy time from four Neon
+      # components, and a first draft of this workflow referenced
+      # `secrets.DATABASE_URL`, which would have been empty. The check refuses an
+      # empty value, so it would have failed closed rather than passed falsely —
+      # but it would also have measured nothing, every night, while looking like
+      # a monitor. The same composition as the production deploy, so the two
+      # cannot disagree about what production means.
+      - name: Compose the production DATABASE_URL from Neon components
+        env:
+          STACKS_PROD_DB_ROLE: ${{ secrets.STACKS_PROD_DB_ROLE }}
+          STACKS_PROD_DB_PASSWORD: ${{ secrets.STACKS_PROD_DB_PASSWORD }}
+          STACKS_PROD_DB_HOST: ${{ secrets.STACKS_PROD_DB_HOST }}
+          STACKS_PROD_DB_NAME: ${{ secrets.STACKS_PROD_DB_NAME }}
+        run: |
+          for v in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::$v is required but not set — nothing was measured"
+              exit 1
+            fi
+          done
+          URL="$(python3 -c "
+          import os, urllib.parse as up
+          role = up.quote(os.environ['STACKS_PROD_DB_ROLE'], safe='')
+          pw   = up.quote(os.environ['STACKS_PROD_DB_PASSWORD'], safe='')
+          host = os.environ['STACKS_PROD_DB_HOST']
+          db   = up.quote(os.environ['STACKS_PROD_DB_NAME'], safe='')
+          print(f'postgresql://{role}:{pw}@{host}/{db}?sslmode=require')
+          ")"
+          echo "::add-mask::${URL}"
+          echo "POSTURE_DATABASE_URL=${URL}" >> "$GITHUB_ENV"
+          echo "Composed a posture URL for ${STACKS_PROD_DB_HOST}"
+
+      - name: Assert the production database's posture
+        env:
+          # The check refuses an empty value and refuses a local host outright,
+          # so a misconfigured secret cannot turn this into a green run against
+          # somebody's sandbox.
+          POSTURE_DATABASE_URL: ${{ env.POSTURE_DATABASE_URL }}
+        run: bash scripts/check-deployed-posture.sh

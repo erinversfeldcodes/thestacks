@@ -1,9 +1,10 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import { type Page } from "@playwright/test";
 import { suiteAuthFile } from "./helpers";
 
 /**
  * Open a top-level nav disclosure (Bookshelves / Marketplace / Admin) by its
- * label. The Wave 8 nav replaced the CSS `:hover`/`:focus-within`
+ * label. The current nav replaced the CSS `:hover`/`:focus-within`
  * reveal — which was unreachable by touch — with a real
  * `<button class="app-nav__disclosure" aria-haspopup aria-expanded>` whose menu
  * is in the DOM ONLY once it is clicked open. Idempotent: a navigation does NOT
@@ -130,6 +131,21 @@ test.describe("Navbar navigation — unauthenticated", () => {
 
     const navLinks = page.locator(".app-nav__link");
     await expect(navLinks.first()).toBeVisible({ timeout: 10000 });
+
+    // ⛔ WAIT FOR THE ONE ITEM THE HEADER WITHHOLDS, not for the first link.
+    // `viewNav` renders every visitor item immediately and adds "Sign In" only
+    // once `authResolved` is true — deliberately, so a signed-in reader is never
+    // shown a "Sign In" link for the duration of the `GET /api/auth/me`
+    // round-trip and then corrected. Waiting on `navLinks.first()` is satisfied
+    // by "Catalogue", which is present BEFORE the answer arrives, so
+    // `allTextContents()` snapshotted the pre-resolution list and this test
+    // failed on a deployed stack while the app was behaving exactly as designed.
+    // A wait for presence of the withheld item is the only signal that the
+    // header has finished.
+    await expect(page.locator('a.app-nav__link[href="/login"]')).toBeVisible({
+      timeout: 10000,
+    });
+
     const texts = await navLinks.allTextContents();
 
     expect(texts).toContain("Catalogue");

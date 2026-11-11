@@ -128,12 +128,52 @@ defmodule StacksWeb.ImportControllerTest do
       assert reported["reason"] == "no ISBN"
     end
 
+    test "a misspelled outcome is refused, not answered with an empty report", %{
+      conn: conn,
+      user: user,
+      import: import
+    } do
+      # The filter is applied by string equality, so an unknown value matched
+      # nothing and the endpoint answered `200 {"rows": []}` — identical to the
+      # true statement "nothing in this import was shelved". A client reading
+      # that cannot tell which it got, and the mistake is a single character.
+      {:ok, [first | _]} = Imports.list_rows(user.id, import.id)
+      Imports.record_outcome(first, "shelved")
+
+      body = json_response(get(conn, "/api/imports/#{import.id}/rows?outcome=shelve"), 422)
+
+      assert body["error"] == "unknown_outcome"
+
+      assert Enum.sort(body["valid_outcomes"]) ==
+               Enum.sort(["shelved", "duplicate", "unverified", "unreadable"])
+
+      # And the near-miss really would have come back empty, so the refusal is
+      # carrying information the 200 could not. Without this the test above
+      # passes against an endpoint that refuses everything.
+      assert %{"rows" => [_]} =
+               json_response(get(conn, "/api/imports/#{import.id}/rows?outcome=shelved"), 200)
+    end
+
     test "another user's import is a 404, not a leak", %{conn: _conn, import: import} do
       stranger = insert(:user)
-      conn = auth_conn(Phoenix.ConnTest.build_conn(), stranger)
+      conn = auth_conn(CoreWeb.ConnCase.proven_conn(), stranger)
 
       assert json_response(get(conn, "/api/imports/#{import.id}"), 404)
       assert json_response(get(conn, "/api/imports/#{import.id}/rows"), 404)
+    end
+
+    test "an import with no filename answers a blank one, not a null", %{
+      conn: conn,
+      import: import
+    } do
+      # `op.library_imports.filename` is nullable and the client's decoder
+      # requires a string, so a null would fail the decode and take the whole
+      # import page — the same shape that made one unreadable CSV row render
+      # "the report didn't load" forever.
+      import |> Ecto.Changeset.change(filename: nil) |> Core.Repo.update!()
+
+      assert %{"import" => shown} = json_response(get(conn, "/api/imports/#{import.id}"), 200)
+      assert shown["filename"] == ""
     end
   end
 end

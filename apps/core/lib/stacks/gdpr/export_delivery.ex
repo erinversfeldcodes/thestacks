@@ -93,6 +93,24 @@ defmodule Stacks.GDPR.ExportDelivery do
   end
 
   @doc """
+      How many export artefacts are past their deadline — the far-end check for
+      the retention sweep, zero when it is caught up.
+
+      ⚠️ Reuses `past_deadline?/2`, the same predicate `sweep_expired/1` splits
+      on, rather than recomputing a TTL. Returns 0 when the object store cannot
+      be listed, because a count is not the place to decide what an outage
+      means; `sweep_expired/1` already fails loudly on that path and is the
+      caller that should.
+  """
+  @spec expired_count(DateTime.t()) :: non_neg_integer()
+  def expired_count(now \\ DateTime.utc_now()) do
+    case Storage.list_objects(@prefix <> "/") do
+      {:ok, keys} -> Enum.count(keys, &past_deadline?(&1, now))
+      _ -> 0
+    end
+  end
+
+  @doc """
       Delete every export object whose deadline has passed.
 
       A delete that fails is the leak this job exists to prevent, so the count
@@ -175,6 +193,26 @@ defmodule Stacks.GDPR.ExportDelivery do
         :ok
 
       undated ->
+        # ⛔ METERED, not just logged — and this was the last of the three alarms
+        # in this module still emitting into nothing.
+        #
+        # Its two siblings (`:expired` and `:orphan`) were given metrics when
+        # someone noticed they were "declared at the call site, reported by no
+        # plugin, so unobservable outside a log line". This one was missed in the
+        # same pass, which is the recurring shape: the fix landed where it was
+        # found and not at the sibling beside it.
+        #
+        # ⚠️ It is also the most consequential of the three to leave invisible.
+        # An object with no parseable deadline is not merely late — the sweep
+        # cannot ever select it, so it is a copy of a reader's personal data that
+        # stays in the bucket permanently. A log line is read when somebody is
+        # already suspicious, and nothing here would ever make them suspicious.
+        :telemetry.execute(
+          [:stacks, :gdpr, :export, :undated],
+          %{count: length(undated)},
+          %{}
+        )
+
         Logger.error(
           "ExportDelivery: ALARM — #{length(undated)} export object(s) carry no deadline and will never be swept"
         )

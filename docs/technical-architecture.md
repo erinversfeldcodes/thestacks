@@ -244,7 +244,7 @@ thestacks/
 | Component | Technology | Notes |
 |-----------|-----------|-------|
 | JWT signing | Guardian (HS256) | 64-char `GUARDIAN_SECRET_KEY`, generated with `mix guardian.gen.secret` |
-| Session storage | Signed/encrypted cookies | `same_site: "Lax"`, `secure: true` in production |
+| Session storage | ⚠️ **Bearer token in `localStorage`** — migrating to `HttpOnly` cookies per [ADR 024](decisions/024-httponly-cookie-sessions.md) | This row previously read "signed/encrypted cookies, `same_site: Lax`, `secure: true` in production", which described a system that did not exist. A `Plug.Session` cookie IS configured (`core_web/endpoint.ex:4-9`, key `_core_key`, `same_site: "Lax"`) but **nothing reads or writes it** — zero `get_session`/`put_session`/`fetch_session` call sites in the web layer — and `secure: true` is not among its options. The real transport is a Guardian JWT returned in a JSON body and stored by the SPA. ADR 024 decides the migration; until it lands this row describes the bearer token. |
 | Token lifetime | 8h access, no refresh token | Refresh flow deferred to #173. Access token is stored in `op.guardian_tokens` and revocable server-side via `guardian_db` (Issue #124). |
 | Password hashing | Argon2 (`argon2_elixir`) | Memory-hard, resistant to GPU attacks |
 
@@ -386,7 +386,7 @@ Automated in CI (see [CI/CD Pipeline](#cicd-pipeline)):
 |---------|---------------|
 | **Separate DB roles** | `stacks_app` (CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`), `stacks_dbt` (SELECT on `op` + `audit`, CRUD on `wh`), `stacks_readonly` (SELECT on `op` + `wh`) |
 | **Connection pooling** | Ecto via `DBConnection` pool. Connection string uses SSL (`sslmode=require`). |
-| **Row-level security** | RLS is **active** on `op.bookshelves`, `op.bookshelf_placements`, `op.user_blocks`, and `op.visibility_grants` (migration `20260319000008_enable_rls_policies.exs`). Policies read `current_setting('app.current_user_id', true)` with a NULL guard so migrations and the test sandbox are not blocked; the Phoenix pool sets the variable via `SET LOCAL` at the start of each transaction. `FORCE ROW LEVEL SECURITY` is enabled to prevent the app role bypassing policies. RLS is defence-in-depth behind the application-layer gate in `Stacks.Visibility.resolve_visibility/2`. Policies for the remaining tables are designed in `docs/rls-design.md` but not yet activated. See [ADR 006](decisions/006-rls-plus-application-visibility.md). |
+| **Row-level security** | RLS is **active** on `op.bookshelves`, `op.bookshelf_placements`, `op.user_blocks`, and `op.visibility_grants` (migration `20260319000008_enable_rls_policies.exs`). ⛔ **The policies permit every row today, and the NULL guard is why.** Every `ALL` policy opens `current_setting('app.current_user_id', true) IS NULL OR …` and **nothing sets that variable** — `app.current_user_id` appears zero times under `apps/core/lib`. An earlier version of this row claimed "the Phoenix pool sets the variable via `SET LOCAL` at the start of each transaction"; that mechanism was never built, and the claim is what let the gap survive an audit. ⚠️ The guard is also non-deterministic rather than merely inert: `current_setting(…, true)` returns NULL on a connection that has never set the variable (the policy then permits everything) but the empty string on one where any transaction has set it, where the `::uuid` cast raises instead — so on a pooled connection the same unscoped query grants every row or 500s depending on which connection serves it. Per-request scoping, the policy shape that replaces the guard, and the dbt/read-only exemptions are decided in [ADR 023](decisions/023-per-request-rls-scoping.md). `FORCE ROW LEVEL SECURITY` is enabled to prevent the app role bypassing policies. RLS is defence-in-depth behind the application-layer gate in `Stacks.Visibility.resolve_visibility/2`. Policies for the remaining tables are designed in `docs/rls-design.md` but not yet activated. See [ADR 006](decisions/006-rls-plus-application-visibility.md). |
 | **Parameterised queries** | Ecto enforces parameterised queries by default. No raw SQL interpolation. |
 
 ---
@@ -596,9 +596,9 @@ The data pipeline follows a **contract-first derived data** pattern, drawing fro
 ```
 SYSTEMS OF RECORD                 DERIVED DATA (all rebuildable)
 ─────────────────                 ──────────────────────────────
-op.* tables (OLTP) ──► wh.stg_*  (structural projections, PII-excluded)
-op.event_log       ──► wh.int_*  (semantic aggregates, domain joins)
-audit.audit_log    ──► wh.mart_* (consumer-optimised read models)
+op.* tables (OLTP) ──► staging.stg_*  (structural projections, PII-excluded)
+op.event_log       ──► intermediate.int_*  (semantic aggregates, domain joins)
+audit.audit_log    ──► marts.mart_* (consumer-optimised read models)
                    ──► ETS caches, search indexes, Atom feeds
 ```
 
@@ -676,28 +676,26 @@ models/
 ├── staging/                          # Structural projections (1:1 with source, PII-excluded)
 │   ├── stg_books.sql                 # Works (logical books)
 │   ├── stg_book_editions.sql         # Editions (ISBN, format, cover)
-│   ├── stg_review_snapshots.sql      # Raw reviews from all sources
 │   ├── stg_price_snapshots.sql       # Price snapshots per store
+│   ├── stg_invite_codes.sql          # Closed-beta invitations (PII-excluded)
 │   ├── stg_event_log.sql             # All staging models are proto-generated
 │   ├── stg_source_health_checks.sql  # via `mix proto.sync`
-│   └── ... (41 total staging views)
+│   └── ... (40 total staging views)
 │
 ├── intermediate/                     # Semantic aggregates (domain-meaningful joins)
 │   ├── int_price_trends.sql          # Price over time per edition per store (incremental)
-│   ├── int_review_sentiment.sql      # All reviews in common schema
-│   ├── int_book_detail_view.sql      # Pre-joined work + editions + prices + reviews
+│   ├── int_book_detail_view.sql      # Pre-joined work + authors + editions
 │   ├── int_book_engagement.sql       # Wear level from placement history
-│   ├── int_source_health.sql         # Per-source operational health
-│   └── ... (10+ intermediate models)
+│   ├── int_author_activity.sql       # Author publishing and update cadence
+│   ├── int_visibility_resolution.sql # Resolved audience per placement
+│   └── ... (8+ intermediate models)
 │
 └── marts/                            # Consumer-optimised read models (one per use case)
     ├── mart_community_read_count.sql # Looking for a Home wear (5-min refresh)
-    ├── mart_platform_searchable.sql  # Platform search index (5-min refresh)
-    ├── mart_book_reviews.sql         # Book detail overlay consumer
-    ├── mart_book_prices.sql          # Price comparison consumer
-    ├── mart_data_quality_trend.sql   # Metrics dashboard: 12-week sparklines
-    ├── mart_system_health.sql        # Metrics dashboard: uptime, latency
-    └── ... (15 total mart models)
+    ├── mart_platform_searchable.sql  # Platform search index (Phase 2)
+    ├── mart_book_prices.sql          # Price comparison (Phase 2)
+    └── mart_cost_tracking.sql        # Platform operational costs by service
+                                      # (4 total mart models)
 ```
 
 **Materialisation strategy (ADR 010):**
@@ -714,9 +712,9 @@ models/
 |---------|-----------------|---------|
 | `shelf.book_placed`, `shelf.book_moved` | `mart_community_read_count` | ≤ 5 min |
 | `enrichment.prices_scraped` | `int_price_trends`, `mart_book_prices` | ≤ 5 min |
-| `enrichment.reviews_scraped` | `int_review_sentiment`, `mart_book_reviews` | ≤ 5 min |
-| `post.published`, `post.updated` | `int_blog_engagement`, `mart_blog_activity` | ≤ 5 min |
-| `source_health.recorded` | `int_source_health`, `mart_data_quality_trend` | ≤ 5 min |
+| `enrichment.reviews_scraped` | ⚠️ nothing — models deleted 2026-10-15. The subscription is kept by owner ruling (the review vertical returns) and is restored with the models |
+| `blog.post_published`, `blog.post_updated`, `blog.post_deleted` | ⚠️ nothing — models deleted 2026-10-15. `blog.post_published` keeps a real handler for blog associations; the other two are recorded as unsubscribed |
+| `source_health.recorded` | ⚠️ nothing — models deleted 2026-10-15; recorded as unsubscribed. The operational view reads the `op.source_health_checks` table directly |
 | Daily cron (catch-all) | All models | Daily |
 
 The event-to-model mapping lives in `Stacks.Workers.DbtRefreshJob` — not scattered across event handlers.
@@ -750,7 +748,7 @@ dbt tests enforce:
 The staging layer serves as a **second evolution boundary** (ADR 010), independent of the Elixir `Events.Upcaster`:
 
 - When a proto message gains a new field, old rows have the column as `NULL`. Staging models use `COALESCE` or conditional logic to handle both old and new rows.
-- All 30 staging models are proto-generated by `mix proto.sync`. Adding a column means adding a proto field and regenerating.
+- All 40 staging models are proto-generated by `mix proto.sync`. Adding a column means adding a proto field and regenerating. (This count is the "load-bearing folklore" `scripts/check-dbt-model-drift.sh` was written to stop drifting — it said 30 against a real 41 for a long time, and is 40 as of 2026-10-15.)
 - The `mix proto.sync --check` CI gate catches drift between proto definitions and all generated artifacts (Ecto schemas, dbt SQL, schema.yml, ProtoJSON.Gen).
 
 ---
@@ -1263,7 +1261,7 @@ Tracks the lifecycle of user-uploaded book photos. Ecto schema: `Stacks.Books.Up
 | `status` | `ENUM('pending', 'resolved', 'rejected')` | |
 | `rejection_reason` | `TEXT` | `NULL` |
 | `uploaded_at` | `TIMESTAMPTZ` | |
-| `expires_at` | `TIMESTAMPTZ` | When the image data should be cleaned up (30 days from upload) |
+| `expires_at` | `TIMESTAMPTZ` | When the image RECORD should be cleaned up (30 days from upload). The photograph itself goes sooner — see *Image retention* below |
 
 ### `audit_log`
 
@@ -1488,7 +1486,9 @@ Completed purchases (fixed price or accepted offer). **Table exists in DB but is
 
 ### Upload image lifecycle
 
-User-uploaded photos exist solely to extract a book identifier (ISBN). Once identification succeeds or the 30-day TTL expires, the image has no further operational or user value. **We intentionally do not preserve the ability to re-run vision model processing on the original image.** The outcomes of identification — book records, placement decisions, event log entries — are the durable artefacts, not the pixels.
+User-uploaded photos exist solely to extract a book identifier (ISBN). Once identification succeeds — or terminally fails — the image has no further operational or user value. **We intentionally do not preserve the ability to re-run vision model processing on the original image.** The outcomes of identification — book records, placement decisions, event log entries — are the durable artefacts, not the pixels.
+
+**So the photograph and its record have different deadlines, and this paragraph used to describe a deletion the code did not perform.** `ImageRetention.cleanup_finished_image_bytes/1` deletes the stored photograph 24 hours after identification reaches a terminal state, and clears the `storage_path` that pointed at it; the `op.uploaded_images` row survives to its own 30-day `expires_at`, because the reader is still owed their inbox entry, their export and erasure reachability. The 24 hours are not a retention policy in their own right — they are exactly the window in which "No, try again" can still re-read the bytes. Past it, that action is refused with `410 photograph_discarded` rather than enqueueing a retry that would report the photo as unreadable.
 
 **Current implementation:** Image bytes are base64-encoded and stored in Oban job args (in PostgreSQL). The `IdentifyBookJob` worker sends the base64 image directly to the Modal vision service over HMAC-authenticated HTTPS. No external object storage is used for uploads in the current phase.
 
@@ -1562,9 +1562,13 @@ Any row returned by this query is alerted on. The 1-hour grace covers the retent
 
 ### Risks and mitigations
 
-**Third-party persons in background.** A user photographing a bookshelf may capture other people who never consented to being processed by a vision model. This is why images are transient — they are purged within 30 days regardless of outcome, and the event log records only book identifiers (ISBNs, titles), never image content or descriptions of people.
+**Third-party persons in background.** A user photographing a bookshelf may capture other people who never consented to being processed by a vision model. This is why images are transient — the photograph is deleted a day after identification finishes, regardless of outcome, and the event log records only book identifiers (ISBNs, titles), never image content or descriptions of people. ⚠️ Thirty days used to be offered here as the mitigation; for a photograph of a bystander that is a weak one, and it was the record's deadline standing in for the image's.
 
-**Embedded malicious content.** An image may contain rendered text including URLs — on a t-shirt, a poster, or a laptop screen in the background. A sufficiently capable vision model that attempts to interpret all text in an image could extract and act on a URL that leads to malware, a phishing page, or a prompt-injection payload. Current mitigation: Modal's `/classify` and `/extract` endpoints return only ISBN-shaped strings and book titles; they do not follow URLs or return raw OCR output. However, passing the full unprocessed image to an external model remains a risk vector.
+**Embedded malicious content.** An image may contain rendered text including URLs — on a t-shirt, a poster, or a laptop screen in the background. A sufficiently capable vision model that attempts to interpret all text in an image could extract and act on a URL that leads to malware, a phishing page, or a prompt-injection payload. ⚠️ **This paragraph claimed a mitigation that does not hold, and the correction is the point.** It read: *"Current mitigation: Modal's `/classify` and `/extract` endpoints return only ISBN-shaped strings and book titles; they do not follow URLs or return raw OCR output."* Both halves are wrong. The two endpoints were deleted on 2026-10-15 and `/analyze` is the only one left — but more importantly, **the surviving response DOES return raw OCR text**: `ExtractedBook.raw_text` is a declared proto field ("Raw OCR text from the image region") and `main.py` populates it from the model's output. That was already untrue before the endpoints were deleted.
+
+What is actually true today: the service does not **follow** URLs found in an image, and nothing downstream interprets `raw_text` as an instruction — core reads it only as a candidate-matching signal. So the exposure is narrower than "the model acts on embedded text", but it is **not** "no raw OCR crosses the boundary", and anyone reasoning about prompt-injection should start from the real shape. Passing the full unprocessed image to an external model remains a risk vector.
+
+⚠️ **Updated 2026-10-16: `raw_text` no longer reaches the application log.** It did — `moderation.ex` wrote the model's raw OCR whole, at `:info`, for every candidate without an ISBN, which put whatever text was in frame with a reader's bookshelf into whatever aggregates logs. The line now emits a deterministic SHAPE (`<bytes>B/<n>isbn-shaped`) rather than the text. Deliberately a summary and not a redactor: a redactor detects named entities and emits everything it does not classify, so on arbitrary OCR most of the text would still land in the log and the failure mode would be a confident miss. The shape is what the diagnostic actually needed. `raw_text` still crosses the service boundary and is still held in memory — this narrows the log exposure, not the boundary.
 
 **Future: feature extraction before transmission.** Before passing an image to Modal, a pre-processing step will extract only the visual regions most likely to contain book-identifying information — spine text, cover art bounding boxes — using classical CV techniques (edge detection, text region detection). This accomplishes three things:
 
@@ -1572,7 +1576,7 @@ Any row returned by this query is alerted on. The 1-hour grace covers the retent
 2. **Reduces size.** A cropped and re-encoded spine region is tens of KB, not hundreds. Lower bandwidth and faster Modal cold starts.
 3. **Defends against prompt injection via imagery.** Content like printed text saying "ignore previous instructions" or a background URL containing adversarial content is removed before the model ever sees it.
 
-This pre-processing step is tracked as a future enhancement. Until it is implemented, the risk is accepted and mitigated by Modal's output contract (ISBN-only returns) and the 30-day image TTL.
+This pre-processing step is tracked as a future enhancement. Until it is implemented, the risk is accepted and mitigated by Modal's output contract (ISBN-only returns) and by deleting the photograph a day after identification finishes.
 
 ### Persistent cover images
 
@@ -1582,7 +1586,7 @@ Book cover thumbnails are the only permanently stored images. These are sourced 
 
 ```
 stacks-images/ (Cloudflare R2)
-  ├── uploads/                    # Upload images — 30-day TTL, then purged
+  ├── uploads/                    # Upload photographs — deleted ~24h after identification finishes
   │   └── {image_id}             # Raw upload bytes, no extension (MIME type stored separately)
   ├── covers/                     # Book cover thumbnails — permanent
   │   └── {isbn}-cover.jpg       # Sourced from Open Library or Google Books
@@ -1633,7 +1637,7 @@ Application-level encryption for Tier 3 uses key management via **age** (the enc
 
 | Data | Retention | Rationale |
 |------|-----------|-----------|
-| `uploaded_images` (R2 object) | 30 days | Purged from R2 after identification complete; `image.purged` event emitted |
+| `uploaded_images` (R2 object) | ~24h after identification finishes | Deleted from R2 by `ImageRetention.cleanup_finished_image_bytes/1`; `image.bytes_discarded` event emitted; the row survives to its own 30-day expiry |
 | `uploaded_images` (row + event log) | Indefinite | Metadata row and `image.*` events are permanent — only the bytes are purged |
 | Book covers (R2 object) | Indefinite | Published cover art; sourced from Open Library / Google Books |
 | Scraped reviews (raw HTML) | 7 days | Debugging only |
@@ -3625,6 +3629,10 @@ models:
           - accepted_values:
               values: ['ZAR', 'USD', 'GBP', 'EUR']
 
+  # ⚠️ The stg_review_snapshots example below was deleted as a model on
+  # 2026-10-15 (it modelled a table with 0 rows). Kept as an ILLUSTRATION of the
+  # test shape, which is what this block is for, and because the model returns
+  # with the review vertical.
   - name: stg_review_snapshots
     columns:
       - name: source_url
@@ -4929,7 +4937,7 @@ The system should function with reduced capability when components fail:
 
 ### What's NOT Backed Up (by design)
 
-- Raw uploaded images (GDPR: deleted after 30 days anyway)
+- Raw uploaded images (GDPR: the photograph is deleted a day after identification finishes)
 - Scraped raw HTML (debugging only, 7-day retention)
 - Rate limiter state (rebuilt in-memory on restart)
 - Circuit breaker state (reset on restart)
@@ -5747,7 +5755,7 @@ Posts are standalone — they are not required to reference a book. The connecti
 - Enrichment data: `price_snapshots` (per edition), `review_snapshots` (per work), `discovered_sources`
 - The user's `bookshelf_placements` row (shelf, wear level)
 - The user's `post_book_associations` (links to their blog posts about this work)
-- Community read count from `wh.mart_community_read_count` (for Looking for a Home wear state)
+- Community read count from `marts.mart_community_read_count` (for Looking for a Home wear state)
 
 **In Phases 1–6**, the join set is small enough that query-time assembly is the correct approach. The enrichment data is canonical (scraped once per ISBN, not per user), and the user-specific joins are a single `placements` row.
 
@@ -5799,6 +5807,15 @@ end
 
 The Python vision service gains a second endpoint for text-to-book association:
 
+> ⚠️ **Not to be confused with the vision cover-association endpoint of the same
+> path**, which existed, was never called, and was deleted on 2026-10-15 along
+> with its callback. This section describes a DIFFERENT and still-unbuilt
+> endpoint: it takes a blog post's body plus candidate books and returns ranked
+> associations, where the deleted one took an ISBN and a cover image URL and
+> replied asynchronously. They share only a name. Anyone implementing this should
+> read it as a fresh design, and anyone cleaning up after the deletion should
+> leave it alone.
+
 ```
 POST /associate
 {
@@ -5832,18 +5849,30 @@ Data quality is measured per data product relative to its consumer, not as a pla
 
 - **"Quality for what?"** — Prices being 3 days stale is fine for browsing, not for buying. Quality dimensions and SLAs vary by data product and consumer.
 - **Nutrition labels, not scores.** — Each data product publishes a quality profile (completeness, freshness, distributions, gaps). The metrics dashboard exposes profiles, not just green/amber/red gauges.
-- **Continuous monitoring with trends.** — `mart_data_quality_trend` tracks weekly quality rollups per category. Alert on 10+ percentage point week-over-week drops, not just current thresholds.
-- **Source health monitoring.** — Per scraper config, per review source, per RSS feed: track last success, error rate, and HTML structure change detection. `int_source_health` dbt model.
-- **LLM faithfulness tracking.** — Review summaries and blog associations have faithfulness metrics: confirm/dismiss ratios, confidence distributions, periodic human spot-checks. `mart_llm_faithfulness` dbt model.
+- **Continuous monitoring with trends.** — alert on 10+ percentage point week-over-week drops, not
+  just current thresholds. ⚠️ The mechanism (`mart_data_quality_trend`) was deleted 2026-10-15; see
+  the note below.
+- **Source health monitoring.** — Per scraper config, per review source, per RSS feed: track last
+  success, error rate, and HTML structure change detection. Lives on the
+  `op.source_health_checks` table; the `int_source_health` dbt rollup was deleted with the mart
+  that was its only consumer.
+- **LLM faithfulness tracking.** — blog associations carry confidence distributions and
+  confirm/dismiss ratios. ⚠️ Review-summary faithfulness is **not** tracked and never was: there
+  are no summaries, and the mart that bore the name measured association confidence instead.
 
 ### dbt models for quality
 
-| Model | Purpose |
-|-------|---------|
-| `int_source_health` | Operational health per external source: last success, consecutive failures, selector match rate, status |
-| `mart_data_quality_trend` | Weekly rollup per enrichment category — freshness %, completeness %, trending over 12 weeks |
-| `mart_enrichment_gaps` | Books/authors with missing enrichment data, grouped by cause (no config, source broken, never scraped) |
-| `mart_llm_faithfulness` | LLM output quality: review summary agreement rate, blog association confirm/dismiss ratio, confidence distributions |
+⚠️ **All four were deleted on 2026-10-15** and the table below is kept as the specification of what a
+rebuilt quality surface should produce — not as a description of what exists. Their only consumer
+was the in-app metrics dashboard, which Grafana superseded, and nothing else read them. The goal is
+filed as its own work; the SQL for the two with real logic is recoverable from git history.
+
+| ~~Model~~ (deleted) | What it produced, and what a rebuild should still produce |
+|---|---|
+| ~~`int_source_health`~~ | Operational health per external source: last success, consecutive failures, selector match rate, status |
+| ~~`mart_data_quality_trend`~~ | Weekly rollup per enrichment category — freshness %, completeness %, trending over 12 weeks |
+| ~~`mart_enrichment_gaps`~~ | Books/authors with missing enrichment data, **grouped by cause** (no config, source broken, never scraped) — the grouping is the part that makes this a label rather than a count |
+| ~~`mart_llm_faithfulness`~~ | Blog-association confidence distributions and confirm/dismiss ratios. ⚠️ NOT review-summary agreement, despite the row's former wording |
 
 ### Source health detection
 

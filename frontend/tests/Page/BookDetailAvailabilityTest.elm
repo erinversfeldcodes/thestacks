@@ -22,7 +22,7 @@ import TestHelpers
 
 startBookDetail : ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 startBookDetail =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
 
 
 availabilityJson : String

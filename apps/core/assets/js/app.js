@@ -124,27 +124,45 @@ import "../css/main.css";
   };
 })();
 
-var storedAuth = null;
-var storedAuthUnreadable = null;
-try {
-  var raw = localStorage.getItem("stacks-auth");
-  if (raw) {
-    storedAuth = JSON.parse(raw);
+// One cookie's value, or null. Split on "; " rather than ";" alone would miss
+// the first pair; `indexOf` rather than a regex because a cookie value can
+// contain characters a loose pattern would treat as delimiters.
+function readCookie(name) {
+  var prefix = name + "=";
+  var parts = (document.cookie || "").split(";");
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (part.indexOf(prefix) === 0) {
+      var value = part.substring(prefix.length);
+      return value.length > 0 ? value : null;
+    }
   }
-} catch (e) {
-  storedAuthUnreadable = String((e && e.message) || e);
+  return null;
 }
 
+// The boot flags carry NO session. There used to be one here: a `stacks-auth`
+// blob read out of localStorage and spread into the flags, which is how the SPA
+// knew who it was before its first request. The session is now an httpOnly
+// cookie this script cannot read, so the app asks the server instead
+// (`GET /api/auth/me`), and the only thing boot still reads from the browser is
+// the same-origin proof below.
 function boot() {
   var flags = {};
-  if (storedAuth && typeof storedAuth === "object") {
-    Object.keys(storedAuth).forEach(function (key) {
-      flags[key] = storedAuth[key];
-    });
-  }
-  if (storedAuthUnreadable !== null) {
-    flags.storedAuthUnreadable = storedAuthUnreadable;
-  }
+  // The same-origin proof the SPA echoes in `X-CSRF-Token` on every write.
+  //
+  // Read from the cookie the server set on THIS page's response. A browser
+  // cannot have run this script without having loaded that response, so the
+  // cookie is present by the time we look — which is why the cookie is issued
+  // on the SPA page rather than at login, where the login POST itself would
+  // have had nothing to echo.
+  //
+  // Deliberately NOT HttpOnly server-side: a token the page cannot read cannot
+  // be double-submitted. It is not a secret — it proves the request came from a
+  // document on our origin, which is exactly what a cross-site attacker cannot
+  // arrange, since they can send a request with our cookies but cannot read
+  // them.
+  flags.csrfToken = readCookie("stacks_csrf");
+
   flags.ageGatingEnabled = false;
   // Fail CLOSED: registration stays invite-gated until the real
   // config arrives; a fetch failure must not reopen public sign-ups.
@@ -154,24 +172,6 @@ function boot() {
     node: document.getElementById("elm"),
     flags: flags,
   });
-
-if (app.ports && app.ports.saveAuth) {
-  app.ports.saveAuth.subscribe(function (authData) {
-    try {
-      localStorage.setItem("stacks-auth", JSON.stringify(authData));
-    } catch (e) {
-    }
-  });
-}
-
-if (app.ports && app.ports.clearAuth) {
-  app.ports.clearAuth.subscribe(function () {
-    try {
-      localStorage.removeItem("stacks-auth");
-    } catch (e) {
-    }
-  });
-}
 
 var ONBOARDING_DONE_KEY = "stacks-onboarding-completed";
 
@@ -192,28 +192,6 @@ if (app.ports && app.ports.onOnboardingStatus) {
     onboardingDone = false;
   }
   app.ports.onOnboardingStatus.send(onboardingDone);
-}
-
-if (app.ports && app.ports.authChanged) {
-  window.addEventListener("storage", function (e) {
-    if (e.key === "stacks-auth") {
-      app.ports.authChanged.send(e.newValue);
-    }
-  });
-}
-
-if (app.ports && app.ports.requestStoredAuth) {
-  app.ports.requestStoredAuth.subscribe(function () {
-    var current = null;
-    try {
-      current = localStorage.getItem("stacks-auth");
-    } catch (e) {
-      current = null;
-    }
-    if (app.ports && app.ports.gotStoredAuth) {
-      app.ports.gotStoredAuth.send(current);
-    }
-  });
 }
 
 var LISTING_DRAFT_KEY = "stacks-listing-draft";

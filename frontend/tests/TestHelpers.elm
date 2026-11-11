@@ -1,19 +1,28 @@
 module TestHelpers exposing
     ( AdminChromeTestModel
+    , AuditLogTestModel
     , BookDetailTestModel
+    , MetricsTestModel
+    , ProfileTestModel
     , ReadingPileTestModel
+    , UploadTestModel
     , adminChromeProgram
+    , auditLogProgram
     , authedRequestFromSpec
     , bookDetailOverlayProgramWithOut
     , bookDetailProgram
     , bookDetailProgramWithOut
     , bookshelfProgram
     , bookshelfUndoProgram
+    , creds
     , libraryProgram
     , loginProgram
     , loginProgramFrom
+    , loginProgramWith
+    , metricsProgram
     , namedPlacement
     , placementWithPages
+    , profileProgram
     , profileShelfProgram
     , readingPileProgram
     , searchProgram
@@ -24,6 +33,8 @@ module TestHelpers exposing
     , simulateBookDetailResponseWithPlacement
     , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
+    , simulateBookDetailResponseWithWriting
+    , simulateBookDetailResponseWithWritingStates
     , simulateBookPricesResponse
     , simulateBookResponse
     , simulateBookshelfErrorResponse
@@ -42,6 +53,7 @@ module TestHelpers exposing
     , testBook
     , testPlacement
     , uploadProgram
+    , uploadProgramFrom
     , uploadProgramWithInbox
     )
 
@@ -53,6 +65,7 @@ simulators, and test data builders.
 -}
 
 import Api
+import Api.Url
 import Components.AdminChrome as AdminChrome
 import Dict
 import Effect
@@ -64,7 +77,10 @@ import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Bookshelf.ReadingPile as ReadingPile
 import Page.Login as Login
+import Page.Metrics as Metrics
+import Page.Profile as Profile
 import Page.Search as Search
+import Page.Settings.AuditLog as AuditLog
 import Page.Upload as Upload
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
@@ -75,6 +91,18 @@ import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement, readingStatusToString)
 import Types.RemoteData
 import Types.Visibility
+
+
+{-| A reader's credentials for a test, from a bearer token alone.
+
+⚠️ The CSRF half is `Nothing` because almost no test is about CSRF. A test that
+IS about it passes `Api.credentials bearer (Just csrf)` directly, so the default
+here cannot quietly satisfy an assertion that should have been explicit.
+
+-}
+creds : String -> Api.Credentials
+creds bearer =
+    Api.credentials bearer Nothing
 
 
 {-| A default edition for tests.
@@ -435,12 +463,12 @@ simulateMergeFormatResponse bookId editionId isbn formatLabel =
 Parameters: token, userId, email, displayName.
 -}
 simulateAuthResponse : String -> String -> String -> String -> Http.Response String
-simulateAuthResponse token userId email displayName =
+simulateAuthResponse bearer userId email displayName =
     let
         json =
             Encode.encode 0
                 (Encode.object
-                    [ ( "token", Encode.string token )
+                    [ ( "token", Encode.string bearer )
                     , ( "user"
                       , Encode.object
                             [ ( "id", Encode.string userId )
@@ -817,6 +845,103 @@ simulateBookDetailResponseWithVisibility bookId book visibility bookshelfVisibil
         json
 
 
+{-| A book-detail response carrying the viewer's own posts about the book, in
+the shape `BookController.render_book_detail/3` serialises them: a list of
+`{id, title, published_at, publication_state}`, with `published_at` null for a
+draft.
+
+Takes the posts as `(id, title, maybeIsoDate)` triples and encodes them here
+rather than accepting ready-made JSON, so a drift between this shape and the
+controller's is a type error in the helper and not a silently-ignored key in
+the decoder under test.
+
+`publication_state` is derived from the date exactly as the controller derives
+it, so this helper only ever produces payloads the server can actually produce.
+For the states the server should NOT produce — published with no date, or no
+state at all — use `simulateBookDetailResponseWithWritingStates`, which takes
+the state verbatim. Keeping them apart matters: if this helper accepted an
+arbitrary state, every existing test would be free to drift away from the
+controller's shape without anything noticing.
+
+-}
+simulateBookDetailResponseWithWriting : String -> Book -> List ( String, String, Maybe String ) -> Http.Response String
+simulateBookDetailResponseWithWriting bookId book posts =
+    simulateBookDetailResponseWithWritingStates bookId
+        book
+        (List.map
+            (\( postId, title, maybePublishedAt ) ->
+                ( postId
+                , title
+                , ( maybePublishedAt
+                  , if maybePublishedAt == Nothing then
+                        Just "draft"
+
+                    else
+                        Just "published"
+                  )
+                )
+            )
+            posts
+        )
+
+
+{-| As `simulateBookDetailResponseWithWriting`, but the publication state is
+given verbatim rather than derived — `Nothing` omits the key entirely.
+
+This exists for the payloads the server should never send: a post marked
+published with no date, and a post with no state at all (an older server, or a
+response from a path the field has not reached). The view has a branch for each,
+and a helper that derived the state could not reach them.
+
+-}
+simulateBookDetailResponseWithWritingStates :
+    String
+    -> Book
+    -> List ( String, String, ( Maybe String, Maybe String ) )
+    -> Http.Response String
+simulateBookDetailResponseWithWritingStates bookId book posts =
+    let
+        encodePost ( postId, title, ( maybePublishedAt, maybeState ) ) =
+            Encode.object
+                ([ ( "id", Encode.string postId )
+                 , ( "title", Encode.string title )
+                 , ( "published_at"
+                   , case maybePublishedAt of
+                        Just publishedAt ->
+                            Encode.string publishedAt
+
+                        Nothing ->
+                            Encode.null
+                   )
+                 ]
+                    ++ (case maybeState of
+                            Just state ->
+                                [ ( "publication_state", Encode.string state ) ]
+
+                            Nothing ->
+                                []
+                       )
+                )
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement", Encode.null )
+                    , ( "placements", Encode.list identity [] )
+                    , ( "my_writing", Encode.list encodePost posts )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
 {-| A book-detail response carrying a placement that already owns `formats`.
 Drives the format picker, whose starting state decides which way a click
 toggles.
@@ -933,11 +1058,11 @@ these tests assert against.
 -}
 authedRequestFromSpec :
     Api.RequestSpec
-    -> String
+    -> Api.Credentials
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
 authedRequestFromSpec spec token expect =
-    requestFromSpec spec (Just token) expect
+    requestFromSpec spec (Just token) Nothing expect
 
 
 {-| Run a page's `Effect` in the simulated runtime — the twin of
@@ -961,6 +1086,7 @@ simulateEffect effect =
         Effect.Request plan ->
             requestFromSpec plan.spec
                 plan.token
+                plan.proof
                 (SimulatedEffect.Http.expectStringResponse
                     (\result ->
                         case result of
@@ -986,20 +1112,32 @@ header appears only when the viewer has a token, which is what
 -}
 requestFromSpec :
     Api.RequestSpec
+    -> Maybe Api.Credentials
     -> Maybe String
     -> SimulatedEffect.Http.Expect msg
     -> SimulatedEffect msg
-requestFromSpec spec maybeToken expect =
+requestFromSpec spec maybeToken maybeProof expect =
     SimulatedEffect.Http.request
         { method = spec.method
-        , headers = authHeaderList maybeToken
-        , url = spec.url
+        , headers = authHeaderList spec.method maybeToken maybeProof
+        , url = Api.Url.toString spec.url
         , body =
             case spec.body of
-                Just value ->
+                Api.JsonBody value ->
                     SimulatedEffect.Http.jsonBody value
 
-                Nothing ->
+                -- ⚠️ A FILE BECOMES AN EMPTY BODY IN THE HARNESS, deliberately, and
+                -- the limit is worth stating. `elm-program-test`'s simulated HTTP
+                -- has no file body, so a test can see that a file-bodied request
+                -- WAS MADE and to where, but cannot assert the bytes. Two requests
+                -- are affected: the Goodreads import and the photograph upload.
+                Api.FileBody _ ->
+                    SimulatedEffect.Http.emptyBody
+
+                Api.MultipartFile _ _ ->
+                    SimulatedEffect.Http.emptyBody
+
+                Api.NoBody ->
                     SimulatedEffect.Http.emptyBody
         , expect = expect
         , timeout = Nothing
@@ -1007,14 +1145,40 @@ requestFromSpec spec maybeToken expect =
         }
 
 
-authHeaderList : Maybe String -> List SimulatedEffect.Http.Header
-authHeaderList maybeToken =
-    case maybeToken of
-        Just token ->
-            [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+{-| The harness's header list, derived from `Api.requestHeaders` rather than
+decided again here.
 
-        Nothing ->
-            []
+⛔ This used to be its own `case maybeToken of` — a second, independent decision
+about what an authenticated request carries. That is the exact shape this
+module's own `Effect` docs describe: two decisions that each pass their own
+tests while disagreeing with each other. Nothing compared them, so the two
+could drift and the whole suite would stay green while every program test
+asserted against a request production does not send.
+
+⚖️ `SimulatedEffect.Http.Header` and `Http.Header` are different opaque types,
+which is why the shared thing is header **data**: `Api.requestHeaders` returns
+`List ( String, String )` and each runtime wraps it in its own type. That is the
+whole reason the builder returns pairs instead of `Http.Header`.
+
+⛔ **DERIVED BY `Api.planHeaders`, THE SAME FUNCTION PRODUCTION CALLS**, rather
+than by a second rule that happens to agree. This used to be
+`Api.requestHeaders method (Api.Optional maybeToken)` and it silently dropped
+`plan.proof` — so for the nine sessionless writes (`Page/Login`,
+`Page/Admin/Session`, `Page/ResetPassword`, `Page/ListingRemoval`) production
+sent `X-CSRF-Token` and the harness sent `[]`.
+
+⚠️ That is exactly the drift `Effect` exists to abolish — "two interpreters
+deciding the same thing separately" — living inside the abstraction built to
+prevent it, on the very header this work added. And the parity test written to
+catch it could not: it drives only `GET`, and `csrfHeader` returns `[]` for
+every safe method, so the dropped field was unobservable by construction in the
+one place parity was asserted.
+
+-}
+authHeaderList : String -> Maybe Api.Credentials -> Maybe String -> List SimulatedEffect.Http.Header
+authHeaderList method maybeToken maybeProof =
+    Api.planHeaderPairs method maybeToken maybeProof
+        |> List.map (\( name, value ) -> SimulatedEffect.Http.header name value)
 
 
 {-| Harness model for the admin chrome: the chrome's own model plus the most
@@ -1037,7 +1201,7 @@ click produces comes from `AdminChrome.updateWithEffect` through
 `simulateEffect`, so nothing here restates which endpoint sign-out calls.
 
 -}
-adminChromeProgram : Maybe String -> ProgramDefinition () AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
+adminChromeProgram : Maybe Api.Credentials -> ProgramDefinition () AdminChromeTestModel AdminChrome.Msg (SimulatedEffect AdminChrome.Msg)
 adminChromeProgram adminToken =
     ProgramTest.createElement
         { init =
@@ -1061,7 +1225,7 @@ adminChromeProgram adminToken =
 seeds the server-config flag so tests can drive both the
 flag-on (age UI present) and flag-off (age UI hidden) states.
 -}
-uploadProgram : Bool -> Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgram : Bool -> Maybe Api.Credentials -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgram ageGatingEnabled maybeToken =
     uploadProgramWithInbox ageGatingEnabled maybeToken Types.RemoteData.NotAsked
 
@@ -1078,7 +1242,7 @@ own reading of the same value, and `UploadControllerTest` covers the query).
 -}
 uploadProgramWithInbox :
     Bool
-    -> Maybe String
+    -> Maybe Api.Credentials
     -> Types.RemoteData.RemoteData Http.Error (List Api.InboxItem)
     -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
@@ -1103,9 +1267,163 @@ uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
         |> ProgramTest.withSimulatedEffects identity
 
 
+{-| Harness model for an Upload program test that needs the page's `OutMsg`.
+
+`uploadProgram`'s update wrapper discards `Upload.update`'s third tuple element,
+which is how a probe replacing `RefreshInbox` with `NoOut` once reddened
+nothing. Recording the most recent `OutMsg` makes the signal the page sends
+`Main` — a session it has decided is over, a stream to open — observable to a
+test that drives the page through its own UI and its own requests.
+
+-}
+type alias MetricsTestModel =
+    { page : Metrics.Model }
+
+
+{-| Harness for the public transparency page.
+
+⚖️ `Page.Metrics` has no `OutMsg` and no credential — it is the clearest example
+of a `public` plan, and the harness exists to prove the request is reachable and
+answerable rather than to watch for an expiry there is none of.
+
+-}
+metricsProgram : ProgramDefinition () MetricsTestModel Metrics.Msg (SimulatedEffect Metrics.Msg)
+metricsProgram =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, effect ) =
+                        Metrics.initWithEffect
+                in
+                ( { page = model }, simulateEffect effect )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _ ) =
+                        Metrics.update msg model.page
+                in
+                ( { page = newPage }, SimulatedEffect.Cmd.none )
+        , view = \model -> Metrics.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+type alias ProfileTestModel =
+    { page : Profile.Model
+    , lastOut : Profile.OutMsg
+    }
+
+
+{-| Harness for a reader's public profile.
+
+⛔ The interesting case here is NOT the one the authed pages have. This is a
+`public` plan with an OPTIONAL credential, so the seam leaves a 401 to the page —
+and the page's own reading of one is correct, because an anonymous request to a
+public profile is answered rather than refused.
+
+-}
+profileProgram :
+    Maybe Api.Credentials
+    -> String
+    -> ProgramDefinition () ProfileTestModel Profile.Msg (SimulatedEffect Profile.Msg)
+profileProgram maybeToken handle =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, effect ) =
+                        Profile.initWithEffect maybeToken handle
+                in
+                ( { page = model, lastOut = Profile.NoOut }, simulateEffect effect )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _, out ) =
+                        Profile.update msg model.page
+                in
+                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+        , view = \model -> Profile.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+type alias AuditLogTestModel =
+    { page : AuditLog.Model
+    , lastOut : AuditLog.OutMsg
+    }
+
+
+{-| Harness for the audit-log page.
+
+⛔ This could not have been written before the page's request moved onto the
+plan. `init` returned a `Cmd`, which `elm-program-test` cannot inspect or
+answer — so there was no way to hand this page an HTTP response at all, and the
+one branch worth testing (what a 401 means to a reader asking for their own
+audit history) was unreachable from a test.
+
+-}
+auditLogProgram :
+    Maybe Api.Credentials
+    -> ProgramDefinition () AuditLogTestModel AuditLog.Msg (SimulatedEffect AuditLog.Msg)
+auditLogProgram maybeToken =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, effect ) =
+                        AuditLog.initWithEffect maybeToken
+                in
+                ( { page = model, lastOut = AuditLog.NoOut }, simulateEffect effect )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, _, out ) =
+                        AuditLog.update msg model.page
+                in
+                ( { page = newPage, lastOut = out }, SimulatedEffect.Cmd.none )
+        , view = \model -> AuditLog.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+type alias UploadTestModel =
+    { page : Upload.Model
+    , lastOut : Upload.OutMsg
+    }
+
+
+{-| An Upload harness started from a GIVEN model, recording each `OutMsg`.
+
+⚠️ Seeded rather than driven from `Upload.init`, because the states worth
+driving here sit behind a file picker and a live progress stream that no
+simulated runtime can produce. The page's own `updateWithEffect` and its own
+requests still do all the work from that point on — only the starting state is
+a fixture.
+
+-}
+uploadProgramFrom :
+    Upload.Model
+    -> Maybe Api.Credentials
+    -> ProgramDefinition () UploadTestModel Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgramFrom startModel maybeToken =
+    ProgramTest.createElement
+        { init = \() -> ( { page = startModel, lastOut = Upload.NoOut }, SimulatedEffect.Cmd.none )
+        , update =
+            \msg model ->
+                let
+                    ( newPage, effect, out ) =
+                        Upload.updateWithEffect msg model.page maybeToken
+                in
+                ( { page = newPage, lastOut = out }, simulateEffect effect )
+        , view = \model -> Upload.view model.page maybeToken Types.RemoteData.NotAsked
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
 {-| Create a ProgramTest harness for the Bookshelf page in its Library config.
 -}
-libraryProgram : Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+libraryProgram : Maybe Api.Credentials -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 libraryProgram =
     bookshelfProgram Bookshelf.libraryConfig
 
@@ -1116,7 +1434,7 @@ so the only thing that varies between them is the `Config` — pass
 `Bookshelf.antiLibraryConfig` / `Bookshelf.wishListConfig` to drive those
 surfaces.
 -}
-bookshelfProgram : Bookshelf.Config -> Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+bookshelfProgram : Bookshelf.Config -> Maybe Api.Credentials -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 bookshelfProgram config maybeToken =
     ProgramTest.createElement
         { init =
@@ -1155,7 +1473,7 @@ type alias ReadingPileTestModel =
 
 {-| Create a ProgramTest harness for the Reading Pile page.
 -}
-readingPileProgram : Maybe String -> ProgramDefinition () ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
+readingPileProgram : Maybe Api.Credentials -> ProgramDefinition () ReadingPileTestModel ReadingPile.Msg (SimulatedEffect ReadingPile.Msg)
 readingPileProgram maybeToken =
     ProgramTest.createElement
         { init =
@@ -1193,7 +1511,7 @@ profile shelf; `BookshelfUndoRemoveTest` runs both and requires them to differ.
 -}
 bookshelfUndoProgram :
     Bookshelf.Config
-    -> Maybe String
+    -> Maybe Api.Credentials
     -> Bookshelf.Removal
     -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 bookshelfUndoProgram config maybeToken removal =
@@ -1223,7 +1541,7 @@ bookshelfUndoProgram config maybeToken removal =
 {-| Create a ProgramTest harness for the read-only profile-shelf browse view
 (`Page.Bookshelf` in its `profileConfig` — /).
 -}
-profileShelfProgram : Maybe String -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+profileShelfProgram : Maybe Api.Credentials -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 profileShelfProgram maybeToken handle bookshelfName =
     let
         config =
@@ -1251,7 +1569,7 @@ profileShelfProgram maybeToken handle bookshelfName =
 
 {-| Create a ProgramTest harness for the Search page.
 -}
-searchProgram : Maybe String -> ProgramDefinition () Search.Model Search.Msg (SimulatedEffect Search.Msg)
+searchProgram : Maybe Api.Credentials -> ProgramDefinition () Search.Model Search.Msg (SimulatedEffect Search.Msg)
 searchProgram maybeToken =
     ProgramTest.createElement
         { init = \() -> ( Search.init, SimulatedEffect.Cmd.none )
@@ -1284,8 +1602,24 @@ starts it, from the arrival.
 -}
 loginProgramFrom : Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgramFrom arrival =
+    loginProgramWith Nothing arrival
+
+
+{-| The login card for a reader whose page HAS handed it a CSRF proof.
+
+⛔ **THE SHAPE NO HARNESS COULD BUILD UNTIL NOW**, and the gap it left was real:
+every login program started from `Login.init Nothing`, so no `ProgramTest` in
+the suite ever drove a request with `token = Nothing, proof = Just _` — the
+exact shape of the nine sessionless writes. The simulated interpreter was
+dropping `plan.proof` and nothing could see it.
+
+⚖️ `loginProgram` is this with `Nothing`, so the ordinary cases are unchanged.
+
+-}
+loginProgramWith : Maybe String -> Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
+loginProgramWith proof arrival =
     ProgramTest.createElement
-        { init = \() -> ( Login.init arrival, SimulatedEffect.Cmd.none )
+        { init = \() -> ( Login.init proof arrival, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let
@@ -1302,7 +1636,7 @@ loginProgramFrom arrival =
 enabled so the 403-driven age-gate block renders under test; the
 production default is off, which hides it (covered by the flag guard).
 -}
-bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgram : String -> Maybe Api.Credentials -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailProgram bookId maybeToken =
     ProgramTest.createElement
         { init =
@@ -1342,7 +1676,7 @@ the page's `OutMsg`. `bookDetailProgram` discards it; this one keeps the latest
 one so a test can observe `NavigateTo previousRoute` from a confirmed remove.
 Takes the previous route so the navigation target is a concrete, asserted value.
 -}
-bookDetailProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailProgramWithOut : String -> Maybe Api.Credentials -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
     ProgramTest.createElement
         { init =
@@ -1371,7 +1705,7 @@ modal chrome: backdrop, close button, focus sentinel) instead of the routed
 `view`. Records the page's `OutMsg` so a test can assert that dismissing the
 overlay via the X button or a backdrop click emits `RequestCloseOverlay`.
 -}
-bookDetailOverlayProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailOverlayProgramWithOut : String -> Maybe Api.Credentials -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
 bookDetailOverlayProgramWithOut bookId maybeToken maybePreviousRoute =
     ProgramTest.createElement
         { init =

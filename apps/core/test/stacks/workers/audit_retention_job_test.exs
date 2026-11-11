@@ -44,6 +44,76 @@ defmodule Stacks.Workers.AuditRetentionJobTest do
       assert count("probe.recent") == 1, "a row inside the retention period must survive"
     end
 
+    test "clears a backlog larger than one batch, across batches" do
+      # ⛔ The sweep was one unbounded DELETE, and its own moduledoc recorded that
+      # both justifications for that were false: batching IS permitted (the
+      # append-only trigger authorises per STATEMENT, not per transaction), and
+      # the timestamp was NOT indexed, so the DELETE Seq Scanned a table designed
+      # to grow forever. Both are fixed; this is what holds the batching.
+      #
+      # ⚠️ The property is that MORE THAN ONE batch runs and the backlog still
+      # clears. A single-batch test would pass against the unbounded version, and
+      # a test that only counted the total would pass against a loop that stopped
+      # after one pass and left rows behind.
+      now = DateTime.utc_now()
+      months = AuditRetentionJob.retention_months()
+      old_at = DateTime.add(now, -(months + 2) * 30 * 24 * 3600, :second)
+
+      # ⚠️ The batch size is LOWERED, and without that this test is worthless.
+      #
+      # The production size is 5,000. Any backlog small enough to seed quickly
+      # fits in one batch, so the test would exercise a single statement and pass
+      # against the unbounded DELETE it is meant to guard. An earlier version of
+      # this test did exactly that while its comment claimed otherwise.
+      #
+      # Two rows per batch over five rows forces three iterations, the last
+      # short — which is also the condition the loop uses to decide it has
+      # finished.
+      Application.put_env(:core, :audit_retention_batch_size, 2)
+      on_exit(fn -> Application.delete_env(:core, :audit_retention_batch_size) end)
+
+      for _ <- 1..5, do: seed_audit_row("probe.backlog", old_at)
+      assert count("probe.backlog") == 5
+      assert AuditRetentionJob.batch_size() == 2, "the batch size override did not take"
+
+      assert :ok = perform_job(AuditRetentionJob, %{})
+
+      assert count("probe.backlog") == 0,
+             "five rows did not clear at two per batch, so the loop ran once and stopped. A " <>
+               "sweep that reports :ok having left rows past their retention period is the " <>
+               "failure this batching exists to avoid."
+    end
+
+    test "the error path can actually run, which the branch it replaced could not" do
+      # ⛔ `perform/1` used to end in `{:error, reason} -> ...` matching
+      # `Repo.transaction/1`, which returns that ONLY for an explicit
+      # `Repo.rollback/1`. Nothing rolls back here and `Repo.query!` RAISES, so
+      # the failure path was a raise propagating straight past a case clause
+      # written to catch it. The clause read as error handling and handled
+      # nothing — which is worse than no clause, because a reader stops looking.
+      #
+      # Driven by revoking the authorisation the append-only trigger demands: the
+      # DELETE then raises, and the rescue must turn that into an error tuple
+      # Oban can retry rather than an unhandled exit.
+      now = DateTime.utc_now()
+      months = AuditRetentionJob.retention_months()
+      seed_audit_row("probe.raises", DateTime.add(now, -(months + 2) * 30 * 24 * 3600, :second))
+
+      # `audit.audit_log` refuses an unauthorised DELETE by raising inside the
+      # trigger. Pointing the job at a relation that does not exist reaches the
+      # same place with no dependence on trigger internals.
+      Repo.query!("ALTER TABLE audit.audit_log RENAME TO audit_log_renamed_for_probe")
+
+      on_exit(fn ->
+        Repo.query!("ALTER TABLE audit.audit_log_renamed_for_probe RENAME TO audit_log")
+      end)
+
+      assert {:error, message} = perform_job(AuditRetentionJob, %{})
+
+      assert is_binary(message),
+             "the rescue must report a message Oban can log and retry on, not an unhandled raise"
+    end
+
     test "keeps the retention period at the ruled twenty-four months" do
       # Deliberately a constant assertion, and the only one here that is.
       #

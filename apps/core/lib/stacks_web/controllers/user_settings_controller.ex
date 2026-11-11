@@ -14,6 +14,7 @@ defmodule StacksWeb.UserSettingsController do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
+  alias StacksWeb.SessionTeardown
 
   @doc """
       PUT /api/settings/profile — update display_name, website_url, and optionally
@@ -45,11 +46,22 @@ defmodule StacksWeb.UserSettingsController do
       # The change could not be recorded because the two letters it is made of
       # could not be sent. Recording it anyway would leave a pending change nobody
       # holds a link to, so this is a refusal, not a partial success.
-      {:error, :rate_limited} ->
+      # ⛔ THE LIMB IS NAMED, because the two mean opposite things to a caller
+      # and a bare `email_rate_limited` forces it to guess. `per_user` is this
+      # account sending too much — a refusal worth acting on. `global` is the
+      # whole stack's hourly volume, and on a test stack the dominant source of
+      # that is the SUITE ITSELF (a user per test, each queuing a confirmation),
+      # so it says "the bucket is full", not "delivery is broken".
+      #
+      # ⚠️ Same reasoning as the two CSRF 403s, which carry a `reason` for
+      # exactly this: a refusal a client cannot attribute gets attributed
+      # wrongly. The deploy warmup's 403 was read as bad credentials for the
+      # same lack.
+      {:error, {:rate_limited, limb}} ->
         conn
         |> put_status(429)
         |> put_resp_header("retry-after", "3600")
-        |> json(%{error: "email_rate_limited"})
+        |> json(%{error: "email_rate_limited", limb: limb})
 
       {:error, :argon2_busy} ->
         conn
@@ -81,8 +93,32 @@ defmodule StacksWeb.UserSettingsController do
 
     case Accounts.change_password(user, current, new_pw) do
       {:ok, _} ->
-        Accounts.revoke_all_user_sessions(user.id)
-        json(conn, %{ok: true})
+        # ⛔ THE CALLER IS SIGNED OUT TOO, and the cookie goes with the session.
+        # `revoke_all_user_sessions/1` already killed every session including this
+        # one; answering `{ok: true}` with no `Set-Cookie` left the reader holding
+        # a credential that no longer worked. They were told "saved", and their
+        # next request — any request — came back 401 and bounced them to sign-in
+        # with nothing connecting it to the password change they had just made.
+        #
+        # ⚖️ Signing out is the DECISION, not merely the tidy-up. The alternative
+        # was to re-issue a session so the caller stays in while other devices are
+        # revoked, which is friendlier and is what many sites do. It was rejected:
+        # a password change that does not end the session performing it leaves a
+        # reader signed in on a machine they may have borrowed, which is the
+        # situation people change their password BECAUSE of.
+        # ⛔ `:everywhere`, and the scope is the point rather than a flag. A
+        # password change ends EVERY session the reader has, on every device,
+        # and clears this browser's cookie so they are not left holding a
+        # credential that no longer works.
+        #
+        # ⚠️ This was two calls — `revoke_all_user_sessions/1` and a scopeless
+        # teardown — until a probe showed that dropping the first left every
+        # test green: they all re-present the CALLER's token, which the teardown
+        # revokes either way, so "everywhere" could narrow to "this device"
+        # invisibly. The scope argument makes that unforgettable.
+        conn
+        |> SessionTeardown.end_session(:everywhere)
+        |> json(%{ok: true})
 
       {:error, :invalid_password} ->
         conn |> put_status(422) |> json(%{error: "invalid_current_password"})

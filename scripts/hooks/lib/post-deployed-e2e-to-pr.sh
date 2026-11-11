@@ -39,7 +39,7 @@ EOF
 
 current_body="$(gh pr view "${PR_NUMBER}" --json body --jq '.body')"
 
-if echo "$current_body" | grep -q "<!-- deployed-e2e-summary-start -->"; then
+if grep -q "<!-- deployed-e2e-summary-start -->" <<< "$current_body"; then
     new_body="$(_replace_deployed_e2e_sentinel "$current_body" "$deployed_e2e_section")"
 else
     new_body="${current_body}

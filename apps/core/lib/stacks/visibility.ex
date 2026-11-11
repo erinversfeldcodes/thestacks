@@ -7,6 +7,7 @@ defmodule Stacks.Visibility do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social
 
@@ -331,25 +332,43 @@ defmodule Stacks.Visibility do
 
   @doc """
       Returns all bookshelves for the given user_id that are visible to the viewer.
+
+      ⛔ Scoped to the **VIEWER**, not to `user_id`. The subject of the question
+      and the principal asking it are different people here, and that is the
+      whole shape of this function — scoping to the subject would hand a reader
+      the subject's own view of their shelves.
+
+      ⚠️ The row-level policies decide only whether a row may be FETCHED; the
+      `can_view?/2` filter below remains the authority on whether the viewer may
+      see it. That division is deliberate. Expressing the whole visibility
+      ladder — tier, profile ceiling, blocks, group membership, explicit grants,
+      age gate — as SQL would be a second implementation of a rule this module
+      already owns, and a drifting SQL copy is permissive everywhere row-level
+      security is bypassed, which includes every test and every superuser. So
+      over-fetching here is safe and under-fetching is not.
+
+      ⚠️ `:unauthenticated` is a real caller, not a defensive branch: this runs
+      under the optional-auth pipeline. It needs the anonymous scope rather than
+      no scope — an unscoped read is refused outright, which is why this path
+      returned a 500 on a public profile for every signed-out visitor.
   """
   @spec viewable_shelves(String.t(), term()) :: [Bookshelf.t()]
   def viewable_shelves(user_id, viewer) do
-    Bookshelf
-    |> where([b], b.user_id == ^user_id)
-    |> Repo.all()
+    Scope.for_viewer(viewer_id(viewer), fn ->
+      Bookshelf
+      |> where([b], b.user_id == ^user_id)
+      |> Repo.all()
+    end)
     |> Enum.filter(&can_view?(&1, viewer))
   end
 
-  @doc """
-      Returns all placements for the given bookshelf_id that are visible to the viewer.
-  """
-  @spec viewable_placements(String.t(), term()) :: [Placement.t()]
-  def viewable_placements(shelf_id, viewer) do
-    Placement
-    |> where([p], p.bookshelf_id == ^shelf_id)
-    |> Repo.all()
-    |> Enum.filter(&can_view?(&1, viewer))
-  end
+  # The viewer shapes this module already speaks, reduced to "is there a
+  # principal, and who". Anything that is not an identified platform user reads
+  # as nobody, which is the conservative direction: it narrows the fetch to
+  # publicly-readable rows.
+  defp viewer_id({:platform_user, id}) when is_binary(id), do: id
+  defp viewer_id(%{id: id}) when is_binary(id), do: id
+  defp viewer_id(_), do: nil
 
   @doc """
       Batch-resolves placement visibility for placements sharing ONE viewer

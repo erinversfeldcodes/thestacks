@@ -72,7 +72,7 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
       assert json_response(first, 201)
 
       second =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(owner)
         |> post("/api/bookshelves/#{bookshelf.id}/grants", %{user_id: grantee.id})
 

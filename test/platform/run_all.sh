@@ -17,12 +17,38 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 SUITES=(
     "$HERE/squawk_destructive_test.sh"
+    "$HERE/extract_migration_sql_test.sh"
     "$HERE/lint_migrations_test.sh"
     "$HERE/migration_gate_syntax_test.sh"
     "$HERE/squawk_worktree_selection_test.sh"
     "$HERE/schema_diff_test.sh"
     "$HERE/ci_migration_safety_job_test.sh"
     "$HERE/probe_production_test.sh"
+    "$HERE/idor_gate_test.sh"
+    "$HERE/tracker_refs_gate_test.sh"
+    "$HERE/script_wiring_test.sh"
+    "$HERE/scheduled_dbt_refresh_test.sh"
+    "$HERE/scheduled_core_jobs_test.sh"
+    "$HERE/scheduled_duty_runner_test.sh"
+    "$HERE/deploy_preview_gating_test.sh"
+    "$HERE/wave_status_stack_guard_test.sh"
+    "$HERE/campaign_residue_ledger_test.sh"
+    "$HERE/rls_scope_gate_test.sh"
+    "$HERE/session_expiry_forms_test.sh"
+    "$HERE/effect_seam_gate_test.sh"
+    "$HERE/one_credential_derivation_test.sh"
+    # The client-side half of the CSRF invariant. Its route-side twin is
+    # `check-csrf-scope.sh`, which has no suite of its own — recorded rather
+    # than quietly skipped.
+    "$HERE/csrf_clients_gate_test.sh"
+    "$HERE/sigpipe_hazard_gate_test.sh"
+    "$HERE/cli_stub_provenance_test.sh"
+    "$HERE/ci_gate_reachability_test.sh"
+    "$HERE/guard_unbypassable_test.sh"
+    "$HERE/status_after_substitution_test.sh"
+    "$HERE/exclusion_tags_have_runners_test.sh"
+    "$HERE/async_cache_clearing_test.sh"
+    "$HERE/platform_suites_job_test.sh"
     "$HERE/check_slo_gate_test.sh"
     "$HERE/rollback_production_test.sh"
     "$HERE/parse_rollback_output_test.sh"
@@ -31,12 +57,33 @@ SUITES=(
     "$HERE/deploy_stack_retry_test.sh"
     "$HERE/deploy_stack_neon_lookup_test.sh"
     "$HERE/deploy_stack_eval_prereq_test.sh"
+    "$HERE/deploy_stack_posture_test.sh"
+    "$HERE/deploy_stack_prod_posture_execution_test.sh"
+    "$HERE/deploy_stack_prod_guards_execution_test.sh"
+    "$HERE/gate_fail_closed_test.sh"
+    "$HERE/dbt_elixir_reference_test.sh"
+    "$HERE/protojson_completeness_test.sh"
+    "$HERE/breaking_suppressions_test.sh"
+    "$HERE/api_only_is_skipped_test.sh"
+    "$HERE/never_serialized_test.sh"
+    "$HERE/workflow_health_test.sh"
+    "$HERE/deployed_posture_test.sh"
+    "$HERE/unbounded_sweeps_test.sh"
+    "$HERE/storage_selection_test.sh"
+    "$HERE/ports_wired_test.sh"
+    "$HERE/sweep_preview_orphans_test.sh"
+    "$HERE/decoder_coverage_test.sh"
+    "$HERE/book_adapter_coverage_test.sh"
+    "$HERE/error_token_spelling_test.sh"
+    "$HERE/app_database_url_derivation_test.sh"
     "$HERE/log_shipper_config_test.sh"
     "$HERE/preview_names_test.sh"
     "$HERE/runtime_comment_freshness_test.sh"
     "$HERE/e2e_warmup_guard_test.sh"
     "$HERE/e2e_global_setup_guard_test.sh"
     "$HERE/e2e_global_setup_behavior_test.sh"
+    "$HERE/e2e_auth_ceiling_handoff_test.sh"
+    "$HERE/rate_limiter_bucket_drift_test.sh"
 )
 
 # Fail loudly if a suite lands on disk without joining SUITES — otherwise the
@@ -54,6 +101,27 @@ done
 if [[ -n "$UNLISTED" ]]; then
     printf '# UNLISTED SUITES (present in test/platform, absent from run_all.sh):%s\n' "$UNLISTED"
     printf '# Add them to SUITES, or delete them. A suite nothing runs is not a test.\n'
+    exit 1
+fi
+
+# ⛔ AND THE MIRROR OF IT: an entry with no file. The check above catches a file
+# that joined no list; this catches a list that outlived its file, which is what
+# happens when a suite is deleted and SUITES is not.
+#
+# ⚠️ MEASURED 2026-11-07: deleting `credential_origin_gate_test.sh` left its
+# entry here, and the symptom was a runner that printed
+# `bash: …/credential_origin_gate_test.sh: No such file or directory`, emitted NO
+# `# passed:` line for it, and then summed the remaining suites to
+# "1697 passed, 0 failed" before announcing that one had FAILED. Both halves were
+# true and the pair was unreadable: nothing in the per-suite output said which.
+MISSING=""
+for s in "${SUITES[@]}"; do
+    [[ -f "$s" ]] || MISSING="${MISSING} $(basename "$s")"
+done
+if [[ -n "$MISSING" ]]; then
+    printf '# MISSING SUITES (listed in run_all.sh, absent from disk):%s\n' "$MISSING"
+    printf '# Remove them from SUITES. A listed suite that is not there exits non-zero\n'
+    printf '# with no assertions, so the run fails while every suite reports 0 failed.\n'
     exit 1
 fi
 

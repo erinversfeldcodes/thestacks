@@ -78,6 +78,79 @@ jobs:
       - name: Generate inter-service Elixir proto structs
         run: bash scripts/gen-elixir-proto.sh
 
+      # ⚠️ BEFORE the migrations, and that order is the whole point of this step.
+      #
+      # This job was red for two months and would have stayed red forever. Three
+      # seeded book_editions carry an ISBN whose EAN-13 check digit is wrong;
+      # one migration adds the checksum constraint NOT VALID and the next
+      # VALIDATEs it, and the validate scans those rows and aborts:
+      #
+      #   ERROR 23514 (check_violation) check constraint
+      #   "book_editions_isbn_ean13_checksum" ... is violated by some row
+      #
+      # The repair already existed and was already wired — into the DEPLOY path
+      # only. `deploy-stack.sh` runs the corrections and then migrates, which is
+      # why a preview branch, copy-on-write from this very database and carrying
+      # the same three rows, migrates to the newest version with the constraint
+      # validated while staging sits stuck at the migration before the validate.
+      # Same data, two pipelines, one step different.
+      #
+      # So this is not a workaround for a stuck database. It is the step that
+      # makes a correction-dependent migration reach staging at all, and leaving
+      # it out is what froze staging's schema — and with it the least-privilege
+      # roles, which a later migration creates and which staging therefore never
+      # got.
+      #
+      # DRY-RUN BY DEFAULT is the task's own contract, hence --apply. The
+      # corrections match on id AND the stale value, so a row that has drifted
+      # is refused rather than overwritten, and a second run is a no-op.
+      - name: Apply data corrections to staging
+        working-directory: apps/core
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.uri }}
+          CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
+          VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
+          SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          # ⚠️ Prod runtime config demands exactly five variables —
+          # DATABASE_URL, SECRET_KEY_BASE, GUARDIAN_SECRET_KEY,
+          # RESEND_API_KEY and VISION_SERVICE_URL — and this one was the
+          # only omission. It was found by enumerating the prod block
+          # rather than by a fourth failed run: the three before it each
+          # revealed one missing input and taught nothing about the rest.
+          GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+          # ⛔ THE ROLE PASSWORDS, OR A RESEED CREATES UNUSABLE ROLES. The role
+          # migration treats an absent STACKS_APP_DB_PASSWORD as "create this role
+          # NOLOGIN with no password" — correct for a machine holding no secrets, and
+          # catastrophic here: a migration runs ONCE, so applying it without these
+          # leaves stacks_app / stacks_dbt / stacks_readonly permanently dead and no
+          # later run repairs them.
+          #
+          # ⚠️ That is not hypothetical. The 2026-11-11 reseed advanced staging from
+          # 102 to 170 migrations with these absent, which left all three roles
+          # rolcanlogin=false / rolpassword=null — and because a Neon branch copies the
+          # cluster, EVERY preview cut from staging inherited them and every booted app
+          # failed with `28P01 invalid_password for user 'stacks_app'` while its machine
+          # reported `started`.
+          STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+          STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+          # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
+          # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
+          # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
+          # deliberate backend, and refused with "No object storage is configured for
+          # a deployed build" — correctly. Two of the four variables it requires is
+          # not a configuration, which is the whole point of that module.
+          #
+          # ⚖️ Local rather than the two missing R2 variables, because the truthful
+          # answer is that this job never writes an object: `seeds.exs` inserts a
+          # `storage_path` STRING into `uploaded_images` and calls no storage API.
+          # Pointing a reseed at production object storage to satisfy a check it only
+          # trips by accident would hand it credentials it has no use for.
+          STORAGE_BACKEND: local
+          UPLOAD_DIR: /tmp/reseed-staging-uploads
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          VISION_SERVICE_URL: http://localhost:8000
+        run: mix stacks.data.correct --apply
+
       - name: Apply migrations to staging
         working-directory: apps/core
         env:
@@ -85,8 +158,42 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # ⚠️ Prod runtime config demands exactly five variables —
+          # DATABASE_URL, SECRET_KEY_BASE, GUARDIAN_SECRET_KEY,
+          # RESEND_API_KEY and VISION_SERVICE_URL — and this one was the
+          # only omission. It was found by enumerating the prod block
+          # rather than by a fourth failed run: the three before it each
+          # revealed one missing input and taught nothing about the rest.
+          GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+          # ⛔ THE ROLE PASSWORDS, OR A RESEED CREATES UNUSABLE ROLES. The role
+          # migration treats an absent STACKS_APP_DB_PASSWORD as "create this role
+          # NOLOGIN with no password" — correct for a machine holding no secrets, and
+          # catastrophic here: a migration runs ONCE, so applying it without these
+          # leaves stacks_app / stacks_dbt / stacks_readonly permanently dead and no
+          # later run repairs them.
+          #
+          # ⚠️ That is not hypothetical. The 2026-11-11 reseed advanced staging from
+          # 102 to 170 migrations with these absent, which left all three roles
+          # rolcanlogin=false / rolpassword=null — and because a Neon branch copies the
+          # cluster, EVERY preview cut from staging inherited them and every booted app
+          # failed with `28P01 invalid_password for user 'stacks_app'` while its machine
+          # reported `started`.
+          STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+          STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+          # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
+          # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
+          # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
+          # deliberate backend, and refused with "No object storage is configured for
+          # a deployed build" — correctly. Two of the four variables it requires is
+          # not a configuration, which is the whole point of that module.
+          #
+          # ⚖️ Local rather than the two missing R2 variables, because the truthful
+          # answer is that this job never writes an object: `seeds.exs` inserts a
+          # `storage_path` STRING into `uploaded_images` and calls no storage API.
+          # Pointing a reseed at production object storage to satisfy a check it only
+          # trips by accident would hand it credentials it has no use for.
+          STORAGE_BACKEND: local
+          UPLOAD_DIR: /tmp/reseed-staging-uploads
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VISION_SERVICE_URL: http://localhost:8000
         run: mix ecto.migrate
@@ -98,8 +205,42 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # ⚠️ Prod runtime config demands exactly five variables —
+          # DATABASE_URL, SECRET_KEY_BASE, GUARDIAN_SECRET_KEY,
+          # RESEND_API_KEY and VISION_SERVICE_URL — and this one was the
+          # only omission. It was found by enumerating the prod block
+          # rather than by a fourth failed run: the three before it each
+          # revealed one missing input and taught nothing about the rest.
+          GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+          # ⛔ THE ROLE PASSWORDS, OR A RESEED CREATES UNUSABLE ROLES. The role
+          # migration treats an absent STACKS_APP_DB_PASSWORD as "create this role
+          # NOLOGIN with no password" — correct for a machine holding no secrets, and
+          # catastrophic here: a migration runs ONCE, so applying it without these
+          # leaves stacks_app / stacks_dbt / stacks_readonly permanently dead and no
+          # later run repairs them.
+          #
+          # ⚠️ That is not hypothetical. The 2026-11-11 reseed advanced staging from
+          # 102 to 170 migrations with these absent, which left all three roles
+          # rolcanlogin=false / rolpassword=null — and because a Neon branch copies the
+          # cluster, EVERY preview cut from staging inherited them and every booted app
+          # failed with `28P01 invalid_password for user 'stacks_app'` while its machine
+          # reported `started`.
+          STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+          STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
+          # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
+          # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
+          # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
+          # deliberate backend, and refused with "No object storage is configured for
+          # a deployed build" — correctly. Two of the four variables it requires is
+          # not a configuration, which is the whole point of that module.
+          #
+          # ⚖️ Local rather than the two missing R2 variables, because the truthful
+          # answer is that this job never writes an object: `seeds.exs` inserts a
+          # `storage_path` STRING into `uploaded_images` and calls no storage API.
+          # Pointing a reseed at production object storage to satisfy a check it only
+          # trips by accident would hand it credentials it has no use for.
+          STORAGE_BACKEND: local
+          UPLOAD_DIR: /tmp/reseed-staging-uploads
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VISION_SERVICE_URL: http://localhost:8000
           ALLOW_SEEDS: "true"

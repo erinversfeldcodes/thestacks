@@ -12,9 +12,12 @@ defmodule StacksWeb.TestHelperController do
 
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+  alias Stacks.Admin.SessionContext
   alias Stacks.AgeVerification
+  alias Stacks.AI.CallLog
   alias Stacks.Blog
   alias Stacks.Books
+  alias Stacks.Email
   alias Swoosh.Adapters.Local.Storage.Memory
 
   require Logger
@@ -109,6 +112,35 @@ defmodule StacksWeb.TestHelperController do
 
   def set_age_verification(conn, _params), do: not_found(conn)
 
+  @doc """
+      DELETE /api/test/admin-sessions  body: {"email"}
+
+      Revokes every live admin session the named operator holds, putting them
+      back to "signed in, not elevated". `200 {"revoked": n}` or `404`.
+
+      ⛔ **Why this exists, and why the E2E suite cannot do without it.** Admin
+      elevation now lives on the server's session and survives a reload — which
+      is the product behaviour — so a spec can no longer assume the sign-in gate
+      appears on every load. Each spec that wants to drive the gate has to start
+      from a known-unelevated state, and the only alternatives were a
+      conditional "pass the gate if it happens to be showing" (a vacuous guard
+      by this repo's own rule) or ordering dependencies between tests.
+
+      ⚖️ **It can only ever reduce access**, which is why it carries no
+      `.test`-domain restriction where its siblings do: those mint or grant
+      something, so they are confined to throwaway accounts. This revokes, so
+      the worst a misuse achieves is making an operator sign in again. It is
+      still behind `STACKS_E2E_TEST_HELPERS` like every route in this scope.
+  """
+  def revoke_admin_sessions(conn, %{"email" => email}) when is_binary(email) do
+    case Accounts.get_user_by_email(email) do
+      %{} = user -> json(conn, %{revoked: SessionContext.revoke_all_for_user(user.id)})
+      _ -> not_found(conn)
+    end
+  end
+
+  def revoke_admin_sessions(conn, _params), do: not_found(conn)
+
   defp apply_verification(user, true),
     do: AgeVerification.record_verification(user, "e2e_test_helper", nil)
 
@@ -190,6 +222,79 @@ defmodule StacksWeb.TestHelperController do
   def seed_book_writing(conn, _params), do: not_found(conn)
 
   @doc """
+      POST /api/test/association-outcome  body: {"email", "outcome", "title"?}
+
+      Seeds a blog post whose book-association pass FINISHED WITH NO
+      ASSOCIATIONS, recording `outcome` in the call log — the state an author
+      sees when the pass found nothing or could not run.
+
+      ⛔ **The failing half is what nothing could drive.** `seed_book_writing`
+      above writes the happy path (a visible association), and production
+      reaches the failing paths only through an async LLM worker whose outcome a
+      browser test cannot steer. So the surface that tells an author "we
+      couldn't link books to this post" had no drivable route to it, which is
+      exactly the half of this component that had never been seen rendered.
+
+      ⚖️ Writes the same end state the worker would, through the same schema,
+      and **weakens no invariant**: `outcome` is validated against the worker's
+      own closed vocabulary rather than taken as given, so this cannot create a
+      row production could not. `.test`-domain emails only.
+
+      `201 {ok, post_id}`, `404` out of scope, `422 {errors}`.
+  """
+  # The worker's own terminal vocabulary. A caller asking for anything else is
+  # asking for a row production cannot produce, and gets a 422 rather than a
+  # fixture that proves something untrue.
+  @association_outcomes ~w(associated no_books_found unreadable_response unexpected_shape llm_error)
+
+  def seed_association_outcome(conn, %{"email" => email, "outcome" => outcome} = params)
+      when is_binary(email) and is_binary(outcome) do
+    title = Map.get(params, "title", "E2E post whose association pass finished")
+
+    # ⚠️ TAGGED, because two bare `true <-` clauses are indistinguishable in
+    # `else`: an out-of-scope email was answering with the outcome-vocabulary
+    # 422 instead of a 404, so the scope refusal was reporting the wrong reason
+    # — and a caller debugging it would go looking at its outcome string.
+    with true <- e2e_test_email?(email),
+         {:outcome, true} <- {:outcome, outcome in @association_outcomes},
+         %{} = user <- Accounts.get_user_by_email(email),
+         {:ok, post} <-
+           Blog.create_post(user, %{title: title, body: "Seeded by the association spec."}),
+         {:ok, _log} <- log_outcome(post.id, outcome) do
+      conn
+      |> put_status(:created)
+      |> json(%{ok: true, post_id: post.id})
+    else
+      {:outcome, false} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: %{outcome: "must be one of #{Enum.join(@association_outcomes, ", ")}"}})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  def seed_association_outcome(conn, _params), do: not_found(conn)
+
+  defp log_outcome(post_id, outcome) do
+    %CallLog{}
+    |> CallLog.changeset(%{
+      post_id: post_id,
+      model: "e2e-seeded",
+      outcome: outcome,
+      prompt_sha256: CallLog.hash_prompt("seeded by the association spec"),
+      raw_response: ""
+    })
+    |> Core.Repo.insert()
+  end
+
+  @doc """
       POST /api/test/book-description  body: {"title", "description", "isbn"?}
 
       Creates a NEW public single-edition book so `description_tsv` populates for
@@ -244,6 +349,41 @@ defmodule StacksWeb.TestHelperController do
     "e2e-mint-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}@thestacks.test"
   end
 
+  @doc """
+      GET /api/test/email-budget[?email=…]
+
+      Reports the hourly email-send budget: both counts and both limits, from
+      `Stacks.Email.budget/1`.
+
+      ⛔ WHY THE HARNESS NEEDS THIS. "Forgot my password" and "resend
+      confirmation" answer identically whether or not a letter was queued —
+      deliberately, so neither can be used to discover whether an address has an
+      account. A spec driving one of them therefore cannot tell a broken feature
+      from a full bucket by reading the response, and **the suite is the thing
+      that fills the bucket**: it registers a user per test and each
+      registration queues a confirmation. Three local runs put 101 sends in an
+      hour against a global limit of 100, and the three email specs then failed
+      with "expected a password-reset email" — which reads as a product defect.
+
+      ⚠️ Counts only, never an address or a subject, and the `email` parameter
+      is held to the same `.test`-domain rule as every other helper here, so
+      this cannot be turned into an account-existence oracle. 404 out of scope.
+  """
+  def email_budget(conn, params) do
+    case Map.get(params, "email") do
+      nil ->
+        json(conn, Email.budget())
+
+      email ->
+        with true <- e2e_test_email?(email),
+             %{} = user <- Accounts.get_user_by_email(email) do
+          json(conn, Email.budget(user.id))
+        else
+          _ -> not_found(conn)
+        end
+    end
+  end
+
   defp issue_session(conn, user) do
     fid = Ecto.UUID.generate()
     {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
@@ -257,6 +397,28 @@ defmodule StacksWeb.TestHelperController do
 
     case Accounts.rotate_token_family(family_attrs) do
       {:ok, _family} ->
+        # ⛔ NO SET-COOKIE HERE, AND THE REASON IS WHAT THIS ENDPOINT IS FOR.
+        # It fabricates a credential for an identity the caller will act as
+        # SOMEWHERE ELSE — a browser context, a bearer header — which is a
+        # different job from `POST /api/auth/login`, where the client doing the
+        # logging in is the client that gets the session. This version did set
+        # the cookie, through the real login's own helper, for the good reason
+        # that a helper issuing a session differently from production is a
+        # harness that passes while production is broken.
+        #
+        # ⚠️ MEASURED COST OF THAT FIDELITY: `AuthPipeline` installs the cookie
+        # plug BEFORE `VerifyHeader`, so the cookie WINS when both are present.
+        # A caller that mints two identities down one HTTP client — which is
+        # the normal shape of a harness that needs an owner and a member — had
+        # its second mint silently overwrite the first, and every later request
+        # then acted as whoever was minted LAST no matter which bearer token it
+        # carried. An owner inviting a member became that member inviting
+        # themselves, and the refusal looked like a product fault in groups.
+        #
+        # ⚖️ So the response describes the credential and changes nothing about
+        # who the caller is. The cookie's attributes still have exactly one
+        # author — `SessionCookie` — and the harness that writes them by hand is
+        # held to it by the attribute test in `session_cookie_test.exs`.
         conn
         |> put_status(:created)
         |> json(%{

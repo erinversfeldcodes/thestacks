@@ -116,17 +116,44 @@ defmodule Stacks.Workers.ImageRetentionJobTest do
   end
 
   describe "cron registration" do
-    test "is scheduled nightly at 02:00 via the Oban Cron plugin" do
-      crontab =
-        :core
-        |> Application.get_env(Oban)
-        |> Keyword.fetch!(:plugins)
-        |> Enum.find_value(fn
-          {Oban.Plugins.Cron, opts} -> Keyword.get(opts, :crontab)
-          _ -> nil
-        end)
+    test "⛔ is NOT in the Oban crontab, because that node scales to zero" do
+      # Oban's Cron plugin computes due jobs on a tick from a running node and
+      # has no catch-up pass, so an entry fires only if something else happened
+      # to wake the machine in that minute. Production's `oban_jobs` showed
+      # exactly that: every retention row inserted at 02:00:00, picked up within
+      # a second, frozen at attempt 1 with a different node UUID each night.
+      refute ImageRetentionJob in Enum.map(crontab(), &elem(&1, 1)),
+             "the 30-day image retention commitment is back on a trigger that fires only when " <>
+               "the machine happens to be awake"
+    end
 
-      assert {"0 2 * * *", ImageRetentionJob} in crontab
+    test "is scheduled nightly at 02:00 by the workflow that replaced the crontab entry" do
+      workflow = scheduled_core_jobs()
+
+      assert workflow =~ ~s(- cron: "0 2 * * *"),
+             "the 02:00 cadence is gone from the workflow, so the duty has no schedule anywhere"
+
+      assert workflow =~ "Stacks.Release.sweep_images",
+             "the workflow carries the cadence but never invokes the duty"
+    end
+
+    defp crontab do
+      :core
+      |> Application.get_env(Oban)
+      |> Keyword.fetch!(:plugins)
+      |> Enum.find_value(fn
+        {Oban.Plugins.Cron, opts} -> Keyword.get(opts, :crontab)
+        _ -> nil
+      end)
+    end
+
+    # The duty's schedule moved from the Oban crontab to a workflow, so the
+    # cadence claim is read off the workflow. ⚠️ Kept as a claim rather than
+    # deleted: "it runs at this hour" is the behavioural promise, and dropping it
+    # because the trigger moved would quietly discard the only thing asserting
+    # the duty has a cadence at all.
+    defp scheduled_core_jobs do
+      File.read!(Path.expand("../../../../../.github/workflows/scheduled-core-jobs.yml", __DIR__))
     end
   end
 end

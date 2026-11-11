@@ -337,7 +337,7 @@ defmodule StacksWeb.BookshelfControllerTest do
 
       for name <- ~w(antilibrary library wishlist reading_pile looking_for_home) do
         conn =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> get("/api/bookshelves/#{name}")
 
@@ -595,7 +595,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert baseline["count"] == 2
 
       filtered =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(user)
         |> get("/api/bookshelves/library?view_as=unauthenticated")
         |> json_response(200)

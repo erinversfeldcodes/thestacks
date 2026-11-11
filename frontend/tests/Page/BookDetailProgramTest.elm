@@ -39,7 +39,7 @@ import Types.RemoteData exposing (RemoteData(..))
 -}
 startBookDetail : ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 startBookDetail =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
 
 
 suite : Test
@@ -203,7 +203,7 @@ multiShelfRemoveKeepsTheReaderOnThePage =
     test "multi_shelf_remove_stays: after removing one of two, the page stays and the notice goes" <|
         \() ->
             ProgramTest.start ()
-                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.AntiLibrary))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacements "book-test-001"
@@ -262,7 +262,7 @@ escapeClosesRemoveModalFirst =
                 ( model, _, out ) =
                     BookDetail.update BookDetail.EscapePressed
                         { loadedOverlayModel | removeModalOpen = True }
-                        (Just "test-token")
+                        (Just (TestHelpers.creds "test-token"))
             in
             Expect.all
                 [ \_ -> Expect.equal False model.removeModalOpen
@@ -282,7 +282,7 @@ escapeClosesProgressFormFirst =
                     }
 
                 ( model, _, out ) =
-                    BookDetail.update BookDetail.EscapePressed editingModel (Just "test-token")
+                    BookDetail.update BookDetail.EscapePressed editingModel (Just (TestHelpers.creds "test-token"))
             in
             Expect.all
                 [ \_ -> Expect.equal (Just False) (Maybe.map .editing model.progressCard)
@@ -297,7 +297,7 @@ escapeWithNoNestedSurfaceRequestsClose =
         \() ->
             let
                 ( _, _, out ) =
-                    BookDetail.update BookDetail.EscapePressed loadedOverlayModel (Just "test-token")
+                    BookDetail.update BookDetail.EscapePressed loadedOverlayModel (Just (TestHelpers.creds "test-token"))
             in
             Expect.equal BookDetail.RequestCloseOverlay out
 
@@ -382,15 +382,15 @@ loadedOverlayModel : BookDetail.Model
 loadedOverlayModel =
     let
         ( m0, _ ) =
-            BookDetail.init "book-test-001" (Just "test-token") Nothing
+            BookDetail.init "book-test-001" (Just (TestHelpers.creds "test-token")) Nothing
 
         ( m1, _, _ ) =
             BookDetail.update
                 (BookDetail.BookLoaded
-                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
+                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                 )
                 m0
-                (Just "test-token")
+                (Just (TestHelpers.creds "test-token"))
     in
     m1
 
@@ -460,7 +460,7 @@ moveCompletedErrorShowsMessage =
 startOverlayWithOut : ProgramTest.ProgramTest TestHelpers.BookDetailTestModel BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 startOverlayWithOut =
     ProgramTest.start ()
-        (TestHelpers.bookDetailOverlayProgramWithOut "book-test-001" (Just "test-token") (Just Route.Library))
+        (TestHelpers.bookDetailOverlayProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.Library))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -865,7 +865,7 @@ removeConfirmNavigatesToPreviousRoute =
     test "remove_confirm_happy: ConfirmRemove then RemoveCompleted Ok emits OutMsg NavigateTo previousRoute" <|
         \() ->
             ProgramTest.start ()
-                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.AntiLibrary))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -894,7 +894,7 @@ removeRecordsTheUndoableRemoval =
     test "remove_records_the_undoable_removal: a successful DELETE records the placement id and title for Undo" <|
         \() ->
             ProgramTest.start ()
-                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.AntiLibrary))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -925,7 +925,7 @@ undoableRemovalIsUnsetBeforeRemoval =
     test "undoable_removal_unset_before_removal: loading a book records no undoable removal" <|
         \() ->
             ProgramTest.start ()
-                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                (bookDetailProgramWithOut "book-test-001" (Just (TestHelpers.creds "test-token")) (Just Route.AntiLibrary))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -971,7 +971,7 @@ confirmMoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
@@ -989,7 +989,7 @@ confirmMoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
@@ -1006,7 +1006,7 @@ confirmRemoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)
@@ -1023,7 +1023,7 @@ confirmRemoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [], myWriting = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)

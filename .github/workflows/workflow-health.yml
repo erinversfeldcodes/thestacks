@@ -1,0 +1,52 @@
+name: Workflow health
+
+# Watches the workflows no pull request depends on.
+#
+# ⚠️ Eleven of this repository's workflows have no `pull_request` trigger — the
+# backup dump, production deploy, the staging reseed, billing-metrics refresh,
+# branch cleanup, both GDPR operator tools, the scheduled core jobs and dbt
+# refresh, scorecard and tag-main. Nothing goes red when one of them breaks, so
+# the staging reseed failed deterministically for two months and three
+# consecutive runs before a human happened to look.
+#
+# ⚠️ WHY THIS IS NOT IN PR CI. It needs the Actions API and it reports on the
+# DEFAULT BRANCH's fleet, which has nothing to do with the contents of any given
+# pull request. Running it per-PR would turn one broken maintenance job into
+# every contributor's problem while telling them nothing about their change.
+#
+# ⛔ HOW THIS ONE IS WATCHED, since it is itself a workflow nobody's PR depends
+# on: it is in its own population. A failure here is a failed scheduled run on
+# the default branch, which GitHub notifies on — and the check reports its own
+# name alongside the others. That is the base case, and it is worth stating
+# rather than leaving as an exercise: a watchdog that cannot report on itself is
+# the next thing to go quietly red.
+
+on:
+  schedule:
+    # Daily, shortly after the nightly maintenance jobs have had their chance to
+    # run and fail. Early enough that a red is a day old at most.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  workflow-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The check compares each run's date against the workflow file's last
+          # commit date to tell a live red from one the current definition has
+          # already superseded. That needs real history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Check the fleet outside PR CI
+        env:
+          # `gh run list` needs this; the job's `actions: read` permission is
+          # what makes it sufficient.
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/check-workflow-health.sh

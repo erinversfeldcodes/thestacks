@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import {
   suiteAuthFile,
@@ -8,6 +8,8 @@ import {
   injectSession,
   fetchSentEmails,
   extractLink,
+  goAnonymous,
+  assertEmailBudgetOrSkip,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
@@ -50,8 +52,29 @@ test.describe("Settings — Privacy & Consent", () => {
     await expect(page.getByTestId("analytics-consent-toggle")).toBeVisible();
   });
 
-  test("analytics toggle switches between on and off", async ({ page }) => {
+  // ⛔ ITS OWN USER, because this test's subject is a TRANSITION. It reads the
+  // toggle, clicks, and asserts the text changed — which is only meaningful
+  // from a known starting state. On the shared suite user it passed once and
+  // failed on the next identical run, because the previous run had left a
+  // consent decision recorded and the control no longer flips the same way.
+  //
+  // ⚖️ Minted rather than restored: restoring the field in an `afterEach` is a
+  // second thing to keep correct, and it fails silently when it drifts. A fresh
+  // user has no recorded consent, which is the precondition this asserts from.
+  test("analytics toggle switches between on and off", async ({
+    page,
+    request,
+  }) => {
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-consent-analytics"),
+    });
+    await injectSession(page, session);
+
     await page.goto("/settings/consent");
+    // ⚠️ A freshly minted user still has onboarding, whose overlay covers the
+    // toggle — the click times out rather than failing an assertion, which
+    // reads like a broken control instead of an obscured one.
+    await dismissOnboarding(page);
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const toggle = page.getByTestId("analytics-consent-toggle");
@@ -105,10 +128,22 @@ test.describe("Settings — Privacy & Consent", () => {
     );
   });
 
+  // ⛔ ITS OWN USER, for the same reason and with one extra wrinkle: this test
+  // already TRIES to be order-independent — it clicks the toggle Off first when
+  // it reads "On" — and that was not enough. It still failed on the second of
+  // two identical runs. An attempted normalisation that does not actually
+  // normalise is worse than none, because it looks like the problem is handled.
   test("book-linking consent grants, flips the off-copy, and persists server-side", async ({
     page,
+    request,
   }) => {
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-consent-booklinking"),
+    });
+    await injectSession(page, session);
+
     await page.goto("/settings/consent");
+    await dismissOnboarding(page);
     await page.getByTestId("settings-hub").waitFor({ timeout: 5000 });
 
     const toggle = page.getByTestId("writing-assistant-consent-toggle");
@@ -214,11 +249,9 @@ test.describe("Settings — Profile & Account API", () => {
         path: string;
         body: Record<string, unknown>;
       }) => {
-        const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
         const resp = await fetch(path, {
           method,
           headers: {
-            Authorization: `Bearer ${auth.token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
@@ -344,6 +377,12 @@ test.describe("Settings — Profile & Account API", () => {
     page,
   }) => {
     await page.goto("/");
+
+    // ⛔ Explicitly credential-free. Sending no `Authorization` header below
+    // proves nothing: the suite's storage state carries the session cookie,
+    // which the server prefers over any header, so these requests would be
+    // authenticated and every assertion would read 200.
+    await goAnonymous(page);
 
     const unauthResults = await page.evaluate(async () => {
       const endpoints = [
@@ -588,8 +627,22 @@ test.describe("Settings — Profile UI flow", () => {
     ).toBeVisible();
     await expect(field(page, "Email")).toHaveValue(newEmail);
 
+    // ⛔ The stack's email-send budget decides whether this half can run at all.
+    // An email change is refused with 429 `email_rate_limited` (retry-after
+    // 3600) when its two letters cannot be sent, and the budget is NOT per-user
+    // — a brand-new minted user is refused on its first attempt once the suite's
+    // own repeated runs have exhausted it. Without this gate the journey below
+    // fails deterministically for an hour and reads as a broken feature.
+    const saved = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/settings/profile") &&
+        r.request().method() === "PUT",
+    );
     await field(page, "Current Password").fill(E2E_PASSWORD);
     await page.getByRole("button", { name: "Save Profile" }).click();
+    const savedResp = await saved;
+    await assertEmailBudgetOrSkip(savedResp);
+
     await expect(page.getByText("Profile saved.")).toBeVisible();
 
     // The typed address does NOT land: it parks as pending, and the account

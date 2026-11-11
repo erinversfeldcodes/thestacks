@@ -109,6 +109,38 @@ message GroupMember {
   google.protobuf.Timestamp created_at = 6 [json_name = "created_at"];
 }
 
+// GroupMemberSummary is one row of a group's member roster: the membership facts
+// a reader needs in order to see who is here, joined to the member's name.
+//
+// Deliberately narrower than GroupMember, and deliberately not it. The
+// membership record's own id and group_id are omitted — a caller who asked for
+// one group's roster has no use for the join row's identity — and display_name
+// is not a field of GroupMember at all, because it belongs to the user.
+//
+// The endpoint sent this shape for months while matching no message here, so
+// nothing tied the fields the server emits to the fields the client requires.
+// That is the gap this message closes; the shape itself is unchanged.
+//
+// display_name is NOT optional on the wire, even though op.users.display_name is
+// nullable: the query coalesces to the handle, which is NOT NULL. A null here
+// would fail the entire roster on the client, because a list decoder fails whole.
+//
+// Source: Social.list_group_members/2
+// JSON shape: {user_id, role, display_name, joined_at}
+message GroupMemberSummary {
+  // Foreign key to the member user.
+  string user_id = 1 [json_name = "user_id"];
+
+  // Role of the user within the group (string on wire, e.g. "member", "moderator").
+  string role = 2 [json_name = "role"];
+
+  // The member's display name, or their handle when they have not set one.
+  string display_name = 3 [json_name = "display_name"];
+
+  // When the user joined the group.
+  google.protobuf.Timestamp joined_at = 4 [json_name = "joined_at"];
+}
+
 // GroupInvitation represents an invitation for a user to join a group.
 message GroupInvitation {
   // UUID of the invitation record.

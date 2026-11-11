@@ -187,7 +187,6 @@ def test_analyze_local_ocr_short_circuit_skips_vlm() -> None:
     with (
         patch(
             "app.main.local_isbn_scan",
-            create=True,
             return_value="9780156001311",
         ) as mock_scan,
         patch(
@@ -242,7 +241,7 @@ def test_analyze_invalid_base64_returns_422() -> None:
 
 
 def test_analyze_rejects_missing_hmac() -> None:
-    """/analyze must be HMAC-gated — same as /classify and /extract."""
+    """/analyze must be HMAC-gated — it is the only authenticated endpoint left."""
     with TestClient(app) as client:
         response = client.post("/analyze", json={"image": _VALID_IMAGE})
     assert response.status_code in (401, 403)
@@ -321,3 +320,388 @@ def test_analyze_empty_excluded_books_passes_empty_list() -> None:
     call = mock_extract.await_args
     assert call is not None
     assert call.kwargs.get("excluded_books") == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The normalisation the deletion kept and the deletion's tests took with them.
+#
+# `_parse_classification` and `_parse_extracted_books` say in their own
+# docstrings that they are "carried over from the removed endpoint's inline
+# parsing". The CODE survived; its tests went with `test_classification.py` and
+# `test_extraction.py`. What was lost: the enum fallback, the confidence clamp,
+# a non-list `books`, a non-dict item, partially-populated books, and more than
+# one book.
+#
+# ⚠️ Coverage cannot see this gap. The clamp and the fallback are branchless
+# single statements, so they are reported EXECUTED by every happy-path test
+# while nothing asserts what they produce. And `/analyze` is now their only
+# caller, so this is the response-shaping path for every upload in the product.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _analyze(classify_output: dict[str, object], extract_output: dict[str, object]):
+    """POST /analyze with both model calls stubbed. Returns the response."""
+    with (
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value=classify_output,
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value=extract_output,
+        ),
+        TestClient(app) as client,
+    ):
+        return client.post(
+            "/analyze",
+            json={"image": _VALID_IMAGE},
+            headers=_make_header(),
+        )
+
+
+def test_unknown_classification_falls_back_to_ambiguous() -> None:
+    """A label the model invents must not reach the response verbatim.
+
+    Every surviving test passes "book", "not_book" or "ambiguous" — all direct
+    hits in `_ML_TO_CLASSIFICATION`, so the `.get(raw_ml, _CLF_AMBIGUOUS)`
+    default was asserted by nothing.
+    """
+    response = _analyze({"classification": "banana", "confidence": 0.5}, {"books": []})
+
+    assert response.status_code == 200
+    assert response.json()["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
+
+
+def test_out_of_range_confidence_is_clamped() -> None:
+    """Confidence is a 0-1 probability in the contract; the model is not bound by that.
+
+    Surviving values were 0.95, 0.92, 0.45 and 0.85 — all already in range, so
+    the clamp was executed on every run and asserted on none.
+    """
+    high = _analyze({"classification": "book", "confidence": 7}, {"books": []})
+    assert high.status_code == 200
+    assert high.json()["confidence"] == 1.0
+
+    low = _analyze({"classification": "book", "confidence": -3}, {"books": []})
+    assert low.status_code == 200
+    assert low.json()["confidence"] == 0.0
+
+
+def test_non_numeric_confidence_becomes_zero_rather_than_raising() -> None:
+    """A string where a float belongs must not 500 the upload path."""
+    response = _analyze({"classification": "book", "confidence": "very"}, {"books": []})
+
+    assert response.status_code == 200
+    assert response.json()["confidence"] == 0.0
+
+
+def test_missing_classification_key_is_ambiguous() -> None:
+    """An envelope with no `classification` at all — the shape a wrong mock produces."""
+    response = _analyze({}, {"books": []})
+
+    assert response.status_code == 200
+    assert response.json()["classification"] == "CLASSIFICATION_RESULT_AMBIGUOUS"
+
+
+def test_non_list_books_field_yields_no_books() -> None:
+    """`books` as a string: the guard at the top of `_parse_extracted_books`."""
+    response = _analyze({"classification": "book", "confidence": 0.9}, {"books": "not a list"})
+
+    assert response.status_code == 200
+    assert response.json()["books"] == []
+
+
+def test_absent_books_key_yields_no_books() -> None:
+    response = _analyze({"classification": "book", "confidence": 0.9}, {})
+
+    assert response.status_code == 200
+    assert response.json()["books"] == []
+
+
+def test_non_dict_book_item_is_skipped_not_fatal() -> None:
+    """One bad element must not lose the good ones beside it.
+
+    This is the failure mode that has already cost this project an import page:
+    a strict parse dropping a whole list over one malformed member.
+    """
+    response = _analyze(
+        {"classification": "book", "confidence": 0.9},
+        {"books": [None, {"title": "Survivor"}, "also not a dict"]},
+    )
+
+    assert response.status_code == 200
+    books = response.json()["books"]
+    assert [b["title"] for b in books] == ["Survivor"]
+
+
+def test_partial_book_fields_are_coerced_rather_than_dropped() -> None:
+    """Five `isinstance` coercions that no surviving test exercised.
+
+    Every remaining test fed a fully-populated book dict, so a wrong type or a
+    missing key never reached them.
+    """
+    response = _analyze(
+        {"classification": "book", "confidence": 0.9},
+        {
+            "books": [
+                {
+                    "title": "Only a Title",
+                    "author": 42,
+                    "potential_isbns": "9780743273565",
+                    "confidence": "high",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    book = response.json()["books"][0]
+    assert book["title"] == "Only a Title"
+    assert book["author"] is None, "a non-string author must become None, not 42"
+    assert book["potential_isbns"] == [], "a bare string is not a list of ISBNs"
+    assert book["raw_text"] is None
+    assert book["confidence"] is None, "a non-numeric confidence must become None"
+
+
+def test_multiple_books_all_surface() -> None:
+    """The loop never ran with more than one item in any surviving test, so a
+    `List.head`-shaped bug would have looked entirely correct."""
+    response = _analyze(
+        {"classification": "book", "confidence": 0.9},
+        {
+            "books": [
+                {"title": "First"},
+                {"title": "Second"},
+                {"title": "Third"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert [b["title"] for b in response.json()["books"]] == ["First", "Second", "Third"]
+
+
+def test_barcode_and_vlm_tiers_are_distinguishable() -> None:
+    """The response says WHICH tier answered, and the two differ.
+
+    ⛔ Without this the per-tier cost question is unanswerable, and that is the
+    question the vision redesign turns on. Cost was charged as a flat constant
+    per call regardless of whether a CPU barcode scan answered in milliseconds
+    or a 7B VLM ran on an A10G — so "should a cover-embedding tier exist?"
+    could not be argued from a figure that cannot tell those apart.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        barcode = client.post(
+            "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
+        ).json()
+
+    assert barcode["tier"] == "ANALYSIS_TIER_BARCODE"
+
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={"classification": "book", "confidence": 0.9},
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={"books": []},
+        ),
+        TestClient(app) as client,
+    ):
+        vlm = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert vlm["tier"] == "ANALYSIS_TIER_VLM_EXTRACT"
+
+    # ⬛ ANTI-VACUITY: the two must actually DIFFER. A producer hardcoding one
+    # tier would satisfy either assertion alone, and a field that always says
+    # the same thing is the flat constant this change replaces.
+    assert barcode["tier"] != vlm["tier"]
+
+
+def test_a_stage_that_did_not_run_reports_no_timing() -> None:
+    """Absent, not zero — because 0ms and "did not run" are different facts.
+
+    ⚖️ A barcode-answered request never calls classify or extract. Reporting 0
+    for them would be indistinguishable from a stage that ran instantly, and
+    the redesign's latency case is argued from exactly these numbers.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    timings = data["timings_ms"]
+
+    assert timings["classify"] is None
+    assert timings["extract"] is None
+
+    # ⬛ ANTI-VACUITY: the stages that DID run must report a number, or a
+    # timings block of all-None would satisfy the assertions above while
+    # measuring nothing.
+    assert isinstance(timings["download"], int)
+    assert isinstance(timings["barcode"], int)
+
+
+def test_only_the_first_request_on_a_container_is_cold() -> None:
+    """Cold is a property of the container, claimed once.
+
+    ⚠️ Read-and-clear in one step, so two requests arriving together on a cold
+    container cannot both claim it — which would double-count the cold-start
+    cost the redesign is trying to measure.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        first = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+        second = client.post(
+            "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
+        ).json()
+
+    assert first["sidecar_cold"] is True
+    assert second["sidecar_cold"] is False
+
+
+def test_barcode_answer_reports_no_gpu_dispatches() -> None:
+    """A barcode answer never woke the model, so it lists no GPU dispatches.
+
+    ⚖️ An empty list, not a null: the request definitely made zero dispatches,
+    which is a measurement rather than an absence. A consumer counts it with no
+    nil branch — which is half the reason the field is `repeated`.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value="9780156001311"),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert data["tier"] == "ANALYSIS_TIER_BARCODE"
+    assert data["gpu_dispatches"] == []
+
+
+def test_both_dispatches_are_reported_not_just_the_first() -> None:
+    """⛔ THE DEFECT THIS SHAPE EXISTS TO FIX.
+
+    A VLM_EXTRACT request makes TWO independent Modal dispatches. Only
+    classify's container reading was kept, so a request whose EXTRACT woke a
+    cold container reported no cold start at all — under-counting billed
+    container lifetimes by up to half, in the direction that flatters the GPU.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={
+                "classification": "book",
+                "confidence": 0.9,
+                "_container": {"cold": False, "container_id": "warm-one"},
+            },
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={
+                "books": [],
+                "_container": {"cold": True, "container_id": "cold-two"},
+            },
+        ),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    dispatches = data["gpu_dispatches"]
+
+    assert len(dispatches) == 2, (
+        f"expected both dispatches, got {dispatches} — the extract reading is being discarded, "
+        "which is the under-count this field was reshaped to fix"
+    )
+
+    # ⬛ THE ASSERTION THAT WOULD HAVE CAUGHT THE ORIGINAL BUG: the cold one is
+    # the SECOND dispatch. Under the old single-valued shape this request
+    # reported cold=false, because only classify was read.
+    assert [d["cold"] for d in dispatches] == [False, True]
+    assert [d["container_id"] for d in dispatches] == ["warm-one", "cold-two"]
+
+
+def test_a_dispatch_with_no_container_reading_is_omitted() -> None:
+    """A GPU image predating these fields contributes no dispatch entry.
+
+    ⚠️ Omitted rather than entered as a false `cold=False`, which would claim
+    the container was warm for a dispatch we know nothing about.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={"classification": "book", "confidence": 0.9},
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={
+                "books": [],
+                "_container": {"cold": True, "container_id": "only-one"},
+            },
+        ),
+        TestClient(app) as client,
+    ):
+        data = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+
+    assert data["gpu_dispatches"] == [{"cold": True, "container_id": "only-one"}]
+
+
+def test_gpu_cold_and_sidecar_cold_are_independent() -> None:
+    """⛔ THE DISTINCTION THIS FIELD EXISTS FOR.
+
+    The sidecar runs in a cheap CPU container whose warmth `modal_app.py` says
+    is independent of the GPU's, and an idle A10G is roughly two orders of
+    magnitude more expensive per second. A test that let these collapse would
+    let the cheap container's warmth stand in for the expensive one — which is
+    the defect that renaming `container_cold` to `sidecar_cold` surfaced.
+    """
+    with (
+        patch("app.main.local_isbn_scan", return_value=None),
+        patch(
+            "app.services.vision_client.VisionClient.classify",
+            new_callable=AsyncMock,
+            return_value={
+                "classification": "book",
+                "confidence": 0.9,
+                "_container": {"cold": True, "container_id": "gpu-one"},
+            },
+        ),
+        patch(
+            "app.services.vision_client.VisionClient.extract",
+            new_callable=AsyncMock,
+            return_value={"books": []},
+        ),
+        TestClient(app) as client,
+    ):
+        first = client.post("/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()).json()
+        second = client.post(
+            "/analyze", json={"image": _VALID_IMAGE}, headers=_make_header()
+        ).json()
+
+    # The sidecar warms after its first request; the GPU's reading is whatever
+    # the GPU reported, both times.
+    assert first["sidecar_cold"] is True
+    assert second["sidecar_cold"] is False
+    assert [d["cold"] for d in first["gpu_dispatches"]] == [True]
+    assert [d["cold"] for d in second["gpu_dispatches"]] == [True]
+
+    # ⬛ ANTI-VACUITY: on the second request the two disagree — sidecar warm,
+    # GPU cold. If one were derived from the other this could not happen, and
+    # the whole point is that they are different facts.
+    gpu_cold_second = any(d["cold"] for d in second["gpu_dispatches"])
+    assert second["sidecar_cold"] != gpu_cold_second

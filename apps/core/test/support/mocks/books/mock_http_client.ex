@@ -25,20 +25,6 @@ defmodule Stacks.Books.MockHttpClient do
     end
   end
 
-  @impl true
-  def get_binary(url) do
-    notify_capture(url)
-    responses = lookup_responses()
-
-    case Enum.find(responses, fn {pattern, _} -> String.contains?(url, pattern) end) do
-      {_, response} ->
-        response
-
-      nil ->
-        {:error, :transport_error}
-    end
-  end
-
   @doc "Register a response for URLs containing `pattern`. Later registrations take priority."
   def put_response(pattern, response) do
     responses = Process.get(__MODULE__, [])

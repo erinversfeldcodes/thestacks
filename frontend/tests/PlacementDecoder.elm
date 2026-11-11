@@ -3,7 +3,15 @@ module PlacementDecoder exposing (suite)
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Placement as Placement exposing (Format(..), ReadingStatus(..), placementDecoder, placementSummaryDecoder)
+import Types.Placement as Placement
+    exposing
+        ( Format(..)
+        , ReadingStatus(..)
+        , bookPlacementDecoder
+        , placementDetailDecoder
+        , placementRefDecoder
+        , placementSummaryDecoder
+        )
 import Types.Visibility as Visibility
 
 
@@ -67,6 +75,24 @@ placementWithBookshelfNameJson =
     """
 
 
+{-| A `BookPlacement` whose `bookshelf_name` is JSON `null` — exactly what
+`proto_json.ex` emits when the bookshelf is absent, and the input that made the
+old hand-written guard fall through to the wrong shape. The other fields are
+present so their loss is observable.
+-}
+nullBookshelfNameJson : String
+nullBookshelfNameJson =
+    """
+    {
+        "id": "placement-006",
+        "bookshelf_name": null,
+        "formats": ["physical"],
+        "personal_rating": 5,
+        "notes": "kept"
+    }
+    """
+
+
 minimalIdOnlyJson : String
 minimalIdOnlyJson =
     """
@@ -106,7 +132,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder minimalPlacementJson
+                        Decode.decodeString placementRefDecoder minimalPlacementJson
                 in
                 case result of
                     Ok placement ->
@@ -132,7 +158,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder fullPlacementJson
+                        Decode.decodeString placementDetailDecoder fullPlacementJson
                 in
                 case result of
                     Ok placement ->
@@ -155,11 +181,86 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
+        , test "a BookPlacement with a NULL bookshelf_name keeps its own fields" <|
+            \_ ->
+                -- ⚠️ The defect the old `oneOf` had, and the reason using the
+                -- declared type is not merely tidier.
+                --
+                -- `placementDecoder` separated BookPlacement from PlacementRef
+                -- with a hand-written guard on the presence of
+                -- `bookshelf_name`. `proto_json.ex` emits
+                -- `bookshelf_name: bookshelf && bookshelf.name`, so the field
+                -- arrives as JSON `null` whenever the bookshelf is absent —
+                -- `Decode.field "bookshelf_name" Decode.string` FAILS on null,
+                -- and the decoder fell through to the PlacementRef branch.
+                --
+                -- Decoding a BookPlacement as a ref silently drops every field
+                -- the ref shape does not have: formats, notes, personal_rating
+                -- and visibility. No error, just a placement that forgot
+                -- things. Reading the type the response declares cannot make
+                -- that mistake, because there is no second branch to fall to.
+                case Decode.decodeString bookPlacementDecoder nullBookshelfNameJson of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal "placement-006" p.id
+                            , \p -> Expect.equal Nothing p.bookshelfName
+                            , \p -> Expect.equal [ Physical ] p.formats
+                            , \p -> Expect.equal (Just "kept") p.notes
+                            , \p -> Expect.equal (Just 5) p.personalRating
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "⛔ carries a PRESENT reading status and page — red before the fix" <|
+            -- The one assertion that would have failed before this change. The
+            -- decoder nulled both fields, so the book-detail progress card read
+            -- "To Read" for a reader 150 pages in, and Save wrote `to_read`
+            -- back over the real status.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-prog","book_id":"b-1","reading_status":"reading","current_page":150}""" of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal (Just Reading) p.readingStatus
+                            , \p -> Expect.equal (Just 150) p.currentPage
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "⛔ current_page 0 decodes to Just 0, NOT Nothing" <|
+            -- ⚠️ This is the only thing holding the `optional` decision against
+            -- a tidy-up. `fromProtoBookPlacement` assigns `currentPage` straight
+            -- through, two lines below `personalRating = zeroToNothing …`, so the
+            -- line that deliberately does not collapse zero looks like an
+            -- oversight beside its neighbour. Collapsing it would make page 0
+            -- indistinguishable from "not recorded" and every other test would
+            -- stay green.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-zero","book_id":"b-1","reading_status":"reading","current_page":0}""" of
+                    Ok placement ->
+                        Expect.equal (Just 0) placement.currentPage
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "a reading status the server cannot send decodes to Nothing, and the badge says so" <|
+            -- ⚠️ The remaining conflation, pinned rather than fixed: an
+            -- unparseable status and an absent one both become Nothing. That is
+            -- tolerable ONLY because the consumer now renders Nothing as "Not
+            -- recorded" and refuses to save it — if either of those changes,
+            -- this case becomes a silent downgrade again.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-bad","book_id":"b-1","reading_status":"finished"}""" of
+                    Ok placement ->
+                        Expect.equal Nothing placement.readingStatus
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "decodes placement with bookshelf_name" <|
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder placementWithBookshelfNameJson
+                        Decode.decodeString bookPlacementDecoder placementWithBookshelfNameJson
                 in
                 case result of
                     Ok placement ->
@@ -175,7 +276,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder minimalIdOnlyJson
+                        Decode.decodeString placementRefDecoder minimalIdOnlyJson
                 in
                 case result of
                     Ok placement ->
@@ -192,7 +293,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder missingRequiredFieldJson
+                        Decode.decodeString placementRefDecoder missingRequiredFieldJson
                 in
                 case result of
                     Ok placement ->
@@ -204,7 +305,7 @@ suite =
             \_ ->
                 let
                     result =
-                        Decode.decodeString placementDecoder placementWithReadingProgressJson
+                        Decode.decodeString placementDetailDecoder placementWithReadingProgressJson
                 in
                 case result of
                     Ok placement ->
@@ -293,7 +394,7 @@ suite =
 
 decodedPlacement : String -> Result Decode.Error Placement.Placement
 decodedPlacement json =
-    Decode.decodeString placementDecoder json
+    Decode.decodeString placementDetailDecoder json
 
 
 decodedVisibility : String -> Result Decode.Error (Maybe Visibility.Visibility)

@@ -18,6 +18,7 @@ import Navigation.Route exposing (Route(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData
 import Types.User exposing (User)
 
@@ -34,12 +35,12 @@ readerUser =
 
 ownerAuth : Main.Auth
 ownerAuth =
-    { user = ownerUser, token = "tok" }
+    { user = ownerUser, token = TestHelpers.creds "tok" }
 
 
 readerAuth : Main.Auth
 readerAuth =
-    { user = readerUser, token = "tok" }
+    { user = readerUser, token = TestHelpers.creds "tok" }
 
 
 {-| The Add Book badge, found the way a test should find it.
@@ -63,6 +64,7 @@ awaitingItem imageId =
     , kind = Api.AwaitingConfirmation
     , bookIds = [ "book-" ++ imageId ]
     , rejectionReason = Nothing
+    , retryable = True
     }
 
 
@@ -72,6 +74,7 @@ failedItem imageId reason =
     , kind = Api.Failed
     , bookIds = []
     , rejectionReason = Just reason
+    , retryable = True
     }
 
 
@@ -79,7 +82,7 @@ failedItem imageId reason =
 -}
 navWithInbox : Types.RemoteData.RemoteData Http.Error (List Api.InboxItem) -> Query.Single Main.Msg
 navWithInbox inbox =
-    Main.viewNav Library (Just readerAuth) Nothing UserMenu.init inbox
+    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init inbox False
         |> Query.fromHtml
 
 
@@ -87,7 +90,7 @@ navWithInbox inbox =
 -}
 navClosed : Query.Single Main.Msg
 navClosed =
-    Main.viewNav Library (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
         |> Query.fromHtml
 
 
@@ -95,7 +98,7 @@ navClosed =
 -}
 navOpen : NavMenu -> Query.Single Main.Msg
 navOpen menu =
-    Main.viewNav Library (Just readerAuth) (Just menu) UserMenu.init Types.RemoteData.NotAsked
+    Main.viewNav Library (Main.Authenticated readerAuth) (Just menu) UserMenu.init Types.RemoteData.NotAsked False
         |> Query.fromHtml
 
 
@@ -104,33 +107,72 @@ owner alone, so its tests cannot reuse the reader helpers.
 -}
 ownerNav : Route -> Maybe NavMenu -> Query.Single Main.Msg
 ownerNav route menu =
-    Main.viewNav route (Just ownerAuth) menu UserMenu.init Types.RemoteData.NotAsked
+    Main.viewNav route (Main.Authenticated ownerAuth) menu UserMenu.init Types.RemoteData.NotAsked False
         |> Query.fromHtml
-
-
-flags : String -> Encode.Value
-flags role =
-    Encode.object
-        [ ( "token", Encode.string "jwt-token" )
-        , ( "userId", Encode.string "u2" )
-        , ( "email", Encode.string "reader@stacks.dev" )
-        , ( "displayName", Encode.string "A Reader" )
-        , ( "role", Encode.string role )
-        ]
 
 
 suite : Test
 suite =
     describe "Main navigation & flags"
-        [ describe "viewNav Nothing (unauthenticated)"
+        [ describe "viewNav while the server has not yet said who this is"
+            [ -- ⛔ THE regression this wave's most likely silent one. `Resolving`
+              -- and `Anonymous` both answer `currentAuth = Nothing`, so a nav
+              -- written against that `Maybe` draws the signed-out chrome on
+              -- every boot — and for a signed-in reader that is the app stating
+              -- the opposite of the truth until the round-trip lands.
+              test "withholds the Sign In link — it is not known that they are signed out" <|
+                \() ->
+                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.text "Sign In" ]
+            , test "withholds the signed-in chrome too — it is not known that they are signed in" <|
+                \() ->
+                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.hasNot [ Selector.text "Bookshelves" ]
+                            , Query.hasNot
+                                [ Selector.attribute (Attr.attribute "data-testid" "user-menu") ]
+                            ]
+            , -- The paired control: everything a visitor could already reach is
+              -- still there, so the header does not jump when the answer lands.
+              test "still offers everything a visitor can reach" <|
+                \() ->
+                    Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Catalogue" ]
+                            , Query.has [ Selector.text "Marketplace" ]
+                            , Query.has [ Selector.text "About" ]
+                            ]
+            , -- ⛔ The anti-vacuity pair. Without these two, the three
+              -- assertions above would pass just as well on a nav that rendered
+              -- nothing at all.
+              test "a RESOLVED signed-out boot does offer the Sign In link" <|
+                \() ->
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "Sign In" ]
+            , test "a RESOLVED signed-in boot does offer the bookshelves" <|
+                \() ->
+                    Main.viewNav Catalogue (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "Bookshelves" ]
+            , test "a boot whose check FAILED is resolved, and says so rather than spinning" <|
+                \() ->
+                    Main.viewNav Catalogue (Main.Unresolved Api.Unreachable) Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "Sign In" ]
+            ]
+        , describe "viewNav Anonymous (unauthenticated)"
             [ test "shows the Sign In link" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             , test "shows Catalogue and Marketplace" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "Catalogue" ]
@@ -138,7 +180,7 @@ suite =
                             ]
             , test "shows a single About entry linking to /about" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "About" ]
@@ -147,7 +189,7 @@ suite =
                             ]
             , test "does not show authenticated-only bookshelves" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.hasNot [ Selector.text "Antilibrary" ]
@@ -180,7 +222,7 @@ suite =
                         |> Query.has [ Selector.class "app-nav__item--active" ]
             , test "owner sees the Admin disclosure" <|
                 \() ->
-                    Main.viewNav Library (Just ownerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Library (Main.Authenticated ownerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Admin" ]
             , test "non-owner does not see the Admin disclosure" <|
@@ -301,13 +343,13 @@ suite =
         , describe "active-route highlight on child routes"
             [ test "a book-detail keeps the Bookshelves item active" <|
                 \() ->
-                    Main.viewNav (BookDetail "b1") (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav (BookDetail "b1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "app-nav__item--active" ]
                         |> Query.has [ Selector.text "Bookshelves" ]
             , test "a marketplace listing detail keeps Marketplace active" <|
                 \() ->
-                    Main.viewNav (MarketplaceDetail "l1") (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav (MarketplaceDetail "l1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "app-nav__item--active" ]
                         |> Query.has [ Selector.text "Marketplace" ]
@@ -365,24 +407,6 @@ suite =
                         |> Query.keep badge
                         |> Query.count (Expect.equal 0)
             ]
-        , describe "decodeFlags"
-            [ test "restores an Auth from valid flags" <|
-                \() ->
-                    Main.decodeFlags (flags "user")
-                        |> Main.storedSession
-                        |> Maybe.map (.user >> .displayName)
-                        |> Expect.equal (Just "A Reader")
-            , test "restores the role from flags" <|
-                \() ->
-                    Main.decodeFlags (flags "owner")
-                        |> Main.storedSession
-                        |> Maybe.map (.user >> .role)
-                        |> Expect.equal (Just "owner")
-            , test "empty flags are a clean signed-out boot, not a corrupt one" <|
-                \() ->
-                    Main.decodeFlags (Encode.object [])
-                        |> Expect.equal Main.NoStoredAuth
-            ]
         , describe "decodeConfig (server-config channel"
             [ test "decodes ageGatingEnabled: true" <|
                 \() ->
@@ -416,12 +440,15 @@ suite =
                 \() ->
                     List.member Main.InitOnboarding Main.loginEffects
                         |> Expect.equal True
-            , test "still persists the auth and navigates to the page they asked for" <|
+            , -- ⚠️ `PersistAuth` used to be asserted here too. It is gone with
+              -- the stored session: the browser holds the cookie, so a login has
+              -- nothing to make durable.
+              test "navigates to the page they asked for" <|
                 \() ->
                     Main.loginEffects
                         |> Expect.all
-                            [ \effects -> Expect.equal True (List.member Main.PersistAuth effects)
-                            , \effects -> Expect.equal True (List.member Main.NavigateToRequestedPage effects)
+                            [ \effects -> Expect.equal True (List.member Main.NavigateToRequestedPage effects)
+                            , \effects -> Expect.equal True (List.member Main.ScheduleRenewal effects)
                             ]
             ]
         , describe "shouldShowOnboarding"

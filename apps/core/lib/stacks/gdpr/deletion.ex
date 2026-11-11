@@ -60,6 +60,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.GDPR.ExportDelivery
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Imports.LibraryImport
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
@@ -67,39 +68,48 @@ defmodule Stacks.GDPR.Deletion do
       anything — the read-only counterpart used by the operator dry-run
       (`Stacks.Release.gdpr_erase_user/1`).
 
-      Returns `{:ok, counts}` with a per-target row count (using the exact same
-      scopes the erasure uses, so the preview cannot drift from the real thing), or
+      Returns `{:ok, counts}` with a per-target row count, or
       `{:error,:user_not_found}` if no user has that id.
+
+      ⚠️ The claim that this uses "the exact same scopes the erasure uses" was
+      false when written: the erasure leads with `Scope.multi_step/2` and this
+      read nothing at all. The operator dry-run runs through `rpc` on a live
+      node — as the least-privilege role — so the two secured reads below were
+      refused, and a dry-run that cannot read is worse than none: it precedes an
+      irreversible action and the operator reads its output as the plan. Now
+      genuinely scoped to the same user, so the preview and the erasure see one
+      row set.
   """
   @spec preview_user_data(binary()) :: {:ok, map()} | {:error, :user_not_found}
   def preview_user_data(user_id) do
     case Repo.get(User, user_id) do
-      nil ->
-        {:error, :user_not_found}
-
-      _user ->
-        bookshelf_ids =
-          Repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id, select: bs.id)
-
-        {:ok,
-         %{
-           bookshelves: length(bookshelf_ids),
-           placements: count(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids),
-           placement_history:
-             count(
-               from h in PlacementHistory,
-                 where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
-             ),
-           feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
-           uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
-           library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
-           feedback_entries: count(from f in FeedbackEntry, where: f.user_id == ^user_id),
-           comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
-           event_log_rows_scrubbed: count(user_event_log_query(user_id)),
-           audit_log_rows_scrubbed: count(user_audit_log_query(user_id)),
-           sessions_revoked: session_row_count(Repo, user_id)
-         }}
+      nil -> {:error, :user_not_found}
+      _user -> Scope.with_user(user_id, fn -> do_preview_user_data(user_id) end)
     end
+  end
+
+  defp do_preview_user_data(user_id) do
+    bookshelf_ids =
+      Repo.all(from bs in Bookshelf, where: bs.user_id == ^user_id, select: bs.id)
+
+    {:ok,
+     %{
+       bookshelves: length(bookshelf_ids),
+       placements: count(from p in Placement, where: p.bookshelf_id in ^bookshelf_ids),
+       placement_history:
+         count(
+           from h in PlacementHistory,
+             where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
+         ),
+       feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
+       uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
+       library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
+       feedback_entries: count(from f in FeedbackEntry, where: f.user_id == ^user_id),
+       comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
+       event_log_rows_scrubbed: count(user_event_log_query(user_id)),
+       audit_log_rows_scrubbed: count(user_audit_log_query(user_id)),
+       sessions_revoked: session_row_count(Repo, user_id)
+     }}
   end
 
   defp count(query), do: Repo.aggregate(query, :count)
@@ -151,6 +161,11 @@ defmodule Stacks.GDPR.Deletion do
     audit_metadata = opts |> Keyword.take([:reason, :actor]) |> Map.new()
 
     Multi.new()
+    # ⚠️ FIRST, before any step touches a row-level-secured table. Erasure
+    # reads and deletes this user's bookshelves and placements, and those
+    # policies refuse a query with no scope — so a Multi that set the erasure
+    # GUC first and the RLS scope later would fail on its second step.
+    |> Scope.multi_step(user_id)
     |> Multi.run(:set_gdpr_guc, fn repo, _ ->
       repo.query!("SET LOCAL app.audit_gdpr_erasure = 'true'")
       {:ok, :set}
@@ -216,9 +231,28 @@ defmodule Stacks.GDPR.Deletion do
 
       {:ok, rows}
     end)
+    # ⛔ THE COUNT IS WHAT WENT, NOT WHAT WAS ATTEMPTED. This step used to call
+    # `delete_storage_objects/1` for its side effect and report `length(rows)` —
+    # so during a storage outage an erasure reported five objects deleted having
+    # deleted none, and then removed the rows, leaving objects no row points at.
+    #
+    # ⚖️ The policy is unchanged and deliberate: a failure here must NOT abort
+    # the erasure. A surviving row still pointing a reader at their image is the
+    # leak this step exists to prevent, and it is worse than a leaked object.
+    # What changes is that the failure is now VISIBLE, and the keys are written
+    # down at the only moment anything still knows them — after the rows go,
+    # nothing links those objects to this user, or to any user, ever again.
     |> Multi.run(:delete_image_objects, fn _repo, %{uploaded_image_rows: rows} ->
-      ImageRetention.delete_storage_objects(rows)
-      {:ok, length(rows)}
+      {deleted, failed} = ImageRetention.delete_storage_objects(rows)
+
+      if failed != [] do
+        Logger.error(
+          "Deletion: #{length(failed)} image object(s) survived erasure for #{user_id} and are " <>
+            "now unattributable — keys: #{inspect(Enum.map(failed, & &1.storage_path))}"
+        )
+      end
+
+      {:ok, length(deleted)}
     end)
     |> Multi.run(:delete_uploaded_images, fn repo, %{uploaded_image_rows: rows} ->
       ids = Enum.map(rows, & &1.id)
@@ -263,8 +297,28 @@ defmodule Stacks.GDPR.Deletion do
       # bytea column, and the reader already maps a null to `%{}`, so this lands
       # on the same value a scrubbed event_log row reads back as — without
       # writing a fresh ciphertext whose key would then outlive the erasure.
-      {count, _} =
-        repo.update_all(user_audit_log_query(user_id), set: [metadata: nil, ip_address: nil])
+      #
+      # ⛔ Through a SECURITY DEFINER function rather than `update_all`, because
+      # the runtime role deliberately does NOT hold UPDATE on `audit.audit_log`
+      # — the audit trail stays append-only at the role level, so no bug in
+      # application code can reach an audit row's columns at all. The function
+      # is narrower than the grant it replaces: two columns, selected by one
+      # user id, with no way to delete a row or touch `action`,
+      # `resource_type`, `resource_id` or `occurred_at`.
+      #
+      # ⚠️ Measured before it existed: the role held INSERT only, this step
+      # raised `42501 permission denied for table audit_log`, and because it
+      # runs AFTER `repo.delete(user)` the abort rolled the user deletion back
+      # too — so erasure was discarded on its only attempt while the caller had
+      # already been handed a 202.
+      #
+      # The `app.audit_gdpr_erasure` authorisation armed earlier in this Multi
+      # still governs the mutation: the function does not arm it, the
+      # append-only trigger still checks it, and the statement-level trigger
+      # still disarms it afterwards, so one authorisation still covers exactly
+      # one statement.
+      %{rows: [[count]]} =
+        repo.query!("SELECT audit.scrub_for_erasure($1)", [Ecto.UUID.dump!(user_id)])
 
       {:ok, count}
     end)
@@ -308,8 +362,51 @@ defmodule Stacks.GDPR.Deletion do
     {:ok, %{scrubbed: scrub_invites(repo, user_id, user_email), restored: restore?}}
   end
 
+  # Three ways a user can be named by an invitation, and all three must scrub —
+  # but NOT all three the same way, which is the subtlety that cost a round here.
+  #
+  # ⚠️ `issued_by_id` was missing, and its absence was invisible: `op.invites`'
+  # user FK is `:nilify_all`, so erasing an ISSUER nulled the reference and left
+  # `note` — the issuer's own free text about a named person, e.g. "Mara from the
+  # book club" — plus `invited_email`, a third party's address, sitting in the
+  # row forever. Author-nulled, content retained. That is exactly the
+  # `op.post_comments.body` defect this project has already shipped once, and the
+  # erasure schema-guard could not catch it because the guard asserts FK
+  # behaviour, not that free text actually went.
+  #
+  # ⚠️ And then adding the issuer to a SINGLE `update_all` was wrong in the other
+  # direction: it widened WHICH ROWS matched without narrowing WHAT WAS SET, so a
+  # redeemer-shaped `set` landed on rows that matched for an issuer-shaped reason
+  # and nulled a THIRD PARTY's `redeemed_by_id`. Consequences, all real:
+  #
+  #   * `GDPR.Export` finds a person's invitation by `redeemed_by_id`, so the
+  #     redeemer's own data export silently lost the invitation that admitted
+  #     them — a right-of-access regression triggered by someone else's erasure.
+  #   * `Invites.consume_invite/2` reads `is_nil(redeemed_by_id)` as "not yet
+  #     redeemed", so on a multi-use code the next redeemer overwrote it.
+  #   * The row was left incoherent: a `redeemed_at` and a `use_count` with no
+  #     redeemer.
+  #
+  # Hence two statements. The rule is that a row's `set` must answer the same
+  # question its `where` asked.
   defp scrub_invites(repo, user_id, user_email) do
-    {scrubbed, _} =
+    # ⚠️ THE ORDER OF THESE TWO BLOCKS IS LOAD-BEARING, and the sum at the end
+    # is what makes it so.
+    #
+    # One row can satisfy both predicates — you redeemed your own invitation —
+    # and the results are summed. It counts once rather than twice only because
+    # the SUBJECT update runs first and nulls `note` and `invited_email`, so the
+    # author update's `not is_nil(note) or not is_nil(invited_email)` no longer
+    # matches that row. Swap them and the author update runs while
+    # `redeemed_by_id` is still set, the subject update then matches, and one row
+    # reports as two.
+    #
+    # Measured, and pinned by a test that swaps them to confirm it fails. If
+    # either WHERE widens, re-check the sum rather than trusting this note.
+    #
+    # Named as the REDEEMER, or by the address the invitation was written to:
+    # the redemption link is this person's own, so it goes with them.
+    {as_subject, _} =
       repo.update_all(
         from(i in Stacks.Accounts.InviteCode,
           where:
@@ -321,6 +418,18 @@ defmodule Stacks.GDPR.Deletion do
         set: [note: nil, invited_email: nil, redeemed_by_id: nil]
       )
 
-    scrubbed
+    # Named as the ISSUER: their free text and the address they typed are theirs
+    # to lose. Who redeemed is somebody else's record and stays. `issued_by_id`
+    # itself is nulled by the FK, so it is deliberately absent from the `set`.
+    {as_author, _} =
+      repo.update_all(
+        from(i in Stacks.Accounts.InviteCode,
+          where: i.issued_by_id == ^user_id,
+          where: not is_nil(i.note) or not is_nil(i.invited_email)
+        ),
+        set: [note: nil, invited_email: nil]
+      )
+
+    as_subject + as_author
   end
 end

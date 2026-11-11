@@ -61,11 +61,47 @@ defmodule Stacks.AccountsTest do
     end
 
     test "register/1 emits event payload without PII fields" do
-      attrs = %{"email" => "pii_test@example.com", "password" => "password123"}
-      assert {:ok, user} = Accounts.register(attrs)
-      assert user.role in ["owner", "user"]
+      # ⚠️ This test used to assert `user.role in ["owner", "user"]` and
+      # `is_binary(user.role)` — properties of the RETURNED STRUCT. It never read
+      # the event at all, so adding the email address to the payload broke
+      # nothing, under a name that said the opposite. The file already had a
+      # `latest_payload/2` helper, used for three other event types and never
+      # for this one.
+      #
+      # The event log is append-only and is NOT deleted on erasure (only its
+      # payload is scrubbed), so PII that reaches a payload is the hardest kind
+      # to retract. That is what makes the named property load-bearing rather
+      # than tidy.
+      email = "pii_test@example.com"
 
-      assert is_binary(user.role)
+      attrs = %{
+        "email" => email,
+        "password" => "password123",
+        "display_name" => "Ada Lovelace"
+      }
+
+      assert {:ok, user} = Accounts.register(attrs)
+
+      payload = latest_payload("user.registered", user.id)
+
+      assert payload, "no user.registered event was emitted, so this test asserts nothing"
+
+      # Allowlisted, not denylisted: the payload may carry exactly these keys.
+      # A denylist only catches the PII somebody thought of, and the next field
+      # added is by definition the one nobody thought of.
+      assert Map.keys(payload) |> Enum.sort() == ["role"],
+             "the registration payload grew a key. It is UUID-and-bounded-atom only by " <>
+               "contract, and the event log outlives erasure, so a new key here has to be " <>
+               "argued for rather than arrive: " <> inspect(payload)
+
+      assert payload["role"] == user.role
+
+      # Named explicitly as well as bounded by the allowlist above, because
+      # these are the values a reader of this test will want to see ruled out.
+      serialised = inspect(payload)
+      refute serialised =~ email
+      refute serialised =~ "Ada Lovelace"
+      refute serialised =~ user.handle
     end
   end
 

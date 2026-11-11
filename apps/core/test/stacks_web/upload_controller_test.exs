@@ -7,7 +7,10 @@ defmodule StacksWeb.UploadControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
+  alias Stacks.GDPR.ImageRetention
+  alias Stacks.Storage
   alias Stacks.Storage.Mock, as: StorageMock
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
 
   setup %{conn: conn} do
@@ -48,14 +51,14 @@ defmodule StacksWeb.UploadControllerTest do
     end
 
     test "returns 401 without auth token" do
-      conn = build_conn() |> post("/api/upload/init", %{})
+      conn = CoreWeb.ConnCase.proven_conn() |> post("/api/upload/init", %{})
       assert json_response(conn, 401)
     end
   end
 
   describe "POST /api/upload/:id/commit" do
     setup %{user: user} do
-      {:ok, init} = Stacks.Uploads.init_upload(user.id)
+      {:ok, init} = Uploads.init_upload(user.id)
       {:ok, init: init}
     end
 
@@ -91,7 +94,9 @@ defmodule StacksWeb.UploadControllerTest do
     test "returns 404 when image_id does not belong to the caller", %{init: init} do
       other = insert(:user)
       {:ok, other_token, _} = Guardian.encode_and_sign(other)
-      other_conn = build_conn() |> put_req_header("authorization", "Bearer #{other_token}")
+
+      other_conn =
+        CoreWeb.ConnCase.proven_conn() |> put_req_header("authorization", "Bearer #{other_token}")
 
       StorageMock.seed("uploads/#{init.image_id}", "fake")
       conn = post(other_conn, "/api/upload/#{init.image_id}/commit", %{})
@@ -125,6 +130,238 @@ defmodule StacksWeb.UploadControllerTest do
     end
   end
 
+  describe "PUT /api/upload/:image_id/data — the byte sink" do
+    # ⛔ THIS ROUTE HAD NO TEST AT ALL until this issue. That is why a `PUT`
+    # with no credential, a non-uuid id nobody reserved, and 20 KB of JPEG
+    # returned 200 on a deployed stack: every suite was green because none of
+    # them touched it.
+
+    setup do
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      {:ok, user: user, token: token}
+    end
+
+    defp reserve(user) do
+      {:ok, %{image_id: image_id}} = Uploads.init_upload(user.id)
+      image_id
+    end
+
+    defp put_bytes(conn, token, image_id, bytes) do
+      conn
+      |> CoreWeb.ConnCase.with_session(token)
+      |> put_req_header("content-type", "application/octet-stream")
+      |> put("/api/upload/#{image_id}/data", bytes)
+    end
+
+    test "refuses a write with no credential at all", %{user: user} do
+      image_id = reserve(user)
+
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/upload/#{image_id}/data", "bytes")
+
+      assert json_response(conn, 401)
+    end
+
+    test "refuses an id that is not a uuid, so it never reaches a storage key",
+         %{token: token} do
+      conn =
+        put_bytes(CoreWeb.ConnCase.proven_conn(), token, "probe-1793184812-readback", "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "refuses a well-formed uuid nobody reserved", %{token: token} do
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, Ecto.UUID.generate(), "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "refuses another reader's reserved id — with the SAME status", %{token: token} do
+      # ⛔ 404, not 403. A different status here would let a caller distinguish
+      # "this id exists and is not yours" from "this id does not exist", and the
+      # id IS the capability.
+      stranger = insert(:user)
+      someone_elses = reserve(stranger)
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, someone_elses, "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+
+    test "accepts the reader's own reserved id, and the bytes land",
+         %{user: user, token: token} do
+      image_id = reserve(user)
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image_id, "the-image-bytes")
+
+      assert conn.status == 200
+      assert {:ok, 15} = Storage.head_image("uploads/#{image_id}")
+    end
+
+    test "refuses a SECOND write to the same id", %{user: user, token: token} do
+      image_id = reserve(user)
+
+      assert put_bytes(CoreWeb.ConnCase.proven_conn(), token, image_id, "first").status == 200
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image_id, "second")
+      assert %{"error" => "already_uploaded"} = json_response(conn, 409)
+
+      assert {:ok, 5} = Storage.head_image("uploads/#{image_id}"),
+             "the first write must survive — a refused second write must not have overwritten it"
+    end
+
+    test "refuses a row that has moved past awaiting_upload", %{user: user, token: token} do
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      conn = put_bytes(CoreWeb.ConnCase.proven_conn(), token, image.id, "bytes")
+
+      assert %{"error" => "not_found"} = json_response(conn, 404)
+    end
+  end
+
+  defp temp_upload(contents) do
+    path = Path.join(System.tmp_dir!(), "upload_probe_#{System.unique_integer([:positive])}.jpg")
+    File.write!(path, contents)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  describe "no upload path ever leaves bytes that no row points at" do
+    # ⛔ THE INVARIANT THE ORPHAN SWEEP'S SAFETY RESTS ON. `cleanup_orphan_objects/1`
+    # deletes any object with no row, and its correctness argument is that such an
+    # object is one whose row has GONE, never one whose row is still COMING. That
+    # argument is a claim about every writer to the prefix, so it is asserted here
+    # rather than left in a comment.
+
+    test "a failed store_upload leaves neither bytes nor a row" do
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: temp_upload("some image bytes"),
+        filename: "test.jpg",
+        content_type: "image/jpeg"
+      }
+
+      StorageMock.steer_error(:put, :unavailable)
+
+      assert {:error, :unavailable} = Uploads.store_upload(user.id, upload)
+
+      {:ok, keys} = Storage.list_objects("uploads/")
+
+      assert keys == [],
+             "bytes-first ordering would strand an object here that nothing points at"
+
+      assert Core.Repo.aggregate(UploadedImage, :count) == 0,
+             "and the compensating delete must take the row with it"
+    end
+
+    test "the sweep running AT THE MOMENT the bytes land does not eat them" do
+      # ⛔ THIS IS THE ASSERTION THE ORDERING EXISTS FOR, and the first version of
+      # this test did not make it. That one steered `put` to fail and checked
+      # nothing was left behind — which passes under BOTH orderings, because the
+      # failure states are identical and the compensating delete covers them. A
+      # probe that swapped the two lines back left it green.
+      #
+      # The difference is only visible to a reader who looks BETWEEN the row
+      # insert and the byte write. So this test is that reader: the sweep runs
+      # from inside `put`, at the one instant where bytes-first would have left
+      # an object no row pointed at.
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: temp_upload("some image bytes"),
+        filename: "test.jpg",
+        content_type: "image/jpeg"
+      }
+
+      StorageMock.steer_callback(:put, fn ->
+        ImageRetention.cleanup_orphan_objects()
+      end)
+
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
+
+      assert {:ok, _size} = Storage.head_image(image.storage_path),
+             "the sweep ran mid-write and the reader's bytes must have survived it"
+
+      assert Core.Repo.get(UploadedImage, image.id),
+             "and the row must still point at them"
+    end
+
+    test "a successful store_upload leaves bytes WITH a row, so the sweep spares them" do
+      user = insert(:user)
+
+      upload = %Plug.Upload{
+        path: temp_upload("some image bytes"),
+        filename: "test.jpg",
+        content_type: "image/jpeg"
+      }
+
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
+
+      assert {:ok, 0} = ImageRetention.cleanup_orphan_objects(),
+             "a committed upload must not look like an orphan to the sweep"
+
+      assert {:ok, _size} = Storage.head_image(image.storage_path)
+    end
+  end
+
+  describe "a HEAD that cannot be answered refuses, and says it is retryable" do
+    setup do
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      {:ok, user: user, token: token}
+    end
+
+    test "answers 503, not 500, when object storage cannot be reached",
+         %{user: user, token: token} do
+      # ⚠️ R2's `head` sits behind a circuit breaker, so this is a routine value
+      # in production — and until this test the branch handling it was reachable
+      # by nothing in the suite.
+      {:ok, %{image_id: image_id}} = Uploads.init_upload(user.id)
+
+      StorageMock.steer_error(:head, :circuit_open)
+
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/upload/#{image_id}/data", "bytes")
+
+      assert %{"error" => "storage_unavailable"} = json_response(conn, 503)
+
+      assert {:ok, []} = Storage.list_objects("uploads/"),
+             "a refused write must not have stored anything"
+    end
+  end
+
+  describe "Uploads.store_upload_bytes/3 — the context function is safe on its own" do
+    # ⚠️ Asserted on the CONTEXT rather than through the router, because the
+    # requirement is that the function is safe for every caller — not that one
+    # controller happens to check first.
+
+    test "a non-uuid never reaches a storage key" do
+      user = insert(:user)
+
+      assert {:error, :not_found} =
+               Uploads.store_upload_bytes(user.id, "../../etc/passwd", "bytes")
+
+      assert {:error, :not_found} = Storage.head_image("uploads/../../etc/passwd")
+    end
+
+    test "a uuid nobody reserved never reaches a storage key" do
+      user = insert(:user)
+      unreserved = Ecto.UUID.generate()
+
+      assert {:error, :not_found} =
+               Uploads.store_upload_bytes(user.id, unreserved, "bytes")
+
+      assert {:error, :not_found} = Storage.head_image("uploads/#{unreserved}")
+    end
+  end
+
   describe "GET /api/upload/:image_id/stream" do
     test "returns status for a pending image via SSE", %{user: user} do
       alias Stacks.Accounts.Guardian
@@ -132,17 +369,53 @@ defmodule StacksWeb.UploadControllerTest do
 
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn2.status == 200
       [content_type | _] = get_resp_header(conn2, "content-type")
       assert String.contains?(content_type, "text/event-stream")
+    end
+
+    test "accepts the Accept header a real EventSource actually sends", %{user: user} do
+      # The browser's EventSource always sends `Accept: text/event-stream`. The
+      # SSE pipeline therefore must NOT carry `plug :accepts, ["json"]`, which
+      # would answer 406 and break upload progress for every reader.
+      #
+      # The test above cannot catch that: it sends no Accept header at all, and
+      # an absent Accept passes an accepts filter. So the invariant — stated in
+      # the router and relied on by the only streaming endpoint in the app — was
+      # asserted nowhere, and adding that plug "for consistency" with the sibling
+      # `:api` pipeline would have shipped green.
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> put_req_header("accept", "text/event-stream")
+        |> get("/api/upload/#{image.id}/stream")
+
+      refute conn.status == 406,
+             "the SSE route rejected `Accept: text/event-stream` — the SSE pipeline has " <>
+               "gained an accepts filter, and a real EventSource cannot connect"
+
+      assert conn.status == 200
     end
 
     test "returns 404 for unknown image_id", %{user: user} do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      conn = get(build_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream?token=#{token}")
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{Ecto.UUID.generate()}/stream")
+
       assert json_response(conn, 404)
     end
 
@@ -150,12 +423,33 @@ defmodule StacksWeb.UploadControllerTest do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      conn = get(build_conn(), "/api/upload/not-a-uuid/stream?token=#{token}")
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/not-a-uuid/stream")
+
       assert conn.status in [400, 422]
     end
 
-    test "returns 401 without auth token" do
-      conn = get(build_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream")
+    test "returns 401 without a session" do
+      # ⛔ The conn carries the CSRF proof and NO session cookie, which is
+      # exactly what an unauthenticated browser sends. Before the stream moved
+      # onto the cookie this case passed by omitting a `?token=` query
+      # parameter — the same verdict for a different reason, and the reason is
+      # the part worth pinning: there is no credential anywhere in the request.
+      conn = get(CoreWeb.ConnCase.proven_conn(), "/api/upload/#{Ecto.UUID.generate()}/stream")
+      assert json_response(conn, 401)
+    end
+
+    test "returns 401 when the session cookie is not a token we issued" do
+      # The paired control for the case above. Without it, a pipeline that
+      # accepted ANY cookie value would still answer 401 to the no-cookie case,
+      # and nothing would report that presence was all it ever checked.
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session("not-a-token")
+        |> get("/api/upload/#{Ecto.UUID.generate()}/stream")
+
       assert json_response(conn, 401)
     end
 
@@ -168,7 +462,11 @@ defmodule StacksWeb.UploadControllerTest do
 
       image = insert(:uploaded_image, status: "pending", user_id: owner.id)
 
-      conn = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{requester_token}")
+      conn =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(requester_token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn.status == 403
     end
 
@@ -186,7 +484,11 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn2.status == 200
       assert String.contains?(conn2.resp_body, "resolved")
       assert String.contains?(conn2.resp_body, book.id)
@@ -206,7 +508,11 @@ defmodule StacksWeb.UploadControllerTest do
           user_id: user.id
         )
 
-      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
       assert conn2.status == 200
       assert String.contains?(conn2.resp_body, "resolved")
       assert String.contains?(conn2.resp_body, book.id)
@@ -356,9 +662,47 @@ defmodule StacksWeb.UploadControllerTest do
       assert %{"status" => "pending"} = json_response(conn, 202)
     end
 
+    test "returns 410 once the photograph has been discarded, rather than a plausible lie",
+         %{conn: conn, user: user} do
+      # ⛔ THE RETRY IS THE ONLY THING THAT STILL READS THE BYTES, and
+      # `cleanup_finished_image_bytes/1` deletes them a day after the answer
+      # lands — while the ROW, and so this button, survive for thirty.
+      #
+      # ⚖️ Without this refusal the retry enqueues anyway: the job cannot
+      # presign a key with nothing behind it, burns three attempts, and the
+      # terminal guarantee writes the row back to `rejected` with
+      # `processing_failed` — telling the reader their photo was unreadable. It
+      # was perfectly readable. We deleted it.
+      author = insert(:author, name: "Gone Author")
+      book = insert(:book, title: "The Gone Book", author: author)
+      insert(:book_edition, book: book, isbn: "9780000000019")
+
+      image =
+        insert(:uploaded_image,
+          status: "resolved",
+          user_id: user.id,
+          book_id: book.id,
+          book_ids: [book.id],
+          storage_path: nil
+        )
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert %{"error" => "photograph_discarded"} = json_response(conn, 410)
+
+      # And the row is left exactly as it was — a refused retry must not move
+      # the image out of its terminal state, or the reader loses the answer too.
+      reloaded = Core.Repo.get!(Stacks.Books.UploadedImage, image.id)
+      assert reloaded.status == "resolved"
+      assert reloaded.book_ids == [book.id]
+    end
+
     test "returns 401 without auth token" do
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> post("/api/upload/#{Ecto.UUID.generate()}/reject-identification", %{
           "rejected_book_ids" => []
         })
@@ -374,7 +718,9 @@ defmodule StacksWeb.UploadControllerTest do
       image = insert(:uploaded_image, status: "resolved", user_id: other.id)
 
       {:ok, token, _} = Guardian.encode_and_sign(user)
-      requester_conn = build_conn() |> put_req_header("authorization", "Bearer #{token}")
+
+      requester_conn =
+        CoreWeb.ConnCase.proven_conn() |> put_req_header("authorization", "Bearer #{token}")
 
       conn =
         post(requester_conn, "/api/upload/#{image.id}/reject-identification", %{
@@ -563,7 +909,7 @@ defmodule StacksWeb.UploadControllerTest do
     end
 
     test "returns 401 without auth token" do
-      assert build_conn() |> get("/api/uploads/inbox") |> json_response(401)
+      assert CoreWeb.ConnCase.proven_conn() |> get("/api/uploads/inbox") |> json_response(401)
     end
 
     test "reading the inbox places nothing on a bookshelf", %{conn: conn, user: user} do

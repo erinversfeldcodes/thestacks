@@ -9,7 +9,7 @@ defmodule Stacks.Workers.ListingExpiryJob do
       Processes in batches of 500 to avoid unbounded memory usage.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

@@ -1,6 +1,7 @@
 # ADR 015: Vision Service Architecture (April 2026)
 
-**Status:** Superseded in part (see 2026-05 update below) — the vLLM / H100 / AWQ / single-`/analyze`-endpoint stack described here was rolled back to the HF Transformers + A10G + bf16 + separate `classify`/`extract` baseline. The architectural reasoning (telemetry-driven evaluation, cache layer, gate threshold rationale, deferred experimental framework) remains in force.
+**Status:** Superseded in part (see 2026-05 update below) — the vLLM / H100 / AWQ stack described here was rolled back to the HF Transformers + A10G + bf16 baseline, and the single-prompt collapse was reverted to **two Modal methods** (`classify`, `extract`).
+⚠️ **Corrected 2026-10-15: this banner previously said the rollback restored a "separate `classify`/`extract` baseline" without saying at which LAYER, and read naturally that means two HTTP endpoints. It does not, and did not.** The revert restored two `@modal.method()`s inside the Modal class; the **HTTP surface kept the single `/analyze` endpoint throughout** and still has it — `apps/vision/app/main.py` serves exactly one POST route plus `/health`, while `apps/vision/modal_app.py` declares the two methods `/analyze` calls internally. The `/classify` and `/extract` HTTP endpoints lingered uncalled until they were deleted on 2026-10-15. The architectural reasoning (telemetry-driven evaluation, cache layer, gate threshold rationale, deferred experimental framework) remains in force.
 **Date:** 2026-04-23
 **Deciders:** Platform owner
 **Technical area:** Vision inference, Modal app
@@ -10,7 +11,8 @@
 
 ## Update — 2026-05 rollback to bf16 / A10G baseline
 
-The inference-stack changes recorded in the Decision section below (vLLM 0.9.0 V1 engine, AWQ 4-bit quantization, H100 GPU, single `/analyze` endpoint, streaming early-terminate via `engine.abort`, `@modal.concurrent(max_inputs=8)`, region unpinning rationale) were **reverted** in commit `07179b9` ("refactor: revert more complex changes and refine original approach"), returning `apps/vision/modal_app.py` to the dfef1333 baseline shape:
+The inference-stack changes recorded in the Decision section below (vLLM 0.9.0 V1 engine, AWQ 4-bit quantization, H100 GPU, the single-prompt `_ANALYZE_PROMPT` collapse into one Modal method, streaming early-terminate via `engine.abort`, `@modal.concurrent(max_inputs=8)`, region unpinning rationale) were **reverted**
+⚠️ *Corrected 2026-10-15: this list said "single `/analyze` endpoint". The single HTTP endpoint was NOT reverted and is still in place; what was reverted is the collapse of classification and extraction into one Modal method/prompt.* in commit `07179b9` ("refactor: revert more complex changes and refine original approach"), returning `apps/vision/modal_app.py` to the dfef1333 baseline shape:
 
 - **Backend:** HuggingFace Transformers + accelerate (no vLLM, no async engine).
 - **Model:** `Qwen/Qwen2.5-VL-7B-Instruct` loaded in **bfloat16** (no AWQ).
@@ -92,6 +94,14 @@ Upgraded from vLLM 0.7.3 (V0 engine) to unlock prefix caching for multimodal pro
 ### 3. Single `/analyze` endpoint (supersedes `/classify` + `/extract`)
 
 The earlier design issued two Modal calls per upload — one to classify ("is this a book?") and, conditionally, a second to extract candidates. The fan-out added a second HTTP round-trip, a second container invocation on potentially-cold resources (Modal's scheduler load-balances independently), and ~2–4 s of inter-call gap observed at upload p95=7.7s.
+
+> ⚠️ **Read the sentence above carefully — it conflates two layers, and that conflation has since cost real work.** It attributes the ~2–4 s gap to a fan-out it describes simultaneously as "two Modal calls" and "a second HTTP round-trip". Those are different things and they did not survive or die together:
+>
+> - **The HTTP round-trip went and has stayed gone.** Core makes ONE call, to `/analyze`.
+> - **The two Modal invocations came BACK** with the 2026-05 revert and are live today: `/analyze` calls `client.classify` and then, conditionally, `client.extract` — two `remote.aio` round-trips with the short-circuit between them.
+>
+> So **the ~2–4 s inter-call cost described here is still being paid**, inside the single HTTP call rather than beside it. Anyone citing this section as evidence that the gap was eliminated is citing it wrongly — and that happened: a 2026-10-15 contract comment claimed deleting the unused `/classify` and `/extract` HTTP endpoints realised this saving. It did not; those endpoints had no caller, so deleting them saved nothing. Corrected there, and corrected here at the source so the claim is not re-imported a third time.
+> If you want this gap back, the target is the Modal fan-out in the `/analyze` handler, and the single-prompt collapse that would close it is precisely what the 2026-05 revert undid — so read that update first.
 
 `_ANALYZE_PROMPT` now asks the model to emit both classification and extraction in a single JSON response. The prompt re-asserts the classification criteria FIRST so the model doesn't leak extraction detail into the `classification` branch. Non-book inputs still return `books: []` (the prompt treats it as a contract); the caller discards `books` on any non-`book` classification regardless of content.
 

@@ -45,7 +45,7 @@ confirm a move — leaving the PUT /move request in flight.
 -}
 startMoveFlow : ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 startMoveFlow =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
@@ -70,7 +70,7 @@ place path shows), open the shelf mover and confirm — leaving the POST
 -}
 startPlaceFlow : ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
 startPlaceFlow =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
         |> ProgramTest.simulateHttpResponse "GET"
             "/api/books/book-test-001"
             (simulateBookDetailResponse "book-test-001" testBook)

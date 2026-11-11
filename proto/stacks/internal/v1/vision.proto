@@ -16,15 +16,21 @@ enum ClassificationResult {
   CLASSIFICATION_RESULT_AMBIGUOUS = 3;
 }
 
-// Status of an async cover association job.
-enum AssociationStatus {
-  // Zero value — status not set.
-  ASSOCIATION_STATUS_UNSPECIFIED = 0;
-  // Cover image confirmed as a valid book cover.
-  ASSOCIATION_STATUS_CONFIRMED = 1;
-  // Cover image rejected (not a book cover or download failed).
-  ASSOCIATION_STATUS_REJECTED = 2;
-}
+
+// ⚠️ The async cover-association contract — `AssociateRequest`, `AssociateResponse`,
+// `AssociateCallback` and `enum AssociationStatus` — was DELETED on 2026-10-16,
+// reversing an earlier decision to retain it unused for the vision redesign.
+//
+// Retaining it was costing live artefacts in three languages on every build with
+// zero hand-written consumers, and buying nothing in return — because the
+// messages were never deleted, standing up a served `/associate` would not have
+// been a proto change at all, so `buf breaking` would have reported NOTHING for
+// precisely the change that most needs flagging. A contract kept to protect a
+// future reintroduction was instead silencing the gate that should announce it.
+//
+// When the redesign needs this, re-derive the shape against the sidecar that
+// will actually serve it and get a contract review on the reintroduction. What
+// was here is in git history; what the service will need is a question for then.
 
 // Why a request to the vision service could not be answered.
 //
@@ -51,17 +57,36 @@ enum VisionErrorCode {
   // (never followed — SSRF guard), or a body over the download cap. The
   // presigned URL in hand will not start working within one job's lifetime.
   VISION_ERROR_CODE_IMAGE_UNREACHABLE = 3;
-  // Neither `image` nor `image_url` was supplied. A malformed request from
-  // core; retrying sends the identical malformed request.
+  // ⚠️ UNREACHABLE as of 2026-10-15 — nothing can send this, and the value is
+  // retained deliberately rather than removed.
+  //
+  // It meant "neither `image` nor `image_url` was supplied". That condition is
+  // now caught earlier: `AnalyzeRequest` declares the two as a `oneof`, so the
+  // request fails schema validation before any handler body runs and the caller
+  // receives MALFORMED_REQUEST instead. The only remaining raise site in the
+  // sidecar is defensive and cannot be reached through `/analyze`. The endpoint
+  // that could reach it, `/extract`, was deleted the same day.
+  //
+  // It stays because removing an enum value is a wire-contract change, and
+  // because the sidecar pins its constant set against this enum. A rebuilt
+  // two-input endpoint could make it reachable again — but until then, do NOT
+  // write a client branch for it expecting traffic.
   VISION_ERROR_CODE_NO_IMAGE_SUPPLIED = 4;
-  // The request violates an endpoint constraint that is not about the image
-  // bytes at all: both `images` and `image_url` set when they are mutually
-  // exclusive, or more `images` than the endpoint accepts. Distinct from
-  // NO_IMAGE_SUPPLIED, which means the request named no image; here it named
-  // too many, or named them in a combination the endpoint rejects. Kept
-  // separate so an operator reading the counter can tell "core sent nothing"
-  // from "core sent a contradiction" — both are core bugs, but not the same
-  // one.
+  // The request violates a constraint that is not about the image bytes at all:
+  // today, `image` and `image_url` both set, or neither set, since
+  // `AnalyzeRequest` declares them as a `oneof`.
+  //
+  // ⚠️ This comment described a `repeated images` field ("more `images` than
+  // the endpoint accepts") until 2026-10-15 and was the last live reference to
+  // it anywhere in this contract; that field went with `ExtractRequest`.
+  //
+  // ⚠️ It also promised an operator distinction that can no longer be drawn.
+  // It said this code is kept separate from NO_IMAGE_SUPPLIED so a counter can
+  // tell "core sent nothing" from "core sent a contradiction". Both now arrive
+  // here: the oneof rejects the empty case before a handler runs. The two codes
+  // remain distinct VALUES — NO_IMAGE_SUPPLIED is unreachable, see above — but
+  // the counter no longer separates those two causes, and an operator should
+  // read the message text rather than the code to tell them apart.
   VISION_ERROR_CODE_MALFORMED_REQUEST = 5;
 }
 
@@ -75,42 +100,58 @@ message VisionError {
   string message = 2 [json_name = "message"];
 }
 
-// POST /classify — determine if an image contains a book cover.
-message ClassifyRequest {
-  // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
-  oneof input {
-    // Base64-encoded image data.
-    string image = 1 [json_name = "image"];
-    // URL of a remote image.
-    string image_url = 2 [json_name = "image_url"];
-  }
-}
-
-// Response from POST /classify.
-message ClassifyResponse {
-  // Classification result; see ClassificationResult enum.
-  ClassificationResult classification = 1 [json_name = "classification"];
-  // Confidence score (0.0–1.0).
-  double confidence = 2 [json_name = "confidence"];
-  // Name of the vision model used for inference.
-  string model_used = 3 [json_name = "model_used"];
-}
-
-// POST /extract — extract book metadata and ISBNs from images.
-message ExtractRequest {
-  // Base64-encoded images (1–3). Mutually exclusive with image_url.
-  repeated string images = 1 [json_name = "images"];
-  // URL of a remote image. Mutually exclusive with images.
-  optional string image_url = 2 [json_name = "image_url"];
-}
-
-// Response from POST /extract.
-message ExtractResponse {
-  // Extracted book candidates.
-  repeated ExtractedBook books = 1 [json_name = "books"];
-  // Name of the vision model used for inference.
-  string model_used = 2 [json_name = "model_used"];
-}
+// The ClassifyRequest/ClassifyResponse and ExtractRequest/ExtractResponse
+// message pairs stood here until 2026-10-15. They described two HTTP endpoints
+// on the vision sidecar, superseded by a single /analyze call.
+//
+// Why they went: they had NO CALLER in any revision — core has always asked
+// /analyze — and the vision architecture decision rules the two-call HTTP shape
+// superseded in principle.
+// ⚠️ Deleting them saved no latency, and an earlier version of this comment
+// wrongly claimed it did, borrowing a "2-4s inter-call gap at p95=7.7s" figure
+// from the architecture decision that chose this stack.
+// That measurement is about two MODAL method invocations, not two HTTP
+// endpoints, and /analyze still makes both: `main.py` calls `client.classify`
+// and then `client.extract`, two `remote.aio` round-trips with a short-circuit
+// between them. That decision's own 2026-05 update records that the single-prompt
+// collapse was REVERTED. So the fan-out cost is still live and still unpaid —
+// anyone chasing it should look at the /analyze handler, not at this deletion.
+//
+// There is no message-level `reserved` construct in protobuf — `reserved`
+// reserves field NUMBERS and names inside a surviving message, and enum values —
+// so nothing is held here on their behalf, and nothing can be.
+//
+// ⚠️ If the two-call shape ever returns, these messages come back by name and
+// their field numbering starts fresh. **That is true HERE and false in general;
+// do not carry it to another message.** It holds only because of three facts
+// specific to these four:
+//   1. Nothing ever encoded them. The endpoints had no caller in any revision —
+//      the same fact that justified deleting them — so no payload of these
+//      shapes exists anywhere to be mis-decoded.
+//   2. This contract is JSON on the wire. Every field carries `json_name`, and
+//      the generated Python, Elixir and Elm all identify fields by NAME, so the
+//      number is not the wire identity.
+//   3. Nothing persists them: `proto/persisted.exs` has no vision entry, so no
+//      stored row carries an encoding of these shapes.
+// For a message that HAS been on the wire, numbering never starts fresh, and
+// reusing a number silently corrupts old data rather than failing loudly.
+//
+// The concrete trap, recorded because the natural rebuild walks into it: the old
+// `ExtractRequest` was `repeated string images = 1` / `optional string image_url = 2`,
+// and `ClassifyRequest` was `string image = 1` / `string image_url = 2` (a oneof).
+// `AnalyzeRequest` today has `string image = 1`. A rebuilt `ExtractRequest`
+// derived from it — the obvious move — would put a SINGULAR string on number 1
+// where a REPEATED one used to be. Both encode length-delimited, so a stale
+// binary payload would decode silently and wrongly rather than erroring. Harmless
+// here only because point 1 above means no such payload exists.
+//
+// Note the asymmetry with the association set kept below: those are RETAINED, so
+// `buf breaking` holds their field numbers immovable for as long as they sit in
+// this file. Keeping a contract is the strongest protection against number drift;
+// it is the deleted-and-never-encoded case that has nothing to protect.
+//
+// ClassificationResult and ExtractedBook deliberately SURVIVE: AnalyzeResponse
+// is typed on both.
 
 // A book candidate extracted from an image by the vision model.
 message ExtractedBook {
@@ -128,13 +169,21 @@ message ExtractedBook {
 
 // POST /analyze — single-request classification + extraction.
 //
-// Combines /classify + /extract into one call so core pays for one HTTP
-// round-trip and one potential cold-start on the Modal side. The vision
-// service runs classify internally first; if the result is BOOK it
-// proceeds to extract, otherwise returns an empty `books` list and
-// skips the expensive extract step. Preserves the pre-consolidation
-// short-circuit ("don't run extract on non-books") without forcing
-// core to make two HTTP calls.
+// Combines classification + extraction into one call so core pays for one
+// HTTP round-trip. The vision service runs classify internally first; if the
+// result is BOOK it proceeds to extract, otherwise returns an empty `books`
+// list and skips the expensive extract step. Preserves the pre-consolidation
+// short-circuit ("don't run extract on non-books") without forcing core to
+// make two HTTP calls.
+//
+// ⚠️ "One HTTP round-trip" is the accurate claim; this comment also used to say
+// "and one potential cold-start on the Modal side", which is NOT true and is
+// worth correcting here because it is the same error as the one in the
+// deletion note above. The handler invokes TWO Modal methods —
+// `client.classify` then `client.extract` — so the Modal-side fan-out and its
+// cold-start exposure are unchanged by the HTTP consolidation. Collapsing them
+// into a single prompt was tried and REVERTED (recorded in the vision
+// architecture decision's 2026-05 update).
 message AnalyzeRequest {
   // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.
   oneof input {
@@ -161,41 +210,136 @@ message AnalyzeResponse {
   repeated ExtractedBook books = 3 [json_name = "books"];
   // Name of the vision model used for inference.
   string model_used = 4 [json_name = "model_used"];
+
+  // Which cascade tier produced this answer.
+  //
+  // ⛔ WITHOUT THIS THE PER-TIER QUESTION IS UNANSWERABLE, and it is the
+  // question the vision redesign turns on. Cost was charged as a flat constant
+  // per call regardless of whether a CPU barcode scan answered in milliseconds
+  // or a 7B VLM ran on an A10G — so "should a cover-embedding tier exist?"
+  // could not be argued from a figure that cannot tell those apart.
+  AnalysisTier tier = 5 [json_name = "tier"];
+
+  // Per-stage wall-clock, milliseconds. A stage that did not run is absent.
+  StageTimings timings_ms = 6 [json_name = "timings_ms"];
+
+  // Whether the SIDECAR container was cold when this request arrived.
+  //
+  // ⛔ NAMED FOR THE CONTAINER IT ACTUALLY MEASURES. This was `container_cold`,
+  // which read as "the cold start that costs money" and is not what it
+  // reports: the FastAPI app runs in the sidecar, whose warmth `modal_app.py`
+  // states outright is "independent of the GPU's" — and "the money is in the
+  // GPU window". An idle A10G is roughly two orders of magnitude more
+  // expensive per second than an idle CPU container, so a field named for the
+  // cheap one and read as the expensive one would have put a wrong term in the
+  // architecture decision this data exists to inform.
+  //
+  // ⚖️ It is still worth reporting: a cold sidecar costs an ASGI cold start ON
+  // TOP OF whatever the GPU is doing, so it is a real term in request latency
+  // — just not the one the cost case turns on. The GPU's own cold start is
+  // knowable from `@modal.enter` and is NOT yet plumbed through; that is
+  // tracked as remaining work rather than implied by this field.
+  //
+  // A boolean rather than an age, because the decision it feeds is binary and
+  // an age would invite a threshold nobody agreed.
+  bool sidecar_cold = 7 [json_name = "sidecar_cold"];
+
+  // The GPU dispatches this request made, one entry per inference.
+  //
+  // ⛔ REPEATED, BECAUSE THE NUMBER OF GPU STAGES IS THE OPEN QUESTION THIS
+  // DATA EXISTS TO SETTLE. A `VLM_EXTRACT` request already makes TWO
+  // independent Modal dispatches (`classify` then `extract`), and with
+  // `max_containers=10` they can land on different containers — so a single
+  // set of container fields described only the first and reported `cold=false`
+  // for a request whose extract paid a cold start. That under-counted billed
+  // container lifetimes by up to half, in the direction that flatters the GPU.
+  //
+  // ⚖️ A named `classify`/`extract` pair was the obvious correction and is the
+  // wrong one: it writes "there are exactly two GPU stages" into the wire
+  // contract while "should a cover-embedding tier exist?" is unanswered — and
+  // such a tier is another dispatch. Under `repeated` that costs nothing;
+  // under a named pair it costs a field, a new branch in every consumer, and a
+  // `buf breaking` argument. The barcode path sends an empty list rather than
+  // an absent message, so a consumer counts with no nil branch.
+  //
+  // ⚠️ No `stage` field and no container age. The tier field already says
+  // which path answered, dispatches arrive in execution order, and an age was
+  // carried here until a reviewer showed its only possible consumer would have
+  // double-counted a term the inference cost line already bills.
+  repeated GpuDispatch gpu_dispatches = 8 [json_name = "gpu_dispatches"];
 }
 
-// POST /associate — async cover classification with callback.
-message AssociateRequest {
-  // ISBN (digits only, no hyphens).
-  string isbn = 1 [json_name = "isbn"];
-  // UUID of the work record in the core database.
-  string book_id = 2 [json_name = "book_id"];
-  // UUID of the edition record (idempotency key).
-  string edition_id = 3 [json_name = "edition_id"];
-  // URL of the cover image to classify.
-  string cover_image_url = 4 [json_name = "cover_image_url"];
+// AnalysisTier names the cascade stage that produced an answer.
+//
+// ⛔ THE NUMBERS ARE IDENTITY, NOT SEQUENCE, AND MUST NOT BE COMPARED
+// ORDINALLY. The cascade runs barcode → cover-embedding → OCR → VLM, and it is
+// tempting to let these numbers carry that order. They must not: a consumer
+// comparing them numerically breaks the moment a tier is inserted out of
+// order, and `buf` will never flag it because the numbers stayed perfectly
+// valid. Order the cascade explicitly in code; let these be arbitrary.
+//
+// ⚖️ EMBEDDING and OCR are therefore NOT reserved space. Appending an enum
+// value is additive and allowed, so a future tier simply takes the next free
+// number — gaps buy nothing.
+enum AnalysisTier {
+  // Unset. A producer that has not been taught to report its tier, which is
+  // distinct from any real tier and must not be counted as one.
+  ANALYSIS_TIER_UNSPECIFIED = 0;
+
+  // A barcode decoded on CPU, before any model ran.
+  ANALYSIS_TIER_BARCODE = 1;
+
+  // The VLM answered the classify question and extraction was skipped.
+  ANALYSIS_TIER_VLM_CLASSIFY = 2;
+
+  // The VLM ran the full extract path.
+  ANALYSIS_TIER_VLM_EXTRACT = 3;
 }
 
-// Response from POST /associate (202 Accepted).
-message AssociateResponse {
-  // Unique job ID for tracking the async classification.
-  string job_id = 1 [json_name = "job_id"];
+// StageTimings carries per-stage wall-clock in milliseconds.
+//
+// ⚖️ Each stage is optional: a request answered by the barcode tier never runs
+// classify or extract, and reporting 0 for a stage that did not run would be
+// indistinguishable from one that ran instantly. Absent means "did not run".
+// One GPU dispatch's reading of the container that served it.
+//
+// ⚖️ Two fields, and each is the other's reason for existing: `container_id`
+// gives the de-duplication a key, and the de-duplication is what gives the id
+// a reader. Together they produce a container count that is both correct and
+// RE-DERIVABLE by the consumer — which matters because that count reaches a
+// public money page, and this codebase's one trustworthy cost series is
+// trustworthy precisely because it can catch our own arithmetic being wrong.
+// A scalar count sent from the sidecar would be smaller and would have to be
+// believed.
+message GpuDispatch {
+  // Whether this dispatch paid the model load — true exactly once per
+  // container lifetime while the GPU class serves one input at a time.
+  bool cold = 1 [json_name = "cold"];
+
+  // Which container served it. ⚠️ Opaque, per-container, and NOT a metric
+  // label: a new id per cold start is unbounded cardinality. For aggregation,
+  // then discard.
+  string container_id = 2 [json_name = "container_id"];
 }
 
-// Callback payload from vision → core when async classification completes.
-// POST /api/internal/vision/associate with X-Vision-Signature header.
-message AssociateCallback {
-  // ISBN (echoed from request).
-  string isbn = 1 [json_name = "isbn"];
-  // Book UUID (echoed from request).
-  string book_id = 2 [json_name = "book_id"];
-  // Edition UUID (echoed from request).
-  string edition_id = 3 [json_name = "edition_id"];
-  // Association result; see AssociationStatus enum.
-  AssociationStatus status = 4 [json_name = "status"];
-  // Job ID (echoed from AssociateResponse).
-  string job_id = 5 [json_name = "job_id"];
-  // Rejection reason (empty string or absent if status is "confirmed").
-  optional string reason = 6 [json_name = "reason"];
-  // Cover image URL (echoed from AssociateRequest).
-  string cover_image_url = 7 [json_name = "cover_image_url"];
+// StageTimings carries per-stage wall-clock in milliseconds.
+//
+// ⚖️ Each stage is optional: a request answered by the barcode tier never runs
+// classify or extract, and reporting 0 for a stage that did not run would be
+// indistinguishable from one that ran instantly. Absent means "did not run".
+message StageTimings {
+  // Fetching or decoding the image.
+  optional int32 download = 1 [json_name = "download"];
+
+  // The CPU barcode pre-pass.
+  optional int32 barcode = 2 [json_name = "barcode"];
+
+  // The VLM classify call.
+  optional int32 classify = 3 [json_name = "classify"];
+
+  // The VLM extract call.
+  optional int32 extract = 4 [json_name = "extract"];
 }
+
+// Cover association: request, response, callback and status enum.
+//

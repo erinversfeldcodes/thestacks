@@ -26,7 +26,7 @@ This story describes a full batch upload with review screen. The current codebas
 **What IS implemented:**
 1. The drop zone accepts a single file (`Decode.index 0 File.decoder` -- takes the first file from a drop event).
 2. The `IdentifyBookJob` and `Moderation.run_pipeline/1` support multiple books from a single image:
-   - Vision sidecar `POST /extract` can return multiple books in the `"books"` array
+   - The vision sidecar's `POST /analyze` can return multiple books in the `"books"` array
    - `expand_compound_candidates/1` splits titles joined by " OR "
    - `resolve_and_store_all/2` iterates all candidates, creating a book for each resolved ISBN
    - `mark_resolved/2` stores all `book_ids` (array) on the uploaded image
@@ -140,7 +140,7 @@ Same as US-1.1.1 per book:
 
 ### Vision Sidecar -- Extraction (multi-book)
 - **Service**: Modal vision sidecar
-- **Endpoint**: `POST /extract`
+- **Endpoint**: `POST /analyze` — ⚠️ `POST /extract` and `POST /classify` were deleted on 2026-10-15; `POST /analyze` answers both in one call. The pipeline already used the fused call, so this is a documentation correction, not a behaviour change.
 - **Response**: `%{"books" => [candidate1, candidate2, ...]}` -- array with one entry per detected book in the image
 - **Each candidate**: `%{"title" => str, "author" => str, "potential_isbns" => [str], "raw_text" => str, "confidence" => float}`
 
@@ -309,7 +309,7 @@ Note: For a single identified book, the step transitions to `Verifying singleBoo
 ### Vision Pipeline Timing
 
 - **Metric name**: Vision extraction time (multi-book)
-- **How measured**: `Stacks.AI.Client.call_vision("extract_isbn", ...)` duration. Not yet instrumented separately.
+- **How measured**: `Stacks.AI.Client.call_vision("analyze", ...)` duration. Not yet instrumented separately.
 - **Target/SLA**: p50 < 8s, p95 < 20s (may be longer for images with many books)
 - **Dashboard**: Vision pipeline section
 
@@ -345,7 +345,7 @@ Note: For a single identified book, the step transitions to `Verifying singleBoo
 
 ### Vision Extraction (Modal GPU)
 - **Service**: Modal (same GPU instance)
-- **Trigger**: `Stacks.AI.Client.call_vision("extract_isbn", ...)` — one extraction per image
+- **Trigger**: `Stacks.AI.Client.call_vision("analyze", ...)` — one call per image, extraction included
 - **Unit cost**: Included in classification cost (same Modal container session). Multi-book extraction may take longer (5-15s vs 3-8s for single book), slightly increasing GPU cost.
 - **Volume estimate**: 1 call per image that passes classification
 - **Tracked by**: `Stacks.AI.BudgetTracker`

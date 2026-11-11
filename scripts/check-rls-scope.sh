@@ -1,0 +1,674 @@
+#!/usr/bin/env bash
+# scripts/check-rls-scope.sh — every query against a row-level-secured table
+# must establish a scope, and every worker's declared scope must be true.
+#
+# ⛔ WHY THIS GATE EXISTS AT ALL, AND WHY IT CANNOT BE A TEST. Four `op` tables
+# carry row-level security, and their policies refuse a query with no request
+# scope set. But the test environment connects as `postgres`, which is
+# `rolsuper = true`, and **superusers bypass row-level security entirely** — so
+# an unscoped query passes every one of the 4000+ tests and fails only on a
+# deployed stack, where the application connects as the least-privilege role.
+#
+# A green suite is therefore not evidence about scoping, and a reviewer reading
+# a diff is the only other thing standing between an unscoped query and
+# production. This gate is the instrument that can actually go red.
+#
+# It checks two things:
+#
+#   1. Every module that references one of the four secured schemas AND runs a
+#      Repo call establishes a scope somewhere — `Stacks.Scope.with_user/2`,
+#      `set!/1`, `multi_step/2`, or a `SECURITY DEFINER` function written for a
+#      question per-user scoping cannot answer.
+#
+#   2. Every worker declaring `scope: :system` touches NONE of those schemas.
+#      ⚠️ That claim is checked rather than trusted: `:system` is the easy
+#      answer when somebody does not want to think about which user a job acts
+#      for, and it is the answer that silently breaks on a deployed stack.
+#
+# ⛔ WHAT THIS GATE CANNOT SEE, stated here because overstating it is worse than
+# the gap. Its granularity is the MODULE; the defect's granularity is the QUERY.
+# A module that scopes in twenty places satisfies check 1, so a single unscoped
+# read added to it passes — measured, by planting exactly that in the largest
+# scoped context and getting a clean exit 0. The compile-time `Stacks.Worker`
+# macro does not cover it either: that applies to workers, and the contexts are
+# not workers.
+#
+# So the honest claim is: this gate catches a module that scopes NOWHERE and a
+# worker whose `:system` declaration is false. It does NOT make every unscoped
+# query catchable, and nothing in this repository does — the one instrument that
+# caught a real one was a deployed preview stack returning HTTP 500 on every
+# bookshelf write. Read "OK" below as "no module-level omission", and keep
+# reviewing diffs.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT" || exit 1
+
+LIB="apps/core/lib/stacks"
+SCHEMAS='Bookshelf|Placement|UserBlock|VisibilityGrant'
+SCOPE_MARKERS='Scope\.with_user|Scope\.set!|Scope\.multi_step|Scope\.anonymous|Scope\.for_viewer|op\.blocked_pair|op\.wishlist_user_ids|op\.placement_owners_for_edition|op\.placement_owner|op\.platform_row_counts'
+REPO_CALLS='Repo\.(all|one|get|get!|get_by|aggregate|exists\?|insert|insert!|update|update!|delete|delete_all|update_all|insert_all|query!|query)'
+
+# ⛔ THE ALLOWLIST IS A CLAIM THIS SCRIPT CHECKS, NOT A SENTENCE IT PRINTS.
+#
+# It used to hold a free-text reason per module, echoed next to `ALLOWED`. Of
+# eight entries, SEVEN were factually false — each true of *part* of its
+# module's behaviour (the read half, the enqueue half, the prose half) while the
+# uncovered part rode along on a true-sounding sentence. Every one was a real
+# refused query on a deployed stack: the public transparency page, the admin
+# dashboard, the marketplace write path, the reader insights page, the group
+# feed, the visibility gate, and a feed handler that swallowed the refusal into
+# a silent nil.
+#
+# ⚠️ What makes this worth restructuring rather than rewording: a reviewer
+# briefed to be adversarial about exactly this ran the discovery predicate, got
+# the complete failing set in its own output, and then cleared three modules by
+# reading these reasons instead of the code. Prose beside a verdict reads as
+# VERIFIED. A corrected sentence would rot the same way, because nothing
+# re-checks a sentence.
+#
+# So an entry now names a KIND, and each kind is a check:
+#
+#   no-queries   the file makes no Repo call at all. Checked.
+#   definer      every secured-table access goes through an `op.*` SECURITY
+#                DEFINER function, and the file contains no direct query form.
+#                Checked, including the pipeline and bare-schema-argument forms.
+#   policy:NAME  a named policy makes this read public. Checked by grepping
+#                `CREATE POLICY NAME` across priv/repo/migrations — so dropping
+#                the policy turns this gate red.
+#
+# ⛔ What is NOT available as a kind: "delegates to something that scopes", which
+# is what four of the seven false reasons claimed. It is unverifiable from one
+# file, and it was wrong every time it was claimed.
+#
+# ⚠️ Three query forms, not one. The first draft of the textual check matched
+# only `from(x in Schema)` and would have passed `visibility.ex` (pipeline head,
+# `Bookshelf |> where(...)`) and `admin/data.ex` (`Repo.aggregate(Bookshelf, …)`)
+# — the dominant styles in this codebase, not edge cases.
+#
+# ⛔ And a limit this gate cannot fix, stated because overstating it is how the
+# last version did damage: a secured table reached through an ASSOCIATION ATOM
+# names no schema module at the call site. `Repo.preload(placement, :bookshelf)`
+# reads `op.bookshelves` with the word "bookshelves" nowhere in the line. No
+# textual check reaches it; one such site existed and was found by connecting as
+# the runtime role, not by any grep. The companion ExUnit check walks Ecto's
+# association graph for that class. Neither is a substitute for driving the
+# surfaces as the least-privilege role, which is the only instrument that found
+# all seven of these.
+# ⚠️ EMPTY, and that is the honest state. The eight prose entries are gone: seven
+# were false, and the eighth — `events/registry.ex`, claiming "runs no query of
+# its own" — was TRUE and also pointless. Discovery requires both a secured
+# schema name and a Repo call, and that module makes no Repo call, so it was
+# never discovered and allowlisting it excluded nothing. The anti-vacuity check
+# below is what revealed that, on its first run.
+#
+# The lesson is the one the false seven teach from the other side: an allowlist
+# entry nobody checks is not a small risk, it is an absence of information. Four
+# modules that used to sit here now scope or call a definer instead; one is
+# unfixed and reports MISSING, which is correct.
+allow_kind() {
+    # ⛔ A TEST SEAM, and it exists because emptying the allowlist left the
+    # verifier below with zero coverage. `verify_kind`, `DIRECT_QUERY_FORMS`
+    # and `DEFINERS` were never executed by any run, and the per-kind
+    # anti-vacuity check compared 0 resolved against 0 declared and passed.
+    #
+    # ⚠️ The guard was written for "the pattern behind a kind stopped
+    # matching". The vacuity arrived instead by **emptying the input**, which
+    # it did not model — so the machinery that will decide the next allowlist
+    # entry, including the three-form query matcher, had no live caller, no
+    # test, and a guard that could not notice.
+    #
+    # ⛔ Re-adding entries to fix that would be wrong: an empty allowlist is
+    # the honest state. The seam lets the suite drive each kind and each query
+    # form against fixtures instead. It is read ONLY from the environment, so
+    # no committed entry can hide in it.
+    # ⚠️ NOT `… | while read`. A while loop at the end of a pipeline is a
+    # subshell in bash 3.2, and this function's output is consumed by a command
+    # substitution — a combination that proved to behave differently inside a
+    # sourced suite than standalone, for reasons not worth chasing when the
+    # pipeline buys nothing.
+    #
+    # ⚠️ AND NOT `IFS=','` EITHER, which is how this was first written. Setting
+    # IFS changes how EVERY later unquoted expansion in the shell splits, and
+    # restoring it on each exit path is a correctness burden carried by hand —
+    # here across three separate `return`/fall-through routes, any one of which
+    # could be missed by a later edit. `bash.lang.security.ifs-tampering`
+    # refuses it for that reason, and the refusal is right: the split below is
+    # done by parameter expansion, which affects nothing outside this loop and
+    # needs no save/restore at all.
+    if [[ -n "${RLS_SCOPE_TEST_ALLOWLIST:-}" ]]; then
+        local rest="$RLS_SCOPE_TEST_ALLOWLIST"
+        local entry path kind
+        while [[ -n "$rest" ]]; do
+            entry="${rest%%,*}"
+            if [[ "$entry" == "$rest" ]]; then
+                rest=""
+            else
+                rest="${rest#*,}"
+            fi
+            path="${entry%%=*}"
+            kind="${entry#*=}"
+            if [[ "$path" == "$1" ]]; then
+                printf '%s' "$kind"
+                return
+            fi
+        done
+        printf '%s' ""
+        return
+    fi
+
+    case "$1" in
+        *) echo "" ;;
+    esac
+}
+
+# The three query forms that reach a secured table by naming its schema module.
+# ⚠️ Comments stripped before matching: this codebase has five recorded cases of
+# an absence assertion satisfied by the prose explaining the pattern it bans.
+DIRECT_QUERY_FORMS='from\([a-z_]+ in (Bookshelf|Placement|UserBlock|VisibilityGrant)|^[[:space:]]*(Bookshelf|Placement|UserBlock|VisibilityGrant)[[:space:]]*$|(Bookshelf|Placement|UserBlock|VisibilityGrant)[[:space:]]*\|>|Repo\.[a-z_!?]+\((Bookshelf|Placement|UserBlock|VisibilityGrant)[,)]'
+
+DEFINERS='op\.blocked_pair|op\.wishlist_user_ids|op\.placement_owners_for_edition|op\.placement_owner|op\.platform_row_counts'
+
+fail=0
+checked=0
+kinds_resolved=0
+echo "==> Checking every module that queries a row-level-secured table"
+
+verify_kind() {
+    # $1 = relative path, $2 = file, $3 = kind. Echoes a failure reason, or
+    # nothing when the claim holds.
+    local rel="$1" file="$2" kind="$3" code
+    code="$(sed 's/#.*//' "$file")"
+
+    case "$kind" in
+        no-queries)
+            if grep -qE "$REPO_CALLS" <<<"$code"; then
+                echo "claims no-queries but makes a Repo call"
+            fi
+            ;;
+        definer)
+            if ! grep -qE "$DEFINERS" <<<"$code"; then
+                echo "claims definer but calls no op.* definer function"
+            elif grep -qE "$DIRECT_QUERY_FORMS" <<<"$code"; then
+                echo "claims definer but also queries a secured schema directly"
+            fi
+            ;;
+        policy:*)
+            local policy="${kind#policy:}"
+            if ! grep -rqE "CREATE POLICY[[:space:]]+${policy}\b" apps/core/priv/repo/migrations; then
+                echo "names policy '${policy}', which no migration creates"
+            elif grep -qE 'Repo\.(update|update!|insert|insert!|delete|delete_all|update_all|insert_all)' <<<"$code"; then
+                echo "names a read policy but writes to a secured table"
+            fi
+            ;;
+        *)
+            echo "unknown kind '${kind}' — kinds are: no-queries, definer, policy:NAME"
+            ;;
+    esac
+}
+
+while IFS= read -r file; do
+    rel="${file#"$LIB"/}"
+
+    grep -qE "$SCHEMAS" "$file" || continue
+    grep -qE "$REPO_CALLS" "$file" || continue
+
+    checked=$(( checked + 1 ))
+
+    kind="$(allow_kind "$rel")"
+    if [[ -n "$kind" ]]; then
+        problem="$(verify_kind "$rel" "$file" "$kind")"
+        if [[ -n "$problem" ]]; then
+            echo "    FALSE CLAIM ${rel} — ${problem}" >&2
+            fail=1
+        else
+            echo "    allowed ${rel} — ${kind} (checked)"
+            kinds_resolved=$(( kinds_resolved + 1 ))
+        fi
+        continue
+    fi
+
+    # ⛔ Comments STRIPPED. This is the one grep that decides pass or fail for
+    # every discovered module, and it was the only one in the file that read its
+    # own prose as evidence — `verify_kind`, the `:system` worker check and the
+    # `:user` worker check all strip, three correct instances beside one wrong
+    # one. This repository has five recorded cases of an assertion satisfied by
+    # the comment explaining the pattern it bans, and `SCOPE_MARKERS` has just
+    # grown five more entries, widening exactly that surface.
+    # ⛔ Stripped into a VARIABLE, then matched with a here-string — not
+    # `sed … | grep -q`. Under `pipefail`, `grep -q` exits on its first match
+    # and closes the pipe, `sed` takes SIGPIPE, and the PIPELINE's status
+    # becomes 141 — so a file that genuinely matched took the else branch.
+    # Measured: it bit `shelving.ex` and nothing else, because it is the
+    # largest file here and the match comes early, so grep closed the pipe
+    # while sed still had a thousand lines to write. A smaller file finishes
+    # writing before grep exits and passes. A size-dependent false failure is
+    # worse than a consistent one.
+    code_only="$(sed 's/#.*//' "$file")"
+    if grep -qE "$SCOPE_MARKERS" <<<"$code_only"; then
+        echo "    ok      ${rel}"
+    else
+        echo "    MISSING ${rel} — queries a row-level-secured table and establishes no scope" >&2
+        fail=1
+    fi
+done < <(find "$LIB" -name '*.ex' -type f ! -path '*/gen/*' | sort)
+
+# ⛔ Anti-vacuity for the kinds themselves, not just for discovery. If the
+# pattern behind a kind stops matching — a definer renamed, a query form
+# rewritten — every entry claiming that kind passes silently and this gate
+# reports clean while checking nothing. The gate's own history is the argument:
+# its first version errored on a bash-4 builtin and still exited 0.
+declared_kinds=$(grep -cE '^[[:space:]]+"[^"]+\.ex"\) echo "' "$0" || true)
+if [[ -n "${RLS_SCOPE_TEST_ALLOWLIST:-}" ]]; then
+    declared_kinds=$(printf '%s' "$RLS_SCOPE_TEST_ALLOWLIST" | tr ',' '\n' | grep -c '=' || true)
+fi
+if (( kinds_resolved != declared_kinds )); then
+    echo "FAIL: ${declared_kinds} allowlist entr(ies) declared, ${kinds_resolved} resolved." >&2
+    echo "      An entry that never matched a discovered module is not being checked at all," >&2
+    echo "      so it excludes nothing and tells a reader something untrue." >&2
+    fail=1
+fi
+if (( declared_kinds > 0 )); then
+    echo "    (${declared_kinds} allowlist entr(ies), all verified against the code)"
+fi
+
+# ⛔ Anti-vacuity. If the discovery above matched nothing — a moved directory, a
+# renamed schema module — every assertion would pass over an empty set and this
+# gate would report a clean bill of health having looked at nothing.
+if (( checked < 8 )); then
+    echo "FAIL: only ${checked} module(s) were examined, which is too few to be this codebase." >&2
+    echo "      The discovery pattern has stopped matching; fix it before trusting a pass." >&2
+    exit 1
+fi
+echo "    (${checked} module(s) examined)"
+
+echo "==> Checking every worker's declared scope is true"
+workers=0
+for file in apps/core/lib/stacks/workers/*.ex; do
+    grep -q "use Stacks.Worker" "$file" || continue
+    workers=$(( workers + 1 ))
+    name="$(basename "$file")"
+
+    if grep -q "scope: :system" "$file"; then
+        # ⚠️ Comments do not count. A `:system` worker may legitimately MENTION
+        # these tables in prose explaining what it does not touch — one of them
+        # does — so the claim is tested against code with comments stripped.
+        # Same SIGPIPE hazard as above — see the note in the module loop.
+        if grep -qE "$SCHEMAS" <<<"$(sed 's/#.*//' "$file")"; then
+            echo "    FALSE CLAIM ${name} — declares scope: :system but references a secured schema" >&2
+            fail=1
+        fi
+    elif grep -q "scope: :user" "$file"; then
+        # ⚠️ A job declaring `:user` with no user to scope to is a contradiction,
+        # and it would surface as a 42501 at whatever hour the job runs. Checked
+        # here rather than in the macro: a macro sees only the `use` options, not
+        # the `perform/1` head, so it cannot tell.
+        if ! grep -qE 'user_id' <<<"$(sed 's/#.*//' "$file")"; then
+            case "$name" in
+                goodreads_import_job.ex)
+                    # Derives the user from `import.user_id`; its args carry an
+                    # `import_id`, so the literal does not appear in the head.
+                    echo "    ALLOWED ${name} — derives its user from the import it is given" ;;
+                *)
+                    echo "    NO USER  ${name} — declares scope: :user but names no user_id" >&2
+                    fail=1 ;;
+            esac
+        fi
+    else
+        echo "    UNDECLARED ${name} — no scope declaration" >&2
+        fail=1
+    fi
+done
+
+if (( workers < 30 )); then
+    echo "FAIL: only ${workers} worker(s) found; the glob has stopped matching." >&2
+    exit 1
+fi
+echo "    (${workers} worker(s) checked)"
+
+echo "==> Checking nothing sets the scope except Stacks.Scope"
+# ⛔ A bare `SET LOCAL app.current_user_id = …` outside `Stacks.Scope` is the
+# one way to defeat all of the above, and it fails in the worst possible
+# manner: measured, `SET LOCAL` outside a transaction emits a WARNING and does
+# NOTHING, so the code reads as wired, enforces nothing, and every query it
+# guards is then refused with 42501 somewhere that does not name this as the
+# cause. `Stacks.Scope` is the only place allowed to set it, because it is the
+# only place that guarantees a transaction.
+setters=0
+while IFS= read -r file; do
+    case "$file" in
+        */stacks/scope.ex) continue ;;
+    esac
+    echo "    FORBIDDEN ${file#apps/core/lib/} — sets the scope directly; use Stacks.Scope" >&2
+    setters=$(( setters + 1 ))
+    fail=1
+done < <(grep -rlE "app\.current_user_id" apps/core/lib 2>/dev/null | sort)
+
+if (( setters == 0 )); then
+    echo "    ok      only Stacks.Scope sets app.current_user_id"
+fi
+
+echo "==> Checking no test supplies the scope its subject is responsible for"
+# ⛔ A TEST THAT WRAPS A SCOPE-ESTABLISHING CALL IN `Scope.with_user` CANNOT
+# FAIL THE WAY IT CLAIMS TO, and this is the one defect class in this area that
+# reads as correct at every line.
+#
+# MEASURED, three times in one session. A case named "a scoped Shelving READ
+# runs entirely within the scope" wrapped `get_bookshelf_shelves/2` in an outer
+# `Scope.with_user` — so the TEST supplied the scope the production function is
+# responsible for supplying, and the case stayed green with the scoping stripped
+# out of that function entirely: 7 of 7 against the planted historical defect.
+# It was proving "RLS enforces when something sets a scope", which other cases
+# already prove, rather than "this path sets its own".
+#
+# ⚠️ WHY NEITHER REVIEW NOR MUTATION PROBING FINDS IT. Everything in the test is
+# correct in isolation: the population is non-empty, the exit code is right, the
+# assertion's subject is genuinely present. It fails SEMANTICALLY — the setup
+# establishes the precondition the subject is responsible for establishing — so
+# reading the test shows nothing wrong. And nineteen rounds of mutation probing
+# all mutated the thing under TEST, while all three of these defects lived in
+# the fixture's ARRANGEMENT, which subject-mutation cannot reach. The reviewer's
+# formulation: probe the setup, not just the subject — remove each piece and
+# classify. Reds for the right reason = scaffolding. Reds because the subject
+# cannot run = load-bearing. **Still passes = the setup was supplying the
+# answer.**
+#
+# ⛔ THE PREDICATE IS THE REVIEWER'S DISCRIMINATOR, NOT A BAN ON NESTING: *is
+# the scope the thing under test, or the precondition for it?* So this flags an
+# outer scope only when the ENCLOSED CALL establishes a scope in its own body.
+# A test that wraps `SQL.query!` in a scope is CORRECT and is not flagged — the
+# four RLS isolation pairs do exactly that, because there the scope is the
+# precondition and the policy is the subject.
+#
+# ⚠️ BUILT ON A MEASURED BASE RATE, because three narrower proposals in this
+# area were refuted by measurement first. Measured 2026-10-22 across
+# apps/core/test: 22 `Scope.with_user` sites in tests, of which **0** enclose a
+# call whose own body establishes a scope. Zero legitimate instances is what
+# makes this a gate rather than a nuisance — had it been non-zero it would have
+# needed reasons per exemption, and this repo has eight entries' worth of
+# evidence that reasons beside a verdict rot unread.
+#
+# ⛔ HOW TO ADMIT A LEGITIMATE CASE: ADD A PERMITTED-SHAPE FIXTURE TO
+# `test/platform/rls_scope_gate_test.sh`. Never by editing the predicate, and
+# never by adding a reason.
+#
+# ⚖️ That path already existed before anyone named it — the `SQL.query!` case
+# and the scope-primitive case are both exemptions in exactly this form — and
+# the reviewer's argument for why it is the right one is worth keeping: a
+# fixture is SELF-VERIFYING (it proves the gate permits the shape), it cannot
+# rot into unread prose (tighten the predicate and it reddens), and it forces
+# whoever wants an exemption to state the shape precisely enough to test. That
+# is the whole distinction between this and the allowlist deleted above, where a
+# REASON stood in for verification.
+#
+# So "no prose exemptions" keeps its teeth without the brittleness of having no
+# exemption path at all. If you are reading this because the gate flagged
+# something you believe is correct, write the fixture.
+MIN_SCOPE_ESTABLISHERS=20
+# ⚠️ RAISE-ONLY SEAM, so the suite can drive the floor's refusal rather than
+# assert that its message exists in the source. A floor can only be moved UP by
+# this, which makes the gate stricter — the one direction that cannot be a
+# bypass. `$(( ))` on a non-numeric value yields 0, and `-gt` then keeps the
+# declared value, so a malformed override cannot lower it either.
+if [[ -n "${RLS_SCOPE_MIN_ESTABLISHERS:-}" ]] \
+   && (( $(( RLS_SCOPE_MIN_ESTABLISHERS + 0 )) > MIN_SCOPE_ESTABLISHERS )); then
+    MIN_SCOPE_ESTABLISHERS="$(( RLS_SCOPE_MIN_ESTABLISHERS + 0 ))"
+fi
+
+if ! python3 - "$MIN_SCOPE_ESTABLISHERS" <<'NESTED'
+import os
+import re
+import pathlib
+import sys
+
+floor = int(sys.argv[1])
+ESTABLISH = re.compile(r"Scope\.(with_user|set_and_run|multi_step)\b")
+DEF = re.compile(r"^\s*(?:defp?)\s+([a-z_][a-zA-Z0-9_!?]*)", re.M)
+
+
+def _blank(text):
+    """Spaces for everything but newlines, so line numbers survive."""
+    return "".join("\n" if c == "\n" else " " for c in text)
+
+
+def strip_elixir(src):
+    """Blank comment text and string literals, keeping line structure intact.
+
+    ⛔ BOTH TEXT-MATCHING HALVES OF THIS CHECK NEED THIS, and applying it to
+    only the half somebody noticed is now a THREE-INSTANCE pattern in this
+    repository. The reviewer's rule, derived from those three rather than from
+    principle: **when you strip comments in one text-matching half of a gate,
+    audit every other text-matching half of the same gate in the same commit.**
+
+    ⚠️ MEASURED, and it was LIVE. `Social.blocked?/2` deliberately does NOT
+    establish a scope — that was a reviewed decision, because wrapping it took
+    the public blog listing from a bounded 13 queries to 43. The comment
+    recording that decision names `Stacks.Scope.with_user/2`. So this gate
+    classified `blocked?` as a scope-establisher **because of the comment
+    documenting that it deliberately is not one**, and any test calling
+    `blocked?` inside a scope would have been a false positive. That is this
+    repo's most-recorded gate failure — a gate reading its own subject matter as
+    configuration — in its sharpest form yet.
+
+    ⚠️ A CHARACTER SCANNER RATHER THAN A REGEX, and that choice is LOAD-BEARING
+    rather than stylistic. MEASURED: `apps/core/lib` contains 20 `?"` character
+    literals — OCCURRENCES, not lines; one line carries two, which is why a
+    `grep -rn | wc -l` of the same thing reports 19 and the figure that matters
+    here is the occurrence count, since each occurrence is one place a regex
+    strip would have blanked real code — and the obvious `re.sub(r'"[^"]*"', …)` version would have read
+    each one's quote as a string opener and blanked real code forward to the
+    next quote — wrong twenty times, silently, in the direction that blinds the
+    gate. The `?` branch consumes the two-character literal before the `"`
+    branch can see it. (`?\\"` would desync it the other way; measured 0, and
+    nobody writes it.)
+
+    ⚠️ TWO KNOWN LIMITS, with their measured base rates, because "a limit
+    exists" and "a limit is reachable at 0 of 52" are different claims and the
+    second is what a future reader needs:
+
+      * `#{…}` interpolation inside a string is blanked with the string, so a
+        function establishing a scope ONLY inside an interpolated expression
+        goes undetected. A false NEGATIVE the floor cannot see.
+        **Measured 0** — no `#{… Scope. …}` anywhere in `apps/core/lib`.
+
+      * `~s`/`~S` sigil contents are NOT blanked, so `Scope.with_user` written
+        inside one would survive the strip and be read as a call — the same
+        shape as the `blocked?` comment above. A false POSITIVE, which is the
+        EXPENSIVE direction here because there is no prose exemption path.
+        **Measured 11 sigils in lib, 0 containing `Scope.`**
+
+    So the gate is sound today on both, and the cheap direction is the one left
+    open. 1842 `\"\"\"` heredoc delimiters are handled explicitly by the branch
+    above rather than by luck.
+    """
+    out, i, n = [], 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch == '"':
+            if src.startswith('"""', i):
+                end = src.find('"""', i + 3)
+                j = n if end < 0 else end + 3
+            else:
+                j = i + 1
+                while j < n and src[j] != '"':
+                    j += 2 if src[j] == "\\" else 1
+                j = min(j + 1, n)
+            out.append(_blank(src[i:j]))
+            i = j
+        elif ch == "?" and i + 1 < n:
+            # A character literal — `?#` must not open a comment.
+            out.append(src[i : i + 2])
+            i += 2
+        elif ch == "#":
+            end = src.find("\n", i)
+            j = n if end < 0 else end
+            out.append(_blank(src[i:j]))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+# A function establishes a scope only if its OWN BODY does. Module-level
+# matching is what makes the rest of this gate module-granular, and repeating
+# that mistake here would flag every call into a scoping context.
+establishers = {}
+for path in pathlib.Path("apps/core/lib").rglob("*.ex"):
+    # ⛔ THE SCOPE PRIMITIVES THEMSELVES ARE NOT SUBJECTS OF THIS RULE, and this
+    # exemption is DELIBERATE where it used to be accidental.
+    #
+    # A test whose subject is `Stacks.Scope` must nest a scope inside a scope —
+    # `scope_test.exs` has four such cases ("the same user nested is a
+    # pass-through", "a DIFFERENT user nested is refused", "refuses to narrow
+    # from a user scope to anonymous mid-operation", "nests with itself without
+    # raising") — and forbidding that would forbid testing the thing.
+    #
+    # ⚠️ MEASURED: those four already escaped, but only because `with_user`'s
+    # own body calls internal helpers rather than `Scope.with_user`, so the
+    # prefix pattern never matched it. `Scope.set!` DOES match and is defined
+    # here, so the exemption rested on which primitive each test happened to
+    # call — one refactor of `with_user` to route through `set_and_run` would
+    # have turned all four red. An accidental exemption is a false positive
+    # waiting for an unrelated change.
+    #
+    # Derivable rather than a convention: "the subject is Scope itself" is a
+    # fact about where the function is DEFINED, not about how a test is named.
+    if path.name == "scope.ex":
+        continue
+    src = strip_elixir(path.read_text(encoding="utf-8"))
+    defs = [(m.start(), m.group(1)) for m in DEF.finditer(src)]
+    for i, (pos, name) in enumerate(defs):
+        end = defs[i + 1][0] if i + 1 < len(defs) else len(src)
+        if ESTABLISH.search(src[pos:end]):
+            establishers.setdefault(name, set()).add(path.name)
+
+# ⚠️ Anti-vacuity, and it is the whole basis of trusting a clean result. If the
+# `def` or `Scope.` patterns stopped matching, this set would be empty, every
+# test would look innocent, and "no test supplies its subject's scope" would be
+# a sentence with no content — the exact shape of a gate attesting a corpus it
+# never read.
+if len(establishers) < floor:
+    print(
+        f"    REFUSING: found only {len(establishers)} scope-establishing function(s); "
+        f"expected at least {floor}.",
+        file=sys.stderr,
+    )
+    print(
+        "    With an empty set every test reads as innocent, so a clean result here would",
+        file=sys.stderr,
+    )
+    print(
+        "    mean nothing was read rather than nothing is wrong. Check the def/Scope patterns.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+# ⚠️ ADDITIVE ONLY, and that is the point of the design rather than a detail.
+# The suite driving this gate needs to plant the forbidden shape somewhere, and
+# an override that REPLACED the scan root could be pointed at an empty
+# directory — which would report "no test wraps a scope-establishing call" over
+# a corpus of nothing, the precise vacuity the floor above exists to refuse. An
+# extra directory can only ever add offenders, never hide one.
+#
+# ⚖️ AND THE SOUNDER REASON, which the sentence above does not name: the floor
+# and the override act on DISJOINT POPULATIONS. The reviewer attacked this
+# expecting the floor to be defeatable — an additive override inflates the
+# scanned corpus, so if `MIN_SCOPE_ESTABLISHERS` counted THAT, pointing the
+# override at a fixture directory with twenty synthetic sites would satisfy the
+# floor while the real corpus eroded. It does not, because the floor counts
+# scope-establishing functions in PRODUCTION code while the override extends the
+# TEST corpus. Nothing the override can add is in the dimension the floor
+# measures.
+#
+# ⚠️ Recorded because "can only add offenders" is an argument about OFFENDERS
+# and the floor is a separate axis — the same shape as the narrowing argument
+# one file over, where the claim was sound and its soundness lived somewhere the
+# claim did not name.
+roots = [pathlib.Path("apps/core/test")]
+extra = os.environ.get("RLS_SCOPE_EXTRA_TEST_DIR", "").strip()
+if extra:
+    roots.append(pathlib.Path(extra))
+
+offenders = []
+sites = 0
+for path in sorted(p for root in roots for p in root.rglob("*.exs")):
+    # ⛔ STRIPPED HERE TOO — the second text-matching half, fixed in the same
+    # change as the first rather than when somebody next notices it.
+    # `rls_enforcement_test.exs` carries comments naming establishers,
+    # including a "NO OUTER `Scope.with_user`" note, and they dodged the
+    # call-token regex only because they happen to be written in arity notation
+    # (`get_or_create_bookshelf/2`) rather than call syntax. A comment written
+    # as `get_bookshelf_shelves(user, "library")` would have flagged.
+    src = strip_elixir(path.read_text(encoding="utf-8"))
+    lines = src.split("\n")
+    for m in re.finditer(r"Scope\.with_user\(", src):
+        sites += 1
+        idx = src[: m.start()].count("\n")
+        line = idx + 1
+        # ⛔ BOUNDED AT THE ENCLOSING BLOCK, not a flat 14 lines. A fixed window
+        # reads past the closing `end` into the NEXT test — and `scope_test.exs`
+        # has three-line tests, so 14 lines reaches well into the following one.
+        # That cross-block bleed was invisible only because the one function it
+        # could have picked up was not yet in the establisher set, which is the
+        # same accident that was suppressing the other half of this check.
+        #
+        # ⚠️ A window rather than a parse is still the right size for the claim:
+        # the enclosed call sits within a few lines in every real instance. What
+        # the bound removes is the reach into code the wrapper does not enclose.
+        indent = len(lines[idx]) - len(lines[idx].lstrip())
+        window = [lines[idx]]
+        for nxt in lines[idx + 1 : idx + 14]:
+            body = nxt.strip()
+            if body.startswith("end") and (len(nxt) - len(nxt.lstrip())) <= indent:
+                break
+            window.append(nxt)
+        called = sorted(
+            {
+                name
+                for name in re.findall(r"\b([a-z_][a-zA-Z0-9_!?]*)\(", "\n".join(window))
+                if name in establishers
+            }
+        )
+        if called:
+            offenders.append((path, line, called))
+
+if offenders:
+    print(f"    FORBIDDEN {len(offenders)} test(s) supply a scope their subject must establish:", file=sys.stderr)
+    for path, line, called in offenders:
+        where = ", ".join(sorted(set().union(*(establishers[c] for c in called))))
+        print(f"      {path}:{line} wraps {', '.join(called)} ({where})", file=sys.stderr)
+    print("    Each of those functions establishes a scope in its OWN body, so an outer", file=sys.stderr)
+    print("    Scope.with_user makes the test supply the precondition the subject is", file=sys.stderr)
+    print("    responsible for supplying — and the case stays green with the subject's", file=sys.stderr)
+    print("    scoping removed entirely. Drop the wrapper and let the subject do its job.", file=sys.stderr)
+    print("    Wrapping a raw query (SQL.query!) is different and is not flagged: there the", file=sys.stderr)
+    print("    scope is the precondition and the policy is the subject.", file=sys.stderr)
+    raise SystemExit(1)
+
+# ⚠️ THE FLOOR IS PRINTED ON SUCCESS, not only in the refusal. Without it the
+# raise-only property of the override above is UNOBSERVABLE: a version that
+# allowed the floor to be lowered behaves identically on a corpus that clears
+# both values, so no run could tell the two apart. MEASURED — removing the
+# raise-only guard entirely left the suite driving it fully green. Reporting
+# the value in use is what turns a structural claim into a checkable one.
+print(
+    f"    ok      no test wraps a scope-establishing call "
+    f"({sites} wrapper site(s) scanned, {len(establishers)} such functions known, floor {floor})"
+)
+NESTED
+then
+    fail=1
+fi
+
+if (( fail )); then
+    echo "FAIL: a query against a row-level-secured table has no scope." >&2
+    echo "      Establish one with Stacks.Scope.with_user/2 (or set!/1 inside a transaction" >&2
+    echo "      the caller owns), or allowlist the module here WITH the reason." >&2
+    exit 1
+fi
+
+echo "OK: every module querying a secured table scopes somewhere, and every :system claim holds."
+echo "    (module-level, not query-level: an unscoped read inside an otherwise-scoped"
+echo "     module passes this gate. Reviewing the diff is still the only thing that"
+echo "     catches that before a deployed stack does.)"

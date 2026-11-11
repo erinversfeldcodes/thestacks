@@ -11,9 +11,11 @@ conversation.
 -}
 
 import Api
+import Api.Url
 import Expect
 import Html.Attributes as Attr
 import Http
+import Json.Decode as Decode
 import Json.Encode as Encode
 import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
 import Page.Admin.Feedback as AdminQueue
@@ -21,7 +23,9 @@ import Page.Feedback as Feedback
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
+import Url.Builder
 
 
 testId : String -> Selector.Selector
@@ -33,7 +37,7 @@ update : Feedback.Msg -> Feedback.Model -> ( Feedback.Model, Cmd Feedback.Msg )
 update msg model =
     let
         ( newModel, cmd, _ ) =
-            Feedback.update msg model (Just "token")
+            Feedback.update msg model (Just (TestHelpers.creds "token"))
     in
     ( newModel, cmd )
 
@@ -56,6 +60,26 @@ entry body =
     , senderHandle = Just "mara"
     , createdAt = "2026-08-18T09:30:00Z"
     }
+
+
+{-| A loaded queue showing `entries` out of `total`, from the first page.
+-}
+queue : List Api.AdminFeedbackEntry -> Int -> AdminQueue.Model
+queue entries total =
+    queueAt 0 (Success { entries = entries, total = total })
+
+
+queueAt : Int -> RemoteData Http.Error Api.AdminFeedbackPage -> AdminQueue.Model
+queueAt offset page =
+    { page = page, offset = offset }
+
+
+adminUpdate :
+    AdminQueue.Msg
+    -> AdminQueue.Model
+    -> ( AdminQueue.Model, Cmd AdminQueue.Msg, AdminQueue.OutMsg )
+adminUpdate msg model =
+    AdminQueue.update msg model (Just (TestHelpers.creds "token"))
 
 
 {-| Every route with an argument, given an argument no path segment could be
@@ -134,7 +158,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err Http.NetworkError))
+                            update (Feedback.SendCompleted (Err (Api.RequestFailed Http.NetworkError)))
                                 (written "Something broke.")
                     in
                     render model
@@ -146,7 +170,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err (Http.BadStatus 429)))
+                            update (Feedback.SendCompleted (Err (Api.RateLimited Nothing)))
                                 (written "My third report today.")
                     in
                     render model
@@ -157,7 +181,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err Http.NetworkError))
+                            update (Feedback.SendCompleted (Err (Api.RequestFailed Http.NetworkError)))
                                 (written "An hour of careful notes.")
                     in
                     Expect.equal "An hour of careful notes." model.message
@@ -165,7 +189,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err (Http.BadStatus 429)))
+                            update (Feedback.SendCompleted (Err (Api.RateLimited Nothing)))
                                 (written "An hour of careful notes.")
                     in
                     Expect.equal "An hour of careful notes." model.message
@@ -173,7 +197,7 @@ suite =
                 \_ ->
                     let
                         ( model, _ ) =
-                            update (Feedback.SendCompleted (Err Http.NetworkError))
+                            update (Feedback.SendCompleted (Err (Api.RequestFailed Http.NetworkError)))
                                 (written "An hour of careful notes.")
                     in
                     render model
@@ -185,9 +209,9 @@ suite =
                 \_ ->
                     Expect.equal
                         { method = "POST"
-                        , url = "/api/feedback"
+                        , url = Api.Url.path [ "api", "feedback" ] []
                         , body =
-                            Just
+                            Api.JsonBody
                                 (Encode.object
                                     [ ( "body", Encode.string "The spines overlap." )
                                     , ( "page_context", Encode.string "/u/:handle" )
@@ -215,28 +239,28 @@ suite =
         , describe "the owner's queue distinguishes empty from broken"
             [ test "renders one row per message" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [ entry "one", entry "two" ] }
+                    AdminQueue.view (queue [ entry "one", entry "two" ] 2)
                         |> Query.fromHtml
                         |> Query.findAll [ testId "admin-feedback-entry" ]
                         |> Query.count (Expect.equal 2)
             , test "shows what the reader actually wrote" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [ entry "The bookcase breaks at 320px." ] }
+                    AdminQueue.view (queue [ entry "The bookcase breaks at 320px." ] 1)
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "The bookcase breaks at 320px." ]
             , test "shows who wrote it" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [ entry "one" ] }
+                    AdminQueue.view (queue [ entry "one" ] 1)
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "@mara" ]
             , test "an empty queue says so" <|
                 \_ ->
-                    AdminQueue.view { entries = Success [] }
+                    AdminQueue.view (queue [] 0)
                         |> Query.fromHtml
                         |> Query.has [ testId "admin-feedback-empty" ]
             , test "a failed load does NOT read as an empty queue" <|
                 \_ ->
-                    AdminQueue.view { entries = Failure Http.NetworkError }
+                    AdminQueue.view (queueAt 0 (Failure Http.NetworkError))
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ testId "admin-feedback-error" ]
@@ -246,28 +270,256 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            AdminQueue.update
-                                (AdminQueue.EntriesReceived (Ok [ entry "one" ]))
-                                { entries = Loading }
+                            adminUpdate
+                                (AdminQueue.EntriesReceived
+                                    (Ok { entries = [ entry "one" ], total = 1 })
+                                )
+                                (queueAt 0 Loading)
                     in
-                    Expect.equal (Success [ entry "one" ]) model.entries
-            , test "a lapsed admin session bubbles out rather than rendering an error" <|
+                    Expect.equal (Success { entries = [ entry "one" ], total = 1 }) model.page
+            , -- ⛔ REWRITTEN WITH THE MIGRATION, and split in two, because the one
+              -- status this used to send now arrives by a different door. The
+              -- request is an `Effect.authed` plan, so a 401 is claimed by the
+              -- plan and delivered as `SessionExpiryDetected`; feeding
+              -- `EntriesReceived (Err (BadStatus 401))` by hand asserts a path a
+              -- real 401 can no longer take.
+              test "a lapsed admin session bubbles out rather than rendering an error" <|
                 \_ ->
                     let
                         ( _, _, out ) =
-                            AdminQueue.update
-                                (AdminQueue.EntriesReceived (Err (Http.BadStatus 401)))
-                                { entries = Loading }
+                            adminUpdate AdminQueue.SessionExpiryDetected (queueAt 0 Loading)
+                    in
+                    Expect.equal AdminQueue.SessionExpired out
+            , -- ⚠️ THE OTHER HALF, and the reason the page's own status test
+              -- survives the migration. `needsAdminElevation` matches 401 OR 403;
+              -- the plan took the 401, so what still reaches this handler is the
+              -- 403 — an operator whose elevation window ran out. No plan can
+              -- route that, because a 403 is not an ended session.
+              test "an expired elevation window also bubbles out, by the handler's own reading" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            adminUpdate
+                                (AdminQueue.EntriesReceived (Err (Http.BadStatus 403)))
+                                (queueAt 0 Loading)
                     in
                     Expect.equal AdminQueue.SessionExpired out
             , test "an ordinary failure stays on the page" <|
                 \_ ->
                     let
                         ( _, _, out ) =
-                            AdminQueue.update
+                            adminUpdate
                                 (AdminQueue.EntriesReceived (Err Http.NetworkError))
-                                { entries = Loading }
+                                (queueAt 0 Loading)
                     in
                     Expect.equal AdminQueue.NoOut out
+            ]
+        , describe "the owner can reach feedback older than one page"
+            [ test "the page states the window it is showing out of the whole queue" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one", entry "two" ] 143)
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-count" ]
+                        |> Query.has [ Selector.text "Showing 1–2 of 143" ]
+            , test "a later window counts from its own offset, not from one" <|
+                \_ ->
+                    AdminQueue.view
+                        (queueAt AdminQueue.pageSize
+                            (Success { entries = [ entry "one" ], total = 143 })
+                        )
+                        |> Query.fromHtml
+                        |> Query.find [ testId "admin-feedback-count" ]
+                        |> Query.has [ Selector.text "Showing 26–26 of 143" ]
+            , test "older feedback is reachable when the total exceeds the window" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one" ] 143)
+                        |> Query.fromHtml
+                        |> Query.has [ testId "admin-feedback-older" ]
+            , test "a full page with nothing behind it offers no older control at all" <|
+                \_ ->
+                    -- ABSENT, not disabled. A dead button in this stylesheet is
+                    -- indistinguishable from a live one — `.btn` has no
+                    -- `:disabled` rule and `.btn--secondary` paints over the
+                    -- browser's grey — so it would invite a click that does
+                    -- nothing and explains nothing.
+                    AdminQueue.view (queue (List.repeat 25 (entry "one")) 25)
+                        |> Query.fromHtml
+                        |> Query.hasNot [ testId "admin-feedback-older" ]
+            , test "the first window offers no newer control at all" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one" ] 143)
+                        |> Query.fromHtml
+                        |> Query.hasNot [ testId "admin-feedback-newer" ]
+            , test "a queue that fits in one window shows no pager" <|
+                \_ ->
+                    AdminQueue.view (queue [ entry "one", entry "two" ] 2)
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.hasNot [ testId "admin-feedback-newer" ]
+                            , Query.hasNot [ testId "admin-feedback-older" ]
+                            ]
+            , test "a failed refetch at a later window still offers the way back" <|
+                \_ ->
+                    -- Otherwise the owner is stranded: an error with no pager, on
+                    -- the only surface that can read feedback, and the sole escape
+                    -- is navigating away — which silently returns them to the
+                    -- newest page as if nothing had happened.
+                    AdminQueue.view (queueAt AdminQueue.pageSize (Failure Http.NetworkError))
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ testId "admin-feedback-error" ]
+                            , Query.has [ testId "admin-feedback-newer" ]
+                            ]
+            , test "asking for older feedback moves the window past what was shown" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedOlder
+                                (queue (List.repeat AdminQueue.pageSize (entry "one")) 143)
+                    in
+                    Expect.equal AdminQueue.pageSize model.offset
+            , test "a short page advances by what arrived, not by what was asked for" <|
+                \_ ->
+                    -- The window advances on the server's actual answer. Asking
+                    -- for 25 and being given 10 means the next window starts at
+                    -- 10; advancing by 25 would skip fifteen entries that were
+                    -- never shown, on the only interface that can read them.
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedOlder
+                                (queue (List.repeat 10 (entry "one")) 143)
+                    in
+                    Expect.equal 10 model.offset
+            , test "asking for older feedback at the end of the queue stays put" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedOlder (queue [ entry "one" ] 1)
+                    in
+                    Expect.equal 0 model.offset
+            , test "coming back from a later window never goes past the start" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedNewer
+                                (queueAt AdminQueue.pageSize
+                                    (Success { entries = [ entry "one" ], total = 143 })
+                                )
+                    in
+                    Expect.equal 0 model.offset
+            , test "a window past the end of the queue does not read as an empty queue" <|
+                \_ ->
+                    AdminQueue.view
+                        (queueAt (AdminQueue.pageSize * 4)
+                            (Success { entries = [], total = 10 })
+                        )
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.hasNot [ testId "admin-feedback-empty" ]
+                            , Query.has [ Selector.text "10 in total" ]
+                            ]
+            , test "coming back from a window that is not a whole page lands on the start" <|
+                \_ ->
+                    -- From offset 10 the arithmetic is 10 - 25 = -15, so this is
+                    -- the only case that exercises the floor at all. The
+                    -- previous test starts at exactly one page, where 25 - 25 is
+                    -- already 0 and the floor is never reached — its name
+                    -- claimed cover it did not have.
+                    let
+                        ( model, _, _ ) =
+                            adminUpdate AdminQueue.ClickedNewer
+                                (queueAt 10 (Success { entries = [ entry "one" ], total = 143 }))
+                    in
+                    Expect.equal 0 model.offset
+            ]
+        , describe "the window actually reaches the server"
+            [ test "the request names the endpoint and carries the window it was given" <|
+                \_ ->
+                    -- The one piece of this change nothing else could reach. An
+                    -- off-by-one here serves the same page forever and every
+                    -- paging test above still passes, because they assert the
+                    -- model and never the request.
+                    Expect.equal
+                        { method = "GET"
+                        , url = Api.Url.path [ "api", "admin", "feedback" ] [ Url.Builder.int "limit" 25, Url.Builder.int "offset" 50 ]
+                        , body = Api.NoBody
+                        }
+                        (Api.adminFeedbackRequest { limit = 25, offset = 50 })
+            , test "the first window asks for offset zero rather than omitting it" <|
+                \_ ->
+                    Expect.equal "/api/admin/feedback?limit=25&offset=0"
+                        (Api.Url.toString
+                            (Api.adminFeedbackRequest { limit = 25, offset = 0 }).url
+                        )
+            ]
+        , describe "the queue response decodes"
+            [ test "a populated page carries its entries and the whole-queue total" <|
+                \_ ->
+                    case
+                        Decode.decodeString Api.adminFeedbackPageDecoder
+                            """
+                            { "feedback": [ { "id": "f1", "body": "The spines overlap.",
+                                              "page_context": "wishlist",
+                                              "sender_handle": "mara",
+                                              "created_at": "2026-08-18T09:30:00Z" } ],
+                              "total": 143 }
+                            """
+                    of
+                        Ok page ->
+                            Expect.equal ( 1, 143 ) ( List.length page.entries, page.total )
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "an empty page with a non-zero total decodes — that is a window past the end" <|
+                \_ ->
+                    case
+                        Decode.decodeString Api.adminFeedbackPageDecoder
+                            """{ "feedback": [], "total": 10 }"""
+                    of
+                        Ok page ->
+                            Expect.equal ( 0, 10 ) ( List.length page.entries, page.total )
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
+            , test "a response with no total is a decode failure" <|
+                \_ ->
+                    -- Without this, renaming the server's `total` to anything
+                    -- else leaves the page saying "could not load the feedback"
+                    -- forever with the whole suite green.
+                    case
+                        Decode.decodeString Api.adminFeedbackPageDecoder
+                            """{ "feedback": [] }"""
+                    of
+                        Ok _ ->
+                            Expect.fail "total must stay required — the count is the point"
+
+                        Err _ ->
+                            Expect.pass
+            ]
+        , describe "the invitation code never travels in the URL"
+            [ test "the lookup is a POST and the code is in the body" <|
+                \_ ->
+                    -- The reason this endpoint is a POST at all: a code in the
+                    -- path is written into the request log on every attempt.
+                    -- Nothing else pins that, so a later refactor could put it
+                    -- back with no test failing.
+                    let
+                        spec =
+                            Api.checkInviteRequest "STK-ABCD-1234"
+                    in
+                    Expect.all
+                        [ \s -> Expect.equal "POST" s.method
+                        , \s ->
+                            Expect.equal False (String.contains "STK-ABCD-1234" (Api.Url.toString s.url))
+                        , \s ->
+                            Expect.equal
+                                (Api.JsonBody
+                                    (Encode.object
+                                        [ ( "code", Encode.string "STK-ABCD-1234" ) ]
+                                    )
+                                )
+                                s.body
+                        ]
+                        spec
             ]
         ]

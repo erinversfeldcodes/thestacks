@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
 
 test.describe("Catalogue — unauthenticated", () => {
@@ -207,10 +207,7 @@ test.describe("Catalogue — authenticated", () => {
   }) => {
     await page.goto("/");
     const result = await page.evaluate(async () => {
-      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      const resp = await fetch("/api/catalogue?per_page=200", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const resp = await fetch("/api/catalogue?per_page=200");
       const data = await resp.json();
       return {
         total: data.total,

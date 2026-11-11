@@ -34,7 +34,7 @@ type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
     , selectedBookId : Maybe String
-    , token : Maybe String
+    , token : Maybe Api.Credentials
     , cards : List Card.Model
     , saveState : RemoteData Api.ProgressError ()
     , finishedPrompt : Maybe String
@@ -58,6 +58,8 @@ type Msg
     | ProgressSaved String (Result Api.ProgressError Api.Progress)
     | RecordReadRequested String
     | RecordReadDone String (Result Api.MoveError ())
+    | SessionGone
+    | SessionGoneMidSave String
     | FinishedPromptDismissed
     | FocusReturned
 
@@ -65,30 +67,52 @@ type Msg
 {-| The one read of the pile: `init` and every refetch go through it, so a
 refetch cannot end up asking for something other than what the page shows.
 -}
-fetchPile : Maybe String -> Effect Msg
+fetchPile : Maybe Api.Credentials -> Effect Msg
 fetchPile maybeToken =
     case maybeToken of
         Just token ->
             Effect.authed (Api.getBookshelfRequest "reading_pile")
                 token
-                (Api.resolveJson bookshelfResponseDecoder
-                    >> Result.map .shelves
-                    >> BooksLoaded
-                )
+                { onExpired = SessionGone
+                , onResponse =
+                    Api.resolveJson bookshelfResponseDecoder
+                        >> Result.map .shelves
+                        >> BooksLoaded
+                }
 
         Nothing ->
             Effect.none
 
 
-cardProgressWrite : Card.Model -> Api.RequestSpec
+{-| `Nothing` when the reader has not chosen a status, so there is nothing
+honest to send.
+
+⛔ The card seeds `draftStatus` from the placement and no longer invents
+`ToRead`, so an unrecorded status stays unrecorded. The server requires
+`reading_status` on a progress update (422 without it), which means the only
+alternatives are to send a guess or not to send — and sending a guess is the
+destructive half of the original defect: it wrote `to_read` over whatever the
+server held, including over a status this build could not parse.
+
+⚠️ The card also disables Save while this would be `Nothing`. This is the second
+half of that guarantee rather than a duplicate of it: the type is what makes the
+unguarded path unwritable, and the compiler found a second call site in this file
+that the first fix had missed.
+
+-}
+cardProgressWrite : Card.Model -> Maybe Api.RequestSpec
 cardProgressWrite card =
-    Api.updateProgressRequest card.placement.id
-        { readingStatus = readingStatusToString card.draftStatus
-        , currentPage = String.toInt card.draftPage
-        }
+    card.draftStatus
+        |> Maybe.map
+            (\chosen ->
+                Api.updateProgressRequest card.placement.id
+                    { readingStatus = readingStatusToString chosen
+                    , currentPage = String.toInt card.draftPage
+                    }
+            )
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         ( model, effect ) =
@@ -99,7 +123,7 @@ init maybeToken =
 
 {-| `init`, with its effect as data — see `updateWithEffect`.
 -}
-initWithEffect : Maybe String -> ( Model, Effect Msg )
+initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
 initWithEffect maybeToken =
     let
         effect =
@@ -196,14 +220,63 @@ updateWithEffect msg model =
             if List.member Card.ProgressUpdateRequested outMsgs then
                 case ( requestedCard, model.token ) of
                     ( Just c, Just token ) ->
-                        ( { model | cards = updatedCards, saveState = Loading }
-                        , Effect.authed (cardProgressWrite c)
-                            token
-                            (Api.progressResponseToResult >> ProgressSaved c.placement.id)
-                        , NoOut
+                        case cardProgressWrite c of
+                            Just spec ->
+                                ( { model | cards = updatedCards, saveState = Loading }
+                                , Effect.authed spec
+                                    token
+                                    { onExpired = SessionGoneMidSave c.placement.id
+                                    , onResponse =
+                                        Api.progressResponseToResult
+                                            >> ProgressSaved c.placement.id
+                                    }
+                                , NoOut
+                                )
+
+                            Nothing ->
+                                -- ⛔ `clearSaving` is load-bearing. `Card.update
+                                -- SaveClicked` has already set `saving = True`,
+                                -- so returning `updatedCards` untouched leaves
+                                -- the card showing "Saving…" with Save disabled
+                                -- FOREVER: no request was issued, so no response
+                                -- will ever arrive to clear it, and the only way
+                                -- out is a page reload. Refusing to send is
+                                -- correct; refusing to send and then pretending
+                                -- a save is in flight is a worse state than the
+                                -- destructive write this guard replaced.
+                                --
+                                -- BookDetail's equivalent branch calls
+                                -- `Card.stopSaving` for the same reason.
+                                ( { model | cards = clearSaving placementId updatedCards }
+                                , Effect.none
+                                , NoOut
+                                )
+
+                    ( _, Nothing ) ->
+                        -- ⛔ EXPLICIT, mirroring BookDetail. Putting this on the
+                        -- catch-all was a third divergence between these two
+                        -- hosts, in the opposite direction from the last one:
+                        -- the catch-all also matches `( Nothing, Just token )`,
+                        -- so a card that could not be found — with a perfectly
+                        -- good token — reported an expired session and drove the
+                        -- parked-logout machinery for a cause that was not the
+                        -- cause.
+                        --
+                        -- Same reasoning as the branch above for the clear: no
+                        -- token means no request, so the card must not be left
+                        -- mid-save. And `SessionExpired` rather than a silent
+                        -- clear, because no token on a save IS an expired
+                        -- session, which this page reports on every other
+                        -- failing path.
+                        ( { model | cards = clearSaving placementId updatedCards }
+                        , Effect.none
+                        , SessionExpired
                         )
 
                     _ ->
+                        -- A card not found for this id, with a token in hand.
+                        -- Nothing was sent and nothing is in flight, so there is
+                        -- no saving flag to clear and no session to report.
                         ( { model | cards = updatedCards }, Effect.none, NoOut )
 
             else if List.member Card.EditClosed outMsgs then
@@ -240,11 +313,31 @@ updateWithEffect msg model =
                     )
 
                 Err (Api.ProgressRequestFailed err) ->
+                    let
+                        -- ⛔ STOPPED BEFORE the error is classified, so the 401
+                        -- and the 500 cannot disagree about it. See the matching
+                        -- comment in `Page.BookDetail`: the 401 branch used to
+                        -- return `model` untouched, leaving the card on "Saving…"
+                        -- with Save disabled, and `SessionExpired` does not
+                        -- guarantee a redirect — the deferred expiry net may
+                        -- adopt a token another tab refreshed and keep the
+                        -- reader here.
+                        --
+                        -- ⚠️ Both hosts had this identically, which is why the
+                        -- shared case list in `tests/ProgressSaveContract.elm`
+                        -- exists rather than another round of checking the
+                        -- sibling by hand.
+                        stopped =
+                            { model
+                                | cards = clearSaving placementId model.cards
+                                , saveState = Failure (Api.ProgressRequestFailed err)
+                            }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Effect.none, SessionExpired )
+                        ( stopped, Effect.none, SessionExpired )
 
                     else
-                        ( { model | cards = clearSaving placementId model.cards, saveState = Failure (Api.ProgressRequestFailed err) }, Effect.none, NoOut )
+                        ( stopped, Effect.none, NoOut )
 
                 Err other ->
                     ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Effect.none, NoOut )
@@ -255,7 +348,9 @@ updateWithEffect msg model =
                     ( model
                     , Effect.authed (Api.moveBookRequest placementId "library")
                         token
-                        (Api.moveResponseToResult >> RecordReadDone placementId)
+                        { onExpired = SessionGone
+                        , onResponse = Api.moveResponseToResult >> RecordReadDone placementId
+                        }
                     , NoOut
                     )
 
@@ -283,6 +378,33 @@ updateWithEffect msg model =
 
                 Err Api.ReadingPileFull ->
                     ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )
+
+        SessionGone ->
+            -- Where every authenticated read on this page sends a 401. Nothing
+            -- local to repair: no save was in flight, and the pile stays as it
+            -- was while `Main` decides whether another tab has already renewed
+            -- the session.
+            ( model, Effect.none, SessionExpired )
+
+        SessionGoneMidSave placementId ->
+            -- ⛔ The save path needs its OWN expiry branch, because a save that
+            -- dies on an expired session leaves a card claiming "Saving…" with
+            -- Save disabled. `SessionExpired` does not guarantee a redirect —
+            -- the deferred expiry net may adopt a token another tab refreshed
+            -- and keep the reader right here — so the card has to be settled
+            -- and the failure has to be on screen.
+            --
+            -- The error carries the status the plan claimed, so the save
+            -- reports what it would have reported had the 401 arrived through
+            -- `ProgressSaved`: this branch changes who notices the 401, not
+            -- what the reader is told.
+            ( { model
+                | cards = clearSaving placementId model.cards
+                , saveState = Failure (Api.ProgressRequestFailed (Http.BadStatus 401))
+              }
+            , Effect.none
+            , SessionExpired
+            )
 
         FinishedPromptDismissed ->
             ( { model | finishedPrompt = Nothing }, Effect.none, NoOut )
@@ -395,16 +517,29 @@ viewProgressPanel model =
 
     else
         div [ class "reading-pile__progress", testId "reading-progress-panel" ]
-            (List.map viewCard model.cards
+            -- ⚠️ The flag must agree with whether `viewSaveState` below actually
+            -- renders the error element, since the card's `aria-describedby`
+            -- points at an id only that call creates.
+            (List.map (viewCard (isSaveFailure model.saveState)) model.cards
                 ++ [ viewSaveState model.saveState
                    , viewFinishedPrompt model.finishedPrompt
                    ]
             )
 
 
-viewCard : Card.Model -> Html Msg
-viewCard card =
-    Html.map (CardMsg card.placement.id) (Card.view card)
+viewCard : Bool -> Card.Model -> Html Msg
+viewCard errorShowing card =
+    Html.map (CardMsg card.placement.id) (Card.view { errorShowing = errorShowing } card)
+
+
+isSaveFailure : RemoteData Api.ProgressError () -> Bool
+isSaveFailure state =
+    case state of
+        Failure _ ->
+            True
+
+        _ ->
+            False
 
 
 viewSaveState : RemoteData Api.ProgressError () -> Html Msg
@@ -414,8 +549,8 @@ viewSaveState state =
             p
                 [ class "error"
                 , attribute "role" "alert"
-                , id "progress-error"
-                , testId "progress-error"
+                , id Card.progressErrorId
+                , testId Card.progressErrorId
                 ]
                 [ text (Api.progressErrorMessage err) ]
 

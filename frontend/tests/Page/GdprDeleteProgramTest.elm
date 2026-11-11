@@ -39,9 +39,9 @@ suite =
         ]
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
 {-| Test model: wraps Privacy's model and accumulates the OutMsgs it emits so

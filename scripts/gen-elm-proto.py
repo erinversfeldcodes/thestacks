@@ -660,6 +660,11 @@ def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
     lines.append("")
     lines.append("")
 
+    if file_def.messages:
+        lines.extend(_generate_object_guard())
+        lines.append("")
+        lines.append("")
+
     if file_def.enums:
         for enum_def in file_def.enums:
             lines.extend(_generate_enum(enum_def))
@@ -675,6 +680,57 @@ def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
+
+
+def _generate_object_guard() -> list[str]:
+    """Emit the shared `requireObject` wrapper every message decoder goes through.
+
+    Why it has to exist. Proto3 gives every scalar field implicit presence and a
+    zero default, so each field decoder is `D.oneOf [ D.field "k" d, D.succeed
+    <zero> ]` — correct per the JSON mapping, and the reason it is correct is the
+    reason it was dangerous: EVERY field falls back, so the composed decoder has
+    no required field, and therefore no failure mode at all. Applied to `null`,
+    to `42`, to `"hello"`, to `[]`, it succeeded and returned a struct of
+    defaults.
+
+    What that cost, concretely. `D.maybe (D.field "placement" decodeX)` against a
+    server sending `"placement": null` produced `Just <all defaults>` instead of
+    `Nothing` — so "no placement" arrived as a placement with a blank id on a
+    blank bookshelf, and the consumer rendered it. A decoder that cannot fail
+    also means "it decodes" carries no information, which is why three
+    hand-rolled decoders grew up alongside these to work around them.
+
+    The guard is the narrowest fix that restores a failure mode: a protobuf
+    message is a JSON object, so require an object and leave per-field
+    defaulting exactly as the mapping specifies. `D.keyValuePairs` is the cheap
+    way to say "object" — the pairs are discarded; only the shape check matters.
+
+    What it deliberately does NOT do: tell two message types apart when both are
+    sent untagged at the same key. Any object still satisfies any message
+    decoder, so a `oneOf` over two messages still needs a real discriminator.
+    That is a contract question, not a codegen one.
+    """
+    return [
+        "{-| Require a JSON object before applying a message decoder.",
+        "",
+        "Proto3 implicit presence means every field below falls back to its zero",
+        "value, so without this the composed decoder has no required field and",
+        "cannot fail -- it answered a struct of defaults for `null`, for a number,",
+        'for a list. The visible cost was `D.maybe (D.field "x" decodeX)` turning a',
+        "JSON `null` into `Just <all defaults>` rather than `Nothing`.",
+        "",
+        "A protobuf message is a JSON object, so requiring one restores a failure",
+        "mode while leaving per-field defaulting exactly as the JSON mapping",
+        "specifies. It does not distinguish one message type from another: any",
+        "object satisfies any message decoder, so telling two untagged shapes apart",
+        "still needs a discriminator in the contract.",
+        "",
+        "-}",
+        "requireObject : D.Decoder a -> D.Decoder a",
+        "requireObject decoder =",
+        "    D.keyValuePairs (D.succeed ())",
+        "        |> D.andThen (\\_ -> decoder)",
+    ]
 
 
 def _build_exposing_list(file_def: FileDef) -> list[str]:
@@ -777,7 +833,7 @@ def _generate_message(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
         lines.append("")
         lines.append(f"decode{msg_def.name} : D.Decoder {msg_def.name}")
         lines.append(f"decode{msg_def.name} =")
-        lines.append("    D.succeed {}")
+        lines.append("    requireObject (D.succeed {})")
         lines.append("")
         lines.append("")
         lines.append(f"encode{msg_def.name} : {msg_def.name} -> E.Value")
@@ -799,8 +855,16 @@ def _generate_message(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
     lines.append("")
     lines.append("")
 
+    # Split in two so the object guard wraps the whole field decoder without
+    # re-indenting it. `…Fields` is module-private (absent from the exposing
+    # list); every caller goes through the guarded name.
     lines.append(f"decode{msg_def.name} : D.Decoder {msg_def.name}")
     lines.append(f"decode{msg_def.name} =")
+    lines.append(f"    requireObject decode{msg_def.name}Fields")
+    lines.append("")
+    lines.append("")
+    lines.append(f"decode{msg_def.name}Fields : D.Decoder {msg_def.name}")
+    lines.append(f"decode{msg_def.name}Fields =")
     lines.extend(_generate_decoder_body(msg_def, resolver))
     lines.append("")
     lines.append("")

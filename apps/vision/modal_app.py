@@ -158,7 +158,9 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     #
     #   * a real upload batch — the `vision` Oban queue runs at concurrency 20
     #     against max_containers=10, so a batch arrives back-to-back and the gap
-    #     between requests is effectively zero;
+    #     between requests is effectively zero. That queue setting lives in
+    #     `apps/core/config/config.exs`, which now carries the reciprocal note;
+    #     the two numbers are one decision and each side points at the other;
     #   * the production probe — `scripts/probe-production.sh` fires every 15s
     #     for a 600s window.
     #
@@ -182,6 +184,43 @@ class VisionModel:
         ``_infer``); concurrency is bounded by ``max_containers`` rather
         than continuous batching.
         """
+        import uuid
+
+        # ⛔ THE GPU'S OWN COLD START, WHICH IS THE ONE THAT COSTS MONEY.
+        #
+        # `@modal.enter` runs once per GPU container, so the first inference
+        # after it is the cold one. The sidecar cannot know this: its FastAPI
+        # `lifespan` tracks a different container whose warmth is, by this
+        # file's own reckoning, independent of the GPU's — and an idle A10G is
+        # roughly two orders of magnitude more expensive per second than an
+        # idle CPU container.
+        #
+        # ⛔ NO TIMESTAMP ANY MORE. This recorded `_loaded_at` so `_infer`
+        # could report a container AGE, and a reviewer showed that age's only
+        # possible consumer would have double-counted a term the inference cost
+        # line already bills — so the field had no reader and is gone, here and
+        # on the wire. What remains is the one fact that is load-bearing: this
+        # container has not inferred yet, so the next inference pays the load.
+        self._inferences_since_load = 0
+
+        # ⛔ AN IDENTITY FOR THE BILLED WINDOW, which the age alone cannot give.
+        #
+        # `gpu_container_age_s` is sampled only when an inference runs, so a
+        # container that wakes, serves one request and then idles out the rest
+        # of its scaledown window reports `age ~ 0` and nothing afterwards —
+        # and the idle seconds are precisely the ones with no request attached.
+        # Summing observed ages therefore UNDER-counts, in the direction that
+        # makes the GPU look cheap, which is the direction that would wrongly
+        # settle the architecture question.
+        #
+        # ⚖️ With an id, a reader can take the MAXIMUM age seen per container
+        # and add the scaledown window — the tail Modal bills after the last
+        # request. That is derivable from what already crosses the wire, needs
+        # no `modal.Dict` and no second channel out of the GPU, and does not
+        # depend on `@modal.exit` firing (a container killed by the platform
+        # may never run it).
+        self._container_id = uuid.uuid4().hex
+
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
@@ -210,6 +249,19 @@ class VisionModel:
     def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
         import torch
         from qwen_vl_utils import process_vision_info
+
+        # ⛔ NO getattr DEFAULTS HERE ANY MORE. These read
+        # `getattr(self, "_loaded_at", 0.0)`, and a reviewer measured what that
+        # fabricates when it fires: `monotonic()`'s epoch is arbitrary, so the
+        # "age" came out as 281,885s — a plausible-looking number in the
+        # OVER-counting direction, against a cost model whose own docs say a
+        # figure above the invoice means the model is wrong.
+        #
+        # ⚖️ `@modal.enter` runs before any input is served, so if these are
+        # missing the container is in a state this code cannot describe. An
+        # AttributeError says so; a default invents a measurement.
+        gpu_cold = self._inferences_since_load == 0
+        self._inferences_since_load += 1
 
         messages = [
             {
@@ -246,7 +298,22 @@ class VisionModel:
             out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids, strict=False)
         ]
         response = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-        return _parse_json(response)
+        parsed = _parse_json(response)
+
+        # ⚖️ Under a reserved key rather than merged flat, so a model that ever
+        # emits a field called `gpu_cold` cannot overwrite the measurement —
+        # and so a reader can tell the model's answer from the container's
+        # telemetry at a glance.
+        #
+        # ⛔ This is the cold start that costs money. The sidecar's own flag
+        # tracks a CPU container whose warmth is independent of this one's; an
+        # idle A10G is roughly two orders of magnitude more expensive per
+        # second. Without this the expensive cold start was unmeasured.
+        parsed["_container"] = {
+            "cold": gpu_cold,
+            "container_id": self._container_id,
+        }
+        return parsed
 
 
 def _parse_json(text: str) -> dict[str, Any]:

@@ -42,7 +42,7 @@ defmodule CoreWeb.RobotsTxtTest do
     end
 
     test "opts the site out of AI training crawlers" do
-      body = get(build_conn(), "/robots.txt").resp_body
+      body = get(CoreWeb.ConnCase.proven_conn(), "/robots.txt").resp_body
 
       for agent <- ~w(GPTBot ClaudeBot CCBot Bytespider PerplexityBot Google-Extended) do
         assert body =~ "User-agent: #{agent}",
@@ -51,7 +51,7 @@ defmodule CoreWeb.RobotsTxtTest do
     end
 
     test "each AI crawler group actually disallows something" do
-      body = get(build_conn(), "/robots.txt").resp_body
+      body = get(CoreWeb.ConnCase.proven_conn(), "/robots.txt").resp_body
 
       for agent <- ~w(GPTBot ClaudeBot CCBot Bytespider PerplexityBot Google-Extended) do
         assert directives_for(body, agent) == ["Disallow: /"],

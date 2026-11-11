@@ -79,7 +79,7 @@ The user creates or edits a TOML configuration file in the designated scrapers d
 
 ### Event Handlers Triggered
 - **Handler**: `Stacks.Workers.DbtRefreshHandler`
-- **Action**: On `source_health.recorded`, enqueues `DbtRefreshJob` for `["mart_system_health"]`
+- **Action**: ⚠️ **nothing today.** It enqueued a refresh for `mart_system_health`, which was deleted 2026-10-15 as unread; the handler is no longer subscribed to this event and it is recorded as unsubscribed in the registry. The operational view reads the `op.source_health_checks` table directly and is unaffected.
 
 ---
 
@@ -123,7 +123,7 @@ N/A
 
 ## 11. dbt Model Dependencies
 
-### `mart_system_health`
+### `mart_system_health` — DELETED 2026-10-15 (no reader)
 - **Model**: `mart_system_health`
 - **Trigger**: `source_health.recorded` via `DbtRefreshHandler`
 - **Materialisation**: View
@@ -166,7 +166,7 @@ N/A
 - **Rust scraper call counts and latencies**: per-store scrape success/failure rates visible in `op.source_health_checks` with `source_type: "scraper_config"`
 - **Circuit breaker state**: `:scraper_fuse` events — if a new store config is malformed, repeated failures will trip the fuse affecting all stores
 - **Source health recording**: `Monitoring.record_success/2` and `Monitoring.record_failure/3` calls per scraper config, feeding the admin health dashboard
-- **dbt refresh job duration**: time to rebuild `mart_system_health` after `source_health.recorded` events
+- **dbt refresh job duration**: ⚠️ n/a — no model is refreshed on this event since `mart_system_health` was deleted 2026-10-15
 
 ---
 
