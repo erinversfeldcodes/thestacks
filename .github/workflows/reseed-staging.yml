@@ -118,6 +118,21 @@ jobs:
           # rather than by a fourth failed run: the three before it each
           # revealed one missing input and taught nothing about the rest.
           GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+          # ⛔ THE ROLE PASSWORDS, OR A RESEED CREATES UNUSABLE ROLES. The role
+          # migration treats an absent STACKS_APP_DB_PASSWORD as "create this role
+          # NOLOGIN with no password" — correct for a machine holding no secrets, and
+          # catastrophic here: a migration runs ONCE, so applying it without these
+          # leaves stacks_app / stacks_dbt / stacks_readonly permanently dead and no
+          # later run repairs them.
+          #
+          # ⚠️ That is not hypothetical. The 2026-11-11 reseed advanced staging from
+          # 102 to 170 migrations with these absent, which left all three roles
+          # rolcanlogin=false / rolpassword=null — and because a Neon branch copies the
+          # cluster, EVERY preview cut from staging inherited them and every booted app
+          # failed with `28P01 invalid_password for user 'stacks_app'` while its machine
+          # reported `started`.
+          STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+          STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
           # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
           # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
           # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
@@ -150,6 +165,21 @@ jobs:
           # rather than by a fourth failed run: the three before it each
           # revealed one missing input and taught nothing about the rest.
           GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+          # ⛔ THE ROLE PASSWORDS, OR A RESEED CREATES UNUSABLE ROLES. The role
+          # migration treats an absent STACKS_APP_DB_PASSWORD as "create this role
+          # NOLOGIN with no password" — correct for a machine holding no secrets, and
+          # catastrophic here: a migration runs ONCE, so applying it without these
+          # leaves stacks_app / stacks_dbt / stacks_readonly permanently dead and no
+          # later run repairs them.
+          #
+          # ⚠️ That is not hypothetical. The 2026-11-11 reseed advanced staging from
+          # 102 to 170 migrations with these absent, which left all three roles
+          # rolcanlogin=false / rolpassword=null — and because a Neon branch copies the
+          # cluster, EVERY preview cut from staging inherited them and every booted app
+          # failed with `28P01 invalid_password for user 'stacks_app'` while its machine
+          # reported `started`.
+          STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+          STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
           # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
           # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
           # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
@@ -182,6 +212,21 @@ jobs:
           # rather than by a fourth failed run: the three before it each
           # revealed one missing input and taught nothing about the rest.
           GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
+          # ⛔ THE ROLE PASSWORDS, OR A RESEED CREATES UNUSABLE ROLES. The role
+          # migration treats an absent STACKS_APP_DB_PASSWORD as "create this role
+          # NOLOGIN with no password" — correct for a machine holding no secrets, and
+          # catastrophic here: a migration runs ONCE, so applying it without these
+          # leaves stacks_app / stacks_dbt / stacks_readonly permanently dead and no
+          # later run repairs them.
+          #
+          # ⚠️ That is not hypothetical. The 2026-11-11 reseed advanced staging from
+          # 102 to 170 migrations with these absent, which left all three roles
+          # rolcanlogin=false / rolpassword=null — and because a Neon branch copies the
+          # cluster, EVERY preview cut from staging inherited them and every booted app
+          # failed with `28P01 invalid_password for user 'stacks_app'` while its machine
+          # reported `started`.
+          STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+          STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
           # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
           # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
           # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
