@@ -158,6 +158,19 @@ PREVIEW_BLOCK="$(sed -n "${PREVIEW_MIGRATE_LINE:-1},${PREVIEW_END:-1}p" "$SCRIPT
 MIGRATE_ENV_BLOCK="$(sed -n "/^preview_mix_env=(/,/^)$/p" "$SCRIPT")"
 assert_contains "$MIGRATE_ENV_BLOCK" '"MIX_ENV=prod"' \
     "the migrate env declares MIX_ENV=prod — :prod is the only env whose runtime config reads DATABASE_URL"
+# ⛔ A MIGRATION READS MORE THAN THE RUNTIME CONFIG DEMANDS. The role-creation
+# migration reads STACKS_APP_DB_PASSWORD and STACKS_DBT_DB_PASSWORD and treats
+# their absence as "create the role NOLOGIN with no password". Because a
+# migration runs exactly once, applying it from here without them left
+# stacks_app at rolcanlogin=false / rolpassword=null, the release's own migrate
+# skipped the already-applied version, and the booted app failed every query
+# with `28P01 invalid_password for user 'stacks_app'` while the machine
+# reported `started`. No unit or integration test could see it; a live drive did.
+assert_contains "$MIGRATE_ENV_BLOCK" 'STACKS_APP_DB_PASSWORD=' \
+    "the migrate carries the app role's password — without it the role migration creates stacks_app NOLOGIN and no later run will fix it"
+assert_contains "$MIGRATE_ENV_BLOCK" 'STACKS_DBT_DB_PASSWORD=' \
+    "and the warehouse role's password, for the same once-only reason"
+
 assert_contains "$MIGRATE_ENV_BLOCK" 'STORAGE_BACKEND=local' \
     "and declares local storage, because a schema migration writes no objects and should not hold production storage credentials"
 

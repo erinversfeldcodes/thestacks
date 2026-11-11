@@ -446,6 +446,19 @@ preview_mix_env=(
     # alone, and CLOAK_KEY would have been this block's next failure.
     "CLOAK_KEY=${CLOAK_KEY:-}"
     "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}"
+    # ⛔ THE DB ROLE PASSWORDS, OR THE ROLES ARE CREATED UNUSABLE. The role
+    # migration takes a `nil` password to mean "create it NOLOGIN", which is
+    # correct for a machine that has no secrets — but a migration runs ONCE.
+    # Applying it here without these two recorded it as done, so the proper run
+    # during the release's own migrate skipped it, and the app then failed with
+    # `28P01 invalid_password ... for user 'stacks_app'` against roles left
+    # rolcanlogin=false, rolpassword=null.
+    #
+    # ⚠️ This is the cost of migrating earlier than the release does: every
+    # variable a migration READS has to be here, not just the ones the runtime
+    # config demands to boot. The two are different lists.
+    "STACKS_APP_DB_PASSWORD=${STACKS_APP_DB_PASSWORD:-}"
+    "STACKS_DBT_DB_PASSWORD=${STACKS_DBT_DB_PASSWORD:-}"
     "STORAGE_BACKEND=local"
     "UPLOAD_DIR=/tmp/preview-migrate-uploads"
 )
