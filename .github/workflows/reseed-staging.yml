@@ -111,6 +111,13 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          # ⚠️ Prod runtime config demands exactly five variables —
+          # DATABASE_URL, SECRET_KEY_BASE, GUARDIAN_SECRET_KEY,
+          # RESEND_API_KEY and VISION_SERVICE_URL — and this one was the
+          # only omission. It was found by enumerating the prod block
+          # rather than by a fourth failed run: the three before it each
+          # revealed one missing input and taught nothing about the rest.
+          GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
           # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
           # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
           # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
@@ -136,6 +143,13 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          # ⚠️ Prod runtime config demands exactly five variables —
+          # DATABASE_URL, SECRET_KEY_BASE, GUARDIAN_SECRET_KEY,
+          # RESEND_API_KEY and VISION_SERVICE_URL — and this one was the
+          # only omission. It was found by enumerating the prod block
+          # rather than by a fourth failed run: the three before it each
+          # revealed one missing input and taught nothing about the rest.
+          GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
           # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
           # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
           # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
@@ -161,6 +175,13 @@ jobs:
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
           VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
           SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
+          # ⚠️ Prod runtime config demands exactly five variables —
+          # DATABASE_URL, SECRET_KEY_BASE, GUARDIAN_SECRET_KEY,
+          # RESEND_API_KEY and VISION_SERVICE_URL — and this one was the
+          # only omission. It was found by enumerating the prod block
+          # rather than by a fourth failed run: the three before it each
+          # revealed one missing input and taught nothing about the rest.
+          GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
           # ⛔ STORAGE IS DECLARED, NOT INFERRED — AND THIS JOB STORES NOTHING.
           # It passed R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and nothing else, so
           # `Stacks.Storage.Selection.choose/2` saw no R2_ACCOUNT_ID, found no
