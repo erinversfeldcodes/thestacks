@@ -907,10 +907,34 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
         with:
           github_token: ${{ github.token }}
+      # ⚠️ PINNED, NOT THE RUNNER DEFAULT. `gen_python_proto.py` uses
+      # `zip(strict=)`, which is a 3.10+ construct, so the codegen below
+      # breaks on an older interpreter — the same failure this repo already
+      # hits when `deploy-preview.sh` runs on a system python 3.9. Every other
+      # job that runs this script pins the version; this one was relying on
+      # whatever ubuntu-latest happens to ship.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
       - name: Install mix deps
         run: mix deps.get
+      # ⛔ BOTH ELIXIR TARGETS, NOT JUST THE ECTO ONE. `gen-ecto-proto.sh`
+      # produces the Ecto schemas; `Stacks.Proto.*` comes from
+      # `gen_python_proto.py --language elixir`, and `scraper_client.ex:404`
+      # builds a `Stacks.Proto.Scraper.ScrapeRequest` struct. With only the
+      # first, the app fails to compile on a module that has nothing to do
+      # with this job's suites:
+      #   error: Stacks.Proto.Scraper.ScrapeRequest.__struct__/1 is undefined
+      #
+      # ⚖️ This is the pair every other compiling job runs — test-elixir,
+      # migration-safety and lint-elixir all run exactly these two — so the
+      # fix is to match them rather than to invent a narrower subset. There
+      # are five codegen targets in total; a job that compiles core needs
+      # these two of them.
       - name: Generate the proto artefacts two suites read
-        run: bash scripts/gen-ecto-proto.sh
+        run: |
+          bash scripts/gen-ecto-proto.sh
+          python3 scripts/gen_python_proto.py --language elixir
 
       # ⚖️ `stacks_dev` specifically, because that is the database name the
       # posture suite hardcodes. MIX_ENV=dev so `dev.exs`'s own Repo config
