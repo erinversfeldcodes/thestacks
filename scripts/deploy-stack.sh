@@ -347,6 +347,31 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
     NEON_BRANCH_NAME="${PREVIEW_NEON_BRANCH}"
     echo "    Neon branch created: ${NEON_BRANCH_NAME}"
 
+    # ⛔ FALL BACK TO THE DEDICATED ENDPOINT WHEN THE CREATE RESPONSE OMITS THE
+    # URI. `POST /branches?include_passwords=true` usually returns
+    # `connection_uris`, but not always — a 2026-11-11 local run created the
+    # branch successfully and returned none, and the `|| true` above turned that
+    # into an empty string. Everything downstream then degraded QUIETLY: the
+    # self-migration skipped, the preview silently kept staging's schema, and
+    # the eval received an empty DATABASE_URL.
+    #
+    # ⚖️ `GET /connection_uri` asks the one question we actually need and is
+    # already how `reseed-staging.yml` resolves staging, so this is the project's
+    # existing answer rather than a new mechanism.
+    if [[ -z "$NEON_CONNECTION_URI" ]]; then
+        echo "    No URI in the create response; asking for one directly..."
+        neon_branch_id="$(printf '%s' "$neon_response" | python3 -c "import json,sys; print(json.load(sys.stdin)['branch']['id'])" 2>/dev/null || true)"
+        if [[ -n "$neon_branch_id" ]]; then
+            NEON_CONNECTION_URI="$(curl -sfL \
+                -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+                "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/connection_uri?branch_id=${neon_branch_id}&database_name=neondb&role_name=neondb_owner" \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('uri',''))" 2>/dev/null || true)"
+            if [[ -n "$NEON_CONNECTION_URI" ]]; then
+                echo "    Resolved a connection URI for ${neon_branch_id}."
+            fi
+        fi
+    fi
+
     if [[ -n "$NEON_CONNECTION_URI" ]]; then
         if command -v psql > /dev/null 2>&1; then
             echo "    Waking the branch compute before migrations run..."
