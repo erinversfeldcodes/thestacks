@@ -876,6 +876,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # ⛔ BEFORE "Install suite dependencies", WHICH PIP-INSTALLS INTO IT.
+      # That step runs `pip3 install pyyaml`, and the suites' own extractors
+      # `import yaml`. With setup-python AFTER it, the pip install landed in
+      # the runner's system interpreter and setup-python then shadowed it with
+      # a clean one: `ModuleNotFoundError: No module named 'yaml'`, which
+      # failed ci_gate_reachability_test.sh at its own anti-vacuity check.
+      #
+      # ⚠️ PINNED, NOT THE RUNNER DEFAULT. `gen_python_proto.py` uses
+      # `zip(strict=)`, which is a 3.10+ construct, so the codegen below
+      # breaks on an older interpreter — the same failure this repo already
+      # hits when `deploy-preview.sh` runs on a system python 3.9. Every other
+      # job that runs this script pins the version; this one was relying on
+      # whatever ubuntu-latest happens to ship.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
       - name: Install suite dependencies
         run: |
           pip3 install --quiet pyyaml
@@ -907,15 +923,6 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
         with:
           github_token: ${{ github.token }}
-      # ⚠️ PINNED, NOT THE RUNNER DEFAULT. `gen_python_proto.py` uses
-      # `zip(strict=)`, which is a 3.10+ construct, so the codegen below
-      # breaks on an older interpreter — the same failure this repo already
-      # hits when `deploy-preview.sh` runs on a system python 3.9. Every other
-      # job that runs this script pins the version; this one was relying on
-      # whatever ubuntu-latest happens to ship.
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ needs.versions.outputs.python }}
       - name: Install mix deps
         run: mix deps.get
       # ⛔ BOTH ELIXIR TARGETS, NOT JUST THE ECTO ONE. `gen-ecto-proto.sh`

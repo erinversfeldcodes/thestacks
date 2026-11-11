@@ -285,5 +285,37 @@ else
     _record_fail "the derivation found no generated gate input. Either every gate now reads only tracked files — in which case delete this pair of assertions on purpose — or the path/ignore derivation has drifted and the check above passed over an empty set"
 fi
 
+# ── the interpreter is set up before anything installs into it ──────────────
+
+test_case "python_is_pinned_before_packages_are_installed" "a pip install must target the interpreter the suites will actually run"
+
+# ⛔ ORDER IS THE FIX, SO ORDER IS WHAT IS ASSERTED. "Install suite
+# dependencies" runs `pip3 install pyyaml`, and several suites' extractors
+# `import yaml`. With setup-python AFTER that step, the packages landed in the
+# runner's system interpreter and setup-python then shadowed it with a clean
+# one — `ModuleNotFoundError: No module named 'yaml'`, which surfaced as
+# ci_gate_reachability_test.sh failing its own anti-vacuity check rather than
+# as anything mentioning python.
+# ⚠️ SCOPED TO THIS JOB'S BODY, NOT THE WHOLE FILE. Four jobs call
+# setup-python; a file-wide `grep -n | head -1` finds line 503 in another job
+# and compares that, which is below the pip install either way — the assertion
+# would have passed without ever looking at this job. `$JOB_TXT` is the
+# platform-suites block alone, so these offsets are its own.
+# ⛔ ANCHORED ON STEP SYNTAX, BECAUSE THE COMMENT ABOVE THE STEP SAYS THE SAME
+# WORDS. The first version matched the bare string "Install suite dependencies"
+# and found it at job line 59 — inside the `# ⛔ BEFORE "Install suite
+# dependencies"` comment that explains this very ordering — so it compared a
+# comment against a step and failed while the workflow was correct. A `- name:`
+# / `- uses:` prefix can only match the step itself.
+PY_LINE="$(printf '%s\n' "$JOB_TXT" | grep -n "^ *- uses: actions/setup-python" | head -1 | cut -d: -f1)"
+PIP_LINE="$(printf '%s\n' "$JOB_TXT" | grep -n "^ *- name: Install suite dependencies" | head -1 | cut -d: -f1)"
+
+[[ -n "$PY_LINE" && -n "$PIP_LINE" ]]
+assert_exit_zero $? "both the python setup and the dependency install are present in the platform-suites job itself"
+
+[[ "${PY_LINE:-0}" -lt "${PIP_LINE:-0}" ]]
+assert_exit_zero $? "setup-python (job line ${PY_LINE:-?}) precedes the pip install (job line ${PIP_LINE:-?}), so pyyaml lands in the interpreter the suites run"
+
+
 summarise
 exit $?
