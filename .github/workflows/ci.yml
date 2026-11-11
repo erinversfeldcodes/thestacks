@@ -819,7 +819,10 @@ jobs:
         run: scripts/check-licenses.sh
 
   platform-suites:
-    needs: changes
+    # ⚖️ `versions` joins the needs because this job now installs Elixir, and
+    # the toolchain pins live there — a second copy of the version numbers is
+    # how two jobs come to build against different compilers.
+    needs: [changes, versions]
     if: needs.changes.outputs.platform == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -850,6 +853,28 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/5db9d9cde2f3deb5035dea3e45f0a9fff2f29448/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # ⛔ TWO OF THESE SUITES READ A GENERATED FILE THIS JOB NEVER PRODUCED.
+      # `protojson_completeness_test.sh` and `never_serialized_test.sh` both
+      # read `apps/core/lib/stacks/gen/proto_json.ex`, which is gitignored and
+      # written by `mix proto.sync` — so they could only pass on a machine
+      # where someone had already generated it, which means locally. In CI they
+      # failed on their own `inputs_exist` precondition, which is the gate
+      # working: a suite that cannot read its subject must not report on it.
+      #
+      # ⚖️ The toolchain comes to the job rather than the suites moving out of
+      # it. `run_all.sh` is the single entry point the local `just ci` also
+      # uses, and splitting it would leave two runners where there is one. The
+      # cost is an Elixir setup this job did not need before; the alternative
+      # is two suites that can never run in CI.
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: ${{ needs.versions.outputs.otp }}
+          elixir-version: ${{ needs.versions.outputs.elixir }}
+      - name: Install mix deps
+        run: mix deps.get
+      - name: Generate the proto artefacts two suites read
+        run: bash scripts/gen-ecto-proto.sh
+
       - name: Platform shell suites
         run: bash test/platform/run_all.sh
       # The other two thirds of the local gate runner's platform group. PR CI
