@@ -450,6 +450,12 @@ if [[ "${PROD_MODE}" != 1 ]] && [[ -n "${NEON_CONNECTION_URI:-}" ]]; then
         "GUARDIAN_SECRET_KEY=${GUARDIAN_SECRET_KEY:-}"
         "RESEND_API_KEY=${RESEND_API_KEY:-}"
         "VISION_SERVICE_URL=${VISION_SERVICE_URL:-http://vision.invalid}"
+        # ⚠️ These two raise in EVERY env, not only :prod — runtime.exs raises
+        # for them before the prod block. They were missing from the first
+        # version of this array because it was enumerated from the prod block
+        # alone, and CLOAK_KEY would have been this block's next failure.
+        "CLOAK_KEY=${CLOAK_KEY:-}"
+        "VISION_HMAC_SECRET=${VISION_HMAC_SECRET:-}"
         "STORAGE_BACKEND=local"
         "UPLOAD_DIR=/tmp/preview-migrate-uploads"
     )

@@ -946,6 +946,23 @@ jobs:
           MIX_ENV: dev
           STACKS_APP_DB_PASSWORD: ci-stacks-app-password-not-a-secret
           STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password-not-a-secret
+          # ⛔ THREE VARIABLES RAISE IN *EVERY* ENV, NOT JUST :prod.
+          # `config/runtime.exs` raises for CLOAK_KEY at line 6 —  before the
+          # `if config_env() == :prod` block — and the same for
+          # VISION_HMAC_SECRET and GUARDIAN_SECRET_KEY. An enumeration of the
+          # prod block alone misses all three, which is how this step failed
+          # with `environment variable CLOAK_KEY is missing` after the codegen
+          # fix landed.
+          #
+          # ⚖️ Test values, not the real secrets: this step creates a schema
+          # and applies migrations. It decrypts nothing, signs nothing and
+          # authenticates no one, so a real CLOAK_KEY here would be a
+          # production credential held by a job that has no use for it.
+          # CLOAK_KEY must still be 32 bytes once base64-decoded or Cloak
+          # rejects it, so this is a decodable literal rather than a word.
+          CLOAK_KEY: Y2ktcGxhdGZvcm0tc3VpdGVzLWNsb2FrLWtleS0zMmI=
+          VISION_HMAC_SECRET: ci-vision-hmac-not-a-secret
+          GUARDIAN_SECRET_KEY: ci-guardian-secret-not-a-secret
 
       - name: Platform shell suites
         run: bash test/platform/run_all.sh
