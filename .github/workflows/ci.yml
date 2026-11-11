@@ -870,6 +870,14 @@ jobs:
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
+      # ⚠️ `buf` TOO, NOT JUST ELIXIR. `mix proto.sync` shells out to
+      # `buf build proto/ --as-file-descriptor-set` (descriptor.ex:7), so a
+      # job with Elixir and no buf fails the codegen with a bare
+      # `** (ErlangError) :enoent` — the error for a command that is not on
+      # PATH, which names neither the command nor the step's real need.
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
+        with:
+          github_token: ${{ github.token }}
       - name: Install mix deps
         run: mix deps.get
       - name: Generate the proto artefacts two suites read
