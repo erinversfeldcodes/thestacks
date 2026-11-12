@@ -208,4 +208,32 @@ assert_contains "$EVAL_INVOCATION" 'env "${preview_mix_env[@]}"' \
 assert_contains "$PREVIEW_BLOCK" "exit 1" \
     "a migration that cannot apply to cloned staging data stops the deploy — that is what a merge would do to production"
 
+# ── a preview does not borrow production's role password ────────────────────
+
+test_case "preview_prefers_its_own_role_password" "staging and prod are separate projects; their credentials should be too"
+
+OVERRIDE_LINE="$(grep -n '^if \[\[ "\${PROD_MODE}" != 1 && -n "\${STACKS_APP_DB_PASSWORD_PREVIEW:-}" \]\]' "$SCRIPT" | head -1 | cut -d: -f1)"
+[[ -n "$OVERRIDE_LINE" ]]
+assert_exit_zero $? "the preview-specific app password override exists"
+
+# ⛔ IT MUST PRECEDE EVERY CONSUMER, and there are two. The first version sat at
+# line 957, below the preview_mix_env array at 485, so the preview's own
+# migrations would have run with production's password while the deployed app
+# used the preview one — the two halves of the same deploy disagreeing. Both
+# bounds are asserted because either alone permits that split.
+FIRST_USE="$(grep -n 'STACKS_APP_DB_PASSWORD=\${STACKS_APP_DB_PASSWORD:-}' "$SCRIPT" | head -1 | cut -d: -f1)"
+DERIVE_USE="$(grep -n 'STACKS_APP_DB_PASSWORD:-.*EFFECTIVE_DATABASE_URL' "$SCRIPT" | head -1 | cut -d: -f1)"
+
+[[ -n "$FIRST_USE" && "${OVERRIDE_LINE:-0}" -lt "${FIRST_USE:-0}" ]]
+assert_exit_zero $? "the override (line ${OVERRIDE_LINE:-?}) precedes the migrate env array (line ${FIRST_USE:-?}), so migrations run as the role the app will use"
+
+[[ -n "$DERIVE_USE" && "${OVERRIDE_LINE:-0}" -lt "${DERIVE_USE:-0}" ]]
+assert_exit_zero $? "and precedes APP_DATABASE_URL derivation (line ${DERIVE_USE:-?}), which is what the running app connects with"
+
+# ⚖️ Guarded on PROD_MODE, because the whole point is that production keeps the
+# shared variable. An unguarded override would silently re-point prod.
+assert_contains "$(sed -n "${OVERRIDE_LINE:-1}p" "$SCRIPT")" 'PROD_MODE' \
+    "the override is gated on PROD_MODE — production must keep reading the shared variable"
+
+
 summarise

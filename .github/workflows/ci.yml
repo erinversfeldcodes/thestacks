@@ -1245,6 +1245,16 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
+      # ⚖️ PREFERRED BY deploy-stack.sh WHEN SET, so a preview stops sharing
+      # production's role credential. Staging and prod are separate Neon
+      # projects, so their `stacks_app` passwords need not match — but one
+      # variable made them the same fact, which meant staging could not be
+      # rotated without breaking production's live connections.
+      #
+      # ⚠️ Additive, not a replacement: with these unset the line above is
+      # still used and every existing deployment behaves exactly as before.
+      STACKS_APP_DB_PASSWORD_PREVIEW: ${{ secrets.STACKS_APP_DB_PASSWORD_PREVIEW }}
+      STACKS_DBT_DB_PASSWORD_PREVIEW: ${{ secrets.STACKS_DBT_DB_PASSWORD_PREVIEW }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:

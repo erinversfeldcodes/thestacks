@@ -425,6 +425,26 @@ if [[ ! -d "$REPO_ROOT/apps/core/lib/stacks/gen" ]] || [[ -z "$(ls -A "$REPO_ROO
 fi
 echo "    Ecto schemas generated to apps/core/lib/stacks/gen/"
 
+# no secret — and the fallback keeps the stack byte-identical to before.
+# ⛔ A PREVIEW MUST NOT BORROW PRODUCTION'S ROLE PASSWORD. Staging and prod are
+# separate Neon projects, so their `stacks_app` passwords need not match — yet
+# both read one variable, which made the preview and prod credentials the same
+# fact. Rotating staging therefore meant rotating prod's running connections,
+# and a mismatch presented as a preview whose machine reported `started` while
+# every query failed `28P01`, surfacing to the deploy as `flyctl` giving up on a
+# health check that was never going to pass.
+#
+# ⚖️ So a preview prefers STACKS_APP_DB_PASSWORD_PREVIEW and only falls back to
+# the shared one, which keeps every existing deployment working unchanged while
+# letting staging's roles be rotated without touching production.
+if [[ "${PROD_MODE}" != 1 && -n "${STACKS_APP_DB_PASSWORD_PREVIEW:-}" ]]; then
+    STACKS_APP_DB_PASSWORD="${STACKS_APP_DB_PASSWORD_PREVIEW}"
+    echo "==> Using the preview-specific app role password (production's is untouched)"
+fi
+if [[ "${PROD_MODE}" != 1 && -n "${STACKS_DBT_DB_PASSWORD_PREVIEW:-}" ]]; then
+    STACKS_DBT_DB_PASSWORD="${STACKS_DBT_DB_PASSWORD_PREVIEW}"
+fi
+
 # ── Apply THIS branch's migrations to the preview's own Neon branch ──────────
 #
 # ⛔ A PREVIEW USED TO INHERIT ITS SCHEMA AND NEVER ADVANCE IT, which made every
@@ -942,7 +962,6 @@ EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
 # ⚠️ Gated on the password being present, because `CREATE ROLE … PASSWORD` is
 # what gave `stacks_app` a password in the first place (migration
 # 20261016150000 RAISES without it). No password, no role worth connecting as,
-# no secret — and the fallback keeps the stack byte-identical to before.
 APP_DATABASE_URL_VALUE=""
 if [[ -n "${STACKS_APP_DB_PASSWORD:-}" && -n "${EFFECTIVE_DATABASE_URL}" ]]; then
     APP_DATABASE_URL_VALUE="$(
