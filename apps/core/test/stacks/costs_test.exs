@@ -422,14 +422,21 @@ defmodule Stacks.CostsTest do
       :ok
     end
 
-    test "rounds the month-to-date increase of the family" do
+    # ⛔ THE QUERY ASSERTION HERE PINNED THE DEFECT, exactly as the reversal
+    # below it records for a sibling case. It asserted
+    # `sum(increase(family{`, and `increase` returns 0 for a counter whose
+    # value accrued before the window's first sample — so every month-to-date
+    # figure went to zero after a mid-month deploy, and this test required it.
+    # Rounding is still the point of the case and still asserted; only the
+    # aggregation function changed.
+    test "rounds the month-to-date total of the family" do
       MockPrometheusClient.put_response({:ok, 42.7})
 
       assert {:ok, 43} =
                Costs.metric_count_this_month("stacks_discovery_brave_search_count_total")
 
       query = MockPrometheusClient.last_query()
-      assert query =~ "sum(increase(stacks_discovery_brave_search_count_total{"
+      assert query =~ "sum(max_over_time(stacks_discovery_brave_search_count_total{"
     end
 
     # ⛔ REVERSED DELIBERATELY. This test used to assert `{:ok, 0}` for a family
@@ -997,6 +1004,67 @@ defmodule Stacks.CostsTest do
              "the GPU surcharge is being read from the baseline attribute again — a VLM call " <>
                "then charges twice the baseline and the Modal ceiling trips at half the call " <>
                "volume, which is an operational change that must be stated rather than inherited"
+    end
+  end
+
+  describe "metric_count_this_month/2" do
+    alias Stacks.Transparency.MockPrometheusClient
+
+    # ⛔ ASSERTS THE QUERY, BECAUSE THE DEFECT WAS IN THE QUERY. `increase` over
+    # the elapsed month returned 0 for a counter whose value accrued BEFORE the
+    # store's first sample — observed live at 118228 in the scrape, 0.0 through
+    # `increase`, 118228.0 through `max_over_time`. Asserting the returned
+    # NUMBER cannot see this: the mock returns whatever it is told regardless of
+    # the PromQL, so a test that only checks the result passes with either
+    # function. The query string is the only place the bug is visible.
+    test "totals a counter with max_over_time, not increase" do
+      MockPrometheusClient.put_response({:ok, 5.0})
+
+      assert {:ok, 5} = Costs.metric_count_this_month("stacks_demo_total")
+
+      q = MockPrometheusClient.last_query()
+
+      assert q =~ "max_over_time",
+             "the month total must use max_over_time; got #{inspect(q)}"
+
+      refute q =~ "increase(",
+             "`increase` drops everything that accrued before the window's first sample, " <>
+               "so a mid-month deploy would zero the month — got #{inspect(q)}"
+    end
+
+    test "a selector narrows the family to a labelled subset" do
+      MockPrometheusClient.put_response({:ok, 2.0})
+
+      assert {:ok, 2} = Costs.metric_count_this_month("stacks_demo_total", ~s|tier="X"|)
+
+      q = MockPrometheusClient.last_query()
+      assert q =~ ~s|tier="X"|, "the selector must reach the query; got #{inspect(q)}"
+      assert q =~ "app=", "and must not displace the app matcher; got #{inspect(q)}"
+    end
+  end
+
+  describe "vision_jobs_this_month/0" do
+    alias Stacks.Transparency.MockPrometheusClient
+
+    # ⛔ THE DENOMINATOR THE MODAL LINE DIVIDES GPU SECONDS INTO. Unfiltered, this
+    # counted every vision request: a deployed stack showed 2 requests at
+    # tier="ANALYSIS_TIER_VLM_EXTRACT" and 2 at tier="none"/303, and the line
+    # rendered "4 inference(s)" — halving the apparent cost per inference.
+    test "counts only the tiers that use a GPU" do
+      MockPrometheusClient.put_response({:ok, 2.0})
+
+      assert {:ok, 2} = Costs.vision_jobs_this_month()
+
+      q = MockPrometheusClient.last_query()
+
+      assert q =~ "ANALYSIS_TIER_VLM_EXTRACT", "VLM extract is a GPU tier; got #{inspect(q)}"
+      assert q =~ "ANALYSIS_TIER_VLM_CLASSIFY", "so is VLM classify; got #{inspect(q)}"
+
+      # ⚖️ Named explicitly rather than inferred from the absence of a filter: a
+      # barcode answer costs ~7ms of CPU and no GPU time, so including it in a
+      # count that GPU seconds are divided into understates the per-call cost.
+      refute q =~ "ANALYSIS_TIER_BARCODE",
+             "a barcode answer uses no GPU and must not dilute the count; got #{inspect(q)}"
     end
   end
 end

@@ -92,6 +92,45 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       assert length(costs) == 11
     end
 
+    # ⛔ THE SECOND REFRESH IS THE WHOLE TEST. A row is INSERTED once and
+    # UPDATED on every refresh after that, and `on_conflict: {:replace, …}`
+    # originally omitted `:basis` — so a line whose measurement arrived later
+    # kept the basis of the FIRST refresh forever. Observed on a deployed
+    # preview: `amount_cents: 9` and a description reading "1 GPU container(s)
+    # started this month × 300s scaledown window", while `basis` still read
+    # "absent".
+    #
+    # ⚖️ So this drives the transition rather than a steady state: refresh with
+    # NO measurement (absent), then refresh WITH one, and assert the stored
+    # basis moved. A single-refresh test passes either way, which is why the
+    # defect survived a green suite — the builder was always right and the
+    # WRITE was what dropped it.
+    test "a measurement arriving after the first refresh updates the stored basis" do
+      MockPrometheusClient.put_response({:error, :no_data})
+      assert :ok = perform_job(RefreshCostsJob, %{})
+
+      idle_before =
+        Stacks.Costs.current_period_costs() |> Enum.find(&(&1.service == "Modal GPU Idle"))
+
+      assert idle_before.basis == "absent",
+             "with no container count the idle line must start absent, or this test proves nothing"
+
+      MockPrometheusClient.put_response({:ok, 4.0})
+      assert :ok = perform_job(RefreshCostsJob, %{})
+
+      idle_after =
+        Stacks.Costs.current_period_costs() |> Enum.find(&(&1.service == "Modal GPU Idle"))
+
+      assert idle_after.basis == "rate_card",
+             "the second refresh measured 4 containers and priced them, but the stored basis is " <>
+               "still #{inspect(idle_after.basis)} — `:basis` is missing from the upsert's " <>
+               "replace list, so the row keeps the basis it was created with while its amount " <>
+               "and description tell the truth"
+
+      assert idle_after.amount_cents == 36,
+             "and the amount follows the same write: 4 × 300s × $0.000306/s is 36 cents"
+    end
+
     test "emits costs.refreshed event" do
       before_count = event_count("costs.refreshed")
 

@@ -284,9 +284,38 @@ defmodule Stacks.Costs do
       Returns `:error` when the metric store cannot be reached, which the cost
       item renders as an estimate rather than as zero.
   """
+  # ⛔ GPU TIERS ONLY, BECAUSE THIS NUMBER IS DIVIDED INTO GPU SECONDS. The
+  # unfiltered family counts EVERY vision request, and the Modal line pairs it
+  # with `gpu_active_seconds` in one sentence: "41s of measured GPU time across
+  # 16 inference(s)". Those two came from different populations, so the obvious
+  # arithmetic produced a per-inference figure describing nothing.
+  #
+  # ⚠️ Measured on a deployed stack after two VLM identifications:
+  #
+  #     request_stop_…count{status="200", tier="ANALYSIS_TIER_VLM_EXTRACT"}  2
+  #     request_stop_…count{status="303", tier="none"}                       2
+  #
+  # Four counted, two GPU-using — the rendered line said "4 inference(s)" and
+  # halved the apparent cost per inference. The `tier="none"` pair carry a 303
+  # and produced no VLM answer at all.
+  #
+  # ⚖️ A filter rather than a new metric: `:tier` is already a label here (it
+  # was added so a percentile over both tiers could not be read as one
+  # population), so the honest denominator was already recorded — nothing was
+  # counting it. BARCODE and UNSPECIFIED are excluded deliberately: a barcode
+  # answer takes ~7ms of CPU and no GPU at all.
+  @gpu_tiers ~w(ANALYSIS_TIER_VLM_CLASSIFY ANALYSIS_TIER_VLM_EXTRACT)
+
+  @doc "The GPU tiers whose requests the Modal inference line is priced across."
+  @spec gpu_tiers() :: [String.t()]
+  def gpu_tiers, do: @gpu_tiers
+
   @spec vision_jobs_this_month() :: {:ok, non_neg_integer()} | :error
   def vision_jobs_this_month do
-    metric_count_this_month("stacks_vision_request_stop_duration_milliseconds_count")
+    metric_count_this_month(
+      "stacks_vision_request_stop_duration_milliseconds_count",
+      ~s|tier=~"#{Enum.join(@gpu_tiers, "|")}"|
+    )
   end
 
   @platform_cost_valid_categories ~w(hosting compute database domain services)
@@ -392,7 +421,21 @@ defmodule Stacks.Costs do
       %PlatformCost{}
       |> platform_cost_changeset(attrs)
       |> Repo.insert(
-        on_conflict: {:replace, [:amount_cents, :description, :updated_at]},
+        # ⛔ `:basis` BELONGS IN THIS LIST, AND ITS ABSENCE WAS THE DEFECT THIS
+        # WHOLE CHANGE EXISTS TO PREVENT. A row is created once and updated on
+        # every refresh thereafter, so omitting `:basis` froze it at whatever
+        # the FIRST refresh of the period computed. Observed on a deployed
+        # preview: the Modal lines held `amount_cents: 9` and a description
+        # reading "1 GPU container(s) started this month × 300s scaledown
+        # window" — the measured branch, unmistakably — while `basis` still
+        # said "absent". A figure labelled unmeasured while being measured is
+        # the exact dishonesty the basis vocabulary was introduced to delete,
+        # and it survived because the builder and the WRITE disagreed.
+        #
+        # ⚖️ `:refreshed_at` is deliberately NOT here: it is derived from
+        # `updated_at` at serialisation rather than stored, so adding it would
+        # name a column that does not exist.
+        on_conflict: {:replace, [:amount_cents, :description, :basis, :updated_at]},
         conflict_target: [:service, :period_start, :period_end]
       )
 
@@ -850,19 +893,51 @@ defmodule Stacks.Costs do
   end
 
   @doc """
-      Month-to-date increase of a counter family from the metrics store —
-      the usage-count source for third-party lines (Together completions,
-      Brave queries, ISBN lookups). `increase` over the elapsed month
-      tolerates per-boot counter resets. `:error` when the store is
-      unreachable; a family with no samples yet counts as 0.
+      Month-to-date total of a counter family from the metrics store — the
+      usage-count source for third-party lines (Together completions, Brave
+      queries, ISBN lookups) and for the Modal GPU figures. `:error` when the
+      store is unreachable; a family with no samples yet counts as 0.
+
+      `selector` adds label matchers to the family, for a caller that must
+      count a SUBSET of a shared metric (see the GPU-tier filter below).
   """
-  @spec metric_count_this_month(String.t()) :: {:ok, non_neg_integer()} | :error
-  def metric_count_this_month(family) do
+  # ⛔ `max_over_time`, NOT `increase`. This read
+  # `sum(increase(family{app=…}[window]))` and the docstring claimed `increase`
+  # "tolerates per-boot counter resets". It tolerates a reset BETWEEN two
+  # samples; it cannot recover value that accrued BEFORE the first sample in
+  # the window — and `increase` over a flat series is 0.
+  #
+  # ⚠️ Observed on a deployed stack: a real identification left
+  # `stacks_vision_gpu_active_milliseconds_total` at 118228 in the scrape, the
+  # push delivered it, and the three queries disagreed:
+  #
+  #     sum(…)                      → 118228.0   the real figure
+  #     sum(increase(…[7d]))        →      0.0   what this function returned
+  #     sum(max_over_time(…[7d]))   → 118228.0
+  #
+  # The work happened before the first push, so the store's earliest sample
+  # ALREADY held the total and the series has been flat since. The cost line
+  # then rendered `absent` while the money had been spent.
+  #
+  # ⬛ This is not a preview artefact. Any deploy mid-month restarts the
+  # process, and everything before the first post-restart push is dropped — so
+  # a deploy on the 20th would zero that month's GPU cost in production.
+  #
+  # ⚖️ The residual limitation, stated rather than hidden: `instance` is the Fly
+  # machine id, so this sums each machine's HIGHEST value in the window. Across
+  # two boots of the SAME machine it takes the max of the two rather than their
+  # sum, which makes the result a LOWER BOUND. That matches the language the
+  # idle line already uses, and a lower bound that moves is worth more than an
+  # exact zero.
+  @spec metric_count_this_month(String.t(), String.t() | nil) ::
+          {:ok, non_neg_integer()} | :error
+  def metric_count_this_month(family, selector \\ nil) do
     now = DateTime.utc_now()
     window_s = max(DateTime.diff(now, beginning_of_month(now), :second), 1)
     app = System.get_env("FLY_APP_NAME") || "thestacks-core"
+    labels = [~s|app="#{app}"|, selector] |> Enum.reject(&is_nil/1) |> Enum.join(",")
 
-    query = ~s|sum(increase(#{family}{app="#{app}"}[#{window_s}s]))|
+    query = ~s|sum(max_over_time(#{family}{#{labels}}[#{window_s}s]))|
 
     case prometheus_client().query(query) do
       {:ok, count} when is_number(count) and count >= 0 ->
