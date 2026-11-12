@@ -472,8 +472,10 @@ fi
 # runs — a break in the one mode CI never exercises.
 #
 # ⚠️ So it is built here for every mode and merely USED where it applies.
-# DATABASE_URL is empty in prod mode, which leaves the eval exactly as it was
-# rather than pointing it somewhere wrong.
+# DATABASE_URL falls back to the ambient value — see the note on that entry; an
+# EMPTY default displaced production's own DATABASE_URL and sent the eval to
+# localhost, which is the defect this array's earlier comment claimed could not
+# happen.
 preview_mix_env=(
     "MIX_ENV=prod"
     # ⚠️ GUARDED NOW THAT IT IS OUTSIDE THE if. The `[[ -n ${NEON_CONNECTION_URI:-} ]]`

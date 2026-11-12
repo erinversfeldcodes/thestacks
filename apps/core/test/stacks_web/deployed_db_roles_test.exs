@@ -100,45 +100,91 @@ defmodule StacksWeb.DeployedDbRolesTest do
                "STACKS_DBT_DB_PASSWORD on the deploy and re-run migrations."
     end
 
-    # ⛔ EXISTENCE IS NOT USABILITY, AND THAT GAP COST A DAY. This suite asserts
-    # the roles exist and that their grants are right, and it never asked
-    # whether they can LOG IN — so on 2026-11-12 all three existed with every
-    # grant in place while `rolcanlogin` was false and `rolpassword` null, and
-    # this suite would have been GREEN throughout. Every app booting against
-    # that database failed `28P01 invalid_password for user 'stacks_app'` while
-    # its Fly machine reported `started` and the deploy reported success.
+    # ⛔ EXISTENCE IS NOT USABILITY, AND THAT GAP COST A DAY. This suite asserted
+    # that the roles exist and that their grants are right, and never whether
+    # they can be USED — so on 2026-11-12 all three existed with every grant in
+    # place while `rolcanlogin` was false and `rolpassword` null, and this suite
+    # would have been GREEN throughout. Every app booting against that database
+    # failed `28P01 invalid_password for user 'stacks_app'` while its Fly machine
+    # reported `started` and the deploy reported success.
     #
-    # ⚖️ The cause is structural, not a slip: the role migration treats an
-    # absent password as "create this role NOLOGIN" — the right call for a
-    # machine holding no secrets — but a migration runs ONCE, so a reseed that
-    # ran without the password left the roles permanently unusable and no later
-    # migrate repairs them (20260310000001_fix_db_role_login sorts EARLIER, so
-    # it has already run). The credential's producer (the deploy) and its
-    # installer (a once-only migration) are decoupled, which is why a deploy can
-    # hold a password the role never received.
+    # ⚖️ The cause is structural, not a slip: the role migration treats an absent
+    # password as "create this role NOLOGIN" — the right call for a machine
+    # holding no secrets — but a migration runs ONCE, so a reseed that ran
+    # without the password left the roles permanently unusable and no later
+    # migrate repairs them (20260310000001_fix_db_role_login sorts EARLIER, so it
+    # has already run). The credential's producer (the deploy) and its installer
+    # (a once-only migration) are decoupled, which is why a deploy can hold a
+    # password the role never received.
     #
-    # ⚠️ `pg_roles`, NOT `pg_authid`: pg_roles is world-readable and masks the
-    # password as '********', while pg_authid needs superuser — which
-    # `neondb_owner` on Neon is not. Reading pg_authid here would fail
-    # "permission denied" and report a problem that is not the one being tested.
-    test "the login roles can actually log in", %{conn: conn} do
+    # ⛔ BOTH SYMPTOMS, because either alone still fails 28P01. The outage was
+    # `rolcanlogin` false AND `rolpassword` null, and an earlier version of this
+    # test asserted only the first — blind to exactly the state
+    # `20260310000001_fix_db_role_login` manufactures when its env var is unset:
+    # `ALTER ROLE stacks_app LOGIN` with no PASSWORD. A role with LOGIN and no
+    # password is unusable and would have passed.
+    #
+    # ⚠️ `pg_authid`, NOT `pg_roles`, and an earlier comment here claimed the
+    # opposite on a rationale that is false for the identity this test connects
+    # as. `pg_roles` hardcodes `rolpassword` to the literal '********', so it can
+    # NEVER see the missing-password half — verified: stacks_readonly reads
+    # '********' in pg_roles while pg_authid correctly shows it has none.
+    # `pg_authid` does need elevated rights, but `DATABASE_URL` here is the Neon
+    # OWNER uri (deploy-stack.sh sets it from NEON_CONNECTION_URI; the separate
+    # stacks_app one is APP_DATABASE_URL), and the owner can read it — confirmed
+    # against staging. `scripts/rotate-db-role-passwords.sh` already queries
+    # pg_authid over this same uri and treats failure as fatal, so the branch
+    # contradicted itself and this test had taken the wrong half.
+    #
+    # ⚠️ `coalesce(bool_or(…), false)` rather than a bare select, because
+    # `scalar/3` matches `rows: [[value]]` and a role that does not exist returns
+    # ZERO rows — which raises `MatchError … rows: []` and discards the message
+    # below. The sibling existence test already avoids this with
+    # `coalesce(array_agg(…), '{}')`; this is the same guard for a boolean.
+    test "the login roles can actually log in, and have a password to do it with", %{conn: conn} do
       for role <- ~w(stacks_app stacks_dbt) do
-        assert scalar(conn, "SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", [role]),
-               "#{role} exists with its grants but rolcanlogin=false — the role migration ran " <>
-                 "without STACKS_#{role |> String.replace("stacks_", "") |> String.upcase()}" <>
-                 "_DB_PASSWORD. A migration runs once, so re-migrating will NOT repair it: run " <>
-                 "scripts/rotate-db-role-passwords.sh against this database. Until then every " <>
-                 "app connecting as #{role} fails 28P01 while its machine reports healthy."
+        var = "STACKS_#{role |> String.replace("stacks_", "") |> String.upcase()}_DB_PASSWORD"
+
+        assert scalar(
+                 conn,
+                 "SELECT coalesce(bool_or(rolcanlogin), false) FROM pg_authid WHERE rolname = $1",
+                 [role]
+               ),
+               "#{role} cannot log in (rolcanlogin=false, or the role is absent entirely). The " <>
+                 "role migration ran without #{var}. A migration runs once, so re-migrating " <>
+                 "will NOT repair it: run scripts/rotate-db-role-passwords.sh against this " <>
+                 "database. Until then every app connecting as #{role} fails 28P01 while its " <>
+                 "machine reports healthy."
+
+        assert scalar(
+                 conn,
+                 "SELECT coalesce(bool_or(rolpassword IS NOT NULL), false) FROM pg_authid " <>
+                   "WHERE rolname = $1",
+                 [role]
+               ),
+               "#{role} has LOGIN but NO PASSWORD, which still fails 28P01. This is the state " <>
+                 "20260310000001_fix_db_role_login produces when #{var} is unset: it runs " <>
+                 "`ALTER ROLE … LOGIN` and sets no password. Run " <>
+                 "scripts/rotate-db-role-passwords.sh."
       end
     end
 
-    # ⚖️ The companion assertion, and the reason it is separate: `stacks_readonly`
-    # is NOLOGIN BY DESIGN (`ensure_nologin_role`), so a test that looped over
-    # all three would have to special-case it — and a reader would reasonably
-    # "fix" that by granting it LOGIN. Stating the intent as its own case makes
-    # the asymmetry deliberate rather than looking like an omission.
+    # ⚖️ The companion assertion, separate on purpose: `stacks_readonly` is
+    # NOLOGIN BY DESIGN (`ensure_nologin_role`), so a loop over all three would
+    # have to special-case it — and a reader would reasonably "fix" that by
+    # granting it LOGIN. Stating the intent as its own case makes the asymmetry
+    # deliberate rather than looking like an omission.
+    #
+    # ⚠️ CLAUDE.md's fresh-DB recovery note currently instructs the violation:
+    # it says to `ALTER ROLE … WITH LOGIN` for "also stacks_app, stacks_readonly".
+    # Following it makes this test fail, correctly — the docs are wrong, not the
+    # test.
     test "stacks_readonly deliberately cannot log in", %{conn: conn} do
-      refute scalar(conn, "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'stacks_readonly'"),
+      refute scalar(
+               conn,
+               "SELECT coalesce(bool_or(rolcanlogin), false) FROM pg_authid " <>
+                 "WHERE rolname = 'stacks_readonly'"
+             ),
              "stacks_readonly has been granted LOGIN. It is a GRANT target, not a connecting " <>
                "identity — the migration calls ensure_nologin_role for it on purpose, and no " <>
                "STACKS_READONLY_DB_PASSWORD exists anywhere in the deploy."

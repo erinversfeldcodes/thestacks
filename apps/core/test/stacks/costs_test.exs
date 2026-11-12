@@ -1067,4 +1067,75 @@ defmodule Stacks.CostsTest do
              "a barcode answer uses no GPU and must not dilute the count; got #{inspect(q)}"
     end
   end
+
+  describe "the public identification count vs the GPU denominator" do
+    alias Stacks.Transparency.MockPrometheusClient
+
+    # ⛔ TWO QUANTITIES, AND A PROBE PROVED NEITHER WAS GUARDED. Reverting
+    # `usage_metrics/0` to the GPU-filtered count left 118 tests green, so the
+    # public page could silently go back to under-reporting identifications.
+    # The SPA renders this as "N identifications this month", and a
+    # barcode-answered identification is one a reader performed.
+    #
+    # ⚖️ The mock discriminates on the PromQL, which is the only way to tell the
+    # two apart: both return a number, so a value-only assertion passes either
+    # way. The filtered query carries `tier=~`; the unfiltered one does not.
+    test "the page's identification count is unfiltered, while the cost denominator is not" do
+      MockPrometheusClient.put_response(fn promql ->
+        if String.contains?(promql, "tier=~"), do: {:ok, 2.0}, else: {:ok, 7.0}
+      end)
+
+      metrics = Costs.usage_metrics()
+
+      assert metrics.vision_jobs_this_month == 7,
+             "the page reported #{metrics.vision_jobs_this_month} identifications. 7 is the " <>
+               "unfiltered count and 2 is the GPU-tier subset — reporting 2 excludes every " <>
+               "barcode-answered identification from a sentence that claims to count them all"
+
+      assert Costs.vision_jobs_this_month() == {:ok, 2},
+             "and the cost denominator must stay GPU-filtered: it is divided into GPU seconds, " <>
+               "so counting non-GPU calls halves the apparent cost per inference"
+    end
+  end
+
+  describe "platform_cost_changeset/2 and the basis default" do
+    # ⚠️ ASSERTS WHAT IS TRUE, after a probe showed my first version asserted
+    # what I wished were true. `validate_required(:basis)` cannot catch an
+    # OMISSION, because the generated schema defaults the column to
+    # "rate_card" — so `%PlatformCost{}` already has a value. This test pins
+    # that fact rather than a refusal that does not happen, so the next reader
+    # sees the real exposure: an omitted basis is written as "rate_card", and
+    # because the upsert replaces `:basis` that default can land over a stored
+    # "absent".
+    #
+    # ⚖️ Not enforced: requiring `:basis` in `changes` broke 12 legitimate
+    # partial-changeset callers, and there is no live defect — every builder
+    # clause sets it. The guard that does work is validate_inclusion plus the
+    # CHECK constraint, both tested above.
+    test "an omitted basis inherits the money-carrying default rather than being refused" do
+      attrs = %{
+        category: "compute",
+        service: "Probe Service",
+        description: "d",
+        amount_cents: 500,
+        currency: "USD",
+        period_start: ~U[2026-11-01 00:00:00Z],
+        period_end: ~U[2026-11-30 23:59:59Z]
+      }
+
+      changeset = Costs.platform_cost_changeset(%Stacks.Costs.PlatformCost{}, attrs)
+
+      assert changeset.valid?,
+             "an omitted basis is accepted today; if this now fails, the omission is being " <>
+               "refused and the comment in costs.ex about this being inert is out of date"
+
+      refute Map.has_key?(changeset.changes, :basis),
+             "nothing supplied a basis, so it is absent from changes — which is exactly why " <>
+               "validate_required cannot see it"
+
+      assert Ecto.Changeset.apply_changes(changeset).basis == "rate_card",
+             "the inherited value is the money-carrying default, which is the exposure: via " <>
+               "the upsert's replace list it can overwrite a stored \"absent\""
+    end
+  end
 end

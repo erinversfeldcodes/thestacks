@@ -32,6 +32,7 @@ suite =
         , categoryHeaderSaysWhenIncomplete
         , bannerTermSaysWhenIncomplete
         , storyCardUnitAttachesToTheMoney
+        , totalCaveatCountsOnlyTheMeasured
         , displaysMonthlyTrend
         ]
 
@@ -481,3 +482,36 @@ displaysMonthlyTrend =
                     [ Selector.text "Monthly Trend" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.class "costs__chart" ]
+
+
+{-| ⛔ THE CAVEAT'S ARITHMETIC, WHICH NO TEST COULD SEE. `totalCaveat` renders
+the page's completeness claim — "N of M services measured; the rest are not yet
+counted" — and swapping `lines - unmeasured` for `lines` published the
+self-contradictory, FALSE "11 of 11 services measured; the rest are not yet
+counted" while all 2320 Elm tests passed. The E2E spec gave false assurance too:
+it asserts the element is visible and matches /services measured/, which that
+lie also satisfies.
+
+⚖️ So this asserts the two numbers against a fixture whose counts are known and
+DIFFERENT from each other, because equal counts cannot distinguish `lines` from
+`lines - unmeasured`. On a public money page the completeness claim is the
+sentence a reader quotes, so it is the last place a plausible-looking number
+should go unchecked.
+
+⚠️ Only the partial branch is guarded. The all-measured branch ("all N services
+measured") has no fixture here — every response in this file carries an absent
+line — and inventing one to assert a string is a larger change than this
+correction. Recorded so the gap is known rather than assumed covered.
+
+-}
+totalCaveatCountsOnlyTheMeasured : Test
+totalCaveatCountsOnlyTheMeasured =
+    test "absent_line: the banner caveat counts measured services, not all of them" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas
+                    [ Selector.all
+                        [ Selector.class "costs__banner-caveat"
+                        , Selector.text "1 of 2 services measured"
+                        ]
+                    ]

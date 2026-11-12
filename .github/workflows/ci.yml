@@ -946,9 +946,16 @@ jobs:
       # ⚖️ `stacks_dev` specifically, because that is the database name the
       # posture suite hardcodes. MIX_ENV=dev so `dev.exs`'s own Repo config
       # applies rather than a URL this job would have to compose.
+      # ⚠️ CLOAK_KEY is COMPUTED in the run block, declared and assigned on
+      # separate lines. A base64 literal here is indistinguishable from a real
+      # key to gitleaks, and `export VAR="$(…)"` trips shellcheck SC2155, which
+      # actionlint enforces as a hard gate — the first fix for one gate broke
+      # the other. Keeping the prose out here also avoids SC1073: shellcheck
+      # tries to parse a leading comment inside a run block as a directive.
       - name: Migrate the database the posture suite plants into
         run: |
-          export CLOAK_KEY="$(printf %s 'ci-platform-suites-cloak-key-32b' | base64)"
+          CLOAK_KEY="$(printf %s 'ci-platform-suites-cloak-key-32b' | base64)"
+          export CLOAK_KEY
           mix ecto.create --quiet && mix ecto.migrate
         working-directory: apps/core
         env:

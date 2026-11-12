@@ -34,10 +34,11 @@ ALLOWLIST = {
         "no later migration repairs it (20260310000001_fix_db_role_login sorts EARLIER, so "
         "it has already run). ⚠️ Wiring this into CI would be wrong twice over: it writes a "
         "credential, and it must be pointed at one database at a time, production included. "
-        "It is deliberately not automatic. ⬛ The standing protection that SHOULD exist is a "
-        "far-end assertion that the login roles can actually log in — "
-        "apps/core/test/stacks_web/deployed_db_roles_test.exs asserts existence and grants "
-        "but never rolcanlogin, so it was green throughout the outage this script repairs."
+        "It is deliberately not automatic. ⬛ The far-end assertion that DETECTS the state "
+        "this script repairs now exists: deployed_db_roles_test.exs asserts rolcanlogin AND "
+        "rolpassword for both login roles. Before that it asserted existence and grants only, "
+        "so it was green throughout the outage — which is why a manual repair tool is still "
+        "the right shape: detection and repair are different jobs."
     ),
     "scripts/classify-credential-rewrite-equivalence.sh": (
         "Evidence over three fixed commits, not a gate. It classifies every credential "

@@ -417,6 +417,20 @@ defmodule Stacks.Costs do
       # deliberately — therefore held for a typo and not for an omission.
       :basis
     ])
+    # ⚠️ `validate_required(:basis)` IS LARGELY INERT, and a test I wrote to
+    # prove the opposite is what showed it. The generated schema defaults
+    # `basis` to "rate_card" (gen/costs/platform_cost.ex), so `%PlatformCost{}`
+    # already carries a value and this catches only an explicit nil, not an
+    # omission. Since the upsert replaces `:basis`, an omission would write that
+    # default over a stored "absent" — a measured figure where there was none.
+    #
+    # ⚖️ Left as-is deliberately rather than enforced: requiring the field to be
+    # in `changes` broke 12 legitimate callers that build partial changesets,
+    # and there is no live defect — every one of the ~20 builder clauses sets
+    # `basis` explicitly and `upsert_cost/1` is the only production caller. The
+    # real guard is the one that exists: `validate_inclusion` below plus the
+    # CHECK constraint. Recorded so the next person does not mistake this line
+    # for protection it does not give.
     |> validate_inclusion(:category, @platform_cost_valid_categories)
     # ⛔ A closed vocabulary, mirrored by a CHECK below. "absent" is the value
     # the page keys on to render text instead of money, so a typo here would put

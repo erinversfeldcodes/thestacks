@@ -425,9 +425,27 @@ defmodule Mix.Tasks.Eval.VisionTest do
       path = Path.join(System.tmp_dir!(), "eval-run-#{System.unique_integer([:positive])}.json")
       System.put_env("EVAL_VISION_RESULT_PATH", path)
 
+      # ⛔ THE BASELINE PATH TOO, OR A PASSING TEST REWRITES A TRACKED FILE.
+      # This setup redirected only the RUN artefact, and every test here passed
+      # `false` to `gate/2` — a failing run raises before recording a baseline,
+      # so the gap never showed. The first test to pass `true` overwrote
+      # apps/core/priv/eval/vision_baseline.json, replacing a real 8/8 record of
+      # the deployed model with a two-case fixture's 2/2.
+      #
+      # ⚠️ That file is the gate's comparison point: a corrupted baseline makes
+      # the next real eval either refuse against a fiction or pass against one.
+      # Redirected in the setup rather than per-test, because the next person to
+      # write a passing case here would hit exactly the same trap.
+      baseline =
+        Path.join(System.tmp_dir!(), "eval-baseline-#{System.unique_integer([:positive])}.json")
+
+      System.put_env("EVAL_VISION_BASELINE_PATH", baseline)
+
       on_exit(fn ->
         System.delete_env("EVAL_VISION_RESULT_PATH")
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
         File.rm(path)
+        File.rm(baseline)
       end)
 
       {:ok, path: path}
@@ -453,6 +471,63 @@ defmodule Mix.Tasks.Eval.VisionTest do
       assert recorded["passed"] == 1
       assert recorded["total"] == 2
       assert length(recorded["cases"]) == 2
+    end
+
+    # ⛔ THE MEASUREMENTS, WHICH WERE CAPTURED AND DROPPED FOR AS LONG AS THEY
+    # EXISTED. `tier`, `timings_ms`, `gpu_cold` and `wall_ms` were all read off
+    # each response and none reached the artefact — the `gpu_cold` line even
+    # carried a comment about fixing a silent-nil bug in a value nothing
+    # consumed. A probe that deleted all four from the payload left 39 tests
+    # green, because the only assertion was `length(cases) == 2`.
+    #
+    # ⚖️ This matters beyond tidiness: these artefacts are the measurement
+    # substrate a cost-and-latency decomposition is computed from. PromEx
+    # counters live in one node's memory and a preview wipes them every deploy,
+    # so these files are the only samples that outlive the process that produced
+    # them. A dropped field is a figure the ADR cannot be argued from.
+    test "the artefact records what each case COST, not just whether it passed", %{path: path} do
+      results = [
+        %{
+          ok: true,
+          name: "a",
+          stratum: :clean_barcode,
+          detail: "",
+          tier: "ANALYSIS_TIER_BARCODE",
+          timings_ms: %{"barcode" => 7},
+          gpu_cold: false,
+          wall_ms: 120
+        },
+        %{
+          ok: true,
+          name: "b",
+          stratum: :hostile_orientation,
+          detail: "",
+          tier: "ANALYSIS_TIER_VLM_EXTRACT",
+          timings_ms: %{"classify" => 20_500, "extract" => 12_400},
+          gpu_cold: true,
+          wall_ms: 33_000
+        }
+      ]
+
+      Vision.gate(results, true)
+      recorded = path |> File.read!() |> Jason.decode!()
+      [barcode, vlm] = recorded["cases"]
+
+      assert barcode["tier"] == "ANALYSIS_TIER_BARCODE"
+      assert barcode["gpu_cold"] == false
+      assert barcode["wall_ms"] == 120
+
+      assert vlm["tier"] == "ANALYSIS_TIER_VLM_EXTRACT",
+             "without the tier the decomposition cannot separate the GPU path from the barcode " <>
+               "pre-pass, which is the whole shape of the cost"
+
+      assert vlm["gpu_cold"] == true,
+             "the cold flag is what prices the 300s idle tail — ~90% of an identification's cost"
+
+      assert vlm["timings_ms"] == %{"classify" => 20_500, "extract" => 12_400},
+             "per-stage timings are what a p95 is taken over"
+
+      assert vlm["wall_ms"] == 33_000
     end
 
     test "and carries the per-stratum breakdown", %{path: path} do

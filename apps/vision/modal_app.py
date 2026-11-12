@@ -280,7 +280,25 @@ class VisionModel:
         # ⚖️ `@modal.enter` runs before any input is served, so if these are
         # missing the container is in a state this code cannot describe. An
         # AttributeError says so; a default invents a measurement.
-        gpu_cold = self._inferences_since_load == 0
+        # ⛔ CAPTURE THE COUNT, DO NOT DECIDE HERE. This line used to be
+        # `gpu_cold = self._inferences_since_load == 0`, and the dispatch below
+        # was then called with `0 if gpu_cold else …` — which made
+        # `container_dispatch` a TAUTOLOGY: its answer was derived from the
+        # predicate it was supposed to encode, so it could never disagree.
+        # Extracting the function had moved the rule, not tested it: hard-coding
+        # this flag left 123 tests green and lint clean, exactly as the
+        # untestable original did. One holder of the rule, not two.
+        #
+        # ⚠️ RESIDUAL, STATED RATHER THAN IMPLIED: what is left here is still
+        # undrivable — VisionModel is wrapped by @app.cls() into a Modal Cls, so
+        # no test can instantiate it. Replacing this line with a literal still
+        # passes 123 tests. The RULE is tested (tests/test_container_cold_counter.py
+        # probes container_dispatch directly and reds 2 when defeated), but a wrong
+        # CAPTURE here would not be caught. Two lines with no branching is a far
+        # smaller unguarded surface than a predicate was; shrinking it further
+        # means making the method drivable via a plain base class the @app.cls
+        # inherits, which is a larger change than this correction.
+        inferences_before = self._inferences_since_load
 
         messages = [
             {
@@ -341,9 +359,7 @@ class VisionModel:
         # already relies on to mean "this container's first answer".
         self._inferences_since_load += 1
 
-        parsed["_container"] = container_dispatch(
-            0 if gpu_cold else self._inferences_since_load, self._container_id
-        )
+        parsed["_container"] = container_dispatch(inferences_before, self._container_id)
         return parsed
 
 
