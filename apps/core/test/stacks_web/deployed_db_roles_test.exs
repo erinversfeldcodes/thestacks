@@ -100,6 +100,50 @@ defmodule StacksWeb.DeployedDbRolesTest do
                "STACKS_DBT_DB_PASSWORD on the deploy and re-run migrations."
     end
 
+    # ⛔ EXISTENCE IS NOT USABILITY, AND THAT GAP COST A DAY. This suite asserts
+    # the roles exist and that their grants are right, and it never asked
+    # whether they can LOG IN — so on 2026-11-12 all three existed with every
+    # grant in place while `rolcanlogin` was false and `rolpassword` null, and
+    # this suite would have been GREEN throughout. Every app booting against
+    # that database failed `28P01 invalid_password for user 'stacks_app'` while
+    # its Fly machine reported `started` and the deploy reported success.
+    #
+    # ⚖️ The cause is structural, not a slip: the role migration treats an
+    # absent password as "create this role NOLOGIN" — the right call for a
+    # machine holding no secrets — but a migration runs ONCE, so a reseed that
+    # ran without the password left the roles permanently unusable and no later
+    # migrate repairs them (20260310000001_fix_db_role_login sorts EARLIER, so
+    # it has already run). The credential's producer (the deploy) and its
+    # installer (a once-only migration) are decoupled, which is why a deploy can
+    # hold a password the role never received.
+    #
+    # ⚠️ `pg_roles`, NOT `pg_authid`: pg_roles is world-readable and masks the
+    # password as '********', while pg_authid needs superuser — which
+    # `neondb_owner` on Neon is not. Reading pg_authid here would fail
+    # "permission denied" and report a problem that is not the one being tested.
+    test "the login roles can actually log in", %{conn: conn} do
+      for role <- ~w(stacks_app stacks_dbt) do
+        assert scalar(conn, "SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", [role]),
+               "#{role} exists with its grants but rolcanlogin=false — the role migration ran " <>
+                 "without STACKS_#{role |> String.replace("stacks_", "") |> String.upcase()}" <>
+                 "_DB_PASSWORD. A migration runs once, so re-migrating will NOT repair it: run " <>
+                 "scripts/rotate-db-role-passwords.sh against this database. Until then every " <>
+                 "app connecting as #{role} fails 28P01 while its machine reports healthy."
+      end
+    end
+
+    # ⚖️ The companion assertion, and the reason it is separate: `stacks_readonly`
+    # is NOLOGIN BY DESIGN (`ensure_nologin_role`), so a test that looped over
+    # all three would have to special-case it — and a reader would reasonably
+    # "fix" that by granting it LOGIN. Stating the intent as its own case makes
+    # the asymmetry deliberate rather than looking like an omission.
+    test "stacks_readonly deliberately cannot log in", %{conn: conn} do
+      refute scalar(conn, "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'stacks_readonly'"),
+             "stacks_readonly has been granted LOGIN. It is a GRANT target, not a connecting " <>
+               "identity — the migration calls ensure_nologin_role for it on purpose, and no " <>
+               "STACKS_READONLY_DB_PASSWORD exists anywhere in the deploy."
+    end
+
     test "stacks_dbt can read the operational and audit schemas", %{conn: conn} do
       for {schema, table} <- [{"op", "op.users"}, {"audit", "audit.audit_log"}] do
         assert scalar(conn, "SELECT has_schema_privilege('stacks_dbt', $1, 'USAGE')", [schema]),
