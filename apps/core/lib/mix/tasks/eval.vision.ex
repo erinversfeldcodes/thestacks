@@ -657,12 +657,29 @@ defmodule Mix.Tasks.Eval.Vision do
         Map.new(per_stratum(results), fn {stratum, counts} -> {to_string(stratum), counts} end),
       cases:
         Enum.map(results, fn r ->
+          # ⛔ THE MEASUREMENTS WERE CAPTURED AND DROPPED. `tier`, `timings_ms`,
+          # `gpu_cold` and `wall_ms` are all read off the response above and
+          # none of them reached this payload, so every run recorded whether a
+          # book was identified and nothing about what it cost. The `gpu_cold`
+          # line even carries a comment about fixing a silent-nil bug in a
+          # value nothing consumed.
+          #
+          # ⚖️ This is what makes a cost-and-latency decomposition possible at
+          # all. PromEx counters live in the memory of one node and a preview
+          # wipes them on every deploy, so a p95 cannot be taken from them —
+          # whereas these artefacts accumulate on disk across runs. A
+          # distribution needs samples that outlive the process that produced
+          # them, and this is the only place in the system that has any.
           %{
             name: r.name,
             stratum: Map.get(r, :stratum, :unknown),
             ok: r.ok,
             unscored: Map.get(r, :unscored, false),
-            detail: r.detail
+            detail: r.detail,
+            tier: Map.get(r, :tier),
+            timings_ms: Map.get(r, :timings_ms),
+            gpu_cold: Map.get(r, :gpu_cold),
+            wall_ms: Map.get(r, :wall_ms)
           }
         end)
     }
