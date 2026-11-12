@@ -2,6 +2,24 @@
 .env
 .env.local
 .env.*.local
+# ⛔ BACKUP VARIANTS TOO. `.env` was ignored and `.env.bkup` was not, so a real
+# file of live database credentials sat untracked-but-committable — one
+# `git add -A` from entering history, where removing it means rewriting history
+# AND rotating every secret it held.
+#
+# ⚖️ A pattern rather than the one filename that turned up: the suffix is
+# whatever the person reaching for a backup happens to type. A search for
+# `.env.bak.*` missed this file precisely because it was called `.bkup`, and
+# that near-miss is the argument for covering the shape instead of the instance.
+#
+# ⚠️ `.env.example` and `.env.local-stack.example` are TRACKED on purpose and
+# must keep matching nothing here — they are templates with no real values.
+.env.bkup
+.env.bak*
+.env.backup*
+.env.orig
+.env.save
+.env.*.bkup
 
 # Elixir / Phoenix
 _build/
