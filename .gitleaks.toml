@@ -16,3 +16,20 @@ paths = [
     '''(^|/)\.env\.local$''',
     '''(^|/)\.env\..+\.local$''',
 ]
+
+[[allowlists]]
+# ⚖️ SCOPED TO ONE COMMIT, NOT A PATH. Commit 539c5573 added a base64 CI test
+# value for CLOAK_KEY to ci.yml. It is not a credential — it decodes to the
+# ASCII phrase "ci-platform-suites-cloak-key-32b", chosen because Cloak needs
+# 32 bytes and the sibling literals in that job say "not-a-secret" in the
+# clear. gitleaks flags it as generic-api-key because base64 of any 32 bytes
+# is indistinguishable from a key.
+#
+# ⛔ The working tree no longer contains it: the step now computes the value
+# with `printf | base64`, so nothing key-shaped sits in the workflow. This
+# entry exists ONLY because the literal is already in pushed history, which a
+# `fetch-depth: 0` scan still reads. A commit-scoped allowlist cannot shelter
+# a future leak the way a path or regex entry would — and the alternative,
+# rewriting pushed history, is the owner's call rather than a lint fix.
+description = "A base64 CI fixture for CLOAK_KEY, in history only (see 539c5573)"
+commits = ["539c5573faca9c19451a61b5a72fa10bb261eb34"]

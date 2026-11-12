@@ -191,8 +191,19 @@ defmodule Stacks.Costs do
       placements: placement_count(),
       db_size_bytes: db_size_bytes(),
       avg_upload_payload_bytes: avg_upload_payload_bytes(),
+      # ⛔ UNFILTERED HERE, BECAUSE THIS SENTENCE COUNTS IDENTIFICATIONS. The SPA
+      # renders this as "N identifications this month"
+      # (Page/CostTransparency.elm). A barcode-answered identification is a real
+      # identification the reader performed, so excluding it understates what the
+      # page claims to report.
+      #
+      # ⚖️ `vision_jobs_this_month/0` is GPU-tier-filtered on purpose — it is the
+      # denominator the Modal line divides GPU seconds into, and mixing the two
+      # populations in one sentence is the defect that filter exists to fix. Two
+      # quantities, so two call sites: the same argument this module makes about
+      # the Modal price constants, which I applied there and missed here.
       vision_jobs_this_month:
-        case vision_jobs_this_month() do
+        case metric_count_this_month("stacks_vision_request_stop_duration_milliseconds_count") do
           {:ok, n} -> n
           :error -> 0
         end
@@ -268,22 +279,6 @@ defmodule Stacks.Costs do
     result || 0
   end
 
-  @doc """
-      Number of Modal vision inferences this month, counted from the per-call
-      request metric.
-
-      Not from `oban_jobs`: job rows are pruned, so counting them reports only
-      the retention window rather than the month — and this is the figure the
-      largest compute line on the public cost page is derived from. ⚠️ The window was sixty
-      seconds when this was written and is now seven days; the decision is
-      unchanged, because a MONTH-to-date figure cannot be derived from a
-      seven-day table either. Raising retention further would not rescue it —
-      the counter is the right source, not a longer-lived side effect. Counts the calls Counts the calls
-      that reached Modal and returned, which is what Modal bills for; a call
-      that raised before a response is counted separately as an exception.
-      Returns `:error` when the metric store cannot be reached, which the cost
-      item renders as an estimate rather than as zero.
-  """
   # ⛔ GPU TIERS ONLY, BECAUSE THIS NUMBER IS DIVIDED INTO GPU SECONDS. The
   # unfiltered family counts EVERY vision request, and the Modal line pairs it
   # with `gpu_active_seconds` in one sentence: "41s of measured GPU time across
@@ -304,11 +299,36 @@ defmodule Stacks.Costs do
   # population), so the honest denominator was already recorded — nothing was
   # counting it. BARCODE and UNSPECIFIED are excluded deliberately: a barcode
   # answer takes ~7ms of CPU and no GPU at all.
-  @gpu_tiers ~w(ANALYSIS_TIER_VLM_CLASSIFY ANALYSIS_TIER_VLM_EXTRACT)
+  @gpu_tiers ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"]
+  # ⚖️ A QUOTED LIST, NOT `~w(…)`, so the enum-coverage gate can see the real
+  # consumer. `check-enum-coverage.py` matches `"([A-Z][A-Z0-9_]*)"` — quoted
+  # literals only — so a `~w` sigil made this selection list invisible to it
+  # while a quoted enum name inside a COMMENT below tripped it. The gate was
+  # firing on prose and blind to the code.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_BARCODE — a barcode answer is
+  #   ~7ms of CPU and no GPU at all, so counting it would dilute a denominator that GPU
+  #   seconds are divided into. Declared rather than filtered silently.
 
   @doc "The GPU tiers whose requests the Modal inference line is priced across."
   @spec gpu_tiers() :: [String.t()]
   def gpu_tiers, do: @gpu_tiers
+
+  @doc """
+      Number of Modal vision inferences this month, counted from the per-call
+      request metric.
+
+      Not from `oban_jobs`: job rows are pruned, so counting them reports only
+      the retention window rather than the month — and this is the figure the
+      largest compute line on the public cost page is derived from. ⚠️ The window was sixty
+      seconds when this was written and is now seven days; the decision is
+      unchanged, because a MONTH-to-date figure cannot be derived from a
+      seven-day table either. Raising retention further would not rescue it —
+      the counter is the right source, not a longer-lived side effect. Counts the calls Counts the calls
+      that reached Modal and returned, which is what Modal bills for; a call
+      that raised before a response is counted separately as an exception.
+      Returns `:error` when the metric store cannot be reached, which the cost
+      item renders as an estimate rather than as zero.
+  """
 
   @spec vision_jobs_this_month() :: {:ok, non_neg_integer()} | :error
   def vision_jobs_this_month do
@@ -383,7 +403,19 @@ defmodule Stacks.Costs do
       :amount_cents,
       :currency,
       :period_start,
-      :period_end
+      :period_end,
+      # ⛔ REQUIRED, OR A MISSING BASIS BECOMES A MONEY-CARRYING DEFAULT. The
+      # generated schema defaults `basis` to "rate_card", and the upsert now
+      # replaces `:basis` — so a changeset that simply OMITS it writes
+      # EXCLUDED.basis, i.e. the default, over a stored "absent". Adding
+      # `:basis` to the replace list made the column updatable, which is what
+      # the stale-basis defect needed; this is the other half of that change.
+      #
+      # ⚖️ `validate_inclusion` below guards an UNKNOWN basis; it cannot guard a
+      # MISSING one, because a nil never reaches it. The allowlist's stated
+      # promise — that a new basis is excluded from money until someone adds it
+      # deliberately — therefore held for a typo and not for an omission.
+      :basis
     ])
     |> validate_inclusion(:category, @platform_cost_valid_categories)
     # ⛔ A closed vocabulary, mirrored by a CHECK below. "absent" is the value

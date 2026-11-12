@@ -480,7 +480,19 @@ preview_mix_env=(
     # test below is what used to make a bare expansion safe here; hoisting the
     # array above that test removed the guarantee, and `set -u` would abort the
     # production deploy on the unset variable.
-    "DATABASE_URL=${NEON_CONNECTION_URI:-}"
+    # ⛔ FALL BACK TO AN AMBIENT DATABASE_URL, OR THIS BREAKS PRODUCTION. In
+    # PROD_MODE there is no Neon branch, so `NEON_CONNECTION_URI` is "" — and a
+    # bare `${NEON_CONNECTION_URI:-}` then OVERRODE the real DATABASE_URL that
+    # `deploy-production.yml` exports into GITHUB_ENV before calling this script.
+    # Ecto parses "" as no options and Postgrex falls back to localhost, so
+    # production's own vision eval could not read `op.ai_spend` — and under
+    # EVAL_VISION_REQUIRED=1 a non-run is a hard exit 1.
+    #
+    # ⚠️ The comment on this array previously said "DATABASE_URL is empty in prod
+    # mode, which leaves the eval exactly as it was". That was false twice: the
+    # empty value DISPLACED a working one, and MIX_ENV went from dev to prod on
+    # the same path. Both only bite in the one mode CI never exercises.
+    "DATABASE_URL=${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
     "SECRET_KEY_BASE=${SECRET_KEY_BASE:-}"
     "GUARDIAN_SECRET_KEY=${GUARDIAN_SECRET_KEY:-}"
     "RESEND_API_KEY=${RESEND_API_KEY:-}"

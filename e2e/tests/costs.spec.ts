@@ -178,25 +178,31 @@ test.describe("Cost Transparency", () => {
       timeout: 10_000,
     });
 
-    const bannerText = await page.locator(".costs__banner").innerText();
+    // ⛔ SCOPED TO THE TERMS, NOT THE WHOLE BANNER, because `indexOf` over the
+    // banner picked the wrong match. `totalCaveat` renders "… 6 of 11 services
+    // measured; the rest are not yet counted" INSIDE `.costs__banner`, ahead of
+    // the formula — so for the category literally named `services`, indexOf
+    // locked onto the caveat at index 47 and the 40-char window never reached
+    // the real term at 186. The banner did render "Services $3.08 + 2
+    // unmeasured"; the failure message was false.
+    //
+    // ⚖️ The previous version chose a string search over a dynamic RegExp to
+    // avoid a ReDoS risk, which was sound — but substituting the match changed
+    // WHICH match wins, and that was never checked. Reading the term elements
+    // removes both problems: no pattern to build, and no window to size.
+    const terms = await page.locator(".costs__banner-term").allInnerTexts();
 
-    // ⚖️ The banner is one line of "Category $X + N unmeasured" terms joined by
-    // " + ", so each category's term is found by splitting on the category name
-    // rather than by building a regex. A dynamic `new RegExp` here was flagged
-    // as a ReDoS risk, and while the input is our own API response rather than
-    // user data, the string form is both safer and easier to read than an
-    // escaped pattern.
+    expect(
+      terms.length,
+      "the banner rendered no term elements at all, so the loop below would assert nothing"
+    ).toBeGreaterThan(0);
+
     for (const cat of withUnmeasured as Array<{ category: string }>) {
-      const idx = bannerText.toLowerCase().indexOf(cat.category.toLowerCase());
+      const term = terms.find((x) =>
+        x.toLowerCase().startsWith(cat.category.toLowerCase())
+      );
 
-      expect(
-        idx,
-        `the banner does not mention ${cat.category} at all`
-      ).toBeGreaterThanOrEqual(0);
-
-      // Everything from this category's name up to the next " + " separator
-      // that starts another category — i.e. this category's own term.
-      const term = bannerText.slice(idx, idx + cat.category.length + 40);
+      expect(term, `the banner has no term for ${cat.category}`).toBeTruthy();
 
       expect(
         term,

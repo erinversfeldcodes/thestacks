@@ -191,8 +191,15 @@ assert_exit_zero $? "it is declared (line ${ARRAY_LINE:-?}) BEFORE the preview-o
 
 # ⚠️ And the one expansion that is no longer protected by that block's own
 # emptiness test must carry its own default, or set -u aborts prod.
-assert_contains "$MIGRATE_ENV_BLOCK" 'DATABASE_URL=${NEON_CONNECTION_URI:-}' \
-    "DATABASE_URL is expanded with a default — hoisting the array above the -n test removed the guarantee that made a bare expansion safe"
+# ⛔ FALLS BACK TO AN AMBIENT DATABASE_URL, not to EMPTY. Two properties in one
+# assertion: the expansion carries a default at all (hoisting the array above
+# the `-n` test removed the guarantee that made a bare expansion safe under
+# `set -u`), and the default is the INHERITED DATABASE_URL rather than "".
+# `${NEON_CONNECTION_URI:-}` satisfied the first and broke production: in
+# PROD_MODE there is no Neon branch, so it displaced the real DATABASE_URL that
+# deploy-production.yml exports, and Postgrex fell back to localhost.
+assert_contains "$MIGRATE_ENV_BLOCK" 'DATABASE_URL=${NEON_CONNECTION_URI:-${DATABASE_URL:-}}' \
+    "DATABASE_URL falls back to the ambient value, not to empty — an empty default displaces production's own DATABASE_URL and sends the eval to localhost"
 
 # ⬛ The failure must STOP the deploy. A preview that carries on after its own
 # migrations failed has a schema that is neither staging's nor main's.

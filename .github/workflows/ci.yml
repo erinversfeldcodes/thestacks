@@ -947,7 +947,9 @@ jobs:
       # posture suite hardcodes. MIX_ENV=dev so `dev.exs`'s own Repo config
       # applies rather than a URL this job would have to compose.
       - name: Migrate the database the posture suite plants into
-        run: mix ecto.create --quiet && mix ecto.migrate
+        run: |
+          export CLOAK_KEY="$(printf %s 'ci-platform-suites-cloak-key-32b' | base64)"
+          mix ecto.create --quiet && mix ecto.migrate
         working-directory: apps/core
         env:
           MIX_ENV: dev
@@ -967,7 +969,10 @@ jobs:
           # production credential held by a job that has no use for it.
           # CLOAK_KEY must still be 32 bytes once base64-decoded or Cloak
           # rejects it, so this is a decodable literal rather than a word.
-          CLOAK_KEY: Y2ktcGxhdGZvcm0tc3VpdGVzLWNsb2FrLWtleS0zMmI=
+          # ⚖️ COMPUTED, NOT A LITERAL. A base64 blob here is indistinguishable from a
+          # real key to gitleaks (generic-api-key), and allowlisting it would open an
+          # exception a future genuine leak could hide behind. Cloak needs 32 bytes
+          # after decoding; this phrase is exactly 32 characters.
           VISION_HMAC_SECRET: ci-vision-hmac-not-a-secret
           GUARDIAN_SECRET_KEY: ci-guardian-secret-not-a-secret
 

@@ -30,6 +30,7 @@ suite =
         , measuredLineStillShowsMoney
         , unmeasuredIsMarkedForStyling
         , categoryHeaderSaysWhenIncomplete
+        , bannerTermSaysWhenIncomplete
         , storyCardUnitAttachesToTheMoney
         , displaysMonthlyTrend
         ]
@@ -185,8 +186,40 @@ categoryHeaderSaysWhenIncomplete : Test
 categoryHeaderSaysWhenIncomplete =
     test "absent_line: the category header reports its unmeasured count" <|
         \() ->
+            -- ⛔ SCOPED TO BOTH SITES THAT MAKE THE CLAIM, because an unscoped
+            -- `Selector.text` was satisfied by a THIRD. `viewStoryCard` appends
+            -- `unmeasuredSuffix` independently, so the story card alone met the
+            -- old assertion: reverting the banner formula term — the very line
+            -- commented "THE THIRD PRESENTATION SITE, AND IT WAS MISSED" — left
+            -- 2319 of 2319 passing, and so did dropping the suffix from
+            -- `categoryTotalText`, which breaks the header and banner together.
+            --
+            -- ⚖️ Two assertions rather than one, because the two sites render
+            -- from different functions and a guard that cannot tell them apart
+            -- is why the headline defect shipped unprotected. This is the same
+            -- vacuity class already fixed for the absent-line test in this file.
             startMixed
-                |> ProgramTest.expectViewHas [ Selector.text "+ 1 unmeasured" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.all
+                        [ Selector.class "costs__category-total"
+                        , Selector.text "+ 1 unmeasured"
+                        ]
+                    ]
+
+
+{-| The banner's own term, asserted separately from the category card's.
+-}
+bannerTermSaysWhenIncomplete : Test
+bannerTermSaysWhenIncomplete =
+    test "absent_line: the banner term reports its unmeasured count" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas
+                    [ Selector.all
+                        [ Selector.class "costs__banner-term"
+                        , Selector.text "+ 1 unmeasured"
+                        ]
+                    ]
 
 
 {-| ⛔ "/mo" IS A SUFFIX ON A NUMBER, NOT ON A SENTENCE. When the aggregate fix

@@ -27,6 +27,18 @@ MODE = sys.argv[1].lstrip("-")
 # Manual tools with no automated caller. Every entry carries its reason; a
 # stale entry (the script gained a caller, or vanished) fails the gate.
 ALLOWLIST = {
+    "scripts/rotate-db-role-passwords.sh": (
+        "An operator-run repair, not a gate. The role migration treats an absent password "
+        "as 'create this role NOLOGIN', and a migration runs ONCE — so a migrate that ran "
+        "without STACKS_APP_DB_PASSWORD leaves stacks_app permanently unable to log in and "
+        "no later migration repairs it (20260310000001_fix_db_role_login sorts EARLIER, so "
+        "it has already run). ⚠️ Wiring this into CI would be wrong twice over: it writes a "
+        "credential, and it must be pointed at one database at a time, production included. "
+        "It is deliberately not automatic. ⬛ The standing protection that SHOULD exist is a "
+        "far-end assertion that the login roles can actually log in — "
+        "apps/core/test/stacks_web/deployed_db_roles_test.exs asserts existence and grants "
+        "but never rolcanlogin, so it was green throughout the outage this script repairs."
+    ),
     "scripts/classify-credential-rewrite-equivalence.sh": (
         "Evidence over three fixed commits, not a gate. It classifies every credential "
         "rewrite in the one-builder migration against a table of equivalences; its corpus "

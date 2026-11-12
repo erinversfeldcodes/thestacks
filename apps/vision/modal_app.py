@@ -29,7 +29,7 @@ def _download_model() -> None:
     """
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-    AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
+    AutoProcessor.from_pretrained(MODEL_NAME)
     Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_NAME, torch_dtype="bfloat16")
 
 
@@ -145,6 +145,26 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     return _EXTRACT_PROMPT + constraint
 
 
+def container_dispatch(inferences_since_load: int, container_id: str) -> dict[str, object]:
+    """The `_container` reading a dispatch is built from — extracted so it is testable.
+
+    ⛔ THIS LIVED INSIDE THE @app.cls-DECORATED METHOD AND THEREFORE HAD NO TEST
+    THAT COULD FAIL. `VisionModel` is wrapped by Modal into a `Cls` object, not
+    a plain type, so a test cannot instantiate it; every sidecar test mocks
+    `classify`/`extract` wholesale and receives `_container` ready-made. A probe
+    that hard-coded `cold = False` left the suite at 119 passed — the reading
+    the entire idle-GPU cost is derived from was unguarded.
+
+    ⚖️ A module-level function rather than a method, because the rule is
+    arithmetic about container lifetime and needs none of the model: cold means
+    this container has not yet ANSWERED, so the caller increments only after a
+    successful inference. Read-then-increment at the top of `_infer` let a
+    raised first inference consume the cold start, under-counting billed
+    lifetimes in the direction that flatters the GPU.
+    """
+    return {"cold": inferences_since_load == 0, "container_id": container_id}
+
+
 @app.cls(
     gpu="A10G",
     image=image,
@@ -224,7 +244,7 @@ class VisionModel:
         import torch
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
+        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             MODEL_NAME,
             torch_dtype=torch.bfloat16,
@@ -261,7 +281,6 @@ class VisionModel:
         # missing the container is in a state this code cannot describe. An
         # AttributeError says so; a default invents a measurement.
         gpu_cold = self._inferences_since_load == 0
-        self._inferences_since_load += 1
 
         messages = [
             {
@@ -309,10 +328,22 @@ class VisionModel:
         # tracks a CPU container whose warmth is independent of this one's; an
         # idle A10G is roughly two orders of magnitude more expensive per
         # second. Without this the expensive cold start was unmeasured.
-        parsed["_container"] = {
-            "cold": gpu_cold,
-            "container_id": self._container_id,
-        }
+        # ⛔ INCREMENTED HERE, AFTER THE INFERENCE SUCCEEDED, NOT BEFORE IT.
+        # Read-then-increment at the top of this method meant a first inference
+        # that RAISED — OOM, a generation error, a decode failure — still moved
+        # the counter to 1, so no dispatch on that container ever reported its
+        # cold start. That under-counts billed container lifetimes, in the same
+        # flattering direction as the defect this measurement was built to
+        # correct.
+        #
+        # ⚖️ Safe to defer: this class serves one input at a time (no
+        # `@modal.concurrent`), which is the same invariant `GpuDispatch.cold`
+        # already relies on to mean "this container's first answer".
+        self._inferences_since_load += 1
+
+        parsed["_container"] = container_dispatch(
+            0 if gpu_cold else self._inferences_since_load, self._container_id
+        )
         return parsed
 
 
