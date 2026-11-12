@@ -51,6 +51,17 @@ ALLOWLIST = {
         "compiler on every build. frontend/tests/ApiRequestHeadersTest.elm still runs and "
         "covers the header half."
     ),
+    "scripts/characterise/vision-cost-decomposition.py": (
+        "An analysis, not a gate. It reads a directory of vision-eval run artefacts and computes "
+        "the idle-vs-inference split, per-tier latency percentiles, cost per identification and the "
+        "barcode-tier hit rate — the decomposition the vision-architecture decision is argued from. "
+        "⚖️ Deliberately not wired into CI: it answers a question once per measurement campaign, "
+        "not once per PR, and its output is a judgement for a document rather than a pass/fail. "
+        "⚠️ It also needs REPEATED runs to mean anything — measured vlm-cls variance on this corpus "
+        "is 60% median and 6.8x max, so a single-run invocation would report percentiles that are "
+        "noise. It refuses an empty directory and prints n<5 instead of a percentile rather than "
+        "dressing a maximum as a p95."
+    ),
     "scripts/characterise/rowless-upload-objects.py": (
         "A one-off, READ-ONLY characterisation of the production bucket, kept as the "
         "record of how a deletion decision was measured rather than as a gate. It lists "
