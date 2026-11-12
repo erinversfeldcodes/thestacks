@@ -147,7 +147,12 @@ def staff_reviewed(path):
     """True when the issue records a staff-review verdict."""
     return bool(STAFF_REVIEW.search(open(path, encoding="utf-8").read()))
 
-violations, actionable, informal = [], [], []
+# ⚖️ `scope_notes` is its own channel because the two that existed mean other
+# things: `informal` prints as "item(s) done WITHOUT an issue file" and
+# `actionable` drives the NEXT line. A drive-scope suppression routed into
+# either would print under a heading that says something false about it,
+# which is worse than not printing at all.
+violations, actionable, informal, scope_notes = [], [], [], []
 # ══════════════════════════════════════════════════════════════════════════════
 # EVERY CONSTANT AND HELPER LIVES HERE, ABOVE ALL EXECUTING CODE.
 #
@@ -563,7 +568,54 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
                         f"falsified later, which is how seven of eight such reasons came to be "
                         f"untrue in a predecessor guard."
                     )
-                stale = [f for f in since if any(f.startswith(p) for p in DRIVE_PATHS)]
+                # ⛔ A GLOBAL PATH LIST MAKES THIS UNSATISFIABLE ON AN ACTIVE
+                # BRANCH. DRIVE_PATHS is every running-code tree, so ANY commit
+                # under `apps/core/lib` staled EVERY wave's drive regardless of
+                # relevance — a wave about scheduled jobs and dbt marts was
+                # reported stale by a change to the cost-transparency page. The
+                # only ways out were an endless re-drive treadmill or editing
+                # `at_sha` to silence it, and the second is exactly the dishonesty
+                # `at_sha_provenance` exists to prevent. A guard that cannot be
+                # satisfied honestly teaches people to satisfy it dishonestly.
+                #
+                # ⚖️ So a wave may narrow the check to the trees its drive
+                # actually covered, via `preview_drive.drive_paths`. Deliberately
+                # NOT a way to silence it:
+                #   · absent, behaviour is unchanged — the full DRIVE_PATHS apply,
+                #     so every existing wave stays exactly as strict as before;
+                #   · a declared scope must carry `drive_paths_reason`, or that is
+                #     its own violation (below) — the same shape as the
+                #     allowlist-with-a-reason pattern used elsewhere in this repo;
+                #   · the narrowing is PRINTED whenever it suppresses a file, so a
+                #     scope that is quietly too narrow is visible rather than
+                #     silent.
+                declared = drive.get("drive_paths")
+                scope = tuple(declared) if declared else DRIVE_PATHS
+                stale = [f for f in since if any(f.startswith(p) for p in scope)]
+                if declared and not drive.get("drive_paths_reason"):
+                    violations.append(
+                        f"  WAVE {wname}: the preview drive narrows the staleness check to "
+                        f"{', '.join(declared)} with no `drive_paths_reason`. A narrowed scope "
+                        f"without a stated reason is indistinguishable from one chosen to make "
+                        f"the check pass."
+                    )
+                if declared:
+                    suppressed = [
+                        f
+                        for f in since
+                        if any(f.startswith(p) for p in DRIVE_PATHS)
+                        and not any(f.startswith(p) for p in scope)
+                    ]
+                    if suppressed:
+                        shown_s = ", ".join(sorted(suppressed)[:3])
+                        more_s = (
+                            f" (+{len(suppressed) - 3} more)" if len(suppressed) > 3 else ""
+                        )
+                        scope_notes.append(
+                            f"  WAVE {wname}: the drive's declared scope suppressed "
+                            f"{len(suppressed)} changed running-code file(s): {shown_s}"
+                            f"{more_s}. Reason given: {drive.get('drive_paths_reason')}"
+                        )
                 if stale:
                     shown = ", ".join(sorted(stale)[:3])
                     more = f" (+{len(stale) - 3} more)" if len(stale) > 3 else ""
@@ -1226,6 +1278,20 @@ if not wave_filter and any(
                         f"Re-record the verdict with the resolved commit the reviewer actually "
                         f"saw."
                     )
+
+# ⛔ ABOVE THE VIOLATIONS BLOCK, BECAUSE THAT BLOCK EXITS 1. Placed after it,
+# this printed only when the campaign was already clean — i.e. never on the
+# path where a reader is deciding whether a narrowed scope is hiding the very
+# file they are chasing. A note that disappears exactly when it matters is a
+# silent exemption, which is the one thing the narrowing must not become.
+if scope_notes:
+    print(
+        f"\n{len(scope_notes)} wave(s) narrowed the drive-staleness check. "
+        f"Changed running-code files OUTSIDE a declared drive scope are listed "
+        f"with the reason given — read them and judge whether the scope is still right:"
+    )
+    for n in scope_notes:
+        print(n)
 
 if violations:
     print("=" * 78)
