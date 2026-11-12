@@ -39,6 +39,18 @@ MICRO_CENTS_PER_GPU_SECOND = 3_060
 SCALEDOWN_WINDOW_S = 300
 
 
+def stage_ms(case: dict[str, Any]) -> float:
+    """Total GPU-stage milliseconds for one case, ignoring stages that did not run.
+
+    ⛔ `timings_ms` carries an explicit null per stage that was skipped — a barcode
+    answer has no classify or extract, and a classify-only answer has no extract.
+    An earlier version summed the values directly and crashed on the FIRST real
+    artefact set (`float(None)`), having passed on a synthetic fixture whose
+    timings were all numeric. A stage that did not run contributes zero.
+    """
+    return sum(float(v) for v in (case.get("timings_ms") or {}).values() if v is not None)
+
+
 def pct(values: list[float], p: float) -> float | None:
     """Percentile with no interpolation games, and None below the sample floor.
 
@@ -96,11 +108,7 @@ def main() -> int:
     print("\n=== per tier ===")
     for tier, cs in sorted(by_tier.items()):
         walls = [float(c["wall_ms"]) for c in cs if c.get("wall_ms") is not None]
-        gpu = [
-            sum(float(v) for v in (c.get("timings_ms") or {}).values())
-            for c in cs
-            if c.get("timings_ms")
-        ]
+        gpu = [stage_ms(c) for c in cs if c.get("timings_ms")]
         colds = [c for c in cs if c.get("gpu_cold") is True]
         p95 = pct(walls, 0.95)
         print(f"\n{tier}  n={len(cs)}")
@@ -119,14 +127,7 @@ def main() -> int:
     # uses, so a discrepancy between this and the page is a real disagreement rather
     # than two different rate cards.
     print("\n=== cost decomposition ===")
-    all_gpu_s = (
-        sum(
-            sum(float(v) for v in (c.get("timings_ms") or {}).values())
-            for c in tiered
-            if c.get("timings_ms")
-        )
-        / 1000.0
-    )
+    all_gpu_s = sum(stage_ms(c) for c in tiered if c.get("timings_ms")) / 1000.0
     cold_count = sum(1 for c in tiered if c.get("gpu_cold") is True)
     idle_s = cold_count * SCALEDOWN_WINDOW_S
     inf_c = all_gpu_s * MICRO_CENTS_PER_GPU_SECOND / 100_000
