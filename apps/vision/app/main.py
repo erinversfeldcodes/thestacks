@@ -19,8 +19,10 @@ from app.proto.gen.vision import (
     AnalyzeResponse,
     ExtractedBook,
     GpuDispatch,
+    OcrAttempt,
     StageTimings,
 )
+from app.services.cover_text import read_cover_text
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
 from app.services.url_validator import validate_image_url
@@ -79,6 +81,7 @@ _CLF_BOOK = "CLASSIFICATION_RESULT_BOOK"
 _TIER_BARCODE = "ANALYSIS_TIER_BARCODE"
 _TIER_VLM_CLASSIFY = "ANALYSIS_TIER_VLM_CLASSIFY"
 _TIER_VLM_EXTRACT = "ANALYSIS_TIER_VLM_EXTRACT"
+_TIER_OCR = "ANALYSIS_TIER_OCR"
 
 
 def _gpu_dispatch(parsed: dict[str, object]) -> GpuDispatch | None:
@@ -373,6 +376,67 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     else:
         barcode_ms = None
 
+    # ⬛ THE CPU TEXT PASS, BETWEEN BARCODE AND THE GPU. This container is the
+    # ASGI front door every request already passes through, with a 1200s
+    # scaledown, so it is warm by construction: text read here opens no new
+    # billable lifetime and owes no idle tail. That is the whole economic case
+    # — measurement put a lone GPU identification at ~9.8c against 0.18c of
+    # actual compute, nearly all of it a 300s window on a container that woke
+    # to answer one request.
+    #
+    # ⚠️ SHADOW BY DEFAULT. The read is recorded and the VLM still answers,
+    # unless `ocr_short_circuit` is on AND the read clears its confidence bar.
+    # Measuring a tier with the thing it would replace still running is the
+    # only way to get a hit rate without first trusting it.
+    ocr_attempt = None
+    ocr_ms = None
+
+    if settings.cover_text_enabled:
+        ocr_started = time.monotonic()
+        cover = read_cover_text(decoded_bytes)
+        ocr_ms = _elapsed_ms(ocr_started)
+
+        confident = (
+            cover.title is not None
+            and cover.confidence >= settings.ocr_short_circuit_min_confidence
+        )
+        answered = bool(settings.ocr_short_circuit and confident)
+
+        ocr_attempt = OcrAttempt(
+            title=cover.title,
+            author=cover.author,
+            raw_text=cover.raw_text,
+            confidence=cover.confidence,
+            answered=answered,
+            engine=cover.engine,
+        )
+
+        if answered:
+            # ⛔ A TITLE IS NOT AN IDENTIFICATION. No `potential_isbns` here,
+            # deliberately: core resolves the title against Open Library /
+            # Google Books and the ISBN hard gate is satisfied there. Emitting
+            # a fabricated ISBN to make this look like the barcode tier would
+            # turn a guess into a verified edition.
+            log.info("cover text answered", title=cover.title, confidence=cover.confidence)
+            return AnalyzeResponse(
+                classification=_CLF_BOOK,
+                confidence=cover.confidence,
+                books=[
+                    ExtractedBook(
+                        title=cover.title,
+                        author=cover.author,
+                        raw_text=cover.raw_text,
+                        potential_isbns=[],
+                        confidence=cover.confidence,
+                    )
+                ],
+                model_used=cover.engine,
+                tier=_TIER_OCR,
+                ocr_attempt=ocr_attempt,
+                timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, ocr=ocr_ms),
+                sidecar_cold=cold,
+            )
+
     client: VisionClient = request.app.state.vision_client
 
     vlm_b64 = _resize_for_vlm(image_b64)
@@ -403,7 +467,10 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             model_used=settings.model_name,
             tier=_TIER_VLM_CLASSIFY,
             gpu_dispatches=gpu_dispatches,
-            timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, classify=classify_ms),
+            ocr_attempt=ocr_attempt,
+            timings_ms=StageTimings(
+                download=download_ms, barcode=barcode_ms, ocr=ocr_ms, classify=classify_ms
+            ),
             sidecar_cold=cold,
         )
 
@@ -442,9 +509,11 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         model_used=settings.model_name,
         tier=_TIER_VLM_EXTRACT,
         gpu_dispatches=gpu_dispatches,
+        ocr_attempt=ocr_attempt,
         timings_ms=StageTimings(
             download=download_ms,
             barcode=barcode_ms,
+            ocr=ocr_ms,
             classify=classify_ms,
             extract=_elapsed_ms(extract_started),
         ),

@@ -20,6 +20,14 @@ warn_unused_configs = true
 module = "pyzbar.*"
 ignore_missing_imports = true
 
+# pytesseract ships no stubs. Declared per-module beside pyzbar, for the same
+# reason: both are thin CPU wrappers around an apt-installed binary, and
+# neither is worth a stub package — but a NEW untyped dependency must still
+# fail the gate rather than be waved through by a blanket flag.
+[[tool.mypy.overrides]]
+module = "pytesseract.*"
+ignore_missing_imports = true
+
 # ⚖️ The GPU libraries exist only inside the Modal image, never in this venv or
 # in CI, so there is nothing to stub against locally. Declared per-module
 # rather than passing --ignore-missing-imports for the whole gate: everything

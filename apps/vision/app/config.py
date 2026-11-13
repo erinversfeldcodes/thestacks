@@ -26,6 +26,23 @@ class Settings(BaseSettings):
     max_image_size_bytes: int = 10_485_760  # 10 MB
     local_ocr_enabled: bool = True
 
+    # Read cover text on CPU. Independent of `ocr_short_circuit` on purpose:
+    # the pass is worth running for measurement long before it is trusted to
+    # answer, and one flag for both would make "measure it" and "ship it" the
+    # same decision.
+    cover_text_enabled: bool = True
+
+    # Let a confident cover-text read ANSWER, skipping the VLM entirely.
+    # ⛔ Off by default. Promotion is a measured decision, not a deployment
+    # detail — the eval has to show the hit rate and the false-accept rate
+    # before this becomes True anywhere.
+    ocr_short_circuit: bool = False
+
+    # Minimum mean word confidence for a read to be allowed to answer, when
+    # short-circuiting is on at all. Deliberately high: a wrong identification
+    # costs more than a fall-through to the VLM, which is merely expensive.
+    ocr_short_circuit_min_confidence: float = 0.80
+
     model_config = SettingsConfigDict(
         env_prefix="VISION_",
         env_file=_env_files(),

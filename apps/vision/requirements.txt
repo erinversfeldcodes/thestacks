@@ -3,5 +3,6 @@ fastapi==0.141.1
 starlette==1.6.0
 uvicorn[standard]==0.52.4
 modal==1.5.5
+pytesseract>=0.3.13
 pyzbar==0.1.9
 Pillow==13.0.0

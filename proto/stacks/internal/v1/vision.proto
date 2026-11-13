@@ -267,6 +267,44 @@ message AnalyzeResponse {
   // carried here until a reviewer showed its only possible consumer would have
   // double-counted a term the inference cost line already bills.
   repeated GpuDispatch gpu_dispatches = 8 [json_name = "gpu_dispatches"];
+
+  // What the CPU text pass read, absent when it did not run. Present even
+  // when the VLM answered, which is the whole point in shadow mode.
+  optional OcrAttempt ocr_attempt = 9 [json_name = "ocr_attempt"];
+}
+
+// OcrAttempt records what the CPU text pass read, whether or not it answered.
+//
+// ⛔ SEPARATE FROM `books`, DELIBERATELY. In shadow mode the VLM still answers
+// and `books` carries ITS result; folding OCR's guess into the same list would
+// make a measurement indistinguishable from an identification, and the eval
+// could no longer tell which tier was right. The two are compared, not merged.
+//
+// ⚖️ `answered` is the honest record of what the cascade DID, as opposed to
+// what it read. A run with a high `confidence` and `answered: false` is the
+// shape that says "this tier was ready and the flag was off" — which is
+// exactly the evidence a promotion decision needs.
+message OcrAttempt {
+  // Title as read off the cover, absent when nothing title-shaped was found.
+  optional string title = 1 [json_name = "title"];
+
+  // Author as read, absent when not found. Weaker than the title: cover
+  // layouts put the author in the smallest type on the page.
+  optional string author = 2 [json_name = "author"];
+
+  // Everything the pass read, unsegmented. Kept because a failure to find a
+  // title is not the same fact as a failure to read anything at all, and only
+  // the raw text distinguishes them.
+  string raw_text = 3 [json_name = "raw_text"];
+
+  // The engine's own mean confidence over the words it kept, 0..1.
+  float confidence = 4 [json_name = "confidence"];
+
+  // Whether this attempt actually short-circuited the cascade.
+  bool answered = 5 [json_name = "answered"];
+
+  // Which engine read it, so a measurement is attributable to a version.
+  string engine = 6 [json_name = "engine"];
 }
 
 // AnalysisTier names the cascade stage that produced an answer.
@@ -294,6 +332,13 @@ enum AnalysisTier {
 
   // The VLM ran the full extract path.
   ANALYSIS_TIER_VLM_EXTRACT = 3;
+
+  // Text read off the cover on CPU, before any model ran. ⚠️ Unlike BARCODE,
+  // this tier does NOT carry an identification: an ISBN checksum makes a
+  // barcode self-verifying, while a title is a claim the platform still has
+  // to resolve against Open Library / Google Books. A consumer that treats
+  // the two as equivalent will report a guess as a verified edition.
+  ANALYSIS_TIER_OCR = 4;
 }
 
 // StageTimings carries per-stage wall-clock in milliseconds.
@@ -339,6 +384,11 @@ message StageTimings {
 
   // The VLM extract call.
   optional int32 extract = 4 [json_name = "extract"];
+
+  // CPU text extraction. Present whenever OCR ran, including when it ran in
+  // shadow and the VLM answered anyway — the point of measuring it is to know
+  // what it would have cost had it answered.
+  optional int32 ocr = 5 [json_name = "ocr"];
 }
 
 // Cover association: request, response, callback and status enum.

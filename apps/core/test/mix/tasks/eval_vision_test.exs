@@ -24,6 +24,7 @@ defmodule Mix.Tasks.Eval.VisionTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Eval.Vision
+  alias Stacks.AI.MockClient
 
   @identity %{model: "qwen2-vl-7b", modal_app: "https://vision.example.test", total: 6}
 
@@ -915,6 +916,288 @@ defmodule Mix.Tasks.Eval.VisionTest do
 
       assert {:different_corpus, 1} =
                Vision.baseline_for(File.read!(tmp), Vision.model_identity(8))
+    end
+  end
+
+  # ⛔ IDENTITY SCORING, and why the corpus needed it. 7 of the 8 original
+  # fixtures carry `expect_isbn: nil`, and `isbn_ok` is
+  # `is_nil(expect_isbn) or ...` — so the identity half of their score could
+  # not fail, whatever the model answered. recall@1 was therefore uncomputable
+  # on this corpus at any size, because growing it the same way adds more
+  # fixtures with no identity to check.
+  #
+  # ⚖️ These tests drive `score_image/1` — the real scoring path, with the real
+  # matcher — rather than restating the matching rule. A reimplemented rule
+  # agrees with the real one exactly where both are right and diverges in
+  # silence everywhere else.
+  describe "scoring which book it is, not just that it is one" do
+    setup do
+      # ⚠️ `score_image/1` resolves `path` against the CORPUS ROOT (the umbrella
+      # directory holding `images/`), so a fixture in the system temp dir reads
+      # as `:enoent` and scores `unscored` — which is the harness being right
+      # about corpus decay, not a test failure. The probe must therefore write
+      # inside the real corpus directory and clean up after itself.
+      root =
+        Enum.reduce_while(0..6, File.cwd!(), fn _, dir ->
+          if File.dir?(Path.join(dir, "images")),
+            do: {:halt, dir},
+            else: {:cont, Path.expand("..", dir)}
+        end)
+
+      name = "ident-probe-#{System.unique_integer([:positive])}.jpg"
+      File.write!(Path.join([root, "images", name]), "not-a-real-jpeg-but-readable")
+      on_exit(fn -> File.rm(Path.join([root, "images", name])) end)
+      {:ok, fixture: Path.join("images", name)}
+    end
+
+    defp analyze_returning(title, author) do
+      MockClient.put_response("analyze", fn _payload ->
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock",
+           "books" => [
+             %{
+               "title" => title,
+               "author" => author,
+               "potential_isbns" => [],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ]
+         }}
+      end)
+    end
+
+    test "a title the model got right scores ok", %{fixture: fixture} do
+      analyze_returning("Flyboys: A True Story of Courage", "James Bradley")
+
+      scored =
+        Vision.score_image(%{
+          path: fixture,
+          name: "reversed",
+          expect_book: true,
+          expect_isbn: nil,
+          expect_title: "Flyboys"
+        })
+
+      assert scored.ok,
+             "the service returns the title as printed on the cover, with its subtitle; " <>
+               "ground truth records the work. Containment, not equality, is the rule — " <>
+               "got: #{scored.detail}"
+    end
+
+    # ⛔ THE CASE THE WHOLE CHANGE EXISTS FOR. Before identity scoring this
+    # fixture passed: `expect_isbn` was nil, so nothing checked WHICH book.
+    test "a confidently WRONG book now fails", %{fixture: fixture} do
+      analyze_returning("Born Again Bodies", "R. Marie Griffith")
+
+      scored =
+        Vision.score_image(%{
+          path: fixture,
+          name: "reversed",
+          expect_book: true,
+          expect_isbn: nil,
+          expect_title: "Flyboys"
+        })
+
+      refute scored.ok,
+             "the model named a different book and the harness called it correct — this is " <>
+               "exactly the vacuous pass that made recall uncomputable; got: #{scored.detail}"
+
+      assert scored.detail =~ "title_ok=false",
+             "a failure must say which identity was expected, or the next reader cannot " <>
+               "tell a wrong answer from a missing label"
+    end
+
+    test "a book the model could not name at all fails", %{fixture: fixture} do
+      analyze_returning(nil, nil)
+
+      scored =
+        Vision.score_image(%{
+          path: fixture,
+          name: "reversed",
+          expect_book: true,
+          expect_isbn: nil,
+          expect_title: "Flyboys"
+        })
+
+      refute scored.ok,
+             "classifying something as a book while naming nothing is not an " <>
+               "identification, and the corpus must not score it as one"
+    end
+
+    # ⚖️ ANTI-VACUITY for the three above: without this, a `title_ok` hardcoded
+    # to `false` would still red the two failure cases and look correct.
+    test "a fixture with no expected title is unaffected", %{fixture: fixture} do
+      analyze_returning("Anything At All", "Someone")
+
+      scored =
+        Vision.score_image(%{
+          path: fixture,
+          name: "negative",
+          expect_book: true,
+          expect_isbn: nil
+        })
+
+      assert scored.ok,
+             "an absent expectation is a documented hole, not a failure — the unlabelled " <>
+               "fixtures must keep scoring as they did until they are labelled"
+
+      refute scored.detail =~ "title_",
+             "a fixture with no identity label must not report an identity verdict"
+    end
+  end
+
+  # ⛔ THE SHADOW MEASUREMENT'S ONLY EVIDENCE. The CPU text pass runs on every
+  # request while the VLM still answers, so what it read exists only in the
+  # artefact. Drop the key and the experiment produces nothing while every run
+  # still reports 8/8 — the same silent shape that already cost this task its
+  # `tier`, `timings_ms` and `model_used` fields once each.
+  describe "what the artefact keeps about the CPU text pass" do
+    setup do
+      n = System.unique_integer([:positive])
+      path = Path.join(System.tmp_dir!(), "ocr-run-#{n}.json")
+      baseline = Path.join(System.tmp_dir!(), "ocr-baseline-#{n}.json")
+      System.put_env("EVAL_VISION_RESULT_PATH", path)
+      # ⚠️ The baseline too: a PASSING run records one, and the tracked
+      # priv/eval/vision_baseline.json is the gate's real comparison point.
+      System.put_env("EVAL_VISION_BASELINE_PATH", baseline)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_RESULT_PATH")
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(path)
+        File.rm(baseline)
+      end)
+
+      {:ok, path: path}
+    end
+
+    test "a shadow read survives into the artefact", %{path: path} do
+      attempt = %{
+        "title" => "The Alchemist",
+        "author" => nil,
+        "raw_text" => "THE ALCHEMIST Paulo Coelho",
+        "confidence" => 0.91,
+        "answered" => false,
+        "engine" => "tesseract"
+      }
+
+      results = [
+        %{
+          ok: true,
+          name: "a",
+          stratum: :clear_cover,
+          detail: "",
+          tier: "ANALYSIS_TIER_VLM_EXTRACT",
+          timings_ms: %{"ocr" => 180, "extract" => 7000},
+          gpu_cold: false,
+          wall_ms: 9000,
+          ocr_attempt: attempt
+        }
+      ]
+
+      Vision.gate(results, true)
+      [case_] = Jason.decode!(File.read!(path))["cases"]
+
+      assert case_["ocr_attempt"]["title"] == "The Alchemist",
+             "the title the CPU pass read is the measurement; without it the " <>
+               "run says only that the VLM answered, which was never in doubt"
+
+      assert case_["ocr_attempt"]["confidence"] == 0.91,
+             "the confidence is what a promotion threshold would be set from"
+
+      refute case_["ocr_attempt"]["answered"],
+             "a shadow run must record that it did NOT answer — a high " <>
+               "confidence with answered=false is exactly the evidence a " <>
+               "promotion decision needs"
+
+      assert case_["timings_ms"]["ocr"] == 180,
+             "what the tier cost is half the comparison; recall alone cannot " <>
+               "rank it against a GPU that charges for an idle tail"
+    end
+
+    # ⚖️ ANTI-VACUITY: without this, an `ocr_attempt` hardcoded to the map
+    # above would satisfy every assertion in the test before it.
+    test "a case with no text pass carries no attempt", %{path: path} do
+      Vision.gate(
+        [%{ok: true, name: "a", detail: "", tier: "ANALYSIS_TIER_BARCODE", ocr_attempt: nil}],
+        true
+      )
+
+      [case_] = Jason.decode!(File.read!(path))["cases"]
+
+      assert is_nil(case_["ocr_attempt"]),
+             "a barcode answer skips the text pass entirely, and an absent " <>
+               "read must not be reported as an empty one"
+    end
+  end
+
+  # ⛔ SIX FIELDS HAVE BEEN DROPPED FROM THE ARTEFACT, ONE AT A TIME. `tier`,
+  # `timings_ms`, `gpu_cold` and `wall_ms` were captured off every response and
+  # written to none; `ocr_attempt` and `expect_title` each had to be added after
+  # an analysis was already written against them. Six instances is not
+  # carelessness — it is that this map is the ONLY place a measured value
+  # becomes durable, and omitting one fails nothing: the run still scores, the
+  # gate still passes, and the analysis silently has no data.
+  #
+  # ⚖️ So this asserts the SET rather than one more member. A seventh field
+  # added to the payload and forgotten here reds this test, which is the only
+  # way the next one gets caught before a measurement is run against it.
+  describe "the artefact's field set" do
+    @durable_fields ~w(
+      name stratum ok unscored detail tier timings_ms gpu_cold wall_ms
+      ocr_attempt expect_title expect_isbn
+    )
+
+    setup do
+      n = System.unique_integer([:positive])
+      path = Path.join(System.tmp_dir!(), "fields-#{n}.json")
+      System.put_env("EVAL_VISION_RESULT_PATH", path)
+      System.put_env("EVAL_VISION_BASELINE_PATH", Path.join(System.tmp_dir!(), "fb-#{n}.json"))
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_RESULT_PATH")
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm(path)
+      end)
+
+      {:ok, path: path}
+    end
+
+    test "every durable field reaches the artefact", %{path: path} do
+      Vision.gate(
+        [
+          %{
+            ok: true,
+            name: "a",
+            stratum: :clear_cover,
+            detail: "",
+            tier: "ANALYSIS_TIER_VLM_EXTRACT",
+            timings_ms: %{"ocr" => 180},
+            gpu_cold: false,
+            wall_ms: 9000,
+            ocr_attempt: %{"title" => "x", "confidence" => 0.9},
+            expect_title: "flyboys",
+            expect_isbn: nil
+          }
+        ],
+        true
+      )
+
+      [case_] = Jason.decode!(File.read!(path))["cases"]
+      present = Map.keys(case_)
+
+      for field <- @durable_fields do
+        assert field in present,
+               "the artefact dropped #{inspect(field)}. Every value in this set was " <>
+                 "measured off a real response and is durable ONLY here — PromEx " <>
+                 "counters live in one node's memory and a preview wipes them. " <>
+                 "A dropped field is an analysis with no data and a run that still " <>
+                 "reports a score. Present: #{inspect(present)}"
+      end
     end
   end
 end

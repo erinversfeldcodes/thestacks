@@ -170,13 +170,29 @@ defmodule Mix.Tasks.Eval.Vision do
               detail: "call failed after #{@call_attempts} attempt(s): #{inspect(reason)}"
             })
 
-          {classified, isbns, resp} ->
+          {classified, isbns, titles, resp} ->
             book_ok = classified == item.expect_book
             isbn_ok = is_nil(item.expect_isbn) or item.expect_isbn in isbns
 
+            # ⚠️ A nil expectation PASSES, for both identity fields, and that is
+            # a deliberate hole with a cost worth stating: 7 of the 8 original
+            # fixtures carry no expected ISBN, so `isbn_ok` was unconditionally
+            # true for them and the identity half of their score could not fail.
+            # `expect_title` closes that for a fixture whose edition is unknown
+            # but whose work is known — a photograph is of one physical copy, so
+            # its ISBN is that edition's and cannot be derived from a title.
+            #
+            # ⛔ Matching is case- and whitespace-insensitive CONTAINMENT, not
+            # equality: the service returns the title as printed on the cover
+            # ("Flyboys: A True Story of Courage"), while ground truth records
+            # the work ("Flyboys"). Equality would red every correct answer.
+            title_ok = identity_ok?(Map.get(item, :expect_title), titles)
+
             Map.merge(item, %{
-              ok: book_ok and isbn_ok,
-              detail: "is_book=#{classified} isbns=#{inspect(Enum.take(isbns, 3))}",
+              ok: book_ok and isbn_ok and title_ok,
+              detail:
+                "is_book=#{classified} isbns=#{inspect(Enum.take(isbns, 3))}" <>
+                  identity_detail(Map.get(item, :expect_title), titles, title_ok),
               tier: Map.get(resp, "tier"),
               timings_ms: Map.get(resp, "timings_ms"),
               # ⚠️ Read from the dispatch LIST, because the flat `gpu_cold` key
@@ -186,10 +202,46 @@ defmodule Mix.Tasks.Eval.Vision do
               # key returns nil silently, so this reported "no cold start" for
               # every fixture and no test noticed.
               gpu_cold: any_cold?(Map.get(resp, "gpu_dispatches")),
+              # ⛔ THE SHADOW MEASUREMENT'S ONLY ROUTE INTO THE ARTEFACT. The
+              # CPU text pass runs on every request and the VLM still answers,
+              # so what it read exists ONLY here — drop this key and the whole
+              # experiment produces no evidence while every run still passes.
+              # That is the shape of every discarded field this task has
+              # already lost once: `tier`, `timings_ms`, `model_used`.
+              ocr_attempt: Map.get(resp, "ocr_attempt"),
               wall_ms: wall_ms
             })
         end
     end
+  end
+
+  # Identity scoring. Absent expectation → pass (see the caller's note on what
+  # that costs). Present → the expected string must appear, normalised, inside
+  # one of the strings the service returned.
+  defp identity_ok?(nil, _returned), do: true
+  defp identity_ok?("", _returned), do: true
+
+  defp identity_ok?(expected, returned) do
+    want = normalise_identity(expected)
+    Enum.any?(returned, fn got -> String.contains?(normalise_identity(got), want) end)
+  end
+
+  defp identity_detail(nil, _returned, _ok), do: ""
+  defp identity_detail("", _returned, _ok), do: ""
+
+  defp identity_detail(expected, returned, ok) do
+    " title_expected=#{inspect(expected)} title_ok=#{ok}" <>
+      " returned=#{inspect(Enum.take(returned, 2))}"
+  end
+
+  # ⚠️ Punctuation is stripped, not just case and space: a cover prints
+  # "Flyboys:" and a subtitle follows, while ground truth has no colon.
+  defp normalise_identity(s) do
+    s
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, " ")
+    |> String.trim()
   end
 
   # A failed CALL is not a wrong ANSWER. A freshly deployed service answers its
@@ -234,6 +286,23 @@ defmodule Mix.Tasks.Eval.Vision do
           |> Map.get("books", [])
           |> Enum.flat_map(fn b -> Map.get(b, "potential_isbns") || [] end)
 
+        # ⛔ `title` and `author` were on this response and discarded, which is
+        # why the corpus could not score IDENTITY. `/analyze` has returned both
+        # per detected book all along (vision.proto:158-161); the harness read
+        # only the ISBN list, so a fixture whose edition ISBN is unknown — which
+        # is most of them, because a photograph is of one physical copy — had no
+        # scoreable ground truth at all and passed vacuously.
+        #
+        # ⚖️ A title is a weaker claim than an ISBN and is kept separate rather
+        # than folded in: an ISBN match is proof of edition, a title match is
+        # proof of work. Collapsing them would let a title agreement report as
+        # an edition identification.
+        titles =
+          resp
+          |> Map.get("books", [])
+          |> Enum.flat_map(fn b -> [Map.get(b, "title"), Map.get(b, "author")] end)
+          |> Enum.reject(&(is_nil(&1) or &1 == ""))
+
         # ⛔ THE MODEL NAMES ITSELF, AND THE IDENTITY USED TO IGNORE IT.
         #
         # `model_identity/0` read `:core, :vision_model` — set NOWHERE in this
@@ -262,7 +331,7 @@ defmodule Mix.Tasks.Eval.Vision do
         # dictionary like `model_used`, because that one is the same answer for
         # every image in a run and these differ per fixture — which is the
         # point of reporting them.
-        {classification == "CLASSIFICATION_RESULT_BOOK", isbns, resp}
+        {classification == "CLASSIFICATION_RESULT_BOOK", isbns, titles, resp}
 
       other ->
         {:error, other}
@@ -308,6 +377,7 @@ defmodule Mix.Tasks.Eval.Vision do
   defp short_tier("ANALYSIS_TIER_BARCODE"), do: "barcode"
   defp short_tier("ANALYSIS_TIER_VLM_CLASSIFY"), do: "vlm-cls"
   defp short_tier("ANALYSIS_TIER_VLM_EXTRACT"), do: "vlm-ext"
+  defp short_tier("ANALYSIS_TIER_OCR"), do: "ocr"
   defp short_tier("ANALYSIS_TIER_UNSPECIFIED"), do: "unspec"
   defp short_tier(other), do: String.slice(to_string(other), 0, 7)
 
@@ -679,7 +749,10 @@ defmodule Mix.Tasks.Eval.Vision do
             tier: Map.get(r, :tier),
             timings_ms: Map.get(r, :timings_ms),
             gpu_cold: Map.get(r, :gpu_cold),
-            wall_ms: Map.get(r, :wall_ms)
+            wall_ms: Map.get(r, :wall_ms),
+            ocr_attempt: Map.get(r, :ocr_attempt),
+            expect_title: Map.get(r, :expect_title),
+            expect_isbn: Map.get(r, :expect_isbn)
           }
         end)
     }
