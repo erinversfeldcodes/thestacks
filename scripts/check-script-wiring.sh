@@ -51,6 +51,38 @@ ALLOWLIST = {
         "compiler on every build. frontend/tests/ApiRequestHeadersTest.elm still runs and "
         "covers the header half."
     ),
+    "scripts/characterise/make-synthetic-strata.py": (
+        "Corpus construction, run once per batch of new clean originals rather than on a "
+        "schedule. It derives the mirrored/rotated and deliberately-illegible strata from "
+        "clean-* photographs — the corpus plan names programmatic transforms as the correct "
+        "source for exactly those two, since a mirrored barcode is precisely what pyzbar "
+        "cannot decode and reproducing it by hand adds variance without information. "
+        "⬛ A derived image INHERITS its source's identity, so no label can be invented, and "
+        "the transform rides in the filename so a synthetic failure is never read as a "
+        "real-world one. Deliberately manual: it writes corpus images, and a corpus is forever."
+    ),
+    "scripts/characterise/scaledown-frontier.py": (
+        "An analysis, not a gate. It prices the GPU scaledown window against latency across a "
+        "range of arrival rates, because measurement put 98.1% of a lone identification's cost "
+        "in idle GPU rather than inference — so the window is the largest cost lever in the "
+        "system and it is one literal. Deliberately manual: its one decisive input, how often "
+        "readers actually upload, is the one thing neither the eval corpus nor any test can "
+        "measure, so the output is a band and choosing a point on it is a human decision. "
+        "⚠️ Validated against both measured extremes before use (0.378c simulated vs 0.429c "
+        "measured back-to-back; 9.97c vs 9.34c lone) — an earlier version never billed the "
+        "window at all and was 11x optimistic."
+    ),
+    "scripts/characterise/ocr-yield.py": (
+        "An analysis, not a gate. It reads vision-eval run artefacts and computes what the CPU "
+        "cover-text pass READ against what the corpus EXPECTED — the figure the architecture "
+        "decision turns on is not 'did OCR read something' but P(OCR yields a title the existing "
+        "cached title search would resolve). Deliberately manual: the pass runs in shadow, so a "
+        "run produces evidence rather than a verdict, and a verdict is a human decision. "
+        "⛔ It REFUSES to print a yield when any run reports engine='unavailable' — a 0% that "
+        "means 'tesseract did not install' and a 0% that means 'these covers are hard' lead to "
+        "opposite decisions, and the first shadow run showed the pass reading social-media "
+        "chrome at 0.95 confidence, so a confident zero is exactly the shape to distrust."
+    ),
     "scripts/characterise/vision-cost-decomposition.py": (
         "An analysis, not a gate. It reads a directory of vision-eval run artefacts and computes "
         "the idle-vs-inference split, per-tier latency percentiles, cost per identification and the "

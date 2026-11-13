@@ -22,7 +22,7 @@ defmodule Stacks.AI.GpuWindow do
   # here can detect that — the sidecar does not report its own configuration.
   # A test asserts the value against the Python source so a change to one side
   # fails rather than silently skewing the cost.
-  @scaledown_window_s 300
+  @scaledown_window_s 60
 
   @doc "The GPU scaledown window, in seconds, that the billed tail is taken from."
   def scaledown_window_s, do: @scaledown_window_s
@@ -67,6 +67,10 @@ defmodule Stacks.AI.GpuWindow do
   #   here would mean returning a verdict about GPU telemetry for a request
   #   that made no GPU dispatch, and the catch-all clause already answers
   #   `false` for it. Listing it is the point, not an oversight.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — text read on
+  # the CPU front-door container woke no GPU, so it opens no container lifetime
+  # and owes no idle tail. ⚠️ It is not free, but its cost belongs to the CPU
+  # container that was already warm to receive the request, not here.
   @vlm_tiers ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"]
 
   @doc """

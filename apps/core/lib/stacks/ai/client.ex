@@ -24,15 +24,13 @@ defmodule Stacks.AI.Client do
 
   @fuse_name :vision_fuse
 
-  # The ledger is denominated in micro-cents; this config value is in cents.
-  @micro_cents_per_cent 100_000
-
   # The tiers this build knows. A label outside this set collapses to "other".
   @known_tiers [
     "ANALYSIS_TIER_UNSPECIFIED",
     "ANALYSIS_TIER_BARCODE",
     "ANALYSIS_TIER_VLM_CLASSIFY",
-    "ANALYSIS_TIER_VLM_EXTRACT"
+    "ANALYSIS_TIER_VLM_EXTRACT",
+    "ANALYSIS_TIER_OCR"
   ]
 
   @modal_function_timeout_ms 300_000
@@ -279,14 +277,14 @@ defmodule Stacks.AI.Client do
     # guard charged a third of what the page claimed. The config key is still
     # honoured for an operator who needs to override, but its default is now
     # the one number rather than a second opinion about it.
-    cost_cents =
+    micro_cents =
       Application.get_env(
         :core,
-        :modal_cost_per_call_cents,
-        Costs.modal_budget_estimate_cents_per_call()
+        :modal_budget_base_micro_cents_per_call,
+        Costs.modal_budget_base_micro_cents_per_call()
       )
 
-    Budget.record_cost(:modal, cost_cents * @micro_cents_per_cent)
+    Budget.record_cost(:modal, micro_cents)
   end
 
   # ⛔ THE TIER IS READ FROM THE RESPONSE, NOT ASSUMED. Charging a flat rate
@@ -315,6 +313,25 @@ defmodule Stacks.AI.Client do
 
     if surcharge > 0 do
       Budget.record_cost(:modal, surcharge)
+    end
+
+    # ⛔ THE IDLE TAIL IS A PER-CONTAINER COST AND WAS BEING CHARGED TO NOBODY.
+    # Modal bills a woken GPU for its whole scaledown window — measured at
+    # 9.18c against 0.198c of actual inference — so a lone identification after
+    # a quiet period costs 56x what one in a busy run costs. The flat per-call
+    # rate could not express that: it was 13.9x too high on sustained traffic
+    # and 0.6x too LOW on the lone cold call, which is the case a ceiling
+    # exists to catch.
+    #
+    # ⚖️ The cold flag was already on the wire and already parsed — for the
+    # telemetry label two lines below, and ignored by the ledger. Charging it
+    # here is what makes the ledger track the invoice instead of a guess.
+    case cold_gpu_containers(resp_body) do
+      0 ->
+        :ok
+
+      n ->
+        Budget.record_cost(:modal, n * Costs.modal_budget_cold_start_micro_cents())
     end
 
     # ⚠️ The label is bounded HERE, at the emit site, against the tiers this
@@ -445,6 +462,26 @@ defmodule Stacks.AI.Client do
   def bounded_tier(tier) when tier in @known_tiers, do: tier
   def bounded_tier(_), do: "other"
 
+  # ⛔ `gpu_dispatches`, NOT `sidecar_cold`. The latter says the CPU front door
+  # was cold, which owes no GPU tail at all — charging the A10G's scaledown
+  # window for it would bill a warm GPU because a FastAPI container restarted.
+  #
+  # ⚠️ COUNTED, not a boolean. A single request can wake two GPU containers —
+  # classify on one and extract on another — and the contract made this field
+  # `repeated` for exactly that reason, after a flat flag was found
+  # "under-counting billed container lifetimes by up to half, in the direction
+  # that flatters the GPU". A boolean here would reintroduce that halving in
+  # the ledger instead of the metric.
+  defp cold_gpu_containers(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"gpu_dispatches" => dispatches}} when is_list(dispatches) ->
+        Enum.count(dispatches, &(Map.get(&1, "cold") == true))
+
+      _ ->
+        0
+    end
+  end
+
   defp cold_label(resp_body) do
     case Jason.decode(resp_body) do
       {:ok, %{"sidecar_cold" => true}} -> "cold"
@@ -475,7 +512,7 @@ defmodule Stacks.AI.Client do
 
   def tier_surcharge_micro_cents(tier)
       when tier in ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"] do
-    Costs.modal_gpu_inference_surcharge_cents() * @micro_cents_per_cent
+    Costs.modal_budget_gpu_active_micro_cents()
   end
 
   def tier_surcharge_micro_cents(_unknown), do: 0

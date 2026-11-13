@@ -200,19 +200,18 @@ defmodule Stacks.AI.ClientTest do
       # assertion cannot drift from the number that is actually charged. A test
       # carrying its own copy of the value under test agrees with whichever copy
       # it holds and proves nothing about the other two.
-      cost_cents =
+      expected =
         Application.get_env(
           :core,
-          :modal_cost_per_call_cents,
-          Costs.modal_budget_estimate_cents_per_call()
+          :modal_budget_base_micro_cents_per_call,
+          Costs.modal_budget_base_micro_cents_per_call()
         )
 
-      expected = cost_cents * 100_000
-
       assert Spend.spent(:modal, :daily) == expected,
-             "a call costing #{cost_cents}c moved the micro-cent ledger by " <>
-               "#{Spend.spent(:modal, :daily)}, not #{expected} — the unit the ledger " <>
-               "stores and the unit this config value is written in have diverged"
+             "the base charge moved the micro-cent ledger by " <>
+               "#{Spend.spent(:modal, :daily)}, not #{expected} — the ledger and this " <>
+               "constant are both micro-cents now, so a mismatch is a real divergence " <>
+               "rather than a unit conversion"
 
       assert Spend.spent(:modal, :monthly) == expected
     end
@@ -298,7 +297,7 @@ defmodule Stacks.AI.ClientTest do
     end
 
     test "a VLM tier adds the GPU surcharge" do
-      expected = Costs.modal_gpu_inference_surcharge_cents() * 100_000
+      expected = Costs.modal_budget_gpu_active_micro_cents()
 
       assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_EXTRACT") == expected
       assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_CLASSIFY") == expected
@@ -327,17 +326,22 @@ defmodule Stacks.AI.ClientTest do
     # which is exactly how this call site charged **1 micro-cent instead of 1
     # cent** for months while a test asserted it was correct.
     #
-    # ⚖️ So this one spells the arithmetic out: the price is 3 cents, a cent is
-    # 100,000 micro-cents, therefore a GPU tier's surcharge is 300,000. If
-    # someone changes the price, this case fails and they must come and change
-    # a number a person can read — which is the review this test exists to
-    # force.
-    test "a GPU tier's surcharge is 300_000 micro-cents, written out" do
-      assert Costs.modal_gpu_inference_surcharge_cents() == 3,
+    # ⚖️ So this one spells the arithmetic out. GPU-active was measured at
+    # 0.198c per identification (226.9s over 35 GPU-tier calls at the published
+    # A10G rate); a cent is 100,000 micro-cents; the figure charged is 25,000,
+    # which is 0.25c — the measurement rounded UP, because a ceiling should err
+    # high. If someone changes it, this case fails and they must change a
+    # number a person can read.
+    #
+    # ⚠️ The old literal here was 300_000 — 3 whole cents — which measurement
+    # later showed to be 12x the real figure. A unit that is merely consistent
+    # with itself is not a unit that is right.
+    test "a GPU tier's surcharge is 25_000 micro-cents, written out" do
+      assert Costs.modal_budget_gpu_active_micro_cents() == 25_000,
              "the price changed; update the literal below deliberately rather than deriving it"
 
-      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_EXTRACT") == 300_000,
-             "3 cents is 300,000 micro-cents — a mismatch here is the unit confusion that " <>
+      assert Client.tier_surcharge_micro_cents("ANALYSIS_TIER_VLM_EXTRACT") == 25_000,
+             "0.25 cents is 25,000 micro-cents — a mismatch here is the unit confusion that " <>
                "left the Modal ceiling needing 50,000,000 calls to trip"
     end
 
@@ -507,10 +511,11 @@ defmodule Stacks.AI.ClientTest do
 
       assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
 
-      # Baseline (one call, charged before the body is parsed) plus the GPU
-      # surcharge. 3 cents each, 100,000 micro-cents to the cent, so 600,000 —
-      # written out rather than derived from the constants the code reads.
-      assert Spend.spent(:modal, :daily) - before == 600_000,
+      # Base (charged before the body is parsed) plus GPU-active. 2,000 +
+      # 25,000 = 27,000 micro-cents, written out rather than derived from the
+      # constants the code reads. ⚠️ `gpu_dispatches` is EMPTY here, so no
+      # cold tail — a warm container owes none.
+      assert Spend.spent(:modal, :daily) - before == 27_000,
              "a VLM inference must move the ledger by the baseline plus the GPU surcharge; " <>
                "moved by #{Spend.spent(:modal, :daily) - before}"
     end
@@ -530,8 +535,70 @@ defmodule Stacks.AI.ClientTest do
 
       assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
 
-      assert Spend.spent(:modal, :daily) - before == 300_000,
-             "a barcode decode must cost the baseline and no GPU surcharge; moved by " <>
+      assert Spend.spent(:modal, :daily) - before == 2_000,
+             "a barcode decode must cost the base and no GPU charge; moved by " <>
+               "#{Spend.spent(:modal, :daily) - before}"
+    end
+
+    # ⛔ THE COLD TAIL, WHICH NOTHING CHARGED AND WHICH DOMINATES THE BILL.
+    # Modal bills a woken GPU for its whole 300s scaledown window — measured at
+    # 9.18c against 0.198c of inference — so the flat per-call rate was 0.6x
+    # too LOW for a lone cold identification while being 13.9x too high on
+    # sustained traffic. The cold flag was already on the wire and already
+    # parsed for a telemetry label; the ledger ignored it.
+    test "a cold GPU container charges its scaledown tail" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_EXTRACT",
+        "gpu_dispatches" => [%{"cold" => true}]
+      })
+
+      before = Spend.spent(:modal, :daily)
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert Spend.spent(:modal, :daily) - before == 227_000,
+             "base 2,000 + gpu-active 25,000 + one cold tail 200,000; moved by " <>
+               "#{Spend.spent(:modal, :daily) - before}"
+    end
+
+    # ⬛ TWO CONTAINERS, TWO TAILS. A single request can wake one GPU for
+    # classify and another for extract — the contract made `gpu_dispatches`
+    # `repeated` after a flat flag was found "under-counting billed container
+    # lifetimes by up to half, in the direction that flatters the GPU". A
+    # boolean read here would reintroduce that halving in the ledger.
+    test "two cold dispatches charge two tails" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_EXTRACT",
+        "gpu_dispatches" => [%{"cold" => true}, %{"cold" => true}]
+      })
+
+      before = Spend.spent(:modal, :daily)
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert Spend.spent(:modal, :daily) - before == 427_000,
+             "two woken containers owe two scaledown windows, not one; moved by " <>
+               "#{Spend.spent(:modal, :daily) - before}"
+    end
+
+    # ⚖️ ANTI-VACUITY for the pair above: a WARM dispatch must charge no tail.
+    # Charging it unconditionally would satisfy both cases and reinstate a flat
+    # rate under a new name.
+    test "a warm GPU dispatch charges no tail" do
+      __MODULE__.StubVision.respond(%{
+        "classification" => "CLASSIFICATION_RESULT_BOOK",
+        "tier" => "ANALYSIS_TIER_VLM_EXTRACT",
+        "gpu_dispatches" => [%{"cold" => false}]
+      })
+
+      before = Spend.spent(:modal, :daily)
+
+      assert {:ok, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert Spend.spent(:modal, :daily) - before == 27_000,
+             "a container already awake owes no scaledown window; moved by " <>
                "#{Spend.spent(:modal, :daily) - before}"
     end
   end

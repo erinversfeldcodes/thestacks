@@ -46,7 +46,32 @@ defmodule Stacks.Costs do
   # estimate is correct there and wrong on a page claiming to say what things
   # cost. ⚠️ Do not reunify these without deciding which direction each caller
   # needs to err in.
-  @modal_budget_estimate_cents_per_call 3
+  # ⛔ MEASURED, IN MICRO-CENTS, AFTER THE FLAT RATE PROVED WRONG IN BOTH
+  # DIRECTIONS. A flat 3c base plus a 3c GPU surcharge charged 6c for every
+  # call. Against Modal's own billing for the same day — $0.54 actual against
+  # a ledger reading $5.01 — that is **13.9x too high under sustained load**,
+  # and simultaneously **0.6x too low for a lone cold identification**, which
+  # is the expensive case a ceiling exists to catch.
+  #
+  # ⚖️ A flat per-call rate CANNOT be right, because the cost is not per call.
+  # Measurement put GPU-active at 0.198c per identification and the scaledown
+  # tail at 9.18c per container woken — so 40 identifications sharing one
+  # container cost 0.43c each, while one identification after a quiet period
+  # costs 9.81c. The difference is 56x and it is entirely which container
+  # answered, not which image was sent.
+  #
+  # ⬛ So the ledger charges what the invoice charges: a little per call, the
+  # GPU's active seconds per GPU-tier call, and the whole idle tail per COLD
+  # start. The sidecar already reports the cold flag — it was being read for
+  # telemetry and ignored by the ledger. Against the measured series this
+  # lands +13% on sustained traffic and +5% on a lone cold call: conservative
+  # in the ceiling's safe direction, without being an order of magnitude out.
+  #
+  # ⚠️ Still an ESTIMATE and still deliberately high. The page that says what
+  # things cost reads the measured rate card, not these.
+  @modal_budget_base_micro_cents_per_call 2_000
+  @modal_budget_gpu_active_micro_cents 25_000
+  @modal_budget_cold_start_micro_cents 200_000
 
   # ⛔ A SECOND CONSTANT, AND TWO CONSTANTS ARE CORRECT HERE. This derived from
   # the baseline above, justified as "two constants for one price is how they
@@ -69,11 +94,10 @@ defmodule Stacks.Costs do
   # constants err the same way for different reasons, which is exactly when two
   # constants beat one.
   #
-  # ⚠️ The barcode tier is still charged the 3c baseline against the ceiling
-  # even though its GPU cost is zero. That is deliberate — it uses CPU, network
-  # and the sidecar — but it means the ceiling still trips largely on call
-  # count, so the tier awareness buys the GUARD less than it buys the cost page.
-  @modal_gpu_surcharge_cents 3
+  # ⚠️ The barcode tier is still charged the base micro-cents against the
+  # ceiling even though its GPU cost is zero. That is deliberate — it uses CPU,
+  # network and the sidecar — but the base is now small enough that the ceiling
+  # trips on GPU seconds and cold starts rather than on call count.
   # ⛔ AN ALLOWLIST, NOT A DENYLIST, AND THE POLARITY IS THE WHOLE POINT.
   #
   # The aggregations used to reject `basis == "absent"`. Add a fourth value
@@ -108,33 +132,28 @@ defmodule Stacks.Costs do
   @domain_monthly_cents 100
 
   @doc """
-      Modal's price per inference, in whole cents.
+      What a call costs before any GPU ran, in micro-cents.
 
-      ⚖️ Exposed so `Stacks.AI.Client` charges the budget at the same rate this
-      page bills at. They were separate constants that disagreed by 3×.
+      ⚖️ Micro-cents, not whole cents: the measured per-identification cost is
+      0.43c amortised and 0.198c of GPU-active time, and neither is expressible
+      in an integer-cent rate. The old whole-cent floor of 1c was already 2.3x
+      the real figure before any surcharge was added.
   """
-  @spec modal_budget_estimate_cents_per_call() :: pos_integer()
-  def modal_budget_estimate_cents_per_call, do: @modal_budget_estimate_cents_per_call
+  @spec modal_budget_base_micro_cents_per_call() :: non_neg_integer()
+  def modal_budget_base_micro_cents_per_call, do: @modal_budget_base_micro_cents_per_call
+
+  @doc "GPU-active seconds a VLM-tier call consumes, as micro-cents. Measured."
+  @spec modal_budget_gpu_active_micro_cents() :: non_neg_integer()
+  def modal_budget_gpu_active_micro_cents, do: @modal_budget_gpu_active_micro_cents
 
   @doc """
-      What a GPU inference costs BEYOND the baseline charged for every call.
+      The scaledown tail a COLD container owes, as micro-cents.
 
-      ⛔ A BARCODE DECODE AND A 7B VLM INFERENCE ARE NOT THE SAME COST, and
-      until the vision response carried a tier they were charged identically.
-      A CPU barcode pre-pass answers without waking the model at all; billing
-      it at the GPU rate is what made "should a cover-embedding tier exist?"
-      unanswerable from this ledger.
-
-      ⚖️ A surcharge rather than a second price, because the baseline is
-      already charged before the response is parsed — a request that errored
-      still ran the container. This is the difference, not the total.
-
-      ⚠️ Derived from the one price rather than declared separately. Two
-      constants for one price is how they drift, and these already had: the
-      page billed 3 cents while the budget guard charged 1.
+      ⛔ Per container woken, never per call. Charging it per call is what made
+      the old flat rate 13.9x too high on sustained traffic.
   """
-  @spec modal_gpu_inference_surcharge_cents() :: non_neg_integer()
-  def modal_gpu_inference_surcharge_cents, do: @modal_gpu_surcharge_cents
+  @spec modal_budget_cold_start_micro_cents() :: non_neg_integer()
+  def modal_budget_cold_start_micro_cents, do: @modal_budget_cold_start_micro_cents
 
   @doc """
       Returns all cost line items for the current billing period (current calendar month).
@@ -299,6 +318,10 @@ defmodule Stacks.Costs do
   # population), so the honest denominator was already recorded — nothing was
   # counting it. BARCODE and UNSPECIFIED are excluded deliberately: a barcode
   # answer takes ~7ms of CPU and no GPU at all.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — an OCR answer
+  # consumed no GPU seconds, so it must not join the denominator those seconds
+  # are divided into. ⬛ It still counts as an identification in the public
+  # "N this month" figure, which is deliberately unfiltered.
   @gpu_tiers ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"]
   # ⚖️ A QUOTED LIST, NOT `~w(…)`, so the enum-coverage gate can see the real
   # consumer. `check-enum-coverage.py` matches `"([A-Z][A-Z0-9_]*)"` — quoted

@@ -74,8 +74,8 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
       # reads `a10g_micro_cents_per_second/0` agrees with whatever that
       # constant says — including a wrong one. This is the same rule the Modal
       # surcharge test states, applied to the figure it was missing from.
-      assert idle.amount_cents == 36,
-             "4 cold starts x 300s x $0.000306/s is 36 cents; got #{idle.amount_cents}. A " <>
+      assert idle.amount_cents == 7,
+             "4 cold starts x 60s x $0.000306/s is 7 cents; got #{idle.amount_cents}. A " <>
                "mismatch here is the unit error that the per-second rate exists to avoid"
 
       assert idle.basis == "rate_card",
@@ -127,8 +127,8 @@ defmodule Stacks.Workers.RefreshCostsJobTest do
                "replace list, so the row keeps the basis it was created with while its amount " <>
                "and description tell the truth"
 
-      assert idle_after.amount_cents == 36,
-             "and the amount follows the same write: 4 × 300s × $0.000306/s is 36 cents"
+      assert idle_after.amount_cents == 7,
+             "and the amount follows the same write: 4 × 60s × $0.000306/s is 7 cents"
     end
 
     test "emits costs.refreshed event" do

@@ -10,14 +10,74 @@ at a few hundred users.
 
 ## The number the decision turns on
 
-Measured on a deployed stack: **9c idle against 1c inference** per identification, so **~90% of the
-cost is a GPU waiting rather than working**. Corroborated three ways — an independent ~93% reading,
-`modal billing report` at 84% idle, and the decomposition harness at 89%. Latencies: barcode ~7 ms,
-VLM warm ~5.2 s, VLM cold ~20.5–32.9 s, with a 300 s scaledown window per woken container.
+⬛ **Most of an identification's cost is a GPU waiting rather than working — and how much
+depends on traffic shape, so it is a range, not a figure.**
 
-⬛ **The target is therefore the idle tail, not inference speed.** Any tier that answers a request
-without waking a GPU removes ~10c, and the *sign* of that effect is independent of how often the tier
-fires — which is what makes a decision possible without traffic prevalence.
+| traffic shape | idle share | cost per identification |
+|---|---|---|
+| **one upload after a quiet period** (the common case at a few hundred users) | **~90%** | **~9.8 c** |
+| **40 consecutive identifications** (measured, 5 runs × 8 fixtures) | **≥60%** | **≥0.429 c** |
+| perfect amortisation, zero idle (the floor) | 0% | 0.176 c |
+
+⚠️ **Quote the condition with the number.** An earlier version of this document stated "~90%"
+alone, as if it were the figure rather than one end of a range; it also attributed "89%" to the
+decomposition harness, which never produced that number. The sustained figure is a **lower bound**
+(see below), and corroboration from `modal billing report` put a real billing period at **84%**,
+which sits inside the range exactly as expected for mixed traffic.
+
+⚖️ **What makes a decision possible despite the range:** any tier that answers without waking a
+GPU removes the idle tail entirely, so the *sign* of the effect is prevalence-independent even
+though its size is not. That is why the promotion rule is a safety gate plus a cost sensitivity
+band, and not a single cost figure.
+
+### ⚠️ The idle figure is a lower bound, and the wire is why
+
+Idle is bounded, not measured. `gpu_container_age_s` was removed from the response as
+double-counting — which was half right: age-at-last-inference is active time *plus* the warm gaps
+between requests, and those gaps are billed. Without it, idle can only be bounded from the run
+timestamps (span + one scaledown window − active). On the measured series the window-only model
+said 300 s where the bound says **334 s**, so the model that ships on the cost page undercounts in
+the direction that makes the GPU look cheap.
+
+### ⛔ The 300-second scaledown window is a knob, and it is not priced here
+
+`scaledown_window=300` is a literal in the sidecar, chosen for a cold-start latency reason that was
+never priced in money. Shortening it captures much of the same saving as an architecture change:
+
+| window | lone cold identification |
+|---|---|
+| 300 s (today) | 9.81 c |
+| 120 s | 4.30 c |
+| 60 s | 2.46 c |
+
+⬛ **So "the GPU is 56× above its floor" does not by itself justify a redesign** — a 60 s window is
+a ~4× reduction on the lone-upload case for one literal. The ADR must place a GPU-free tier on that
+frontier rather than against today's window, or it will credit the redesign with a saving a
+parameter change would have delivered. ⚠️ The latency cost of a shorter window is real and
+unmeasured; that is the trade the ADR has to make, and it needs both numbers.
+
+### ⚠️ Latency: the first request of a run is the slow one, and that is not transport
+
+Wall time minus GPU stage, by position in the run (median of 5 runs):
+
+| position | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| residual (ms) | **5,283** | 2,692 | 2,836 | 2,626 | 2,062 | 2,000 | 1,902 | 1,827 |
+
+⛔ **A monotone warm-up curve (Spearman ρ = −0.976 against position), not a per-request transport
+cost.** An earlier version of this document read the barcode tier's 5.3 s residual as upload and
+network overhead that "every tier pays". It is not: the barcode fixture is always case #1, and the
+upload hypothesis is directly falsified by payload size — a 108 KB image at position 3 carries a
+2,836 ms residual while a 20 KB image at position 1 carries 5,283 ms. Five times the bytes, half
+the residual. ⚠️ The corpus runs in a fixed order, so tier and position are confounded; permuting
+fixture order per run would decorrelate them and costs nothing.
+
+⚖️ **The CPU case is stronger than the transport reading suggested, for a different reason.**
+Against the real non-first-request envelope (~2.4 s residual), a CPU tier at ~200 ms of compute
+lands near **2.6 s** against VLM_EXTRACT's measured **9,745 ms** p50 — roughly a **3.7× latency
+improvement**, not the "close to invisible" an earlier version claimed. ⚠️ `download` reads 0 ms in
+all 40 cases, so ~108 s of wall time is genuinely unattributed; "transport" remains a hypothesis,
+not a reading.
 
 ## Shortlist
 

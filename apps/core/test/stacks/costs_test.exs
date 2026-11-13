@@ -969,41 +969,67 @@ defmodule Stacks.CostsTest do
     end
   end
 
-  describe "the budget ceiling's two Modal constants are independent" do
+  describe "the budget ceiling's Modal constants" do
     # ⛔ THEY WERE ONE CONSTANT, AND THAT SILENTLY HALVED THE GUARD'S TRIP
-    # POINT. `modal_gpu_inference_surcharge_cents/0` returned the baseline, on
-    # the reasoning that two constants for one price is how they drift — but
-    # these are two different quantities: a conservative all-in ceiling per
-    # call, and the incremental cost of waking a GPU. While they were equal, a
-    # VLM call charged 6c where it had charged 3c, so the Modal ceiling tripped
-    # at HALF the call volume, and nothing said so.
-    test "the baseline and the GPU surcharge are separate figures" do
-      baseline = Costs.modal_budget_estimate_cents_per_call()
-      surcharge = Costs.modal_gpu_inference_surcharge_cents()
-
-      assert baseline == 3
-      assert surcharge == 3
-    end
-
-    # ⬛ ANTI-VACUITY, and it is the whole point of the split: the two must be
-    # settable independently. They are EQUAL today, so an equality assertion
-    # cannot tell a shared constant from two that agree — only changing one and
-    # observing the other hold distinguishes them.
+    # POINT. A shared attribute meant a VLM call charged 6c where it had
+    # charged 3c, so the ceiling tripped at HALF the call volume with nothing
+    # saying so. The split stays; what changed is that there are now three
+    # quantities, because the cost has three parts.
     #
-    # ⚖️ Expressed as a claim about the SOURCE rather than the value, because a
-    # runtime test cannot rebind a module attribute: if these two functions
-    # ever return the same attribute again, this is the comment that says why
-    # that is wrong.
-    test "the two figures are read from different attributes" do
+    # ⬛ AND THE FLAT RATE WAS WRONG IN BOTH DIRECTIONS. Against Modal's own
+    # billing for 2026-11-13 — $0.54 actual against a ledger reading $5.01 —
+    # 3c + 3c per call was 13.9x too high on sustained traffic and 0.6x too LOW
+    # on a lone cold identification, which is the expensive case a ceiling
+    # exists to catch. A flat per-call rate cannot express a cost that ranges
+    # 56x on which container answered rather than which image was sent.
+    test "the three figures are separate attributes" do
       source = File.read!(Path.join([__DIR__, "..", "..", "lib", "stacks", "costs.ex"]))
 
-      assert source =~
-               "def modal_budget_estimate_cents_per_call, do: @modal_budget_estimate_cents_per_call"
+      for {fun, attr} <- [
+            {"modal_budget_base_micro_cents_per_call", "@modal_budget_base_micro_cents_per_call"},
+            {"modal_budget_gpu_active_micro_cents", "@modal_budget_gpu_active_micro_cents"},
+            {"modal_budget_cold_start_micro_cents", "@modal_budget_cold_start_micro_cents"}
+          ] do
+        assert source =~ "def #{fun}, do: #{attr}",
+               "#{fun}/0 must read its OWN attribute. Sharing one is how these drift into " <>
+                 "each other — it happened once already and halved the ceiling's trip point."
+      end
+    end
 
-      assert source =~ "def modal_gpu_inference_surcharge_cents, do: @modal_gpu_surcharge_cents",
-             "the GPU surcharge is being read from the baseline attribute again — a VLM call " <>
-               "then charges twice the baseline and the Modal ceiling trips at half the call " <>
-               "volume, which is an operational change that must be stated rather than inherited"
+    # ⚖️ The VALUES are asserted because they are measurements, not preferences.
+    # GPU-active came from 226.9s over 35 GPU-tier calls; the cold tail is the
+    # 300s scaledown window at the published A10G rate. A change to either is a
+    # claim about what Modal charges and should have to restate itself here.
+    test "the figures are the measured ones, in micro-cents" do
+      assert Costs.modal_budget_base_micro_cents_per_call() == 2_000
+      assert Costs.modal_budget_gpu_active_micro_cents() == 25_000
+      assert Costs.modal_budget_cold_start_micro_cents() == 200_000
+    end
+
+    # ⛔ THE RELATIONSHIP IS THE POINT, AND IT MOVED WHEN THE WINDOW DID.
+    # Waking a container still costs more than an inference on one already
+    # awake, but the ratio is now ~8x rather than the ~46x it was at a 300s
+    # scaledown window. That drop IS the window cut: shortening it to 60s is
+    # precisely an attack on the term that dominated the bill, and the ledger
+    # reflecting a smaller ratio is the change working rather than a drift.
+    #
+    # ⚠️ So this asserts the ORDERING and a floor, not the old multiple. If a
+    # future window change makes these comparable, the ledger has stopped
+    # distinguishing a cold start from a busy run — which is the only
+    # distinction that matters for what Modal charges.
+    test "waking a container still costs several inferences" do
+      assert Costs.modal_budget_cold_start_micro_cents() >
+               4 * Costs.modal_budget_gpu_active_micro_cents(),
+             "a 60s tail is 1.84c against 0.25c of inference, about 8x. Below ~4x the two " <>
+               "are comparable and the per-cold-start model has stopped earning its keep."
+    end
+
+    # ⚠️ ANTI-VACUITY for the ordering above: the base must stay the smallest,
+    # or "charged on every call" quietly becomes the dominant term again and
+    # the ceiling trips on call count as it did before.
+    test "the per-call base is the smallest of the three" do
+      assert Costs.modal_budget_base_micro_cents_per_call() <
+               Costs.modal_budget_gpu_active_micro_cents()
     end
   end
 

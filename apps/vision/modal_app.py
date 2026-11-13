@@ -35,7 +35,7 @@ def _download_model() -> None:
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("libzbar0")
+    .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-eng")
     .pip_install(
         "transformers>=4.50.0",
         "qwen-vl-utils>=0.0.10",
@@ -44,6 +44,7 @@ image = (
         "accelerate>=0.34.0",
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
+        "pytesseract>=0.3.13",
     )
     .run_function(_download_model)
 )
@@ -170,25 +171,37 @@ def container_dispatch(inferences_since_load: int, container_id: str) -> dict[st
     image=image,
     max_containers=10,
     timeout=300,
-    # 300s, cut from 1200s against a measured gap rather than a guess.
+    # ⛔ 60s, CUT FROM 300s AGAINST A MEASURED COST DECOMPOSITION. This is how
+    # long an idle A10G keeps billing after its last request, and measurement
+    # put it at **98.1% of what a lone identification costs**: 9.18c of idle
+    # against 0.198c of inference. Halving the model's speed would save 1% of
+    # that bill; this literal saves 73%.
     #
-    # This is how long an idle A10G keeps billing after the last request, so the
-    # question is whether anything actually needs a container warm for longer.
-    # Two things drive this GPU and both are far tighter than 300s:
+    # ⚖️ WHAT THE WINDOW IS ACTUALLY PROTECTING, now that it has been measured.
+    # Not a batch: the `vision` Oban queue runs at concurrency 20 against
+    # `max_containers=10` below, deliberately, so uploads in one session arrive
+    # back-to-back and the gap between them is effectively zero. The window
+    # only ever rescues a reader who uploads, leaves, and RETURNS — and a
+    # simulated month at 12 uploads/day puts the cold-start rate at 95% with a
+    # 300s window and 99% with 60s. Four points of rescue, for four times the
+    # idle bill.
     #
-    #   * a real upload batch — the `vision` Oban queue runs at concurrency 20
-    #     against max_containers=10, so a batch arrives back-to-back and the gap
-    #     between requests is effectively zero. That queue setting lives in
-    #     `apps/core/config/config.exs`, which now carries the reciprocal note;
-    #     the two numbers are one decision and each side points at the other;
-    #   * the production probe — `scripts/probe-production.sh` fires every 15s
-    #     for a 600s window.
+    # ⚠️ The latency cost is therefore near zero where the product actually
+    # sits today, and real only above ~10 uploads/hour, where p50 drops from
+    # 30s to 9.7s because containers stay warm between readers. At that traffic
+    # the A10G is already several times over the $50/month budget on ANY
+    # window, so the window is not the knob that gets there — a cheaper GPU is,
+    # and the two compound.
     #
-    # 300s is twenty times the larger of those. What it does cost: a reader who
-    # uploads one image, walks away for 5-20 minutes, and comes back now pays one
-    # cold start (15-30s) that the old window would have absorbed. That is the
-    # trade being made, and it is deliberate.
-    scaledown_window=300,
+    # ⬛ Why 60 and not 30: 30s saves a further ~35% but stops spanning a human
+    # cadence. If the queue is drained and a reader is framing books by hand at
+    # ~45s apart, a 30s window leaves 37% of them cold against 22% at 60s. The
+    # queue makes that the uncommon path, not the impossible one.
+    #
+    # The arithmetic is `scripts/characterise/scaledown-frontier.py`, validated
+    # against both measured extremes — 0.378c simulated vs 0.429c measured
+    # back-to-back, and 9.97c vs 9.34c for a lone cold identification.
+    scaledown_window=60,
 )
 class VisionModel:
     @modal.enter()
@@ -390,7 +403,7 @@ _VISION_DIR = Path(__file__).parent
 
 _fastapi_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("libzbar0")
+    .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-eng")
     .pip_install(
         "fastapi==0.139.0",
         "starlette==1.3.1",
@@ -402,6 +415,7 @@ _fastapi_image = (
         "modal>=0.73.0",
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
+        "pytesseract>=0.3.13",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )
