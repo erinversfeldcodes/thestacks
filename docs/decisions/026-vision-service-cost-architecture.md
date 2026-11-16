@@ -120,13 +120,16 @@ the 4B, which the slice gate refuses as a drop-in.
 | # | config | result |
 |---|---|---|
 | 1 | T4 + 7B fp16 "as is" | ⛔ **Does not fit — `device_map="auto"` silently offloads to CPU.** Scored-case accuracy at parity (85/113), but p-max latency 151s and 9 lone requests died against timeouts. Fails criterion (b). |
-| 1v2 | warmed clean re-run | `PENDING — mid-run` |
-| 2 | T4 + `max_pixels=1003520` | `PENDING — queued` (expectation: marginal; cannot fix weight shuttling) |
+| 1v2 | warmed clean re-run | ⚠️ **Aborted by an infrastructure collision, not re-run.** A concurrent preview deploy reset the shared Neon preview branch mid-run and killed the eval at its budget lookup, four hours in. The as-is verdict rests on run 1 plus the container's own offload evidence; another four offloaded hours would polish a conclusion already forced. |
+| 2 | `max_pixels=1003520` (repointed to L4 by owner decision after the T4-7B disqualification) | ⬛ **A no-op by construction, and the discovery is the result**: the CPU front door already resizes every image to ≤672px (~452k pixels) — under half the tested cap — so the knob never bit. Accuracy byte-identical (86/122, every stratum); the ±5–8% latency deltas between two identical L4 runs calibrate **run-to-run jitter (~5–8% on medians)** — no smaller delta is ever signal. The pixel lever was pulled before this wave began. |
+| L4 | L4 + 7B bf16 as-is | ✅ **86/122, 0 unscored, per-stratum identical to the A10G baseline** — zero model risk, measured rather than assumed. Extract p50 16.5s (+32%, the bandwidth ratio); warm cost/extract a wash (0.367c vs 0.382c); **idle tail per lone identification −27% (1.33c vs 1.83c) — the dominant term.** No cold-start failure mode, unlike every tested T4 configuration. |
 | 3a | T4 + 7B bnb-int8 | ⛔ **Fits, and is unusable — the pre-registered prediction confirmed in the worst way.** 30/122 scored, 88 unscored: every success came from the CPU barcode tier and **zero VLM answers survived the HTTP serving path** (all died as upstream failures). The model answers through Modal's patient direct client, so this is pure inference speed: bnb-int8 on Turing is slow enough that every call outlives the caller. Fails criterion (b) absolutely. |
 | 3b | T4 + 7B AWQ int4 | ⛔ **BLOCKED after three distinct toolchain failures** (gptqmodel missing → Triton AWQ kernel rejects the vision-merger shape on sm75 → autoawq demands IPEX on a CPU builder). ⬛ Finding: the quantisation ecosystem has moved past Turing; fast kernels (Marlin) start at Ampere. |
 | 4 | T4 + Qwen3-VL-4B fp16 | ✅ **84/122, 0 unscored.** Perfect clear_cover (22/22) and rotation (12/12); **illegible collapsed 5/10 → 1/10**, hostile_barcode −1, book_adjacent −1. Latency T4-viable (cls p50 7.0s ≈ A10G 7B). ⚖️ As a drop-in swap, **our own slice gate refuses it** — correctly. As a cascade role-player (clean input only), strongest candidate measured. |
 
-Harness facts with standing value: Modal binds **decorator args at deploy time but
+Harness facts with standing value: the **preview Neon branch is shared mutable
+state** — a preview deploy resets it and kills every consumer mid-flight (cost:
+one four-hour run); Modal binds **decorator args at deploy time but
 re-resolves module globals in the container**, so experiment knobs must be baked
 into the image env (a max_pixels "variant" would otherwise silently re-run the
 baseline); the GPU must be warmed through Modal's own client (an HTTP warmup
