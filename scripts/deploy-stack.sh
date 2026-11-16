@@ -1304,6 +1304,28 @@ if [[ -n "${machine_id}" ]]; then
                 || { echo "FAIL deploy: preview seed failed"; exit 1; }
             echo "PASS deploy: preview dev fixtures seeded"
         fi
+
+        # ⚖️ OPTIONAL BY THE SAME GUARD PROD USES. With both prober variables
+        # set, the preview gets the account the SLO prober authenticates as,
+        # so the gate's availability probes measure the stack instead of
+        # 4xx-ing on a missing fixture — which once turned an untestable third
+        # of the gate into a formal availability breach (0.7143 with zero 5xx
+        # and zero timeouts). Unset, this block is a no-op and previews behave
+        # exactly as before.
+        #
+        # ⛔ `rpc`, never `eval`: a second BEAM OOMs the 512MB preview VM.
+        # Runs after BOTH seed paths above, because a CoW-inherited branch
+        # lacks the account just as a freshly-seeded one does; `seed_prober/0`
+        # is idempotent and the account's role is plain "user", so re-running
+        # on every preview deploy is safe by design.
+        if [[ -n "${STACKS_PROBER_EMAIL:-}" && -n "${STACKS_PROBER_PASSWORD:-}" ]]; then
+            deploy_with_retry "preview prober seed" \
+                fly machine exec "${machine_id}" \
+                "/bin/sh -c \"/app/bin/core rpc 'Stacks.Release.seed_prober()'\"" \
+                --app "${CORE_APP}" --timeout 60 \
+                || { echo "FAIL deploy: preview prober seed failed"; exit 1; }
+            echo "PASS deploy: preview prober account seeded"
+        fi
     fi
 else
     echo "FAIL deploy: no running machine — migrations and seeds did NOT run." >&2
