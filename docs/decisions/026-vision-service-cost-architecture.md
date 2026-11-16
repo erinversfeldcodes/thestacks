@@ -127,6 +127,20 @@ the 4B, which the slice gate refuses as a drop-in.
 | 3b | T4 + 7B AWQ int4 | ⛔ **BLOCKED after three distinct toolchain failures** (gptqmodel missing → Triton AWQ kernel rejects the vision-merger shape on sm75 → autoawq demands IPEX on a CPU builder). ⬛ Finding: the quantisation ecosystem has moved past Turing; fast kernels (Marlin) start at Ampere. |
 | 4 | T4 + Qwen3-VL-4B fp16 | ✅ **84/122, 0 unscored.** Perfect clear_cover (22/22) and rotation (12/12); **illegible collapsed 5/10 → 1/10**, hostile_barcode −1, book_adjacent −1. Latency T4-viable (cls p50 7.0s ≈ A10G 7B). ⚖️ As a drop-in swap, **our own slice gate refuses it** — correctly. As a cascade role-player (clean input only), strongest candidate measured. |
 
+**The production SLO gate, run report-only against a T4+4B preview (2026-11-16):
+formally "would roll back", substantively a pass with one caveat.** The breach was
+availability 0.7143 vs 0.99 — but its decomposition is 287 synthetic probes, 205
+succeeded, **zero 5xx, zero timeouts**: every failure was a 4xx-class refusal from
+probe types that presuppose production fixtures a preview does not carry. The
+signal the gate measured cleanly all passed: 40/40 real uploads succeeded, no
+circuit fuse opened, DB pool queues single-digit ms, BEAM memory flat at 138MB of
+a 400MB ceiling — the 4B under concurrent upload load destabilised nothing.
+⚠️ Two caveats: the reported upload p95 (47ms) is implausibly small against known
+10–20s identification streams and measures something narrower than the pipeline —
+not to be quoted until understood; and ⬛ the gate itself is not preview-portable
+(prod-fixture assumptions), which is a gap worth closing before the gate is ever
+pointed at a preview as a release check.
+
 Harness facts with standing value: the **preview Neon branch is shared mutable
 state** — a preview deploy resets it and kills every consumer mid-flight (cost:
 one four-hour run); Modal binds **decorator args at deploy time but
