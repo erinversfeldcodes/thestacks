@@ -99,6 +99,30 @@ _EXTRACT_PROMPT = (
     "the same name. Authors should be people, not production companies "
     '(e.g. "Discovery Communications", "Warner Bros.", "Productions, Inc.") '
     "— if the only plausible author is an organisation/brand, return books:[].\n\n"
+    # ⚠️ THE ISBN IS DELIBERATELY NOT ASKED FOR HERE, AND THAT WAS MEASURED.
+    #
+    # Measurement showed the VLM returning `is_book=true, isbns=[]` on 6 of 6
+    # hostile-barcode photographs — it had never been asked. Adding an
+    # instruction to read the printed digits, plus a hard prohibition on
+    # inferring them, was tried on 2026-11-13 and reverted the same day:
+    #
+    #   * `clear_cover` collapsed from 20/22 to 2/22. The model stopped
+    #     returning titles AT ALL — `[]` where it had read "A Cageful of
+    #     Butterflies" and "DREAMING THE KAROO" correctly. The caution
+    #     generalised from the ISBN field to the whole response.
+    #   * `hostile_barcode` moved only 3/20 to 4/20, and the template's own
+    #     example ISBN was copied verbatim onto 10 of 16 unrelated books.
+    #
+    # ⛔ A PROMPT IS GLOBAL STATE. The change was measured on the stratum it
+    # was meant to help, which showed a small gain and was structurally blind
+    # to a 91%-to-9% regression elsewhere. Any future attempt must be scored
+    # on the WHOLE corpus before it is believed.
+    #
+    # ⚖️ The two seam guards that change bought are kept, because they are
+    # right whatever produces an ISBN: `Moderation` validates the check digit
+    # before trusting a model-read ISBN, and cross-checks it against the title
+    # the cover reads — a well-formed ISBN for the wrong book defeats both the
+    # checksum and the hard gate, and only disagreement catches it.
     "Reasoning approach:\n"
     "1. Transcribe all readable text verbatim (including fragments), noting any orientation "
     "issues.\n"

@@ -494,7 +494,9 @@ defmodule Mix.Tasks.Eval.Vision do
     # regression (the model never answered) nor clear the gate (the baseline
     # counts every case). Say that, in words deploy-stack.sh classifies as a
     # broken gate rather than a scored regression — it greps for REGRESSION.
-    identity = model_identity(total)
+    # ⬛ Strata merged in here rather than inside `model_identity/1`, which is
+    # called from places that have a corpus size but no scored results.
+    identity = total |> model_identity() |> Map.put(:strata, stratum_counts(results))
 
     # ⛔ WRITTEN BEFORE THE *UNSCORED* CHECK, NOT MERELY BEFORE THE VERDICT.
     # The write used to sit below this `Mix.raise`, so "written before the
@@ -522,12 +524,17 @@ defmodule Mix.Tasks.Eval.Vision do
   # complexity limit, and the split is the better shape regardless: the
   # counting is arithmetic, the verdict is policy, and only one of them has
   # five ways to refuse.
-  defp verdict(baseline, baseline_file, passed, total, identity, record?) do
-    cond do
-      record? ->
-        write_baseline(baseline_file, passed, total, identity)
-        Mix.shell().info("recorded #{passed}/#{total} as the new baseline for #{identity.model}")
+  defp verdict(_baseline, baseline_file, passed, total, identity, true) do
+    write_baseline(baseline_file, passed, total, identity)
+    Mix.shell().info("recorded #{passed}/#{total} as the new baseline for #{identity.model}")
+  end
 
+  # ⬛ The comparison branches, split from the record path above so that adding
+  # a refusal does not push the whole decision over the complexity limit — and
+  # so the two halves read as what they are: one writes a fact, the other
+  # judges one.
+  defp verdict(baseline, _baseline_file, passed, total, identity, false) do
+    cond do
       baseline == :absent ->
         Mix.raise(refusal(:absent, passed, total, identity, baseline))
 
@@ -543,6 +550,10 @@ defmodule Mix.Tasks.Eval.Vision do
 
       baseline == :unreadable ->
         Mix.raise(refusal(:unreadable, passed, total, identity, baseline))
+
+      match?({:slice_regression, _}, baseline) ->
+        {:slice_regression, dropped} = baseline
+        Mix.raise(slice_refusal(dropped, passed, total))
 
       match?({:mismatch, nil}, baseline) ->
         Mix.raise(refusal(:legacy_baseline, passed, total, identity, baseline))
@@ -674,12 +685,66 @@ defmodule Mix.Tasks.Eval.Vision do
           Map.get(recorded, "total") != Map.get(identity, :total) ->
             {:different_corpus, Map.get(recorded, "total")}
 
+          # ⬛ A SLICE REGRESSION IS A REGRESSION, EVEN WHEN THE TOTAL RISES.
+          # Checked before the total, because the total is the number that
+          # hides it: reporting "no regression, 67 vs 57" while a healthy
+          # stratum fell by 18 points is precisely the blindness this gate
+          # exists to remove.
+          (dropped = slice_regressions(recorded, identity)) != [] ->
+            {:slice_regression, dropped}
+
           true ->
             {:ok, passed}
         end
 
       _ ->
         :unreadable
+    end
+  end
+
+  defp slice_refusal(dropped, passed, total) do
+    lines =
+      Enum.map_join(dropped, "\n  ", fn {stratum, was, now, of} ->
+        "#{stratum}: #{was}/#{of} -> #{now}/#{of}"
+      end)
+
+    "eval.vision: A STRATUM REGRESSED, scored #{passed}/#{total} overall.\n  " <>
+      lines <>
+      "\n\nThe overall score is not the gate. A change that helps one stratum and " <>
+      "breaks another can raise the total while making the system worse for the readers " <>
+      "in the broken slice. If this trade is deliberate, re-record with `--record` and " <>
+      "say in the commit which slice was sold and for what."
+  end
+
+  # String keys, because this round-trips through JSON and a baseline read back
+  # from disk has string keys either way — building it with atoms here would
+  # make the recorded and the loaded shapes differ in a way only the second run
+  # notices.
+  defp stratum_counts(results) do
+    results
+    |> Enum.group_by(&(Map.get(&1, :stratum) || "unknown"))
+    |> Map.new(fn {stratum, cases} ->
+      {to_string(stratum), %{passed: Enum.count(cases, & &1.ok), total: length(cases)}}
+    end)
+  end
+
+  # ⚠️ ONLY STRATA PRESENT IN BOTH ARE COMPARED. A corpus gains strata over
+  # time, and a stratum the baseline never scored is not a regression — it is
+  # new information. Silently treating it as 0 -> n would make every corpus
+  # growth look like an improvement, which is the mirror of the bug this
+  # guards.
+  defp slice_regressions(recorded, identity) do
+    was = Map.get(recorded, "strata") || %{}
+    now = Map.get(identity, :strata) || %{}
+
+    for {stratum, %{"passed" => before_n, "total" => before_of}} <- was,
+        %{passed: after_n, total: after_of} = Map.get(now, stratum, %{passed: nil, total: nil}),
+        after_n != nil,
+        # A stratum whose size changed is not comparable, for the same reason
+        # the whole corpus is not when its total moves.
+        before_of == after_of,
+        after_n < before_n do
+      {stratum, before_n, after_n, before_of}
     end
   end
 
@@ -699,6 +764,13 @@ defmodule Mix.Tasks.Eval.Vision do
         %{
           passed: passed,
           total: total,
+          # ⛔ PER-STRATUM, BECAUSE A TOTAL CANNOT SEE A SLICE COLLAPSE.
+          # A prompt change once moved the total from 57/87 to 67/122 — which
+          # reads as progress — while `clear_cover` went 20/22 to 2/22 and the
+          # model stopped returning titles at all. The total rose because a
+          # different stratum improved. Recording the slices is what makes the
+          # regression nameable.
+          strata: identity.strata,
           model: identity.model,
           modal_app: identity.modal_app,
           recorded_at: DateTime.utc_now()

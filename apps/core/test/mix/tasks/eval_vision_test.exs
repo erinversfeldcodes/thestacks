@@ -852,6 +852,92 @@ defmodule Mix.Tasks.Eval.VisionTest do
       assert {:ok, 6} = Vision.baseline_for(body, identity)
     end
 
+    # ⛔ THE REGRESSION THIS GATE MISSED, IN THE NUMBERS IT MISSED IT WITH.
+    # A prompt change moved the total from 57 to 67 while `clear_cover` fell
+    # from 20/22 to 2/22 — the model stopped returning titles at all. The gate
+    # compared totals only, so a rising number reported "no regression" over a
+    # stratum that had collapsed by 18 points.
+    test "a stratum that fell is a regression even though the total rose" do
+      identity = %{
+        model: "m",
+        modal_app: "https://example.test",
+        total: 44,
+        strata: %{
+          "clear_cover" => %{passed: 2, total: 22},
+          "hostile_barcode" => %{passed: 20, total: 22}
+        }
+      }
+
+      body =
+        Jason.encode!(%{
+          passed: 23,
+          total: 44,
+          model: "m",
+          modal_app: "https://example.test",
+          strata: %{
+            "clear_cover" => %{passed: 20, total: 22},
+            "hostile_barcode" => %{passed: 3, total: 22}
+          }
+        })
+
+      assert {:slice_regression, dropped} = Vision.baseline_for(body, identity),
+             "the total rose 23 -> 22... and a slice fell 20 -> 2. Comparing totals " <>
+               "cannot see that, which is how an 18-point collapse shipped reported as " <>
+               "an improvement"
+
+      assert [{"clear_cover", 20, 2, 22}] == dropped,
+             "the failing slice must be named with its before and after, or the gate " <>
+               "tells someone to go looking — got #{inspect(dropped)}"
+    end
+
+    # ⬛ ANTI-VACUITY: a slice that IMPROVED must not trip it, or the gate
+    # would refuse every run and be removed within a week.
+    test "a stratum that rose is not a regression" do
+      identity = %{
+        model: "m",
+        modal_app: "https://example.test",
+        total: 22,
+        strata: %{"hostile_barcode" => %{passed: 9, total: 22}}
+      }
+
+      body =
+        Jason.encode!(%{
+          passed: 3,
+          total: 22,
+          model: "m",
+          modal_app: "https://example.test",
+          strata: %{"hostile_barcode" => %{passed: 3, total: 22}}
+        })
+
+      assert {:ok, 3} = Vision.baseline_for(body, identity)
+    end
+
+    # ⚠️ A stratum the baseline never scored is NEW INFORMATION, not a
+    # regression. Treating an absent slice as 0 would make every corpus growth
+    # trip the gate — the mirror of the bug being guarded.
+    test "a stratum the baseline never had does not trip the gate" do
+      identity = %{
+        model: "m",
+        modal_app: "https://example.test",
+        total: 30,
+        strata: %{
+          "clear_cover" => %{passed: 20, total: 22},
+          "typography" => %{passed: 1, total: 8}
+        }
+      }
+
+      body =
+        Jason.encode!(%{
+          passed: 20,
+          total: 30,
+          model: "m",
+          modal_app: "https://example.test",
+          strata: %{"clear_cover" => %{passed: 20, total: 22}}
+        })
+
+      assert {:ok, 20} = Vision.baseline_for(body, identity)
+    end
+
     # ⚠️ And the model mismatch still wins, because it is the more fundamental
     # disagreement: a different model's number is not comparable whatever the
     # corpus did.

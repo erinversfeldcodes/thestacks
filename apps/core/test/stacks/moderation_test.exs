@@ -719,4 +719,211 @@ defmodule Stacks.ModerationTest do
       assert capture_pipeline_log("") =~ "raw_text=empty"
     end
   end
+
+  # ⛔ A MODEL-READ ISBN IS A CLAIM, AND THE CHECK DIGIT IS THE ONLY VERIFIER
+  # THE MODEL DOES NOT CONTROL. The extract prompt now asks the VLM to read
+  # the digits printed beside a barcode, because measurement showed the VLM
+  # returning `is_book=true, isbns=[]` on 6 of 6 hostile-barcode photographs
+  # where it had never been asked for one — while those printed digits survive
+  # the glare, curvature and covering thumb that defeat the bar pattern.
+  #
+  # ⚖️ Asking a generative model for an identifier is only safe because this
+  # seam validates it. A misread must cost a fall-through to title search, not
+  # a confident resolution to a DIFFERENT book — which is strictly worse than
+  # returning nothing, under an ISBN hard gate that would then admit it.
+  defp collect_requested_urls(acc \\ []) do
+    receive do
+      {Stacks.Books.MockHttpClient, :request, url} -> collect_requested_urls([url | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  describe "an ISBN the model read off the cover" do
+    # ⚠️ THE DISCRIMINATOR IS THE WIRE, NOT THE RESULT. Two earlier versions of
+    # this test were vacuous: both the validated and unvalidated paths end in
+    # `{:error, :isbn_not_found}` under the test mocks, so asserting on the
+    # pipeline's return value could not tell them apart — a probe deleting
+    # `canonical_isbn13/1` left all 42 tests green, twice.
+    #
+    # ⬛ What DOES differ is whether the misread is ever looked up. With
+    # validation the seam discards it and falls through to the title search;
+    # without, the resolver is handed it and asks Open Library. `capture_requests/0`
+    # exists for exactly this — asserting on the query the resolver built.
+    test "a misread that fails its check digit never reaches the resolver" do
+      MockHttpClient.capture_requests()
+
+      MockClient.put_response("analyze", fn _payload ->
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock",
+           "books" => [
+             %{
+               "title" => "The Great Gatsby",
+               "author" => nil,
+               # One digit off a real ISBN: structurally perfect, checksum wrong.
+               "potential_isbns" => ["9780743273566"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ]
+         }}
+      end)
+
+      Moderation.run_pipeline(%{
+        image_b64: @test_image_b64,
+        book_attrs: %{"title" => "The Great Gatsby"}
+      })
+
+      urls = collect_requested_urls()
+
+      refute Enum.any?(urls, &String.contains?(&1, "9780743273566")),
+             "the model offered an ISBN whose check digit does not hold and the resolver " <>
+               "was asked to look it up. The checksum is the one verifier a generative " <>
+               "model does not control; skipping it is what makes asking a model for an " <>
+               "identifier unsafe. Requested: #{inspect(urls)}"
+
+      assert urls != [],
+             "no request was made at all, so this test cannot distinguish a validated " <>
+               "seam from a broken pipeline"
+    end
+
+    # ⛔ THE FAILURE THAT ACTUALLY HAPPENED, IN PRODUCTION SHAPE. The extract
+    # prompt's output template briefly carried a real ISBN as an example and
+    # the model copied it verbatim onto 10 of 16 unrelated books. Both existing
+    # guards passed it: the check digit holds, and it resolves against Open
+    # Library — to the WRONG book. A reader photographing one title would have
+    # been given another.
+    #
+    # ⚖️ The only signal left is that the two readings disagree. The digits come
+    # off the barcode area and the title off the cover; agreement is weak
+    # evidence, disagreement is strong evidence one of them is invented.
+    test "an ISBN that resolves to a different book than the cover reads is not trusted" do
+      MockHttpClient.capture_requests()
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok, %{"ISBN:9780312853235" => %{"title" => "Ender's Game"}}}
+      )
+
+      MockClient.put_response("analyze", fn _payload ->
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock",
+           "books" => [
+             %{
+               # The cover says one book; the "ISBN" is a different real book
+               # copied out of the prompt. Checksum valid, resolves cleanly.
+               "title" => "Bhagavad Gita As It Is",
+               "author" => nil,
+               "potential_isbns" => ["9780312853235"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ]
+         }}
+      end)
+
+      result =
+        Moderation.run_pipeline(%{
+          image_b64: @test_image_b64,
+          book_attrs: %{"title" => "Bhagavad Gita As It Is"}
+        })
+
+      stored =
+        case result do
+          {:ok, %{resolved: books}} ->
+            Enum.flat_map(books, fn b -> Enum.map(b.editions, & &1.isbn) end)
+
+          _ ->
+            []
+        end
+
+      refute "9780312853235" in stored,
+             "the model offered an ISBN for a DIFFERENT book than the cover it read, and " <>
+               "it was stored. Its check digit holds and it resolves, so neither the " <>
+               "checksum nor the ISBN hard gate can catch this — the disagreement between " <>
+               "the two readings is the only signal left. Stored: #{inspect(stored)}"
+
+      urls = collect_requested_urls()
+
+      assert urls != [],
+             "nothing was requested, so this cannot distinguish a cross-checked seam from " <>
+               "a pipeline that failed before reaching it"
+    end
+
+    # ⬛ ANTI-VACUITY: without this, a seam that rejected EVERY model-read ISBN
+    # would satisfy the case above while removing the capability entirely.
+    test "a correctly read ISBN still resolves" do
+      MockClient.put_response("analyze", fn _payload ->
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock",
+           "books" => [
+             %{
+               "title" => "The Great Gatsby",
+               "author" => nil,
+               "potential_isbns" => ["9780743273565"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ]
+         }}
+      end)
+
+      assert {:ok, %{resolved: [book | _]}} =
+               Moderation.run_pipeline(%{
+                 image_b64: @test_image_b64,
+                 book_attrs: %{"title" => "The Great Gatsby"}
+               })
+
+      assert [edition | _] = book.editions
+
+      assert edition.isbn == "9780743273565",
+             "a valid model-read ISBN must still resolve — rejecting every one would " <>
+               "make the prompt change pointless"
+    end
+
+    # ⚖️ A 10-digit ISBN is what an older cover prints, and it converts here
+    # rather than being corrected retroactively — which is what the
+    # `normalise_edition_isbn10` data correction exists to undo.
+    test "a 10-digit ISBN read off an older cover is canonicalised" do
+      MockClient.put_response("analyze", fn _payload ->
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "model_used" => "mock",
+           "books" => [
+             %{
+               "title" => "The Great Gatsby",
+               "author" => nil,
+               # ISBN-10 for the same edition as 9780743273565.
+               "potential_isbns" => ["0743273567"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ]
+         }}
+      end)
+
+      case Moderation.run_pipeline(%{image_b64: @test_image_b64}) do
+        {:ok, %{resolved: [book | _]}} ->
+          [edition | _] = book.editions
+
+          assert String.length(edition.isbn) == 13,
+                 "a 10-digit ISBN must be canonicalised at this seam, not stored as-is and " <>
+                   "corrected by a later data-correction job; got #{edition.isbn}"
+
+        _ ->
+          :ok
+      end
+    end
+  end
 end

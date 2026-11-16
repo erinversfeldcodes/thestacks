@@ -328,10 +328,65 @@ defmodule Stacks.Moderation do
   defp store_failure_reason(reason) when is_atom(reason), do: reason
   defp store_failure_reason(_), do: :store_failed
 
-  defp resolve_candidate(%{"potential_isbns" => [isbn | _]} = _candidate, idx, _context)
+  # ⛔ CANONICALISED AND CHECK-DIGIT VALIDATED AT THE SEAM, because this is
+  # where a MODEL-READ ISBN enters the system. The extract prompt now asks the
+  # VLM to read the digits printed beside a barcode — those survive glare,
+  # curvature and a covering thumb where the bar pattern pyzbar needs does
+  # not — and a model that reads digits can misread them.
+  #
+  # ⚖️ `canonical_isbn13/1` returns nil for anything whose check digit does
+  # not hold, so a misread falls through to the title search below rather than
+  # resolving as a different book. That is the whole safety argument for
+  # asking a generative model for an identifier at all: the checksum is a
+  # verifier the model does not control. A 10-digit ISBN converts here too,
+  # which is what `normalise_edition_isbn10` had to correct retroactively.
+  defp resolve_candidate(%{"potential_isbns" => [isbn | _]} = candidate, idx, context)
        when is_binary(isbn) and isbn != "" do
-    Logger.info("Moderation: candidate #{idx} has direct ISBN #{isbn}")
-    {:ok, isbn, nil}
+    # ⚠️ TWO FUNCTIONS, TWO JOBS, AND THEY ARE NOT INTERCHANGEABLE.
+    # `canonical_isbn13/1` is a COMPARISON normaliser — its own doc says
+    # "anything else returns stripped/upcased unchanged", so a checksum-invalid
+    # ISBN-13 passes straight through it. Using it alone here looked like
+    # validation and was not: a test asserting the misread never reached the
+    # resolver failed on the first run that could actually tell.
+    #
+    # ⬛ `valid_isbn_checksum?/1` is the validator, and its doc already names
+    # this caller: "publicly exposed so callers (e.g. Stacks.Moderation) can
+    # trust a scanner-decoded ISBN without a round-trip to Open Library".
+    # Validate first, canonicalise second.
+    stripped = String.replace(isbn, ~r/[\s-]/, "")
+
+    case ISBN.valid_isbn_checksum?(stripped) and ISBN.canonical_isbn13(stripped) do
+      false ->
+        Logger.info(
+          "Moderation: candidate #{idx} offered ISBN #{inspect(isbn)} that fails its own " <>
+            "check digit — falling through to title search rather than trusting it"
+        )
+
+        resolve_candidate(Map.delete(candidate, "potential_isbns"), idx, context)
+
+      canonical ->
+        # ⛔ CROSS-CHECK THE ISBN AGAINST THE TITLE THE MODEL READ, because a
+        # well-formed hallucination defeats every other guard here. The prompt
+        # template briefly carried a real ISBN as an example and the model
+        # copied it onto 10 of 16 unrelated books — a value whose check digit
+        # holds and which resolves against Open Library, so both the checksum
+        # and the ISBN hard gate passed it. A reader photographing one book
+        # would have been given another.
+        #
+        # ⚖️ The two readings are independent: the digits come off the barcode
+        # area, the title off the cover. Agreement is weak evidence; DISAGREEMENT
+        # is strong evidence that one of them is invented. Preferring the title
+        # search on disagreement costs a cheap lookup and converts a silently
+        # wrong identification into a correct one or none.
+        case cross_check_isbn_title(canonical, candidate, idx) do
+          :ok ->
+            Logger.info("Moderation: candidate #{idx} has direct ISBN #{canonical}")
+            {:ok, canonical, nil}
+
+          :disagrees ->
+            resolve_candidate(Map.delete(candidate, "potential_isbns"), idx, context)
+        end
+    end
   end
 
   defp resolve_candidate(candidate, idx, context) do
@@ -353,6 +408,53 @@ defmodule Stacks.Moderation do
   end
 
   @nullish_author_values ["null", "none", "n/a", "unknown", ""]
+
+  # ⚠️ Absent evidence is NOT disagreement. When the model read no title, or
+  # the resolver returns no title for the ISBN, there is nothing to compare and
+  # the ISBN stands on its checksum alone — the behaviour before this check
+  # existed. Treating "cannot tell" as "disagrees" would reject the barcode
+  # tier's own answers, which carry no title at all.
+  defp cross_check_isbn_title(isbn, candidate, idx) do
+    read_title = normalise_nullish_text(candidate["title"])
+
+    with true <- is_binary(read_title) and read_title != "",
+         {:ok, resolved} <- ISBNResolver.resolve(isbn),
+         # ⚠️ ATOM key. `build_open_library_metadata/1` returns %{title: ...},
+         # not a string-keyed map — reading "title" here silently matched
+         # nothing and the cross-check passed everything.
+         resolved_title when is_binary(resolved_title) <- Map.get(resolved, :title) do
+      if titles_agree?(read_title, resolved_title) do
+        :ok
+      else
+        Logger.warning(
+          "Moderation: candidate #{idx} offered ISBN #{isbn}, which resolves to " <>
+            "#{inspect(resolved_title)} while the cover reads #{inspect(read_title)} — " <>
+            "treating the ISBN as unread and searching on the title instead"
+        )
+
+        :disagrees
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  # ⬛ Containment on normalised text, matching how the eval scores a title: a
+  # cover prints "Flyboys: A True Story of Courage" where the catalogue holds
+  # "Flyboys". Equality would reject almost every correct pair.
+  defp titles_agree?(a, b) do
+    na = normalise_title_for_match(a)
+    nb = normalise_title_for_match(b)
+    na != "" and nb != "" and (String.contains?(na, nb) or String.contains?(nb, na))
+  end
+
+  defp normalise_title_for_match(s) do
+    s
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, " ")
+    |> String.trim()
+  end
 
   defp normalise_author(value) when is_binary(value) do
     if String.downcase(String.trim(value)) in @nullish_author_values, do: nil, else: value
