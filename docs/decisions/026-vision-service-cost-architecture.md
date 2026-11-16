@@ -112,12 +112,17 @@ Pre-registered criteria, in order: **(a)** no stratum regresses vs the 86/122
 baseline under the slice gate; **(b)** a lone cold request survives the client
 timeout; **(c)** lowest GPU-seconds per identification among survivors.
 
+⬛ **Series conclusion already forced, whatever 1v2/2 add: the T4 cannot serve
+the 7B in any tested configuration** — fp16 offloads and crawls, int8 fits and
+times out, AWQ is toolchain-blocked. The T4's only measured viable config is
+the 4B, which the slice gate refuses as a drop-in.
+
 | # | config | result |
 |---|---|---|
 | 1 | T4 + 7B fp16 "as is" | ⛔ **Does not fit — `device_map="auto"` silently offloads to CPU.** Scored-case accuracy at parity (85/113), but p-max latency 151s and 9 lone requests died against timeouts. Fails criterion (b). |
 | 1v2 | warmed clean re-run | `PENDING — mid-run` |
 | 2 | T4 + `max_pixels=1003520` | `PENDING — queued` (expectation: marginal; cannot fix weight shuttling) |
-| 3a | T4 + 7B bnb-int8 | `PENDING — running` (prediction on record: fits, but slower — bnb-int8 saves memory, not time) |
+| 3a | T4 + 7B bnb-int8 | ⛔ **Fits, and is unusable — the pre-registered prediction confirmed in the worst way.** 30/122 scored, 88 unscored: every success came from the CPU barcode tier and **zero VLM answers survived the HTTP serving path** (all died as upstream failures). The model answers through Modal's patient direct client, so this is pure inference speed: bnb-int8 on Turing is slow enough that every call outlives the caller. Fails criterion (b) absolutely. |
 | 3b | T4 + 7B AWQ int4 | ⛔ **BLOCKED after three distinct toolchain failures** (gptqmodel missing → Triton AWQ kernel rejects the vision-merger shape on sm75 → autoawq demands IPEX on a CPU builder). ⬛ Finding: the quantisation ecosystem has moved past Turing; fast kernels (Marlin) start at Ampere. |
 | 4 | T4 + Qwen3-VL-4B fp16 | ✅ **84/122, 0 unscored.** Perfect clear_cover (22/22) and rotation (12/12); **illegible collapsed 5/10 → 1/10**, hostile_barcode −1, book_adjacent −1. Latency T4-viable (cls p50 7.0s ≈ A10G 7B). ⚖️ As a drop-in swap, **our own slice gate refuses it** — correctly. As a cascade role-player (clean input only), strongest candidate measured. |
 
