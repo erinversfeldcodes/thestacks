@@ -58,7 +58,7 @@ defmodule Mix.Tasks.Eval.Vision do
     if skip?() do
       skip_or_fail()
     else
-      results = Enum.map(corpus, &score_image/1)
+      results = score_corpus(corpus)
       report(results)
       gate(results, Keyword.get(cli, :record, false))
     end
@@ -97,6 +97,45 @@ defmodule Mix.Tasks.Eval.Vision do
   # there. Setting the env var is how you say "score THIS deployment", and this
   # is the task that acts on it — otherwise the variable silently means nothing
   # and the failures look like the model rather than the wiring.
+  # ⚖️ SERIAL BY DEFAULT, CONCURRENT BY EXPLICIT CHOICE. The sidecar was built
+  # for concurrency (`max_containers=10`; production drives it 20-wide), yet
+  # this harness ran 122 cases one at a time — which is most of a deploy's
+  # wall-clock and the expensive shape for a per-lifetime-billed container: a
+  # concurrent batch amortises one idle tail where serial calls each pay their
+  # own. `EVAL_VISION_CONCURRENCY` opts a caller in; the default stays 1
+  # because defaults are the baseline every recorded run was measured on.
+  #
+  # ⚠️ CONCURRENCY CHANGES WHAT THE LATENCY COLUMNS MEAN. Calls queueing
+  # inside a shared container inflate per-case wall times, so a concurrent
+  # run's latency rows are not comparable with a serial baseline's — accuracy
+  # is unaffected, which is all the GATE reads. The artefact records the
+  # concurrency so nobody compares across that line unknowingly.
+  def eval_concurrency do
+    case Integer.parse(System.get_env("EVAL_VISION_CONCURRENCY") || "1") do
+      {n, ""} when n >= 1 -> min(n, 10)
+      _ -> 1
+    end
+  end
+
+  defp score_corpus(corpus) do
+    case eval_concurrency() do
+      1 ->
+        Enum.map(corpus, &score_image/1)
+
+      n ->
+        Mix.shell().info("scoring #{length(corpus)} cases #{n}-wide")
+
+        # ⬛ `ordered: true` (the default) is load-bearing: the artefact's case
+        # order is corpus order, and downstream diffing of two artefacts
+        # depends on it. `timeout: :infinity` because each call already
+        # carries its own HTTP timeout and retry budget — a second, racing
+        # timeout here would convert one slow case into a crashed run.
+        corpus
+        |> Task.async_stream(&score_image/1, max_concurrency: n, timeout: :infinity)
+        |> Enum.map(fn {:ok, result} -> result end)
+    end
+  end
+
   defp point_client_at_configured_service do
     case System.get_env("VISION_SERVICE_URL") do
       nil -> :ok
@@ -794,6 +833,11 @@ defmodule Mix.Tasks.Eval.Vision do
       passed: passed,
       total: total,
       unscored: unscored,
+      # How wide the run was driven. Latency rows from runs with different
+      # widths are not comparable — queueing inside a shared container
+      # inflates per-case wall time — and this field is what stops that
+      # comparison happening unknowingly.
+      concurrency: eval_concurrency(),
       ran_at: DateTime.utc_now(),
       per_stratum:
         Map.new(per_stratum(results), fn {stratum, counts} -> {to_string(stratum), counts} end),

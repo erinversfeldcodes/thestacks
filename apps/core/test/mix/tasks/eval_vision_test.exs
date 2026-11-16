@@ -938,6 +938,27 @@ defmodule Mix.Tasks.Eval.VisionTest do
       assert {:ok, 20} = Vision.baseline_for(body, identity)
     end
 
+    # ⛔ THE MIGRATION CASE, AND EVERY BASELINE ON DISK IS IN IT. Per-stratum
+    # counts were added after baselines already existed, so the first run
+    # against any of them reads a file with no `strata` key at all. If that
+    # path raised, the gate would be broken for every caller on the day it
+    # shipped — and the deploy script's E2E gate would report it as a model
+    # regression, which is the wrong diagnosis entirely.
+    test "a baseline recorded before strata existed still compares on the total" do
+      identity = %{
+        model: "m",
+        modal_app: "https://example.test",
+        total: 8,
+        strata: %{"clear_cover" => %{passed: 2, total: 8}}
+      }
+
+      body = Jason.encode!(%{passed: 6, total: 8, model: "m", modal_app: "https://example.test"})
+
+      assert {:ok, 6} = Vision.baseline_for(body, identity),
+             "a legacy baseline has nothing to compare slices against, so the total is " <>
+               "the only verdict available — and it must still be reached"
+    end
+
     # ⚠️ And the model mismatch still wins, because it is the more fundamental
     # disagreement: a different model's number is not comparable whatever the
     # corpus did.
@@ -948,6 +969,39 @@ defmodule Mix.Tasks.Eval.VisionTest do
         Jason.encode!(%{passed: 6, total: 6, model: "old", modal_app: "https://example.test"})
 
       assert {:mismatch, "old"} = Vision.baseline_for(body, identity)
+    end
+  end
+
+  describe "how wide the eval runs" do
+    # ⚖️ The default is the baseline: every recorded run before this knob
+    # existed was serial, so an unset environment must stay serial or the
+    # latency columns of old and new artefacts silently stop being comparable.
+    test "unset means serial" do
+      System.delete_env("EVAL_VISION_CONCURRENCY")
+      assert Vision.eval_concurrency() == 1
+    end
+
+    test "a caller can opt in, bounded by the sidecar's own container cap" do
+      System.put_env("EVAL_VISION_CONCURRENCY", "6")
+      assert Vision.eval_concurrency() == 6
+
+      # max_containers=10 in the sidecar; driving wider than the fleet can
+      # serve converts concurrency into queueing and queueing into timeouts.
+      System.put_env("EVAL_VISION_CONCURRENCY", "64")
+      assert Vision.eval_concurrency() == 10
+    after
+      System.delete_env("EVAL_VISION_CONCURRENCY")
+    end
+
+    # ⬛ ANTI-VACUITY for the default test: garbage must not crash the task at
+    # its first line nor smuggle in surprise parallelism.
+    test "garbage reads as serial" do
+      for bad <- ["six", "", "0", "-3", "3x"] do
+        System.put_env("EVAL_VISION_CONCURRENCY", bad)
+        assert Vision.eval_concurrency() == 1, "#{inspect(bad)} must mean serial"
+      end
+    after
+      System.delete_env("EVAL_VISION_CONCURRENCY")
     end
   end
 
