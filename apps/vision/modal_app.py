@@ -17,7 +17,63 @@ from typing import Any
 import modal
 
 MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
-MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
+# ⚖️ THE FOUR KNOBS AN EXPERIMENT VARIES, READ FROM THE ENVIRONMENT SO THAT A
+# VARIANT IS A DEPLOY RATHER THAN A SOURCE EDIT. Every default below is the
+# value that was deployed and measured before this block existed, so an
+# unparameterised deploy is byte-identical in behaviour — which is the only way
+# the baseline stays a baseline while variants are being tried against it.
+#
+# ⚠️ Modal evaluates the decorators at DEPLOY time, so these are fixed when the
+# app is pushed, not per request. That is what makes a run attributable: one
+# deployment, one configuration, one artefact.
+MODEL_NAME = os.environ.get("VISION_MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct")
+VISION_GPU = os.environ.get("VISION_GPU", "A10G")
+VISION_DTYPE = os.environ.get("VISION_DTYPE", "bfloat16")
+
+# `None` means "whatever the processor's own config says", which is what ran
+# before this knob existed. An explicit value caps the image tokens the vision
+# encoder emits, and so both the latency and the GPU seconds a photograph costs.
+_max_px = os.environ.get("VISION_MAX_PIXELS")
+VISION_MAX_PIXELS = int(_max_px) if _max_px else None
+
+# ⛔ DECORATOR ARGUMENTS BIND AT DEPLOY TIME; FUNCTION BODIES DO NOT. Modal
+# re-imports this module inside the build and runtime containers, where the
+# VISION_* variables above re-resolve against a container environment that
+# never had them — so `gpu=VISION_GPU` honoured the experiment while
+# MODEL_NAME, VISION_DTYPE and VISION_MAX_PIXELS silently fell back to their
+# defaults in the container. A max_pixels experiment deployed this way runs a
+# byte-identical copy of the baseline and reports it as a variant. The
+# overrides are therefore baked into the image env — but ONLY when set, so an
+# unparameterised deploy keeps the exact image hash the baseline was measured
+# on.
+_ENV_OVERRIDES = {
+    k: v
+    for k, v in (
+        ("VISION_MODEL_NAME", os.environ.get("VISION_MODEL_NAME")),
+        ("VISION_DTYPE", os.environ.get("VISION_DTYPE")),
+        ("VISION_MAX_PIXELS", os.environ.get("VISION_MAX_PIXELS")),
+    )
+    if v
+}
+
+# Extra packages a variant needs that the baseline must not carry: an AWQ
+# checkpoint needs `autoawq`, Qwen3-VL needs a newer transformers than the
+# baseline pin. Comma-separated pip specs; empty by default, and an empty list
+# adds no layer, so the default image hash is again untouched.
+_EXTRA_PIPS = [s.strip() for s in os.environ.get("VISION_EXTRA_PIPS", "").split(",") if s.strip()]
+
+
+def _model_class_name(model_name: str) -> str:
+    """Which transformers class loads this checkpoint.
+
+    ⚖️ Returns the NAME, not the class, so the mapping is testable in an
+    environment without transformers installed. Qwen3-VL shipped a new model
+    class; an -AWQ checkpoint of 2.5-VL is still a 2.5-VL — its quantisation
+    rides in the checkpoint's own config, not in the loader.
+    """
+    if "qwen3-vl" in model_name.lower():
+        return "Qwen3VLForConditionalGeneration"
+    return "Qwen2_5_VLForConditionalGeneration"
 
 
 def _download_model() -> None:
@@ -27,10 +83,11 @@ def _download_model() -> None:
     The downloaded weights are cached in the image layer — every subsequent
     container start loads from local disk rather than re-downloading.
     """
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    import transformers
 
-    AutoProcessor.from_pretrained(MODEL_NAME)
-    Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_NAME, torch_dtype="bfloat16")
+    cls = getattr(transformers, _model_class_name(MODEL_NAME))
+    transformers.AutoProcessor.from_pretrained(MODEL_NAME)
+    cls.from_pretrained(MODEL_NAME, torch_dtype="auto")
 
 
 image = (
@@ -46,8 +103,41 @@ image = (
         "pyzbar>=0.1.9",
         "pytesseract>=0.3.13",
     )
-    .run_function(_download_model)
 )
+
+
+def _image_plan() -> list[tuple[str, object]]:
+    """The variant layers this deploy adds, as data.
+
+    ⬛ AS DATA BECAUSE THE WIRING IS WHAT FAILED A PROBE. A first version
+    tested that the overrides dict was *captured* and inlined the `image.env`
+    call — deleting that call left every test green, which is a guard that
+    cannot fire. The conditional and ordering logic now lives here where a
+    test can red on it; the loop below that consumes it is deliberately too
+    dumb to get wrong.
+
+    Layer order is load-bearing: the env must exist BEFORE the weight bake,
+    or _download_model resolves MODEL_NAME to the default inside the build
+    container and bakes the wrong weights into a variant's image. And with
+    no overrides and no extra pips the plan holds only the bake, so the
+    default image hashes identically to the one the baseline was measured on.
+    """
+    steps: list[tuple[str, object]] = []
+    if _EXTRA_PIPS:
+        steps.append(("pip_install", tuple(_EXTRA_PIPS)))
+    if _ENV_OVERRIDES:
+        steps.append(("env", dict(_ENV_OVERRIDES)))
+    steps.append(("run_function", "_download_model"))
+    return steps
+
+
+for _step, _arg in _image_plan():
+    if _step == "pip_install":
+        image = image.pip_install(*_arg)  # type: ignore[arg-type]
+    elif _step == "env":
+        image = image.env(_arg)  # type: ignore[arg-type]
+    else:
+        image = image.run_function(_download_model)
 
 app = modal.App(MODAL_APP_NAME)
 
@@ -191,7 +281,7 @@ def container_dispatch(inferences_since_load: int, container_id: str) -> dict[st
 
 
 @app.cls(
-    gpu="A10G",
+    gpu=VISION_GPU,
     image=image,
     max_containers=10,
     timeout=300,
@@ -279,13 +369,62 @@ class VisionModel:
         self._container_id = uuid.uuid4().hex
 
         import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        import transformers
 
-        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
+        # ⚖️ `max_pixels` caps what the vision encoder emits per image, and so
+        # both the latency and the GPU seconds a photograph costs. Left unset it
+        # is the processor's own default, which is what ran before this was a
+        # knob — passing `None` would OVERRIDE that default with nothing, so the
+        # argument is omitted entirely rather than passed as None.
+        proc_kwargs = {}
+        if VISION_MAX_PIXELS:
+            proc_kwargs["max_pixels"] = VISION_MAX_PIXELS
+
+        self.processor = transformers.AutoProcessor.from_pretrained(MODEL_NAME, **proc_kwargs)
+
+        # ⛔ T4 IS TURING AND HAS NO BF16. Loading bf16 weights there either
+        # fails outright or silently upcasts, and a silent upcast would double
+        # the memory of a model that already barely fits 16GB — so the dtype is
+        # part of the experiment, not an invariant. int8 is a different shape
+        # again: it is a quantisation config rather than a dtype, which is why
+        # it branches here rather than being another `torch.<name>` lookup.
+        load_kwargs: dict[str, Any] = {"device_map": "auto"}
+
+        if VISION_DTYPE == "int8":
+            from transformers import BitsAndBytesConfig
+
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            load_kwargs["torch_dtype"] = getattr(torch, VISION_DTYPE)
+
+        model_cls = getattr(transformers, _model_class_name(MODEL_NAME))
+        self.model = model_cls.from_pretrained(MODEL_NAME, **load_kwargs)
+
+        # ⬛ REPORTED, NOT ASSUMED — AND PRINTED, NOT LOGGED. The first version
+        # of this line used `logger.info` with no handler configured in the
+        # container, so it never emitted anywhere: the one observability line
+        # the series depended on was dead on arrival, and the CPU offload was
+        # only discovered because transformers prints its own warning
+        # directly. A measurement line must not depend on logging
+        # configuration to exist.
+        #
+        # ⛔ `devices` is the most load-bearing field. On a 16GB card,
+        # `device_map="auto"` does not fail when the model is too big — it
+        # silently offloads layers to CPU and shuttles weights every forward
+        # pass, which "works" at a latency that breaks every caller timeout.
+        # A result whose devices include `cpu` measures the offload, not the
+        # GPU.
+        if hasattr(self.model, "hf_device_map"):
+            devices = sorted({str(d) for d in self.model.hf_device_map.values()})
+        else:
+            devices = ["unknown"]
+        print(
+            f"vision model loaded: name={MODEL_NAME} gpu={VISION_GPU} "
+            f"requested_dtype={VISION_DTYPE} "
+            f"actual_dtype={getattr(self.model, 'dtype', 'unknown')} "
+            f"max_pixels={VISION_MAX_PIXELS or 'processor default'} "
+            f"devices={devices}",
+            flush=True,
         )
 
     @modal.method()
