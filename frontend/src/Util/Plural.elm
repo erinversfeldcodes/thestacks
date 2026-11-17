@@ -1,4 +1,4 @@
-module Util.Plural exposing (books)
+module Util.Plural exposing (books, unit)
 
 {-| Count-aware English labels.
 
@@ -24,3 +24,17 @@ books count =
 
     else
         String.fromInt count ++ " books"
+
+
+{-| A count with a unit noun under regular `-s` pluralisation: `unit 1 "minute"
+== "1 minute"`, `unit 2 "minute" == "2 minutes"`, `unit 0 "day" == "0 days"`.
+Irregular nouns ("foot", "child") need their own function — this is the same
+"1 X" vs "N Xs" rule as `books`, named once so no surface re-derives it.
+-}
+unit : Int -> String -> String
+unit count noun =
+    if count == 1 then
+        "1 " ++ noun
+
+    else
+        String.fromInt count ++ " " ++ noun ++ "s"

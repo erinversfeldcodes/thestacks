@@ -42,6 +42,7 @@ testModel =
     , blockModal = Nothing
     , origin = "https://thestacks.test"
     , syndication = Nothing
+    , now = Nothing
     }
 
 

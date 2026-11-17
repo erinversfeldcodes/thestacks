@@ -20,8 +20,11 @@ import Html.Events exposing (onClick, onInput)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route(..))
+import Task
+import Time
 import Types.BlogPost exposing (BlogPost, Comment, commentAuthorId, commentBody, commentCreatedAt, commentId, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.RelativeTime as RelativeTime
 
 
 type alias Model =
@@ -36,6 +39,11 @@ type alias Model =
     , blockModal : Maybe BlockModal.Model
     , origin : String
     , syndication : Maybe Syndication.Model
+
+    -- The reader's clock, fetched once on load, so the byline can read the
+    -- post's age relative to now ("2 minutes ago"). `Nothing` until it resolves;
+    -- the byline shows the plain date until then.
+    , now : Maybe Time.Posix
     }
 
 
@@ -57,6 +65,7 @@ type Msg
     | BlockModalMsg BlockModal.Msg
     | SyndicationMsg Syndication.Msg
     | EscapePressed
+    | GotNow Time.Posix
 
 
 type OutMsg
@@ -88,9 +97,11 @@ initWithEffect postId maybeToken currentUserId origin =
       , blockModal = Nothing
       , origin = origin
       , syndication = Nothing
+      , now = Nothing
       }
     , Effect.Batch
-        [ Effect.public (Api.blogPostRequest postId)
+        [ Effect.Custom (Task.perform GotNow Time.now)
+        , Effect.public (Api.blogPostRequest postId)
             maybeToken
             Nothing
             (Api.resolveJson Types.BlogPost.blogPostShowDecoder >> PostLoaded)
@@ -119,6 +130,9 @@ updateWithEffect msg model maybeToken =
     case msg of
         SessionExpiryDetected ->
             ( model, Effect.None, SessionExpired )
+
+        GotNow t ->
+            ( { model | now = Just t }, Effect.None, NoOut )
 
         PostLoaded result ->
             case result of
@@ -496,7 +510,7 @@ view model =
                         model.currentUserId == Just post.userId
                 in
                 div []
-                    [ viewPost post isOwner
+                    [ viewPost model.now post isOwner
                     , case model.syndication of
                         Just syndicationModel ->
                             Html.map SyndicationMsg
@@ -519,13 +533,13 @@ view model =
         ]
 
 
-viewPost : BlogPost -> Bool -> Html Msg
-viewPost post isOwner =
+viewPost : Maybe Time.Posix -> BlogPost -> Bool -> Html Msg
+viewPost maybeNow post isOwner =
     div [ class "blog-post" ]
         [ div [ class "blog-post__header" ]
             [ h1 [ class "blog-post__title" ] [ text post.title ]
             , viewAuthorByline post
-            , p [ class "blog-post__date" ] [ text post.insertedAt ]
+            , p [ class "blog-post__date" ] [ text (postAge maybeNow post.insertedAt) ]
             , if isOwner then
                 a
                     [ href (Route.toPath (BlogEdit post.id))
@@ -546,6 +560,20 @@ viewPost post isOwner =
             , onDismiss = DismissAssociation
             }
         ]
+
+
+{-| The post's age for the byline: relative to the reader's clock once it has
+loaded ("2 minutes ago"), and the plain `YYYY-MM-DD` date until then — never the
+raw datetime string the API sends.
+-}
+postAge : Maybe Time.Posix -> String -> String
+postAge maybeNow iso =
+    case maybeNow of
+        Just now ->
+            RelativeTime.relative now iso
+
+        Nothing ->
+            String.left 10 iso
 
 
 {-| Render the author's name as a link to their public profile.
