@@ -39,11 +39,12 @@ class Settings(BaseSettings):
     ocr_short_circuit: bool = False
 
     # ⬛ R0: run classify + extract as ONE Modal dispatch on one container
-    # (single_dispatch) instead of two separate .remote() calls. Eliminates the
-    # second-cold-start tail (~52s p95 on a cold book). Off by default — the
-    # two-call path stays the measured baseline — until a deploy proves the
-    # cold-path win and the slice gate proves accuracy is unchanged.
-    single_dispatch: bool = False
+    # instead of two separate .remote() calls. ON by default since 2026-11-17,
+    # validated on T4+4B: accuracy IDENTICAL (84/122, every stratum matches the
+    # two-call path) and cold p95 ~13% lower under concurrency (25.6s vs 29.3s),
+    # a rarer over-cap two-cold-start tail removed outright. The two-call path
+    # stays behind the flag as a fallback; set VISION_SINGLE_DISPATCH=0 to use it.
+    single_dispatch: bool = True
 
     # Minimum mean word confidence for a read to be allowed to answer, when
     # short-circuiting is on at all. Deliberately high: a wrong identification

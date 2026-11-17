@@ -110,9 +110,12 @@ def main() -> int:
             int(args.analyze[2]),
             float(args.analyze[3]),
         )
-        got = solve(packed, spaced, n, w)
+        solved = solve(packed, spaced, n, w)
+        non_physical = solved["active_s"] <= 0 or solved["cold_load_s"] <= 0
+        # Widened for display: solve() returns floats, the report adds string notes.
+        got: dict[str, object] = dict(solved)
         got["warm_wall_s_note"] = "measure separately from eval latency (VLM_EXTRACT p50)"
-        if got["active_s"] <= 0 or got["cold_load_s"] <= 0:
+        if non_physical:
             got["⚠️ warning"] = (
                 "a non-physical constant means the container model was violated "
                 "(spacing < window, or the packed burst was not one container) — "

@@ -9,14 +9,26 @@ import base64
 import hashlib
 import hmac
 import time
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import settings
 from app.main import app
 
 _VALID_IMAGE = base64.b64encode(b"fake-image-data").decode()
+
+
+@pytest.fixture(autouse=True)
+def _two_call_path() -> Iterator[None]:
+    """These tests exercise the TWO-CALL fallback path. R0's single_dispatch is
+    now the default (see config.py), so pin it off here — the single-dispatch
+    path has its own coverage in test_single_dispatch.py."""
+    with patch.object(settings, "single_dispatch", False):
+        yield
 
 
 def _make_header(path: str = "/analyze") -> dict[str, str]:
@@ -339,7 +351,7 @@ def test_analyze_empty_excluded_books_passes_empty_list() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _analyze(classify_output: dict[str, object], extract_output: dict[str, object]):
+def _analyze(classify_output: dict[str, object], extract_output: dict[str, object]) -> Any:
     """POST /analyze with both model calls stubbed. Returns the response."""
     with (
         patch(
