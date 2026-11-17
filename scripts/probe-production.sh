@@ -207,6 +207,16 @@ _probe_upload_canary() {
     fi
 
     body_file="$WORK_DIR/upload_${canary_name}.body"
+    # ⛔ ORDERING BUG, FIXED HERE: this function consumes $CSRF_PROOF, but the
+    # helper that populates it was first invoked at line ~379 — after this
+    # section. Every upload write therefore carried an EMPTY proof value, the
+    # app refused it as absent, and the gate recorded a 28.6% availability hole
+    # that looked like the stack failing. Preparing the proof at the point of
+    # first use costs one extra fetch and makes the function order-independent.
+    if [ -z "${CSRF_PROOF:-}" ]; then
+        _csrf_proof
+    fi
+
     t0="$(_now_ms)"
     http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}' \
         --max-time "$UPLOAD_POST_TIMEOUT" \
@@ -221,6 +231,19 @@ _probe_upload_canary() {
 
     body="$(cat "$body_file" 2>/dev/null || true)"
     rm -f "$body_file"
+
+    # ⬛ A REFUSAL'S REASON IS SIGNAL THE APP ALREADY HANDED US. Reducing every
+    # 4xx to a bare tag discarded the structured error field that names WHY —
+    # which let a probe/app contract mismatch read as a 28.6% availability
+    # hole, twice, before anyone saw a reason. On a 4xx the outcome tag now
+    # carries the app's own error code.
+    if [ "$kind" = "http_4xx" ]; then
+        reason="$(printf '%s' "$body" | python3 -c \
+            "import json,sys
+try: print(json.load(sys.stdin).get('error','') or '')
+except Exception: print('')" 2>/dev/null)"
+        [ -n "$reason" ] && kind="http_4xx:${reason}"
+    fi
     image_id="$(printf '%s' "$body" | python3 -c \
         "import json,sys
 try: print(json.load(sys.stdin).get('image_id','') or '')
@@ -257,11 +280,19 @@ except: pass" 2>/dev/null || true)"
     # on a signed request breaks the signature, and it would hand our CSRF token
     # to a third party.
     if [[ ${upload_is_ours} -eq 1 ]]; then
-        http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+        # ⛔ BEARER BELONGS HERE TOO. `put /api/upload/:id/data` is under the
+        # `:authenticated` pipeline exactly like init and commit, which both
+        # send the token — this arm omitted it, so once the CSRF ordering bug
+        # above was fixed the PUT became the new 4xx, silently (its body went
+        # to /dev/null, so even the reason tag was empty). Capture the body so
+        # a future refusal on this arm is never silent again.
+        local put_body="$WORK_DIR/upload_put_${canary_name}.body"
+        http_code="$(curl -4 -s -o "$put_body" -w '%{http_code}' \
             --max-time "$UPLOAD_POST_TIMEOUT" \
             -X PUT "$upload_url" \
             -b "$CSRF_JAR" \
             -H "X-CSRF-Token: ${CSRF_PROOF}" \
+            -H "Authorization: Bearer ${token}" \
             -H "Content-Type: image/jpeg" \
             --data-binary "@${canary}" \
             2>/dev/null)" || true
@@ -275,6 +306,14 @@ except: pass" 2>/dev/null || true)"
     fi
     exit_code=$?
     kind="$(_classify "$exit_code" "${http_code:-000}")"
+    if [ "$kind" = "http_4xx" ] && [ -f "${put_body:-}" ]; then
+        reason="$(python3 -c \
+            "import json,sys
+try: print(json.load(open(sys.argv[1])).get('error','') or '')
+except Exception: print('')" "$put_body" 2>/dev/null)"
+        [ -n "$reason" ] && kind="http_4xx:${reason}"
+    fi
+    rm -f "${put_body:-}"
 
     if [[ "$kind" != "ok" ]]; then
         t1="$(_now_ms)"
@@ -509,7 +548,7 @@ all_samples = health + catalogue + login + bookshelf + upload + deps_check
 total = len(all_samples)
 succeeded = sum(1 for _, _, k in all_samples if k == "ok")
 http_5xx_count = sum(1 for _, _, k in all_samples if k == "http_5xx")
-http_4xx_count = sum(1 for _, _, k in all_samples if k == "http_4xx")
+http_4xx_count = sum(1 for _, _, k in all_samples if k.startswith("http_4xx"))
 timeout_count = sum(1 for _, _, k in all_samples if k == "timeout")
 
 # ⛔ THE FIFTH KIND, which the summary used to omit entirely.
