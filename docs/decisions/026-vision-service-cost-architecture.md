@@ -1,6 +1,6 @@
 # ADR 026: Vision Service Cost, Hardware and Architecture — Wave 7 Findings
 
-**Status:** Proposed — ⚠️ DRAFT for a ruling at the end of wave 7. Sections marked
+**Status:** Accepted (2026-11-17)
 `PENDING` await experiments still in flight or data not yet collected; the ruling
 slot at the bottom is deliberately empty until then.
 **Date:** 2026-11-16 (draft)
@@ -196,4 +196,67 @@ Ordered by expected leverage; none yet ruled on.
 
 ## Ruling
 
-`EMPTY — to be made at the end of wave 7.`
+**Status: ACCEPTED (2026-11-17). Owner's decision, on a pre-stated condition:
+"if the SLO gate passes for T4+4B, that's our new architecture."**
+
+**GPU + model: T4 + Qwen3-VL-4B-Instruct (Apache 2.0).** The production SLO
+gate — the same gate and thresholds that guard a prod deploy, run report-only
+against a T4+4B preview with a 10-minute soak and 40 real uploads — **passed,
+exit 0**: availability 1.0, 5xx 0.0, auth p95 232ms, catalogue 47ms,
+bookshelves 242ms, upload 913ms (all ≤ their thresholds), upload success 1.0,
+every circuit fuse closed. The GPU rate is −46% vs the A10G baseline.
+
+⚖️ **What this ruling IS and IS NOT.** It is a decision that T4+4B holds the
+**operational** KPIs the current stack holds, at lower cost — availability,
+latency, error rate, stability. It is **NOT** a finding that the 4B matches the
+7B on **identification accuracy**: §5 records the opposite — the 4B is perfect
+on clean covers (clear_cover 22/22, rotation 12/12) and **weaker on degraded
+input** (illegible 5/10 → 1/10, hostile_barcode −1, book_adjacent −1), and our
+own eval slice gate refuses it as a drop-in. The owner adopts that trade
+**knowingly**: cheaper and better on clean input, measurably weaker on poor
+input, on a corpus that under-represents the stated primary case (spines,
+varying quality).
+
+⛔ **Named review trigger: the spine photographs.** The accuracy trade is
+accepted *provisionally against the review trigger*, not closed. When the spine
+stratum exists (LORA-DATASET.md §5 priority set), the 4B is re-measured on it;
+if degraded-spine accuracy falls below a bar the owner sets then, this ruling is
+revisited — either a role-split cascade (4B on clean input, a 7B-class fallback
+on degraded) or a return to a larger model on L4.
+
+**The L4 alternative, declined but recorded as the fallback.** L4 + 7B as-is
+also passed every accuracy check (86/122, per-stratum identical to baseline) at
+−27% rate and carries **zero accuracy risk**. It is the standing fallback if the
+spine review rejects the 4B: it keeps the exact model and costs less than today,
+just less than the T4.
+
+### Decisions on §8
+
+- [x] **GPU + model:** T4 + Qwen3-VL-4B. (L4 + 7B is the recorded fallback.)
+- [x] **Responsiveness target adopted:** p50 ≤ 5s, p95 ≤ 15s perceived. The gate
+  measured upload p95 at 913ms (HTTP round-trips; identification is async over
+  SSE and out of this percentile), comfortably inside it.
+- [ ] **CPU-first text path:** still YES as the next build — it is orthogonal to
+  this hardware ruling and attacks the dominant cost term (wake frequency) and
+  the spine case at once. Scoped as wave-8 work, not gated on this decision.
+- [ ] **Scaledown window at T4+4B:** re-run the frontier with the 4B's measured
+  cold-load (smaller weights load faster than the 7B's 20.5s) before fixing a
+  window; the 60s interim stands until then.
+
+### Implementation consequences (follow-on, NOT done in this ADR)
+
+1. **Default the sidecar to T4+4B** — `modal_app.py` / deploy config. Until this
+   lands, production still runs 7B/A10G; the ruling is adopted, not yet shipped.
+2. **Re-record the eval baseline to the 4B**, per the slice gate's own protocol
+   (`--record`, naming in the commit which slice was sold and for what) — done
+   *with* step 1, not before, so the baseline never describes a model that isn't
+   the deployed one.
+3. **Residue filed:** the suite's intermittent telemetry-test flake (seen twice
+   this wave); the gate's upload-p95 metric is now meaningful (the probe fix made
+   it read a real 913ms instead of a failed-fast 47ms) — caveat retired.
+
+### What this ruling does not touch
+
+The **writing assistant** half of the branch inherits none of this: ADR 025's
+containment argument (verified identifier, not generated prose) does not extend
+to it, and its model choice is its own decision.
