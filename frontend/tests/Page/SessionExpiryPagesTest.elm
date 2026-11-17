@@ -280,7 +280,7 @@ suite =
                     let
                         ( _, _, outMsg ) =
                             Editor.update
-                                (Editor.PublishCompleted (Err unauthorized))
+                                (Editor.PublishCompleted "post-123" (Err unauthorized))
                                 (Tuple.first (Editor.init Editor.New (Just (TestHelpers.creds "tok"))))
                                 (Just (TestHelpers.creds "tok"))
                     in

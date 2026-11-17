@@ -113,14 +113,30 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Editor.update (PublishCompleted (Ok ())) newModel token
+                            Editor.update (PublishCompleted "post-123" (Ok ())) newModel token
                     in
                     model.publishing |> Expect.equal (Success ())
+            , test "PublishCompleted Ok records the post id so the view can link to it" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Editor.update (PublishCompleted "post-123" (Ok ())) newModel token
+                    in
+                    -- The post-publish "View post" link needs /blog/:id; before
+                    -- this the id was discarded and the reader was stranded.
+                    model.publishedId |> Expect.equal (Just "post-123")
+            , test "PublishCompleted Err leaves publishedId unset (no link on failure)" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Editor.update (PublishCompleted "post-123" (Err (Http.BadStatus 500))) newModel token
+                    in
+                    model.publishedId |> Expect.equal Nothing
             , test "PublishCompleted Err sets publishing to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Editor.update (PublishCompleted (Err (Http.BadStatus 500))) newModel token
+                            Editor.update (PublishCompleted "post-123" (Err (Http.BadStatus 500))) newModel token
                     in
                     isFailure model.publishing |> Expect.equal True
             ]
@@ -198,7 +214,7 @@ sessionExpiryStillSettlesTheFlag =
                         Editor.update Publish newModel token
 
                     ( settled, _, out ) =
-                        Editor.update (PublishCompleted (Err (Http.BadStatus 401))) inFlight token
+                        Editor.update (PublishCompleted "post-123" (Err (Http.BadStatus 401))) inFlight token
                 in
                 Expect.all
                     [ \_ -> inFlight.publishing |> Expect.equal Loading

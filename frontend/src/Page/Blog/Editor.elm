@@ -11,8 +11,8 @@ module Page.Blog.Editor exposing
 import Api
 import Components.SaveButton as SaveButton
 import Effect
-import Html exposing (Html, div, h1, label, option, p, select, text, textarea)
-import Html.Attributes exposing (class, placeholder, rows, selected, value)
+import Html exposing (Html, a, div, h1, label, option, p, select, text, textarea)
+import Html.Attributes exposing (class, href, placeholder, rows, selected, value)
 import Html.Events exposing (onInput)
 import Http
 import Json.Decode as Decode
@@ -33,6 +33,11 @@ type alias Model =
     , saving : RemoteData Http.Error ()
     , publishing : RemoteData Http.Error ()
     , loading : RemoteData Http.Error ()
+
+    -- Set to `Just postId` on a successful publish so the view can offer a
+    -- "View post" link to /blog/:id. Kept separate from `publishing` (which
+    -- stays `()`) so the SaveButton's state type is untouched.
+    , publishedId : Maybe String
     }
 
 
@@ -44,7 +49,7 @@ type Msg
     | SaveDraft
     | Publish
     | SaveCompleted (Result Http.Error String)
-    | PublishCompleted (Result Http.Error ())
+    | PublishCompleted String (Result Http.Error ())
     | PostLoaded (Result Http.Error BlogPost)
 
 
@@ -64,6 +69,7 @@ init mode maybeToken =
             , saving = NotAsked
             , publishing = NotAsked
             , loading = NotAsked
+            , publishedId = Nothing
             }
 
         cmd =
@@ -234,7 +240,7 @@ update msg model maybeToken =
                                                 token
                                                 { onExpired = SessionExpiryDetected
                                                 , onResponse =
-                                                    Api.resolveWhatever >> PublishCompleted
+                                                    Api.resolveWhatever >> PublishCompleted postId
                                                 }
                                             )
 
@@ -266,10 +272,13 @@ update msg model maybeToken =
                     else
                         ( settled, Cmd.none, NoOut )
 
-        PublishCompleted result ->
+        PublishCompleted postId result ->
             case result of
                 Ok _ ->
-                    ( { model | publishing = Success () }, Cmd.none, NoOut )
+                    ( { model | publishing = Success (), publishedId = Just postId }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
                     let
@@ -425,5 +434,16 @@ viewFeedback model =
                 p [ class "error" ] [ text "Could not publish post. Please try again." ]
 
             _ ->
+                text ""
+
+        -- After a successful publish, offer a way to the published post. Before
+        -- this the editor showed "Published!" and left the reader stranded on
+        -- /blog/new with no route to what they just published.
+        , case model.publishedId of
+            Just postId ->
+                p [ class "blog-editor__published" ]
+                    [ a [ href ("/blog/" ++ postId) ] [ text "View post" ] ]
+
+            Nothing ->
                 text ""
         ]
