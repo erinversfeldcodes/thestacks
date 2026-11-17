@@ -193,6 +193,32 @@ else
   # the shipper wakes/sleeps with this app (unset = no shipper, ping disabled)
   config :core, :log_shipper_keepalive_url, System.get_env("LOG_SHIPPER_KEEPALIVE_URL")
 
+  # AI spend caps, env-configurable at runtime so a ceiling can be changed
+  # WITHOUT a rebuild. Defaults live in config.exs; only keys whose env var is
+  # set override them.
+  #
+  # ⚠️ UNITS, RECONCILED HERE ONCE. The env vars and config are in CENTS
+  # (monthly 5000 = $50, the total inference budget); the Spend ledger and the
+  # ceiling comparison are in MICRO-CENTS, converted a single time in
+  # `Stacks.AI.Budget`. `AI_BUDGET_ALERT_PCT` is a FRACTION (0.8 = warn at 80%
+  # of a cap, before the hard stop), not a percent integer.
+  ai_budget_env =
+    for {env, key, parse} <- [
+          {"AI_DAILY_LIMIT_CENTS", :daily_limit_cents, &String.to_integer/1},
+          {"AI_MONTHLY_LIMIT_CENTS", :monthly_limit_cents, &String.to_integer/1},
+          {"AI_BUDGET_ALERT_PCT", :alert_pct, &elem(Float.parse(&1), 0)}
+        ],
+        raw = System.get_env(env),
+        is_binary(raw) and raw != "" do
+      {key, parse.(raw)}
+    end
+
+  if ai_budget_env != [] do
+    config :core,
+           :ai_budget,
+           Keyword.merge(Application.get_env(:core, :ai_budget, []), ai_budget_env)
+  end
+
   grafana_host = System.get_env("GRAFANA_HOST")
   grafana_token = System.get_env("GRAFANA_AUTH_TOKEN")
 

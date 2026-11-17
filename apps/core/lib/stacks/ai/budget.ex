@@ -57,6 +57,9 @@ defmodule Stacks.AI.Budget do
 
   @default_daily_limit_cents 500
   @default_monthly_limit_cents 5_000
+  # Fraction of a cap at which a pre-breach warning fires (0.8 = 80%). A
+  # fraction, not a percent integer — the env var AI_BUDGET_ALERT_PCT matches.
+  @default_alert_pct 0.8
 
   @doc """
       Record an AI API cost, in MICRO-CENTS, against a provider.
@@ -176,6 +179,15 @@ defmodule Stacks.AI.Budget do
       %{provider: bounded_provider(provider)}
     )
 
+    # ⬛ PRE-BREACH ALERT. The hard limits below REFUSE a request; by then the
+    # operator is already cut off. `alert_pct` (a fraction, default 0.8) emits a
+    # warning as spend crosses that share of a cap but before it hits it — the
+    # window in which a cap can be raised, or spend investigated, without an
+    # outage. Emitted per period that is in the warning band and not yet over.
+    alert_pct = get_limit(:alert_pct, @default_alert_pct)
+    maybe_alert(provider, :monthly, monthly_spent, monthly_limit, alert_pct)
+    maybe_alert(provider, :daily, daily_spent, daily_limit, alert_pct)
+
     cond do
       monthly_spent >= monthly_limit ->
         :telemetry.execute(
@@ -232,5 +244,25 @@ defmodule Stacks.AI.Budget do
     :core
     |> Application.get_env(:ai_budget, [])
     |> Keyword.get(key, default)
+  end
+
+  # Emit a warning when spend is in the band [alert_pct·limit, limit) — over the
+  # alert threshold but not yet over the hard cap, which is the only window in
+  # which acting avoids an outage. A zero/negative limit has no meaningful band
+  # (and would divide by zero), so it is skipped.
+  defp maybe_alert(_provider, _period, _spent, limit, _alert_pct) when limit <= 0, do: :ok
+
+  defp maybe_alert(provider, period, spent, limit, alert_pct) do
+    threshold = round(limit * alert_pct)
+
+    if spent >= threshold and spent < limit do
+      :telemetry.execute(
+        [:stacks, :budget, :allowance_warning],
+        %{spent_micro_cents: spent, limit_micro_cents: limit, pct: spent / limit},
+        %{provider: bounded_provider(provider), type: period}
+      )
+    end
+
+    :ok
   end
 end

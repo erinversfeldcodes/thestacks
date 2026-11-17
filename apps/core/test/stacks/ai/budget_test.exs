@@ -251,6 +251,67 @@ defmodule Stacks.AI.BudgetTest do
     end
   end
 
+  describe "the pre-breach allowance alert" do
+    setup do
+      handler = "allowance-test-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:stacks, :budget, :allowance_warning],
+        fn _event, measurements, metadata, pid ->
+          send(pid, {:allowance_warning, measurements, metadata})
+        end,
+        self()
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+      :ok
+    end
+
+    # Daily cap is 500 cents = 50_000_000 micro-cents; default alert_pct 0.8, so
+    # the band is [40_000_000, 50_000_000). 45_000_000 (= $4.50 of $5) sits in it.
+    test "warns when spend is in the band below a cap but above alert_pct" do
+      :ok = Budget.record_cost(:together, 45_000_000)
+
+      assert :ok == Budget.check_budget(:together)
+      assert_receive {:allowance_warning, measurements, %{type: :daily, provider: "together"}}
+      assert measurements.pct >= 0.8 and measurements.pct < 1.0
+    end
+
+    # ⬛ ANTI-VACUITY both ways: below the threshold, and at/above the hard cap.
+    test "does not warn below the alert threshold" do
+      # $1 of $5 = 20%, well under 80%.
+      :ok = Budget.record_cost(:together, 10_000_000)
+
+      assert :ok == Budget.check_budget(:together)
+      refute_receive {:allowance_warning, _, %{type: :daily}}
+    end
+
+    test "does not warn once the hard cap is hit — that is a refusal, not a warning" do
+      # $6 of $5 — over the cap, so outside the [threshold, limit) band.
+      :ok = Budget.record_cost(:together, 60_000_000)
+
+      assert {:error, :daily_limit_exceeded} == Budget.check_budget(:together)
+      refute_receive {:allowance_warning, _, %{type: :daily}}
+    end
+
+    # The threshold is env/config-driven, not hard-coded: lower alert_pct and a
+    # spend that did NOT warn at 0.8 now warns.
+    test "alert_pct is configurable" do
+      Application.put_env(:core, :ai_budget,
+        daily_limit_cents: 500,
+        monthly_limit_cents: 5_000,
+        alert_pct: 0.1
+      )
+
+      # $1 of $5 = 20%, under the default 0.8 but over a configured 0.1.
+      :ok = Budget.record_cost(:together, 10_000_000)
+
+      assert :ok == Budget.check_budget(:together)
+      assert_receive {:allowance_warning, _measurements, %{type: :daily}}
+    end
+  end
+
   describe "a charge the ledger could not record" do
     # ⛔ ALARMABLE, NOT ONLY LOGGED. `Spend.record/3` swallows a database fault
     # so a transient error does not kill a job that has already spent the money
