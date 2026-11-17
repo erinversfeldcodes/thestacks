@@ -286,11 +286,25 @@ def container_dispatch(inferences_since_load: int, container_id: str) -> dict[st
     return {"cold": inferences_since_load == 0, "container_id": container_id}
 
 
+# ⚖️ GPU MEMORY SNAPSHOT, GATED BEHIND A KNOB (U2). Modal's snapshot feature
+# restores CUDA/import state instead of re-running it, targeting the ~15s
+# warm-up layer that dominates this cold start (NOT the ~4s weight load). ⚠️
+# UNCONFIRMED ON TURING/T4 by any source — every Modal benchmark is
+# A10G/H100/A100 — so this is a TEST, off by default. VISION_GPU_SNAPSHOT=1
+# enables it and flips `@modal.enter` to run under the snapshot (snap=True).
+_SNAPSHOT = bool(os.environ.get("VISION_GPU_SNAPSHOT"))
+_cls_kwargs: dict[str, Any] = {}
+if _SNAPSHOT:
+    _cls_kwargs["enable_memory_snapshot"] = True
+    _cls_kwargs["experimental_options"] = {"enable_gpu_snapshot": True}
+
+
 @app.cls(
     gpu=VISION_GPU,
     image=image,
     max_containers=10,
     timeout=300,
+    **_cls_kwargs,
     # ⛔ 60s, CUT FROM 300s AGAINST A MEASURED COST DECOMPOSITION. This is how
     # long an idle A10G keeps billing after its last request, and measurement
     # put it at **98.1% of what a lone identification costs**: 9.18c of idle
@@ -324,7 +338,9 @@ def container_dispatch(inferences_since_load: int, container_id: str) -> dict[st
     scaledown_window=60,
 )
 class VisionModel:
-    @modal.enter()
+    # snap=True makes the load run DURING snapshot creation when enabled, so the
+    # restored container skips it. `snap` is harmless when snapshots are off.
+    @modal.enter(snap=_SNAPSHOT)
     def load(self) -> None:
         """Load the Qwen2.5-VL processor + model via HF Transformers.
 

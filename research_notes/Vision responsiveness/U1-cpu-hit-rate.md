@@ -55,3 +55,38 @@ of reach for CPU-first alone.
 
 **Net: U1 confirms CPU-first is worth building (p50 + cost) but cannot carry p95.
 U2 (T4 snapshot feasibility) is now the decision's pivot.**
+
+---
+
+# U2 — do GPU memory snapshots work on our T4? NO (measured)
+
+Test (`VISION_GPU_SNAPSHOT=1`, `enable_memory_snapshot=True` +
+`experimental_options={"enable_gpu_snapshot": True}`, `@modal.enter(snap=True)`):
+deploy snapshot-enabled T4+4B, call 1 creates the snapshot, force scaledown,
+call 2 is a cold RESTORE.
+
+| | |
+|---|---|
+| deploy on T4 | ✅ accepted (rc=0) — not hard-blocked |
+| call 1 (create) | 41.0s |
+| **call 2 (restore)** | **24.8s — vs 26.3s no-snapshot baseline. NO speedup.** |
+| logs | `Creating GPU memory snapshot` on BOTH calls, model re-loads both times; no "Restoring" line |
+
+⛔ **Conclusion: GPU snapshot RESTORE does not work (or does not help) on our T4.**
+Modal accepts the config but each cold start re-creates rather than restores —
+consistent with the research's warning that snapshots are unconfirmed on
+Turing (every Modal benchmark is A10G/H100/A100). The ~10× cold-path lever is
+unavailable on T4.
+
+⚠️ One-run caveat: my drive forced scaledown between the two calls, which could
+in principle have discarded the snapshot before it persisted. But no-speedup +
+re-creation logged is a strong signal; a confirming run is cheap if the decision
+hinges on it.
+
+## The box this puts p95 in
+
+- CPU-first ceiling on the corpus = **63%** (negatives/adjacent/illegible need
+  the GPU) — below the **f ≥ 0.95** p95 needs.
+- GPU snapshots (the fast-cold-path lever) = **dead on T4**.
+- ⛔ Therefore **p95 ≤ 15s is unmeetable on T4+4B synchronously.** p50 ≤ 5s is
+  still reachable (fix the OCR tier). The decision forks — see below.
