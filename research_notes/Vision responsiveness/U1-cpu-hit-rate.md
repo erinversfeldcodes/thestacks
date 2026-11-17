@@ -90,3 +90,12 @@ hinges on it.
 - GPU snapshots (the fast-cold-path lever) = **dead on T4**.
 - ⛔ Therefore **p95 ≤ 15s is unmeetable on T4+4B synchronously.** p50 ≤ 5s is
   still reachable (fix the OCR tier). The decision forks — see below.
+
+## U2 on L4 — INCONCLUSIVE (not re-run; decision went B/C)
+
+Same test on L4: call 1 = 400.0s (hit the 400s timeout), call 2 = 213.2s — both
+far beyond the T4's ~26-41s, timeout-dominated by L4 scheduling/capacity or a
+stuck snapshot creation, NOT a clean restore measurement. It neither confirms nor
+refutes L4 snapshots. Left inconclusive on purpose: the owner chose to keep T4+4B
+and revise the target (B+C), so the L4 question is informational only. A clean
+re-run is cheap if the budget or responsiveness bar is ever revisited.
