@@ -233,9 +233,25 @@ just less than the T4.
 ### Decisions on §8
 
 - [x] **GPU + model:** T4 + Qwen3-VL-4B. (L4 + 7B is the recorded fallback.)
-- [x] **Responsiveness target adopted:** p50 ≤ 5s, p95 ≤ 15s perceived. The gate
-  measured upload p95 at 913ms (HTTP round-trips; identification is async over
-  SSE and out of this percentile), comfortably inside it.
+- [x] **Responsiveness target REVISED 2026-11-17 to the architecture's physics
+  (owner decision: keep T4+4B, revise the bar + make the tail honest).** The
+  original p95 ≤ 15s was shown unmeetable on T4+4B synchronously: CPU-first tops
+  out at a 63% resolution ceiling (negatives/adjacent/illegible need the GPU,
+  measured U1) and GPU snapshots give no cold-path speedup on our T4 (measured
+  U2: 24.8s restore vs 26.3s baseline). Rather than buy a different card for a
+  tail number, the target is set to what a scale-to-zero $50/mo architecture
+  actually delivers, as **time-to-ANSWER**:
+    - **p50 ≤ 5s** — kept; met once CPU-first resolves the median (U1 path).
+    - **p95 ≈ 30s** — the cold-start physics (≈26s), accepted, not fought.
+    - **warm p95 ≤ 10s** — the number that holds once a reader is in a session.
+    - **time-to-acknowledgement < 1s** — the async affordance below.
+  ⬛ And C (make the tail honest): the EXISTING SSE stream delivers an immediate
+  "identifying your book…" state and the verified result when ready. CPU-resolved
+  answers are FINAL (the ISBN hard gate makes them non-speculative), so there is
+  no wrong-then-corrected flicker — a cold wait is shown honestly, not frozen.
+  ⚖️ This is B+C from the responsiveness fork, not a redefinition of "perceived"
+  to paper over a missed bar: the slow tail is named and owned, and the product
+  commits to fast acknowledgement + a fast median rather than a fast worst case.
 - [ ] **CPU-first text path:** still YES as the next build — it is orthogonal to
   this hardware ruling and attacks the dominant cost term (wake frequency) and
   the spine case at once. Scoped as wave-8 work, not gated on this decision.
