@@ -99,3 +99,25 @@ stuck snapshot creation, NOT a clean restore measurement. It neither confirms no
 refutes L4 snapshots. Left inconclusive on purpose: the owner chose to keep T4+4B
 and revise the target (B+C), so the L4 question is informational only. A clean
 re-run is cheap if the budget or responsiveness bar is ever revisited.
+
+---
+
+# R0 — single-dispatch, VALIDATED (modest win, honest)
+
+Flag `VISION_SINGLE_DISPATCH`, off by default. Validated on T4+4B:
+
+| axis | result |
+|---|---|
+| accuracy | ✅ 84/122, **every stratum identical** to the two-call 4B (exp-4) — R0 changes nothing about identification |
+| cold p95 (N=6 concurrent) | ✅ 25.6s vs two-call 29.3s — **~13% / ~3.7s** faster, consistently |
+| the ~52s two-cold-start tail | ⚠️ did NOT reproduce at N=6 under the 10-container cap (extracts found warm containers). The tail needs OVER-CAP contention (N > max_containers); untested. The common concurrent case saves one dispatch (~3.7s), not a second cold start (~25s). |
+
+⬛ CORRECTION to the earlier framing: "kills the 52s tail" was the theoretical
+worst case. Measured, R0 is a solid ~13% cold-p95 win with zero accuracy cost,
+plus halved dispatch count and a shared image encode — worth enabling, but the
+dramatic tail is rarer than first claimed.
+
+Flip criterion (config comment) is MET on the 4B. Two caveats before defaulting
+on: production still runs 7B/A10G (R0 accuracy validated on 4B only — structurally
+identical, but unmeasured on 7B), and it is a production-behaviour change. Flip
+with the 4B deployment, or run the 7B slice gate first.
