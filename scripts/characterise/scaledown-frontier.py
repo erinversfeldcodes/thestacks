@@ -26,21 +26,42 @@ simulation is checkable by reading it.
 
 from __future__ import annotations
 
+import os
 import random
 import statistics
 import sys
 
 # ── Measured inputs. Every one of these came off a deployed stack. ───────────
+#
+# ⚖️ DEFAULTS ARE THE 7B/A10G MEASUREMENTS; EACH IS ENV-OVERRIDABLE so the
+# frontier can be re-run for a different architecture without editing the
+# script — the ADR 026 ruling (T4+Qwen3-VL-4B) has different constants, and
+# welding one model's numbers into the model made it un-reusable for exactly
+# the moment it was most needed. Override with VISION_ACTIVE_S, _COLD_LOAD_S,
+# _WARM_WALL_S; unset keeps the 7B/A10G baseline this was first validated on.
 
-# GPU-active seconds per identification: 226.9s over 40 identifications.
-ACTIVE_S = 5.74
 
-# Model load on a cold container, from the W6c cold identification. Billed as
-# GPU time AND paid by the reader as latency — it is the whole cost of a miss.
-COLD_LOAD_S = 20.5
+def _measured(env_name: str, default: float) -> float:
+    raw = os.environ.get(env_name)
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    return v if v > 0 else default
 
-# Wall-clock a reader waits on a WARM container: VLM_EXTRACT p50.
-WARM_WALL_S = 9.745
+
+# GPU-active seconds per identification: 226.9s over 40 identifications (7B/A10G).
+ACTIVE_S = _measured("VISION_ACTIVE_S", 5.74)
+
+# Model load on a cold container (7B/A10G: W6c). Billed as GPU time AND paid by
+# the reader as latency — it is the whole cost of a miss. ⚠️ Isolate this from
+# container boot and image pull before trusting a cross-architecture value.
+COLD_LOAD_S = _measured("VISION_COLD_LOAD_S", 20.5)
+
+# Wall-clock a reader waits on a WARM container: VLM_EXTRACT p50 (7B/A10G).
+WARM_WALL_S = _measured("VISION_WARM_WALL_S", 9.745)
 
 # `modal billing rates`, 2026-11-13.
 RATE_PER_S = {"A10G": 1.10 / 3600, "L4": 0.80 / 3600, "T4": 0.59 / 3600}

@@ -52,6 +52,12 @@ _ENV_OVERRIDES = {
         ("VISION_MODEL_NAME", os.environ.get("VISION_MODEL_NAME")),
         ("VISION_DTYPE", os.environ.get("VISION_DTYPE")),
         ("VISION_MAX_PIXELS", os.environ.get("VISION_MAX_PIXELS")),
+        # ⛔ VISION_GPU IS BAKED TOO, FOR THE LOAD LINE'S HONESTY. It drives the
+        # `gpu=` decorator at deploy time (correct hardware either way), but the
+        # runtime print reads it from the container env — unbaked, that printed
+        # `gpu=A10G` for a container actually on a T4, which is precisely the
+        # lying-instrument failure the print exists to prevent.
+        ("VISION_GPU", os.environ.get("VISION_GPU")),
     )
     if v
 }
@@ -132,10 +138,10 @@ def _image_plan() -> list[tuple[str, object]]:
 
 
 for _step, _arg in _image_plan():
-    if _step == "pip_install":
-        image = image.pip_install(*_arg)  # type: ignore[arg-type]
-    elif _step == "env":
-        image = image.env(_arg)  # type: ignore[arg-type]
+    if _step == "pip_install" and isinstance(_arg, tuple):
+        image = image.pip_install(*_arg)
+    elif _step == "env" and isinstance(_arg, dict):
+        image = image.env(_arg)
     else:
         image = image.run_function(_download_model)
 
