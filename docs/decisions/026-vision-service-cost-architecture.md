@@ -239,9 +239,23 @@ just less than the T4.
 - [ ] **CPU-first text path:** still YES as the next build — it is orthogonal to
   this hardware ruling and attacks the dominant cost term (wake frequency) and
   the spine case at once. Scoped as wave-8 work, not gated on this decision.
-- [ ] **Scaledown window at T4+4B:** re-run the frontier with the 4B's measured
-  cold-load (smaller weights load faster than the 7B's 20.5s) before fixing a
-  window; the 60s interim stands until then.
+- [x] **Scaledown window at T4+4B: 60s, MEASURED 2026-11-17.** The preview cost
+  harness (packed+spaced billing solve) measured T4+4B at COLD_LOAD=24.98s (clean;
+  matches the 26s cold-wall), model fit exact. Frontier at those constants: at
+  48 uploads/day the 60s window = **$21.98/mo** (vs 7B/A10G $37.60 — a 42% cut,
+  tracking the rate delta), within budget through ~60/day. **Keep 60s at hobby
+  scale.**
+- [ ] ⛔ **Responsiveness is a MEASURED blocker, not a hypothetical — async is
+  now a GATING requirement, not an optional optimisation.** The same frontier
+  shows **p95 wait = 32.6s at every window**, because at hobby traffic ~94% of
+  lone requests are cold and the cold path (cold-load 25s + inference) dominates.
+  That is **2.2× over the adopted p95≤15s target**, and no window setting or GPU
+  choice moves it — only a warm floor or the answer-now/confirm-later async
+  pattern (§7 item 1/4) can. So the responsiveness target is unmeetable
+  synchronously on the chosen architecture: the CPU-first path + async response
+  is promoted from "next build" to a **precondition for meeting the responsiveness
+  bar this ADR adopted**. (⚠️ the 32.6s carries the sequential-driving ACTIVE_S
+  inflation, but cold-load alone keeps it far over 15s, so the conclusion holds.)
 
 ### Implementation consequences (follow-on, NOT done in this ADR)
 
