@@ -58,6 +58,9 @@ _ENV_OVERRIDES = {
         # `gpu=A10G` for a container actually on a T4, which is precisely the
         # lying-instrument failure the print exists to prevent.
         ("VISION_GPU", os.environ.get("VISION_GPU")),
+        # R0 flag — baked so the CPU front door's pydantic Settings sees it in
+        # the container (it reads VISION_SINGLE_DISPATCH), same as every knob here.
+        ("VISION_SINGLE_DISPATCH", os.environ.get("VISION_SINGLE_DISPATCH")),
     )
     if v
 }
