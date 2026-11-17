@@ -240,6 +240,20 @@ _EXTRACT_PROMPT = (
 )
 
 
+def _classification_is_book(classify_parsed: dict[str, Any]) -> bool:
+    """Whether the classify output means "extract this one".
+
+    ⛔ THE BUNNY-SCREENSHOT GUARD, now sidecar-side. `analyze` extracts ONLY
+    when this is true, so a non-book (a screenshot, a bare barcode photo) never
+    reaches the extract prompt — the regression that once surfaced BOOK with no
+    books. Kept as a pure module function, NOT inlined in the @app.cls method,
+    precisely so it is unit-testable: the Modal-wrapped class method is not.
+    `"book"` is the single raw value `main.py._ML_TO_CLASSIFICATION` maps to a
+    book; this must agree with that mapping, which a test pins.
+    """
+    return str(classify_parsed.get("classification", "")).strip().lower() == "book"
+
+
 def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     """Return the extract prompt, augmented with a rejection-retry constraint
     when ``excluded_books`` is non-empty.
@@ -463,6 +477,35 @@ class VisionModel:
             return {"books": []}
         prompt = _build_extract_prompt(excluded_books)
         return self._infer(images_b64[0], prompt)
+
+    @modal.method()
+    def analyze(
+        self,
+        image_b64: str,
+        excluded_books: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Classify, then extract ONLY if it is a book — on ONE container, ONE
+        dispatch, one loaded model.
+
+        ⬛ THIS IS R0. The front door used to call `classify` then `extract` as
+        two independent `.remote()` dispatches, which under the vision queue's
+        concurrency could land on DIFFERENT containers — risking a SECOND cold
+        start and a ~52s p95 tail on a cold book. Collapsing them into one
+        method guarantees one container: at most one cold start, and the
+        extract runs on the model the classify just warmed.
+
+        ⚠️ The book-decision duplicates exactly ONE string compare against the
+        single raw value main.py's `_ML_TO_CLASSIFICATION` maps to a book
+        (`"book"`). Kept trivial on purpose: a richer rule on this side could
+        drift from the front door's and extract for a non-book (wasted GPU) or
+        skip a book (missed identification). The front door still re-parses the
+        classification authoritatively from the returned `classify` payload.
+        """
+        classify_parsed = self._infer(image_b64, _CLASSIFY_PROMPT)
+        extract_parsed: dict[str, Any] | None = None
+        if _classification_is_book(classify_parsed):
+            extract_parsed = self._infer(image_b64, _build_extract_prompt(excluded_books))
+        return {"classify": classify_parsed, "extract": extract_parsed}
 
     def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
         import torch

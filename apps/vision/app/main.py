@@ -441,14 +441,28 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
 
     vlm_b64 = _resize_for_vlm(image_b64)
 
-    log.info("calling vision model for classify")
-    classify_started = time.monotonic()
-    classify_parsed = await client.classify(vlm_b64)
-    classify_ms = _elapsed_ms(classify_started)
-    # ⛔ A LIST, COLLECTED ACROSS EVERY DISPATCH. This read only the classify
-    # call, so a request whose EXTRACT woke a cold container reported no cold
-    # start — under-counting billed container lifetimes by up to half, in the
-    # direction that makes the GPU look cheap.
+    # ⬛ R0, BEHIND settings.single_dispatch. ON: classify + conditional extract
+    # run as ONE Modal dispatch on one container (`analyze`), eliminating the
+    # second-cold-start tail two separate `.remote()` calls risked (~52s p95 on
+    # a cold book). OFF (default): the measured two-call baseline, unchanged.
+    # Either way the front door re-parses the classification authoritatively and
+    # uses the extract only for a book, so the shared logic below is identical.
+    extract_parsed_opt: dict[str, object] | None = None
+    if settings.single_dispatch:
+        log.info("calling vision model for analyze (single dispatch)")
+        analyze_started = time.monotonic()
+        analyzed = await client.analyze(vlm_b64, excluded_books=list(body.excluded_books))
+        classify_ms = _elapsed_ms(analyze_started)
+        _c = analyzed.get("classify")
+        classify_parsed: dict[str, object] = _c if isinstance(_c, dict) else {}
+        _e = analyzed.get("extract")
+        extract_parsed_opt = _e if isinstance(_e, dict) else None
+    else:
+        log.info("calling vision model for classify")
+        classify_started = time.monotonic()
+        classify_parsed = await client.classify(vlm_b64)
+        classify_ms = _elapsed_ms(classify_started)
+
     gpu_dispatches: list[GpuDispatch] = []
     if (d := _gpu_dispatch(classify_parsed)) is not None:
         gpu_dispatches.append(d)
@@ -474,24 +488,22 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             sidecar_cold=cold,
         )
 
-    log.info(
-        "calling vision model for extract",
-        excluded_books_count=len(body.excluded_books),
-    )
-    extract_started = time.monotonic()
-    extract_parsed = await client.extract(
-        [vlm_b64],
-        excluded_books=list(body.excluded_books),
-    )
-
-    # ⛔ THE DISPATCH THAT WAS BEING THROWN AWAY. `extract_parsed`'s `_container`
-    # block was already in hand and discarded, on the reasoning that "the
-    # extract runs on a container the classify just proved warm". Nothing
-    # enforces that: these are two independent `.remote.aio` dispatches against
-    # `max_containers=10`, and under this project's own documented load profile
-    # — the vision Oban queue at concurrency 20 against that cap, a batch
-    # arriving back-to-back — landing on different containers is the NORMAL
-    # case for a batch, not a corner.
+    # Book path. Single-dispatch: extract already ran inside `analyze` on the
+    # same container (no second cold start). Two-call: dispatch extract now.
+    if settings.single_dispatch:
+        extract_parsed = extract_parsed_opt or {"books": []}
+        extract_ms: int | None = None
+    else:
+        log.info(
+            "calling vision model for extract",
+            excluded_books_count=len(body.excluded_books),
+        )
+        extract_started = time.monotonic()
+        extract_parsed = await client.extract(
+            [vlm_b64],
+            excluded_books=list(body.excluded_books),
+        )
+        extract_ms = _elapsed_ms(extract_started)
     if (d := _gpu_dispatch(extract_parsed)) is not None:
         gpu_dispatches.append(d)
     books = _parse_extracted_books(extract_parsed)
@@ -514,8 +526,12 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             download=download_ms,
             barcode=barcode_ms,
             ocr=ocr_ms,
+            # Two-call path: classify and extract are separately timed. Single
+            # dispatch: `classify_ms` covers the whole analyze round-trip and
+            # `extract_ms` is None (not separately observable) rather than a
+            # fabricated split.
             classify=classify_ms,
-            extract=_elapsed_ms(extract_started),
+            extract=extract_ms,
         ),
         sidecar_cold=cold,
     )

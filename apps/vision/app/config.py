@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     # before this becomes True anywhere.
     ocr_short_circuit: bool = False
 
+    # ⬛ R0: run classify + extract as ONE Modal dispatch on one container
+    # (single_dispatch) instead of two separate .remote() calls. Eliminates the
+    # second-cold-start tail (~52s p95 on a cold book). Off by default — the
+    # two-call path stays the measured baseline — until a deploy proves the
+    # cold-path win and the slice gate proves accuracy is unchanged.
+    single_dispatch: bool = False
+
     # Minimum mean word confidence for a read to be allowed to answer, when
     # short-circuiting is on at all. Deliberately high: a wrong identification
     # costs more than a fall-through to the VLM, which is merely expensive.
