@@ -1494,7 +1494,7 @@ viewHero model book =
 {-| How many readers across the platform have read this book. Shown only when
 it is > 0: the field is a proto3 int32, so a real 0 and an omitted/unknown count
 both arrive as 0, and a "read by 0 readers" line would assert a fact the wire
-cannot carry. The ADR-008 wear ladder — turning this figure into a spine's
+cannot carry. The wear ladder — turning this figure into a spine's
 visible wear — is deliberately NOT built here; this is the plain number.
 -}
 viewCommunityReadCount : Book -> Html Msg

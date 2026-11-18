@@ -35,7 +35,7 @@ import sys
 #
 # ⚖️ DEFAULTS ARE THE 7B/A10G MEASUREMENTS; EACH IS ENV-OVERRIDABLE so the
 # frontier can be re-run for a different architecture without editing the
-# script — the ADR 026 ruling (T4+Qwen3-VL-4B) has different constants, and
+# script — the chosen T4+Qwen3-VL-4B configuration has different constants, and
 # welding one model's numbers into the model made it un-reusable for exactly
 # the moment it was most needed. Override with VISION_ACTIVE_S, _COLD_LOAD_S,
 # _WARM_WALL_S; unset keeps the 7B/A10G baseline this was first validated on.
@@ -55,7 +55,7 @@ def _measured(env_name: str, default: float) -> float:
 # GPU-active seconds per identification: 226.9s over 40 identifications (7B/A10G).
 ACTIVE_S = _measured("VISION_ACTIVE_S", 5.74)
 
-# Model load on a cold container (7B/A10G: W6c). Billed as GPU time AND paid by
+# Model load on a cold container (7B/A10G). Billed as GPU time AND paid by
 # the reader as latency — it is the whole cost of a miss. ⚠️ Isolate this from
 # container boot and image pull before trusting a cross-architecture value.
 COLD_LOAD_S = _measured("VISION_COLD_LOAD_S", 20.5)

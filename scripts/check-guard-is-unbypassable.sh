@@ -95,7 +95,13 @@ SUCCESS_EXIT = re.compile(
 # change", and it is the only honest reason to lower this number: a guard that
 # went away because its question stopped being askable, not one that was
 # removed because it was inconvenient.
-EXPECTED_GUARDED_SCRIPTS = 23
+#
+# ⚖️ 23 → 24 on 2026-11-18: `scripts/characterise/vision-cost-decomposition.py`
+# gained `MIN_SAMPLES_FOR_PCT` — a floor on the sample count before a percentage
+# is reported, so a thin run cannot present a noisy ratio as a measured fact. The
+# guard sits above the script's success exit (the gate verified that); only the
+# population count had gone unaccounted when the guard shipped.
+EXPECTED_GUARDED_SCRIPTS = 24
 
 guarded = {}
 violations = []

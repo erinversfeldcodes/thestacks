@@ -6,7 +6,7 @@ This reads `modal billing report --json` and reports what was *charged*. Run
 both over the same window and the gap between them is the cost model's error,
 measured rather than assumed. This is what lets a preview answer "what will
 this architecture cost" BEFORE it ships, instead of waiting for a month of
-production billing — the capability W8a/W8b actually need.
+production billing — the capability the cost-characterisation work actually needs.
 
 ⚠️ WHAT "PER IDENTIFICATION" MEANS HERE, EXACTLY. Billing gives total
 GPU-seconds for a window: active inference + cold loads + idle tails, summed
