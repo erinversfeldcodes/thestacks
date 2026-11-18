@@ -29,7 +29,7 @@ source status =
     , url = "https://truth.coffee"
     , sourceType = "community"
     , status = status
-    , confidenceScore = 0.6
+    , confidenceScore = Just 0.6
     }
 
 
@@ -37,6 +37,21 @@ loaded : String -> SourceApproval.Model
 loaded status =
     { sources =
         Success { sources = [ source status ], total = 1, page = 1, perPage = 20 }
+    , statusFilter = SourceApproval.All
+    , page = 1
+    , actionInProgress = Nothing
+    , actionError = Nothing
+    }
+
+
+loadedWithConfidence : Maybe Float -> SourceApproval.Model
+loadedWithConfidence conf =
+    let
+        base =
+            source "pending_review"
+    in
+    { sources =
+        Success { sources = [ { base | confidenceScore = conf } ], total = 1, page = 1, perPage = 20 }
     , statusFilter = SourceApproval.All
     , page = 1
     , actionInProgress = Nothing
@@ -52,7 +67,21 @@ render model =
 suite : Test
 suite =
     describe "Page.Admin.SourceApproval"
-        [ describe "a source awaiting review offers the decisions"
+        [ describe "storage literals do not reach the operator"
+            [ test "a scored source shows its confidence" <|
+                \_ ->
+                    render (loadedWithConfidence (Just 0.6))
+                        |> Query.has [ Selector.text "0.6" ]
+            , test "an unscored source shows an em-dash, never a real 0" <|
+                \_ ->
+                    render (loadedWithConfidence Nothing)
+                        |> Query.has [ Selector.text "—" ]
+            , test "the status badge reads as copy, not the stored atom" <|
+                \_ ->
+                    render (loaded "pending_review")
+                        |> Query.has [ Selector.text "Pending review" ]
+            ]
+        , describe "a source awaiting review offers the decisions"
             [ test "Approve renders for the server's real status value" <|
                 \_ ->
                     render (loaded "pending_review")

@@ -19,17 +19,23 @@ import Effect
 import Html exposing (Html, div, h1, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class)
 import Http
+import Task
+import Time
 import Types.RemoteData exposing (RemoteData(..))
+import Util.Label as Label
+import Util.RelativeTime as RelativeTime
 
 
 type alias Model =
     { sourceHealth : RemoteData Http.Error (List SourceHealth)
+    , now : Maybe Time.Posix
     }
 
 
 type Msg
     = SourceHealthReceived (Result Http.Error (List SourceHealth))
     | SessionExpiryDetected
+    | GotNow Time.Posix
 
 
 type OutMsg
@@ -41,22 +47,25 @@ init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         model =
-            { sourceHealth = Loading }
+            { sourceHealth = Loading, now = Nothing }
     in
     case maybeToken of
         Just token ->
             ( model
-            , Effect.perform
-                (Effect.authed Api.sourceHealthRequest
-                    token
-                    { onExpired = SessionExpiryDetected
-                    , onResponse = Api.resolveJson Api.sourceHealthListDecoder >> SourceHealthReceived
-                    }
-                )
+            , Cmd.batch
+                [ Effect.perform
+                    (Effect.authed Api.sourceHealthRequest
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveJson Api.sourceHealthListDecoder >> SourceHealthReceived
+                        }
+                    )
+                , Task.perform GotNow Time.now
+                ]
             )
 
         Nothing ->
-            ( { sourceHealth = NotAsked }, Cmd.none )
+            ( { sourceHealth = NotAsked, now = Nothing }, Cmd.none )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -64,6 +73,9 @@ update msg model =
     case msg of
         SessionExpiryDetected ->
             ( model, Cmd.none, SessionExpired )
+
+        GotNow posix ->
+            ( { model | now = Just posix }, Cmd.none, NoOut )
 
         SourceHealthReceived result ->
             case result of
@@ -111,11 +123,11 @@ viewContent model =
                 p [ class "admin__empty" ] [ text "No sources configured." ]
 
             else
-                viewHealthTable sources
+                viewHealthTable model.now sources
 
 
-viewHealthTable : List SourceHealth -> Html Msg
-viewHealthTable sources =
+viewHealthTable : Maybe Time.Posix -> List SourceHealth -> Html Msg
+viewHealthTable now sources =
     table [ class "metrics-table" ]
         [ thead []
             [ tr []
@@ -128,20 +140,39 @@ viewHealthTable sources =
                 ]
             ]
         , tbody []
-            (List.map viewHealthRow sources)
+            (List.map (viewHealthRow now) sources)
         ]
 
 
-viewHealthRow : SourceHealth -> Html Msg
-viewHealthRow source =
+viewHealthRow : Maybe Time.Posix -> SourceHealth -> Html Msg
+viewHealthRow now source =
     tr []
         [ td [] [ text source.name ]
         , td [] [ text source.sourceType ]
         , td [] [ viewStatusBadge source.status ]
         , td [] [ text (String.fromInt source.consecutiveFailures) ]
-        , td [] [ text (Maybe.withDefault "-" source.lastSuccess) ]
-        , td [] [ text (Maybe.withDefault "-" source.lastFailure) ]
+        , td [] [ text (relativeOrDash now source.lastSuccess) ]
+        , td [] [ text (relativeOrDash now source.lastFailure) ]
         ]
+
+
+{-| A stored timestamp as relative-time copy, or an em-dash when there is none.
+Before `now` has loaded it shows the date alone rather than the raw timestamp, so
+a microsecond-precision storage literal never reaches the operator's eye.
+-}
+relativeOrDash : Maybe Time.Posix -> Maybe String -> String
+relativeOrDash now maybeIso =
+    case maybeIso of
+        Nothing ->
+            "—"
+
+        Just iso ->
+            case now of
+                Just posix ->
+                    RelativeTime.relative posix iso
+
+                Nothing ->
+                    String.left 10 iso
 
 
 viewStatusBadge : String -> Html Msg
@@ -161,4 +192,4 @@ viewStatusBadge status =
                 _ ->
                     ""
     in
-    span [ class ("status-badge " ++ badgeClass) ] [ text status ]
+    span [ class ("status-badge " ++ badgeClass) ] [ text (Label.humanize status) ]

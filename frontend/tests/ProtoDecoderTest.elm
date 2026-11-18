@@ -2226,6 +2226,7 @@ sourceResponseSuite =
                               , type_ = "scraper_config"
                               , url = "https://loot.co.za"
                               , confidence = 0.85
+                              , confidenceScored = True
                               , discoveredVia = "crawler"
                               , discoveredAt = "2026-03-20T00:00:00Z"
                               , status = "pending"
@@ -2295,7 +2296,7 @@ sourceResponseSuite =
 
                     Err e ->
                         Expect.fail (D.errorToString e)
-        , test "DiscoveredSource decodes all 10 fields" <|
+        , test "DiscoveredSource decodes all 11 fields" <|
             \_ ->
                 let
                     json =
@@ -2306,6 +2307,7 @@ sourceResponseSuite =
                             "type": "rss_feed",
                             "url": "https://example.com/feed",
                             "confidence": 0.7,
+                            "confidence_scored": true,
                             "discovered_via": "crawler",
                             "discovered_at": "2026-03-20T00:00:00Z",
                             "status": "pending",
@@ -2325,6 +2327,7 @@ sourceResponseSuite =
                             , \s -> Expect.equal "rss_feed" s.type_
                             , \s -> Expect.equal "https://example.com/feed" s.url
                             , \s -> Expect.within (Expect.Absolute 0.001) 0.7 s.confidence
+                            , \s -> Expect.equal True s.confidenceScored
                             , \s -> Expect.equal "crawler" s.discoveredVia
                             , \s -> Expect.equal "pending" s.status
                             , \s -> Expect.equal "" s.approvedAt
@@ -2344,6 +2347,7 @@ sourceResponseSuite =
                         , type_ = "llm_output"
                         , url = ""
                         , confidence = 0.5
+                        , confidenceScored = True
                         , discoveredVia = "manual"
                         , discoveredAt = "2026-03-22T00:00:00Z"
                         , status = "approved"

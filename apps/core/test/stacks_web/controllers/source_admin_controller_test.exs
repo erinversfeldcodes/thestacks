@@ -41,6 +41,22 @@ defmodule StacksWeb.SourceAdminControllerTest do
       assert length(sources) == 2
     end
 
+    test "distinguishes a scored source from one that was never scored", %{conn: conn} do
+      {conn, _user, _session} = setup_admin_conn(conn)
+      insert(:discovered_source, name: "Scored", status: "pending_review", confidence: 0.6)
+      insert(:discovered_source, name: "Unscored", status: "pending_review", confidence: nil)
+
+      conn = get(conn, "/api/admin/sources")
+      %{"sources" => sources} = json_response(conn, 200)
+      by_name = Map.new(sources, &{&1["name"], &1})
+
+      assert by_name["Scored"]["confidence_scored"] == true
+      assert by_name["Scored"]["confidence"] == 0.6
+      # The unscored row carries its placeholder 0, flagged so the reader shows "—".
+      assert by_name["Unscored"]["confidence_scored"] == false
+      assert by_name["Unscored"]["confidence"] == 0.0
+    end
+
     test "filters by status", %{conn: conn} do
       {conn, _user, _session} = setup_admin_conn(conn)
       insert(:discovered_source, status: "pending_review")

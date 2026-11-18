@@ -18,7 +18,7 @@ message SourceAdminListResponse {
 }
 
 // DiscoveredSource represents a discovered data source in the admin panel.
-// JSON shape: {id, name, type, url, confidence, discovered_via, discovered_at, status, approved_at, created_at}
+// JSON shape: {id, name, type, url, confidence, confidence_scored, discovered_via, discovered_at, status, approved_at, created_at}
 message DiscoveredSource {
   // UUID of the source record.
   string id = 1 [json_name = "id"];
@@ -32,7 +32,9 @@ message DiscoveredSource {
   // URL of the source.
   string url = 4 [json_name = "url"];
 
-  // Confidence score from discovery.
+  // Confidence score from discovery, 0.0–1.0. Only meaningful when
+  // `confidence_scored` is true; an unscored source reports 0 here and false
+  // there, which the reader renders as "—" rather than a real zero.
   double confidence = 5 [json_name = "confidence"];
 
   // How the source was discovered (e.g. "manual", "crawler").
@@ -49,6 +51,10 @@ message DiscoveredSource {
 
   // When the source record was created.
   string created_at = 10 [json_name = "created_at"];
+
+  // Whether `confidence` carries a real score. False means the source has not
+  // been scored yet, so `confidence`'s 0 is a placeholder, not a measurement.
+  bool confidence_scored = 11 [json_name = "confidence_scored"];
 }
 
 // VisibilityUpdateResponse is returned by bookshelf/placement visibility updates.

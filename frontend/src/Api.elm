@@ -4901,7 +4901,7 @@ type alias AdminSource =
     , url : String
     , sourceType : String
     , status : String
-    , confidenceScore : Float
+    , confidenceScore : Maybe Float
     }
 
 
@@ -4914,7 +4914,12 @@ fromProtoDiscoveredSource proto =
     , url = proto.url
     , sourceType = proto.type_
     , status = proto.status
-    , confidenceScore = proto.confidence
+    , confidenceScore =
+        if proto.confidenceScored then
+            Just proto.confidence
+
+        else
+            Nothing
     }
 
 
