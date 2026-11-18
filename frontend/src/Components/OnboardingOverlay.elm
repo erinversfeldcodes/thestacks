@@ -323,7 +323,12 @@ advance token model =
 
 finishNow : Maybe Api.Credentials -> Model -> ( Model, Cmd Msg, OutMsg )
 finishNow token model =
-    ( { model | visible = False }, recordCurrentStep token model, OnboardingFinished )
+    -- Skip and Escape jump straight to the end, so — unlike the step-by-step
+    -- walk — they must record EVERY server step, not just the one being left.
+    -- Onboarding counts as complete only when all its steps are, and that
+    -- completion is the server-side fact the overlay now reads on the next boot;
+    -- recording one step would leave the reader onboarding again forever.
+    ( { model | visible = False }, recordAllServerSteps token model, OnboardingFinished )
 
 
 focusContainerCmd : Cmd Msg
@@ -338,6 +343,32 @@ overlay yet).
 focusElementCmd : String -> Cmd Msg
 focusElementCmd elementId =
     Task.attempt (\_ -> FocusResult) (Browser.Dom.focus elementId)
+
+
+{-| Mark EVERY onboarding step that has a server counterpart complete — the
+finish path for Skip and Escape, which do not walk the steps one at a time and
+so would otherwise leave later steps unrecorded and the reader never done.
+-}
+recordAllServerSteps : Maybe Api.Credentials -> Model -> Cmd Msg
+recordAllServerSteps maybeToken model =
+    case maybeToken of
+        Just token ->
+            model.steps
+                |> List.filterMap backendStepName
+                |> List.map
+                    (\name ->
+                        Effect.perform
+                            (Effect.authed (Api.completeOnboardingStepRequest name)
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse = \_ -> StepCompleted
+                                }
+                            )
+                    )
+                |> Cmd.batch
+
+        Nothing ->
+            Cmd.none
 
 
 recordCurrentStep : Maybe Api.Credentials -> Model -> Cmd Msg
