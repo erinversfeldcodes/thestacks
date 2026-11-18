@@ -114,6 +114,13 @@ type alias Model =
     , waitedSeconds : Int
     , silentSeconds : Int
     , retryable : Bool
+
+    -- Attempts left to re-fetch a just-identified book while it is still
+    -- provisional (title shaped like "ISBN 978…"). Identification resolves the
+    -- book before enrichment fills in its real title and author, and enrichment
+    -- is a separate job that cannot signal this upload's stream — so the page
+    -- polls the book until the title it shows is the real one. 0 = not polling.
+    , provisionalRefetches : Int
     }
 
 
@@ -163,6 +170,8 @@ type Msg
     | StreamEvent String
     | StreamError
     | GotIdentifiedBook String (Result Http.Error BookDetailResponse)
+    | RefetchProvisional String
+    | ProvisionalRefetched (Result Http.Error BookDetailResponse)
     | GotDuplicateBook (Result Http.Error BookDetailResponse)
     | ManualIsbnChanged String
     | SubmitManualIsbn
@@ -222,6 +231,7 @@ init =
     -- retry can re-read it. Only a RESUMED item can be otherwise, and it says
     -- so on the wire — see `ResumeInboxItem`.
     , retryable = True
+    , provisionalRefetches = 0
     }
 
 
@@ -583,6 +593,10 @@ updateWithEffect msg model maybeToken =
                     if List.isEmpty remaining then
                         case newCollected of
                             [ singleBook ] ->
+                                let
+                                    ( refetches, refetchEffect ) =
+                                        startProvisionalRefetch singleBook
+                                in
                                 ( { model
                                     | result = Identified newCollected
                                     , collectedBooks = []
@@ -590,8 +604,9 @@ updateWithEffect msg model maybeToken =
                                     , step = Verifying singleBook
                                     , existingShelves =
                                         List.filterMap .bookshelfName response.placements
+                                    , provisionalRefetches = refetches
                                   }
-                                , Effect.none
+                                , refetchEffect
                                 , NoOut
                                 )
 
@@ -641,6 +656,51 @@ updateWithEffect msg model maybeToken =
 
                     else
                         ( { model | pendingBookIds = remaining, failedBookIds = newFailed }, Effect.none, NoOut )
+
+        RefetchProvisional bookId ->
+            case maybeToken of
+                Just token ->
+                    ( model
+                    , Effect.authed (Api.getBookRequest bookId)
+                        token
+                        { onExpired = SessionGone
+                        , onResponse =
+                            Api.resolveJson Api.bookDetailResponseDecoder
+                                >> ProvisionalRefetched
+                        }
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( { model | provisionalRefetches = 0 }, Effect.none, NoOut )
+
+        ProvisionalRefetched (Ok response) ->
+            let
+                refreshedStep =
+                    replaceStepBook response.book model.step
+            in
+            if isUnidentified response.book && model.provisionalRefetches > 1 then
+                -- Still a placeholder title and attempts left: show what we have
+                -- and poll again. The identified book is live immediately; its
+                -- real title and author arrive with the enrichment job after.
+                ( { model
+                    | step = refreshedStep
+                    , provisionalRefetches = model.provisionalRefetches - 1
+                  }
+                , Effect.sleepThen provisionalRefetchDelayMs (RefetchProvisional response.book.id)
+                , NoOut
+                )
+
+            else
+                -- Enriched (the title is real now), or out of attempts: stop.
+                ( { model | step = refreshedStep, provisionalRefetches = 0 }
+                , Effect.none
+                , NoOut
+                )
+
+        ProvisionalRefetched (Err _) ->
+            -- A failed poll leaves the provisional book as it is; stop polling.
+            ( { model | provisionalRefetches = 0 }, Effect.none, NoOut )
 
         GotDuplicateBook result ->
             case result of
@@ -1011,6 +1071,60 @@ resolvedBookReads response =
 
         ids ->
             List.map (\bid -> ( bid, GotIdentifiedBook bid )) ids
+
+
+{-| How many times the page re-fetches a just-identified book while it is still
+provisional, and how long it waits between tries. Six tries at 1.5s covers the
+~1–9s an enrichment job takes without polling a stuck book forever.
+-}
+maxProvisionalRefetches : Int
+maxProvisionalRefetches =
+    6
+
+
+provisionalRefetchDelayMs : Float
+provisionalRefetchDelayMs =
+    1500
+
+
+{-| Begin polling a freshly-identified book if its title is still a placeholder
+("ISBN 978…"). A book that already has a real title needs no poll, so this is a
+no-op (0 attempts, no effect) in the common case where enrichment already ran.
+-}
+startProvisionalRefetch : Book -> ( Int, Effect Msg )
+startProvisionalRefetch book =
+    if isUnidentified book then
+        ( maxProvisionalRefetches
+        , Effect.sleepThen provisionalRefetchDelayMs (RefetchProvisional book.id)
+        )
+
+    else
+        ( 0, Effect.none )
+
+
+{-| Swap the book inside the current step for a freshly-fetched copy, matched by
+id, so a poll that enriched the title updates what the reader sees without
+disturbing the step itself. Any other step is left untouched.
+-}
+replaceStepBook : Book -> UploadStep -> UploadStep
+replaceStepBook book step =
+    case step of
+        Verifying current ->
+            if current.id == book.id then
+                Verifying book
+
+            else
+                step
+
+        Complete current shelf ->
+            if current.id == book.id then
+                Complete book shelf
+
+            else
+                step
+
+        _ ->
+            step
 
 
 bookReadEffect : Api.Credentials -> PollResponse -> Effect Msg

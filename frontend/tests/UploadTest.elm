@@ -93,6 +93,45 @@ dummyEdition =
     }
 
 
+{-| A just-identified, not-yet-enriched book: a barcode-unverified edition and a
+title that is still the ISBN placeholder, so `Types.Book.isUnidentified` is True.
+-}
+provisionalEdition : Edition
+provisionalEdition =
+    { dummyEdition | isbn = "9780316769488", verificationSource = "barcode_unverified" }
+
+
+provisionalBook : Book
+provisionalBook =
+    { dummyBook
+        | id = "book-prov"
+        , title = "ISBN 9780316769488"
+        , editions = [ provisionalEdition ]
+        , primaryEdition = Just provisionalEdition
+    }
+
+
+{-| The same book after enrichment: same id and edition, a real title — so it is
+no longer `isUnidentified`, which is the page's signal to stop polling.
+-}
+enrichedBook : Book
+enrichedBook =
+    { provisionalBook | title = "The Catcher in the Rye" }
+
+
+{-| Wrap a book in the book-detail response shape the identification and refetch
+handlers decode, with no placement or writing — the fields those handlers read
+off it are only the book itself.
+-}
+identifiedResponse book =
+    { book = book
+    , placement = Nothing
+    , bookshelfVisibility = Nothing
+    , placements = []
+    , myWriting = []
+    }
+
+
 dummyBookWithEdition : Book
 dummyBookWithEdition =
     { id = "book-1"
@@ -326,6 +365,81 @@ suite =
                             Upload.update (GotIdentifiedBook "book-1" (Err Http.NetworkError)) modelPending Nothing
                     in
                     model.result |> Expect.equal (IdentificationFailed ConnectionLost)
+            ]
+        , describe "provisional refetch — the page polls a just-identified book until enrichment fills in its title"
+            [ test "identifying a book whose title is still the ISBN placeholder starts polling" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        modelPending =
+                            { base | pendingBookIds = [ "book-prov" ], collectedBooks = [] }
+
+                        ( model, _, _ ) =
+                            Upload.update (GotIdentifiedBook "book-prov" (Ok (identifiedResponse provisionalBook))) modelPending Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.step |> Expect.equal (Verifying provisionalBook)
+                        , \m -> m.provisionalRefetches |> Expect.greaterThan 0
+                        ]
+                        model
+            , test "identifying a book that already has a real title does NOT poll" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        modelPending =
+                            { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
+
+                        ( model, _, _ ) =
+                            Upload.update (GotIdentifiedBook "book-1" (Ok (identifiedResponse dummyBook))) modelPending Nothing
+                    in
+                    model.provisionalRefetches |> Expect.equal 0
+            , test "a poll that enriched the title swaps the shown book and stops polling" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying provisionalBook, provisionalRefetches = 6 }
+
+                        ( model, _, _ ) =
+                            Upload.update (ProvisionalRefetched (Ok (identifiedResponse enrichedBook))) verifying Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.step |> Expect.equal (Verifying enrichedBook)
+                        , \m -> m.provisionalRefetches |> Expect.equal 0
+                        ]
+                        model
+            , test "a poll still showing the placeholder keeps polling, decrementing the budget" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying provisionalBook, provisionalRefetches = 6 }
+
+                        ( model, _, _ ) =
+                            Upload.update (ProvisionalRefetched (Ok (identifiedResponse provisionalBook))) verifying Nothing
+                    in
+                    model.provisionalRefetches |> Expect.equal 5
+            , test "the poll budget runs out so a stuck provisional book does not poll forever" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying provisionalBook, provisionalRefetches = 1 }
+
+                        ( model, _, _ ) =
+                            Upload.update (ProvisionalRefetched (Ok (identifiedResponse provisionalBook))) verifying Nothing
+                    in
+                    model.provisionalRefetches |> Expect.equal 0
             ]
         , describe "GotDuplicateBook"
             [ test "Ok sets result to DuplicateDetected" <|
