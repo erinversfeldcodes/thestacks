@@ -275,6 +275,7 @@ aBook =
     , editionCount = 0
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 

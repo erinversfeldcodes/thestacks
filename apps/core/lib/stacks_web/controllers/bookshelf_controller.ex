@@ -7,6 +7,7 @@ defmodule StacksWeb.BookshelfController do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Blog
+  alias Stacks.Books
   alias Stacks.Shelving
   alias Stacks.Visibility
   alias StacksWeb.Plugs.ViewAsPlug
@@ -70,14 +71,26 @@ defmodule StacksWeb.BookshelfController do
     else
       shelves = Shelving.get_bookshelf_shelves(user.id, bookshelf_name)
 
-      writing_book_ids =
+      book_ids =
         shelves
         |> Enum.flat_map(& &1.placements)
         |> Enum.map(& &1.book_id)
-        |> then(&Blog.book_ids_with_user_writing(user.id, &1))
+
+      writing_book_ids = Blog.book_ids_with_user_writing(user.id, book_ids)
+
+      # One query for the whole bookcase; `:error` (mart unreadable) omits the
+      # count for every spine rather than paint a `0` nobody measured.
+      read_counts =
+        case Books.community_read_counts(book_ids) do
+          {:ok, counts} -> counts
+          :error -> %{}
+        end
 
       shelf_json =
-        Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer, writing_book_ids))
+        Enum.map(
+          shelves,
+          &ProtoJSON.shelf_with_placements(&1, viewer, writing_book_ids, read_counts)
+        )
 
       placement_count = shelf_json |> Enum.flat_map(& &1.placements) |> length()
 

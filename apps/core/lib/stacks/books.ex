@@ -120,6 +120,51 @@ defmodule Stacks.Books do
     e -> read_count_unavailable(book_id, e)
   end
 
+  @doc """
+      Community read counts for many books in one query — the shelf payload runs
+      this once for a whole bookcase rather than `community_read_count/1` per
+      spine.
+
+      `{:ok, map}` carries every requested id: a book with a mart row gets its
+      count, a book with none gets a knowable `0` (the mart exists). `:error`
+      means the mart could not be read at all, and the caller omits the key for
+      every book rather than assert a `0` nobody measured — the same honesty the
+      singular keeps, applied to the whole batch.
+  """
+  @spec community_read_counts([binary()]) :: {:ok, %{binary() => non_neg_integer()}} | :error
+  def community_read_counts([]), do: {:ok, %{}}
+
+  def community_read_counts(book_ids) do
+    case Repo.query(
+           "SELECT book_id::text, read_count FROM marts.mart_community_read_count WHERE book_id::text = ANY($1)",
+           [book_ids]
+         ) do
+      {:ok, %{rows: rows}} ->
+        found = Map.new(rows, fn [book_id, count] -> {book_id, count} end)
+        {:ok, Map.new(book_ids, fn id -> {id, Map.get(found, id, 0)} end)}
+
+      {:error, reason} ->
+        read_counts_unavailable(reason)
+    end
+  rescue
+    e -> read_counts_unavailable(e)
+  end
+
+  defp read_counts_unavailable(reason) do
+    require Logger
+
+    Logger.warning(
+      "community_read_counts: mart unavailable — #{inspect(reason)}. " <>
+        "A missing mart means the scheduled dbt refresh has not run."
+    )
+
+    :telemetry.execute([:stacks, :marts, :read_unavailable], %{count: 1}, %{
+      mart: "mart_community_read_count"
+    })
+
+    :error
+  end
+
   defp read_count_unavailable(book_id, reason) do
     require Logger
 

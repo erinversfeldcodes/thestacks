@@ -53,6 +53,7 @@ provisionalBook =
     , editionCount = 1
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 

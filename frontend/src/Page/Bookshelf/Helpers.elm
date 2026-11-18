@@ -338,6 +338,7 @@ viewClickableSpine config placement =
                     , editionCount = 0
                     , subjects = []
                     , visibilityTier = Types.Book.Public
+                    , communityReadCount = 0
                     }
 
         texture =

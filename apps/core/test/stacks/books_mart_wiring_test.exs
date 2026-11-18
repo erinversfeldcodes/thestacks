@@ -76,4 +76,39 @@ defmodule Stacks.BooksMartWiringTest do
              "Returning 0 here is the defect: it reports 'nobody has read this book' for every " <>
              "book in the catalogue, forever, with nothing saying otherwise"
   end
+
+  # The shelf payload reads the whole bookcase's counts in one query rather than
+  # one per spine. The three answers the singular keeps apart must survive the
+  # batch: a measured count, a knowable 0 for a book the mart has no row for,
+  # and :error when the mart itself cannot be read.
+  test "community_read_counts/1 batches the read, 0 for absent rows, :error for an absent mart" do
+    read = insert(:book)
+    unread = insert(:book)
+
+    Core.Repo.query!("CREATE SCHEMA IF NOT EXISTS marts")
+
+    Core.Repo.query!("""
+    CREATE TABLE IF NOT EXISTS marts.mart_community_read_count (
+      book_id uuid PRIMARY KEY,
+      read_count bigint NOT NULL
+    )
+    """)
+
+    Core.Repo.query!(
+      "INSERT INTO marts.mart_community_read_count (book_id, read_count) VALUES ($1, 5)",
+      [Ecto.UUID.dump!(read.id)]
+    )
+
+    assert Stacks.Books.community_read_counts([read.id, unread.id]) ==
+             {:ok, %{read.id => 5, unread.id => 0}},
+           "the batch returns a measured count for a mart row and a knowable 0 for a book with none"
+
+    assert Stacks.Books.community_read_counts([]) == {:ok, %{}},
+           "an empty bookcase needs no query"
+
+    Core.Repo.query!("DROP TABLE marts.mart_community_read_count")
+
+    assert Stacks.Books.community_read_counts([read.id]) == :error,
+           "with the mart gone the batch is :error, so the controller omits the field for every spine"
+  end
 end

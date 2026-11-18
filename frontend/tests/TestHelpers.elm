@@ -134,6 +134,7 @@ testBook =
     , editionCount = 1
     , subjects = [ "Psychology", "Self-Help" ]
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 

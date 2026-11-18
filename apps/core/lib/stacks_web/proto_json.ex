@@ -270,11 +270,12 @@ defmodule StacksWeb.ProtoJSON do
       bisac_codes, and community_read_count. Author uses the bookshelf shape
       `{id, name, bio: nil}`.
   """
-  @spec bookshelf_book(map()) :: map() | nil
-  def bookshelf_book(%Ecto.Association.NotLoaded{}), do: nil
-  def bookshelf_book(nil), do: nil
+  @spec bookshelf_book(map() | nil, keyword()) :: map() | nil
+  def bookshelf_book(book, opts \\ [])
+  def bookshelf_book(%Ecto.Association.NotLoaded{}, _opts), do: nil
+  def bookshelf_book(nil, _opts), do: nil
 
-  def bookshelf_book(book) do
+  def bookshelf_book(book, opts) do
     editions = editions_list(book)
     primary = Books.primary_edition(book)
 
@@ -286,6 +287,7 @@ defmodule StacksWeb.ProtoJSON do
       edition_count: length(editions),
       primary_edition: edition_or_nil(primary)
     })
+    |> maybe_put_read_count(opts)
   end
 
   @doc """
@@ -351,8 +353,8 @@ defmodule StacksWeb.ProtoJSON do
 
       Matches `BookshelfController.format_placement/1`.
   """
-  @spec placement_detail(map()) :: map()
-  def placement_detail(placement) do
+  @spec placement_detail(map(), keyword()) :: map()
+  def placement_detail(placement, opts \\ []) do
     Gen.placement(placement)
     |> Map.take([
       :id,
@@ -367,7 +369,7 @@ defmodule StacksWeb.ProtoJSON do
       :finished_at,
       :visibility
     ])
-    |> Map.put(:book, bookshelf_book(placement.book))
+    |> Map.put(:book, bookshelf_book(placement.book, opts))
   end
 
   @doc """
@@ -670,8 +672,11 @@ defmodule StacksWeb.ProtoJSON do
       (any enumerable; default `[]`) flags books the owner has written about for
       the ribbon.
   """
-  @spec shelf_with_placements(map(), term(), Enumerable.t()) :: map()
-  def shelf_with_placements(shelf, viewer, writing_book_ids \\ []) do
+  @spec shelf_with_placements(map(), term(), Enumerable.t(), %{
+          optional(binary()) => non_neg_integer()
+        }) ::
+          map()
+  def shelf_with_placements(shelf, viewer, writing_book_ids \\ [], counts \\ %{}) do
     writing_set = MapSet.new(writing_book_ids)
 
     visible_placements =
@@ -679,11 +684,21 @@ defmodule StacksWeb.ProtoJSON do
       |> Enum.filter(&(Stacks.Visibility.resolve_visibility(&1, viewer) == :visible))
       |> Enum.map(fn placement ->
         placement
-        |> placement_detail()
+        |> placement_detail(read_count_opts(counts, placement.book_id))
         |> Map.put(:has_user_writing, MapSet.member?(writing_set, placement.book_id))
       end)
 
     %{id: shelf.id, position: shelf.position, placements: visible_placements}
+  end
+
+  # A book present in the counts map gets its count; a book absent from it — the
+  # mart was unreadable so the controller passed `%{}` — gets no key at all, so
+  # the wire omits the field rather than assert a `0` nobody measured.
+  defp read_count_opts(counts, book_id) do
+    case Map.fetch(counts, book_id) do
+      {:ok, count} -> [community_read_count: count]
+      :error -> []
+    end
   end
 
   @doc """

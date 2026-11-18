@@ -49,6 +49,7 @@ dummyBook =
     , editionCount = 0
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 
@@ -103,6 +104,7 @@ dummyBookWithEdition =
     , editionCount = 1
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 

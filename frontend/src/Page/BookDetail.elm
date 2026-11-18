@@ -39,6 +39,7 @@ import Types.Placement exposing (Format, Placement, ReadingStatus(..), formatToS
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, rowLabel)
 import Types.Visibility as Visibility exposing (Visibility)
+import Util.Plural as Plural
 import Util.TestId exposing (testId)
 
 
@@ -1485,8 +1486,25 @@ viewHero model book =
             , viewEditionSelector book model.selectedEdition
             , viewEditionDetails edition
             , viewRating model
+            , viewCommunityReadCount book
             ]
         ]
+
+
+{-| How many readers across the platform have read this book. Shown only when
+it is > 0: the field is a proto3 int32, so a real 0 and an omitted/unknown count
+both arrive as 0, and a "read by 0 readers" line would assert a fact the wire
+cannot carry. The ADR-008 wear ladder — turning this figure into a spine's
+visible wear — is deliberately NOT built here; this is the plain number.
+-}
+viewCommunityReadCount : Book -> Html Msg
+viewCommunityReadCount book =
+    if book.communityReadCount > 0 then
+        p [ class "book-detail__read-count", testId "book-read-count" ]
+            [ text ("Read by " ++ Plural.unit book.communityReadCount "reader") ]
+
+    else
+        text ""
 
 
 {-| The provisional-book explainer: the reader lands here when the

@@ -1841,6 +1841,13 @@ h4 {
     color: #3a2e1e;
 }
 
+/* How many readers across the platform have read this book. */
+.book-detail__read-count {
+    margin-top: 0.35rem;
+    font-size: var(--size-sm);
+    color: var(--parchment-muted, var(--text-muted));
+}
+
 .book-detail__rating--empty {
     color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
