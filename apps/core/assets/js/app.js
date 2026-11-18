@@ -173,26 +173,11 @@ function boot() {
     flags: flags,
   });
 
-var ONBOARDING_DONE_KEY = "stacks-onboarding-completed";
-
-if (app.ports && app.ports.saveOnboardingCompleted) {
-  app.ports.saveOnboardingCompleted.subscribe(function () {
-    try {
-      localStorage.setItem(ONBOARDING_DONE_KEY, "true");
-    } catch (e) {
-    }
-  });
-}
-
-if (app.ports && app.ports.onOnboardingStatus) {
-  var onboardingDone = false;
-  try {
-    onboardingDone = localStorage.getItem(ONBOARDING_DONE_KEY) === "true";
-  } catch (e) {
-    onboardingDone = false;
-  }
-  app.ports.onOnboardingStatus.send(onboardingDone);
-}
+// Onboarding completion is a per-user server fact, read from GET /api/auth/me
+// on boot. It used to be mirrored in browser localStorage and fed back to Elm,
+// which was browser-global: once anyone on a browser finished onboarding, every
+// later user inherited "done" and the overlay was shown to nobody. The server
+// is authoritative now, so there is no localStorage to keep.
 
 var LISTING_DRAFT_KEY = "stacks-listing-draft";
 

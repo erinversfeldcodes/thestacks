@@ -125,12 +125,6 @@ port playLoginTransition : Json.Encode.Value -> Cmd msg
 port onLoginTransitionComplete : (Decode.Value -> msg) -> Sub msg
 
 
-port saveOnboardingCompleted : () -> Cmd msg
-
-
-port onOnboardingStatus : (Bool -> msg) -> Sub msg
-
-
 port openUploadStream : { url : String } -> Cmd msg
 
 
@@ -781,6 +775,12 @@ resolveBoot answer model =
                 , page = page
                 , arrival = consumeArrival page Login.Fresh
                 , redirectAfterLogin = loginRedirectFor model.route (Just session)
+
+                -- Server is authoritative for onboarding, per user — not the
+                -- browser-global localStorage flag the `onOnboardingStatus` port
+                -- used to carry, which hid the overlay from a brand-new user on
+                -- any browser where onboarding had ever been finished.
+                , onboardingCompleted = identity.onboardingCompleted
               }
             , Cmd.batch [ pageCmd, bootCommandsFor session ]
             )
@@ -1985,7 +1985,6 @@ type Msg
     | EscapePressed
     | AdminChromeMsg AdminChrome.Msg
     | OnboardingMsg OnboardingOverlay.Msg
-    | OnboardingStatusReceived Bool
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
       -- ⛔ MAIN'S OWN EXPIRY MSG, which it did not need while its requests were
@@ -3213,8 +3212,11 @@ update msg model =
             in
             case outMsg of
                 OnboardingOverlay.OnboardingFinished ->
+                    -- Optimistic: the overlay's step calls already persisted
+                    -- completion server-side, so the next boot's /api/auth/me
+                    -- will agree; this just hides it now without a round trip.
                     ( { baseModel | onboardingCompleted = True }
-                    , Cmd.batch [ baseCmd, saveOnboardingCompleted () ]
+                    , baseCmd
                     )
 
                 OnboardingOverlay.UploadOpenStream url ->
@@ -3231,9 +3233,6 @@ update msg model =
 
                 OnboardingOverlay.NoOut ->
                     ( baseModel, baseCmd )
-
-        OnboardingStatusReceived completed ->
-            ( { model | onboardingCompleted = completed }, Cmd.none )
 
         InviteOnlyConfigReceived enabled ->
             let
@@ -3356,8 +3355,12 @@ update msg model =
 
         RevalidatedIdentity (Api.IdentityKnown identity) ->
             -- The reader is still signed in, and this is where a role or a
-            -- renamed account catches up without a reload.
-            ( { model | auth = Authenticated (sessionFor model.csrf identity) }
+            -- renamed account — or a finished onboarding in another tab —
+            -- catches up without a reload.
+            ( { model
+                | auth = Authenticated (sessionFor model.csrf identity)
+                , onboardingCompleted = identity.onboardingCompleted
+              }
             , Cmd.none
             )
 
@@ -3629,7 +3632,6 @@ subscriptions model =
     Sub.batch
         [ onSwipe decodeSwipe
         , onLoginTransitionComplete (\_ -> ArrivalSettled)
-        , onOnboardingStatus OnboardingStatusReceived
         , ageGatingConfig AgeGatingConfigReceived
         , inviteOnlyConfig InviteOnlyConfigReceived
         , connectivityChanged ConnectivityChanged

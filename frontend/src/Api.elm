@@ -3372,6 +3372,12 @@ type alias Identity =
     , role : String
     , consentAnalytics : Bool
     , consentWritingAssistant : Bool
+
+    -- The server's per-user onboarding state, from `GET /api/auth/me`. This is
+    -- the authoritative source the boot handler sets `model.onboardingCompleted`
+    -- from — replacing a browser-global localStorage flag that hid the
+    -- onboarding overlay from every user once anyone on the browser finished it.
+    , onboardingCompleted : Bool
     }
 
 
@@ -3396,7 +3402,7 @@ unreadable.
 identityDecoder : Decoder Identity
 identityDecoder =
     Decode.field "user"
-        (Decode.map7 Identity
+        (Decode.map8 Identity
             (Decode.field "id" Decode.string)
             (Decode.field "email" Decode.string)
             (optionalString "display_name")
@@ -3404,6 +3410,7 @@ identityDecoder =
             (Decode.field "role" Decode.string)
             (optionalBool "consent_analytics")
             (optionalBool "consent_writing_assistant")
+            (optionalBool "onboarding_completed")
         )
 
 

@@ -57,6 +57,7 @@ suite =
             , nullConsentsAreFalse
             , aWrongTypedConsentFails
             , anErrorEnvelopeIsNotAnAccount
+            , onboardingCompletedIsDecoded
             ]
         ]
 
@@ -251,6 +252,34 @@ aWrongTypedDisplayNameFails =
             decode (serverPayload [ ( "display_name", Encode.int 7 ) ])
                 |> Result.toMaybe
                 |> Expect.equal Nothing
+
+
+{-| ⛔ The regression guard for the overlay-shown-to-nobody bug. The server's
+per-user `onboarding_completed` was present in `/api/auth/me` all along, but the
+decoder dropped it, so the gate fell back to a browser-global localStorage flag.
+This asserts the value now reaches the model, the two values it can take and the
+lenient-false an absent field decodes to — so a new user's `false` can never
+again be lost on the way in.
+-}
+onboardingCompletedIsDecoded : Test
+onboardingCompletedIsDecoded =
+    describe "onboarding_completed is read from the server, not dropped"
+        [ test "true decodes to True" <|
+            \() ->
+                decode (serverPayload [ ( "onboarding_completed", Encode.bool True ) ])
+                    |> Result.map .onboardingCompleted
+                    |> Expect.equal (Ok True)
+        , test "false decodes to False — the value that lets a new user see the overlay" <|
+            \() ->
+                decode (serverPayload [ ( "onboarding_completed", Encode.bool False ) ])
+                    |> Result.map .onboardingCompleted
+                    |> Expect.equal (Ok False)
+        , test "an absent flag is lenient-false, not a decode failure" <|
+            \() ->
+                decode (withoutField "onboarding_completed")
+                    |> Result.map .onboardingCompleted
+                    |> Expect.equal (Ok False)
+        ]
 
 
 absentConsentsAreFalse : Test
