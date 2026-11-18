@@ -3369,8 +3369,16 @@ h4 {
     font-size: var(--size-sm);
     color: var(--text);
     font-family: var(--font-heading);
-    border: 1px solid var(--border);
     border-radius: var(--radius-pill);
+}
+
+/* ⛔ Compound selector (0,2,0): the pill's border has to beat
+   `.user-menu__trigger`'s `border: 0` reset, which sits LATER in this file and
+   would otherwise win at the (0,1,0) specificity `.app-nav__user` alone carries —
+   so a border declared on `.app-nav__user` renders as 0 and the pill reads as
+   plain text. Verified live: without this the computed border-width is 0px. */
+.user-menu__trigger.app-nav__user {
+    border: 1px solid var(--border);
 }
 
 @media (max-width: 768px) {
