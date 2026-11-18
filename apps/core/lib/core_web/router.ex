@@ -91,7 +91,7 @@ defmodule CoreWeb.Router do
   end
 
   pipeline :require_owner do
-    plug StacksWeb.Plugs.RequireRole, role: "owner"
+    plug StacksWeb.Plugs.RequireRole, role: "owner", on_denied: :not_found
   end
 
   pipeline :admin do
@@ -109,6 +109,20 @@ defmodule CoreWeb.Router do
     # request, which is a confusing way to learn about a missing plug.
     plug StacksWeb.Plugs.AuthPipeline
     plug StacksWeb.Plugs.AdminAuthPipeline
+    plug StacksWeb.Plugs.RequireMFA
+    plug StacksWeb.Plugs.AuditAdminCall
+  end
+
+  # The owner-only admin surface. Authorisation (is this the owner?) is settled
+  # BEFORE authentication-strength (has this session cleared the second factor?):
+  # a non-owner is turned away as a 404 — the same answer a route that does not
+  # exist gives — and so is never shown the MFA prompt for a surface it can never
+  # reach. The owner check sits after AdminAuthPipeline so the user is loaded, and
+  # before RequireMFA; audit runs last, on the authorised, second-factor call.
+  pipeline :admin_owner do
+    plug StacksWeb.Plugs.AuthPipeline
+    plug StacksWeb.Plugs.AdminAuthPipeline
+    plug StacksWeb.Plugs.RequireRole, role: "owner", on_denied: :not_found
     plug StacksWeb.Plugs.RequireMFA
     plug StacksWeb.Plugs.AuditAdminCall
   end
@@ -393,7 +407,7 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api/admin", StacksWeb do
-    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    pipe_through [:api, :admin_owner, :rate_limit_admin]
     get "/invites", InviteAdminController, :index
     post "/invites", InviteAdminController, :create
     delete "/invites/:id", InviteAdminController, :delete
@@ -423,7 +437,7 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api/admin", StacksWeb do
-    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    pipe_through [:api, :admin_owner, :rate_limit_admin]
     get "/data_corrections", DataCorrectionController, :index
     post "/data_corrections/:name/apply", DataCorrectionController, :apply
     post "/data_corrections/:name/target", DataCorrectionController, :target

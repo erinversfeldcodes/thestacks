@@ -2,7 +2,7 @@ defmodule StacksWeb.DataCorrectionControllerTest do
   @moduledoc """
       340 — the owner-facing surface. Four load-bearing properties, each
       tested to fail if it goes away: owner-only where the WRITE happens (an
-      admin token outliving a demotion must 403 — login-only coverage would
+      admin token outliving a demotion must be refused as a 404 — login-only coverage would
       pass with the route open); GET means dry-run (index writes nothing);
       apply requires a reason (recorded in the audit row); unknown names 404
       through `Registry.fetch/1` (no reachable-set widening).
@@ -93,13 +93,13 @@ defmodule StacksWeb.DataCorrectionControllerTest do
       assert json_response(conn, 401)
     end
 
-    test "GET is 403 for a non-owner holding a valid MFA-verified admin session", %{conn: conn} do
+    test "GET is 404 for a non-owner holding a valid MFA-verified admin session", %{conn: conn} do
       {conn, _session} = admin_session(conn, insert(:user))
 
-      assert json_response(get(conn, "/api/admin/data_corrections"), 403)
+      assert json_response(get(conn, "/api/admin/data_corrections"), 404)
     end
 
-    test "POST is 403 for a non-owner, and changes nothing", %{conn: conn, id: id} do
+    test "POST is 404 for a non-owner, and changes nothing", %{conn: conn, id: id} do
       {conn, _session} = admin_session(conn, insert(:user))
 
       conn =
@@ -107,7 +107,7 @@ defmodule StacksWeb.DataCorrectionControllerTest do
           reason: "I should not be able to do this"
         })
 
-      assert json_response(conn, 403)
+      assert json_response(conn, 404)
       assert isbn_of(id) == @isbn10
       assert correction_audit_rows() == []
     end
@@ -312,7 +312,7 @@ defmodule StacksWeb.DataCorrectionControllerTest do
       assert work_id_of(merged.id) == work.id
     end
 
-    test "is 403 for a non-owner, and changes nothing", %{conn: conn, merged: merged, work: work} do
+    test "is 404 for a non-owner, and changes nothing", %{conn: conn, merged: merged, work: work} do
       {conn, _session} = admin_session(conn, insert(:user))
 
       conn =
@@ -322,7 +322,7 @@ defmodule StacksWeb.DataCorrectionControllerTest do
           unmerge_body(merged.id, %{"apply" => true})
         )
 
-      assert json_response(conn, 403)
+      assert json_response(conn, 404)
       assert work_id_of(merged.id) == work.id
       assert correction_audit_rows() == []
     end

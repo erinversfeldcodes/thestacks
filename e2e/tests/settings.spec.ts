@@ -149,6 +149,14 @@ test.describe("Settings — Privacy & Consent", () => {
     const toggle = page.getByTestId("writing-assistant-consent-toggle");
     await expect(toggle).toBeVisible();
 
+    // The control is held DISABLED until the stored consent has hydrated from the
+    // server (Privacy page: `controlsLocked` is true while settings are Loading,
+    // then the settings response re-seeds the toggle from the saved value). Its
+    // text only reflects reality once it is enabled; `textContent()` does not wait
+    // for actionability, so reading and branching on the toggle before then races
+    // the hydration, which flips it under the test. Wait for enabled first.
+    await expect(toggle).toBeEnabled();
+
     const offCopy = page.getByText(
       "Your published posts are not sent to an AI model, so books you mention won't be linked automatically."
     );

@@ -283,7 +283,7 @@ defmodule StacksWeb.AdminAuthControllerTest do
       assert json_response(conn, 401)
     end
 
-    test "returns 403 for non-owner user", %{conn: conn} do
+    test "returns 404 for non-owner user", %{conn: conn} do
       user = insert(:user)
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
@@ -292,7 +292,9 @@ defmodule StacksWeb.AdminAuthControllerTest do
         |> put_req_header("authorization", "Bearer #{token}")
         |> post("/api/admin/auth/mfa/setup", %{})
 
-      assert json_response(conn, 403)
+      # The owner-only enrolment surface stays hidden from a non-owner: a 404, the
+      # same answer an absent route gives, not a 403 that admits it is real.
+      assert json_response(conn, 404)
     end
   end
 
