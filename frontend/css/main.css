@@ -3820,6 +3820,43 @@ h4 {
     100% { transform: translateZ(50px) rotateX(-25deg) rotateY(-40deg) rotateZ(-15deg); }
 }
 
+/* A newly-placed book rises into its slot once, when the shelf is reached with
+   ?arrived=<id>. One-shot: no `forwards`, and 100% is the resting transform, so
+   the book settles into its normal state with no jump when the animation ends. */
+.book--arriving {
+    animation: book-arriving 0.6s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Hover intent wins over the arrival sweep: a reader who reaches for the book
+   mid-arrival gets the same pull-out as any other spine. Without this explicit
+   rule the arriving modifier would silently lose `animation` to `.book:hover`. */
+.book--arriving:hover {
+    animation: book-pull-out 0.8s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}
+
+@keyframes book-arriving {
+    0% {
+        opacity: 0;
+        transform: translateY(18px) translateZ(0) rotateY(0) rotateX(0) rotateZ(0);
+    }
+
+    60% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) translateZ(0) rotateY(0) rotateX(0) rotateZ(0);
+    }
+}
+
+/* Readers who ask for less motion get the book, placed, with no arrival sweep. */
+@media (prefers-reduced-motion: reduce) {
+    .book--arriving {
+        animation: none;
+    }
+}
+
 .book__face {
     position: absolute;
     border: 1px solid rgba(0, 0, 0, 0.25);
@@ -7462,6 +7499,17 @@ h4 {
     flex-direction: column;
     gap: 0.9rem;
     margin-top: 1rem;
+}
+
+/* The "View post" link offered after a successful publish. */
+.blog-editor__published {
+    margin-top: 0.75rem;
+    font-size: 0.95rem;
+}
+
+.blog-editor__published a {
+    color: var(--accent-text);
+    text-decoration: underline;
 }
 
 .marketplace__grid {

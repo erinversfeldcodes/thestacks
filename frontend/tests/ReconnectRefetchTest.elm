@@ -38,6 +38,7 @@ bookshelfIn shelves =
         , organiserError = Nothing
         , undoToast = Bookshelf.ToastHidden
         , focusedSpine = Nothing
+        , arrivedId = Nothing
         }
 
 

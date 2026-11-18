@@ -99,6 +99,7 @@ hiddenBook =
         , coverImageUrl = Nothing
         , hidden = True
         , hasWriting = False
+        , arriving = False
         }
 
 
@@ -113,6 +114,7 @@ visibleBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = False
+        , arriving = False
         }
 
 

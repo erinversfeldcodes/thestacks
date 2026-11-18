@@ -18,6 +18,7 @@ module Page.Bookshelf exposing
     , updateWithEffect
     , view
     , wishListConfig
+    , withArrived
     , withPendingUndo
     )
 
@@ -166,6 +167,11 @@ type alias Model =
     , organiserError : Maybe String
     , undoToast : UndoToast
     , focusedSpine : Maybe String
+
+    -- The book just placed and navigated to with `?arrived=<id>`, if any. Its
+    -- spine plays the one-shot arrival keyframe once this page renders; it is
+    -- read once from the URL at init and never re-armed.
+    , arrivedId : Maybe String
     }
 
 
@@ -352,9 +358,24 @@ initWithEffect config maybeToken userId =
       , organiserError = Nothing
       , undoToast = ToastHidden
       , focusedSpine = Nothing
+
+      -- Defaults to Nothing; `withArrived` arms it from the URL on the one
+      -- navigation that carries `?arrived=<id>`, so ordinary visits and every
+      -- test caller get no arrival without having to pass the id.
+      , arrivedId = Nothing
       }
     , apiEffect
     )
+
+
+{-| Arm the arrival animation for a specific book, read from `?arrived=<id>` on
+the post-placement navigation. Applied by the caller to the model `init`
+returns, so `init`'s own signature stays stable for the many call sites that
+never arrive at a shelf.
+-}
+withArrived : Maybe String -> Model -> Model
+withArrived arrivedId model =
+    { model | arrivedId = arrivedId }
 
 
 {-| How long the "Removed — Undo" toast stays offered, in milliseconds.
@@ -1005,6 +1026,7 @@ viewBookshelfFromShelves model shelves =
                                 , onBookClicked = BookClicked
                                 , onNavKey = SpineNavKey
                                 , tabStopId = tabStopId
+                                , arrivedId = model.arrivedId
                                 }
                             )
             in

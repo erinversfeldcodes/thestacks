@@ -652,6 +652,10 @@ viewPiledBook selectedBookId index placement =
                 , coverImageUrl = bookCoverImageUrl bookData
                 , hidden = Placement.isHidden placement
                 , hasWriting = placement.hasUserWriting
+
+                -- The reading pile is a separate surface from the shelf the
+                -- arrival animation targets, so no spine here ever arrives.
+                , arriving = False
                 }
             ]
         ]

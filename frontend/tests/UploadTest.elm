@@ -386,34 +386,34 @@ suite =
                     Upload.init.selectedShelf |> Expect.equal "wishlist"
             ]
         , describe "GoToShelf"
-            [ test "emits NavigateTo with Library route" <|
+            [ test "emits NavigateToArrival with Library route and the placed book's id" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "library") Upload.init Nothing
+                            Upload.update (GoToShelf "library" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
-            , test "emits NavigateTo with AntiLibrary route" <|
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.Library "book-1")
+            , test "emits NavigateToArrival with AntiLibrary route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "antilibrary") Upload.init Nothing
+                            Upload.update (GoToShelf "antilibrary" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.AntiLibrary)
-            , test "emits NavigateTo with WishList route" <|
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.AntiLibrary "book-1")
+            , test "emits NavigateToArrival with WishList route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "wishlist") Upload.init Nothing
+                            Upload.update (GoToShelf "wishlist" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.WishList)
-            , test "unknown shelf falls back to Library route" <|
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.WishList "book-1")
+            , test "unknown shelf falls back to Library route, carrying the book id" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "unknown_shelf") Upload.init Nothing
+                            Upload.update (GoToShelf "unknown_shelf" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.Library "book-1")
             ]
         , describe "init state"
             [ test "step is Uploading" <|

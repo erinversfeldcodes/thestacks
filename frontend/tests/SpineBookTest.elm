@@ -38,6 +38,7 @@ suite =
         , readingPileSpineIsSoftened
         , writingRibbonRendering
         , writingSuffixInAriaLabel
+        , arrivingBookCarriesArrivalClass
         ]
 
 
@@ -133,7 +134,39 @@ sampleBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = False
+        , arriving = False
         }
+
+
+{-| The one-shot arrival animation is opt-in per spine: a book placed and
+navigated to with `?arrived=<id>` carries `book--arriving` (the keyframe hook),
+and every ordinary spine does not — so only the just-placed book animates in.
+-}
+arrivingBookCarriesArrivalClass : Test
+arrivingBookCarriesArrivalClass =
+    describe "book--arriving is present only when arriving = True"
+        [ test "arriving = True adds the book--arriving class" <|
+            \_ ->
+                book
+                    { pageCount = 400
+                    , wearLevel = Pristine
+                    , texture = Leather
+                    , title = "Moby Dick"
+                    , author = "Herman Melville"
+                    , coverImageUrl = Nothing
+                    , hidden = False
+                    , hasWriting = False
+                    , arriving = True
+                    }
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.class "book--arriving" ]
+        , test "the ordinary spine (arriving = False) has no book--arriving class" <|
+            \_ ->
+                sampleBook
+                    |> Query.fromHtml
+                    |> Query.findAll [ Selector.class "book--arriving" ]
+                    |> Query.count (Expect.equal 0)
+        ]
 
 
 sampleClothBook : Html.Html msg
@@ -147,6 +180,7 @@ sampleClothBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = False
+        , arriving = False
         }
 
 
@@ -258,6 +292,7 @@ softenedHiddenBook =
         , coverImageUrl = Nothing
         , hidden = True
         , hasWriting = False
+        , arriving = False
         }
 
 
@@ -385,6 +420,7 @@ writingBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = True
+        , arriving = False
         }
 
 
@@ -402,6 +438,7 @@ wornWrittenHiddenBook =
         , coverImageUrl = Nothing
         , hidden = True
         , hasWriting = True
+        , arriving = False
         }
 
 

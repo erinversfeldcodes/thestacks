@@ -256,6 +256,7 @@ loadedShelf config =
     , organiserError = Nothing
     , undoToast = Bookshelf.ToastHidden
     , focusedSpine = Nothing
+    , arrivedId = Nothing
     }
 
 

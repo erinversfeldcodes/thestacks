@@ -1075,6 +1075,35 @@ redirectAfterNavigation navigation =
         loginRedirectFor navigation.arrivingAt navigation.auth
 
 
+{-| The `arrived` query parameter from a shelf URL (`/<shelf>?arrived=<id>`): the
+id of a book just placed and navigated to, so its spine plays the one-shot
+arrival keyframe once. Parsed from the raw query because `Navigation.Route`
+carries no query by design. `Nothing` on every ordinary visit.
+-}
+arrivedParam : Url -> Maybe String
+arrivedParam url =
+    url.query
+        |> Maybe.andThen
+            (\query ->
+                query
+                    |> String.split "&"
+                    |> List.filterMap
+                        (\pair ->
+                            case String.split "=" pair of
+                                [ "arrived", value ] ->
+                                    if value == "" then
+                                        Nothing
+
+                                    else
+                                        Url.percentDecode value
+
+                                _ ->
+                                    Nothing
+                        )
+                    |> List.head
+            )
+
+
 {-| Build the page for a route. `arrival` is the reason the reader would be
 looking at a login card, threaded IN rather than patched on afterwards:
 there is more than one way to reach the card (protected-route bounce,
@@ -1130,6 +1159,21 @@ isAdminRoute route =
 
         _ ->
             False
+
+
+{-| Arm the just-placed book's arrival animation on the Bookshelf page a
+navigation produced, from the `?arrived=<id>` on its URL. A no-op for any other
+page and for a navigation carrying no arrival id — which is every ordinary one —
+so only the post-placement "View on shelf" hop animates a spine in.
+-}
+applyArrival : Maybe String -> ( Page, Cmd Msg ) -> ( Page, Cmd Msg )
+applyArrival arrivedId ( page, cmd ) =
+    case ( arrivedId, page ) of
+        ( Just _, PageBookshelf bookshelfModel ) ->
+            ( PageBookshelf (Bookshelf.withArrived arrivedId bookshelfModel), cmd )
+
+        _ ->
+            ( page, cmd )
 
 
 {-| Hand a just-built page the removal the reader may still take back. Applied to `initPage`'s result, not threaded through it — only the
@@ -2002,6 +2046,7 @@ update msg model =
                         (Just model.route)
                         model.arrival
                         |> applyPendingUndo model.pendingUndo
+                        |> applyArrival (arrivedParam url)
             in
             ( { model
                 | url = url
@@ -2274,6 +2319,18 @@ update msg model =
                             , Cmd.batch
                                 [ baseCmd
                                 , Nav.pushUrl model.key (Route.toPath route)
+                                ]
+                            )
+
+                        Upload.NavigateToArrival route bookId ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+
+                                -- The arrival signal rides the URL as a query so
+                                -- the shelf page can read it on the `UrlChanged`
+                                -- this provokes; the id is a URL-safe UUID.
+                                , Nav.pushUrl model.key (Route.toPath route ++ "?arrived=" ++ bookId)
                                 ]
                             )
 

@@ -169,6 +169,10 @@ viewSpine wearLevel placement =
             , coverImageUrl = bookData.coverUrl
             , hidden = Placement.isHidden placement
             , hasWriting = placement.hasUserWriting
+
+            -- This read-only spine render is not the post-placement arrival
+            -- target (that is the clickable grid below); it never animates in.
+            , arriving = False
             }
         ]
 
@@ -188,6 +192,11 @@ type alias SpineGridConfig msg =
     , onBookClicked : Book -> msg
     , onNavKey : String -> GridNav.Key -> msg
     , tabStopId : Maybe String
+
+    -- The id of the book just placed and arrived at via `?arrived=<id>`, if
+    -- any. The matching spine plays the one-shot arrival keyframe; `Nothing`
+    -- on an ordinary visit means no spine arrives.
+    , arrivedId : Maybe String
     }
 
 
@@ -366,5 +375,6 @@ viewClickableSpine config placement =
             , coverImageUrl = bookCoverImageUrl bookData
             , hidden = Placement.isHidden placement
             , hasWriting = placement.hasUserWriting
+            , arriving = config.arrivedId == Just bookData.id
             }
         ]

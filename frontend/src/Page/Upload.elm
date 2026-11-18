@@ -120,6 +120,10 @@ type alias Model =
 type OutMsg
     = NoOut
     | NavigateTo Route.Route
+      -- Navigate to a shelf AND arm its arrival animation for a specific book:
+      -- the shelf route plus the just-placed book's id, which the host turns
+      -- into `/<shelf>?arrived=<id>` (Route carries no query by design).
+    | NavigateToArrival Route.Route String
     | OpenStream String
     | SessionExpired
     | RefreshInbox
@@ -178,7 +182,7 @@ type Msg
     | SessionGone
     | ConfirmCompleted (Result Api.ConfirmError Api.ConfirmResponse)
     | GotSameWorkBook (Result Http.Error BookDetailResponse)
-    | GoToShelf String
+    | GoToShelf String String
     | WaitTick
     | ResumeInboxItem Api.InboxItem
 
@@ -913,10 +917,10 @@ updateWithEffect msg model maybeToken =
 
         PlacementCompleted result ->
             case ( result, model.step ) of
-                ( Ok _, ChoosingShelf book ) ->
+                ( Ok placement, ChoosingShelf book ) ->
                     ( { model
                         | step = Complete book model.selectedShelf
-                        , placementState = Success placementStub
+                        , placementState = Success placement
                         , rejectedBookIds = []
                       }
                     , Effect.none
@@ -936,8 +940,8 @@ updateWithEffect msg model maybeToken =
                 _ ->
                     ( model, Effect.none, NoOut )
 
-        GoToShelf shelfName ->
-            ( model, Effect.none, NavigateTo (shelfRoute shelfName) )
+        GoToShelf shelfName bookId ->
+            ( model, Effect.none, NavigateToArrival (shelfRoute shelfName) bookId )
 
         WaitTick ->
             if isWaiting model then
@@ -1022,27 +1026,6 @@ bookReadEffect token response =
             )
             (resolvedBookReads response)
         )
-
-
-{-| Minimal placement stub — only used to track success state.
--}
-placementStub : Placement
-placementStub =
-    { id = ""
-    , book = Nothing
-    , position = Nothing
-    , placedAt = Nothing
-    , formats = []
-    , personalRating = Nothing
-    , notes = Nothing
-    , bookshelfName = Nothing
-    , readingStatus = Nothing
-    , currentPage = Nothing
-    , startedAt = Nothing
-    , finishedAt = Nothing
-    , visibility = Nothing
-    , hasUserWriting = False
-    }
 
 
 view : Model -> Maybe Api.Credentials -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
@@ -2031,7 +2014,7 @@ viewComplete model book shelfName =
                 [ text "Add another" ]
             , button
                 [ class "btn btn--secondary"
-                , onClick (GoToShelf shelfName)
+                , onClick (GoToShelf shelfName book.id)
                 ]
                 [ text "View on shelf" ]
             ]
