@@ -1486,13 +1486,31 @@ defmodule Stacks.Accounts do
           {:ok, User.t()} | {:error, :invalid_step}
   def complete_onboarding_step(user_id, step) when is_binary(step) do
     if step in @valid_onboarding_steps do
-      user = get_user!(user_id)
-      current = normalize_steps(user.onboarding_steps)
-      updated = Map.put(current, step, true)
+      # ⛔ ATOMIC MERGE, not read-modify-write. Completing two steps at once —
+      # which Skip does, recording every step in one go — raced here: each call
+      # read the same `{}`, added its own key, and wrote the whole map back, so
+      # the second write erased the first and onboarding never reached complete.
+      # A `jsonb ||` merge in one statement sets exactly the one key and keeps
+      # whatever the other concurrent write set.
+      {count, _} =
+        from(u in User,
+          where: u.id == ^user_id,
+          update: [
+            set: [
+              onboarding_steps:
+                fragment(
+                  "COALESCE(?, '{}'::jsonb) || jsonb_build_object(?::text, true)",
+                  u.onboarding_steps,
+                  ^step
+                )
+            ]
+          ]
+        )
+        |> Repo.update_all([])
 
-      case user |> onboarding_steps_changeset(%{onboarding_steps: updated}) |> Repo.update() do
-        {:ok, saved} -> {:ok, Repo.reload!(saved)}
-        error -> error
+      case count do
+        1 -> {:ok, get_user!(user_id)}
+        _ -> {:error, :invalid_step}
       end
     else
       {:error, :invalid_step}
