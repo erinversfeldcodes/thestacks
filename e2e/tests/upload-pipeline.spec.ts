@@ -487,7 +487,7 @@ test.describe("Happy paths", () => {
     );
 
     await expect(
-      page.getByRole("button", { name: "View on shelf" }),
+      page.getByRole("button", { name: "View on bookshelf" }),
     ).toBeVisible();
 
     await expect(
@@ -576,7 +576,7 @@ test.describe("Happy paths", () => {
     await expect(page.getByTestId("upload-complete")).toContainText("Library");
   });
 
-  test("'View on shelf' navigates to the correct shelf route", async ({
+  test("'View on bookshelf' navigates to the correct shelf route", async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -594,7 +594,7 @@ test.describe("Happy paths", () => {
     await page.getByRole("button", { name: /Add to Wish List/ }).click();
     await expect(page.getByTestId("upload-complete")).toBeVisible();
 
-    await page.getByRole("button", { name: "View on shelf" }).click();
+    await page.getByRole("button", { name: "View on bookshelf" }).click();
     await expect(page).toHaveURL(/\/wishlist/);
   });
 });
@@ -1029,7 +1029,7 @@ test.describe("Age-gated content", () => {
     );
 
     await expect(
-      page.getByRole("button", { name: "View on shelf" }),
+      page.getByRole("button", { name: "View on bookshelf" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Add another" }),

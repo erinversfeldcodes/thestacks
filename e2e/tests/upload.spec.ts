@@ -468,7 +468,7 @@ test.describe("Upload pipeline — manual ISBN entry", () => {
     await expect(complete).toBeVisible({ timeout: 10_000 });
     await expect(complete).toContainText(/Dispossessed/i);
     await expect(complete).toContainText(/Antilibrary/i);
-    await expect(page.getByRole("button", { name: "View on shelf" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "View on bookshelf" })).toBeVisible();
   });
 
   test("valid ISBN-13 is added to the chosen bookshelf", async ({ page }) => {

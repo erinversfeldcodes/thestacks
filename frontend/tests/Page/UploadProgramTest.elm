@@ -706,7 +706,7 @@ The manual add now goes through `POST /api/books/confirm`, which places the
 book and reports every bookshelf the reader has it on. The duplicate awareness
 survives the rewiring — and the ruling's point survives with it: the notice
 INFORMS. It appears alongside a completed add, not instead of one. The flow
-reached its terminal screen, "Add another" and "View on shelf" are both live,
+reached its terminal screen, "Add another" and "View on bookshelf" are both live,
 and nothing anywhere was refused.
 
 -}
@@ -1505,7 +1505,7 @@ uploadAdultsOnly =
                         "{}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Adding to shelf..." ]
+                    [ Selector.text "Adding to your bookshelf..." ]
 
 
 {-| age-gating shipped dark. With the server config flag OFF (the

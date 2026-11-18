@@ -1903,7 +1903,7 @@ viewChoosingShelf model book =
             Loading ->
                 div [ class "upload-shelf-picker__loading" ]
                     [ span [ class "spinner" ] []
-                    , p [] [ text "Adding to shelf..." ]
+                    , p [] [ text "Adding to your bookshelf..." ]
                     ]
 
             Failure Api.PlaceReadingPileFull ->
@@ -2016,7 +2016,7 @@ viewComplete model book shelfName =
                 [ class "btn btn--secondary"
                 , onClick (GoToShelf shelfName book.id)
                 ]
-                [ text "View on shelf" ]
+                [ text "View on bookshelf" ]
             ]
         ]
 
