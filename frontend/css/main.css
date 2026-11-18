@@ -531,6 +531,25 @@ h4 {
     text-align: center;
 }
 
+.app-footer__links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-2) 1.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.app-footer__link {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    text-decoration: none;
+}
+
+.app-footer__link:hover {
+    color: var(--text);
+    text-decoration: underline;
+}
+
 .app-footer__text {
     font-size: var(--size-xs);
     color: var(--text-muted);
@@ -3344,12 +3363,14 @@ h4 {
 }
 
 .app-nav__user {
-    display: block;
-    padding: 0.4rem 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.8rem;
     font-size: var(--size-sm);
-    color: var(--text-muted);
-    font-style: italic;
+    color: var(--text);
     font-family: var(--font-heading);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
 }
 
 @media (max-width: 768px) {

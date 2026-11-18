@@ -301,11 +301,18 @@ viewStoryCard title narrative cat =
 
 viewCategoryCards : List CostCategory -> Html Msg
 viewCategoryCards categories =
-    div [ class "costs__categories" ]
-        [ h2 [ class "costs__section-title" ] [ text "By Service" ]
-        , div [ class "costs__category-grid" ]
-            (List.map viewCategoryCard categories)
-        ]
+    if List.isEmpty categories then
+        -- Nothing to break down yet: a "By Service" heading over an empty grid
+        -- reads as a surface that failed to load, so it stays absent until there
+        -- is a service to show.
+        text ""
+
+    else
+        div [ class "costs__categories" ]
+            [ h2 [ class "costs__section-title" ] [ text "By Service" ]
+            , div [ class "costs__category-grid" ]
+                (List.map viewCategoryCard categories)
+            ]
 
 
 viewCategoryCard : CostCategory -> Html Msg

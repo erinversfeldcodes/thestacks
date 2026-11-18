@@ -7,6 +7,7 @@ simulated HTTP responses. No authentication is required for this page.
 
 -}
 
+import Expect
 import Http
 import Json.Encode as Encode
 import Page.CostTransparency as CostTransparency
@@ -14,6 +15,7 @@ import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 
 
@@ -34,6 +36,8 @@ suite =
         , storyCardUnitAttachesToTheMoney
         , totalCaveatCountsOnlyTheMeasured
         , displaysMonthlyTrend
+        , byServiceShownWhenCategoriesExist
+        , byServiceAbsentWhenEmpty
         ]
 
 
@@ -126,6 +130,65 @@ startMixed : ProgramTest.ProgramTest CostTransparency.Model CostTransparency.Msg
 startMixed =
     startCostPage
         |> ProgramTest.simulateHttpOk "GET" "/api/costs" mixedBasisResponseJson
+
+
+emptyCategoriesResponseJson : String
+emptyCategoriesResponseJson =
+    Encode.encode 0
+        (Encode.object
+            [ ( "data"
+              , Encode.object
+                    [ ( "total_cents", Encode.int 0 )
+                    , ( "currency", Encode.string "USD" )
+                    , ( "cost_per_book", Encode.float 0.0 )
+                    , ( "categories", Encode.list identity [] )
+                    , ( "metrics"
+                      , Encode.object
+                            [ ( "books", Encode.int 0 )
+                            , ( "uploads", Encode.int 0 )
+                            , ( "placements", Encode.int 0 )
+                            , ( "db_size_bytes", Encode.int 0 )
+                            , ( "avg_upload_payload_bytes", Encode.int 0 )
+                            , ( "vision_jobs_this_month", Encode.int 0 )
+                            ]
+                      )
+                    , ( "monthly_totals", Encode.list identity [] )
+                    , ( "generated_at", Encode.string "2026-11-10T00:00:00Z" )
+                    ]
+              )
+            ]
+        )
+
+
+startEmptyCategories : ProgramTest.ProgramTest CostTransparency.Model CostTransparency.Msg (SimulatedEffect CostTransparency.Msg)
+startEmptyCategories =
+    startCostPage
+        |> ProgramTest.simulateHttpOk "GET" "/api/costs" emptyCategoriesResponseJson
+
+
+byServiceShownWhenCategoriesExist : Test
+byServiceShownWhenCategoriesExist =
+    test "By Service renders when there is a category to break down" <|
+        \() ->
+            startMixed
+                |> ProgramTest.expectViewHas [ Selector.text "By Service" ]
+
+
+{-| ⬛ ANTI-VACUITY paired with the case above: the absence is only meaningful
+if the page actually rendered. The heading is withheld specifically because the
+breakdown is empty, not because nothing loaded.
+-}
+byServiceAbsentWhenEmpty : Test
+byServiceAbsentWhenEmpty =
+    test "By Service is withheld when there are no categories, but the page still renders" <|
+        \() ->
+            startEmptyCategories
+                |> ProgramTest.expectView
+                    (Expect.all
+                        [ Query.has [ Selector.text "Cost Transparency" ]
+                        , Query.hasNot [ Selector.text "By Service" ]
+                        ]
+                    )
 
 
 absentLineShowsTextNotZero : Test

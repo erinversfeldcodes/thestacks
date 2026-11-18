@@ -164,6 +164,27 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             ]
+        , describe "the signed-in nav and footer reach the whole product"
+            [ test "the signed-in nav offers Catalogue and Blog" <|
+                \() ->
+                    Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Catalogue" ]
+                            , Query.has [ Selector.text "Blog" ]
+                            ]
+            , test "the footer links the four transparency pages and the FAQ" <|
+                \() ->
+                    Main.viewFooter
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Costs" ]
+                            , Query.has [ Selector.text "Metrics" ]
+                            , Query.has [ Selector.text "Transparency" ]
+                            , Query.has [ Selector.text "Architecture" ]
+                            , Query.has [ Selector.text "FAQ" ]
+                            ]
+            ]
         , describe "viewNav Anonymous (unauthenticated)"
             [ test "shows the Sign In link" <|
                 \() ->

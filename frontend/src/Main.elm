@@ -4091,6 +4091,7 @@ viewNav route authState openNavMenu userMenu inbox sessionStillLive =
                                     ]
                             }
                         , navItem route Search "Search"
+                        , navItem route Catalogue "Catalogue"
                         , viewAddBook route (pendingConfirmationBadge inbox)
                         , navDisclosure
                             { menu = MarketplaceMenu
@@ -4110,6 +4111,7 @@ viewNav route authState openNavMenu userMenu inbox sessionStillLive =
                         -- no way back to it short of keeping the URL. Signed-in
                         -- only, because groups are not a thing a stranger browses.
                         , navItem route Groups "Groups"
+                        , navItem route BlogArchive "Blog"
                         , navItem route About "About"
                         , if auth.user.role == "owner" then
                             navDisclosure
@@ -4669,9 +4671,21 @@ viewNotFound =
 viewFooter : Html Msg
 viewFooter =
     footer [ class "app-footer" ]
-        [ p [ class "app-footer__text" ]
+        [ nav [ class "app-footer__links", attribute "aria-label" "Footer" ]
+            [ footerLink Route.CostTransparency "Costs"
+            , footerLink Route.Metrics "Metrics"
+            , footerLink Route.DataTransparency "Transparency"
+            , footerLink Route.Architecture "Architecture"
+            , footerLink Route.Faq "FAQ"
+            ]
+        , p [ class "app-footer__text" ]
             [ text "The Stacks — source-available book management" ]
         ]
+
+
+footerLink : Route -> String -> Html Msg
+footerLink targetRoute label =
+    a [ href (Route.toPath targetRoute), class "app-footer__link" ] [ text label ]
 
 
 {-| The shell's connectivity banner. Losing the connection is a fact
