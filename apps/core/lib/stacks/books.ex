@@ -1059,4 +1059,151 @@ defmodule Stacks.Books do
       end
     end)
   end
+
+  # Every table carrying a plain `book_id` FK to `op.books` with no unique
+  # constraint on `book_id` — a straight re-parent cannot collide. Verified
+  # against `pg_index` (2026-11); the five tables whose unique key pairs
+  # `book_id` with another column are handled explicitly in `merge_duplicate/2`.
+  @book_reparent_plain ~w(
+    book_content_chunks
+    bookshelf_placement_history
+    library_import_rows
+    price_snapshots
+    uploaded_images
+    user_book_content_access
+  )
+
+  @doc """
+  Merge a duplicate work into a survivor so the catalogue holds one row per work.
+
+  Every row pointing at `duplicate_id` is re-parented to `survivor_id` — across
+  all eleven book-FK tables and the `uploaded_images.book_ids` array — and the
+  duplicate `books` row is deleted, in one transaction so a half-merge cannot
+  happen.
+
+  No user data is lost: placements, images, listings and content access are
+  re-pointed, never removed, so erasure and export still reach them through the
+  survivor. Where a unique key would collide (a reader holding both works on one
+  bookshelf, a seller listing both, a post citing both, a source reviewing both),
+  the duplicate's row is dropped in favour of the survivor's equivalent — the
+  work is already represented, so the drop loses no distinct fact. Editions
+  re-parent with `is_primary` cleared, because a book may have only one primary
+  edition; the survivor keeps its own.
+  """
+  @spec merge_duplicate(binary(), binary()) :: {:ok, binary()} | {:error, term()}
+  def merge_duplicate(survivor_id, duplicate_id)
+      when is_binary(survivor_id) and is_binary(duplicate_id) and survivor_id != duplicate_id do
+    Repo.transaction(fn ->
+      s = survivor_id
+      d = duplicate_id
+
+      # Editions: ISBN is globally unique so no isbn collision; clear is_primary
+      # so the survivor's own primary stays the only one.
+      Repo.query!(
+        "UPDATE op.book_editions SET book_id = $1::uuid, is_primary = false WHERE book_id = $2::uuid",
+        [s, d]
+      )
+
+      # Tables whose unique key pairs book_id with another column: drop the
+      # duplicate's colliding row, then re-parent what remains.
+      reparent_consolidate!("bookshelf_placements", "bookshelf_id", s, d)
+      reparent_consolidate!("post_book_associations", "post_id", s, d)
+      reparent_consolidate!("review_snapshots", "source", s, d)
+      merge_listings!(s, d)
+
+      # Plain book_id FKs with no unique constraint: a straight re-parent.
+      Enum.each(@book_reparent_plain, &reparent_plain!(&1, s, d))
+
+      # The uploaded_images.book_ids array (not an FK): swap the id in place.
+      Repo.query!(
+        "UPDATE op.uploaded_images SET book_ids = array_replace(book_ids, $2::uuid, $1::uuid) WHERE $2::uuid = ANY(book_ids)",
+        [s, d]
+      )
+
+      # Don't let the merge blank out a described work: if the survivor has no
+      # description but the duplicate does, carry it over. Idempotent — once the
+      # survivor has a description this changes nothing on a re-run.
+      Repo.query!(
+        "UPDATE op.books surv SET description = dup.description FROM op.books dup " <>
+          "WHERE surv.id = $1::uuid AND dup.id = $2::uuid " <>
+          "AND (surv.description IS NULL OR btrim(surv.description) = '') " <>
+          "AND dup.description IS NOT NULL AND btrim(dup.description) <> ''",
+        [s, d]
+      )
+
+      Repo.query!("DELETE FROM op.books WHERE id = $1::uuid", [d])
+      s
+    end)
+  end
+
+  @doc """
+  Groups of books that are the same work — identical title (case-, whitespace-
+  and edge-insensitive) under the same author — with more than one row. Each
+  group names the survivor (the oldest row) and the duplicates to merge into it.
+
+  Books with no author are left alone: without an author the title alone is too
+  weak a signal to merge two rows on, and a wrong merge cannot be undone.
+  """
+  @spec duplicate_work_groups() :: [%{survivor: binary(), duplicates: [binary()]}]
+  def duplicate_work_groups do
+    sql = """
+    SELECT array_agg(id::text ORDER BY created_at ASC)
+    FROM op.books
+    WHERE author_id IS NOT NULL
+    GROUP BY regexp_replace(lower(btrim(title)), '\\s+', ' ', 'g'), author_id
+    HAVING count(*) > 1
+    """
+
+    %{rows: rows} = Repo.query!(sql, [])
+
+    Enum.map(rows, fn [ids] ->
+      [survivor | duplicates] = ids
+      %{survivor: survivor, duplicates: duplicates}
+    end)
+  end
+
+  @doc """
+  Merge every duplicate work into its survivor so the catalogue holds one row per
+  work. Returns the number of duplicate rows removed.
+  """
+  @spec dedup_works() :: non_neg_integer()
+  def dedup_works do
+    duplicate_work_groups()
+    |> Enum.flat_map(fn %{survivor: s, duplicates: dups} -> Enum.map(dups, &{s, &1}) end)
+    |> Enum.reduce(0, fn {s, d}, acc ->
+      {:ok, _} = merge_duplicate(s, d)
+      acc + 1
+    end)
+  end
+
+  # Listings collide only while draft/active (the partial unique). Drop the
+  # duplicate's live listing where the seller already holds one on the survivor,
+  # so no seller loses an active listing the survivor does not already carry.
+  defp merge_listings!(s, d) do
+    Repo.query!(
+      "DELETE FROM op.listings dup WHERE dup.book_id = $2::uuid AND dup.status IN ('draft', 'active') " <>
+        "AND EXISTS (SELECT 1 FROM op.listings surv WHERE surv.book_id = $1::uuid " <>
+        "AND surv.seller_id = dup.seller_id AND surv.status IN ('draft', 'active'))",
+      [s, d]
+    )
+
+    Repo.query!("UPDATE op.listings SET book_id = $1::uuid WHERE book_id = $2::uuid", [s, d])
+  end
+
+  # The table and column are compile-time literals from this module, never input.
+  # sobelow_skip ["SQL.Query"]
+  defp reparent_consolidate!(table, col, s, d) do
+    Repo.query!(
+      "DELETE FROM op.#{table} dup WHERE dup.book_id = $2::uuid " <>
+        "AND EXISTS (SELECT 1 FROM op.#{table} surv WHERE surv.book_id = $1::uuid AND surv.#{col} = dup.#{col})",
+      [s, d]
+    )
+
+    reparent_plain!(table, s, d)
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp reparent_plain!(table, s, d) do
+    Repo.query!("UPDATE op.#{table} SET book_id = $1::uuid WHERE book_id = $2::uuid", [s, d])
+  end
 end

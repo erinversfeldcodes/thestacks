@@ -453,13 +453,16 @@ test.describe("Anonymous search", () => {
 
     const query = `/api/search?q=${encodeURIComponent(book.title)}`;
     type Hit = {
-      book: { title: string };
+      book: { id: string; title: string };
       source: string;
       owner_handle: string;
       price: string;
     };
-    const hitFor = (hits: Hit[]) =>
-      hits.find((h) => h.book.title === book.title);
+    // Match on the book's id, not its title: two distinct works can share a
+    // title (same name, different author), so a title match is ambiguous and
+    // picks whichever hit the search ordered first. The id is unique, so this
+    // finds exactly the catalogue book under test on any seeded stack.
+    const hitFor = (hits: Hit[]) => hits.find((h) => h.book.id === book.id);
 
     // Read the authed leg as someone OTHER than the seller: a seller's own
     // listing is deduped into their `collection`, so their view would never

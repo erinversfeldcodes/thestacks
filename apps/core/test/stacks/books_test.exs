@@ -1261,4 +1261,79 @@ defmodule Stacks.BooksTest do
       :count
     )
   end
+
+  describe "merge_duplicate/2" do
+    test "re-parents references, consolidates a shared-bookshelf collision, and deletes the duplicate" do
+      author = insert(:author)
+      survivor = insert(:book, author: author, title: "The Name of the Rose")
+      dup = insert(:book, author: author, title: "The Name of the Rose")
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user)
+
+      # Both works on the SAME bookshelf — the unique-key collision the merge
+      # must consolidate rather than violate.
+      surv_placement = insert(:placement, book: survivor, bookshelf: bookshelf)
+      dup_placement = insert(:placement, book: dup, bookshelf: bookshelf)
+
+      # A listing on the duplicate — a plainly re-parented reference.
+      listing = insert(:listing, book: dup)
+
+      assert {:ok, survivor_id} = Books.merge_duplicate(survivor.id, dup.id)
+      assert survivor_id == survivor.id
+
+      # The duplicate work is gone.
+      refute Repo.get(Book, dup.id)
+
+      # Its edition joined the survivor as a non-primary; exactly one primary
+      # survives.
+      assert Repo.aggregate(from(e in BookEdition, where: e.book_id == ^survivor.id), :count) == 2
+
+      assert Repo.aggregate(
+               from(e in BookEdition, where: e.book_id == ^survivor.id and e.is_primary == true),
+               :count
+             ) == 1
+
+      # The shared-bookshelf placement is consolidated: the duplicate's row is
+      # dropped, the survivor's kept — one placement, not two.
+      refute Repo.get(Stacks.Shelving.Placement, dup_placement.id)
+      assert Repo.get(Stacks.Shelving.Placement, surv_placement.id)
+
+      # The listing follows the work to the survivor.
+      assert Repo.get(Stacks.Marketplace.Listing, listing.id).book_id == survivor.id
+    end
+
+    test "dedup_works collapses same-title-same-author rows, and leaves the rest alone" do
+      author = insert(:author)
+      insert(:book, author: author, title: "Invisible Cities")
+      insert(:book, author: author, title: "invisible cities")
+      insert(:book, author: author, title: "Invisible Cities ")
+      # A different work by the same author — must NOT merge.
+      other = insert(:book, author: author, title: "If on a Winter's Night a Traveler")
+      # A same-title book with NO author — too weak a signal; left alone.
+      authorless = insert(:book, author: nil, title: "Invisible Cities")
+
+      assert Books.dedup_works() == 2
+
+      # The author's four rows (three variants + one distinct work) collapse to two.
+      assert Repo.aggregate(from(bk in Book, where: bk.author_id == ^author.id), :count) == 2
+      assert Repo.get(Book, other.id)
+      assert Repo.get(Book, authorless.id)
+    end
+
+    test "merge carries the duplicate's description onto a survivor that has none" do
+      author = insert(:author)
+      survivor = insert(:book, author: author, title: "Mason & Dixon", description: nil)
+
+      dup =
+        insert(:book,
+          author: author,
+          title: "Mason & Dixon",
+          description: "A sprawling historical novel."
+        )
+
+      assert {:ok, _} = Books.merge_duplicate(survivor.id, dup.id)
+      assert Repo.get(Book, survivor.id).description == "A sprawling historical novel."
+    end
+  end
 end
