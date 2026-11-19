@@ -181,7 +181,15 @@ Ordered by expected leverage; none yet ruled on.
 5. **Digit-beam barcode rescue** — k candidates over OCR confusions, checksum +
    catalogue select. `PENDING: the false-accept measurement (perturb known-good
    ISBNs, count wrong-but-resolving) — the load-bearing unknown, measurable
-   offline for free.`
+   offline for free.` **MEASURED 2026-11-19: 22/303 = 7.3% false accepts, 0
+   transport failures** (`scripts/characterise/digit-beam-false-accept.py`;
+   single substitutions are provably checksum-caught — the exposure is
+   cancelling confusion PAIRS and |a−b|=5 adjacent transpositions, 392+17 of
+   which exist over the corpus's own 27 ISBNs). One in ~14 valid variants
+   resolves as a DIFFERENT real book, past the checksum and the ISBN gate,
+   and the title cross-check is weakest exactly on the hostile_barcode images
+   a rescue would fire on. **Struck as a decider**; revisit only as a
+   candidate generator into full title agreement, with its own measurement.
 6. **Model roles, not model swap** — 4B (or smaller specialist) where input is
    clean; 7B-class where it is degraded. Only meaningful after (1) exists.
 
@@ -356,7 +364,9 @@ ships with a planted-violation red run.
 the digit-beam rescue, whose false-accept measurement (§7 item 5) was named
 load-bearing and free, then landed in neither follow-on plan. It belongs to the
 build wave's gate work: measure offline (perturb known-good ISBNs, count
-wrong-but-resolving) before any rescue ships.
+wrong-but-resolving) before any rescue ships. *Discharged 2026-11-19: measured
+7.3% (see §7 item 5's annotation) — the rescue is struck as a decider, and
+`hostile_barcode` falls to the CPU-first path and the model track instead.*
 
 **7. Arrival rate: stop assuming.** Every cost figure above is a band on an
 assumed rate while the platform already counts vision jobs and uploads. The

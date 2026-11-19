@@ -61,6 +61,7 @@ __pycache__/
 dist/
 .venv/
 .venv-tools/
+.venv-visual/
 venv/
 .mypy_cache/
 .ruff_cache/
