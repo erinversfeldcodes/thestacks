@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import logging
@@ -22,7 +23,7 @@ from app.proto.gen.vision import (
     OcrAttempt,
     StageTimings,
 )
-from app.services.cover_text import read_cover_text
+from app.services.cover_text import CoverText, read_cover_text
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
 from app.services.url_validator import validate_image_url
@@ -43,10 +44,13 @@ _VLM_MAX_SIDE = 672
 _VLM_JPEG_QUALITY = 85
 
 
-def _resize_for_vlm(image_b64: str) -> str:
-    """Downsize a base64-encoded image to max side `_VLM_MAX_SIDE` before
-    sending to the VLM. Preserves aspect ratio, re-encodes as JPEG to
-    guarantee a known format for the model. If the image is already
+def _resize_for_vlm(image_b64: str, raw: bytes) -> str:
+    """Downsize an image to max side `_VLM_MAX_SIDE` before sending to the
+    VLM. Takes BOTH forms the caller already holds — the base64 string (the
+    no-resize fallback, returned untouched so nothing is re-encoded) and the
+    decoded bytes (so the one decode in `_load_image_b64` stays the only
+    decode on the request path). Preserves aspect ratio, re-encodes as JPEG
+    to guarantee a known format for the model. If the image is already
     smaller than the target, re-encode anyway to normalise format —
     the model accepts JPEG most reliably and the re-encode is ~5ms.
 
@@ -56,7 +60,6 @@ def _resize_for_vlm(image_b64: str) -> str:
     than fail the upload.
     """
     try:
-        raw = base64.b64decode(image_b64, validate=True)
         opened = Image.open(io.BytesIO(raw))
         opened.load()
         img: Image.Image = opened if opened.mode in ("RGB", "L") else opened.convert("RGB")
@@ -259,16 +262,20 @@ async def _download_image(image_url: str) -> bytes:
 async def _load_image_b64(
     image: str | None,
     image_url: str | None,
-) -> str:
+) -> tuple[str, bytes]:
     """Resolve `image` (already base64) OR `image_url` (downloaded and re-encoded)
-    into a single base64-encoded string. Raises HTTPException(422) for invalid
-    input — carrying forward the validation semantics the removed /classify
-    endpoint applied inline, factored out so /analyze can reuse them without
-    duplication.
+    into a (base64 string, decoded bytes) pair. Raises HTTPException(422) for
+    invalid input — carrying forward the validation semantics the removed
+    /classify endpoint applied inline, factored out so /analyze can reuse them
+    without duplication.
+
+    The bytes ride along because this function already decoded them to validate:
+    returning both makes this the ONE base64 decode on the request path — every
+    downstream tier (barcode, cover text, resize) takes the bytes.
     """
     if image_url is not None:
         image_bytes = await _download_image(image_url)
-        return base64.b64encode(image_bytes).decode()
+        return base64.b64encode(image_bytes).decode(), image_bytes
     if image is None:
         raise _vision_error(
             _ERR_NO_IMAGE_SUPPLIED, "Either 'image' or 'image_url' must be provided"
@@ -282,7 +289,18 @@ async def _load_image_b64(
             _ERR_IMAGE_TOO_LARGE,
             f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
         )
-    return image
+    return image, decoded
+
+
+async def _timed_cover_read(image_bytes: bytes) -> tuple[CoverText, int]:
+    """The shadow cover read, timed from inside its own coroutine so `ocr_ms`
+    reports the read's duration, not how long it overlapped the GPU call it
+    runs concurrently with. Thread-offloaded: Tesseract-class work must not
+    block the event loop. `read_cover_text` never raises by contract, so a
+    task over this is harvest-safe."""
+    started = time.monotonic()
+    cover = await asyncio.to_thread(read_cover_text, image_bytes)
+    return cover, _elapsed_ms(started)
 
 
 def _parse_classification(parsed: dict[str, object]) -> tuple[str, float]:
@@ -349,17 +367,17 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     request.app.state.container_cold = False
 
     download_started = time.monotonic()
-    image_b64 = await _load_image_b64(body.image, body.image_url)
+    image_b64, decoded_bytes = await _load_image_b64(body.image, body.image_url)
     download_ms = _elapsed_ms(download_started)
 
     if body.image_url is not None:
         log = log.bind(image_url=body.image_url)
 
-    decoded_bytes = base64.b64decode(image_b64, validate=True)
-
     if settings.local_ocr_enabled:
         barcode_started = time.monotonic()
-        isbn = local_isbn_scan(decoded_bytes)
+        # Thread-offloaded: six pyzbar decode attempts at full resolution would
+        # otherwise sit on the event loop under `:vision` concurrency.
+        isbn = await asyncio.to_thread(local_isbn_scan, decoded_bytes)
         barcode_ms = _elapsed_ms(barcode_started)
 
         if isbn is not None:
@@ -390,17 +408,28 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
     # only way to get a hit rate without first trusting it.
     ocr_attempt = None
     ocr_ms = None
+    ocr_task: asyncio.Task[tuple[CoverText, int]] | None = None
 
-    if settings.cover_text_enabled:
+    if settings.cover_text_enabled and not settings.ocr_short_circuit:
+        # Pure shadow: the VLM answers regardless, so the read must not sit on
+        # the serial path adding latency it then discards. It overlaps the GPU
+        # call and is harvested after the dispatch returns. If the dispatch
+        # raises, the task finishes quietly in its thread — `read_cover_text`
+        # never raises, and an unretrieved RESULT (unlike an exception) emits
+        # no warning — so no try/finally ceremony is owed here.
+        ocr_task = asyncio.create_task(_timed_cover_read(decoded_bytes))
+    elif settings.cover_text_enabled:
+        # Short-circuit mode: serial by necessity — a confident read answers
+        # without waking the GPU at all. Thread-offloaded like every CPU tier.
         ocr_started = time.monotonic()
-        cover = read_cover_text(decoded_bytes)
+        cover = await asyncio.to_thread(read_cover_text, decoded_bytes)
         ocr_ms = _elapsed_ms(ocr_started)
 
         confident = (
             cover.title is not None
             and cover.confidence >= settings.ocr_short_circuit_min_confidence
         )
-        answered = bool(settings.ocr_short_circuit and confident)
+        answered = bool(confident)
 
         ocr_attempt = OcrAttempt(
             title=cover.title,
@@ -439,7 +468,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
 
     client: VisionClient = request.app.state.vision_client
 
-    vlm_b64 = _resize_for_vlm(image_b64)
+    vlm_b64 = _resize_for_vlm(image_b64, decoded_bytes)
 
     # ⬛ R0, BEHIND settings.single_dispatch. ON: classify + conditional extract
     # run as ONE Modal dispatch on one container (`analyze`), eliminating the
@@ -462,6 +491,19 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         classify_started = time.monotonic()
         classify_parsed = await client.classify(vlm_b64)
         classify_ms = _elapsed_ms(classify_started)
+
+    # Harvest the shadow read that overlapped the GPU call. `ocr_ms` is the
+    # read's own duration (timed inside the task), so the timings stay honest.
+    if ocr_task is not None:
+        cover, ocr_ms = await ocr_task
+        ocr_attempt = OcrAttempt(
+            title=cover.title,
+            author=cover.author,
+            raw_text=cover.raw_text,
+            confidence=cover.confidence,
+            answered=False,
+            engine=cover.engine,
+        )
 
     gpu_dispatches: list[GpuDispatch] = []
     if (d := _gpu_dispatch(classify_parsed)) is not None:
