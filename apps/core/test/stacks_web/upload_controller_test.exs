@@ -379,6 +379,31 @@ defmodule StacksWeb.UploadControllerTest do
       assert String.contains?(content_type, "text/event-stream")
     end
 
+    test "the FIRST event is the acknowledgement: the current state, before any work", %{
+      user: user
+    } do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      conn2 =
+        CoreWeb.ConnCase.proven_conn()
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/upload/#{image.id}/stream")
+
+      # The stream used to open SILENT — the client's own rendering was the
+      # only "identifying…" signal, and time-to-acknowledgement was
+      # unmeasurable at the server. The first frame must now be the row's
+      # current state, which is what the ack threshold reads.
+      assert [first_frame | _] = String.split(conn2.resp_body, "\n\n", trim: true)
+      assert String.starts_with?(first_frame, "data: ")
+
+      payload = first_frame |> String.replace_prefix("data: ", "") |> Jason.decode!()
+      assert payload["status"] == "pending"
+      assert payload["image_id"] == image.id
+    end
+
     test "accepts the Accept header a real EventSource actually sends", %{user: user} do
       # The browser's EventSource always sends `Accept: text/event-stream`. The
       # SSE pipeline therefore must NOT carry `plug :accepts, ["json"]`, which

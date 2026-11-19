@@ -479,7 +479,7 @@ defmodule StacksWeb.UploadController do
     conn
   end
 
-  defp stream_sse(conn, image_id, _initial_payload, user) do
+  defp stream_sse(conn, image_id, initial_payload, user) do
     conn =
       conn
       |> put_resp_header("content-type", "text/event-stream")
@@ -487,8 +487,23 @@ defmodule StacksWeb.UploadController do
       |> put_resp_header("x-accel-buffering", "no")
       |> send_chunked(200)
 
-    deadline = System.monotonic_time(:millisecond) + sse_max_timeout_ms()
-    sse_receive_loop(conn, image_id, user, deadline)
+    # ⬛ THE ACKNOWLEDGEMENT. The row's current state goes down the pipe as the
+    # FIRST event — one DB read after connect, no vision work in front of it.
+    # Before this, the stream opened silent and the client's own rendering was
+    # the only "identifying…" signal, which made time-to-acknowledgement
+    # unmeasurable at the server; now it is the time to this chunk, which is
+    # the number the SLO gate's ack threshold reads. The client treats a
+    # Pending event as keep-waiting, and as proof of life — it resets the
+    # stream-silence watchdog.
+    case chunk(conn, "data: #{Jason.encode!(initial_payload)}\n\n") do
+      {:ok, conn} ->
+        deadline = System.monotonic_time(:millisecond) + sse_max_timeout_ms()
+        sse_receive_loop(conn, image_id, user, deadline)
+
+      {:error, _closed} ->
+        Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")
+        conn
+    end
   end
 
   defp sse_max_timeout_ms do
