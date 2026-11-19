@@ -451,9 +451,6 @@ mapUploadOut upOut =
         Upload.RefreshInbox ->
             UploadRefreshInbox
 
-        Upload.NavigateTo route ->
-            UploadNavigate route
-
         -- During onboarding the arrival animation is not the point — the reader
         -- is being walked to their first shelf, not returning to it — so this
         -- navigates to the shelf and drops the arrival id.

@@ -38,7 +38,11 @@ MAX_SEAMLESS=26
 # grow inside an already-seamed module raise the site count. Both would
 # otherwise look like progress, or like nothing at all.
 EXPECTED_POPULATION=42
-MAX_TOTAL_SITES=90
+# ⚖️ 90 → 91 on 2026-11-19: making onboarding server-authoritative, the
+# dismissal path records every step through `Effect.perform` in
+# `OnboardingOverlay` (a module that already holds a seam), one genuine new
+# authenticated-write site that is not a conversion.
+MAX_TOTAL_SITES=91
 
 mode="${1:-}"
 

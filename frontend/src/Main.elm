@@ -2313,14 +2313,6 @@ update msg model =
                         Upload.SessionExpired ->
                             handleSessionExpiry model
 
-                        Upload.NavigateTo route ->
-                            ( baseModel
-                            , Cmd.batch
-                                [ baseCmd
-                                , Nav.pushUrl model.key (Route.toPath route)
-                                ]
-                            )
-
                         Upload.NavigateToArrival route bookId ->
                             ( baseModel
                             , Cmd.batch

@@ -126,7 +126,6 @@ type alias Model =
 
 type OutMsg
     = NoOut
-    | NavigateTo Route.Route
       -- Navigate to a shelf AND arm its arrival animation for a specific book:
       -- the shelf route plus the just-placed book's id, which the host turns
       -- into `/<shelf>?arrived=<id>` (Route carries no query by design).

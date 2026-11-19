@@ -536,7 +536,7 @@ h4 {
     flex-wrap: wrap;
     justify-content: center;
     gap: var(--space-2) 1.25rem;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-3);
 }
 
 .app-footer__link {
@@ -7539,7 +7539,7 @@ h4 {
 
 /* The "View post" link offered after a successful publish. */
 .blog-editor__published {
-    margin-top: 0.75rem;
+    margin-top: var(--space-3);
     font-size: 0.95rem;
 }
 

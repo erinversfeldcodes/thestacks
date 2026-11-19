@@ -37,15 +37,10 @@ ADAPTER = pathlib.Path("frontend/src/Types/Book.elm")
 # Each needs an owner, because "deliberately" is only true while somebody can
 # say who decided it.
 #
-#   community_read_count — carrying this one into the record is a separate,
-#   already-planned piece of work: reading it costs a per-request warehouse
-#   query (`SELECT read_count FROM wh.mart_community_read_count WHERE
-#   book_id = $1`), and the plan is to carry it through `Types.Book` AND render
-#   it, which is a surface decision rather than an adapter fix. That is why it
-#   was not absorbed here. ⚠️ When the adapter starts reading it, DELETE this
-#   entry — the gate fails on a declared exception that no longer describes the
-#   code, so the list cannot rot into a place things go to be forgotten.
-DECLARED = {"community_read_count"}
+# (Empty: `community_read_count` was the standing example until the adapter began
+# carrying it through `Types.Book` and rendering it. Per the rule above, once the
+# adapter reads a key its entry is deleted, so the list cannot rot.)
+DECLARED = set()
 
 
 def read(path):
