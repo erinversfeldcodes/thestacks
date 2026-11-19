@@ -102,6 +102,15 @@ defmodule Stacks.Moderation do
   # everything else falls through to the full (GPU) analyze with the same
   # payload. The old single-call order stays reachable with the flag off for
   # one release, then this branch becomes the only one.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — a cpu_only
+  # response never carries it: the sidecar answers tier UNSPECIFIED on a read
+  # (OCR appears only when the full-path short-circuit answers), and any
+  # non-barcode tier flows through the generic read/escalate clause by design.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_VLM_CLASSIFY — no
+  # GPU runs on a cpu_only request, so a VLM tier here is structurally
+  # impossible; the catch-all clause escalates safely if the contract drifts.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_VLM_EXTRACT — same:
+  # a cpu_only response cannot carry a VLM tier; drift lands in the catch-all.
   defp cpu_first(payload, context) do
     case AIClient.call_vision("analyze", Map.put(payload, :cpu_only, true)) do
       {:ok, %{"tier" => "ANALYSIS_TIER_BARCODE", "books" => books} = resp}
