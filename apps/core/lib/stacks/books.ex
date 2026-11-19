@@ -1089,6 +1089,10 @@ defmodule Stacks.Books do
   work is already represented, so the drop loses no distinct fact. Editions
   re-parent with `is_primary` cleared, because a book may have only one primary
   edition; the survivor keeps its own.
+
+  Privileged: it deletes an `op.books` row, which the `stacks_app` runtime role
+  cannot do. Call it from a migration or an operator task, never a user-facing
+  request path.
   """
   @spec merge_duplicate(binary(), binary()) :: {:ok, binary()} | {:error, term()}
   def merge_duplicate(survivor_id, duplicate_id)
