@@ -337,7 +337,8 @@ shared half is the **pgvector embedding substrate**
 (`plans/vision-accuracy-program.md` §4a): the assistant needs a text-embedding
 index regardless, and cover/spine embeddings ride the same index as a top-k
 candidate generator over the reader's own catalogue. The serving story —
-what runs where, its cold-start profile, cost at 10× — is **open design debt**,
+what runs where, its cold-start profile, cost at 10× — is **open design debt**
+(discharged 2026-11-19: `docs/vision-embedding-substrate.md`),
 carried to the build wave, not resolved by this paragraph.
 
 **5. The promotion rule, consolidated.** The rule currently lives in four

@@ -7,12 +7,11 @@
 # to being processed by a vision model, and those people cannot be asked. A
 # corpus is forever. See docs/vision-eval-corpus-plan.md.
 #
-# Six fixtures is far too few to carry an ABSOLUTE accuracy threshold: one image
-# changing its mind moves the score 16.7 points, which reads as rigour and
-# behaves as noise. So the harness gates on NO REGRESSION against a recorded
-# baseline instead. docs/vision-eval-corpus-plan.md specifies the ~120-image
-# corpus that would make per-stratum thresholds defensible; expanding to it is
-# deliberately deferred.
+# This corpus grew from six fixtures to the stratified ~122-image set that
+# docs/vision-eval-corpus-plan.md specified (the expansion this header once
+# recorded as deferred). Small strata still cannot carry ABSOLUTE thresholds —
+# one image changing its mind moves a small stratum by whole points — so the
+# harness gates on NO PER-STRATUM REGRESSION against a recorded baseline.
 #
 # `expect_book: false` is as load-bearing as the true cases — a model that says
 # "yes, a book" to everything scores perfectly on books alone.

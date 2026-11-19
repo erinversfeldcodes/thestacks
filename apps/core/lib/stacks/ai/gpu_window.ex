@@ -31,9 +31,11 @@ defmodule Stacks.AI.GpuWindow do
   How many distinct GPU containers were cold among one response's dispatches.
 
   ⛔ **Counting cold flags is not the same as counting containers**, and the
-  difference is the whole reason the dispatch list carries a container id. One
-  `/analyze` request makes up to two independent Modal dispatches, so a count
-  of `cold` booleans double-counts if both landed on the same container.
+  difference is the whole reason the dispatch list carries a container id.
+  Under the collapsed single-dispatch default an `/analyze` request makes ONE
+  Modal dispatch — but the two-call fallback path still exists behind the
+  flag, and under it a count of `cold` booleans double-counts if both calls
+  landed on the same container. The grouping stays load-bearing either way.
 
   ⚠️ Those two happen to agree under today's deployment: the GPU class sets no
   per-container concurrency, so a container serves one input at a time and its
