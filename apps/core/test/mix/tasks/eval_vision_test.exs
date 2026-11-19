@@ -147,6 +147,66 @@ defmodule Mix.Tasks.Eval.VisionTest do
     end
   end
 
+  describe "the 7B end-state reference is read-only" do
+    # ⛔ The two-baseline protocol's teeth. `--record` after the model swap
+    # writes the DROP-IN baseline; the 7B reference is the end-state bar, and
+    # overwriting it would silently make the accepted 4B regression the
+    # permanent reference. The guard sits in the WRITE path, below every
+    # routing decision, so the env-var route is as refused as the flag route.
+    test "a record aimed at the reference file is refused, whatever routed it there" do
+      tmp_dir = Path.join(System.tmp_dir!(), "eval-ref-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp_dir)
+      tmp = Path.join(tmp_dir, "vision_baseline_7b_reference.json")
+      File.write!(tmp, ~s({"passed": 86, "total": 122, "model": "Qwen/Qwen2.5-VL-7B-Instruct"}))
+
+      System.put_env("EVAL_VISION_BASELINE_PATH", tmp)
+
+      on_exit(fn ->
+        System.delete_env("EVAL_VISION_BASELINE_PATH")
+        File.rm_rf(tmp_dir)
+      end)
+
+      results = [%{ok: true, name: "a", detail: ""}]
+
+      error =
+        assert_raise Mix.Error, fn ->
+          Vision.gate(results, true)
+        end
+
+      assert error.message =~ "read-only by protocol",
+             "expected the reference write refusal; got: #{error.message}"
+
+      # ⬛ ANTI-VACUITY: the refusal left the file byte-identical.
+      assert File.read!(tmp) =~ ~s("passed": 86)
+    end
+
+    test "--against-reference routes the comparison to the reference file" do
+      # The routing half: gate/3 with against_reference? reads the app-dir
+      # reference, NOT the env-var drop-in path — proven by planting an
+      # impossible env baseline and watching it be ignored.
+      System.put_env("EVAL_VISION_BASELINE_PATH", "/nonexistent/decoy.json")
+      on_exit(fn -> System.delete_env("EVAL_VISION_BASELINE_PATH") end)
+
+      results = [%{ok: true, name: "a", detail: ""}]
+
+      # The committed reference is model-stamped Qwen2.5-VL-7B; the test env's
+      # model identity differs, so the model-mismatch refusal fires — and a
+      # refusal NAMING THE REFERENCE'S OWN MODEL is the proof of which file
+      # was read (the decoy would have produced the absent-baseline branch).
+      error =
+        assert_raise Mix.Error, fn ->
+          Vision.gate(results, false, true)
+        end
+
+      refute error.message =~ "decoy",
+             "the decoy env path must be ignored under --against-reference"
+
+      assert error.message =~ "Qwen/Qwen2.5-VL-7B-Instruct",
+             "the refusal should name the reference's recorded model; got: " <>
+               error.message
+    end
+  end
+
   describe "a gate with nothing to compare against" do
     setup do
       # A baseline path the task will not find, so `read_baseline` returns

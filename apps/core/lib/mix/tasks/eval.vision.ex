@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Eval.Vision do
           mix eval.vision                  # score, compare to the baseline, gate
           mix eval.vision --record         # write today's score as the new baseline
           mix eval.vision --corpus path    # an alternative corpus
+          mix eval.vision --against-reference  # gate against the 7B end-state reference
 
       ## Why this gates on no-regression rather than a threshold
 
@@ -51,8 +52,10 @@ defmodule Mix.Tasks.Eval.Vision do
 
   alias Stacks.AI.Client
 
-  @switches [record: :boolean, corpus: :string, stratum: :string]
+  @switches [record: :boolean, corpus: :string, stratum: :string, against_reference: :boolean]
   @baseline_path "priv/eval/vision_baseline.json"
+  @reference_basename "vision_baseline_7b_reference.json"
+  @reference_path "priv/eval/#{@reference_basename}"
   @call_attempts 3
   @retry_pause_ms 30_000
 
@@ -72,9 +75,20 @@ defmodule Mix.Tasks.Eval.Vision do
     if skip?() do
       skip_or_fail()
     else
+      record? = Keyword.get(cli, :record, false)
+      against_reference? = Keyword.get(cli, :against_reference, false)
+
+      if record? and against_reference? do
+        Mix.raise(
+          "eval.vision: --record with --against-reference would overwrite the 7B " <>
+            "end-state reference — the exact failure the two-baseline protocol exists " <>
+            "to prevent. The reference is read-only; record only the drop-in baseline."
+        )
+      end
+
       results = score_corpus(corpus)
       report(results)
-      gate(results, Keyword.get(cli, :record, false))
+      gate(results, record?, against_reference?)
     end
   end
 
@@ -537,7 +551,7 @@ defmodule Mix.Tasks.Eval.Vision do
   # ⚠️ Public for the same reason the baseline reader is: this is the decision a
   # deploy gate makes, and asserting it by running the task would need a live
   # vision service — which is how it came to have no test at all.
-  def gate(results, record?) do
+  def gate(results, record?, against_reference? \\ false) do
     passed = Enum.count(results, & &1.ok)
     total = length(results)
     unscored = Enum.count(results, &Map.get(&1, :unscored, false))
@@ -566,7 +580,7 @@ defmodule Mix.Tasks.Eval.Vision do
       )
     end
 
-    baseline_file = baseline_file()
+    baseline_file = baseline_file(against_reference?)
     baseline = read_baseline(baseline_file, identity)
 
     verdict(baseline, baseline_file, passed, total, identity, record?)
@@ -578,6 +592,17 @@ defmodule Mix.Tasks.Eval.Vision do
   # counting is arithmetic, the verdict is policy, and only one of them has
   # five ways to refuse.
   defp verdict(_baseline, baseline_file, passed, total, identity, true) do
+    # ⛔ UNBYPASSABLE, deliberately below every routing decision: whatever path
+    # selected this file — the flag, EVAL_VISION_BASELINE_PATH, a future
+    # caller — the 7B end-state reference is never written. Overwriting it
+    # would silently make the accepted 4B regression the permanent bar.
+    if Path.basename(baseline_file) == @reference_basename do
+      Mix.raise(
+        "eval.vision: refusing to write #{baseline_file} — the 7B end-state " <>
+          "reference is read-only by protocol. Record the drop-in baseline instead."
+      )
+    end
+
     write_baseline(baseline_file, passed, total, identity)
     Mix.shell().info("recorded #{passed}/#{total} as the new baseline for #{identity.model}")
   end
@@ -682,9 +707,15 @@ defmodule Mix.Tasks.Eval.Vision do
   # run. `EVAL_VISION_BASELINE_PATH` is how the suite keeps its recording in a
   # temp directory; nothing sets it in production, where the app-dir path is
   # the right one.
-  defp baseline_file do
-    System.get_env("EVAL_VISION_BASELINE_PATH") ||
-      Path.join(Application.app_dir(:core), @baseline_path)
+  defp baseline_file(against_reference? \\ false) do
+    if against_reference? do
+      # The end-state bar: the full cascade answers to the 7B per-stratum
+      # reference, not to whatever drop-in baseline is current.
+      Path.join(Application.app_dir(:core), @reference_path)
+    else
+      System.get_env("EVAL_VISION_BASELINE_PATH") ||
+        Path.join(Application.app_dir(:core), @baseline_path)
+    end
   end
 
   @doc false
