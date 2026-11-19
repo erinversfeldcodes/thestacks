@@ -289,4 +289,82 @@ just less than the T4.
 
 The **writing assistant** half of the branch inherits none of this: ADR 025's
 containment argument (verified identifier, not generated prose) does not extend
-to it, and its model choice is its own decision.
+to it, and its model choice is its own decision. ⚠️ Its *substrate* is a
+different matter — see Addendum §4.
+
+---
+
+## Addendum (2026-11-19): review findings, folded in before the build
+
+A pre-build review of this ADR found the ruling sound and the following gaps.
+They amend the implementation consequences; nothing below reopens the GPU/model
+decision.
+
+**1. Baseline protocol — the trade must expire, not compound.** Re-recording the
+eval baseline to the 4B (consequence 2) makes the knowingly-accepted per-stratum
+concessions (`illegible` 5/10 → 1/10, `hostile_barcode` −1, `book_adjacent` −1)
+the *reference*, so later cascade work could regress against today's system while
+every gate stays green. Protocol: the 4B-keyed baseline recorded with the swap is
+the **interim drop-in gate only**. The **end-state bar for the full cascade**
+(CPU tiers + GPU fallback, measured at the `/analyze` boundary) remains the
+7B reference — **86/122, no stratum below its 7B score** — with the named
+concessions tolerated *only until* the CPU-first path and the spine review land,
+at which point the full-cascade score must meet or beat the reference or the
+fallback ruling (L4 + 7B) is taken. The build wave's gate states both baselines
+and which one each change answers to.
+
+**2. The spine review trigger, armed.** The ruling's trigger had no bar, no date
+and no owner — the shape a provisional ruling needs to become permanent by
+default. Armed as: the owner shoots the 15–20 spine photographs
+(`LORA-DATASET.md` §5 priority set); on arrival both models are scored on the new
+stratum; **proposed bar, owner to confirm or replace when the stratum exists: the
+4B's full-cascade spine score is no worse than the 7B's on the same set**. Below
+the bar → role-split cascade or the recorded L4+7B fallback. The embedding-index
+experiment and any LoRA work stay blocked behind this stratum
+(`plans/vision-accuracy-program.md`, items 3 and 5).
+
+**3. One alternative recorded as rejected, not unconsidered: hosted VLM APIs.**
+Per-call pricing at this volume is cost-comparable with zero cold start —
+rejected on grounds independent of cost: reader photographs are personal data
+under a deletion promise (the photograph is destroyed ~24h after identification;
+record at 30 days), and ADR 025's provenance posture. Shipping reader photographs
+to a third-party inference API is a different privacy architecture, not a
+cheaper instance of this one.
+
+**4. The one-substrate brief, cross-referenced.** The 2026-10-14 ruling was one
+substrate for recognition *and* blog writing. This ADR settles the GPU half; the
+shared half is the **pgvector embedding substrate**
+(`plans/vision-accuracy-program.md` §4a): the assistant needs a text-embedding
+index regardless, and cover/spine embeddings ride the same index as a top-k
+candidate generator over the reader's own catalogue. The serving story —
+what runs where, its cold-start profile, cost at 10× — is **open design debt**,
+carried to the build wave, not resolved by this paragraph.
+
+**5. The promotion rule, consolidated.** The rule currently lives in four
+places: the per-stratum slice gate, the production SLO gate, the revised
+responsiveness targets above, and the cost frontier. The build wave wires them
+into **one gate**: slice gate against the §1-addendum baselines (negatives
+scored separately, never blended), the revised responsiveness thresholds
+(p50 ≤ 5s, warm p95 ≤ 10s, acknowledgement < 1s) written into the SLO gate's
+own thresholds — superseding the p95 ≤ 15s still printed in
+`plans/vision-responsiveness-plan.md` — and the `/costs` Modal line re-based
+from post-R0 measurements. A gate that cannot fail is not a gate: the wiring
+ships with a planted-violation red run.
+
+**6. `hostile_barcode` gets an owner.** The worst stratum (3/20) is attacked by
+the digit-beam rescue, whose false-accept measurement (§7 item 5) was named
+load-bearing and free, then landed in neither follow-on plan. It belongs to the
+build wave's gate work: measure offline (perturb known-good ISBNs, count
+wrong-but-resolving) before any rescue ships.
+
+**7. Arrival rate: stop assuming.** Every cost figure above is a band on an
+assumed rate while the platform already counts vision jobs and uploads. The
+capacity model consumes the measured monthly rate from the existing cost
+telemetry; the re-based `/costs` line cites it.
+
+**8. Sequencing: R0 first.** The double-dispatch collapse
+(`plans/vision-responsiveness-plan.md` R0) is free, invisible, gated on nothing —
+and it changes the constants this ADR quotes (the harness measured
+single-dispatch cost; real books pay two forward passes). It lands before the
+4B swap so the re-based cost numbers describe the corrected dispatch, not the
+accident.
