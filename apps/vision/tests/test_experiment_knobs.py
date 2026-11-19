@@ -26,9 +26,9 @@ class TestDefaultsAreTheMeasuredBaseline:
     @pytest.mark.parametrize(
         ("attr", "expected"),
         [
-            ("MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct"),
-            ("VISION_GPU", "A10G"),
-            ("VISION_DTYPE", "bfloat16"),
+            ("MODEL_NAME", "Qwen/Qwen3-VL-4B-Instruct"),
+            ("VISION_GPU", "T4"),
+            ("VISION_DTYPE", "float16"),
         ],
     )
     def test_an_unset_knob_keeps_the_measured_value(self, attr: str, expected: str) -> None:
@@ -38,9 +38,11 @@ class TestDefaultsAreTheMeasuredBaseline:
             mod = _reload()
 
         assert getattr(mod, attr) == expected, (
-            f"{attr} drifted from the value the corpus was scored against. Every "
-            "comparison in the experiment series is against that run, so moving a "
-            "default silently invalidates all of them."
+            f"{attr} drifted from the ruled production architecture (T4 + "
+            "Qwen3-VL-4B fp16, the measured 84/122 configuration, owner-accepted "
+            "2026-11-17). Moving a default is an architecture decision with its "
+            "own eval baseline, never a drive-by edit — the previous move, off "
+            "the 7B/A10G baseline, carried a ruling and a re-recorded baseline."
         )
 
     # ⚠️ None, NOT a number. An explicit value would override the processor's

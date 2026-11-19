@@ -12,16 +12,30 @@ defmodule Mix.Tasks.Eval.Vision do
 
       ## Why this gates on no-regression rather than a threshold
 
-      Six fixtures. One image changing its mind moves an accuracy percentage by
-      16.7 points, so an "≥90%" gate would fire on noise, and the first time it
-      went red for a benign reason someone would raise the threshold rather than
-      investigate — which is how a gate becomes decoration. Instead the score is
-      compared against `priv/eval/vision_baseline.json` and the task fails only
-      when it gets WORSE. That detects breakage honestly on the corpus we have.
+      One image changing its mind moves a small stratum by whole points, so an
+      "≥90%" gate would fire on noise, and the first time it went red for a
+      benign reason someone would raise the threshold rather than investigate —
+      which is how a gate becomes decoration. Instead the score is compared
+      per-stratum against `priv/eval/vision_baseline.json` and the task fails
+      only when a stratum gets WORSE. (The corpus grew from the original six
+      fixtures to the 122-image stratified corpus this rationale was written
+      to await.)
 
-      `docs/vision-eval-corpus-plan.md` specifies the ~120-image corpus that
-      would make per-stratum absolute thresholds defensible. Expanding to it is
-      deferred, deliberately, and this moduledoc is where that promise lives.
+      ## The two baselines, and which one `--record` writes
+
+      `--record` overwrites `vision_baseline.json` — the model-stamped,
+      DROP-IN gate for whatever model is deployed. It is NOT the end-state
+      bar. That bar is `priv/eval/vision_baseline_7b_reference.json`: the
+      Qwen2.5-VL-7B reference (86/122, per-stratum), preserved read-only by
+      convention, which the FULL CASCADE must meet with no stratum below its
+      7B score. The ruled T4+4B swap concedes `illegible`, `hostile_barcode`
+      and `book_adjacent` only until the CPU-first tiers and the spine review
+      land; if the cascade cannot clear the reference then, the recorded
+      fallback is L4 + the 7B. Wiring the reference comparison into one
+      consolidated gate is the build wave's gate child; until that lands,
+      re-recording after a model swap is how the accepted regression would
+      silently become the permanent bar — so never `--record` without also
+      checking this section's reference file survives untouched.
 
       ## Why it can skip, and why the skip is loud
 

@@ -1,8 +1,10 @@
-"""Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
+"""Modal app: Qwen3-VL-4B-Instruct vision inference for The Stacks.
 
-Stack: HF Transformers + accelerate (no vLLM), bf16 on an A10G — the
-empirically-clean dfef1333 baseline; no vLLM/H100 without an eval
-framework. One inference per container (sync @modal.method calls,
+Stack: HF Transformers + accelerate (no vLLM), fp16 on a T4 — the ruled
+production architecture (owner-accepted 2026-11-17: the measured 84/122
+config; L4 + Qwen2.5-VL-7B bf16 is the recorded zero-accuracy-risk
+fallback, reachable via the VISION_* env knobs without a source edit).
+No vLLM/H100 without an eval framework. One inference per container (sync @modal.method calls,
 serialised); scale by container count, not in-process concurrency.
 300s function timeout — core's client timeout is DERIVED from this
 number and must never be below it (350).
@@ -26,9 +28,17 @@ MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
 # ⚠️ Modal evaluates the decorators at DEPLOY time, so these are fixed when the
 # app is pushed, not per request. That is what makes a run attributable: one
 # deployment, one configuration, one artefact.
-MODEL_NAME = os.environ.get("VISION_MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct")
-VISION_GPU = os.environ.get("VISION_GPU", "A10G")
-VISION_DTYPE = os.environ.get("VISION_DTYPE", "bfloat16")
+# ⬛ THE DEFAULTS ARE THE RULED PRODUCTION ARCHITECTURE, deliberately moved
+# from the 7B/A10G/bf16 baseline the experiment series was scored against:
+# T4 + Qwen3-VL-4B-Instruct (apache-2.0, licence re-read at swap) in fp16 —
+# the T4 has no usable bf16, and fp16 is the exact configuration the 84/122
+# score was measured on. The 4B-keyed eval baseline is recorded WITH this
+# swap, and the 7B 86/122 per-stratum reference stays the end-state bar for
+# the full cascade. Experiments still override via env, never by editing
+# these lines.
+MODEL_NAME = os.environ.get("VISION_MODEL_NAME", "Qwen/Qwen3-VL-4B-Instruct")
+VISION_GPU = os.environ.get("VISION_GPU", "T4")
+VISION_DTYPE = os.environ.get("VISION_DTYPE", "float16")
 
 # `None` means "whatever the processor's own config says", which is what ran
 # before this knob existed. An explicit value caps the image tokens the vision
@@ -66,9 +76,11 @@ _ENV_OVERRIDES = {
 }
 
 # Extra packages a variant needs that the baseline must not carry: an AWQ
-# checkpoint needs `autoawq`, Qwen3-VL needs a newer transformers than the
-# baseline pin. Comma-separated pip specs; empty by default, and an empty list
-# adds no layer, so the default image hash is again untouched.
+# checkpoint needs `autoawq`, for example. (Qwen3-VL once needed a newer
+# transformers than the baseline pin and rode in here; it is the default now
+# and the baseline floor carries it.) Comma-separated pip specs; empty by
+# default, and an empty list adds no layer, so the default image hash is
+# again untouched.
 _EXTRA_PIPS = [s.strip() for s in os.environ.get("VISION_EXTRA_PIPS", "").split(",") if s.strip()]
 
 
@@ -103,7 +115,11 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-eng")
     .pip_install(
-        "transformers>=4.50.0",
+        # ⚖️ 4.57.0 is where Qwen3VLForConditionalGeneration landed (the model
+        # card pins exactly that version) — the floor that makes the DEFAULT
+        # image able to load the DEFAULT model. 2.5-VL checkpoints (the L4+7B
+        # fallback) load fine on it too, so no variant needs a lower floor.
+        "transformers>=4.57.0",
         "qwen-vl-utils>=0.0.10",
         "torch>=2.4.0",
         "torchvision",
@@ -175,6 +191,16 @@ _CLASSIFY_PROMPT = (
     '{"classification": "book", "confidence": 0.95,'
     ' "reasoning": "one sentence explaining your decision"}'
 )
+
+# ⚖️ The classify answer is JSON with a verdict, a confidence, and the one
+# reasoning sentence the prompt itself demands — ~40-70 tokens all in.
+# Generating under a 512-token window billed GPU seconds for headroom the
+# answer never uses. 128 is deliberately generous (about twice the longest honest
+# answer) so the JSON can never be truncated mid-structure — a too-tight cap
+# would flip real books into parse failures, which `_parse_classification`
+# treats as non-answers. ⚠️ Proven harmless by the next slice-gate run, not
+# assumed: per-stratum scores must be identical to the uncapped baseline.
+_CLASSIFY_MAX_TOKENS = 128
 
 _EXTRACT_PROMPT = (
     "You are a book identification assistant with expertise in OCR and cover recognition.\n\n"
@@ -468,7 +494,7 @@ class VisionModel:
 
     @modal.method()
     def classify(self, image_b64: str) -> dict[str, Any]:
-        return self._infer(image_b64, _CLASSIFY_PROMPT)
+        return self._infer(image_b64, _CLASSIFY_PROMPT, max_new_tokens=_CLASSIFY_MAX_TOKENS)
 
     @modal.method()
     def extract(
@@ -504,13 +530,15 @@ class VisionModel:
         skip a book (missed identification). The front door still re-parses the
         classification authoritatively from the returned `classify` payload.
         """
-        classify_parsed = self._infer(image_b64, _CLASSIFY_PROMPT)
+        classify_parsed = self._infer(
+            image_b64, _CLASSIFY_PROMPT, max_new_tokens=_CLASSIFY_MAX_TOKENS
+        )
         extract_parsed: dict[str, Any] | None = None
         if _classification_is_book(classify_parsed):
             extract_parsed = self._infer(image_b64, _build_extract_prompt(excluded_books))
         return {"classify": classify_parsed, "extract": extract_parsed}
 
-    def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
+    def _infer(self, image_b64: str, prompt: str, max_new_tokens: int = 512) -> dict[str, Any]:
         import torch
         from qwen_vl_utils import process_vision_info
 
@@ -569,7 +597,7 @@ class VisionModel:
         with torch.no_grad():
             generated_ids = self.model.generate(
                 **inputs,
-                max_new_tokens=512,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
                 temperature=None,
                 top_p=None,
