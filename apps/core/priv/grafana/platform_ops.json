@@ -1587,6 +1587,68 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "Identification time-to-answer and acknowledgement",
+      "description": "WHAT: p50/p95 wall-clock from identification job start to a terminal answer (the identify_book pipeline phase), and p95 time to the upload stream's FIRST SSE event (the acknowledgement). WHY: these are the ruled responsiveness thresholds (p50 <= 5s time-to-answer, acknowledgement < 1s; cold p95 ~30s is accepted scale-to-zero physics, the SLO gate holds p95 at the 35s hung-pipeline ceiling). The phase histogram existed as a span and reached no store until 2026-11-19; the ack series exists because the stream used to open silent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 136
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(stacks_upload_phase_stop_duration_milliseconds_bucket{phase=\"identify_book\"}[5m])))",
+          "legendFormat": "p50 time-to-answer"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_upload_phase_stop_duration_milliseconds_bucket{phase=\"identify_book\"}[5m])))",
+          "legendFormat": "p95 time-to-answer"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_upload_ack_duration_milliseconds_bucket[5m])))",
+          "legendFormat": "p95 acknowledgement"
+        }
+      ]
     }
   ]
 }

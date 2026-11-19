@@ -411,6 +411,10 @@ defmodule StacksWeb.UploadController do
   end
 
   defp render_stream(conn, image_id) do
+    # The acknowledgement clock starts here — everything between this line and
+    # the first chunk is one authz read; the emit at the first chunk is what
+    # the ack threshold (< 1s) measures.
+    ack_started = System.monotonic_time()
     user = Guardian.Plug.current_resource(conn)
 
     Phoenix.PubSub.subscribe(Core.PubSub, "upload:#{image_id}")
@@ -460,14 +464,14 @@ defmodule StacksWeb.UploadController do
 
         if status in ["resolved", "rejected"] do
           Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")
-          send_sse_event(conn, payload)
+          send_sse_event(conn, payload, ack_started)
         else
-          stream_sse(conn, image_id, payload, user)
+          stream_sse(conn, image_id, payload, user, ack_started)
         end
     end
   end
 
-  defp send_sse_event(conn, payload) do
+  defp send_sse_event(conn, payload, ack_started) do
     conn =
       conn
       |> put_resp_header("content-type", "text/event-stream")
@@ -476,10 +480,11 @@ defmodule StacksWeb.UploadController do
       |> send_chunked(200)
 
     {:ok, conn} = chunk(conn, "data: #{Jason.encode!(payload)}\n\n")
+    emit_ack(ack_started)
     conn
   end
 
-  defp stream_sse(conn, image_id, initial_payload, user) do
+  defp stream_sse(conn, image_id, initial_payload, user, ack_started) do
     conn =
       conn
       |> put_resp_header("content-type", "text/event-stream")
@@ -497,6 +502,7 @@ defmodule StacksWeb.UploadController do
     # stream-silence watchdog.
     case chunk(conn, "data: #{Jason.encode!(initial_payload)}\n\n") do
       {:ok, conn} ->
+        emit_ack(ack_started)
         deadline = System.monotonic_time(:millisecond) + sse_max_timeout_ms()
         sse_receive_loop(conn, image_id, user, deadline)
 
@@ -504,6 +510,17 @@ defmodule StacksWeb.UploadController do
         Phoenix.PubSub.unsubscribe(Core.PubSub, "upload:#{image_id}")
         conn
     end
+  end
+
+  # Both first-event paths (a live stream's initial state, and the terminal
+  # answer a late connector receives) are acknowledgements; the measurement is
+  # the duration to the first chunk, whichever path wrote it.
+  defp emit_ack(ack_started) do
+    :telemetry.execute(
+      [:stacks, :upload, :ack],
+      %{duration: System.monotonic_time() - ack_started},
+      %{}
+    )
   end
 
   defp sse_max_timeout_ms do

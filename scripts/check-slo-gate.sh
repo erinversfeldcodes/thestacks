@@ -235,6 +235,12 @@ COUNTER_NAMES = {
     "core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket",
     "core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum",
     "core_prom_ex_ecto_repo_query_queue_time_milliseconds_count",
+    "stacks_upload_phase_stop_duration_milliseconds_bucket",
+    "stacks_upload_phase_stop_duration_milliseconds_sum",
+    "stacks_upload_phase_stop_duration_milliseconds_count",
+    "stacks_upload_ack_duration_milliseconds_bucket",
+    "stacks_upload_ack_duration_milliseconds_sum",
+    "stacks_upload_ack_duration_milliseconds_count",
 }
 BEAM_MEMORY_METRICS = (
     "core_prom_ex_beam_memory_atom_total_bytes",
@@ -329,7 +335,7 @@ def windowed_rows_for(name: str):
     """Windowed (last - first) values — used for rate + histogram SLIs."""
     return list(windowed.get(name, {}).values())
 
-def histogram_p95_by_group(metric: str, group_label: str, target_group: str):
+def histogram_p95_by_group(metric: str, group_label: str, target_group: str, q: float = 0.95):
     rows = [
         r for r in windowed_rows_for(metric)
         if r["labels"].get(group_label) == target_group
@@ -347,7 +353,7 @@ def histogram_p95_by_group(metric: str, group_label: str, target_group: str):
     total = buckets[-1][1]
     if total <= 0:
         return 0
-    target = 0.95 * total
+    target = q * total
     prev_le = 0.0
     prev_count = 0.0
     for le, count in buckets:
@@ -362,6 +368,14 @@ def histogram_p95_by_group(metric: str, group_label: str, target_group: str):
         prev_le = le
         prev_count = count
     return int(buckets[-1][0])
+
+def histogram_total_by_group(metric: str, group_label: str, target_group: str):
+    """Windowed sample count: the +Inf bucket of the filtered histogram."""
+    return sum(
+        r["value"]
+        for r in windowed_rows_for(metric)
+        if r["labels"].get(group_label) == target_group and r["labels"].get("le") == "+Inf"
+    )
 
 def histogram_p95(metric: str):
     """p95 across a non-labelled histogram (e.g. ecto queue_time).
@@ -507,6 +521,85 @@ for group, threshold, name in [
             "breached": p95 > threshold,
         }
     )
+
+# ⬛ THE RULED RESPONSIVENESS THRESHOLDS (vision cost-architecture ruling,
+# revised 2026-11-17): p50 time-to-answer ≤ 5s and acknowledgement < 1s, wired
+# as gating SLIs. The identification p95 gates at the COLD CEILING (35s): the
+# ruling accepts cold p95 ≈ 30s, so 35s catches a hung pipeline without
+# fighting accepted physics. ⚠️ The warm p95 ≤ 10s bar needs a warm/cold label
+# on the phase metric and is wired when that label lands — stated here so the
+# missing SLI reads as a known gap, not an oversight.
+PHASE_HIST = "stacks_upload_phase_stop_duration_milliseconds_bucket"
+ACK_HIST = "stacks_upload_ack_duration_milliseconds_bucket"
+IDENT_MIN_SAMPLES = 5
+ACK_MIN_SAMPLES = 5
+
+ident_samples = histogram_total_by_group(PHASE_HIST, "phase", "identify_book")
+for name, q, threshold in [
+    ("identification_p50_ms", 0.50, 5000),
+    ("identification_p95_ms", 0.95, 35000),
+]:
+    val = histogram_p95_by_group(PHASE_HIST, "phase", "identify_book", q=q)
+    ident_entry = {
+        "name": name,
+        "value": int(val),
+        "threshold": threshold,
+        "samples": int(ident_samples),
+        "min_samples": IDENT_MIN_SAMPLES,
+        "breached": ident_samples >= IDENT_MIN_SAMPLES and val > threshold,
+    }
+    if ident_samples < IDENT_MIN_SAMPLES:
+        ident_entry["note"] = "below min_samples; not gating"
+    slis.append(ident_entry)
+
+ack_samples = sum(
+    r["value"]
+    for r in windowed_rows_for(ACK_HIST)
+    if r["labels"].get("le") == "+Inf"
+)
+# The ack histogram is unlabelled, so the grouped helper cannot filter it;
+# compute the quantile directly over its bucket rows:
+def _unlabelled_quantile(metric, q):
+    buckets = []
+    for r in windowed_rows_for(metric):
+        le = r["labels"].get("le")
+        if le is None:
+            continue
+        buckets.append((float("inf") if le == "+Inf" else float(le), r["value"]))
+    buckets.sort()
+    if not buckets:
+        return 0
+    total = buckets[-1][1]
+    if total <= 0:
+        return 0
+    target = q * total
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in buckets:
+        if count >= target:
+            if le == float("inf"):
+                return int(prev_le * 2) if prev_le > 0 else 99_999
+            span = count - prev_count
+            if span <= 0:
+                return int(le)
+            frac = (target - prev_count) / span
+            return int(prev_le + frac * (le - prev_le))
+        prev_le = le
+        prev_count = count
+    return int(buckets[-1][0])
+
+ack_p95 = _unlabelled_quantile(ACK_HIST, 0.95)
+ack_entry = {
+    "name": "upload_ack_p95_ms",
+    "value": int(ack_p95),
+    "threshold": 1000,
+    "samples": int(ack_samples),
+    "min_samples": ACK_MIN_SAMPLES,
+    "breached": ack_samples >= ACK_MIN_SAMPLES and ack_p95 > 1000,
+}
+if ack_samples < ACK_MIN_SAMPLES:
+    ack_entry["note"] = "below min_samples; not gating"
+slis.append(ack_entry)
 
 UPLOAD_MIN_SAMPLES = 5
 terminal = {

@@ -195,6 +195,12 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_visibility_recap_placements_capped_total" => :public,
     "stacks_visibility_recap_posts_capped_total" => :public,
     "stacks_vision_request_stop_duration_milliseconds" => :public,
+    # Aggregate pipeline-phase durations (ms) by code-owned phase name — the
+    # time-to-answer number the responsiveness thresholds govern. No PII: the
+    # upload_id lives in span metadata, never a label.
+    "stacks_upload_phase_stop_duration_milliseconds" => :public,
+    # Time to the stream's first SSE event — the acknowledgement bound (< 1s).
+    "stacks_upload_ack_duration_milliseconds" => :public,
     "stacks_vision_request_exception_count_total" => :public
   }
 

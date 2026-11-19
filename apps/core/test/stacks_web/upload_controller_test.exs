@@ -404,6 +404,39 @@ defmodule StacksWeb.UploadControllerTest do
       assert payload["image_id"] == image.id
     end
 
+    test "the first chunk emits the acknowledgement telemetry, from the real path", %{
+      user: user
+    } do
+      alias Stacks.Accounts.Guardian
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
+
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach(
+        {__MODULE__, ref},
+        [:stacks, :upload, :ack],
+        fn _event, %{duration: d}, _meta, _cfg -> send(parent, {:ack_emitted, ref, d}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, ref}) end)
+
+      CoreWeb.ConnCase.proven_conn()
+      |> CoreWeb.ConnCase.with_session(token)
+      |> get("/api/upload/#{image.id}/stream")
+
+      # ⬛ The REAL HTTP path emitted it — this is the producer half of the
+      # emit-and-scrape pair (the plugin half lives in
+      # responsiveness_families_test.exs). The duration must be positive and
+      # native-unit sane (< 10s in a test), or the clock is wrong-ended.
+      assert_receive {:ack_emitted, ^ref, duration}
+      assert duration > 0
+      assert System.convert_time_unit(duration, :native, :millisecond) < 10_000
+    end
+
     test "accepts the Accept header a real EventSource actually sends", %{user: user} do
       # The browser's EventSource always sends `Accept: text/event-stream`. The
       # SSE pipeline therefore must NOT carry `plug :accepts, ["json"]`, which

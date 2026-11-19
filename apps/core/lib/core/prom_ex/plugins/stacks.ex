@@ -31,6 +31,11 @@ defmodule Core.PromEx.Plugins.Stacks do
     300_000
   ]
 
+  # The acknowledgement is one DB read + one chunk write — its whole budget is
+  # sub-second (the ruled bar is < 1s), so the buckets resolve THAT range;
+  # the 5s tail bucket exists to make a regression visible, not acceptable.
+  @ack_duration_buckets [10, 25, 50, 100, 250, 500, 1_000, 2_000, 5_000]
+
   @vision_duration_buckets [
     100,
     250,
@@ -209,6 +214,34 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :upload, :terminal],
           description: "Upload pipeline terminal outcomes (resolved/rejected/timeout).",
           tags: [:outcome]
+        ),
+        # ⬛ THE RULED RESPONSIVENESS THRESHOLDS READ THESE TWO. The upload
+        # phase span fired for every identification and reached no store —
+        # the same declared-but-unreported shape as the six families below —
+        # so p50/p95 time-to-answer was unmeasurable in production and the
+        # SLO gate had nothing to hold the ruling's numbers against.
+        # `:phase` is a code-owned atom (identify_book / isbn_resolution /
+        # persistence), bounded at source by construction.
+        distribution(
+          [:stacks, :upload, :phase, :stop, :duration, :milliseconds],
+          event_name: [:stacks, :upload, :phase, :stop],
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          description:
+            "Upload pipeline phase durations (ms), by phase — phase=identify_book is " <>
+              "time-to-answer, the number the responsiveness thresholds govern.",
+          tags: [:phase],
+          reporter_options: [buckets: @vision_duration_buckets]
+        ),
+        distribution(
+          [:stacks, :upload, :ack, :duration, :milliseconds],
+          event_name: [:stacks, :upload, :ack],
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          description:
+            "Time from stream request to the FIRST SSE event (ms) — the acknowledgement " <>
+              "the ruling bounds at < 1s. Exists because the stream used to open silent.",
+          reporter_options: [buckets: @ack_duration_buckets]
         ),
         counter(
           [:stacks, :ai, :together_completion, :count, :total],

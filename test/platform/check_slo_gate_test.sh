@@ -556,4 +556,45 @@ rm -f "$probe_fixture"
 assert_exit_nonzero "$RC" "gate exits non-zero when --out has no value"
 assert_contains "$OUT" "--out requires a value" "error message names the missing value"
 
+test_case "identification_p50_breach_fails" "identify_book p50 > 5000ms → gate exits non-zero"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_breached_identification.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero on identification p50 breach"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "identification_p50_ms") | .breached] | any' \
+        >/dev/null 2>&1; then
+    _record_pass "identification_p50_ms SLI flagged as breached"
+else
+    _record_fail "identification_p50_ms was not flagged breached"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "identification_p95_ms") | .breached == false] | any' \
+        >/dev/null 2>&1; then
+    _record_pass "identification_p95_ms stays green (the fixture breaches ONLY p50)"
+else
+    _record_fail "identification_p95_ms unexpectedly breached — the fixture should isolate p50"
+fi
+
+test_case "ack_breach_fails" "stream acknowledgement p95 > 1000ms → gate exits non-zero"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_breached_ack.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero on ack p95 breach"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "upload_ack_p95_ms") | .breached] | any' \
+        >/dev/null 2>&1; then
+    _record_pass "upload_ack_p95_ms SLI flagged as breached"
+else
+    _record_fail "upload_ack_p95_ms was not flagged breached"
+fi
+
 summarise
