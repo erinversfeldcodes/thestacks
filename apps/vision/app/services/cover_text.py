@@ -147,6 +147,15 @@ def read_cover_text(image_bytes: bytes) -> CoverText:
         return _EMPTY
 
 
+# The sweep order for a read that found nothing upright. Spines and sideways
+# phone photos are the common cases, so quarter-turns; 180 last (rarest).
+# ⚖️ Upright is ALWAYS read first and a usable upright read is returned
+# without trying any rotation — the sweep can only add reads for images the
+# upright pass scored at zero, so it cannot regress the measured upright
+# hit rate (the same argument local_isbn_scan's transform sweep makes).
+_ROTATION_SWEEP = (90, 270, 180)
+
+
 def _read(image_bytes: bytes) -> CoverText:
     import pytesseract
     from PIL import Image
@@ -155,12 +164,27 @@ def _read(image_bytes: bytes) -> CoverText:
         # Greyscale only. Tesseract does its own thresholding, and anything
         # more here is a preprocessing choice that should be measured before
         # it is adopted rather than assumed to help.
+        grey = im.convert("L")
         data = pytesseract.image_to_data(
-            im.convert("L"),
+            grey,
             output_type=pytesseract.Output.DICT,
         )
 
-    words = _usable_words(data)
+        words = _usable_words(data)
+
+        if not words:
+            # Rotation-aware: a spine or a sideways photo reads as nothing
+            # upright. `expand=True` so a quarter-turn keeps every pixel.
+            for angle in _ROTATION_SWEEP:
+                rotated = grey.rotate(angle, expand=True)
+                data = pytesseract.image_to_data(
+                    rotated,
+                    output_type=pytesseract.Output.DICT,
+                )
+                words = _usable_words(data)
+                if words:
+                    break
+
     if not words:
         return _EMPTY
 

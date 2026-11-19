@@ -175,8 +175,14 @@ defmodule Stacks.Books.ISBNResolver do
       least one lookup never happened (a fact about us; retry may differ, and it
       must NOT be cached — pre-352 outages were cached as "no such book" for an
       hour).
+
+      ⬛ `title` may be nil when `raw_text` carries a read — the bag-of-words
+      entry: the query set is built from the raw keywords alone and the scorer
+      judges docs against the raw-text tokens. This is how a cover-text read
+      with no discernible title line still searches — the framing the measured
+      title-selection failures argued for.
   """
-  @spec search_by_title(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
+  @spec search_by_title(String.t() | nil, String.t() | nil, String.t() | nil, keyword()) ::
           {:ok, String.t(), map()} | {:error, :not_found | :unavailable}
   def search_by_title(title, author \\ nil, raw_text \\ nil, opts \\ []) do
     excluded_isbns = Keyword.get(opts, :excluded_isbns, [])
@@ -220,13 +226,21 @@ defmodule Stacks.Books.ISBNResolver do
     signals = %{title: title, author: author, raw_text: raw_text}
 
     enriched_prefix =
-      if raw_keywords != "" do
-        [
-          {title <> " " <> raw_keywords, surname},
-          {raw_keywords, surname}
-        ]
-      else
-        []
+      cond do
+        raw_keywords == "" ->
+          []
+
+        # Bag-of-words entry: no title line at all. Every title-carrying
+        # variant below is dropped by the nil filter, so the raw keywords ARE
+        # the search.
+        is_nil(title) ->
+          [{raw_keywords, surname}]
+
+        true ->
+          [
+            {title <> " " <> raw_keywords, surname},
+            {raw_keywords, surname}
+          ]
       end
 
     main_title = strip_subtitle(title)

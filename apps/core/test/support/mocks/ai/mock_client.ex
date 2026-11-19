@@ -93,15 +93,39 @@ defmodule Stacks.AI.MockClient do
   # hand a test a confident green for a response production cannot produce.
   defp default_response("is_book", payload), do: default_response("analyze", payload)
 
+  # ⚠️ A cpu_only pass NEVER classifies (the classify guard is a GPU step) and
+  # never carries VLM candidates — the real sidecar answers UNSPECIFIED with
+  # at most an OCR read. A mock that returned the full BOOK body for a
+  # cpu_only payload would hand a test a confident green for a response
+  # production cannot produce — this module's own moduledoc failure. The
+  # default is the MISS shape; steer a richer one per test.
   defp default_response("analyze", payload) do
-    {:ok,
-     %{
-       "classification" => "CLASSIFICATION_RESULT_BOOK",
-       "confidence" => 0.9,
-       "books" => [book_result(payload_isbn(payload))],
-       "model_used" => "mock"
-     }}
+    if cpu_only?(payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_UNSPECIFIED",
+         "confidence" => 0.0,
+         "books" => [],
+         "model_used" => "cpu_only",
+         "tier" => "ANALYSIS_TIER_UNSPECIFIED",
+         "ocr_attempt" => nil
+       }}
+    else
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
+         "books" => [book_result(payload_isbn(payload))],
+         "model_used" => "mock"
+       }}
+    end
   end
+
+  defp cpu_only?(payload) when is_map(payload) do
+    Map.get(payload, :cpu_only) == true or Map.get(payload, "cpu_only") == true
+  end
+
+  defp cpu_only?(_payload), do: false
 
   defp default_response(_endpoint, _payload), do: {:ok, %{}}
 

@@ -224,3 +224,53 @@ class TestRestraint:
             "the short-circuit gate reads this number, so its scale is "
             f"load-bearing: 0..1, not 0..100 — got {got.confidence}"
         )
+
+
+class TestRotationSweep:
+    """Rotation-aware reading: spines and sideways photos read as nothing
+    upright. The contract is upright-first — a usable upright read must try no
+    rotation at all, so the sweep cannot regress the measured upright hit rate.
+    """
+
+    def test_an_unreadable_upright_image_is_retried_rotated(self) -> None:
+        upright_empty = _tesseract_returning([])
+        rotated_words = _tesseract_returning(
+            [_word("SHIPPING", 88.0, 40.0), _word("NEWS", 90.0, 40.0)]
+        )
+        with (
+            patch(
+                "pytesseract.image_to_data",
+                side_effect=[upright_empty, rotated_words],
+            ) as data,
+            patch("PIL.Image.open"),
+        ):
+            result = read_cover_text(b"not-a-real-image")
+
+        assert "SHIPPING" in result.raw_text
+        # Upright first, then exactly one rotation — the sweep stops on a hit.
+        assert data.call_count == 2
+
+    def test_a_usable_upright_read_tries_no_rotation(self) -> None:
+        with (
+            patch(
+                "pytesseract.image_to_data",
+                return_value=_tesseract_returning([_word("DUNE", 91.0, 50.0)]),
+            ) as data,
+            patch("PIL.Image.open"),
+        ):
+            result = read_cover_text(b"not-a-real-image")
+
+        assert "DUNE" in result.raw_text
+        assert data.call_count == 1
+
+    def test_a_blank_image_sweeps_every_rotation_then_reports_empty(self) -> None:
+        empty = _tesseract_returning([])
+        with (
+            patch("pytesseract.image_to_data", side_effect=[empty, empty, empty, empty]) as data,
+            patch("PIL.Image.open"),
+        ):
+            result = read_cover_text(b"not-a-real-image")
+
+        assert result.raw_text == ""
+        # ⬛ ANTI-VACUITY: all four orientations were actually tried.
+        assert data.call_count == 4

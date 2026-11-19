@@ -197,6 +197,17 @@ message AnalyzeRequest {
   // vision extractor is instructed to pick a different match or return an
   // empty books list. Empty list = unconstrained extraction (the default).
   repeated string excluded_books = 3 [json_name = "excluded_books"];
+
+  // CPU tiers only: the sidecar runs the barcode scan and the cover-text read
+  // and answers WITHOUT any GPU dispatch. The caller (core) owns what happens
+  // next — catalogue resolution of whatever was read, and the decision to
+  // escalate to a full (GPU) analyze on a miss. This is the CPU-first cascade
+  // order: the GPU wakes only for images the CPU tiers could not resolve.
+  //
+  // A cpu_only response makes NO classification claim (the classify guard is
+  // a GPU step): classification is UNSPECIFIED unless a barcode answered, and
+  // consumers must not route it through the book/not-book branch.
+  bool cpu_only = 4 [json_name = "cpu_only"];
 }
 
 // Response from POST /analyze.
@@ -271,6 +282,16 @@ message AnalyzeResponse {
   // What the CPU text pass read, absent when it did not run. Present even
   // when the VLM answered, which is the whole point in shadow mode.
   optional OcrAttempt ocr_attempt = 9 [json_name = "ocr_attempt"];
+
+  // 10 held `gpu_container_id` (string) until the per-dispatch readings moved
+  // into `gpu_dispatches = 8`; it was freed with no reserved record, which
+  // left it one refactor away from silent reuse. (Its sibling 9, which held
+  // `gpu_container_age_s`, was already reoccupied by `ocr_attempt` before
+  // this record landed — harmless here only because no payload of the old
+  // shape ever existed off this branch, the same narrow argument the deleted
+  // Associate* messages document above. Do not extend it further.)
+  reserved 10;
+  reserved "gpu_container_id";
 }
 
 // OcrAttempt records what the CPU text pass read, whether or not it answered.

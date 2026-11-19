@@ -68,6 +68,11 @@ config :core, :validate_event_payload_contract, true
 config :core, :isbn_http_client, Stacks.Books.MockHttpClient
 config :core, :isbn_resolver_cache_enabled, false
 config :core, :title_search_cache_enabled, false
+
+# Off by default so the existing single-call pipeline suites keep testing the
+# path the flag preserves; the cpu-first suite flips it on per-test. Prod/dev
+# default is ON (config.exs) — the planted flag-flip test proves the switch.
+config :core, :cpu_first_identification, false
 config :core, :persistent_cache_enabled, false
 config :core, :vision_hmac_secret, "test-hmac-secret"
 config :core, :scraper_client, Stacks.Enrichment.MockScraperClient

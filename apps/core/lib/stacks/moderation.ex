@@ -73,12 +73,127 @@ defmodule Stacks.Moderation do
   """
   @spec run_pipeline(map()) :: pipeline_result()
   def run_pipeline(%{image_url: image_url} = context) do
-    analyze(build_payload(%{image_url: image_url}, context), context)
+    dispatch_pipeline(build_payload(%{image_url: image_url}, context), context)
   end
 
   def run_pipeline(%{image_b64: image_b64} = context) do
-    analyze(build_payload(%{image: image_b64}, context), context)
+    dispatch_pipeline(build_payload(%{image: image_b64}, context), context)
   end
+
+  defp dispatch_pipeline(payload, context) do
+    if cpu_first_enabled?() do
+      cpu_first(payload, context)
+    else
+      analyze(payload, context)
+    end
+  end
+
+  defp cpu_first_enabled? do
+    Application.get_env(:core, :cpu_first_identification, false)
+  end
+
+  # ⬛ THE CPU-FIRST CASCADE ORDER (`:cpu_first_identification`): one cpu_only
+  # call answers with whatever the CPU tiers read, and the GPU wakes ONLY for
+  # images the CPU could not resolve. A cpu_only response makes no
+  # classification claim (the classify guard is a GPU step), so it is never
+  # routed through the book/not-book branch — the two outcomes read here are
+  # structural: a checksum'd barcode ISBN, or a cover-text read the catalogue
+  # search resolves and the ISBN gate verifies. Both produce FINAL answers;
+  # everything else falls through to the full (GPU) analyze with the same
+  # payload. The old single-call order stays reachable with the flag off for
+  # one release, then this branch becomes the only one.
+  defp cpu_first(payload, context) do
+    case AIClient.call_vision("analyze", Map.put(payload, :cpu_only, true)) do
+      {:ok, %{"tier" => "ANALYSIS_TIER_BARCODE", "books" => books} = resp}
+      when is_list(books) and books != [] ->
+        cpu_barcode_answer(books, resp, payload, context)
+
+      {:ok, resp} ->
+        cpu_read_answer(resp, payload, context)
+
+      {:error, reason} ->
+        # The CPU pass is an optimisation; its failure must not cost the
+        # reader an identification the GPU path could still deliver.
+        Logger.warning(
+          "Moderation: cpu_only pass failed (#{inspect(reason)}); running full analyze"
+        )
+
+        analyze(payload, context)
+    end
+  end
+
+  defp cpu_barcode_answer(books, resp, payload, context) do
+    emit_classification(:book)
+    ctx = Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
+
+    case resolve_and_store_all(books, ctx) do
+      {:ok, _} = resolved ->
+        resolved
+
+      _miss ->
+        # A checksum-valid barcode that no catalogue resolves is a CPU MISS,
+        # not a terminal rejection — the GPU may still read the cover. The
+        # single-call order had no later tier to try; this one does, and
+        # falling through is its whole point.
+        analyze(payload, context)
+    end
+  end
+
+  defp cpu_read_answer(resp, payload, context) do
+    case cpu_read_candidates(resp) do
+      [] ->
+        analyze(payload, context)
+
+      candidates ->
+        ctx = Map.put(context, :vision_model_used, cpu_engine(resp))
+        cpu_resolve_or_escalate(candidates, ctx, payload, context)
+    end
+  end
+
+  defp cpu_resolve_or_escalate(candidates, ctx, payload, context) do
+    case resolve_and_store_all(candidates, ctx) do
+      {:ok, _} = resolved ->
+        # The classifier never ran, but a catalogue-resolved, ISBN-verified
+        # read IS a book determination — counted so the classification
+        # outcomes stay comparable across cascade orders.
+        emit_classification(:book)
+        resolved
+
+      _miss ->
+        analyze(payload, context)
+    end
+  end
+
+  # The read becomes ONE candidate for the existing resolution seam — the same
+  # seam VLM candidates pass through, so the checksum, the ISBN/title
+  # cross-check, the scorer's plausibility floor and the ISBN hard gate all
+  # apply unchanged. Bag-of-words by shape: `raw_text` carries every word the
+  # engine read, and the resolver builds keyword queries from it even when no
+  # title line was picked out.
+  #
+  # ⚖️ Deliberately NO "confidence" key: `check_confidence/2` would gate it on
+  # `enrichment_confidence_threshold`, and a model-confidence threshold is
+  # exactly the gate vocabulary the cascade ruling bans — the measured 0.95
+  # that was read off the wrong object. Acceptance here is structural only.
+  defp cpu_read_candidates(%{"ocr_attempt" => %{"raw_text" => raw} = attempt})
+       when is_binary(raw) and raw != "" do
+    [
+      %{
+        "title" => Map.get(attempt, "title"),
+        "author" => Map.get(attempt, "author"),
+        "raw_text" => raw,
+        "potential_isbns" => []
+      }
+    ]
+  end
+
+  defp cpu_read_candidates(_), do: []
+
+  defp cpu_engine(%{"ocr_attempt" => %{"engine" => engine}})
+       when is_binary(engine) and engine != "",
+       do: engine
+
+  defp cpu_engine(_), do: "cpu_only"
 
   defp build_payload(base, context) do
     case Map.get(context, :excluded_books) do
@@ -468,23 +583,34 @@ defmodule Stacks.Moderation do
 
   defp normalise_nullish_text(_), do: nil
 
+  # Bag-of-words: no title line was picked out, but the engine read words.
+  # The resolver builds keyword queries from `raw_text` alone; the scorer's
+  # plausibility floor and the ISBN hard gate still decide acceptance.
+  defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors)
+       when (is_nil(title) or title == "") and is_binary(raw_text) and raw_text != "" do
+    do_title_search(nil, author, raw_text, excluded_isbns, excluded_descriptors)
+  end
+
   defp title_fallback(nil, _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
   defp title_fallback("", _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
-  defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
+  defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors),
+    do: do_title_search(title, author, raw_text, excluded_isbns, excluded_descriptors)
+
+  defp do_title_search(title, author, raw_text, excluded_isbns, excluded_descriptors) do
     case ISBNResolver.search_by_title(title, author, raw_text,
            excluded_isbns: excluded_isbns,
            excluded_book_descriptors: excluded_descriptors
          ) do
       {:ok, isbn, metadata} ->
-        Logger.info("Moderation: title search found ISBN #{isbn} for '#{title}'")
+        Logger.info("Moderation: title search found ISBN #{isbn} for #{inspect(title)}")
         {:ok, isbn, metadata}
 
       {:error, :not_found} ->
-        Logger.warning("Moderation: title search found no results for '#{title}'")
+        Logger.warning("Moderation: title search found no results for #{inspect(title)}")
         {:error, :isbn_not_found}
 
       {:error, :unavailable} ->

@@ -85,6 +85,9 @@ _TIER_BARCODE = "ANALYSIS_TIER_BARCODE"
 _TIER_VLM_CLASSIFY = "ANALYSIS_TIER_VLM_CLASSIFY"
 _TIER_VLM_EXTRACT = "ANALYSIS_TIER_VLM_EXTRACT"
 _TIER_OCR = "ANALYSIS_TIER_OCR"
+# A cpu_only response that no tier answered: the request was served but makes
+# no identification or classification claim of its own.
+_TIER_UNSPECIFIED = "ANALYSIS_TIER_UNSPECIFIED"
 
 
 def _gpu_dispatch(parsed: dict[str, object]) -> GpuDispatch | None:
@@ -124,6 +127,7 @@ def _elapsed_ms(started: float) -> int:
 
 _CLF_NOT_BOOK = "CLASSIFICATION_RESULT_NOT_BOOK"
 _CLF_AMBIGUOUS = "CLASSIFICATION_RESULT_AMBIGUOUS"
+_CLF_UNSPECIFIED = "CLASSIFICATION_RESULT_UNSPECIFIED"
 
 _ML_TO_CLASSIFICATION: dict[str, str] = {
     "book": _CLF_BOOK,
@@ -393,6 +397,42 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             )
     else:
         barcode_ms = None
+
+    if body.cpu_only:
+        # ⬛ THE CPU-FIRST PASS: report what the CPU tiers read and STOP — the
+        # GPU is NEVER dispatched on this request. Core owns catalogue
+        # resolution of the read and the decision to escalate to a full
+        # analyze on a miss. No classification claim is made here (the
+        # classify guard is a GPU step), so classification is UNSPECIFIED and
+        # the contract tells consumers not to route it through the
+        # book/not-book branch. A barcode hit never reaches this point — it
+        # already returned above, tier BARCODE, same as every other mode.
+        cpu_ocr_attempt = None
+        cpu_ocr_ms = None
+
+        if settings.cover_text_enabled:
+            ocr_started = time.monotonic()
+            cover = await asyncio.to_thread(read_cover_text, decoded_bytes)
+            cpu_ocr_ms = _elapsed_ms(ocr_started)
+            cpu_ocr_attempt = OcrAttempt(
+                title=cover.title,
+                author=cover.author,
+                raw_text=cover.raw_text,
+                confidence=cover.confidence,
+                answered=False,
+                engine=cover.engine,
+            )
+
+        return AnalyzeResponse(
+            classification=_CLF_UNSPECIFIED,
+            confidence=0.0,
+            books=[],
+            model_used=cpu_ocr_attempt.engine if cpu_ocr_attempt else "cpu_only",
+            tier=_TIER_UNSPECIFIED,
+            ocr_attempt=cpu_ocr_attempt,
+            timings_ms=StageTimings(download=download_ms, barcode=barcode_ms, ocr=cpu_ocr_ms),
+            sidecar_cold=cold,
+        )
 
     # ⬛ THE CPU TEXT PASS, BETWEEN BARCODE AND THE GPU. This container is the
     # ASGI front door every request already passes through, with a 1200s

@@ -231,6 +231,11 @@ config :core, :ai_budget,
 
 config :core, :enrichment_confidence_threshold, 0.5
 
+# The CPU-first cascade order: one cpu_only vision call (barcode + cover-text
+# read, no GPU), catalogue-resolved in core, and the GPU wakes only on a miss.
+# Off restores the single-call order for one release, then the flag goes away.
+config :core, :cpu_first_identification, true
+
 config :core, :login_lockout_threshold, 10
 config :core, :login_lockout_window_seconds, 600
 config :core, :login_lockout_duration_seconds, 900
