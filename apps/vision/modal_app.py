@@ -68,8 +68,11 @@ _ENV_OVERRIDES = {
         # `gpu=A10G` for a container actually on a T4, which is precisely the
         # lying-instrument failure the print exists to prevent.
         ("VISION_GPU", os.environ.get("VISION_GPU")),
-        # R0 flag — baked so the CPU front door's pydantic Settings sees it in
-        # the container (it reads VISION_SINGLE_DISPATCH), same as every knob here.
+        # R0 flag — the CPU FRONT DOOR reads VISION_SINGLE_DISPATCH through its
+        # pydantic Settings, so it is baked into the front-door image too (see
+        # `_fastapi_image` below), not only the GPU model's image. Baking it only
+        # into the GPU image left a deploy-time VISION_SINGLE_DISPATCH=0 inert on
+        # the front door — the documented two-call fallback silently did nothing.
         ("VISION_SINGLE_DISPATCH", os.environ.get("VISION_SINGLE_DISPATCH")),
     )
     if v
@@ -690,6 +693,16 @@ _fastapi_image = (
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )
+
+# The front door runs in THIS image, and reads VISION_SINGLE_DISPATCH /
+# VISION_MODEL_NAME through its pydantic Settings — so the deploy-time overrides
+# must be baked into it too, not only the GPU model's image. Without this a
+# deploy-time knob (e.g. VISION_SINGLE_DISPATCH=0) resolved to the config default
+# in the front-door container and the documented fallback was inert. The extra
+# GPU-only keys (VISION_GPU/DTYPE/MAX_PIXELS) are harmless here — the front door
+# does not read them.
+if _ENV_OVERRIDES:
+    _fastapi_image = _fastapi_image.env(dict(_ENV_OVERRIDES))
 
 
 @app.function(
