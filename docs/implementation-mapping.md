@@ -45,11 +45,11 @@
 | **Phase 1** | MVP | US-1.1.1, US-1.1.2, US-1.1.3, US-1.1.4, US-1.1.5, US-1.1.6, US-1.1.7, US-1.1.8, US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4, US-1.2.5, US-1.3.1, US-1.3.2, US-1.4.1, US-1.5.1, US-1.5.2, US-1.5.3, US-1.5.4, US-1.6.1, US-1.6.2, US-1.6.3, US-1.6.4, US-1.6.5, US-1.6.6, US-1.7.1, US-1.1.9, US-1.5.5 | The core loop: upload photo(s), identify book(s), verify ("We think this is…"), place on shelf, browse and manage. Includes multi-format merge (US-1.1.8), importing an existing Goodreads library through the ISBN gate (US-1.1.9), and browsing the full catalogue (US-1.5.5). Everything a single user needs to start using The Stacks. |
 | **Phase 2** | Enrichment | US-2.1.1, US-2.2.1, US-2.2.2, US-2.3.1, US-2.4.1, US-2.5.1, US-2.5.2, US-2.5.3, US-2.6.1 | Layer intelligence on top of the book graph: reviews, prices, author info, events, source discovery, geographic sweep (US-2.5.2), automatic edition discovery (US-2.6.1), and business opt-out (US-2.5.3). |
 | **Phase 3** | Partner Integration | US-9.1.1, US-9.1.2, US-9.2.1, US-9.2.2, US-9.3.1, US-9.3.2, US-9.4.1, US-9.4.2, US-9.5.1, US-9.6.1, US-9.6.2, US-9.7.1, US-9.7.2, US-9.8.1 | Inbound partner API, dashboard, CSV import. Depends on Third Spaces cork board and ISBN resolution from Phases 1–2. EDA and Protobuf land here as cross-cutting infrastructure. |
-| **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
+| **Phase 4** | Polish | US-3.1.1, ~~US-5.1.1~~, US-5.2.1, US-6.1.1 | Community features (Third Spaces scraping), operational visibility (~~in-app Metrics dashboard — **superseded by Grafana, #267**~~; ops-metrics surface is now the Grafana observability stack, ADR-021/#236–240), and sharing (RSS/OPDS). |
 | **Phase 5** | Marketplace | US-7.1.1, US-7.2.1, US-7.3.1, US-13.2.1, US-13.2.2 | Classifieds board (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). US-7.1.1 (listings + state machine + expiry) is implemented. Payments (#054b), shipping (#054c), offer threads, and seller KYC are deferred. |
 | **Phase 6** | Social Graph & Visibility | US-10.1.1, US-10.1.2, US-10.2.1, US-10.2.2, US-10.2.3, US-10.3.1, US-10.4.1, US-10.5.1, US-10.5.2, US-10.5.3, US-10.5.4, US-11.1.1, US-11.1.2, US-11.1.3, US-11.1.4, US-11.1.5 | Profile visibility, shelf/placement/post visibility, ceiling rule enforcement, view-as mode, user blocks, public handles/profiles (US-10.5.x), groups, and group content feeds (US-11.1.5). Requires `resolve_visibility/2` context and `ViewAsPlug`. |
-| **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-12.2.1, US-12.2.2, US-13.1.1, US-13.1.2, US-6.2.1 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering, and POSSE syndication of posts to Substack (US-6.2.1). The writing assistant (US-12.2.x) was designed and deferred to Phase 2, so it is NOT part of what this phase delivered. Requires Phase 6 visibility infrastructure. |
-| **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-14.1.1, US-14.1.2, US-14.1.3, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-14.4.1, US-14.4.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-15.4.1, US-15.5.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), invite-only registration for the closed beta (US-14.1.3), password reset (US-14.4.1/US-14.4.2), a platform FAQ (US-15.4.1) and beta feedback channel (US-15.5.1), and accessibility (US-19.x). |
+| **Phase 7** | Blog & Comments | US-12.1.1, US-12.1.2, US-12.1.3, US-12.2.1, US-12.2.2, US-12.3.1, US-12.3.2, US-12.3.3, US-12.3.4, US-12.3.5, US-13.1.1, US-13.1.2, US-6.2.1 | Native blog posts, LLM book associations via `PostBookAssociationWorker`, threaded comments with block filtering, and POSSE syndication of posts to Substack (US-6.2.1). The writing assistant (US-12.2.x) was designed and deferred to Phase 2, so it is NOT part of what this phase delivered. Requires Phase 6 visibility infrastructure. |
+| **Phase 1 (extended)** | Auth, Navigation, Errors, Settings | US-1.1.11, US-1.1.12, US-1.1.13, US-1.1.14, US-1.1.15, US-1.1.16, US-1.1.17, US-14.1.1, US-14.1.2, US-14.1.3, US-14.2.1, US-14.3.1, US-14.3.2, US-14.3.3, US-14.4.1, US-14.4.2, US-15.1.1, US-15.2.1, US-15.2.2, US-15.3.1, US-15.4.1, US-15.5.1, US-16.1.1, US-16.2.1, US-16.3.1, US-17.1.1, US-17.2.1, US-17.2.2, US-17.2.3, US-17.3.1, US-18.1.1, US-19.1.1, US-19.1.2, US-19.2.1 | Authentication (including onboarding US-14.1.2), home page, global navigation with user menu dropdown (US-14.3.3), error handling, settings hub (US-17.1.1) with profile (US-17.2.1), location (US-17.2.2), password (US-17.2.3), notifications (US-17.3.1), the fifth bookshelf with community wear (US-18.1.1), invite-only registration for the closed beta (US-14.1.3), password reset (US-14.4.1/US-14.4.2), a platform FAQ (US-15.4.1) and beta feedback channel (US-15.5.1), and accessibility (US-19.x). |
 | **Cross-cutting** | GDPR, Moderation, Age, EDA | US-4.1, US-4.2, US-8.1, US-8.2, US-8.3, US-8.4, US-8.5, US-8.6.1, US-14.5.1, US-20.1.1, US-20.2.1 | Built incrementally across all phases. Moderation pipeline ships with Phase 1; GDPR primitives land in Phase 1 and mature through Phase 3. Event bus (Oban) and Protobuf schema contracts land in Phase 3. Phases 6–7 add new GDPR-covered entities: `blog_posts`, `comments`, `listings`, `groups`, `user_blocks`. `offer_threads` and `offer_messages` tables exist but are unused (see [ADR 013](decisions/013-marketplace-classifieds-first.md)). Also spans data insights/transparency (US-8.6.1), 24-hour erasure of unconfirmed accounts (US-14.5.1), and the admin/owner surfaces — MFA-gated admin access (US-20.1.1) and owner-only data corrections such as edition un-merge (US-20.2.1). |
 
 ### Additional Features Under Consideration (per phase)
@@ -434,7 +434,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Page.Upload` module — multi-step state machine: `Uploading` → `Verifying IdentifiedBook` → `ChoosingShelf IdentifiedBook` → `Complete`. Drag-and-drop / file picker. Verification step shows uploaded image alongside identified book ("We think this is…"). Shelf picker defaults to WishList. Post-success: "Add another" / "View on shelf". Types: `UploadStep`, `IdentifiedBook`, `ShelfPicker`. Ports for file-input interop. |
-| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.init/2` (`POST /api/upload/init`) then `commit/2` (`POST /api/upload/:image_id/commit`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`. |
+| **Backend (Phoenix)** | **Step 1:** `StacksWeb.UploadController.init/2` (`POST /api/upload/init`) then `commit/2` (`POST /api/upload/:image_id/commit`) — reads Plug temp file, base64-encodes, inserts `uploaded_images` record, enqueues `IdentifyBookJob`, returns candidate(s) to frontend. **Step 2:** `StacksWeb.BookController.confirm/2` (`POST /api/books/confirm`) — receives confirmed ISBN + target shelf. Checks `book_editions` for existing ISBN → if found, checks for same-work merge (US-1.1.8). If new, creates `books` work + `book_editions` edition + `bookshelf_placements`. `Stacks.Books` context — `Books.create_work_with_edition/2`, `Books.find_or_create_author/1`.; `POST /api/upload/:image_id/reject-identification` (reader rejection, `excluded_books`/`excluded_isbns` carried into the retry); `GET /api/uploads/inbox` (answers finished in the reader's absence). |
 | **Database** | **Write:** `op.books` (work), `op.book_editions` (edition with ISBN, format, cover), `op.authors`, `op.uploaded_images`, `op.bookshelf_placements`, `op.audit_log`. **Read:** `op.book_editions` (dedup check by ISBN), `op.books` (fuzzy match for multi-format merge). |
 | **Jobs (Oban)** | `Stacks.Workers.IdentifyBookJob` — sends base64 image to Modal vision service over HMAC-authenticated HTTPS. Returns candidates to caller. `Stacks.Workers.EnrichBookJob` — fetch metadata from Open Library / Google Books after ISBN resolved. |
 | **External Services** | **Modal** (Qwen2.5-VL-7B-Instruct on A10G GPU) for image classification and book extraction. Open Library API for ISBN lookup + work/edition metadata. Google Books API as fallback. |
@@ -684,6 +684,13 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **Dependencies** | US-1.2.1, US-1.2.2, US-1.2.3, US-1.2.4 (all shelves must exist to navigate between them). |
 
 ---
+
+> ⚠️ **Known ID collision (recorded 2026-11-20, reconciliation tracked as its own issue):**
+> the sections below for US-1.3.2, US-1.4.1, US-1.5.1 and US-1.5.2 carry titles that DIFFER
+> from the story files bearing the same IDs (`US-1.3.2-spine-wear.md`,
+> `US-1.4.1-book-detail-overlay.md`, `US-1.5.1-search-shelves.md`,
+> `US-1.5.2-fulltext-search.md`) — two numbering generations coexist. Read titles, not IDs,
+> in this block until the reconciliation lands; neither artefact should be trusted by ID alone.
 
 #### US-1.3.1 -- Spine Rendering
 
@@ -951,6 +958,232 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **External Services** | Modal — the deployed vision service. With no `VISION_SERVICE_URL` the task SKIPS and says so; `EVAL_VISION_REQUIRED=1` turns that skip into a failure for callers that need it enforced. |
 | **dbt Models** | None. |
 
+#### US-1.1.11 -- The Cheap Tiers Answer First
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | The identification cascade spends barcode and (shadow) text reads before any GPU dispatch; rejections escalate past the failed tier; accuracy gated per-stratum by `mix eval.cascade`. |
+| **Phase** | Phase 1 (extended) |
+| **Phase note** | The cover-text tier answers only when its acceptance design lands (measured net-negative as a decider, 2026-11-20). |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `Stacks.Moderation` cpu-first orchestration; `mix eval.cascade` gate |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal (GPU on miss); Open Library / Google Books (resolution) |
+| **dbt Models** | None. |
+
+#### US-1.1.12 -- The GPU Sleeps When Nobody Is Uploading
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Scale-to-zero GPU with cost constants solved from bills (one burst pattern per dedicated Modal app); the billed idle tail is the recorded number. |
+| **Phase** | Phase 1 (extended) |
+| **Phase note** | Billed effective tail ~91s vs configured 60s window — frontier re-derivation tracked in the gate child. |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `scripts/characterise/` burst → decompose → solve → frontier loop |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal billing report |
+| **dbt Models** | None. |
+
+#### US-1.1.13 -- The Cost Figures Come From Bills
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Cost claims trace to provider bills; prediction-vs-bill gaps stated; delivery of dashboard cadence + provenance labels tracked as #587/#588. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Partially built (audit + billed constants live; dashboard delivery filed) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `RefreshCostsJob`; `scripts/push_billing_metrics.py` |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal / Fly / Neon billing & consumption APIs |
+| **dbt Models** | None. |
+
+#### US-1.1.14 -- A Cold Start Waits Honestly
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | First-event SSE acknowledgement; honest waiting affordances; the four ruled responsiveness thresholds wired as gating SLIs with planted-red proof. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `UploadController` stream ack; `check-slo-gate.sh` SLIs; warm/cold label on the identify phase |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-1.1.15 -- A Canary Photographs a Book in Production
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | A scheduled production canary drives the real identification loop on its own account; its spend is attributed via per-app billing. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built (previously storyless) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `scripts/probe-production.sh`; deploy-seeded prober account |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal (real GPU spend, attributed) |
+| **dbt Models** | None. |
+
+#### US-1.1.16 -- Uploads Queue Honestly When the GPU Is Saturated
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Burst saturation degrades to honest queueing, not errors; the queue/container oversubscription becomes a recorded, measured decision. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Spec (future; gap recorded 2026-11-20) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | Vision queue concurrency vs GPU container caps — no handling today |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-1.1.17 -- The Title Resolver Is Gated Like the Model
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | The post-model half of recognition (search, scorer, floor, derivative penalty) is a single seam with an offline replay gate in every verify. |
+| **Phase** | Phase 1 (extended) |
+| **Status** | Built (previously storyless) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `CandidateScorer.pick_best/3`; `mix eval.resolver` in `lint-elixir` |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Open Library / Google Books |
+| **dbt Models** | None. |
+
+#### US-12.3.1 -- Every LLM Path Has a Budget Ceiling
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Each model-spending path names and enforces a ceiling; Modal guarded today, the Together path has a fuse but no budget (gap recorded). |
+| **Phase** | Phase 7 (Blog & Comments) |
+| **Phase note** | Cross-cutting LLM platform story; applies to every provider path as added. |
+| **Status** | Partially built |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `BudgetTracker` (Modal); Together fuse without budget — the recorded gap |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal; Together |
+| **dbt Models** | None. |
+
+#### US-12.3.2 -- Every LLM Call Is Logged, Scored, Replayable
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Call-level observability (prompt identity, provenance, output, cost, score) in a replayable, Langfuse-compatible shape; GDPR-first. |
+| **Phase** | Phase 7 (Blog & Comments) |
+| **Status** | Spec (future; counters only today) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | None yet — counters in `refresh_costs_job.ex` are the whole of it |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-12.3.3 -- Model Output Reaches Readers Through Guardrails
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Every reader-facing LLM surface enumerates its guardrails and carries a red-team record; associations ship ungated today (gap recorded). |
+| **Phase** | Phase 7 (Blog & Comments) |
+| **Status** | Spec (gap live: associations reach readers with structural validation only) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `PostBookAssociationWorker` — the live surface |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-12.3.4 -- LLM Claims Are Checked Against Their Sources
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Faithfulness judged against sources by rubric/judge, never the producer's own confidence; gates promotion for its surface. |
+| **Phase** | Phase 7 (Blog & Comments) |
+| **Phase note** | Supersedes the confidence-histogram framing of `mart_llm_faithfulness`. |
+| **Status** | Spec (substrate exists, measurement does not) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | None yet |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | dbt: `mart_llm_faithfulness` (to be re-pointed) |
+| **dbt Models** | None. |
+
+#### US-12.3.5 -- "What Should I Read Next?"
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Reader-grounded recommendations over the shared pgvector substrate; consent-gated; offline recall eval before UI. |
+| **Phase** | Phase 7 (Blog & Comments) |
+| **Phase note** | Under consideration; substrate delivered (`docs/vision-embedding-substrate.md`). |
+| **Status** | Spec (Phase-2/under consideration) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | None yet — rides `op.embeddings` when taken up |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | None. |
+| **dbt Models** | None. |
+
+#### US-5.2.1 -- The Cost Page Tells Billed Truth
+
+| Dimension | Detail |
+|-----------|--------|
+| **Summary** | Public cost lines labelled billed vs estimate, refreshed through the day; PENDING never renders as $0; per-PR attribution. Delivery = #587/#588. |
+| **Phase** | Phase 4 (Polish) |
+| **Status** | Partially built (path live daily; cadence/labels filed) |
+
+| Layer | Components |
+|-------|------------|
+| **Frontend (Elm)** | None. |
+| **Backend (Phoenix)** | `push_billing_metrics.py` → VictoriaMetrics → `RefreshCostsJob` → `/costs`; `op.platform_costs` |
+| **Database** | None. |
+| **Jobs (Oban)** | None. |
+| **External Services** | Modal / Fly / Neon |
+| **dbt Models** | None. |
+
 #### US-1.5.5 -- Browse the Whole Catalogue and Shelve What You Find
 
 | Dimension | Detail |
@@ -976,9 +1209,9 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | Planned (Phase 2, not yet built): a review-summary component — sentiment bar (positive/mixed/negative), source cards with rating + link, expandable detail. No `Components.ReviewSummary` module exists today. |
-| **Backend (Phoenix)** | `Stacks.Enrichment.Reviews` context. `ReviewAggregator` Broadway pipeline for ingestion. `Enrichment.Reviews.get_review_summary/1`. |
+| **Backend (Phoenix)** | Planned (spec-only by owner ruling D6, 2026-07-30 — nothing below is built): `Stacks.Enrichment.Reviews` context; `ReviewAggregator` Broadway pipeline. Neither exists in the tree. |
 | **Database** | **Write:** `op.review_snapshots`. **Read:** `op.books` (ISBN for lookup). |
-| **Jobs (Oban)** | `Stacks.Workers.FetchReviewsJob` -- per-book, scheduled with adaptive staleness (popular books refresh more often). |
+| **Jobs (Oban)** | Planned: `FetchReviewsJob` (adaptive staleness). ⚠️ Does not exist — an earlier revision of this row described it as live. |
 | **External Services** | GoodReads (scrape/API), Reddit API, Storygraph (scrape). |
 | **dbt Models** | ⚠️ **none** — ⚠️ deleted 2026-10-15: the three review models modelled a table with 0 rows. The TABLE, proto message, Ecto schema and payload contract are kept by owner ruling; the dbt layer is rebuilt when there are rows. |
 | **Infrastructure** | Broadway pipeline for backpressure on bulk review fetching. |
@@ -1236,7 +1469,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | **Frontend (Elm)** | ~~`Page.Admin.Metrics` module~~ removed (#267). Ops-metrics surface is Grafana. |
 | **Backend (Phoenix)** | ~~`Stacks.Admin.Metrics` context / `StacksWeb.MetricsController`~~ removed (#267). Source-health survives as `Stacks.Monitoring.list_source_health/0` for the scraper-health page. |
 | **Database** | **Read:** `op.audit_log`, `marts.*` (warehouse views — `wh` is the empty default schema, not the warehouse), Oban job tables, `op.discovered_sources`. |
-| **Jobs (Oban)** | `Stacks.Workers.MetricsSnapshotJob` -- periodic snapshot of system state. |
+| **Jobs (Oban)** | ~~`MetricsSnapshotJob`~~ — never existed in the tree (the story is superseded; this row described an intention as an implementation). |
 | **External Services** | None (all internal data). |
 | **dbt Models** | `mart_cost_tracking` only. The other four — ⚠️ deleted 2026-10-15 — their consumer was the in-app metrics dashboard, which Grafana superseded. |
 | **Infrastructure** | dbt scheduled runs (could be Oban-triggered or cron). |
@@ -2704,7 +2937,7 @@ Which user stories touch each database table:
 | `IdentifyBookJob` | US-1.1.1 (photo upload) | On-demand |
 | `EnrichBookJob` | US-1.1.1 (after ISBN resolved) | On-demand |
 | `RecalculateWearJob` | US-1.5.1, US-1.5.2, US-1.6.3 (shelf moves / re-read) | Event-driven |
-| `FetchReviewsJob` | US-2.1.1 | Adaptive staleness (hours to days) |
+| ~~`FetchReviewsJob`~~ (planned, not built — US-2.1.1 is spec-only by ruling) | US-2.1.1 | Adaptive staleness (hours to days) |
 | `TriggerPriceScrapeJob` | US-2.2.1 | Scheduled (daily) |
 | `DiscoverAuthorSourcesJob` | US-2.3.1 | Scheduled (weekly) |
 | `FetchAuthorRSSJob` | US-2.3.1 | Scheduled (hourly) |
@@ -2813,7 +3046,7 @@ Which user stories touch each database table:
 | `stg_blog_posts` | Staging | US-12.1.1 | US-12.x, US-13.x |
 | `stg_comments` | Staging | US-13.1.1 | US-13.x |
 | `stg_offer_threads` | Staging | US-7.1.1, US-13.2.2 | US-7.x |
-| `stg_post_book_associations` | Staging | US-12.2.1 | US-12.2.1 |
+| `stg_post_book_associations` | Staging | US-12.1.2 (the association worker's writes) | US-12.3.4 (faithfulness, when re-pointed) |
 | `int_visibility_resolution` | Intermediate | US-10.1.1--5 | US-10.x, US-12.x, US-13.x |
 | `int_comment_threads` | Intermediate | US-13.1.1 | US-13.1.1 |
 | `int_offer_activity` | Intermediate | US-7.1.1, US-13.2.2 | US-5.1.1 |
