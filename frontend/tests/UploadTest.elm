@@ -490,6 +490,36 @@ suite =
                         , \m -> m.uploadState |> Expect.equal NotAsked
                         ]
                         model
+            , test "RejectIdentification opens NO stream — the reject must land first" <|
+                \_ ->
+                    let
+                        verifying =
+                            { init_
+                                | step = Verifying dummyBook
+                                , result = Identified [ dummyBook ]
+                                , uploadState = Success "img-1"
+                            }
+
+                        ( _, _, out ) =
+                            Upload.update RejectIdentification
+                                verifying
+                                (Just (Api.credentials "t" Nothing))
+                    in
+                    -- A stream opened here races the reject POST; a connect
+                    -- that wins replays the just-rejected terminal state and
+                    -- closes, stranding the page on the old answer (watched
+                    -- live). NoOut is the fix's whole contract.
+                    out |> Expect.equal Upload.NoOut
+            , test "the stream opens once the rejection has landed" <|
+                \_ ->
+                    let
+                        rejected =
+                            { init_ | uploadState = Success "img-1" }
+
+                        ( _, _, out ) =
+                            Upload.update (RejectIdentificationCompleted (Ok ())) rejected Nothing
+                    in
+                    out |> Expect.equal (Upload.OpenStream "/api/upload/img-1/stream")
             , test "ShelfSelected updates selectedShelf" <|
                 \_ ->
                     let

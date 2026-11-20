@@ -898,7 +898,17 @@ updateWithEffect msg model maybeToken =
                         { onExpired = SessionGone
                         , onResponse = Api.resolveWhatever >> RejectIdentificationCompleted
                         }
-                    , streamFor imageId
+                      -- ⛔ NO STREAM YET. This used to open the stream here,
+                      -- concurrently with the reject POST — and when the
+                      -- connect won that race, the server replayed the OLD
+                      -- terminal state and closed, so the page re-rendered
+                      -- the answer just rejected and nobody was listening
+                      -- when the retry resolved. Watched live: the second
+                      -- rejection stranded on the previous book for >40s
+                      -- while the server had the right one in 4. The stream
+                      -- opens in RejectIdentificationCompleted, once the row
+                      -- is pending again.
+                    , NoOut
                     )
 
                 _ ->
@@ -907,7 +917,15 @@ updateWithEffect msg model maybeToken =
         RejectIdentificationCompleted result ->
             case result of
                 Ok () ->
-                    ( model, Effect.none, NoOut )
+                    -- The rejection has landed and the row is pending again:
+                    -- NOW the stream's first event is the fresh ack, never a
+                    -- replay of the rejected answer.
+                    case model.uploadState of
+                        Success imageId ->
+                            ( model, Effect.none, streamFor imageId )
+
+                        _ ->
+                            ( model, Effect.none, NoOut )
 
                 Err err ->
                     ( { model | result = IdentificationFailed (failureFromHttpError err) }, Effect.none, NoOut )
