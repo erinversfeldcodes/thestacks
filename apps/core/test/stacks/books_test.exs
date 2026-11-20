@@ -1322,6 +1322,57 @@ defmodule Stacks.BooksTest do
       assert Repo.get(Stacks.Marketplace.Listing, listing.id).book_id == survivor.id
     end
 
+    test "keeps the duplicate's ACTIVE placement when the survivor's placement on that shelf is soft-removed" do
+      author = insert(:author)
+      survivor = insert(:book, author: author, title: "The Name of the Rose")
+      dup = insert(:book, author: author, title: "The Name of the Rose")
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user)
+
+      # The survivor's placement on this shelf is soft-REMOVED — a history row,
+      # outside the `(book_id, bookshelf_id) WHERE removed_at IS NULL` partial
+      # unique, so it cannot actually collide with anything.
+      insert(:placement, book: survivor, bookshelf: bookshelf, removed_at: DateTime.utc_now())
+
+      # The duplicate's placement on the SAME shelf is ACTIVE and carries the
+      # reader's free-text notes + rating — the data a removed_at-blind
+      # consolidation silently destroys.
+      dup_active =
+        insert(:placement,
+          book: dup,
+          bookshelf: bookshelf,
+          removed_at: nil,
+          notes: "keep me",
+          personal_rating: 5
+        )
+
+      assert {:ok, _} = Books.merge_duplicate(survivor.id, dup.id)
+
+      # The active placement survived and re-parented to the survivor — notes and
+      # rating intact. Consolidating on bookshelf_id alone would have deleted it,
+      # because the survivor had a (removed) row on the same shelf.
+      kept = Repo.get(Stacks.Shelving.Placement, dup_active.id)
+      assert kept
+      assert kept.book_id == survivor.id
+      assert kept.removed_at == nil
+      assert kept.notes == "keep me"
+      assert kept.personal_rating == 5
+
+      # Exactly one ACTIVE placement remains on the shelf (the survivor's own was removed).
+      active_count =
+        Repo.aggregate(
+          from(p in Stacks.Shelving.Placement,
+            where:
+              p.book_id == ^survivor.id and p.bookshelf_id == ^bookshelf.id and
+                is_nil(p.removed_at)
+          ),
+          :count
+        )
+
+      assert active_count == 1
+    end
+
     test "dedup_works collapses same-title-same-author rows, and leaves the rest alone" do
       author = insert(:author)
       insert(:book, author: author, title: "Invisible Cities")

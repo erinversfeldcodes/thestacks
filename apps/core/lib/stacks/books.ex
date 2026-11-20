@@ -1119,7 +1119,7 @@ defmodule Stacks.Books do
 
       # Tables whose unique key pairs book_id with another column: drop the
       # duplicate's colliding row, then re-parent what remains.
-      reparent_consolidate!("bookshelf_placements", "bookshelf_id", s, d)
+      merge_placements!(s, d)
       reparent_consolidate!("post_book_associations", "post_id", s, d)
       reparent_consolidate!("review_snapshots", "source", s, d)
       merge_listings!(s, d)
@@ -1142,6 +1142,18 @@ defmodule Stacks.Books do
           "AND (surv.description IS NULL OR btrim(surv.description) = '') " <>
           "AND dup.description IS NOT NULL AND btrim(dup.description) <> ''",
         [s, d]
+      )
+
+      # An irreversible merge with a no-op `down`: record the pair so an
+      # over-merge (two genuinely distinct works that share a normalised title
+      # under one author) is diagnosable after the fact. Application log only —
+      # never event_log, which is UUID-only and must not carry the free-text title.
+      %{rows: [[dup_title, dup_author]]} =
+        Repo.query!("SELECT title, author_id::text FROM op.books WHERE id = $1::uuid", [d])
+
+      Logger.info(
+        "catalogue merge: duplicate #{d} (#{inspect(dup_title)}, author #{dup_author}) " <>
+          "merged into survivor #{s}"
       )
 
       Repo.query!("DELETE FROM op.books WHERE id = $1::uuid", [d])
@@ -1201,6 +1213,27 @@ defmodule Stacks.Books do
     )
 
     Repo.query!("UPDATE op.listings SET book_id = $1::uuid WHERE book_id = $2::uuid", [s, d])
+  end
+
+  # Placements collide only on the ACTIVE partial unique
+  # `(book_id, bookshelf_id) WHERE removed_at IS NULL`. Drop the duplicate's
+  # ACTIVE placement only where the survivor already holds an active one on the
+  # same shelf; a removed (soft-deleted) placement is outside the index, so it
+  # never collides and re-parents freely — the user keeps its notes and rating.
+  # Consolidating on bookshelf_id alone (ignoring removed_at) would delete a
+  # live active placement whenever the survivor had a removed history row on the
+  # same shelf: silent, irreversible loss of the reader's current placement.
+  defp merge_placements!(s, d) do
+    Repo.query!(
+      "DELETE FROM op.bookshelf_placements dup " <>
+        "WHERE dup.book_id = $2::uuid AND dup.removed_at IS NULL " <>
+        "AND EXISTS (SELECT 1 FROM op.bookshelf_placements surv " <>
+        "WHERE surv.book_id = $1::uuid AND surv.bookshelf_id = dup.bookshelf_id " <>
+        "AND surv.removed_at IS NULL)",
+      [s, d]
+    )
+
+    reparent_plain!("bookshelf_placements", s, d)
   end
 
   # The table and column are compile-time literals from this module, never input.
