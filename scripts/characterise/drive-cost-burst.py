@@ -96,12 +96,12 @@ def main() -> int:
         print(f"spaced window: {spaced_start} .. {spaced_end}")
     print("\nnext:")
     print(
-        f"  just run python3 scripts/characterise/billing-decompose.py --app {args.app} "
-        f"--gpu T4 --identifications {args.n} --start {packed_start} --end {packed_end}"
+        "  (day-bucketed billing: read each pattern's DEDICATED app for the "
+        "whole day — see billing-decompose.py's header)"
     )
     print(
         f"  just run python3 scripts/characterise/billing-decompose.py --app {args.app} "
-        f"--gpu T4 --identifications {args.n} --start {spaced_start} --end {spaced_end}"
+        f"--gpu T4 --identifications {args.n} --for today"
     )
     print(
         f"  just run python3 scripts/characterise/preview-cost-harness.py "
