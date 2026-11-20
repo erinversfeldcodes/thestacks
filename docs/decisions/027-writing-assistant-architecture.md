@@ -1,8 +1,8 @@
 # ADR 027: Writing Assistant Architecture (the design, as amended by what shipped)
 
-**Status:** PROPOSED — awaiting owner ruling (the decision section at the end).
-**Date:** 2026-11-20
-**Deciders:** Platform owner (ruling requested)
+**Status:** ACCEPTED (owner ruling 2026-11-20: "ADR 27 is acceptable").
+**Date:** 2026-11-20 (proposed) / 2026-11-20 (accepted)
+**Deciders:** Platform owner
 **Technical area:** Writing assistant (Socratic editor panel), LLM platform
 **Builds on:** `docs/writing-assistant-design.md` (the behaviour/RAG/eval design, which this
 ADR adopts as amended below); ADR 017 (GDPR data model — delivered); ADR 026 + addendum §4
@@ -50,15 +50,25 @@ and lists the preconditions that must exist before a reader sees a generated wor
 
 ## 3. Model stack — ruled, with alternatives
 
-**Adopt the doc's §4 stack as the starting configuration**: Together AI only (ADR 001
-posture: one vendor per capability), `Llama-Guard` as the inline `safety_model`, an
-8B-class classifier in front, a 70B-class instruct model for dialogue.
+**LOCAL-FIRST, pending the eval** (owner ruling 2026-11-20, reinforced by §4b): keep the
+assistant inside our own tenancy by default, so the author's unpublished drafts never transit
+a third party at inference time — the same posture the vision path already holds, and the
+sharper version of it that §4b's threat model argues for. Concretely: a small open dialogue
+model (Qwen3-class ~8–14B) on the existing scale-to-zero GPU family, woken per editing session
+(an upload-style demand wake, NOT the idle keep-warm the responsiveness ruling banned); the
+classifier and the Llama-Guard-class safety pass run local regardless (small, latency-tolerant).
 
-- **Alternative: self-hosted dialogue model (Modal GPU)** — REJECTED for v1: violates the
-  one-substrate ruling's economics (a second always-warm-ish GPU for conversational latency
-  is exactly the idle-tail problem the vision work just measured at ~91 s billed per wake),
-  and the assistant's latency envelope (streamed tokens into an editor) suits a serverless
-  API.
+- **The eval decides, not this ADR.** Build §6's golden set and `mix eval.assistant` FIRST, then
+  score the local candidate AND a hosted 70B-class reference against the same rubric + billed
+  cost-per-session. Local is the default and ships if it clears the per-dimension bar; a hosted
+  API (Together, ADR 001's one-vendor posture) is the RECORDED FALLBACK if measurement shows the
+  small local model cannot meet the Socratic bar. The choice is made on numbers, the way the
+  vision model was.
+- **Why not hosted-by-default:** it would send the author's private drafts to a third party at
+  every turn — defensible only behind consent, and §4b makes the point that keeping it local
+  makes that question disappear. The idle-tail economics that argued against a self-hosted
+  dialogue model (~91 s billed per wake) are answered by the per-session demand wake + a small
+  model, and are themselves what the eval's cost-per-session line measures.
 - **Alternative: a second vendor for dialogue** — REJECTED: ADR 001's one-vendor-per-
   capability posture; Together already carries the association path and the budget/fuse
   machinery extends to it.
@@ -205,9 +215,21 @@ this ADR is ruled.
 
 ## Ruling
 
-**Status: AWAITING OWNER DECISION.**
+**ACCEPTED by the platform owner, 2026-11-20 ("ADR 27 is acceptable").**
 
-- [ ] Adopt the design-as-amended (sections 2–4) — yes / amend
-- [ ] Preconditions list (section 5) binding before first reader exposure — yes / amend
-- [ ] Promotion rule (section 6) — yes / amend
-- [ ] Anything above de-scoped or re-sequenced — owner's note
+- [x] Adopt the design-as-amended (sections 2–4) — YES, including §4a (import + annotate the
+  author's own writing) and §4b (never-verbatim + breach-unreadable, research-settled).
+- [x] Model stack (§3) — **LOCAL-FIRST, pending the eval**, per the owner's repeated request to
+  keep both the book-recognition and writing-assistant systems inside our own tenancy. A hosted
+  API is the recorded fallback the eval may select; it is not the default.
+- [x] Preconditions list (section 5) binding before first reader exposure — YES.
+- [x] Promotion rule (section 6) — YES; it is also the mechanism that decides §3's local-vs-hosted
+  question on measured per-dimension quality + billed cost-per-session.
+- [x] Sequencing — build children (§7, incl. migration item 0's schema refinements, the ingestion
+  + annotation pipeline #593, and `mix eval.assistant` before any reader sees generated text) may
+  now be filed; the LoRA path stays Phase-7 and separately ruled.
+
+⚠️ Recorded interpretation: the owner's "acceptable" is read as local-first for §3 (not Together-
+as-originally-drafted), because the owner twice asked to keep these systems local and §4b's research
+reinforced it; accepting the ADR against that stated preference would have contradicted it. Flagged
+here so it can be corrected if the owner meant accept-as-originally-drafted.
