@@ -75,6 +75,37 @@ shelf intent, reading history per consent). A turn that retrieved nothing says s
 rather than asserts; retrieved spans are the faithfulness gate's evidence. Ghost-writing
 refusal (§2's anti-sycophancy) is enforced in the output pass and red-teamed per US-12.3.3.
 
+## 4a. The author's own corpus: ingestion and annotation (owner requirement, 2026-11-20)
+
+The assistant's knowledge is not only what was published on the platform: the author
+imports UNPUBLISHED writing (PDF, ePub, DOCX, Markdown, plain text) into their corpus,
+annotates it, and the assistant grounds in it like anything else.
+
+- **Data class: the most sensitive text the platform will hold.** Unpublished drafts are
+  personal by default and intimate in practice. They enter through the DEPLOYED app's
+  consent-gated path (never tooling that writes straight to the database past the consent,
+  audit and purge machinery), live under the `writing_assistant` consent — revocation
+  purges them with the rest — cascade on erasure, appear in export (text included,
+  vectors summarised), and never reach event_log, audit payloads, or the warehouse
+  (the `retrieval_log.query` exclusion pattern governs).
+- **One pipeline for published and imported alike:** extraction (on the Python CPU front
+  door — the PDF/ePub libraries live there naturally) → chunking per §6 → the item-0
+  substrate (chunk text, span provenance, model stamp) → hybrid retrieval. `source_type`
+  distinguishes; nothing else forks.
+- **Annotation is first-class, not an afterthought:** per-work and per-chunk annotations
+  (topic tags, exemplar quality, DO-NOT-RETRIEVE redaction, notes) stored as structured
+  data beside the chunks. The authoring tool may run locally, but it writes THROUGH the
+  API as the author — annotations are corpus data with the same GDPR standing as what
+  they annotate. The same mechanism authors the §6 golden set.
+- **This is the LoRA path's missing substrate.** The Phase-7 expert-corpus item (adapter
+  training, grant/revocation, extraction eval) was excluded for lack of exactly this
+  pipeline; it stays Phase 7, but ingestion + annotation is designed so adapter training
+  consumes it without rework. "Training" in v1 means retrieval grounding; fine-tuning
+  remains a later, separately-ruled step.
+- ⚠️ **Interaction with the §3 model question:** unpublished drafts transiting a
+  third-party inference API is a materially sharper version of the privacy trade than
+  published posts — weight accordingly when ruling on local-first.
+
 ## 5. Preconditions (no reader sees generated text before these exist)
 
 | Precondition | Story | State |
@@ -98,8 +129,9 @@ refusal (§2's anti-sycophancy) is enforced in the output pass and red-teamed pe
 ## 7. Migration path
 
 §13's issue breakdown re-scoped by the amendments: (0) the four schema refinements above +
-`op.prompt_templates`, as one gdpr-reviewed migration change; (1) embeddings producer on the
-existing substrate + backfill (model-stamped per refinement c); (2) retrieval + hybrid search (§5–§7 unchanged); (3) the budget
+`op.prompt_templates` + the imported-works and annotation tables (§4a), as one gdpr-reviewed
+migration change; (1) embeddings producer on the existing substrate + backfill (model-stamped
+per refinement c); (1a) ingestion + annotation tooling (§4a; filed as its own issue); (2) retrieval + hybrid search (§5–§7 unchanged); (3) the budget
 precondition (US-12.3.1); (4) `mix eval.assistant` + golden set; (5) the editor panel +
 SSE streaming (riding the upload stream's ack-first pattern); (6) guardrails/observability
 per their stories. Each lands as its own scoped issue at build time; none starts before
