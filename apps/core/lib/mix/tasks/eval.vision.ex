@@ -707,7 +707,7 @@ defmodule Mix.Tasks.Eval.Vision do
   # run. `EVAL_VISION_BASELINE_PATH` is how the suite keeps its recording in a
   # temp directory; nothing sets it in production, where the app-dir path is
   # the right one.
-  defp baseline_file(against_reference? \\ false) do
+  defp baseline_file(against_reference?) do
     if against_reference? do
       # The end-state bar: the full cascade answers to the 7B per-stratum
       # reference, not to whatever drop-in baseline is current.

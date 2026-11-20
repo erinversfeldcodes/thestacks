@@ -597,4 +597,28 @@ else
     _record_fail "upload_ack_p95_ms was not flagged breached"
 fi
 
+test_case "warm_p95_breach_fails" "warm (cold=false) identification p95 > 10000ms → gate exits non-zero"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_breached_warm.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero on warm p95 breach"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "identification_warm_p95_ms") | .breached] | any' \
+        >/dev/null 2>&1; then
+    _record_pass "identification_warm_p95_ms SLI flagged as breached"
+else
+    _record_fail "identification_warm_p95_ms was not flagged breached"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "identification_p50_ms" or .name == "identification_p95_ms") | .breached == false] | all' \
+        >/dev/null 2>&1; then
+    _record_pass "p50 and the cold-ceiling p95 stay green (the fixture isolates the warm bar)"
+else
+    _record_fail "the warm-breach fixture unexpectedly breached p50 or the cold-ceiling p95"
+fi
+
 summarise

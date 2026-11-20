@@ -228,9 +228,19 @@ defmodule Core.PromEx.Plugins.Stacks do
           measurement: :duration,
           unit: {:native, :millisecond},
           description:
-            "Upload pipeline phase durations (ms), by phase — phase=identify_book is " <>
-              "time-to-answer, the number the responsiveness thresholds govern.",
-          tags: [:phase],
+            "Upload pipeline phase durations (ms), by phase and GPU warmth — " <>
+              "phase=identify_book is time-to-answer, the number the responsiveness " <>
+              "thresholds govern; cold=false is the warm p95 <= 10s population " <>
+              "(cold answers are accepted scale-to-zero physics, gated only at the " <>
+              "hung-pipeline ceiling). cold=na: phases that carry no answer, and " <>
+              "answerless outcomes.",
+          tags: [:phase, :cold],
+          tag_values: fn meta ->
+            %{
+              phase: Map.get(meta, :phase, "unknown"),
+              cold: meta |> Map.get(:cold, "na") |> to_string()
+            }
+          end,
           reporter_options: [buckets: @vision_duration_buckets]
         ),
         distribution(

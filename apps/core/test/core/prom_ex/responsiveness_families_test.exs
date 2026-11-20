@@ -40,7 +40,7 @@ defmodule Core.PromEx.ResponsivenessFamiliesTest do
     :telemetry.execute(
       [:stacks, :upload, :phase, :stop],
       %{duration: native_ms(4_321)},
-      %{phase: :identify_book, upload_id: Ecto.UUID.generate()}
+      %{phase: :identify_book, upload_id: Ecto.UUID.generate(), cold: false}
     )
 
     after_count = family_count(scrape(), family, ~s(phase="identify_book"))
@@ -48,6 +48,22 @@ defmodule Core.PromEx.ResponsivenessFamiliesTest do
     # ⬛ A value CAME BACK, attributed to the phase the thresholds will filter
     # on — not merely a declaration in the plugin.
     assert after_count == before + 1
+
+    # And the warmth label rode along — the warm p95 threshold filters on it.
+    assert family_count(scrape(), family, ~s(cold="false")) >= 1
+  end
+
+  test "a phase stop with no warmth fact labels cold=na, not a lie" do
+    family = "stacks_upload_phase_stop_duration_milliseconds"
+    before = family_count(scrape(), family, ~s(cold="na"))
+
+    :telemetry.execute(
+      [:stacks, :upload, :phase, :stop],
+      %{duration: native_ms(100)},
+      %{phase: :isbn_resolution, upload_id: Ecto.UUID.generate()}
+    )
+
+    assert family_count(scrape(), family, ~s(cold="na")) == before + 1
   end
 
   test "an acknowledgement emit reaches the scrape" do

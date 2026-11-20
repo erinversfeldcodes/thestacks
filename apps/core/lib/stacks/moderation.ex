@@ -137,7 +137,7 @@ defmodule Stacks.Moderation do
 
     case resolve_and_store_all(books, ctx) do
       {:ok, _} = resolved ->
-        resolved
+        put_cold(resolved, resp)
 
       _miss ->
         # A checksum-valid barcode that no catalogue resolves is a CPU MISS,
@@ -155,18 +155,18 @@ defmodule Stacks.Moderation do
 
       candidates ->
         ctx = Map.put(context, :vision_model_used, cpu_engine(resp))
-        cpu_resolve_or_escalate(candidates, ctx, payload, context)
+        cpu_resolve_or_escalate(candidates, ctx, resp, payload, context)
     end
   end
 
-  defp cpu_resolve_or_escalate(candidates, ctx, payload, context) do
+  defp cpu_resolve_or_escalate(candidates, ctx, resp, payload, context) do
     case resolve_and_store_all(candidates, ctx) do
       {:ok, _} = resolved ->
         # The classifier never ran, but a catalogue-resolved, ISBN-verified
         # read IS a book determination — counted so the classification
         # outcomes stay comparable across cascade orders.
         emit_classification(:book)
-        resolved
+        put_cold(resolved, resp)
 
       _miss ->
         analyze(payload, context)
@@ -204,6 +204,23 @@ defmodule Stacks.Moderation do
 
   defp cpu_engine(_), do: "cpu_only"
 
+  # ⬛ THE WARM/COLD FACT, carried on the answer. `cold: true` means a GPU
+  # container on this answer's path reported a cold start — the fact the
+  # ruled warm p95 ≤ 10s threshold conditions on. GPU dispatches ONLY, never
+  # `sidecar_cold` (the client's cost telemetry documents why: a restarted
+  # FastAPI container owes no GPU tail), so a CPU-resolved answer is warm by
+  # definition — there is no GPU physics in it. Added as a subset key so every
+  # existing `%{resolved: _, rejected: _}` match keeps working.
+  defp put_cold({:ok, summary}, resp) when is_map(summary),
+    do: {:ok, Map.put(summary, :cold, gpu_cold?(resp))}
+
+  defp put_cold(other, _resp), do: other
+
+  defp gpu_cold?(%{"gpu_dispatches" => dispatches}) when is_list(dispatches),
+    do: Enum.any?(dispatches, &(Map.get(&1, "cold") == true))
+
+  defp gpu_cold?(_resp), do: false
+
   defp build_payload(base, context) do
     case Map.get(context, :excluded_books) do
       list when is_list(list) and list != [] -> Map.put(base, :excluded_books, list)
@@ -225,7 +242,7 @@ defmodule Stacks.Moderation do
         context_with_source =
           Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
 
-        resolve_and_store_all(books, context_with_source)
+        books |> resolve_and_store_all(context_with_source) |> put_cold(resp)
 
       {:ok, %{"classification" => classification}} ->
         emit_classification(classification_outcome(classification))

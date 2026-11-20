@@ -371,11 +371,48 @@ def histogram_p95_by_group(metric: str, group_label: str, target_group: str, q: 
 
 def histogram_total_by_group(metric: str, group_label: str, target_group: str):
     """Windowed sample count: the +Inf bucket of the filtered histogram."""
+    return histogram_total_by_labels(metric, {group_label: target_group})
+
+def histogram_total_by_labels(metric: str, want: dict):
+    """Windowed sample count across rows matching EVERY label in `want`."""
     return sum(
         r["value"]
         for r in windowed_rows_for(metric)
-        if r["labels"].get(group_label) == target_group and r["labels"].get("le") == "+Inf"
+        if r["labels"].get("le") == "+Inf"
+        and all(r["labels"].get(k) == v for k, v in want.items())
     )
+
+def histogram_quantile_by_labels(metric: str, want: dict, q: float):
+    """Quantile over the rows matching EVERY label in `want` — the two-label
+    (phase + cold) filter the warm threshold needs; the single-label helper
+    cannot express it."""
+    buckets = []
+    for r in windowed_rows_for(metric):
+        le = r["labels"].get("le")
+        if le is None or not all(r["labels"].get(k) == v for k, v in want.items()):
+            continue
+        buckets.append((float("inf") if le == "+Inf" else float(le), r["value"]))
+    buckets.sort()
+    if not buckets:
+        return 0
+    total = buckets[-1][1]
+    if total <= 0:
+        return 0
+    target = q * total
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in buckets:
+        if count >= target:
+            if le == float("inf"):
+                return int(prev_le * 2) if prev_le > 0 else 99_999
+            span = count - prev_count
+            if span <= 0:
+                return int(le)
+            frac = (target - prev_count) / span
+            return int(prev_le + frac * (le - prev_le))
+        prev_le = le
+        prev_count = count
+    return int(buckets[-1][0])
 
 def histogram_p95(metric: str):
     """p95 across a non-labelled histogram (e.g. ecto queue_time).
@@ -526,9 +563,9 @@ for group, threshold, name in [
 # revised 2026-11-17): p50 time-to-answer ≤ 5s and acknowledgement < 1s, wired
 # as gating SLIs. The identification p95 gates at the COLD CEILING (35s): the
 # ruling accepts cold p95 ≈ 30s, so 35s catches a hung pipeline without
-# fighting accepted physics. ⚠️ The warm p95 ≤ 10s bar needs a warm/cold label
-# on the phase metric and is wired when that label lands — stated here so the
-# missing SLI reads as a known gap, not an oversight.
+# fighting accepted physics. The warm p95 ≤ 10s bar gates further down on the
+# cold="false" population — the label set from the answer's GPU dispatch
+# records (answerless outcomes carry "na" and gate nowhere).
 PHASE_HIST = "stacks_upload_phase_stop_duration_milliseconds_bucket"
 ACK_HIST = "stacks_upload_ack_duration_milliseconds_bucket"
 IDENT_MIN_SAMPLES = 5
@@ -551,6 +588,24 @@ for name, q, threshold in [
     if ident_samples < IDENT_MIN_SAMPLES:
         ident_entry["note"] = "below min_samples; not gating"
     slis.append(ident_entry)
+
+# The ruled WARM bar: p95 ≤ 10s over answers whose GPU dispatches were all
+# warm (cold="false" — set from the dispatch records; cold answers are gated
+# only at the hung-pipeline ceiling above, and answerless outcomes carry "na").
+WARM_WANT = {"phase": "identify_book", "cold": "false"}
+warm_samples = histogram_total_by_labels(PHASE_HIST, WARM_WANT)
+warm_p95 = histogram_quantile_by_labels(PHASE_HIST, WARM_WANT, 0.95)
+warm_entry = {
+    "name": "identification_warm_p95_ms",
+    "value": int(warm_p95),
+    "threshold": 10000,
+    "samples": int(warm_samples),
+    "min_samples": IDENT_MIN_SAMPLES,
+    "breached": warm_samples >= IDENT_MIN_SAMPLES and warm_p95 > 10000,
+}
+if warm_samples < IDENT_MIN_SAMPLES:
+    warm_entry["note"] = "below min_samples; not gating"
+slis.append(warm_entry)
 
 ack_samples = sum(
     r["value"]
