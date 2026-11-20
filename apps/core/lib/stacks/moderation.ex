@@ -151,11 +151,16 @@ defmodule Stacks.Moderation do
   end
 
   defp cpu_barcode_answer(books, resp, payload, context) do
-    emit_classification(:book)
     ctx = Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
 
     case resolve_and_store_all(books, ctx) do
       {:ok, _} = resolved ->
+        # A checksum-valid, catalogue-resolved barcode IS a book determination,
+        # counted here (the classifier never ran) so classification outcomes stay
+        # comparable across cascade orders. ONLY on the success branch: on a miss
+        # the escalated analyze/2 emits its own classification, so emitting here
+        # too would double-count one image, defeating that very comparison.
+        emit_classification(:book)
         put_cold(resolved, resp)
 
       _miss ->
