@@ -37,24 +37,40 @@ There is no UI. The flow is a run:
 
 ## 3. The corpus, and the constraint on it
 
-Six committed fixtures: a clean barcode, a negative (`not_a_book`), two hostile orientations, an
-occlusion, and text clutter. The negative is as load-bearing as the positives — a model that
-answers "yes, a book" to everything scores perfectly on books alone.
+122 committed fixtures across 11 strata (clear covers, clean and hostile barcodes, hostile
+orientation and typography, illegible, book-adjacent, occlusion, text clutter, multiple books,
+and 20 negatives), each with owner-authored provenance. The negatives are as load-bearing as the
+positives — a model that answers "yes, a book" to everything scores perfectly on books alone,
+and rejection accuracy carries the tightest reading of any stratum.
 
 ⛔ **No real user upload may ever be added.** Not a sample, not "just the ones that failed", not
 with consent bolted on afterwards. A reader photographing a bookshelf may capture other people who
 never consented to being processed by a vision model, those people cannot be asked, and a corpus is
 forever. Every fixture is owner-authored or synthetic. See `docs/vision-eval-corpus-plan.md`.
 
-## 4. Why no-regression rather than a threshold
+## 4. The two baselines, and why no-regression rather than a threshold
 
-On six samples every observation moves the score by 16.7 points. An "≥90% accuracy" gate would fire
-on one image changing its mind — and the first time it went red for a benign reason, someone would
-raise the threshold rather than investigate, which is how a gate becomes decoration.
+Small strata still move by whole points when one image changes its mind, so the gates compare
+per-stratum against RECORDED baselines rather than absolute thresholds — and since the 2026-11-17
+model ruling there are deliberately TWO:
 
-`docs/vision-eval-corpus-plan.md` specifies the ~120-image corpus (15–20 per stratum, mirroring the
-cascade) at which per-stratum absolute thresholds become defensible. Expanding to it is deferred to
-Phase 2, deliberately.
+- **The drop-in baseline** (`priv/eval/vision_baseline.json`): model-stamped, written by
+  `--record`, the question "did THIS deployment regress against itself?". Recorded for the ruled
+  T4 + Qwen3-VL-4B at 84/122 (three identical passes).
+- **The end-state reference** (`priv/eval/vision_baseline_7b_reference.json`): the 7B's 86/122
+  per-stratum, preserved behind an unbypassable write-guard, the bar the FULL CASCADE answers to
+  across model swaps — with the ruling's concessions (`illegible`, `hostile_barcode`,
+  `book_adjacent`) named and an expiry switch (`EVAL_CASCADE_STRICT=1`).
+
+Two harnesses enforce them: `mix eval.vision` scores the sidecar seam against the drop-in
+baseline (the deploy gate — it refused a real regression live on 2026-11-20); `mix eval.cascade`
+drives `Stacks.Moderation.run_pipeline/1` — the PRODUCTION path, in a sandbox that stores
+nothing — against the reference. The cascade harness exists because the layer above the model
+can be wrong while the model eval stays green: its first full runs caught a net-negative tier
+and a scorer blind spot before passing at 91/122.
+
+Refusal semantics both harnesses share: an INCOMPLETE run (transport, unscored cases) is never
+a verdict; a conceded stratum is reported, never blended into a pass.
 
 ## 5–11. Database, Events, Jobs, Storage, Cache, dbt
 
@@ -68,7 +84,10 @@ Phase 2, deliberately.
 
 ## Baseline
 
-**6/6**, recorded 2026-08-20 against the live service.
+**84/122 per-stratum** (drop-in, T4+Qwen3-VL-4B, recorded 2026-11-20 after the reporting path
+was made unable to lie about the model's name); **86/122** (the 7B end-state reference,
+write-guarded). The original 6/6 of 2026-08-20 is history worth keeping for what recording it
+caught:
 
 Getting there caught a mislabel rather than a model fault: the corpus expected ISBN
 `9780061470769` for the barcode fixture, the model returned `9780156001311`, and Open Library

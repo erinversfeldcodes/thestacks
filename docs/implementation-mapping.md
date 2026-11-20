@@ -946,7 +946,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 |-----------|--------|
 | **Summary** | A scored, labelled corpus run against the real vision service, so that a regression in book recognition is caught by a failing gate rather than by readers noticing their uploads stopped working. Gates on **no regression against a recorded baseline** rather than an absolute accuracy threshold — on six fixtures one image changing its mind moves a percentage by 16.7 points, which reads as rigour and behaves as noise. |
 | **Phase** | Phase 1 (extended) |
-| **Phase note** | Corpus expansion to ~120 images (per `docs/vision-eval-corpus-plan.md`) is deferred to Phase 2, when per-stratum absolute thresholds become defensible. |
+| **Phase note** | The ~120-image corpus DELIVERED (122, 11 strata); two baselines + two harnesses since the 2026-11-17 model ruling (`mix eval.vision` drop-in gate, `mix eval.cascade` vs the write-guarded 7B end-state reference). |
 | **Status** | Built |
 
 | Layer | Components |
