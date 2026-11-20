@@ -536,7 +536,11 @@ class VisionModel:
         extract_parsed: dict[str, Any] | None = None
         if _classification_is_book(classify_parsed):
             extract_parsed = self._infer(image_b64, _build_extract_prompt(excluded_books))
-        return {"classify": classify_parsed, "extract": extract_parsed}
+        # ⬛ THE CONTAINER NAMES ITS OWN MODEL. The front door used to report its
+        # configured model_name instead, and the two defaults diverged — the
+        # response said 7B while this container ran the 4B, and a recorded
+        # eval baseline inherited the lie. The loader's name is the truth.
+        return {"classify": classify_parsed, "extract": extract_parsed, "model": MODEL_NAME}
 
     def _infer(self, image_b64: str, prompt: str, max_new_tokens: int = 512) -> dict[str, Any]:
         import torch

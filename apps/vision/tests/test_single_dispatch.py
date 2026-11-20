@@ -122,3 +122,29 @@ class TestSingleDispatchHandler:
         assert data["classification"] == "CLASSIFICATION_RESULT_BOOK"
         assert data["books"] == []
         assert data["model_used"] == settings.model_name
+
+
+class TestModelClaim:
+    """The GPU container names its own model in the analyze payload, and that
+    claim outranks the front door's configured default — the two defaults
+    diverged once (the T4 ran the 4B while responses said 7B) and a recorded
+    eval baseline inherited the wrong name."""
+
+    def test_the_containers_claim_outranks_the_front_door_config(self) -> None:
+        data = _run(
+            {
+                "classify": {"classification": "book", "confidence": 0.9},
+                "extract": {"books": []},
+                "model": "the-container-truth",
+            }
+        )
+        assert data["model_used"] == "the-container-truth"
+
+    def test_a_payload_with_no_claim_falls_back_to_the_configured_name(self) -> None:
+        data = _run(
+            {
+                "classify": {"classification": "book", "confidence": 0.9},
+                "extract": {"books": []},
+            }
+        )
+        assert data["model_used"] == settings.model_name

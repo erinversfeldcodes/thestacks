@@ -21,7 +21,13 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "info"
     hmac_secret: str = "change_me_in_dev"
-    model_name: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    # ⚠️ A REPORTING value, and it must track modal_app.py's MODEL_NAME default
+    # — two defaults, one truth. They diverged once (front door reporting the
+    # 7B while the T4 ran the 4B) and the first `--record` after the swap
+    # stamped the new baseline with the OLD model's name. The single-dispatch
+    # path now prefers the GPU container's own claim from the response; this
+    # default is the fallback for the paths that never reach a GPU.
+    model_name: str = "Qwen/Qwen3-VL-4B-Instruct"
     request_timeout_seconds: int = 180
     max_image_size_bytes: int = 10_485_760  # 10 MB
     local_ocr_enabled: bool = True

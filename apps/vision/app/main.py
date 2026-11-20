@@ -526,11 +526,19 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         classify_parsed: dict[str, object] = _c if isinstance(_c, dict) else {}
         _e = analyzed.get("extract")
         extract_parsed_opt = _e if isinstance(_e, dict) else None
+        # The GPU container names its own model in the analyze payload; prefer
+        # that claim over this front door's configured default — the two
+        # diverged once and a recorded baseline inherited the wrong name.
+        _m = analyzed.get("model")
+        gpu_model = _m if isinstance(_m, str) and _m else settings.model_name
     else:
         log.info("calling vision model for classify")
         classify_started = time.monotonic()
         classify_parsed = await client.classify(vlm_b64)
         classify_ms = _elapsed_ms(classify_started)
+        # The two-call methods carry no model claim; the configured name is
+        # the only available answer on this fallback path.
+        gpu_model = settings.model_name
 
     # Harvest the shadow read that overlapped the GPU call. `ocr_ms` is the
     # read's own duration (timed inside the task), so the timings stay honest.
@@ -560,7 +568,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             classification=classification,
             confidence=confidence,
             books=[],
-            model_used=settings.model_name,
+            model_used=gpu_model,
             tier=_TIER_VLM_CLASSIFY,
             gpu_dispatches=gpu_dispatches,
             ocr_attempt=ocr_attempt,
@@ -600,7 +608,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
         classification=classification,
         confidence=confidence,
         books=books,
-        model_used=settings.model_name,
+        model_used=gpu_model,
         tier=_TIER_VLM_EXTRACT,
         gpu_dispatches=gpu_dispatches,
         ocr_attempt=ocr_attempt,
