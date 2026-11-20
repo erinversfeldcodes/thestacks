@@ -252,6 +252,11 @@ defmodule Mix.Tasks.Eval.Cascade do
   defp judge(_item, {:error, reason}),
     do: %{ok: false, unscored: true, detail: "transport: #{inspect(reason)}"}
 
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — an OCR-tier
+  # ANSWER only exists when the sidecar's short-circuit is on (off everywhere;
+  # the cpu-title tier is demoted to shadow), and the catch-all below already
+  # classifies any non-VLM, non-barcode response as :cpu_title — drift lands
+  # there visibly rather than being miscounted.
   defp resolved_via({:error, _}, _tiers), do: :none
 
   defp resolved_via({:ok, _}, tiers) do
