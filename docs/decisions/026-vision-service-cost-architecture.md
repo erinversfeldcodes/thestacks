@@ -331,6 +331,16 @@ the bar → role-split cascade or the recorded L4+7B fallback. The embedding-ind
 experiment and any LoRA work stay blocked behind this stratum
 (`plans/vision-accuracy-program.md`, items 3 and 5).
 
+*Owner ruling 2026-11-20: the bar's confirmation is DEFERRED, deliberately. The
+sequence is: measure both models on the spine stratum when the photographs land
+→ build the improvement architecture this ADR and the accuracy program lay out
+(CPU-first resolution over spines, the own-library embedding tier, and the
+model-track items as warranted) → set the bar from what the improved cascade
+measures. The L4+7B fallback is NOT the default response to a miss any more —
+it stays recorded as an option, not the plan. Hard constraint: a confirmed
+spine bar must exist BEFORE this branch merges to main; the campaign does not
+finish without it.*
+
 **3. One alternative recorded as rejected, not unconsidered: hosted VLM APIs.**
 Per-call pricing at this volume is cost-comparable with zero cold start —
 rejected on grounds independent of cost: reader photographs are personal data
