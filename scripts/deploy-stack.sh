@@ -682,7 +682,14 @@ print(urls[0] if urls else '')
         # real regression took the else branch and was reported as "the eval
         # COULD NOT RUN" — exactly the misattribution the comment above exists
         # to prevent, arriving by a different route.
-        if grep -q "REGRESSION" <<< "$EVAL_OUT"; then
+        # ⚠️ Both spellings, because the eval's wording moved once already: the
+        # per-stratum rewrite says "A STRATUM REGRESSED" where the old message
+        # said "REGRESSION", and this grep lagging behind reported a real
+        # scored regression as "COULD NOT RUN" (observed on the first T4+4B
+        # preview deploy, 2026-11-20). Uppercase on purpose: the eval's
+        # incomplete-run message says "No regression is claimed" in lowercase,
+        # and matching it would re-create the misattribution the other way.
+        if grep -qE "REGRESSION|REGRESSED" <<< "$EVAL_OUT"; then
             echo "FAIL deploy: vision model regressed against its recorded baseline — stopping before the core deploy" >&2
         else
             echo "FAIL deploy: the vision eval COULD NOT RUN (exit $EVAL_RC) — that is a broken gate, not a scored regression; see the output above. Stopping, because an unscored model must not roll forward under EVAL_VISION_REQUIRED." >&2
