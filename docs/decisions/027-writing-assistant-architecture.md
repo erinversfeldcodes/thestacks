@@ -28,11 +28,21 @@ and lists the preconditions that must exist before a reader sees a generated wor
 2. **No keep-warm pings (§4 "Latency Considerations").** Contradicted by the 2026-11-17
    responsiveness ruling (honest waits, never idle spend) — and moot: Together's serverless
    API has no container of ours to keep warm. Time-to-first-token via SSE stands.
-3. **The data model is DELIVERED, not aspirational (status header, §11).** `op.embeddings`
-   (vector(1024), HNSW, user-FK CASCADE), `op.book_content_chunks`, the
-   `writing_assistant` consent type with revocation-triggered purge
-   (`Stacks.GDPR.Consent`, `WritingAssistantDataPurgeWorker`) — all in the tree since July.
-   §11's erasure/export claims are now citations, not plans.
+3. **The data model is DELIVERED — and needs four refinements before retrieval works as
+   designed.** Delivered since July: `op.embeddings` (vector(1024), HNSW, user-FK CASCADE),
+   `op.book_content_chunks`, `op.blog_assistant_sessions`, `op.turn_feedback`,
+   `op.retrieval_log` (with its PII-excluded staging pattern), and the `writing_assistant`
+   consent type with revocation-triggered purge — §11's erasure/export claims are citations,
+   not plans. NOT delivered: `op.prompt_templates`. And the live `op.embeddings` shape
+   (verified 2026-11-20) lacks what the grounding contract consumes:
+   (a) the CHUNK TEXT itself — nothing to retrieve as a span without re-deriving from
+   source at query time, with embed-vs-display boundary drift; (b) span provenance
+   (`chunk_index`/offsets) for honest citations; (c) a `model` column, so a re-embed is a
+   coexisting backfill rather than a destructive one (the model-identity lesson, already
+   encoded in the visual-embeddings spec); (d) an FTS side for §7's hybrid RRF (the
+   `op.books` tsvector pattern). All additive, all on an already-cascading personal table,
+   all under the gdpr-review lens (a content column makes export summarise it) — together
+   they are migration-path item 0.
 4. **The eval bar rose (§12).** The rubric stands, but promotion follows the W7e/eval
    culture as practised this campaign: a RECORDED golden-set baseline, per-dimension (never
    blended), a gate that demonstrably reds on a planted violation, and faithfulness judged
@@ -87,8 +97,9 @@ refusal (§2's anti-sycophancy) is enforced in the output pass and red-teamed pe
 
 ## 7. Migration path
 
-§13's issue breakdown re-scoped by the amendments: (1) embeddings producer on the existing
-substrate + backfill; (2) retrieval + hybrid search (§5–§7 unchanged); (3) the budget
+§13's issue breakdown re-scoped by the amendments: (0) the four schema refinements above +
+`op.prompt_templates`, as one gdpr-reviewed migration change; (1) embeddings producer on the
+existing substrate + backfill (model-stamped per refinement c); (2) retrieval + hybrid search (§5–§7 unchanged); (3) the budget
 precondition (US-12.3.1); (4) `mix eval.assistant` + golden set; (5) the editor panel +
 SSE streaming (riding the upload stream's ack-first pattern); (6) guardrails/observability
 per their stories. Each lands as its own scoped issue at build time; none starts before
