@@ -1,53 +1,53 @@
 {
-  "passed": 86,
   "total": 122,
+  "model": "Qwen/Qwen3-VL-4B-Instruct",
   "strata": {
-    "clean_barcode": {
-      "passed": 18,
-      "total": 19
-    },
-    "negative": {
-      "passed": 20,
-      "total": 20
-    },
-    "hostile_orientation": {
-      "passed": 11,
-      "total": 12
-    },
-    "occlusion": {
-      "passed": 0,
-      "total": 1
-    },
-    "text_clutter": {
-      "passed": 1,
-      "total": 1
-    },
     "book_adjacent": {
-      "passed": 6,
-      "total": 12
+      "total": 12,
+      "passed": 5
+    },
+    "clean_barcode": {
+      "total": 19,
+      "passed": 18
     },
     "clear_cover": {
-      "passed": 20,
-      "total": 22
+      "total": 22,
+      "passed": 22
     },
     "hostile_barcode": {
-      "passed": 3,
-      "total": 20
+      "total": 20,
+      "passed": 2
     },
-    "illegible": {
-      "passed": 5,
-      "total": 10
-    },
-    "multiple_books": {
-      "passed": 0,
-      "total": 1
+    "hostile_orientation": {
+      "total": 12,
+      "passed": 12
     },
     "hostile_typography": {
-      "passed": 2,
-      "total": 4
+      "total": 4,
+      "passed": 2
+    },
+    "illegible": {
+      "total": 10,
+      "passed": 1
+    },
+    "multiple_books": {
+      "total": 1,
+      "passed": 0
+    },
+    "negative": {
+      "total": 20,
+      "passed": 20
+    },
+    "occlusion": {
+      "total": 1,
+      "passed": 1
+    },
+    "text_clutter": {
+      "total": 1,
+      "passed": 1
     }
   },
-  "model": "Qwen/Qwen2.5-VL-7B-Instruct",
   "modal_app": "https://erinversfeldcodes--thestacks-vision-refactor-vision-rede-df1ee4.us-east.modal.run",
-  "recorded_at": "2026-11-13T16:29:43.931453Z"
+  "passed": 84,
+  "recorded_at": "2026-11-20T06:28:02.385780Z"
 }
