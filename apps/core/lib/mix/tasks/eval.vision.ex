@@ -186,10 +186,13 @@ defmodule Mix.Tasks.Eval.Vision do
     end
   end
 
-  defp load_corpus(nil),
+  @doc false
+  # Public for `mix eval.cascade`: the two harnesses must read the SAME corpus
+  # the same way, or their per-stratum tables stop being comparable.
+  def load_corpus(nil),
     do: load_corpus(Application.app_dir(:core, "priv/eval/vision_corpus.exs"))
 
-  defp load_corpus(path) do
+  def load_corpus(path) do
     path = if File.exists?(path), do: path, else: Path.join(File.cwd!(), path)
     {corpus, _} = Code.eval_file(path)
     corpus
@@ -285,10 +288,14 @@ defmodule Mix.Tasks.Eval.Vision do
   # Identity scoring. Absent expectation → pass (see the caller's note on what
   # that costs). Present → the expected string must appear, normalised, inside
   # one of the strings the service returned.
-  defp identity_ok?(nil, _returned), do: true
-  defp identity_ok?("", _returned), do: true
+  @doc false
+  # Public for `mix eval.cascade`: identity matching is the comparability-
+  # critical rule (normalised containment) — a second implementation would
+  # agree on the easy cases and drift on the ones that matter.
+  def identity_ok?(nil, _returned), do: true
+  def identity_ok?("", _returned), do: true
 
-  defp identity_ok?(expected, returned) do
+  def identity_ok?(expected, returned) do
     want = normalise_identity(expected)
     Enum.any?(returned, fn got -> String.contains?(normalise_identity(got), want) end)
   end
@@ -405,7 +412,8 @@ defmodule Mix.Tasks.Eval.Vision do
     end
   end
 
-  defp root do
+  @doc false
+  def root do
     # The fixtures sit at the umbrella root, but this task may be invoked from
     # there or from apps/core, and `Application.app_dir/1` points into _build.
     # Walk up until the images directory is actually found rather than counting
