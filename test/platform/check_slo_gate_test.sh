@@ -621,4 +621,33 @@ else
     _record_fail "the warm-breach fixture unexpectedly breached p50 or the cold-ceiling p95"
 fi
 
+# Regression: the phase-only identification SLIs must SUM buckets across the cold
+# series (PromQL `sum by (le)`). This fixture has 50 healthy warm samples (<=2s)
+# plus 6 slow cold samples (30-60s); the combined p95 is ~46s, over the 35s cold
+# ceiling. Before the sum-by-le fix the helper read the warm series alone (~2s)
+# and the gate was FALSE-GREEN on a slow cold tail. Warm and p50 stay green.
+test_case "identification_cold_ceiling_multi_series" "mixed cold=false+true: summed p95 > 35000ms cold ceiling -> gate exits non-zero"
+probe_fixture="$(mktemp)"
+write_probe_fixture "$probe_fixture" "1.0" "resolved"
+METRICS_FIXTURE="$METRICS_FIX/prom_sample_mixed_cold.txt" \
+PROBE_SUMMARY_FIXTURE="$probe_fixture" \
+    run_gate
+rm -f "$probe_fixture"
+assert_exit_nonzero "$RC" "gate exits non-zero when the summed cold-ceiling p95 breaches"
+BLOB="$(last_json)"
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "identification_p95_ms") | .breached] | any' \
+        >/dev/null 2>&1; then
+    _record_pass "identification_p95_ms breached on the summed multi-series tail"
+else
+    _record_fail "identification_p95_ms did NOT breach — phase-only SLI is not summing cold series (pre-fix false-green)"
+fi
+if [[ -n "$BLOB" ]] && echo "$BLOB" \
+    | jq -e '[.slis[] | select(.name == "identification_warm_p95_ms" or .name == "identification_p50_ms") | .breached == false] | all' \
+        >/dev/null 2>&1; then
+    _record_pass "warm p95 and p50 stay green (the slow minority is only in the cold series)"
+else
+    _record_fail "warm or p50 unexpectedly breached — the mixed fixture should isolate the cold ceiling"
+fi
+
 summarise

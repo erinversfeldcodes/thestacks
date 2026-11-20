@@ -335,19 +335,31 @@ def windowed_rows_for(name: str):
     """Windowed (last - first) values — used for rate + histogram SLIs."""
     return list(windowed.get(name, {}).values())
 
-def histogram_p95_by_group(metric: str, group_label: str, target_group: str, q: float = 0.95):
-    rows = [
-        r for r in windowed_rows_for(metric)
-        if r["labels"].get(group_label) == target_group
-    ]
-    buckets: list[tuple[float, float]] = []
+def _sum_buckets_by_le(rows):
+    """Sum cumulative bucket counts by ``le`` across every matching series.
+
+    A Prometheus histogram filtered by a SUBSET of its labels leaves one row per
+    ``le`` for each still-free label value (here ``cold`` in {true,false,na}).
+    Those rows share an ``le`` and MUST be summed before the quantile, exactly as
+    PromQL's ``sum by (le)`` does. Appending them as independent buckets (and
+    reading the max +Inf row as the total) understates the tail and trends the
+    gate green on a slow minority series.
+    """
+    by_le: dict = {}
     for r in rows:
         le = r["labels"].get("le")
         if le is None:
             continue
         le_f = float("inf") if le == "+Inf" else float(le)
-        buckets.append((le_f, r["value"]))
-    buckets.sort()
+        by_le[le_f] = by_le.get(le_f, 0.0) + r["value"]
+    return sorted(by_le.items())
+
+def histogram_p95_by_group(metric: str, group_label: str, target_group: str, q: float = 0.95):
+    rows = [
+        r for r in windowed_rows_for(metric)
+        if r["labels"].get(group_label) == target_group
+    ]
+    buckets = _sum_buckets_by_le(rows)
     if not buckets:
         return 0
     total = buckets[-1][1]
@@ -386,13 +398,11 @@ def histogram_quantile_by_labels(metric: str, want: dict, q: float):
     """Quantile over the rows matching EVERY label in `want` — the two-label
     (phase + cold) filter the warm threshold needs; the single-label helper
     cannot express it."""
-    buckets = []
-    for r in windowed_rows_for(metric):
-        le = r["labels"].get("le")
-        if le is None or not all(r["labels"].get(k) == v for k, v in want.items()):
-            continue
-        buckets.append((float("inf") if le == "+Inf" else float(le), r["value"]))
-    buckets.sort()
+    rows = [
+        r for r in windowed_rows_for(metric)
+        if all(r["labels"].get(k) == v for k, v in want.items())
+    ]
+    buckets = _sum_buckets_by_le(rows)
     if not buckets:
         return 0
     total = buckets[-1][1]
