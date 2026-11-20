@@ -60,7 +60,12 @@ defmodule Stacks.Moderation do
     potential ISBN if available, otherwise its title).
   """
   @type pipeline_result ::
-          {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
+          {:ok,
+           %{
+             :resolved => [Stacks.Books.Book.t()],
+             :rejected => [{String.t(), atom()}],
+             optional(:cold) => boolean()
+           }}
           | {:error, failure_reason()}
 
   @doc """
@@ -81,11 +86,25 @@ defmodule Stacks.Moderation do
   end
 
   defp dispatch_pipeline(payload, context) do
-    if cpu_first_enabled?() do
+    if cpu_first_enabled?() and not retry_with_exclusions?(context) do
       cpu_first(payload, context)
     else
       analyze(payload, context)
     end
+  end
+
+  # ⬛ A REJECTION IS A MISS. The cascade's rule is "GPU only on a miss", and a
+  # reader rejecting an answer is the strongest miss signal there is — yet the
+  # first live drive watched a partial OCR title ("BOOK of the DEAD") resolve
+  # three different wrong-but-real books across three attempts while the GPU
+  # never woke: the retry re-entered the same cheap tier with one more
+  # exclusion, marching down the catalogue's same-title ranking. So ANY retry
+  # carrying exclusions skips the whole CPU pass — barcode included, by
+  # decision: a rejected barcode answer would be exclusion-filtered anyway,
+  # and one rare extra GPU call is cheaper than a second code path.
+  defp retry_with_exclusions?(context) do
+    Map.get(context, :excluded_isbns, []) != [] or
+      Map.get(context, :excluded_books, []) != []
   end
 
   defp cpu_first_enabled? do

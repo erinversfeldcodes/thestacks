@@ -198,14 +198,14 @@ defmodule Stacks.ModerationCpuFirstTest do
     assert_received {:vision_call, false}
   end
 
-  test "a barcode whose ISBN the reader already rejected falls through to the GPU" do
-    parent = self()
-
+  test "a retry carrying excluded ISBNs never offers the cpu tier again" do
+    # ⬛ A REJECTION IS A MISS: the first live drive watched the cpu tier
+    # resolve three different wrong-but-real books for one partial title read
+    # while the GPU never woke. The non-cpu branch is the ONLY branch a retry
+    # may take — the cpu branch raising is what makes this test able to fail.
     MockClient.put_response("analyze", fn payload ->
-      send(parent, {:vision_call, cpu_only?(payload)})
-
       if cpu_only?(payload) do
-        barcode_response(@isbn)
+        raise "the cpu tier ran on a retry that carries exclusions"
       else
         full_gpu_response(@other_isbn)
       end
@@ -220,8 +220,24 @@ defmodule Stacks.ModerationCpuFirstTest do
     assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(context)
     assert [edition | _] = book.editions
     assert edition.isbn == @other_isbn
-    assert_received {:vision_call, true}
-    assert_received {:vision_call, false}
+  end
+
+  test "a retry carrying excluded books (title rejections) escalates the same way" do
+    MockClient.put_response("analyze", fn payload ->
+      if cpu_only?(payload) do
+        raise "the cpu tier ran on a retry that carries exclusions"
+      else
+        full_gpu_response(@isbn)
+      end
+    end)
+
+    context = %{
+      image_b64: @test_image_b64,
+      excluded_books: ["The Book of the Dead by E. A. Wallis Budge"],
+      book_attrs: %{"title" => "Stored"}
+    }
+
+    assert {:ok, %{resolved: [_book]}} = Moderation.run_pipeline(context)
   end
 
   test "a cpu pass transport failure costs nothing but the fallthrough" do
