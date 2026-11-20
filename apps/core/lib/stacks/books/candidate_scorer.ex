@@ -56,7 +56,7 @@ defmodule Stacks.Books.CandidateScorer do
       raw_text_score(signals[:raw_text], candidate_text, w.raw_text) +
       author_score(signals[:author], candidate_meta[:author], w.author) +
       exact_title_score(signals[:title], candidate_meta[:title], w.exact_title) +
-      derivative_penalty(signal_title_tokens, title_tokens, w.derivative_penalty)
+      derivative_penalty(signal_title_tokens, candidate_tokens, w.derivative_penalty)
   end
 
   @doc """
@@ -203,6 +203,13 @@ defmodule Stacks.Books.CandidateScorer do
     end
   end
 
+  # ⚠️ Scans title AND subtitle tokens, because the subtitle is where a
+  # commentary hides: "Luminous Emptiness: a GUIDE TO the Tibetan Book of the
+  # Dead" outranked the actual Tibetan Book of the Dead on a clear-cover
+  # photograph (cascade run 4, 2026-11-20) — its subtitle earned the full
+  # overlap score while the penalty, scanning only the two-word title, never
+  # fired. A derivative that names its subject in the subtitle is the COMMON
+  # derivative shape, not the edge case.
   defp derivative_penalty(signal_title_tokens, candidate_title_tokens, weight) do
     candidate_derivative? =
       Enum.any?(@derivative_tokens, &MapSet.member?(candidate_title_tokens, &1))
