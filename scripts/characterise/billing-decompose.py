@@ -18,6 +18,14 @@ patterns (packed vs spaced), which the harness that calls this does. So the
 per-id number is only meaningful if N is the identifications driven in exactly
 the --start/--end window, and the script refuses to pretend otherwise.
 
+⚠️ THE ROWS ARE DAY-BUCKETED, so an intra-day --start/--end returns ZERO even
+when the day carries real spend (measured 2026-11-20: a six-identification
+burst window read 0.0 while --for today read 10,225 GPU-seconds). The window
+flags only make sense at day granularity; to isolate ONE measurement, give it
+its OWN modal app and read that app's whole day — which is what the
+experiment series' app-per-variant convention was quietly doing for this
+script all along.
+
 ⚠️ READ-ONLY. It shells `modal billing report` (a read) or reads a saved JSON;
 it never deploys, drives traffic, or writes outside its given output path.
 

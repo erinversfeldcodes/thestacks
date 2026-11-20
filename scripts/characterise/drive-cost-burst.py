@@ -45,6 +45,17 @@ def main() -> int:
     ap.add_argument("--image", required=True, help="a real cover photo, so extract runs")
     ap.add_argument("--n", type=int, default=6)
     ap.add_argument("--window-s", type=int, default=60)
+    ap.add_argument(
+        "--mode",
+        choices=["both", "packed", "spaced"],
+        default="both",
+        help=(
+            "Modal bills by DAY per app, so an intra-day window cannot split "
+            "the two patterns on a shared app (measured: sub-day --start/--end "
+            "returns zero against day-bucketed rows). One pattern per "
+            "DEDICATED app + that app's day total is the clean solve."
+        ),
+    )
     args = ap.parse_args()
 
     import modal
@@ -53,31 +64,36 @@ def main() -> int:
     model = modal.Cls.from_name(args.app, "VisionModel")()
     gap = args.window_s + 30
 
-    print(f"burst driver: app={args.app} n={args.n} window={args.window_s}s gap={gap}s")
+    print(
+        f"burst driver: app={args.app} mode={args.mode} n={args.n} "
+        f"window={args.window_s}s gap={gap}s"
+    )
 
-    packed_start = utc()
-    for i in range(args.n):
-        t0 = time.monotonic()
-        model.analyze.remote(img_b64)
-        print(f"  packed {i + 1}/{args.n}: {time.monotonic() - t0:.1f}s wall")
-    packed_end = utc()
+    if args.mode in ("both", "packed"):
+        packed_start = utc()
+        for i in range(args.n):
+            t0 = time.monotonic()
+            model.analyze.remote(img_b64)
+            print(f"  packed {i + 1}/{args.n}: {time.monotonic() - t0:.1f}s wall")
+        packed_end = utc()
+        print(f"packed window: {packed_start} .. {packed_end}")
 
-    print(f"packed window: {packed_start} .. {packed_end}")
-    print(f"waiting {gap}s for the packed container's tail to close…")
-    time.sleep(gap)
+    if args.mode == "both":
+        print(f"waiting {gap}s for the packed container's tail to close…")
+        time.sleep(gap)
 
-    spaced_start = utc()
-    for i in range(args.n):
-        t0 = time.monotonic()
-        model.analyze.remote(img_b64)
-        print(f"  spaced {i + 1}/{args.n}: {time.monotonic() - t0:.1f}s wall")
-        if i < args.n - 1:
-            time.sleep(gap)
-    # the last container's idle tail belongs to the spaced bill: include it
-    time.sleep(gap)
-    spaced_end = utc()
-
-    print(f"spaced window: {spaced_start} .. {spaced_end}")
+    if args.mode in ("both", "spaced"):
+        spaced_start = utc()
+        for i in range(args.n):
+            t0 = time.monotonic()
+            model.analyze.remote(img_b64)
+            print(f"  spaced {i + 1}/{args.n}: {time.monotonic() - t0:.1f}s wall")
+            if i < args.n - 1:
+                time.sleep(gap)
+        # the last container's idle tail belongs to the spaced bill: include it
+        time.sleep(gap)
+        spaced_end = utc()
+        print(f"spaced window: {spaced_start} .. {spaced_end}")
     print("\nnext:")
     print(
         f"  just run python3 scripts/characterise/billing-decompose.py --app {args.app} "
