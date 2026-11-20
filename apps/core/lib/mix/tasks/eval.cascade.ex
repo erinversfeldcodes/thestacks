@@ -159,6 +159,13 @@ defmodule Mix.Tasks.Eval.Cascade do
 
       {:ok, bytes} ->
         _ = drain_calls([])
+        # ⚠️ 122 uncached serial cases melt the OL fuse mid-run (5 cases came
+        # back :resolver_unavailable on the first full run). An offline
+        # harness can afford manners: a breath between cases, and fresh fuses
+        # so one throttled burst does not poison the cases behind it.
+        :fuse.reset(:open_library_fuse)
+        :fuse.reset(:google_books_fuse)
+        Process.sleep(500)
         started = System.monotonic_time(:millisecond)
 
         outcome =

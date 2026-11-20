@@ -30,6 +30,14 @@ defmodule Stacks.ModerationCpuFirstTest do
     :ok
   end
 
+  # The cpu-TITLE tier is off by default (measured net-negative on the first
+  # full cascade eval); the tests that exercise it opt in explicitly.
+  defp enable_cpu_title_resolution do
+    previous = Application.get_env(:core, :cpu_title_resolution)
+    Application.put_env(:core, :cpu_title_resolution, true)
+    on_exit(fn -> Application.put_env(:core, :cpu_title_resolution, previous) end)
+  end
+
   defp cpu_only?(payload), do: Map.get(payload, :cpu_only) == true
 
   defp barcode_response(isbn) do
@@ -100,7 +108,9 @@ defmodule Stacks.ModerationCpuFirstTest do
     assert edition.isbn == @isbn
   end
 
-  test "a cover-text read resolves bag-of-words without waking the GPU" do
+  test "a cover-text read resolves bag-of-words without waking the GPU (tier opted in)" do
+    enable_cpu_title_resolution()
+
     MockHttpClient.put_response(
       "openlibrary.org/search.json",
       {:ok,
@@ -142,6 +152,43 @@ defmodule Stacks.ModerationCpuFirstTest do
     assert edition.isbn == @isbn
   end
 
+  test "by DEFAULT a cover-text read never answers — the GPU does" do
+    # ⛔ The first full cascade eval measured cpu-title-as-FINAL net-negative
+    # (clear_cover 22/22 → 6/22; three negatives identified as books, past a
+    # classify guard that never ran). Until the acceptance design can tell a
+    # partial title from an identification, a read is evidence for the
+    # SHADOW measurement, not an answer.
+    parent = self()
+
+    MockClient.put_response("analyze", fn payload ->
+      send(parent, {:vision_call, cpu_only?(payload)})
+
+      if cpu_only?(payload) do
+        cpu_read_response(%{
+          "title" => "The Great Gatsby",
+          "author" => "F. Scott Fitzgerald",
+          "raw_text" => "THE GREAT GATSBY F SCOTT FITZGERALD",
+          "confidence" => 0.99,
+          "answered" => false,
+          "engine" => "tesseract"
+        })
+      else
+        full_gpu_response(@isbn)
+      end
+    end)
+
+    assert {:ok, %{resolved: [_book]}} =
+             Moderation.run_pipeline(%{
+               image_b64: @test_image_b64,
+               book_attrs: %{"title" => "Stored"}
+             })
+
+    # Both calls happened: the read was collected, and the ANSWER came from
+    # the full path — even for a perfect-looking read.
+    assert_received {:vision_call, true}
+    assert_received {:vision_call, false}
+  end
+
   test "a cpu pass that read nothing falls through to the full analyze" do
     parent = self()
 
@@ -167,6 +214,7 @@ defmodule Stacks.ModerationCpuFirstTest do
   end
 
   test "a read the catalogue cannot resolve falls through rather than rejecting" do
+    enable_cpu_title_resolution()
     MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
     MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
     parent = self()

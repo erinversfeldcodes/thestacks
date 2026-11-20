@@ -168,14 +168,27 @@ defmodule Stacks.Moderation do
   end
 
   defp cpu_read_answer(resp, payload, context) do
-    case cpu_read_candidates(resp) do
-      [] ->
-        analyze(payload, context)
-
-      candidates ->
-        ctx = Map.put(context, :vision_model_used, cpu_engine(resp))
-        cpu_resolve_or_escalate(candidates, ctx, resp, payload, context)
+    # ⛔ OFF BY DEFAULT, measured not assumed: the first full cascade eval
+    # (2026-11-20) scored cpu-title-as-FINAL net-negative — clear_cover fell
+    # 22/22 → 6/22 (easy OCR intercepts the model's best stratum with
+    # wrong-but-real books) and three NEGATIVES were identified as books
+    # (a CPU-final answer never meets the classify guard). The same run
+    # proved the tier's promise — illegible rose 1/10 → 8/10 — so the flag
+    # stays, and flips back when the acceptance design can tell a partial
+    # title from an identification (the improve-first sequence the owner
+    # ruled). Barcode answers are untouched: a checksum is identity, a
+    # resolved title is only existence.
+    with true <- cpu_title_resolution_enabled?(),
+         [_ | _] = candidates <- cpu_read_candidates(resp) do
+      ctx = Map.put(context, :vision_model_used, cpu_engine(resp))
+      cpu_resolve_or_escalate(candidates, ctx, resp, payload, context)
+    else
+      _ -> analyze(payload, context)
     end
+  end
+
+  defp cpu_title_resolution_enabled? do
+    Application.get_env(:core, :cpu_title_resolution, false)
   end
 
   defp cpu_resolve_or_escalate(candidates, ctx, resp, payload, context) do
