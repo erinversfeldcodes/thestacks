@@ -1,6 +1,12 @@
 # Writing Assistant — Design Document
 
-> **Status:** Design / forward-looking. No code exists yet. Tracked by
+> **Status:** Design, AMENDED — see [ADR 027](decisions/027-writing-assistant-architecture.md)
+> (2026-11-20, awaiting ruling), which adopts this document with four amendments: no second
+> sidecar/GPU (one-substrate ruling), no keep-warm pings (honest-waits ruling), the §11 data
+> model is DELIVERED (op.embeddings / book_content_chunks / consent purge shipped July), and
+> §12's rubric gates per the campaign's eval bar (recorded baseline, planted red,
+> faithfulness vs retrieved spans). Read §3/§4/§13 through those amendments.
+> Original status line (2026-08): Design / forward-looking. No code exists yet. Tracked by
 > US-12.2.1 (`docs/user_stories/US-12.2.1-writing-assistant.md`) and US-12.2.2
 > (`docs/user_stories/US-12.2.2-writing-assistant-data.md`). Builds on the blog
 > stories US-12.1.1–US-12.1.3 (`Stacks.Blog` context, `op.blog_posts`). The
