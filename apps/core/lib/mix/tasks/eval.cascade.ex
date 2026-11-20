@@ -175,6 +175,28 @@ defmodule Mix.Tasks.Eval.Cascade do
             image_id: Ecto.UUID.generate()
           })
 
+        # ⚠️ One retry on TRANSPORT only, after a cooldown: a throttled OL
+        # window is not an answer about the cascade, and the first two full
+        # runs each lost 5–6 cases to :resolver_unavailable despite pacing.
+        # Answers — right or wrong — are never retried.
+        outcome =
+          case judge(item, outcome) do
+            %{unscored: true} ->
+              Process.sleep(15_000)
+              :fuse.reset(:open_library_fuse)
+              :fuse.reset(:google_books_fuse)
+              _ = drain_calls([])
+
+              Stacks.Moderation.run_pipeline(%{
+                image_b64: Base.encode64(bytes),
+                user_id: Ecto.UUID.generate(),
+                image_id: Ecto.UUID.generate()
+              })
+
+            _scored ->
+              outcome
+          end
+
         wall_ms = System.monotonic_time(:millisecond) - started
         tiers = drain_calls([])
         via = resolved_via(outcome, tiers)

@@ -147,6 +147,36 @@ defmodule Mix.Tasks.Eval.VisionTest do
     end
   end
 
+  describe "identity matching reads answers, not catalogue typography" do
+    # The first full cascade run failed FOUR correctly-resolved clear covers
+    # on catalogue conventions. Each case below is one of those live
+    # artifacts, verbatim.
+    test "a comma-inverted catalogue title matches its cover form" do
+      assert Vision.identity_ok?("The Year of Magical Thinking", [
+               "Year of Magical Thinking, The"
+             ])
+
+      assert Vision.identity_ok?("A Child Is Born", ["Child Is Born, A"])
+    end
+
+    test "a collapsed hyphen compound still matches" do
+      assert Vision.identity_ok?("The New Complete Book of Self-Sufficiency", [
+               "The New Complete Book Of Selfsufficiency"
+             ])
+    end
+
+    # ⬛ ANTI-VACUITY both ways: canonicalisation must not manufacture
+    # matches. The live wrong-book case stays a mismatch — a SHORTER
+    # same-prefix title cannot satisfy a LONGER expectation.
+    test "a wrong-but-similar shorter title still fails" do
+      refute Vision.identity_ok?("The Tibetan Book of the Dead", ["The Book of the Dead"])
+    end
+
+    test "an unrelated title still fails" do
+      refute Vision.identity_ok?("The Year of Magical Thinking", ["Year of the Monkey"])
+    end
+  end
+
   describe "the 7B end-state reference is read-only" do
     # ⛔ The two-baseline protocol's teeth. `--record` after the model swap
     # writes the DROP-IN baseline; the 7B reference is the end-state bar, and
