@@ -100,6 +100,12 @@ defmodule Mix.Tasks.Eval.Cascade do
     # test.exs pins a dummy HMAC secret; the DEPLOYED sidecar validates the
     # real one, so the run must sign with it or every call is a 401 that
     # would read as a cascade failure.
+    # Test env skips the umbrella runtime.exs secrets block, so the GB key
+    # (optional there, same semantics) rides in here for the eval run.
+    if gb_key = System.get_env("GOOGLE_BOOKS_API_KEY") do
+      Application.put_env(:core, :google_books_api_key, gb_key)
+    end
+
     case System.get_env("VISION_HMAC_SECRET") do
       secret when is_binary(secret) and secret != "" ->
         Application.put_env(:core, :vision_hmac_secret, secret)

@@ -1018,7 +1018,16 @@ defmodule Stacks.Books do
     |> cast(attrs, @edition_required_fields ++ @edition_optional_fields)
     |> validate_required(@edition_required_fields)
     |> validate_inclusion(:verification_source, @verification_sources)
-    |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
+    # ⚠️ The shape must admit the X check digit or the message lies: a valid
+    # ISBN-10 ends in X roughly one time in eleven, `Stacks.Books.ISBN`
+    # handles it everywhere (shape, checksum, 10→13 conversion), and this
+    # regex silently rejected what the whole pipeline downstream supports —
+    # watched live when Google Books served 043941184X for a cover and the
+    # reader's identification died at the store with "must be a valid
+    # ISBN-10". Mirrors `ISBN.isbn10_shaped?/1`.
+    |> validate_format(:isbn, ~r/^(\d{9}[\dXx]|\d{13})$/,
+      message: "must be a valid ISBN-10 or ISBN-13"
+    )
     |> validate_isbn_checksum()
     |> normalize_edition_isbn()
     |> unique_constraint(:isbn)

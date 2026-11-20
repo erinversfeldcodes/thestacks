@@ -23,6 +23,25 @@ defmodule Stacks.BooksTest do
       assert edition.is_primary == true
     end
 
+    test "accepts a valid ISBN-10 ending in X and stores it as ISBN-13" do
+      # ⚠️ 1 in ~11 valid ISBN-10s end in X, the ISBN module supports them
+      # everywhere, and the changeset's shape regex rejected them anyway —
+      # watched live: Google Books served 043941184X and the reader's
+      # identification died at the store under a message claiming ISBN-10
+      # support. 043941184X's checksum holds (weighted sum 198 ≡ 0 mod 11).
+      attrs = %{"isbn" => "043941184X", "title" => "Alice in Wonderland"}
+      assert {:ok, book} = Books.create(attrs)
+      assert [edition] = book.editions
+      # Normalised to the 13-digit form the storage constraint demands.
+      assert edition.isbn == "9780439411844"
+    end
+
+    test "still rejects an X-tailed string whose ISBN-10 checksum fails" do
+      attrs = %{"isbn" => "043941185X", "title" => "Not A Book"}
+      assert {:error, changeset} = Books.create(attrs)
+      assert %{isbn: [_]} = errors_on(changeset)
+    end
+
     test "returns error on missing isbn" do
       attrs = %{"title" => "No ISBN Book"}
       assert {:error, changeset} = Books.create(attrs)

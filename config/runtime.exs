@@ -28,6 +28,16 @@ else
     config :core, Stacks.Accounts.Guardian, issuer: "stacks", secret_key: guardian_secret
   end
 
+  # ⚠️ Optional on purpose, and WIRED NOWHERE until 2026-11-20: the resolver
+  # has read `:google_books_api_key` since April while no environment ever
+  # set it — so every GB fallback in every deployment rode the anonymous
+  # per-IP quota, and the cascade eval watched the same five OL-miss cases
+  # 429 out of Google Books on three consecutive full runs. Unset, behavior
+  # is exactly the unkeyed status quo.
+  if google_books_key = System.get_env("GOOGLE_BOOKS_API_KEY") do
+    config :core, :google_books_api_key, google_books_key
+  end
+
   if google_books_key = System.get_env("GOOGLE_BOOKS_API_KEY") do
     config :core, :google_books_api_key, google_books_key
   end
