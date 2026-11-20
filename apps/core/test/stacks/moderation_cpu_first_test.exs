@@ -158,6 +158,27 @@ defmodule Stacks.ModerationCpuFirstTest do
     # classify guard that never ran). Until the acceptance design can tell a
     # partial title from an identification, a read is evidence for the
     # SHADOW measurement, not an answer.
+    #
+    # ⬛ ANTI-VACUITY: the catalogue IS stubbed to resolve this read — without
+    # this stub the CPU resolution would miss and fall through regardless,
+    # and forcing the tier on left this test green (measured, probe S, first
+    # attempt). The flag must be the ONLY thing standing between the read
+    # and a CPU-final answer, or the assertions below assert nothing.
+    MockHttpClient.put_response(
+      "openlibrary.org/search.json",
+      {:ok,
+       %{
+         "docs" => [
+           %{
+             "isbn" => [@isbn],
+             "title" => "The Great Gatsby",
+             "author_name" => ["F. Scott Fitzgerald"],
+             "first_publish_year" => 1925
+           }
+         ]
+       }}
+    )
+
     parent = self()
 
     MockClient.put_response("analyze", fn payload ->
