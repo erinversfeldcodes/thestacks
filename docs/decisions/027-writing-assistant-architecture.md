@@ -106,6 +106,31 @@ annotates it, and the assistant grounds in it like anything else.
   third-party inference API is a materially sharper version of the privacy trade than
   published posts — weight accordingly when ruling on local-first.
 
+## 4b. The corpus's two hard protections (owner requirement, 2026-11-20)
+
+1. **Never verbatim.** The assistant may surface a work's key arguments and its
+   bibliographic specifics (titles, references, where-you-said-it citations) — it may not
+   reproduce the writing itself. Enforced, not promised: the output pass gains a
+   verbatim-overlap gate (response vs retrieved chunks; n-gram/longest-common-substring
+   over a recorded threshold → block or transform), with a planted-verbatim red run in its
+   DoD. This also hardens the existing anti-ghost-writing stance, and it is a HARD
+   precondition for any future corpus-sharing (the Phase-7 permissioned-grant idea) —
+   grounding for others is citations and arguments only, by construction.
+2. **A breach must not read the corpus.** Layers, honestly stated: imported-work originals
+   and chunk TEXT encrypted at rest via the existing Cloak vault (the audit-metadata
+   pattern); per-request RLS (ADR 023) and the least-privilege roles this campaign just
+   repaired; and the open problems NAMED rather than hand-waved — a tsvector index leaks
+   lexemes (hybrid search's FTS side may be vector-only for imported works), and
+   EMBEDDINGS THEMSELVES partially invert to text under published attacks, so the threat
+   model must treat vectors as derived personal data, not as opaque. Any future LoRA
+   carries the training-data-extraction risk on top (the Phase-7 item's "extraction eval"
+   exists for this).
+
+⚠️ Both protections are RESEARCH-GATED by owner request (2026-11-20): a deep-research pass
+on regurgitation control, fine-tuning extraction risk, embedding inversion, and
+encrypted-retrieval patterns lands as a cited report before the implementing issues are
+scoped; its findings may amend this section.
+
 ## 5. Preconditions (no reader sees generated text before these exist)
 
 | Precondition | Story | State |
@@ -114,6 +139,8 @@ annotates it, and the assistant grounds in it like anything else.
 | Call log / replay | US-12.3.2 | future-spec |
 | Guardrails + red-team record | US-12.3.3 | spec; LlamaGuard inline is the start, not the record |
 | Faithfulness measurement | US-12.3.4 | spec |
+| Verbatim-overlap gate (§4b.1) | the guardrails child | spec — planted-verbatim red required |
+| Corpus threat model + at-rest posture (§4b.2) | research report → #593's schema work | research launched 2026-11-20 |
 | Consent gating | ADR 017 / `ConsentCheck` | DELIVERED |
 | Retrieval substrate | serving story | DELIVERED (embeddings producer is part of the build) |
 
