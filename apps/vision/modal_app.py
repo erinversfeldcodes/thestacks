@@ -482,7 +482,15 @@ class VisionModel:
         if hasattr(self.model, "hf_device_map"):
             devices = sorted({str(d) for d in self.model.hf_device_map.values()})
         else:
-            devices = ["unknown"]
+            # ⚠️ The Qwen3-VL loader does not set hf_device_map, so the first
+            # T4+4B deploy printed devices=['unknown'] — the no-offload probe
+            # went blind exactly when the ruling's fit claim needed it. The
+            # parameters themselves always know where they live; a CPU entry
+            # in this set IS offload, visible instead of unknowable.
+            try:
+                devices = sorted({str(p.device) for p in self.model.parameters()})
+            except Exception:
+                devices = ["unknown"]
         print(
             f"vision model loaded: name={MODEL_NAME} gpu={VISION_GPU} "
             f"requested_dtype={VISION_DTYPE} "
