@@ -106,30 +106,69 @@ annotates it, and the assistant grounds in it like anything else.
   third-party inference API is a materially sharper version of the privacy trade than
   published posts — weight accordingly when ruling on local-first.
 
-## 4b. The corpus's two hard protections (owner requirement, 2026-11-20)
+## 4b. The corpus's two hard protections (owner requirement, 2026-11-20 — research-settled)
 
-1. **Never verbatim.** The assistant may surface a work's key arguments and its
-   bibliographic specifics (titles, references, where-you-said-it citations) — it may not
-   reproduce the writing itself. Enforced, not promised: the output pass gains a
-   verbatim-overlap gate (response vs retrieved chunks; n-gram/longest-common-substring
-   over a recorded threshold → block or transform), with a planted-verbatim red run in its
-   DoD. This also hardens the existing anti-ghost-writing stance, and it is a HARD
-   precondition for any future corpus-sharing (the Phase-7 permissioned-grant idea) —
-   grounding for others is citations and arguments only, by construction.
-2. **A breach must not read the corpus.** Layers, honestly stated: imported-work originals
-   and chunk TEXT encrypted at rest via the existing Cloak vault (the audit-metadata
-   pattern); per-request RLS (ADR 023) and the least-privilege roles this campaign just
-   repaired; and the open problems NAMED rather than hand-waved — a tsvector index leaks
-   lexemes (hybrid search's FTS side may be vector-only for imported works), and
-   EMBEDDINGS THEMSELVES partially invert to text under published attacks, so the threat
-   model must treat vectors as derived personal data, not as opaque. Any future LoRA
-   carries the training-data-extraction risk on top (the Phase-7 item's "extraction eval"
-   exists for this).
+The deep-research pass is done (`reports/Protecting a private writing corpus.md`, four
+cited notes under `research_notes/`). It turns both protections from aspirations into
+buildable postures. The one architectural decision it forces: **keep the corpus out of
+every artifact the database or a future adapter could hand an attacker.**
 
-⚠️ Both protections are RESEARCH-GATED by owner request (2026-11-20): a deep-research pass
-on regurgitation control, fine-tuning extraction risk, embedding inversion, and
-encrypted-retrieval patterns lands as a cited report before the implementing issues are
-scoped; its findings may amend this section.
+1. **Never verbatim — a four-layer gate, because no single mechanism suffices.** The
+   assistant may surface a work's key arguments and bibliographic specifics; it may not
+   reproduce the prose. A system-prompt rule alone is proven insufficient (it leaks on
+   retry, and cannot see text that is in the context window), so: (a) the prompt rule;
+   (b) a normalised n-gram + longest-common-substring/subsequence detector of the response
+   against the RETRIEVED chunks (research anchor: ~50-token canonical verbatim threshold,
+   an 8–50-token gray band, an ACS floor above ~3 words); (c) a detect→rewrite→abstain
+   loop; (d) a distinctiveness/allowlist path (entropy/IDF + a structural allowlist) that
+   lets bibliographic strings and paraphrased arguments through while blocking distinctive
+   prose; (e) an OWNER bypass so the author reads their own text (the Gemini-RECITATION
+   false-positive lesson); (f) a CoTaEval-style regression eval. DoD carries a
+   planted-verbatim RED run. This is also the hard precondition for any future
+   corpus-sharing — grounding for others is citations and arguments only, by construction.
+
+2. **A breach must not read the corpus — and the naive layering is a trap.** The research's
+   sharpest finding: the pgvector column is a near-complete copy of the corpus (vec2text
+   recovers ~92% of 32-token inputs EXACTLY; bge-m3 being open-weights is the worst case,
+   exact encoder in the attacker's hands), and a tsvector/GIN index is the corpus
+   transcribed (built-in lexeme extraction). So encrypting only the chunk TEXT while
+   vectors and FTS stay plaintext is "redacting the document but shipping its photocopy."
+   The posture, strongest-first:
+   - **Store vectors AES-GCM-encrypted and run exact brute-force kNN in application
+     memory** — at this corpus's scale (10³–10⁵ chunks) this is free and removes plaintext
+     vectors from the DB, its backups, and its branches entirely. This is the decisive move
+     and it makes encryption-at-rest and semantic search fully compatible (the trade vendor
+     schemes are still failing to buy). ⚠️ No published kNN-vs-HNSW benchmark at this scale
+     — PROVE the latency on our own corpus before committing, HNSW-on-quantized as the
+     fallback.
+   - **Default to vector-only retrieval, NO tsvector/trgm index** over corpus text.
+   - **App-layer AES-GCM (Cloak) on chunk text + sensitive metadata**, decrypt only top-k
+     at prompt assembly; keep decrypted chunks out of logs, traces, caches, event_log,
+     audit, warehouse, and preview branches.
+   - **Dedicated least-privilege role + RLS, probed under `SET LOCAL ROLE`** (the local
+     superuser-bypass lesson — an untested RLS layer is an unproven one).
+   - **Erasure deletes rows AND destroys/rotates `CLOAK_KEY` for crypto-shredding**; the
+     corpus IS the person under GDPR, so every copy (backups, branches, caches, any future
+     adapter, eval logs) is reachable by the same erasure path.
+   - Noise/rotation/shuffling are NON-defenses against an open encoder (ALGEN/ZSinvert/
+     Zero2Text break them); quantization is the only cheap in-DB hardening and is
+     adversarially under-tested, so it is a fallback carrying a documented residual risk,
+     not the plan.
+
+3. **LoRA is the sharpest knife — deferred, not forbidden.** A canary repeated just 16×
+   reproduced in full on a LLaMA-2-7B LoRA; a hundred-document corpus over a few epochs
+   crosses that threshold for EVERY document, and membership inference sits at ~0.9 AUC.
+   RAG-only eliminates the weight-memorisation class entirely, which is why v1 is RAG-only.
+   Any future fine-tune (the Phase-7 item) uses near-dup dedup + few epochs + low rank +
+   dropout, treats the adapter at the corpus's own data classification, and ships ONLY
+   behind a canary + extraction + MIA eval.
+
+⚠️ **Proven vs uncertain (carry into the implementing issues):** PROVEN — short-chunk
+inversion, geometry-obfuscation failure, tsvector extractability, microsecond top-k
+decrypt cost, the 16–32-rep memorisation threshold, RAG's class-elimination. UNCERTAIN,
+treat as live until measured — inversion at 256–1000-token chunks (gist-level leakage is
+extrapolation), quantization vs alignment attacks, how safe a well-configured LoRA is (two
+studies disagree), and the in-app-kNN latency at our scale.
 
 ## 5. Preconditions (no reader sees generated text before these exist)
 
@@ -140,7 +179,7 @@ scoped; its findings may amend this section.
 | Guardrails + red-team record | US-12.3.3 | spec; LlamaGuard inline is the start, not the record |
 | Faithfulness measurement | US-12.3.4 | spec |
 | Verbatim-overlap gate (§4b.1) | the guardrails child | spec — planted-verbatim red required |
-| Corpus threat model + at-rest posture (§4b.2) | research report → #593's schema work | research launched 2026-11-20 |
+| Corpus threat model + at-rest posture (§4b.2) | `reports/Protecting a private writing corpus.md` → #593's schema work | research SETTLED 2026-11-20: encrypted-vectors + in-app kNN, no FTS, crypto-shred erasure |
 | Consent gating | ADR 017 / `ConsentCheck` | DELIVERED |
 | Retrieval substrate | serving story | DELIVERED (embeddings producer is part of the build) |
 
