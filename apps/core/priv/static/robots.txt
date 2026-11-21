@@ -8,12 +8,15 @@
 # Covered by `robots_txt_test.exs`, which asserts against the served response
 # rather than this file, because "wrong file served" is invisible from here.
 
-# ── Search engines: index public pages, never user-scoped ones ───────────────
-# `/u/`, `/shelf/` and `/post/` are user-authored and user-identifying. Keeping
-# them out of search results is a privacy commitment, not SEO.
+# ── Search engines: profiles are crawlable, indexing is PER-USER opt-in ───────
+# A profile page (`/u/…`) is crawlable so the per-request `x-robots-tag` header
+# CoreWeb.PageController sets can decide indexing per profile: it is FAIL-CLOSED
+# `noindex` for everyone, and `index` ONLY for a public profile whose owner has
+# opted in to search indexing. So the default is still "not in search results";
+# the opt-in is what changes it, not this file. `/shelf/`, `/post/` and
+# `/listing/` stay fully disallowed — the opt-in does not cover them.
 User-agent: *
 Disallow: /api/
-Disallow: /u/
 Disallow: /shelf/
 Disallow: /post/
 Disallow: /listing/

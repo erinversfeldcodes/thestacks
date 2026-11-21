@@ -16,9 +16,12 @@ defmodule StacksWeb.RobotsTest do
              "Expected priv/static/robots.txt to exist — create it as part of anti-scraping hardening"
     end
 
-    test "disallows crawlers from user profile paths (/u/)" do
+    test "lets crawlers reach profile paths (/u/) so the per-user opt-in header governs" do
       content = File.read!(@robots_path)
-      assert content =~ "Disallow: /u/"
+      # Reversed from a blanket block: a profile is crawlable, and CoreWeb.PageController's
+      # fail-closed x-robots-tag header decides indexing per profile (noindex unless the
+      # owner opted in to search indexing on a public profile).
+      refute content =~ "Disallow: /u/"
     end
 
     test "disallows crawlers from shelf paths (/shelf/)" do

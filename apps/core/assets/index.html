@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="robots" content="noindex, nofollow" />
+    <!--
+      No blanket robots meta: indexability is decided PER REQUEST by the
+      `x-robots-tag` header CoreWeb.PageController sets (fail-closed — noindex
+      unless the path is a public profile whose owner opted in to search
+      indexing). A blanket `noindex` here would override that header for every
+      page and make the per-user opt-in inert, so it must not come back.
+    -->
     <title>The Stacks</title>
     <link rel="stylesheet" href="/assets/app.css" />
     <style>body { padding: 0; margin: 0; }</style>

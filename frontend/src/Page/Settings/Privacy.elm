@@ -528,7 +528,7 @@ view model =
             , p [ class "settings-section__desc" ]
                 [ text "Control who can discover your profile." ]
             , p [ class "settings-section__note" ]
-                [ text "Your profile and content will never appear in search engine results." ]
+                [ text "By default your profile and content stay out of search engine results. You can opt in to search indexing of your public content below." ]
             , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Profile" ]
                 , select

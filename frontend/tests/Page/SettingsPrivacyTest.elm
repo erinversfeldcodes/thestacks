@@ -185,7 +185,7 @@ suite =
                     Privacy.init
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "never appear in search engine results" ]
+                        |> Query.has [ Selector.text "By default your profile and content stay out of search engine results. You can opt in to search indexing of your public content below." ]
             ]
         , describe "loading saved visibility (FE-1)"
             [ test "GotPrivacySettings Ok seeds the profile visibility from the payload" <|
