@@ -51,13 +51,18 @@ enum ReviewSource {
   // Default unspecified value; should not be used in practice.
   REVIEW_SOURCE_UNSPECIFIED = 0;
 
-  // Reviews sourced from Goodreads.
+  // ⛔ UNREACHABLE by ruling D6 (US-2.1.1 §4): GoodReads ToS prohibits scraping
+  // and it has had no public API since 2020. The number stays (field numbers are
+  // forever) but no sanctioned write may produce it — `review_snapshot_changeset/2`
+  // rejects `source: "goodreads"`.
   REVIEW_SOURCE_GOODREADS = 1;
 
-  // Reviews sourced from Reddit.
+  // Reviews sourced from Reddit (SANCTIONED only via the official API — fetching
+  // old.reddit.com HTML is scraping wearing this source's name).
   REVIEW_SOURCE_REDDIT = 2;
 
-  // Reviews sourced from StoryGraph.
+  // ⛔ UNREACHABLE by ruling D6 (US-2.1.1 §4): StoryGraph has no API; "be
+  // respectful" is a sentiment, not a right. Number retained, write path refuses it.
   REVIEW_SOURCE_STORYGRAPH = 3;
 
   // Reviews from an unclassified source.

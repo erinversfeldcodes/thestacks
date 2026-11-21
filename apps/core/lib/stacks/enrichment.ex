@@ -76,6 +76,29 @@ defmodule Stacks.Enrichment do
     :stale_after
   ]
 
+  # ⛔ The sanctioned-source policy (US-2.1.1 §4, ruling D6), enforced where the
+  # write is — not in a fetcher, because a policy enforced only in the fetcher
+  # lasts until the next fetcher, exactly as the ISBN hard gate lives in the
+  # write (`Books.merge_edition/2`) rather than its callers. A source is
+  # sanctioned only when we hold a standing, checkable right: open data, an
+  # official API within its terms, consent, or a syndication feed. The proto
+  # `ReviewSource` enum still names GOODREADS and STORYGRAPH (field numbers are
+  # forever), but no sanctioned write may produce them — this is why.
+  @sanctioned_sources ~w(open_library reddit partner author_rss)
+
+  # Sources with a FIXED origin are pinned to their host(s); a snapshot cannot
+  # claim one of these while linking elsewhere. `partner` and `author_rss` carry
+  # variable hosts (their right comes from consent/syndication, not one domain),
+  # so they are validated only for a well-formed http(s) URL.
+  @source_hosts %{
+    "open_library" => ["openlibrary.org"],
+    "reddit" => ["reddit.com", "redd.it"]
+  }
+
+  @doc "The review sources we hold a standing, checkable right to (US-2.1.1 §4)."
+  @spec sanctioned_sources() :: [String.t()]
+  def sanctioned_sources, do: @sanctioned_sources
+
   @doc "Changeset for creating or updating a review snapshot."
   @spec review_snapshot_changeset(ReviewSnapshot.t(), map()) :: Ecto.Changeset.t()
   def review_snapshot_changeset(snapshot, attrs) do
@@ -83,7 +106,57 @@ defmodule Stacks.Enrichment do
     |> cast(attrs, @review_snapshot_required_fields ++ @review_snapshot_optional_fields)
     |> validate_required(@review_snapshot_required_fields)
     |> validate_length(:summary, max: 500)
+    |> validate_inclusion(:source, @sanctioned_sources,
+      message: "is not a sanctioned review source (US-2.1.1 §4, ruling D6)"
+    )
+    |> validate_source_url_host()
     |> foreign_key_constraint(:book_id)
+  end
+
+  defp validate_source_url_host(changeset) do
+    source = get_field(changeset, :source)
+    url = get_field(changeset, :source_url)
+
+    cond do
+      is_nil(source) or is_nil(url) ->
+        # required-field validation already reports the missing value.
+        changeset
+
+      not Map.has_key?(@source_hosts, source) ->
+        # variable-host sanctioned source (partner / author_rss): require a
+        # parseable http(s) URL, but do not pin a domain it may legitimately vary.
+        if parseable_http_url?(url),
+          do: changeset,
+          else: add_error(changeset, :source_url, "is not a valid http(s) URL")
+
+      host_allowed?(url, Map.fetch!(@source_hosts, source)) ->
+        changeset
+
+      true ->
+        add_error(
+          changeset,
+          :source_url,
+          "host does not belong to the #{source} source — a snapshot may not claim a sanctioned source while linking elsewhere"
+        )
+    end
+  end
+
+  defp parseable_http_url?(url) do
+    case URI.parse(url) do
+      %URI{scheme: s, host: h} when s in ["http", "https"] and is_binary(h) and h != "" -> true
+      _ -> false
+    end
+  end
+
+  defp host_allowed?(url, allowed) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) ->
+        host = String.downcase(host)
+        Enum.any?(allowed, fn a -> host == a or String.ends_with?(host, "." <> a) end)
+
+      _ ->
+        false
+    end
   end
 
   @price_snapshot_required_fields [
