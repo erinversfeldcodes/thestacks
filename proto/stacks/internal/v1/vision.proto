@@ -147,11 +147,17 @@ message VisionError {
 // Note the asymmetry between what SURVIVES and what was removed: the association
 // set (deleted above) is the deleted-and-never-encoded case — it has nothing to
 // protect. ClassificationResult and ExtractedBook deliberately SURVIVE
-// (AnalyzeResponse is typed on both), so `buf breaking` holds their field numbers
-// immovable for as long as they sit in this file — and the ENUM_NO_DELETE /
-// MESSAGE_NO_DELETE entries in buf.yaml keep that guarantee if AnalyzeResponse
-// ever stops referencing them. Keeping a contract is the strongest protection
-// against number drift.
+// (AnalyzeResponse is typed on both), so `buf breaking`'s FILE rule normally
+// holds their field numbers immovable. Keeping a contract is the strongest
+// protection against number drift.
+//
+// ⚠️ One caveat while the vision deletions are fresh: the file-wide
+// ENUM_NO_DELETE / MESSAGE_NO_DELETE breaking-suppressions in buf.yaml (which
+// exist only to let the Classify/Extract and association sets go) silence EVERY
+// enum/message deletion in this file — so a deletion of ClassificationResult or
+// ExtractedBook would currently slip through unflagged too. That protection is
+// restored when those entries are removed once the deletions land on the default
+// branch (their whole purpose; tracked as its own work, not a someday note).
 
 // A book candidate extracted from an image by the vision model.
 message ExtractedBook {
