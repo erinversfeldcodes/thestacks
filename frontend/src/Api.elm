@@ -253,6 +253,7 @@ module Api exposing
     , retryAfterSeconds
     , revokeAdminInviteRequest
     , saveConsentRequest
+    , saveSearchIndexingConsentRequest
     , saveWritingAssistantConsentRequest
     , searchBooksRequest
     , searchResponseDecoder
@@ -2713,6 +2714,23 @@ saveWritingAssistantConsentRequest consent =
     }
 
 
+{-| Same `POST /api/gdpr/consent` endpoint, `type = "search_indexing"`: the
+per-user opt-in that lets search engines index the reader's PUBLIC content.
+-}
+saveSearchIndexingConsentRequest : Bool -> RequestSpec
+saveSearchIndexingConsentRequest consent =
+    { method = "POST"
+    , url = Api.Url.path [ "api", "gdpr", "consent" ] []
+    , body =
+        JsonBody
+            (Encode.object
+                [ ( "consent", Encode.bool consent )
+                , ( "type", Encode.string "search_indexing" )
+                ]
+            )
+    }
+
+
 {-| Response from GET /api/catalogue — paginated book list.
 -}
 type alias CatalogueResponse =
@@ -4653,6 +4671,7 @@ type alias PrivacySettings =
     , shelves : List ShelfVisibilitySetting
     , consentAnalytics : Bool
     , consentWritingAssistant : Bool
+    , consentSearchIndexing : Bool
     }
 
 
@@ -4665,11 +4684,12 @@ shelfVisibilitySettingDecoder =
 
 privacySettingsDecoder : Decoder PrivacySettings
 privacySettingsDecoder =
-    Decode.map4 PrivacySettings
+    Decode.map5 PrivacySettings
         (Decode.field "profile_visibility" Decode.string)
         (Decode.field "shelves" (Decode.list shelfVisibilitySettingDecoder))
         (Decode.field "consent_analytics" Decode.bool)
         (Decode.field "consent_writing_assistant" Decode.bool)
+        (Decode.field "consent_search_indexing" Decode.bool)
 
 
 {-| `GET /api/settings/privacy` — the reader's privacy choices, as data.

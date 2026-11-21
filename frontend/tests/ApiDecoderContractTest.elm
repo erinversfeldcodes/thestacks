@@ -120,7 +120,8 @@ suite =
                     {"name": "antilibrary", "visibility": "owner"}
                   ],
                   "consent_analytics": false,
-                  "consent_writing_assistant": true
+                  "consent_writing_assistant": true,
+                  "consent_search_indexing": false
                 }
                 """
             , accepts "one shelf row on its own decodes"
@@ -133,7 +134,8 @@ suite =
                   "profile_visibility": "platform",
                   "shelves": [],
                   "consent_analytics": null,
-                  "consent_writing_assistant": false
+                  "consent_writing_assistant": false,
+                  "consent_search_indexing": false
                 }
                 """
 

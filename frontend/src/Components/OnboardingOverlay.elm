@@ -134,7 +134,7 @@ init =
     , visible = True
     , upload =
         (\u -> { u | embedded = True }) Upload.init
-    , consent = Consent.init { analytics = False, writingAssistant = False }
+    , consent = Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
     }
 
 

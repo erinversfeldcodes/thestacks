@@ -159,7 +159,7 @@ init =
     , loadingMore = False
     , unblocking = Nothing
     , unblockError = False
-    , consent = Consent.init { analytics = False, writingAssistant = False }
+    , consent = Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
     , settings = NotAsked
     }
 
@@ -174,7 +174,14 @@ initWithToken : Maybe Api.Credentials -> { analytics : Bool, writingAssistant : 
 initWithToken maybeToken consentSeed =
     let
         seeded =
-            { init | consent = Consent.init consentSeed }
+            { init
+                | consent =
+                    Consent.init
+                        { analytics = consentSeed.analytics
+                        , writingAssistant = consentSeed.writingAssistant
+                        , searchIndexing = False
+                        }
+            }
     in
     case maybeToken of
         Just token ->
@@ -392,6 +399,7 @@ update msg model maybeToken =
                             Consent.init
                                 { analytics = settings.consentAnalytics
                                 , writingAssistant = settings.consentWritingAssistant
+                                , searchIndexing = settings.consentSearchIndexing
                                 }
                       }
                     , Cmd.none

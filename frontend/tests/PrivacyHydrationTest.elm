@@ -38,6 +38,7 @@ hydrated =
     , shelves = []
     , consentAnalytics = False
     , consentWritingAssistant = False
+    , consentSearchIndexing = False
     }
 
 

@@ -40,6 +40,14 @@ type alias Model =
        button speaks only for what it actually governs.
     -}
     , writingAssistantSaving : RemoteData Http.Error ()
+
+    {- The search-indexing opt-in writes on click, exactly like the writing
+       toggle, so it carries its OWN save state for the same reason: a shared
+       `saving` would make the Save button speak for a write the reader never
+       asked for.
+    -}
+    , searchIndexingSaving : RemoteData Http.Error ()
+    , searchIndexingConsent : Bool
     }
 
 
@@ -53,6 +61,8 @@ type Msg
       -- opposite exactly rather than toggling the current value back — which
       -- assumes exactly one flip is in flight.
     | SaveWritingAssistantCompleted Bool (Result Http.Error ())
+    | ToggleSearchIndexing
+    | SaveSearchIndexingCompleted Bool (Result Http.Error ())
 
 
 type OutMsg
@@ -95,12 +105,19 @@ toggles reflect reality on open. Previously both toggles were
 hard-coded OFF, so a user who had already granted consent saw them as OFF and
 their first click re-granted instead of revoking.
 -}
-init : { analytics : Bool, writingAssistant : Bool } -> Model
+searchIndexingDescription : String
+searchIndexingDescription =
+    "Off by default: your public profile and shelves are not offered to search engines. Turn this on to let search engines index content you have ALREADY made public — it does not change who can see it, only whether it can be found through a search engine."
+
+
+init : { analytics : Bool, writingAssistant : Bool, searchIndexing : Bool } -> Model
 init consent =
     { analyticsConsent = consent.analytics
     , writingAssistantConsent = consent.writingAssistant
     , saving = NotAsked
     , writingAssistantSaving = NotAsked
+    , searchIndexingConsent = consent.searchIndexing
+    , searchIndexingSaving = NotAsked
     }
 
 
@@ -211,6 +228,53 @@ updateWithEffect msg model maybeToken =
                         --
                         -- The error beside the toggle says the save failed; the
                         -- toggle itself goes back to what is actually stored.
+                        ( restored, Effect.None, NoOut )
+
+        ToggleSearchIndexing ->
+            let
+                newValue =
+                    not model.searchIndexingConsent
+            in
+            case maybeToken of
+                Just token ->
+                    ( { model
+                        | searchIndexingConsent = newValue
+                        , searchIndexingSaving = Loading
+                      }
+                    , Effect.authed (Api.saveSearchIndexingConsentRequest newValue)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveWhatever >> SaveSearchIndexingCompleted newValue
+                        }
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( { model | searchIndexingConsent = newValue }, Effect.None, NoOut )
+
+        SaveSearchIndexingCompleted attempted result ->
+            case result of
+                Ok _ ->
+                    ( { model | searchIndexingSaving = Success () }, Effect.None, NoOut )
+
+                Err err ->
+                    let
+                        -- Restored from the ATTEMPTED value, and settled BEFORE
+                        -- the 401 is classified — the same contract the
+                        -- writing-assistant handler documents above, so a failed
+                        -- opt-in save never leaves the toggle lying about what
+                        -- the server stores.
+                        restored =
+                            { model
+                                | searchIndexingConsent = not attempted
+                                , searchIndexingSaving = Failure err
+                            }
+                    in
+                    if Api.isUnauthorized err then
+                        ( restored, Effect.None, SessionExpired )
+
+                    else
                         ( restored, Effect.None, NoOut )
 
         SaveCompleted result ->
@@ -369,6 +433,50 @@ viewSection locked model =
             -- ⚠️ `role="alert"` because a failure here has to be announced, not
             -- merely rendered — the same treatment this project gives
             -- `syndication-url-error` and `invite-refusal`.
+            ]
+        , div [ class "settings-section" ]
+            [ h2 [ class "settings-section__title" ] [ text "Search-engine indexing" ]
+            , p [ class "settings-section__desc" ]
+                [ text searchIndexingDescription ]
+            , div [ class "toggle-row" ]
+                [ label [ class "toggle-row__label" ]
+                    [ text "Let search engines index my public content" ]
+                , button
+                    [ class
+                        (if model.searchIndexingConsent then
+                            "toggle toggle--on"
+
+                         else
+                            "toggle toggle--off"
+                        )
+                    , attribute "data-testid" "search-indexing-consent-toggle"
+
+                    -- Writes on click, so it is disabled while its own save is in
+                    -- flight as well as while the host is still learning the
+                    -- stored state — the same contract as the writing toggle.
+                    , disabled (locked || model.searchIndexingSaving == Loading)
+                    , onClick ToggleSearchIndexing
+                    ]
+                    [ text
+                        (if model.searchIndexingConsent then
+                            "On"
+
+                         else
+                            "Off"
+                        )
+                    ]
+                ]
+            , case model.searchIndexingSaving of
+                Failure err ->
+                    p
+                        [ class "error"
+                        , attribute "role" "alert"
+                        , attribute "data-testid" "search-indexing-consent-error"
+                        ]
+                        [ text (FailureCopy.saveFailure "your search-indexing preference" err) ]
+
+                _ ->
+                    text ""
             ]
         , div [ class "settings-actions" ]
             [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]

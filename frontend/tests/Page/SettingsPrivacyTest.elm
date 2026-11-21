@@ -310,6 +310,7 @@ samplePrivacySettings =
         ]
     , consentAnalytics = True
     , consentWritingAssistant = False
+    , consentSearchIndexing = False
     }
 
 

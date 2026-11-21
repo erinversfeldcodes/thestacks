@@ -193,7 +193,8 @@ defmodule StacksWeb.UserSettingsController do
       profile_visibility: user.profile_visibility,
       shelves: shelves,
       consent_analytics: user.consent_analytics,
-      consent_writing_assistant: user.consent_writing_assistant
+      consent_writing_assistant: user.consent_writing_assistant,
+      consent_search_indexing: user.consent_search_indexing
     })
   end
 

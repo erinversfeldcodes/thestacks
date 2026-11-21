@@ -17,23 +17,31 @@ suite =
         [ describe "Consent init seeding (FF-1)"
             [ test "init seeds analyticsConsent from the current user" <|
                 \_ ->
-                    (Consent.init { analytics = True, writingAssistant = False }).analyticsConsent
+                    (Consent.init { analytics = True, writingAssistant = False, searchIndexing = False }).analyticsConsent
                         |> Expect.equal True
             , test "init seeds writingAssistantConsent from the current user" <|
                 \_ ->
-                    (Consent.init { analytics = False, writingAssistant = True }).writingAssistantConsent
+                    (Consent.init { analytics = False, writingAssistant = True, searchIndexing = False }).writingAssistantConsent
                         |> Expect.equal True
             , test "init keeps saving as NotAsked" <|
                 \_ ->
-                    (Consent.init { analytics = True, writingAssistant = True }).saving
+                    (Consent.init { analytics = True, writingAssistant = True, searchIndexing = False }).saving
                         |> Expect.equal NotAsked
-            , test "a consenting user sees both toggles ON (no OFF toggles rendered)" <|
+            , test "search-indexing consent seeds true from the init value" <|
                 \_ ->
-                    Consent.init { analytics = True, writingAssistant = True }
+                    (Consent.init { analytics = False, writingAssistant = False, searchIndexing = True }).searchIndexingConsent
+                        |> Expect.equal True
+            , test "search-indexing consent defaults off when not granted" <|
+                \_ ->
+                    (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }).searchIndexingConsent
+                        |> Expect.equal False
+            , test "a fully-consenting user sees all toggles ON (no OFF toggles rendered)" <|
+                \_ ->
+                    Consent.init { analytics = True, writingAssistant = True, searchIndexing = True }
                         |> Consent.view
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.findAll [ Selector.class "toggle--on" ] >> Query.count (Expect.equal 2)
+                            [ Query.findAll [ Selector.class "toggle--on" ] >> Query.count (Expect.equal 3)
                             , Query.hasNot [ Selector.class "toggle--off" ]
                             ]
             ]
@@ -44,13 +52,13 @@ suite =
                         |> Expect.equal "Reserved — nothing reads this yet. No usage data is collected about you, by us or by anyone else. Your answer is recorded now so that if that ever changes, it changes with your say-so already on file rather than assumed."
             , test "the page renders that description rather than a claim of its own" <|
                 \_ ->
-                    Consent.init { analytics = False, writingAssistant = False }
+                    Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
                         |> Consent.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.text Consent.analyticsDescription ]
             , test "it says the same with the toggle on — consent does not start a collection" <|
                 \_ ->
-                    Consent.init { analytics = True, writingAssistant = False }
+                    Consent.init { analytics = True, writingAssistant = False, searchIndexing = False }
                         |> Consent.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.text Consent.analyticsDescription ]
@@ -60,14 +68,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False }) (Just (TestHelpers.creds "tok"))
+                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) (Just (TestHelpers.creds "tok"))
                     in
                     model.saving |> Expect.equal Loading
             , test "SaveConsent without token leaves saving as NotAsked" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False }) Nothing
+                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) Nothing
                     in
                     model.saving |> Expect.equal NotAsked
             , test "⛔ a 401 on Save Preferences settles `saving` and hands off the session" <|
@@ -89,7 +97,7 @@ suite =
                     let
                         ( inFlight, _, _ ) =
                             Consent.update Consent.SaveConsent
-                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
 
                         ( settled, _, out ) =
@@ -115,7 +123,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             Consent.update Consent.ToggleWritingAssistant
-                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
@@ -131,7 +139,7 @@ suite =
                         ( model, _, _ ) =
                             Consent.update
                                 (Consent.SaveWritingAssistantCompleted True (Err (Http.BadStatus 500)))
-                                (Consent.init { analytics = False, writingAssistant = True })
+                                (Consent.init { analytics = False, writingAssistant = True, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
@@ -157,7 +165,7 @@ suite =
                         ( model, _, _ ) =
                             Consent.update
                                 (Consent.SaveWritingAssistantCompleted True (Err (Http.BadStatus 500)))
-                                (Consent.init { analytics = False, writingAssistant = False }
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
                                     |> (\m -> { m | writingAssistantConsent = True })
                                 )
                                 (Just (TestHelpers.creds "tok"))
@@ -197,7 +205,7 @@ suite =
                                 (Consent.SaveWritingAssistantCompleted True
                                     (Err (Http.BadStatus 500))
                                 )
-                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
 
                         rendered =
@@ -232,7 +240,7 @@ suite =
                 -- ever looks at the failure state cannot tell a correct render
                 -- from one that always renders.
                 \_ ->
-                    Consent.init { analytics = False, writingAssistant = False }
+                    Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
                         |> Consent.viewSection False
                         |> Query.fromHtml
                         |> Query.findAll
@@ -261,7 +269,7 @@ suite =
                                 (Consent.SaveWritingAssistantCompleted True
                                     (Err (Http.BadStatus 401))
                                 )
-                                (Consent.init { analytics = False, writingAssistant = False }
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
                                     |> (\m -> { m | writingAssistantConsent = True })
                                 )
                                 (Just (TestHelpers.creds "tok"))
@@ -290,7 +298,7 @@ suite =
                                 (Consent.SaveWritingAssistantCompleted False
                                     (Err (Http.BadStatus 500))
                                 )
-                                (Consent.init { analytics = False, writingAssistant = True })
+                                (Consent.init { analytics = False, writingAssistant = True, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     model.writingAssistantConsent
@@ -303,7 +311,7 @@ suite =
                         ( model, _, _ ) =
                             Consent.update
                                 (Consent.SaveCompleted (Err (Http.BadStatus 500)))
-                                (Consent.init { analytics = True, writingAssistant = False })
+                                (Consent.init { analytics = True, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
@@ -315,21 +323,21 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.ToggleAnalytics (Consent.init { analytics = False, writingAssistant = False }) Nothing
+                            Consent.update Consent.ToggleAnalytics (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) Nothing
                     in
                     model.analyticsConsent |> Expect.equal True
             , test "SaveCompleted Ok sets saving to Success" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update (Consent.SaveCompleted (Ok ())) (Consent.init { analytics = False, writingAssistant = False }) (Just (TestHelpers.creds "tok"))
+                            Consent.update (Consent.SaveCompleted (Ok ())) (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) (Just (TestHelpers.creds "tok"))
                     in
                     model.saving |> Expect.equal (Success ())
             , test "SaveCompleted Err sets saving to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update (Consent.SaveCompleted (Err Http.NetworkError)) (Consent.init { analytics = False, writingAssistant = False }) (Just (TestHelpers.creds "tok"))
+                            Consent.update (Consent.SaveCompleted (Err Http.NetworkError)) (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) (Just (TestHelpers.creds "tok"))
                     in
                     model.saving |> Expect.equal (Failure Http.NetworkError)
             ]
@@ -373,7 +381,7 @@ suite =
 -}
 consentAfterSave : Consent.Model
 consentAfterSave =
-    Consent.init { analytics = False, writingAssistant = False }
+    Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
         |> toggleAnalytics
         |> consentUpdate Consent.SaveConsent
         |> consentUpdate (Consent.SaveCompleted (Ok ()))

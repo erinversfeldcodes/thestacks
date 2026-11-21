@@ -63,7 +63,7 @@ suite =
                         ( _, _, outMsg ) =
                             Consent.update
                                 (Consent.SaveCompleted (Err unauthorized))
-                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     outMsg |> Expect.equal Consent.SessionExpired
@@ -73,7 +73,7 @@ suite =
                         ( _, _, outMsg ) =
                             Consent.update
                                 (Consent.SaveCompleted (Err nonAuth))
-                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     outMsg |> Expect.equal Consent.NoOut
@@ -83,7 +83,7 @@ suite =
                         ( _, _, outMsg ) =
                             Consent.update
                                 (Consent.SaveCompleted (Ok ()))
-                                (Consent.init { analytics = False, writingAssistant = False })
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     outMsg |> Expect.equal Consent.NoOut
