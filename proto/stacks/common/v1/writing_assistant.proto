@@ -177,7 +177,10 @@ message TurnFeedback {
   // CASCADE.
   string session_id = 2 [json_name = "session_id"];
 
-  // Zero-based index of the conversation turn this feedback is about.
+  // Zero-based index into the session's ordered messages for the turn this
+  // feedback is about. There is no `Turn` message — the ordinal indexes the
+  // message sequence directly (a deliberate choice while the assistant is still
+  // being designed, rather than introduce a Turn contract prematurely).
   int32 turn_index = 3 [json_name = "turn_index"];
 
   // Feedback rating: "up" or "down".
@@ -215,7 +218,9 @@ message RetrievalLog {
   // Similarity scores aligned with retrieved_ids.
   repeated double scores = 5 [json_name = "scores"];
 
-  // Zero-based index of the conversation turn this retrieval served.
+  // Zero-based index into the session's ordered messages for the turn this
+  // retrieval served (see `BlogAssistantFeedback.turn_index`: the ordinal indexes
+  // the message sequence; there is no `Turn` message).
   int32 turn_index = 6 [json_name = "turn_index"];
 
   // When the retrieval was performed.
