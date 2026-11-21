@@ -78,7 +78,8 @@ fromProtoBook pb =
     , primaryEdition = pb.primaryEdition
     , editionCount = pb.editionCount
     , subjects = pb.subjects
-    , visibilityTier = pb.visibilityTier${extra_reads}
+    , visibilityTier = pb.visibilityTier
+    , communityReadCount = pb.communityReadCount${extra_reads}
     }
 
 
@@ -154,17 +155,21 @@ else
 fi
 
 test_case "a_declared_exception_PASSES_and_a_stale_one_FAILS" "the exception list cannot rot"
-# `community_read_count` is added by a helper after the pipe and is deliberately
-# unread, owned elsewhere. The gate must accept it — and must fail when the
-# declaration stops describing the code, or an exception list becomes a place
-# where things go to be forgotten.
-assert_contains "$GATE_SRC" "community_read_count" "the exception is declared"
-assert_contains "$GATE_SRC" "DELETE this" \
-    "with the instruction to remove it once the adapter reads the field"
+# The live DECLARED list is empty today: `community_read_count` was its standing
+# example until the adapter began reading it through `Types.Book`, at which point
+# the entry was correctly deleted — the adapter now carries the key, so it is no
+# longer a deliberate drop. The mechanism itself must still work, so this
+# exercises stale-detection with a SYNTHETIC entry injected into a gate copy,
+# rather than a live exception the gate would — correctly — no longer contain.
+assert_contains "$GATE_SRC" "DECLARED" "the declared-exception mechanism exists"
+assert_contains "$GATE_SRC" "no longer describe the code" \
+    "the gate flags a declaration the code has outgrown"
 
-DIR="$(build_fixture '' '
-    , communityReadCount = pb.communityReadCount')"
-OUT_STALE="$(run_gate "$DIR")"
+# Inject a declared exception for a key the fixture's adapter DOES read → stale.
+STALE_GATE="$WORK/stale_gate.sh"
+sed 's/^DECLARED = set()/DECLARED = {"community_read_count"}/' "$GATE" > "$STALE_GATE"
+DIR="$(build_fixture '' '')"
+OUT_STALE="$(cd "$DIR" && bash "$STALE_GATE" 2>&1)"
 RC_STALE=$?
 if [[ "$RC_STALE" -ne 0 ]]; then
     _record_pass "an exception the adapter now reads fails the gate (exit $RC_STALE)"
