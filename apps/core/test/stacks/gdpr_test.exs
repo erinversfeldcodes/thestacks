@@ -788,6 +788,40 @@ defmodule Stacks.GDPRTest do
     end
   end
 
+  describe "Consent — search_indexing (the public-indexing opt-in)" do
+    test "defaults off: a fresh user has not opted in, so public content stays noindex" do
+      user = insert(:user)
+      assert user.consent_search_indexing == false
+      assert Consent.check_consent(user.id, "search_indexing") == false
+    end
+
+    test "grant sets the flag + a timestamp; revoke clears the flag" do
+      user = insert(:user)
+
+      assert {:ok, granted} = Consent.grant_consent(user.id, "search_indexing")
+      assert granted.consent_search_indexing == true
+      assert granted.consent_search_indexing_at != nil
+      assert Consent.check_consent(user.id, "search_indexing") == true
+
+      assert {:ok, revoked} = Consent.revoke_consent(user.id, "search_indexing")
+      assert revoked.consent_search_indexing == false
+      assert Consent.check_consent(user.id, "search_indexing") == false
+    end
+
+    test "search_indexing is independent of analytics (no clause fall-through)" do
+      user = insert(:user, consent_analytics: true)
+
+      assert {:ok, _} = Consent.grant_consent(user.id, "search_indexing")
+      assert Consent.check_consent(user.id, "search_indexing") == true
+      # granting/one feature must not be read as, or disturb, another
+      assert Consent.check_consent(user.id, "analytics") == true
+
+      assert {:ok, _} = Consent.revoke_consent(user.id, "search_indexing")
+      assert Consent.check_consent(user.id, "search_indexing") == false
+      assert Consent.check_consent(user.id, "analytics") == true
+    end
+  end
+
   describe "ImageRetention.cleanup_expired_images/0" do
     test "deletes images with expires_at in the past" do
       now = DateTime.utc_now()

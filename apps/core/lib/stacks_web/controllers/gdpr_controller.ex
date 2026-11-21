@@ -54,7 +54,11 @@ defmodule StacksWeb.GDPRController do
     |> json(%{status: "accepted", message: "Account deletion has been queued."})
   end
 
-  @consent_types %{"analytics" => "analytics", "writing_assistant" => "writing_assistant"}
+  @consent_types %{
+    "analytics" => "analytics",
+    "writing_assistant" => "writing_assistant",
+    "search_indexing" => "search_indexing"
+  }
 
   @doc """
       POST /api/gdpr/consent — grant or revoke consent for a feature.
@@ -73,7 +77,7 @@ defmodule StacksWeb.GDPRController do
       {:error, :invalid_consent_type} ->
         conn
         |> put_status(422)
-        |> json(%{error: "type must be one of: analytics, writing_assistant"})
+        |> json(%{error: "type must be one of: analytics, writing_assistant, search_indexing"})
 
       {:error, :invalid_consent_value} ->
         conn
@@ -108,6 +112,13 @@ defmodule StacksWeb.GDPRController do
     %{
       consent_writing_assistant: user.consent_writing_assistant,
       consent_writing_assistant_at: user.consent_writing_assistant_at
+    }
+  end
+
+  defp consent_payload(user, "search_indexing") do
+    %{
+      consent_search_indexing: user.consent_search_indexing,
+      consent_search_indexing_at: user.consent_search_indexing_at
     }
   end
 

@@ -88,7 +88,9 @@ defmodule Stacks.Accounts do
       :consent_analytics,
       :consent_analytics_at,
       :consent_writing_assistant,
-      :consent_writing_assistant_at
+      :consent_writing_assistant_at,
+      :consent_search_indexing,
+      :consent_search_indexing_at
     ])
   end
 

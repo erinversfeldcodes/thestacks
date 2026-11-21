@@ -246,6 +246,7 @@
         age_verified: %{default: false},
         consent_analytics: %{default: false},
         consent_writing_assistant: %{default: false},
+        consent_search_indexing: %{default: false},
         syndication_default: %{default: true, null: false},
         onboarding_completed: %{generated_always: true},
         onboarding_steps: %{ecto_type: :map, default: %{}},

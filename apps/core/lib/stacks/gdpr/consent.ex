@@ -1,9 +1,11 @@
 defmodule Stacks.GDPR.Consent do
   @moduledoc """
       GDPR consent: grant, revoke, check — always with timestamps. Features:
-      `"analytics"` and `"writing_assistant"` (revoking the latter enqueues
+      `"analytics"`, `"writing_assistant"` (revoking the latter enqueues
       `WritingAssistantDataPurgeWorker` to erase AI session history +
-      embeddings). `feature` must be one of the known labels — it becomes a
+      embeddings), and `"search_indexing"` (the per-user opt-in that lets search
+      engines index the reader's PUBLIC content; default off, so public content
+      stays `noindex` until granted). `feature` must be one of the known labels — it becomes a
       telemetry tag, and an unbounded string would blow up Prometheus label
       cardinality; `GDPRController` whitelists before it reaches here.
   """
@@ -61,13 +63,18 @@ defmodule Stacks.GDPR.Consent do
   defp grant_attrs("writing_assistant", now),
     do: %{consent_writing_assistant: true, consent_writing_assistant_at: now}
 
+  defp grant_attrs("search_indexing", now),
+    do: %{consent_search_indexing: true, consent_search_indexing_at: now}
+
   defp grant_attrs(_analytics, now),
     do: %{consent_analytics: true, consent_analytics_at: now}
 
   defp revoke_attrs("writing_assistant"), do: %{consent_writing_assistant: false}
+  defp revoke_attrs("search_indexing"), do: %{consent_search_indexing: false}
   defp revoke_attrs(_analytics), do: %{consent_analytics: false}
 
   defp consented?(%User{consent_writing_assistant: v}, "writing_assistant"), do: v == true
+  defp consented?(%User{consent_search_indexing: v}, "search_indexing"), do: v == true
   defp consented?(%User{consent_analytics: v}, _analytics), do: v == true
 
   defp maybe_purge_on_revoke({:ok, user} = result, "writing_assistant") do

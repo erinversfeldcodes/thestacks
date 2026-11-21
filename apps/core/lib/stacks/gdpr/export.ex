@@ -165,6 +165,8 @@ defmodule Stacks.GDPR.Export do
           consent_analytics_at: user.consent_analytics_at,
           consent_writing_assistant: user.consent_writing_assistant,
           consent_writing_assistant_at: user.consent_writing_assistant_at,
+          consent_search_indexing: user.consent_search_indexing,
+          consent_search_indexing_at: user.consent_search_indexing_at,
           created_at: user.created_at,
           updated_at: user.updated_at
         },

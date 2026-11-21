@@ -76,6 +76,10 @@ message User {
   // (shelf + writing history used to personalise suggestions).
   bool consent_writing_assistant = 30 [json_name = "consent_writing_assistant"];
 
+  // Whether the user has opted in to search-engine indexing of their PUBLIC
+  // content. Default false: public content is noindex until the reader opts in.
+  bool consent_search_indexing = 39 [json_name = "consent_search_indexing"];
+
   // Whether the user has verified their age for age-gated content.
   bool age_verified = 8 [json_name = "age_verified"];
 
@@ -99,6 +103,9 @@ message User {
 
   // Timestamp of when writing-assistant consent was granted or revoked.
   google.protobuf.Timestamp consent_writing_assistant_at = 31 [json_name = "consent_writing_assistant_at"];
+
+  // Timestamp of when search-indexing consent was granted or revoked.
+  google.protobuf.Timestamp consent_search_indexing_at = 40 [json_name = "consent_search_indexing_at"];
 
   // Whether the user has completed onboarding.
   bool onboarding_completed = 13 [json_name = "onboarding_completed"];
