@@ -50,6 +50,7 @@ type alias Model =
 type Msg
     = PlacementsReceived (Result Http.Error (List Placement))
     | SessionExpiryDetected
+    | ComposeSessionExpired
     | BookSelected String
     | ConditionSelected String
     | PricingModeSelected String
@@ -132,6 +133,15 @@ update msg model maybeToken maybeUserId =
         SessionExpiryDetected ->
             ( model, Cmd.none, SessionExpired )
 
+        ComposeSessionExpired ->
+            -- The session expired on the submit itself, so there is an
+            -- in-progress draft to carry out: park it and let the login page
+            -- promise it survives, then restore it when the reader returns.
+            ( model
+            , Cmd.none
+            , SessionExpiredWithDraft (encodeDraft (toDraft model maybeUserId))
+            )
+
         PlacementsReceived result ->
             case result of
                 Ok placements ->
@@ -189,7 +199,7 @@ update msg model maybeToken maybeUserId =
                     , Effect.perform
                         (Effect.authed (Api.createListingRequest params)
                             token
-                            { onExpired = SessionExpiryDetected
+                            { onExpired = ComposeSessionExpired
                             , onResponse =
                                 Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
                                     >> ListingCreated
@@ -210,14 +220,11 @@ update msg model maybeToken maybeUserId =
                     )
 
                 Err err ->
-                    if Api.isUnauthorized err then
-                        ( model
-                        , Cmd.none
-                        , SessionExpiredWithDraft (encodeDraft (toDraft model maybeUserId))
-                        )
-
-                    else
-                        ( { model | submitState = Failure err }, Cmd.none, NoOut )
+                    -- A 401 is intercepted by `onExpired` (ComposeSessionExpired)
+                    -- before a response ever reaches here, so an error that
+                    -- arrives is a genuine failure to surface, not an expiry to
+                    -- recover the draft from.
+                    ( { model | submitState = Failure err }, Cmd.none, NoOut )
 
         ActivateListing listingId ->
             case maybeToken of

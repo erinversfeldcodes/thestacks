@@ -1,9 +1,9 @@
-import { test, expect, provenHeaders } from "./fixtures";
+import { test, expect } from "./fixtures";
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
   ensureBookOnLibrary,
-  hasSessionCookie,
+  expireSession,
   signInViaForm,
 } from "./helpers";
 
@@ -41,16 +41,13 @@ test.describe("Marketplace listing draft", () => {
     await page.fill("#contact-input", DRAFT_CONTACT);
     await page.fill("#description-input", DRAFT_DESCRIPTION);
 
-    // ⛔ `page.request` IS the reader: it shares the browser context's cookie
-    // jar, so the session travels without a header. The proof still has to be
-    // spelled out, because `page.request` is not the `request` fixture and so
-    // does not get the fixture's CSRF header.
-    const revokeResp = await page.request.delete("/api/auth/logout", {
-      headers: {
-        ...(await provenHeaders(page)),
-      },
-    });
-    expect(revokeResp.status()).toBe(204);
+    // ⛔ Expire the session the way a real TTL expiry does — corrupt the session
+    // cookie, leaving the CSRF cookie intact. `logout` would clear the CSRF
+    // cookie too, so the mid-compose write would fail the stateless
+    // double-submit check (403) before auth (401) is ever reached — and the
+    // draft-save path keys on 401 (`Api.isUnauthorized`), so a logout-based
+    // revoke never exercises the expiry branch this spec exists to prove.
+    await expireSession(page);
 
     await page
       .getByRole("button", { name: "Create Listing", exact: true })
@@ -66,10 +63,10 @@ test.describe("Marketplace listing draft", () => {
 
     await expect(page.getByTestId("login-error")).toHaveCount(0);
 
-    expect(
-      await hasSessionCookie(page),
-      "the revoked session must be cleared from the browser, not just forgotten"
-    ).toBe(false);
+    // An expiry leaves a present-but-invalid session cookie (unlike a logout,
+    // which clears it), so the credential's absence is the wrong thing to
+    // assert here. The refusal is proven by the session-expired notice and the
+    // redirect to /login above — the expiry path actually ran.
 
     const persistedDraft = await page.evaluate(
       (key) => localStorage.getItem(key),
