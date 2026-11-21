@@ -4,7 +4,7 @@ defmodule Core.Repo.Migrations.AddTheSanctionedReviewSourcesToTheEnum do
   # ALTER TYPE … ADD VALUE cannot run inside a transaction.
   @disable_ddl_transaction true
 
-  # US-2.1.1 §4 (ruling D6): the sanctioned review sources are Open Library,
+  # The sanctioned review sources are Open Library,
   # Reddit (already present), partner-pushed, and author/publisher RSS. The enum
   # only carried the OLD vocabulary (goodreads/reddit/storygraph/other), so three
   # of the four sanctioned values could not be stored and the write gate in

@@ -281,7 +281,7 @@ defmodule Stacks.TransparencyTest do
 
     test "a de-sanctioned review does not fill the reviews gap" do
       book = insert(:book)
-      # goodreads left the sanctioned set (US-2.1.1 §4) — it must not read as review enrichment
+      # goodreads left the sanctioned set — it must not read as review enrichment
       insert(:review_snapshot, book: book, source: "goodreads")
 
       profile = Transparency.enrichment_profile()

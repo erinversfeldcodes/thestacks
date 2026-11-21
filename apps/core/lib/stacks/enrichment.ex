@@ -76,7 +76,7 @@ defmodule Stacks.Enrichment do
     :stale_after
   ]
 
-  # ⛔ The sanctioned-source policy (US-2.1.1 §4, ruling D6), enforced where the
+  # ⛔ The sanctioned-source policy, enforced where the
   # write is — not in a fetcher, because a policy enforced only in the fetcher
   # lasts until the next fetcher, exactly as the ISBN hard gate lives in the
   # write (`Books.merge_edition/2`) rather than its callers. A source is
@@ -95,7 +95,7 @@ defmodule Stacks.Enrichment do
     "reddit" => ["reddit.com", "redd.it"]
   }
 
-  @doc "The review sources we hold a standing, checkable right to (US-2.1.1 §4)."
+  @doc "The review sources we hold a standing, checkable right to."
   @spec sanctioned_sources() :: [String.t()]
   def sanctioned_sources, do: @sanctioned_sources
 
@@ -107,7 +107,7 @@ defmodule Stacks.Enrichment do
     |> validate_required(@review_snapshot_required_fields)
     |> validate_length(:summary, max: 500)
     |> validate_inclusion(:source, @sanctioned_sources,
-      message: "is not a sanctioned review source (US-2.1.1 §4, ruling D6)"
+      message: "is not a sanctioned review source"
     )
     |> validate_source_url_host()
     |> foreign_key_constraint(:book_id)
@@ -165,7 +165,7 @@ defmodule Stacks.Enrichment do
   ⛔ Filters to `sanctioned_sources/0` at READ time as well as write time, so a
   source that is DE-sanctioned (removed from the list) stops being displayed
   without a data migration — "a source list that can only grow is not a policy"
-  (US-2.1.1 §4). A snapshot written while its source was sanctioned, whose source
+  A snapshot written while its source was sanctioned, whose source
   later leaves the list, simply stops appearing.
   """
   @spec list_sanctioned_reviews(binary()) :: [ReviewSnapshot.t()]
@@ -182,8 +182,7 @@ defmodule Stacks.Enrichment do
 
   @doc """
   Fetch Open Library ratings for a book's OL work and store them as the
-  `open_library` review snapshot (the preferred first sanctioned source,
-  US-2.1.1 §4). Open Library returns an average rating and a count and no
+  `open_library` review snapshot (the preferred first sanctioned source). Open Library returns an average rating and a count and no
   sentiment text, so the snapshot carries a rating and a count and nothing it
   would have to summarise. The write goes through `review_snapshot_changeset/2`,
   so the sanctioned-source gate applies to this path like any other.

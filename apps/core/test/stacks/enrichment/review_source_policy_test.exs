@@ -1,6 +1,6 @@
 defmodule Stacks.Enrichment.ReviewSourcePolicyTest do
   @moduledoc """
-  US-2.1.1 §4 (ruling D6): reviews may come ONLY from sanctioned sources, and the
+  Reviews may come ONLY from sanctioned sources, and the
   list is enforced in the WRITE, not by convention. These prove the changeset
   refuses an unsanctioned source and a sanctioned source that links elsewhere —
   the guard the deleted implementation never had while it scraped GoodReads.
@@ -31,7 +31,7 @@ defmodule Stacks.Enrichment.ReviewSourcePolicyTest do
 
     refute cs.valid?
 
-    assert "is not a sanctioned review source (US-2.1.1 §4, ruling D6)" in errors_on(cs).source
+    assert "is not a sanctioned review source" in errors_on(cs).source
   end
 
   test "a snapshot may not claim a sanctioned source while linking to another host" do

@@ -1,6 +1,6 @@
 defmodule Stacks.Workers.FetchBookReviewsJob do
   @moduledoc """
-  The trigger for the sanctioned review vertical (US-2.1.1 §4): fetch a book's
+  The trigger for the sanctioned review vertical: fetch a book's
   Open Library ratings and store them as its `open_library` review snapshot.
 
   Open Library reviews are per-WORK, so this needs the OL work id resolved at

@@ -137,7 +137,7 @@ GATE_SRC="$(cat "$GATE")"
 # Extract the STACK_PATHS dict VALUES only — isolate the dict block, drop each
 # line's key (everything up to its first colon), then harvest quoted strings.
 # This excludes the keys ("elixir", …) and every other quoted path elsewhere in
-# the file (`origin/main`, `issues/complete/`) that is not a review-axis tree.
+# the file (such as `origin/main`) that is not a review-axis tree.
 mapfile -t STACK_TREES < <(
     awk '/STACK_PATHS *= *\{/{f=1;next} /^\}/{f=0} f' "$WAVE" 2>/dev/null \
         | sed 's/^[^:]*://' \

@@ -16,7 +16,7 @@ defmodule CoreWeb.PageController do
 
   # The per-resource crawl directive, FAIL-CLOSED: every SPA shell response is
   # `noindex` unless it is a reader's PUBLIC profile AND that reader opted in to
-  # search indexing (US-10.4.1 / the per-user opt-in). A missing handle, a
+  # search indexing (the per-user opt-in). A missing handle, a
   # non-public profile, or no opt-in all fall through to noindex — the global
   # default this header replaces. The opt-in alone is not enough: only a
   # `public`-visibility profile of an opted-in user is indexable.
