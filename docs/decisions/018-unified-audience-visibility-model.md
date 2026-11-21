@@ -248,21 +248,22 @@ overlay types are defined **once** in proto and generated everywhere:
 - RLS role-switching integration tests must be updated in the *same* change as the
   application-layer rank function.
 
-**Deferred / Open questions** — ⚠️ these were deferred to an implementation issue whose number
-no longer resolves to anything; they are now carried by **#490**, which records each decision
-rather than citing one. Each item below is a RECOMMENDATION, not a ruling.
+**Resolved questions** — ⚖️ **RULED by the owner 2026-11-21.** These were carried by **#490**;
+each recommendation below is now ACCEPTED as the ruling, with one amendment: the per-user opt-in
+indexing that items 2 and 3 wait on is no longer a vague Phase-6 deferral — it is SCOPED, DESIGNED
+E2E and ASSIGNED as issue #637 (wave 13, W13m), and `AUDIENCE_PUBLIC` is enabled when that lands.
 1. **Multi-group visibility.** Today `visibility_group_id` is a single FK — a resource
    is scoped to exactly one group; US-11.1.5 only needs "this group or broader."
-   Recommendation: **keep single-FK now**; design the `Audience.GROUP` type so
+   ⚖️ RULED: **keep single-FK now**; design the `Audience.GROUP` type so
    cardinality can grow to a join table (`*_visibility_groups`) later without a
    vocabulary change.
-2. **Enable `AUDIENCE_PUBLIC` now, or keep reserved?** Recommendation: **reserved** —
+2. **Enable `AUDIENCE_PUBLIC` now, or keep reserved?** ⚖️ RULED: **reserved** —
    effective ceiling stays `PLATFORM` until the per-user opt-in indexing story is
    scheduled.
 3. **Discoverability as a stored per-resource field now, or keep global?**
-   Recommendation: **model the type now, keep the global `noindex` behavior** as the
+   ⚖️ RULED: **model the type now, keep the global `noindex` behavior** as the
    default; wire per-user/per-visibility opt-in when Phase 6 anti-scraping lands.
-4. **Phasing.** The refactor is too large for one atomic change. The phase plan is
+4. **Phasing.** ⚖️ RULED: accept the phase plan. The refactor is too large for one atomic change. The phase plan is
    proto+codegen → resolver+rank → controllers/Elm → dbt/warehouse → RLS + data
    migration, each behind the property suite — stated here rather than by reference,
    because the issue it used to point at had gone.
