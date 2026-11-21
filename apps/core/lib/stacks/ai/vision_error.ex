@@ -148,6 +148,15 @@ defmodule Stacks.AI.VisionError do
   defp from_code("VISION_ERROR_CODE_IMAGE_UNREACHABLE", _status),
     do: emit(:image_unreachable, {:undecodable_image, "image_unreachable"})
 
+  # Kept though `/analyze` cannot currently emit code 4 (NO_IMAGE_SUPPLIED is
+  # unreachable — the oneof rejects the empty case before a handler runs; see
+  # vision.proto). The reason is RETRY SEMANTICS, not sidecar version skew:
+  # deploy-stack.sh ships the sidecar from the same checkout and before core, so
+  # the sidecar is never behind, and an "older sidecar might emit 4" story does
+  # not hold. What this clause buys is that an unexpected 4 is a CANCEL — delete
+  # it and code 4 falls through to the unrecognised-code path, is retried, and
+  # costs three GPU attempts at a deterministic failure, the exact waste the enum
+  # exists to remove.
   defp from_code("VISION_ERROR_CODE_NO_IMAGE_SUPPLIED", _status),
     do: emit(:no_image_supplied, {:undecodable_image, "no_image_supplied"})
 
