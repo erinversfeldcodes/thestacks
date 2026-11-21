@@ -273,6 +273,10 @@ sources:
             description: Whether the user consented to writing-assistant personalisation.
           - name: consent_writing_assistant_at
             description: Timestamp of writing-assistant consent decision.
+          - name: consent_search_indexing
+            description: Whether the user consented to search-engine indexing of their public profile.
+          - name: consent_search_indexing_at
+            description: Timestamp of search-indexing consent decision.
           - name: syndication_default
             description: Account-level default for new posts' syndication-feed inclusion.
           - name: created_at
