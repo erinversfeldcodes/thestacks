@@ -266,6 +266,17 @@ history. `int_source_health` went with them — note that the operational view a
 from `Monitoring.list_source_health/0`, which queries the `op.source_health_checks` TABLE directly
 and is unaffected.
 
+✅ **Delivered 2026-11-21 (the nutrition-label goal, one dimension, with its reader).**
+`Stacks.Transparency.enrichment_profile/0` publishes a catalogue **enrichment** nutrition label on
+the public `/metrics` page (`GET /api/transparency/metrics` → `profiles`): per-dimension gap counts
+and shares for cover art, price data, and sanctioned reviews — a *profile*, never a collapsed
+score. It is read from **op-data directly** (like `durable_stats/0`), not a mart, because the
+transparency surface already reads op-data and that is "a reader exists and was observed reading it"
+rather than another unread mart. The richer **causal** grouping the deleted `mart_enrichment_gaps`
+implied (no source configured vs. source broken vs. never scraped) needs the `int_source_health`
+rollup and is the next dimension, tracked as a follow-up — this closes the *instance* (enrichment
+gaps by type), not the *class* (every data product's full causal profile).
+
 | dbt model | Layer | Purpose |
 |-----------|-------|---------|
 | `stg_price_snapshots` | staging | Clean price data (proto-generated) |
