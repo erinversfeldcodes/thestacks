@@ -219,8 +219,8 @@ message RetrievalLog {
   repeated double scores = 5 [json_name = "scores"];
 
   // Zero-based index into the session's ordered messages for the turn this
-  // retrieval served (see `BlogAssistantFeedback.turn_index`: the ordinal indexes
-  // the message sequence; there is no `Turn` message).
+  // retrieval served (see `TurnFeedback.turn_index`: the ordinal indexes the
+  // message sequence; there is no `Turn` message).
   int32 turn_index = 6 [json_name = "turn_index"];
 
   // When the retrieval was performed.

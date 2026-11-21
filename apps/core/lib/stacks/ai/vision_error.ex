@@ -154,9 +154,11 @@ defmodule Stacks.AI.VisionError do
   # deploy-stack.sh ships the sidecar from the same checkout and before core, so
   # the sidecar is never behind, and an "older sidecar might emit 4" story does
   # not hold. What this clause buys is that an unexpected 4 is a CANCEL — delete
-  # it and code 4 falls through to the unrecognised-code path, is retried, and
-  # costs three GPU attempts at a deterministic failure, the exact waste the enum
-  # exists to remove.
+  # it and code 4 falls through to the unrecognised-code path and is retried,
+  # burning three attempts on a deterministic failure — the exact waste the enum
+  # exists to remove. (This code fails in sidecar validation before a GPU is
+  # allocated, so those three are wasted round-trips rather than GPU dispatches —
+  # wasted all the same.)
   defp from_code("VISION_ERROR_CODE_NO_IMAGE_SUPPLIED", _status),
     do: emit(:no_image_supplied, {:undecodable_image, "no_image_supplied"})
 
