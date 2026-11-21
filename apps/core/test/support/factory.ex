@@ -31,7 +31,6 @@ defmodule Stacks.Factory do
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
-  alias Stacks.Visibility
 
   alias Stacks.WritingAssistant.{
     BookContentChunk,
@@ -291,32 +290,28 @@ defmodule Stacks.Factory do
     end
   end
 
-  # The profile ceiling: a bookshelf cannot be more exposed than its owner's
-  # profile. `assert_shelvable` validates the enum and name but not this pairing,
-  # because `Shelving.bookshelf_changeset/2` never sees the owner's profile — the
-  # write path enforces it separately (`set_bookshelf_visibility/3` via
-  # `validate_bookshelf_profile_ceiling`, keyed on the user). Building the struct
-  # directly would otherwise mint a bookshelf the write path refuses and the read
-  # path hides. Pass `allow_over_ceiling: true` ONLY when a test deliberately
-  # builds the impossible pairing to prove it is refused or hidden.
+  # Mirror the EXACT production rule (`Shelving.validate_bookshelf_profile_ceiling`,
+  # shelving.ex:848): the write path refuses a bookshelf ONLY when its owner's
+  # profile is "owner" (fully private) and the shelf is more exposed than owner. A
+  # platform or public profile places NO ceiling on its shelves. `assert_shelvable`
+  # validates the enum and name but not this pairing (`Shelving.bookshelf_changeset/2`
+  # never sees the owner's profile). The full exposure ladder would be STRICTER than
+  # production — it would forbid, e.g., a platform profile's public shelf, which the
+  # write path creates — so a legitimate fixture would be forced to misuse the escape.
+  # Pass `allow_over_ceiling: true` ONLY when a test deliberately builds the refused
+  # owner-profile pairing to prove it is hidden or clamped (e.g. the recap worker's
+  # transient owner-profile + exposed-shelf input, a real post-downgrade leftover).
   defp assert_within_profile_ceiling(bookshelf, _user, true), do: bookshelf
 
   defp assert_within_profile_ceiling(%Bookshelf{} = bookshelf, user, false) do
-    case Visibility.validate_visibility_ceiling(
-           bookshelf.visibility,
-           user.profile_visibility,
-           "bookshelf"
-         ) do
-      :ok ->
-        bookshelf
-
-      {:error, message} ->
-        raise ArgumentError,
-              "bookshelf exceeds its owner's profile ceiling: " <>
-                message <>
-                " — raise the owner's profile_visibility to match, or pass " <>
-                "allow_over_ceiling: true if the test builds the impossible " <>
-                "pairing on purpose to prove it is refused."
+    if user.profile_visibility == "owner" and bookshelf.visibility != "owner" do
+      raise ArgumentError,
+            "bookshelf '#{bookshelf.visibility}' on an 'owner' (fully private) profile is " <>
+              "refused by the write path (set_bookshelf_visibility/3). Raise the owner's " <>
+              "profile_visibility off 'owner', or pass allow_over_ceiling: true if the test " <>
+              "builds this pairing on purpose to prove it is refused or hidden."
+    else
+      bookshelf
     end
   end
 

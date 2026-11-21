@@ -66,7 +66,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "returns {:error, :not_public} for group-visibility bookshelf" do
-      user = insert(:user, profile_visibility: "group")
+      user = insert(:user, profile_visibility: "platform")
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
 
       assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library", user)

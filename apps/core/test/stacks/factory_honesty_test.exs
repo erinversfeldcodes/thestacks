@@ -357,7 +357,7 @@ defmodule Stacks.FactoryHonestyTest do
       # minting a pairing production cannot create and the read path hides.
       owner = build(:user, profile_visibility: "owner")
 
-      assert_raise ArgumentError, ~r/exceeds its owner's profile ceiling/, fn ->
+      assert_raise ArgumentError, ~r/refused by the write path/, fn ->
         build(:bookshelf, user: owner, visibility: "public")
       end
     end

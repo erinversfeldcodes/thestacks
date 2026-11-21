@@ -539,7 +539,7 @@ defmodule StacksWeb.ProtoJSONTest do
     end
 
     test "emits placement visibility and parent bookshelf visibility independently" do
-      user = insert(:user, profile_visibility: "group")
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
       book = insert(:book)
 

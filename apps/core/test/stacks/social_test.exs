@@ -651,7 +651,7 @@ defmodule Stacks.SocialTest do
 
   describe "grant_visibility/3" do
     test "happy path: grant created for group-visibility bookshelf" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -663,7 +663,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":unauthorized when caller doesn't own bookshelf" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       other = insert(:user)
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
@@ -681,7 +681,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":already_granted on duplicate" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -694,7 +694,7 @@ defmodule Stacks.SocialTest do
 
   describe "revoke_visibility/3" do
     test "happy path: grant deleted" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
       {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
@@ -704,7 +704,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":unauthorized for non-owner" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       other = insert(:user)
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
@@ -715,7 +715,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":not_found when no grant exists" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -726,7 +726,7 @@ defmodule Stacks.SocialTest do
 
   describe "list_visibility_grants/2" do
     test "returns grants for bookshelf owner" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
       {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
@@ -737,7 +737,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":unauthorized for non-owner" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       other = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -747,7 +747,7 @@ defmodule Stacks.SocialTest do
 
   describe "has_visibility_grant?/2" do
     test "returns true when grant exists" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
       {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
@@ -756,7 +756,7 @@ defmodule Stacks.SocialTest do
     end
 
     test "returns false when no grant exists" do
-      owner = insert(:user, profile_visibility: "group")
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 

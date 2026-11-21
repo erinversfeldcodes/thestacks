@@ -15,7 +15,7 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
   defp group_bookshelf(user) do
     # A group-visibility bookshelf can only exist under an owner whose profile
     # admits group exposure, so raise the owner to match before creating it.
-    owner = Core.Repo.update!(Ecto.Changeset.change(user, profile_visibility: "group"))
+    owner = Core.Repo.update!(Ecto.Changeset.change(user, profile_visibility: "platform"))
     insert(:bookshelf, user: owner, visibility: "group")
   end
 
