@@ -145,10 +145,13 @@ mapfile -t STACK_TREES < <(
 )
 missing=""
 for t in "${STACK_TREES[@]}"; do
-    # Covered if some AXIS_PREFIXES or ALLOWLIST line contains this tree as a prefix.
-    if ! printf '%s\n' "$GATE_SRC" | grep -qF "\"$t"; then
+    # Covered if some AXIS_PREFIXES or ALLOWLIST line contains this tree as a
+    # prefix. A here-string, not a pipe into grep -q: under pipefail an
+    # early-exiting grep -q SIGPIPEs the producer and the pipeline reports 141,
+    # which would read as "no match" on a match (check-sigpipe-hazards.sh).
+    if ! grep -qF "\"$t" <<<"$GATE_SRC"; then
         # tolerate a trailing-slash difference (STACK_PATHS "apps/core/lib" vs gate "apps/core/lib/")
-        if ! printf '%s\n' "$GATE_SRC" | grep -qF "\"${t%/}/"; then
+        if ! grep -qF "\"${t%/}/" <<<"$GATE_SRC"; then
             missing="${missing} ${t}"
         fi
     fi
