@@ -1,6 +1,7 @@
 # ADR 027: Writing Assistant Architecture (the design, as amended by what shipped)
 
 **Status:** ACCEPTED (owner ruling 2026-11-20: "ADR 27 is acceptable").
+**Amendment 2026-11-21 (owner):** the full build is scheduled as campaign wave 24, and **LoRA is IN-SCOPE for it** — overriding this ADR's original Phase-7 deferral of fine-tuning. The research's gate stands as a HARD precondition: the adapter ships only behind a canary + extraction + membership-inference eval (a 16-rep canary reproduced in full on a 7B LoRA), RAG-only remains the default, and the adapter is handled at the corpus's data classification (erasure reaches it).
 **Date:** 2026-11-20 (proposed) / 2026-11-20 (accepted)
 **Deciders:** Platform owner
 **Technical area:** Writing assistant (Socratic editor panel), LLM platform
