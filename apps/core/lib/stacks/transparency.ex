@@ -15,6 +15,8 @@ defmodule Stacks.Transparency do
   alias Core.Repo
   alias Stacks.Books.{Book, BookEdition}
   alias Stacks.Costs
+  alias Stacks.Enrichment
+  alias Stacks.Enrichment.{PriceSnapshot, ReviewSnapshot}
   alias Stacks.Transparency.Cache
 
   @cache_ttl_seconds 45
@@ -115,6 +117,7 @@ defmodule Stacks.Transparency do
   @spec metrics() :: %{
           live: [map()] | :unavailable,
           durable: [map()],
+          profiles: [map()],
           generated_at: DateTime.t(),
           cache_ttl: pos_integer()
         }
@@ -122,6 +125,7 @@ defmodule Stacks.Transparency do
     %{
       live: cached_live_signals(),
       durable: durable_stats(),
+      profiles: [enrichment_profile()],
       generated_at: DateTime.utc_now(),
       cache_ttl: @cache_ttl_seconds
     }
@@ -199,6 +203,78 @@ defmodule Stacks.Transparency do
       )
     ]
   end
+
+  @doc """
+      A data NUTRITION LABEL for the catalogue: not a quality score, but a profile
+      of what enrichment the corpus actually has and what it is missing, broken
+      out per dimension with the share of the catalogue each gap covers. "Quality
+      for what?" — a reader browsing wants covers; a reader buying wants prices;
+      a reader deciding wants reviews, so the label names each rather than
+      collapsing them into one green/amber/red gauge.
+
+      Read from op-data directly (like `durable_stats/0`), never a per-user row.
+      This is one dimension-set; the richer causal grouping (no source configured
+      vs. source broken vs. never scraped) needs the source-health intermediate
+      and is tracked as the follow-up.
+  """
+  @spec enrichment_profile() :: map()
+  def enrichment_profile do
+    total = Costs.book_count()
+
+    %{
+      key: :enrichment_gaps,
+      label: "Catalogue enrichment",
+      what:
+        "What share of catalogued works are missing each kind of enrichment — cover art, price data, and sanctioned reviews.",
+      how:
+        "For each dimension, the count of distinct works with NO such record in op-data, over the total works. A corpus profile, never a per-user value.",
+      why:
+        "A single quality score hides which half is thin. A reader buying cares about prices; a reader browsing cares about covers. The label says which, honestly.",
+      total_books: total,
+      dimensions: [
+        gap_dimension(
+          "cover art",
+          total,
+          distinct_books(
+            from(e in BookEdition, where: not is_nil(e.cover_image_url), select: e.book_id)
+          )
+        ),
+        gap_dimension(
+          "price data",
+          total,
+          distinct_books(from(p in PriceSnapshot, select: p.book_id))
+        ),
+        gap_dimension(
+          "sanctioned reviews",
+          total,
+          distinct_books(
+            from(r in ReviewSnapshot,
+              where: r.source in ^Enrichment.sanctioned_sources(),
+              select: r.book_id
+            )
+          )
+        )
+      ]
+    }
+  end
+
+  defp gap_dimension(name, total, present) do
+    missing = max(total - present, 0)
+
+    %{
+      dimension: name,
+      present: present,
+      missing: missing,
+      missing_pct: pct(missing, total)
+    }
+  end
+
+  defp distinct_books(queryable) do
+    Repo.aggregate(from(x in subquery(distinct(queryable, true)), select: x.book_id), :count)
+  end
+
+  defp pct(_missing, 0), do: 0.0
+  defp pct(missing, total), do: Float.round(missing / total * 100, 1)
 
   defp cached_live_signals do
     case Cache.get(@live_cache_key, @cache_ttl_ms) do
