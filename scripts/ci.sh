@@ -197,6 +197,12 @@ if has_group platform; then
     if ! run_group "platform: script wiring" bash scripts/check-script-wiring.sh; then
         FAILED+=(platform-script-wiring)
     fi
+    # Every CHANGED file of running code maps to a review axis (or an allowlisted
+    # tree) — the inverse of STACK_PATHS, so a module reviewed by nobody is a
+    # failing diff rather than a silent pass (RL-472/RL-450).
+    if ! run_group "platform: axis coverage" bash scripts/check-axis-coverage.sh; then
+        FAILED+=(platform-axis-coverage)
+    fi
     # The project-tools MCP server's own suite — orphaned once, never again.
     if ! run_group "platform: mcp server tests" bash scripts/test-mcp.sh; then
         FAILED+=(platform-mcp)

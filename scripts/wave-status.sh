@@ -171,11 +171,16 @@ violations, actionable, informal, scope_notes = [], [], [], []
 # ══════════════════════════════════════════════════════════════════════════════
 
 STACK_PATHS = {
-    "elixir": ("apps/core/lib", "apps/core/test"),
-    "elm": ("frontend/src", "frontend/tests"),
+    # config/ and apps/core/config are Elixir config (runtime.exs/test.exs/dev.exs
+    # and the storage/role selectors they drive) — they belong to the elixir axis,
+    # not to nobody. A config selector shipped a production defect while mapping to
+    # no reviewer (RL-472); mapping it here is what makes a config change stale the
+    # elixir review instead of passing unseen.
+    "elixir": ("apps/core/lib", "apps/core/test", "config/", "apps/core/config"),
+    "elm": ("frontend/src", "frontend/tests", "apps/core/assets", "frontend/css"),
     "database": ("apps/core/priv/repo", "dbt/"),
     "contract": ("proto/",),
-    "platform": ("scripts/", ".github/", "justfile", "test/platform"),
+    "platform": ("scripts/", ".github/", "justfile", "test/", "e2e/", "setup.sh"),
     "python": ("apps/vision",),
     "rust": ("apps/scraper",),
 }
