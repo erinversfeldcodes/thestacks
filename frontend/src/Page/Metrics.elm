@@ -21,7 +21,7 @@ section is `unavailable` (Prometheus unconfigured) or the whole fetch fails.
 
 -}
 
-import Api exposing (LiveSignals(..), TransparencyEntry, TransparencyMetrics)
+import Api exposing (LiveSignals(..), ProfileDimension, TransparencyEntry, TransparencyMetrics, TransparencyProfile)
 import Effect exposing (Effect)
 import Html exposing (Html, a, details, div, h1, h2, h3, p, section, span, summary, text)
 import Html.Attributes exposing (class, href, rel, target)
@@ -107,6 +107,7 @@ viewMetrics metrics =
     div [ class "metrics__content", testId "metrics-content" ]
         [ viewCostsWidget metrics.durable
         , viewLiveSection metrics.live
+        , viewProfilesSection metrics.profiles
         , viewDurableSection metrics.durable
         , viewObserveSection
         ]
@@ -164,6 +165,44 @@ viewLiveSection live =
             LiveUnavailable ->
                 p [ class "metrics__unavailable", testId "metrics-live-unavailable" ]
                     [ text "Live signals are currently unavailable. The durable figures below are still accurate." ]
+        ]
+
+
+viewProfilesSection : List TransparencyProfile -> Html Msg
+viewProfilesSection profiles =
+    section [ class "metrics__section metrics__section--profiles", testId "metrics-profiles-section" ]
+        (h2 [ class "metrics__section-title" ] [ text "Data nutrition labels" ]
+            :: p [ class "metrics__section-lede" ]
+                [ text "Not a quality score — a profile of what the catalogue actually holds and what it is missing, broken out so you can see which half is thin." ]
+            :: List.map viewProfile profiles
+        )
+
+
+viewProfile : TransparencyProfile -> Html Msg
+viewProfile profile =
+    div [ class "metrics__profile", testId "metrics-profile" ]
+        [ h3 [ class "metrics__profile-title" ] [ text profile.label ]
+        , p [ class "metrics__profile-total" ]
+            [ text (String.fromInt profile.totalBooks ++ " works catalogued") ]
+        , div [ class "metrics__profile-dimensions" ] (List.map viewDimension profile.dimensions)
+        , p [ class "metrics__profile-why" ] [ text profile.why ]
+        ]
+
+
+viewDimension : ProfileDimension -> Html Msg
+viewDimension dim =
+    div [ class "metrics__dimension", testId "metrics-profile-dimension" ]
+        [ span [ class "metrics__dimension-name" ] [ text dim.dimension ]
+        , span [ class "metrics__dimension-stat" ]
+            [ text
+                (String.fromInt dim.present
+                    ++ " of "
+                    ++ String.fromInt (dim.present + dim.missing)
+                    ++ " — "
+                    ++ String.fromFloat dim.missingPct
+                    ++ "% missing"
+                )
+            ]
         ]
 
 

@@ -27,6 +27,13 @@ livePayload =
         {"key":"total_books","label":"Books catalogued","what":"total distinct works","how":"count of rows","why":"honest measure","unit":"books","value":42},
         {"key":"platform_cost_cents","label":"Platform cost this period","what":"what it costs to run","how":"sum of line items","why":"free platforms sell your data","unit":"usd_cents","value":1309}
       ],
+      "profiles": [
+        {"key":"enrichment_gaps","label":"Catalogue enrichment","what":"what share is missing each enrichment","how":"distinct works with no record over total","why":"a single score hides which half is thin","total_books":42,"dimensions":[
+          {"dimension":"cover art","present":30,"missing":12,"missing_pct":28.6},
+          {"dimension":"price data","present":20,"missing":22,"missing_pct":52.4},
+          {"dimension":"sanctioned reviews","present":5,"missing":37,"missing_pct":88.1}
+        ]}
+      ],
       "generated_at":"2026-07-16T12:00:00.000000Z",
       "cache_ttl":45
     }
@@ -40,6 +47,13 @@ unavailablePayload =
       "live":"unavailable",
       "durable":[
         {"key":"total_books","label":"Books catalogued","what":"total distinct works","how":"count of rows","why":"honest measure","unit":"books","value":42}
+      ],
+      "profiles": [
+        {"key":"enrichment_gaps","label":"Catalogue enrichment","what":"what share is missing each enrichment","how":"distinct works with no record over total","why":"a single score hides which half is thin","total_books":42,"dimensions":[
+          {"dimension":"cover art","present":30,"missing":12,"missing_pct":28.6},
+          {"dimension":"price data","present":20,"missing":22,"missing_pct":52.4},
+          {"dimension":"sanctioned reviews","present":5,"missing":37,"missing_pct":88.1}
+        ]}
       ],
       "generated_at":"2026-07-16T12:00:00.000000Z",
       "cache_ttl":45
@@ -126,6 +140,37 @@ suite =
                     Ok metrics ->
                         List.length metrics.durable
                             |> Expect.equal 1
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "decodes the enrichment nutrition-label profile with its dimensions" <|
+            \() ->
+                case Decode.decodeString Api.transparencyMetricsDecoder livePayload of
+                    Ok metrics ->
+                        case List.head metrics.profiles of
+                            Just profile ->
+                                Expect.all
+                                    [ \p -> Expect.equal "enrichment_gaps" p.key
+                                    , \p -> Expect.equal 42 p.totalBooks
+                                    , \p -> Expect.equal 3 (List.length p.dimensions)
+                                    , \p ->
+                                        case List.head p.dimensions of
+                                            Just dim ->
+                                                Expect.all
+                                                    [ \d -> Expect.equal "cover art" d.dimension
+                                                    , \d -> Expect.equal 30 d.present
+                                                    , \d -> Expect.equal 12 d.missing
+                                                    , \d -> Expect.within (Expect.Absolute 0.001) 28.6 d.missingPct
+                                                    ]
+                                                    dim
+
+                                            Nothing ->
+                                                Expect.fail "expected a dimension"
+                                    ]
+                                    profile
+
+                            Nothing ->
+                                Expect.fail "expected at least one profile"
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)

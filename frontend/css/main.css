@@ -4886,6 +4886,68 @@ h4 {
     line-height: 1.1;
 }
 
+.metrics__section--profiles {
+    margin-top: 2rem;
+}
+
+.metrics__profile {
+    background: linear-gradient(145deg, rgba(61, 43, 31, 0.6), rgba(42, 31, 20, 0.8));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.metrics__profile-title {
+    font-family: var(--font-heading);
+    font-size: var(--size-xxl);
+    color: var(--text);
+    margin: 0;
+}
+
+.metrics__profile-total {
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    margin: 0;
+}
+
+.metrics__profile-dimensions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.metrics__dimension {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.metrics__dimension-name {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.metrics__dimension-stat {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--size-sm);
+    text-align: right;
+}
+
+.metrics__profile-why {
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    font-style: italic;
+    margin: 0;
+}
+
 .metrics__teaching {
     border-top: 1px solid var(--border);
     padding-top: 0.75rem;

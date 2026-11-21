@@ -82,6 +82,7 @@ livePayload =
         {"key":"total_books","label":"Books catalogued","what":"The total number of distinct works.","how":"A count of rows in the books table.","why":"The simplest honest measure of the library.","unit":"books","value":42},
         {"key":"platform_cost_cents","label":"Platform cost this period","what":"What it costs to run the platform.","how":"The sum of infrastructure line items.","why":"Running a platform costs money.","unit":"usd_cents","value":1309}
       ],
+      "profiles": [{"key":"enrichment_gaps","label":"Catalogue enrichment","what":"what the catalogue is missing","how":"distinct works with no record over total","why":"a single score hides which half is thin","total_books":42,"dimensions":[{"dimension":"cover art","present":30,"missing":12,"missing_pct":28.6}]}],
       "generated_at":"2026-07-16T12:00:00.000000Z",
       "cache_ttl":45
     }
@@ -96,6 +97,7 @@ unavailablePayload =
       "durable":[
         {"key":"total_books","label":"Books catalogued","what":"The total number of distinct works.","how":"A count of rows in the books table.","why":"The simplest honest measure of the library.","unit":"books","value":42}
       ],
+      "profiles": [{"key":"enrichment_gaps","label":"Catalogue enrichment","what":"what the catalogue is missing","how":"distinct works with no record over total","why":"a single score hides which half is thin","total_books":42,"dimensions":[{"dimension":"cover art","present":30,"missing":12,"missing_pct":28.6}]}],
       "generated_at":"2026-07-16T12:00:00.000000Z",
       "cache_ttl":45
     }

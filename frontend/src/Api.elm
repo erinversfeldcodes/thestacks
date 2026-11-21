@@ -59,6 +59,7 @@ module Api exposing
     , PollResponse
     , PollStatus(..)
     , PrivacySettings
+    , ProfileDimension
     , ProfileError(..)
     , ProfileSaved
     , ProfileShelfSummary
@@ -85,6 +86,7 @@ module Api exposing
     , SyndicationExport
     , TransparencyEntry
     , TransparencyMetrics
+    , TransparencyProfile
     , UploadInit
     , accountDecoder
     , adminBookDecoder
@@ -1960,6 +1962,34 @@ type alias TransparencyEntry =
     }
 
 
+{-| One dimension of a data nutrition label: how many works have this kind of
+enrichment and how many are missing it, with the missing share. A profile of
+these is shown INSTEAD of a single quality score, so a reader sees which half of
+the catalogue is thin rather than one green/amber/red gauge.
+-}
+type alias ProfileDimension =
+    { dimension : String
+    , present : Int
+    , missing : Int
+    , missingPct : Float
+    }
+
+
+{-| A data nutrition label for one data product (the catalogue): a set of gap
+dimensions, each with its share, plus the total it is measured against. Never a
+collapsed score — the dimensions are the point.
+-}
+type alias TransparencyProfile =
+    { key : String
+    , label : String
+    , what : String
+    , how : String
+    , why : String
+    , totalBooks : Int
+    , dimensions : List ProfileDimension
+    }
+
+
 {-| The live-signals section of the transparency payload. The backend degrades to
 `"unavailable"` (rather than an error) when Prometheus is unconfigured or every
 whitelisted query fails, so the page can render the durable section regardless.
@@ -1975,6 +2005,7 @@ type LiveSignals
 type alias TransparencyMetrics =
     { live : LiveSignals
     , durable : List TransparencyEntry
+    , profiles : List TransparencyProfile
     , generatedAt : String
     , cacheTtl : Int
     }
@@ -2004,11 +2035,33 @@ liveSignalsDecoder =
         ]
 
 
+profileDimensionDecoder : Decoder ProfileDimension
+profileDimensionDecoder =
+    Decode.map4 ProfileDimension
+        (Decode.field "dimension" Decode.string)
+        (Decode.field "present" Decode.int)
+        (Decode.field "missing" Decode.int)
+        (Decode.field "missing_pct" Decode.float)
+
+
+transparencyProfileDecoder : Decoder TransparencyProfile
+transparencyProfileDecoder =
+    Decode.map7 TransparencyProfile
+        (Decode.field "key" Decode.string)
+        (Decode.field "label" Decode.string)
+        (Decode.field "what" Decode.string)
+        (Decode.field "how" Decode.string)
+        (Decode.field "why" Decode.string)
+        (Decode.field "total_books" Decode.int)
+        (Decode.field "dimensions" (Decode.list profileDimensionDecoder))
+
+
 transparencyMetricsDecoder : Decoder TransparencyMetrics
 transparencyMetricsDecoder =
-    Decode.map4 TransparencyMetrics
+    Decode.map5 TransparencyMetrics
         (Decode.field "live" liveSignalsDecoder)
         (Decode.field "durable" (Decode.list transparencyEntryDecoder))
+        (Decode.field "profiles" (Decode.list transparencyProfileDecoder))
         (Decode.field "generated_at" Decode.string)
         (Decode.field "cache_ttl" Decode.int)
 
