@@ -993,6 +993,8 @@ jobs:
       # A platform suite asserts that these stay in step with the local group.
       - name: Script wiring and inventory
         run: bash scripts/check-script-wiring.sh
+      - name: Axis coverage
+        run: bash scripts/check-axis-coverage.sh
       - name: MCP server tests
         run: bash scripts/test-mcp.sh
 
