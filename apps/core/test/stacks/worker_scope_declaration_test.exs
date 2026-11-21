@@ -24,7 +24,7 @@ defmodule Stacks.WorkerScopeDeclarationTest do
   # Pinned so a worker added without a declaration, or one whose declaration
   # stopped reaching runtime, moves this number and fails rather than slipping
   # in. Not a target — the size of the roster, stated.
-  @expected_workers 34
+  @expected_workers 35
 
   test "every worker carries its scope declaration at runtime" do
     declared = Worker.declared_scopes()
@@ -48,7 +48,7 @@ defmodule Stacks.WorkerScopeDeclarationTest do
     # noticing in a diff.
     scopes = Worker.declared_scopes() |> Enum.map(&elem(&1, 1)) |> Enum.frequencies()
 
-    assert scopes == %{user: 8, system: 26},
+    assert scopes == %{user: 8, system: 27},
            "the scope split changed to #{inspect(scopes)}. That is fine if deliberate — update " <>
              "this — but a job moving from :user to :system means it stopped acting for a " <>
              "specific person, which is a claim worth checking against what it actually queries."
