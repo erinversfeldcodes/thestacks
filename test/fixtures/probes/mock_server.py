@@ -75,6 +75,23 @@ def make_handler(mode: str, fail_ratio: float):
             if self.path.startswith("/api/bookshelves/"):
                 self._respond(200, b'{"books":[]}')
                 return
+            if self.path.startswith("/api/upload/") and "/stream" in self.path:
+                # The probe GETs /api/upload/:id/stream (SSE) after
+                # init->PUT->commit to read the identification result; a healthy
+                # production streams `data: {...}` chunks at 200. Without this the
+                # canary's final GET 404s, so a healthy deploy reads as degraded
+                # (availability 0.8571, upload canaries counted http_4xx). This
+                # path was never mocked, so healthy_mock_passes had been failing,
+                # masked by run_all.sh's truncated tail.
+                self._respond(200, b'data: {"status": "completed"}')
+                return
+            if self.path.startswith("/internal/deps-check"):
+                # Bearer-authed dependency health check; the probe runs it every
+                # iteration, so a 404 here (never mocked) counted as http_4xx each
+                # time — the other half of the masked healthy_mock_passes failure.
+                # A healthy production answers 200.
+                self._respond(200, b'{"status":"ok"}')
+                return
             self._respond(404)
 
         def do_POST(self):
