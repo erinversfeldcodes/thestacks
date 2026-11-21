@@ -159,6 +159,25 @@ defmodule Stacks.Enrichment do
     end
   end
 
+  @doc """
+  The latest review snapshot per source for a book, newest first.
+
+  ⛔ Filters to `sanctioned_sources/0` at READ time as well as write time, so a
+  source that is DE-sanctioned (removed from the list) stops being displayed
+  without a data migration — "a source list that can only grow is not a policy"
+  (US-2.1.1 §4). A snapshot written while its source was sanctioned, whose source
+  later leaves the list, simply stops appearing.
+  """
+  @spec list_sanctioned_reviews(binary()) :: [ReviewSnapshot.t()]
+  def list_sanctioned_reviews(book_id) when is_binary(book_id) do
+    from(r in ReviewSnapshot,
+      where: r.book_id == ^book_id and r.source in ^@sanctioned_sources,
+      order_by: [desc: r.scraped_at]
+    )
+    |> Repo.all()
+    |> Enum.uniq_by(& &1.source)
+  end
+
   @price_snapshot_required_fields [
     :book_edition_id,
     :book_id,

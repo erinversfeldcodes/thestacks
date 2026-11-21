@@ -67,6 +67,14 @@ enum ReviewSource {
 
   // Reviews from an unclassified source.
   REVIEW_SOURCE_OTHER = 4;
+
+  // SANCTIONED sources added by ruling D6 (US-2.1.1 §4). Additive — numbers are
+  // forever. Open Library is the preferred first source (open data, open API).
+  REVIEW_SOURCE_OPEN_LIBRARY = 5;
+  // Partner-pushed reviews: consent on file via the partner agreement.
+  REVIEW_SOURCE_PARTNER = 6;
+  // Author/publisher-published RSS/Atom feeds, labelled as their own source.
+  REVIEW_SOURCE_AUTHOR_RSS = 7;
 }
 
 // ThirdSpaceType classifies the kind of community space.

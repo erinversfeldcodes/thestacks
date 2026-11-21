@@ -9,6 +9,7 @@ defmodule Stacks.Enrichment.ReviewSourcePolicyTest do
 
   import Stacks.Factory
 
+  alias Core.Repo
   alias Stacks.Enrichment
   alias Stacks.Enrichment.ReviewSnapshot
 
@@ -66,5 +67,32 @@ defmodule Stacks.Enrichment.ReviewSourcePolicyTest do
              %ReviewSnapshot{},
              attrs(source: "author_rss", source_url: "not a url")
            ).valid?
+  end
+
+  test "a de-sanctioned source's snapshot stops being displayed, with no data migration" do
+    book = insert(:book)
+
+    {:ok, _} =
+      %ReviewSnapshot{}
+      |> Enrichment.review_snapshot_changeset(%{
+        book_id: book.id,
+        source: "open_library",
+        source_url: "https://openlibrary.org/works/OL1W",
+        scraped_at: DateTime.utc_now()
+      })
+      |> Repo.insert()
+
+    # A row whose source was sanctioned when written and has since left the list,
+    # inserted directly (the write gate refuses it now — that is the point).
+    Repo.insert!(%ReviewSnapshot{
+      book_id: book.id,
+      source: "storygraph",
+      source_url: "https://app.thestorygraph.com/books/1",
+      scraped_at: DateTime.utc_now()
+    })
+
+    sources = book.id |> Enrichment.list_sanctioned_reviews() |> Enum.map(& &1.source)
+    assert "open_library" in sources
+    refute "storygraph" in sources
   end
 end
