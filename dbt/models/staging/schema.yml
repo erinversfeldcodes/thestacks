@@ -175,6 +175,10 @@ models:
         description: Syndication default.
         tests:
           - not_null
+      - name: consent_search_indexing
+        description: Consent search indexing.
+      - name: consent_search_indexing_at
+        description: Consent search indexing at.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

@@ -27,6 +27,8 @@ select
     consent_writing_assistant_at,
     handle,
     syndication_default,
+    consent_search_indexing,
+    consent_search_indexing_at,
     created_at,
     updated_at
 from {{ source('op', 'users') }}
