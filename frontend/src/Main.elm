@@ -30,6 +30,7 @@ port module Main exposing
     , refreshShelfBehindOverlay
     , requiresAuth
     , resetPasswordDestination
+    , resolveIdentityEffect
     , settleArrival
     , shouldShowOnboarding
     , signOutAnswer
@@ -715,12 +716,19 @@ request could not establish where it came from.
 -}
 resolveIdentity : Maybe String -> Cmd Msg
 resolveIdentity csrf =
-    Effect.perform
-        (Effect.public Api.identityRequest
-            (Just (Api.cookieSession csrf))
-            Nothing
-            (Api.identityOutcome >> GotBootIdentity)
-        )
+    Effect.perform (resolveIdentityEffect csrf)
+
+
+{-| Main's own boot request, as data. Extracted from `resolveIdentity` so a
+harness can read Main's first request through the effects seam rather than only
+watch it leave as a performed `Cmd` — the page-level seam, lifted to the top.
+-}
+resolveIdentityEffect : Maybe String -> Effect.Effect Msg
+resolveIdentityEffect csrf =
+    Effect.public Api.identityRequest
+        (Just (Api.cookieSession csrf))
+        Nothing
+        (Api.identityOutcome >> GotBootIdentity)
 
 
 {-| The session an identity plus this browsing context amount to.
