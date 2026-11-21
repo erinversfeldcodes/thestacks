@@ -105,6 +105,7 @@ gate check-e2e-vacuous-guards.sh
 # have turned "the toolchain was missing" into "the mocks are fine". What was
 # wrong was where it ran.
 gate check-prose-assertions.sh
+gate check-exacttext-ratchet.sh
 gate check-orphan-classes.sh
 gate check-session-expiry-coverage.sh
 gate check-effect-seam.sh

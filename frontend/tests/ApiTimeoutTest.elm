@@ -64,7 +64,7 @@ timeoutIsVisibleToTheReader =
                         "/api/bookshelves/library"
                         Test.Http.timeout
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "Your library is taking too long to arrive. The library may be busy — please try again." ]
+                        [ Selector.exactText "Your library is taking too long to arrive. The library may be busy — please try again." ]
                     |> ProgramTest.ensureViewHasNot [ Selector.text "Could not load your library. Please try again." ]
                     |> ProgramTest.expectViewHasNot
                         [ Selector.text "Your library is waiting. Move a book here when you've finished reading it." ]
@@ -91,5 +91,5 @@ timeoutIsVisibleToTheReader =
                             }
                         )
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "Could not load your library. Please try again." ]
+                        [ Selector.exactText "Could not load your library. Please try again." ]
         ]
