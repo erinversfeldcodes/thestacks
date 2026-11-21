@@ -78,7 +78,13 @@ defmodule StacksWeb.ProtoJSON do
                         # because a dead field that decodes as a confident
                         # `false` is a loaded gun for the next consumer, and the
                         # asymmetry with `consent_analytics` had no reason.
-                        :consent_writing_assistant
+                        :consent_writing_assistant,
+                        # The search-indexing opt-in, carried in the owner's own
+                        # record for the same reason as the two consent flags
+                        # above: a bool with implicit presence that the codegen
+                        # emits but a hand-written allowlist would silently drop
+                        # decodes as a confident `false` for the next consumer.
+                        :consent_search_indexing
                       ]
   # ⛔ `@user_embed_fields` lived here and is DELETED rather than left unused.
   # It was `@user_core_fields ++ [:created_at, :updated_at]` and had exactly one

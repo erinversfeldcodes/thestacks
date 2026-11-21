@@ -629,6 +629,7 @@ defmodule StacksWeb.ProtoJSONTest do
                age_verified: true,
                consent_analytics: true,
                consent_writing_assistant: false,
+               consent_search_indexing: false,
                country_code: "ZA",
                city: "Cape Town",
                website_url: "https://alice.example",

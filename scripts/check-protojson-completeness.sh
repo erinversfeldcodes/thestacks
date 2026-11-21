@@ -187,6 +187,9 @@ BASELINE = {
     # raced the settings fetch. The `_at` timestamp below stays omitted, which is
     # correct: nothing reads it and it is the server's own bookkeeping.
     "user:consent_writing_assistant_at",
+    # Same as the two consent timestamps above: the opt-in bool is serialized,
+    # its `_at` is the server's own bookkeeping and nothing reads it.
+    "user:consent_search_indexing_at",
     "user:created_at",
     "user:email_confirmed",
     "user:notify_event_matches",
