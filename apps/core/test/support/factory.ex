@@ -31,6 +31,7 @@ defmodule Stacks.Factory do
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
+  alias Stacks.Visibility
 
   alias Stacks.WritingAssistant.{
     BookContentChunk,
@@ -254,6 +255,7 @@ defmodule Stacks.Factory do
   """
   def bookshelf_factory(attrs) do
     {user, attrs} = Map.pop_lazy(attrs, :user, fn -> build(:user) end)
+    {allow_over_ceiling, attrs} = Map.pop(attrs, :allow_over_ceiling, false)
 
     %Bookshelf{
       id: Ecto.UUID.generate(),
@@ -262,6 +264,7 @@ defmodule Stacks.Factory do
     }
     |> merge_attributes(attrs)
     |> assert_shelvable(user)
+    |> assert_within_profile_ceiling(user, allow_over_ceiling)
     |> Map.put(:user, user)
   end
 
@@ -285,6 +288,35 @@ defmodule Stacks.Factory do
       raise ArgumentError,
             "no write path can create this bookshelf: " <>
               inspect(changeset.errors) <> " — see Shelving.bookshelf_changeset/2"
+    end
+  end
+
+  # The profile ceiling: a bookshelf cannot be more exposed than its owner's
+  # profile. `assert_shelvable` validates the enum and name but not this pairing,
+  # because `Shelving.bookshelf_changeset/2` never sees the owner's profile — the
+  # write path enforces it separately (`set_bookshelf_visibility/3` via
+  # `validate_bookshelf_profile_ceiling`, keyed on the user). Building the struct
+  # directly would otherwise mint a bookshelf the write path refuses and the read
+  # path hides. Pass `allow_over_ceiling: true` ONLY when a test deliberately
+  # builds the impossible pairing to prove it is refused or hidden.
+  defp assert_within_profile_ceiling(bookshelf, _user, true), do: bookshelf
+
+  defp assert_within_profile_ceiling(%Bookshelf{} = bookshelf, user, false) do
+    case Visibility.validate_visibility_ceiling(
+           bookshelf.visibility,
+           user.profile_visibility,
+           "bookshelf"
+         ) do
+      :ok ->
+        bookshelf
+
+      {:error, message} ->
+        raise ArgumentError,
+              "bookshelf exceeds its owner's profile ceiling: " <>
+                message <>
+                " — raise the owner's profile_visibility to match, or pass " <>
+                "allow_over_ceiling: true if the test builds the impossible " <>
+                "pairing on purpose to prove it is refused."
     end
   end
 

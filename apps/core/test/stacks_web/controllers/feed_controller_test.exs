@@ -19,7 +19,7 @@ defmodule StacksWeb.FeedControllerTest do
 
   describe "GET /api/feeds/u/:handle/:bookshelf_name — the canonical, handle form" do
     test "serves the same feed as the id form", %{conn: conn} do
-      user = insert(:user, display_name: "Erin", handle: "erin")
+      user = insert(:user, display_name: "Erin", handle: "erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
@@ -59,7 +59,7 @@ defmodule StacksWeb.FeedControllerTest do
 
   describe "GET /api/feeds/:user_id/:bookshelf_name" do
     test "returns 200 with Atom XML for a platform-visible bookshelf", %{conn: conn} do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       author = insert(:author, name: "Donna Tartt")
 
@@ -83,7 +83,7 @@ defmodule StacksWeb.FeedControllerTest do
     end
 
     test "returns 304 Not Modified when ETag matches", %{conn: conn} do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "Stable Book")
       fixed_time = ~U[2026-01-01 12:00:00.000000Z]
@@ -119,7 +119,7 @@ defmodule StacksWeb.FeedControllerTest do
     end
 
     test "serves the feed for a bookshelf shared MORE widely than platform", %{conn: conn} do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "public")
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
 
       conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
@@ -131,7 +131,7 @@ defmodule StacksWeb.FeedControllerTest do
 
   describe "GET /api/feeds — cache hit" do
     test "serves the STORED atom_xml + etag verbatim (not a fresh render)", %{conn: conn} do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
 
       stored_xml = ~s(<?xml version="1.0"?><feed xmlns="stored">SENTINEL-CACHED-BODY</feed>)
@@ -158,7 +158,7 @@ defmodule StacksWeb.FeedControllerTest do
     end
 
     test "returns 304 when If-None-Match matches the STORED etag", %{conn: conn} do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
 
       stored_xml = ~s(<feed xmlns="stored">CACHED</feed>)
@@ -182,7 +182,7 @@ defmodule StacksWeb.FeedControllerTest do
 
   describe "GET /api/feeds — cache miss fills the cache" do
     test "generates, writes the cache row, and serves the fresh feed", %{conn: conn} do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
@@ -208,7 +208,7 @@ defmodule StacksWeb.FeedControllerTest do
   describe "GET /api/feeds — cache write failure" do
     test "still serves the fresh feed with a 200 (no 500) when the cache write fails",
          %{conn: conn} do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)

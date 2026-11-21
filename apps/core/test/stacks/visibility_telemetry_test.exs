@@ -77,7 +77,10 @@ defmodule Stacks.VisibilityTelemetryTest do
     test "emits recap with :capped outcome and cap counts" do
       attach_telemetry([[:stacks, :visibility, :recap]])
       user = insert(:user, profile_visibility: "owner")
-      bookshelf = insert(:bookshelf, user: user, visibility: "platform")
+
+      bookshelf =
+        insert(:bookshelf, user: user, visibility: "platform", allow_over_ceiling: true)
+
       _placement = insert(:placement, bookshelf: bookshelf, visibility: "platform")
 
       assert :ok =

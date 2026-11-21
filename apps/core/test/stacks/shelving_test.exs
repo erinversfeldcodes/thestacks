@@ -1175,7 +1175,7 @@ defmodule Stacks.ShelvingTest do
 
   describe "update_placement_visibility/3" do
     setup do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book)
       placement = insert(:placement, bookshelf: bookshelf, book: book, visibility: "owner")

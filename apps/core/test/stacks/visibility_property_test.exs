@@ -69,7 +69,7 @@ defmodule Stacks.VisibilityPropertyTest do
           ) do
       owner = insert(:user, profile_visibility: "owner")
       viewer = insert(:user)
-      bookshelf = insert(:bookshelf, user: owner, visibility: vis)
+      bookshelf = insert(:bookshelf, user: owner, visibility: vis, allow_over_ceiling: true)
 
       assert :hidden ==
                Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})

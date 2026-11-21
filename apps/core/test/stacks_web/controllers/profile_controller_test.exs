@@ -146,7 +146,14 @@ defmodule StacksWeb.ProfileControllerTest do
 
     test "a ghost profile's shelf is 404", %{conn: conn} do
       target = insert(:user, handle: "ghost_shelf", profile_visibility: "owner")
-      insert(:bookshelf, user: target, name: "library", visibility: "platform")
+
+      insert(:bookshelf,
+        user: target,
+        name: "library",
+        visibility: "platform",
+        allow_over_ceiling: true
+      )
+
       viewer = insert(:user)
 
       conn
@@ -574,7 +581,7 @@ defmodule StacksWeb.ProfileControllerTest do
     end
 
     test "true for a public bookshelf — the flag tracks the feed, not one visibility string" do
-      target = insert(:user, handle: "public_reader", profile_visibility: "platform")
+      target = insert(:user, handle: "public_reader", profile_visibility: "public")
       shelf = insert(:bookshelf, user: target, name: "library", visibility: "public")
       viewer = insert(:user)
 

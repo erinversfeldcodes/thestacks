@@ -348,4 +348,35 @@ defmodule Stacks.FactoryHonestyTest do
       assert changeset.valid?, inspect(changeset.errors)
     end
   end
+
+  describe "probe 10 — the factory refuses a bookshelf above its owner's profile ceiling" do
+    test "a bookshelf more exposed than its owner's profile raises" do
+      # The write path (`set_bookshelf_visibility/3` via
+      # `validate_bookshelf_profile_ceiling`) refuses a bookshelf whose visibility
+      # is less restrictive than its owner's profile; `build/2` bypassed that,
+      # minting a pairing production cannot create and the read path hides.
+      owner = build(:user, profile_visibility: "owner")
+
+      assert_raise ArgumentError, ~r/exceeds its owner's profile ceiling/, fn ->
+        build(:bookshelf, user: owner, visibility: "public")
+      end
+    end
+
+    test "allow_over_ceiling bypasses the check, for a deliberate refusal probe" do
+      # A test that asserts the impossible pairing is HIDDEN or REFUSED must be
+      # able to build it; the escape is the single explicit way to say so.
+      owner = build(:user, profile_visibility: "owner")
+
+      bookshelf =
+        build(:bookshelf, user: owner, visibility: "public", allow_over_ceiling: true)
+
+      assert bookshelf.visibility == "public"
+    end
+
+    test "a bookshelf at or below its owner's profile is built normally" do
+      owner = build(:user, profile_visibility: "platform")
+
+      assert build(:bookshelf, user: owner, visibility: "platform").visibility == "platform"
+    end
+  end
 end

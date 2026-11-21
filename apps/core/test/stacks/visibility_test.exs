@@ -38,7 +38,9 @@ defmodule Stacks.VisibilityTest do
     test "platform user viewer + profile_visibility owner (not owner of resource) → :hidden" do
       owner = insert(:user, profile_visibility: "owner")
       viewer = insert(:user)
-      bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
+
+      bookshelf =
+        insert(:bookshelf, user: owner, visibility: "platform", allow_over_ceiling: true)
 
       assert :hidden = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
     end

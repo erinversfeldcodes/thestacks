@@ -561,7 +561,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
   describe "PUT /api/placements/:id/visibility" do
     setup %{conn: conn} do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       placement = insert(:placement, bookshelf: bookshelf, visibility: "owner")
       {:ok, conn: auth_conn(conn, user), user: user, bookshelf: bookshelf, placement: placement}

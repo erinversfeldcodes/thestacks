@@ -131,7 +131,7 @@ defmodule StacksWeb.BookshelfControllerTest do
     test "filters out owner-visibility placements from platform-visibility bookshelf", %{
       conn: conn
     } do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       shelf = insert(:shelf, bookshelf: bookshelf)
       book_visible = insert(:book)

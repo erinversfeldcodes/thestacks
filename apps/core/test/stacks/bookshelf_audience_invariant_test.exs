@@ -42,7 +42,7 @@ defmodule Stacks.BookshelfAudienceInvariantTest do
   end
 
   defp seed_one_of_each do
-    owner = insert(:user)
+    owner = insert(:user, profile_visibility: "public")
 
     %{
       owner: owner,

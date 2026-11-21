@@ -218,7 +218,7 @@ defmodule CoreWeb.MetricsEndpointTest do
          %{conn: conn} do
       user = insert(:user)
 
-      assert {:ok, _} = Accounts.update_profile_visibility(user.id, "platform")
+      assert {:ok, user} = Accounts.update_profile_visibility(user.id, "platform")
 
       owner_shelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
       owner_placement = insert(:placement, bookshelf: owner_shelf, visibility: "owner")
