@@ -220,10 +220,13 @@ update msg model maybeToken maybeUserId =
                     )
 
                 Err err ->
-                    -- A 401 is intercepted by `onExpired` (ComposeSessionExpired)
-                    -- before a response ever reaches here, so an error that
-                    -- arrives is a genuine failure to surface, not an expiry to
-                    -- recover the draft from.
+                    -- A *readable* 401 means expiry and is claimed upstream by
+                    -- `onExpired` (ComposeSessionExpired) before it reaches here.
+                    -- An *unreadable* 401 still arrives (interceptExpiry's
+                    -- ReasonUnreadable falls through to onResponse) — a proxy blip,
+                    -- not an expiry — so surfacing it as a retryable failure is
+                    -- exactly right; parking a draft and bouncing to /login here
+                    -- would be the mid-journey sign-out that case exists to avoid.
                     ( { model | submitState = Failure err }, Cmd.none, NoOut )
 
         ActivateListing listingId ->

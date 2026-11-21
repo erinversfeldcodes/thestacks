@@ -1,10 +1,18 @@
 module MainEffectTest exposing (suite)
 
-{-| Main's own first request — the boot identity resolve — read as data through
-the effects seam, the way a converted page's requests are. Before this, Main
-performed its own requests in place, so no harness could see them: the plan
-escaped as a `Cmd` the moment it was built. `resolveIdentityEffect` returns the
-plan instead, and `resolveIdentity` performs it once.
+{-| Main's boot-identity request BUILDER, read as data through the effects seam,
+the way a converted page's requests are. Before this, Main performed its own
+requests in place, so no harness could see them: the plan escaped as a `Cmd` the
+moment it was built. `resolveIdentityEffect` returns the plan instead, and
+`resolveIdentity` performs it once.
+
+⚖️ This guards the BUILDER — that `resolveIdentityEffect` constructs the right
+plan — not that Main's `init` actually ISSUES it (`init` still returns `Cmd`, so
+a `plansIn` reader cannot reach boot by construction). Proving boot dispatches
+this is the named class follow-up: one `ProgramTest.createApplication` of Main
+covering all boot requests at once, as `Page/SeamEffectTest.elm` drives page
+dispatch.
+
 -}
 
 import Api
@@ -35,8 +43,8 @@ plansIn effect =
 
 suite : Test
 suite =
-    describe "Main reads its own requests as data"
-        [ test "the boot identity resolve is a readable GET /api/auth/me plan" <|
+    describe "Main's boot-identity request builder reads as data"
+        [ test "the boot-identity builder constructs a readable GET /api/auth/me plan" <|
             \() ->
                 Main.resolveIdentityEffect (Just "the-proof")
                     |> plansIn

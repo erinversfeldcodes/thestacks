@@ -27,7 +27,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-# ⛔ RATCHET. Lower this as copy assertions convert to exactText; never raise it.
+# ⛔ RATCHET. Lower this as copy assertions convert to exactText. Raise it ONLY for a
+# legitimately-new `hasNot [ Selector.text ]` absence assertion or deliberate containment —
+# exactText on a negative makes the absence fail OPEN, the bug this whole effort fights.
 # EXACTTEXT_MAX / EXACTTEXT_ROOT override only the platform test, which points the
 # gate at a mktemp copy with a planted violation so probes never touch the real tree.
 MAX_SELECTOR_TEXT="${EXACTTEXT_MAX:-181}"
@@ -76,7 +78,8 @@ for f in files:
 
 if count > max_allowed:
     print(f"FAIL: {count} Selector.text copy match(es), above the ratchet of {max_allowed}.")
-    print("A positive copy assertion on Selector.text cannot detect appended text; use exactText.")
+    print("A positive copy assertion on Selector.text cannot detect appended text; use exactText")
+    print("— UNLESS this is a hasNot absence or deliberate containment, then raise the ratchet and keep Selector.text.")
     sys.exit(1)
 
 if count < max_allowed:
