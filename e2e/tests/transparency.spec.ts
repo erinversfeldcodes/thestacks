@@ -46,6 +46,26 @@ test.describe("Public transparency page (/metrics)", () => {
     await expect(page.locator('a[href="/settings/consent"]')).toBeVisible();
   });
 
+  test("renders the data nutrition label — a per-dimension gap profile, not a score", async ({
+    page,
+  }) => {
+    await page.goto("/metrics");
+    await expect(page.getByTestId("metrics-content")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const profiles = page.getByTestId("metrics-profiles-section");
+    await expect(profiles).toBeVisible();
+    await expect(profiles.getByText("Data nutrition labels")).toBeVisible();
+
+    // a profile with its per-dimension breakdown (cover art / price data /
+    // sanctioned reviews), which is the "label not a gauge" the page promises
+    await expect(page.getByTestId("metrics-profile").first()).toBeVisible();
+    await expect(
+      page.getByTestId("metrics-profile-dimension").first(),
+    ).toBeVisible();
+  });
+
   test("reachable via About → /metrics", async ({ page }) => {
     await page.goto("/about");
 
