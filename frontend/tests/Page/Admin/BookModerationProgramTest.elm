@@ -131,9 +131,9 @@ loadsList =
                         , encodeBookJson "b2" "Adult Title" "Some Author" "age_gated"
                         ]
                     )
-                |> ProgramTest.ensureViewHas [ Selector.text "Dune" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Adult Title" ]
-                |> ProgramTest.expectViewHas [ Selector.text "age_gated" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Dune" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Adult Title" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "age_gated" ]
 
 
 togglesRow : Test
@@ -146,11 +146,11 @@ togglesRow =
                     (booksListResponse
                         [ encodeBookJson "b1" "Dune" "Frank Herbert" "public" ]
                     )
-                |> ProgramTest.ensureViewHas [ Selector.text "Mark age-gated" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Mark age-gated" ]
                 |> ProgramTest.clickButton "Mark age-gated"
                 |> ProgramTest.simulateHttpResponse "PUT"
                     "/api/admin/books/b1/age-gate"
                     (bookUpdateResponse "b1"
                         (encodeBookJson "b1" "Dune" "Frank Herbert" "age_gated")
                     )
-                |> ProgramTest.expectViewHas [ Selector.text "Un-gate" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Un-gate" ]

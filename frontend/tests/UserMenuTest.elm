@@ -127,13 +127,13 @@ suite =
                 \() ->
                     UserMenu.view testUser sampleLinks True UserMenu.init
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text " — still signed in on this device" ]
+                        |> Query.has [ Selector.exactText " — still signed in on this device" ]
             , test "the open menu states it in words, at the top" <|
                 \() ->
                     UserMenu.view testUser sampleLinks True openMenu
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text
+                            [ Selector.exactText
                                 "Still signed in on this device — your last sign-out did not reach us."
                             ]
 
@@ -160,7 +160,7 @@ suite =
                 \() ->
                     UserMenu.view testUser sampleLinks False UserMenu.init
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "A Reader" ]
+                        |> Query.has [ Selector.exactText "A Reader" ]
             , test "closed menu does not render the dropdown items" <|
                 \() ->
                     UserMenu.view testUser sampleLinks False UserMenu.init
@@ -171,10 +171,10 @@ suite =
                     UserMenu.view testUser sampleLinks False openMenu
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Profile" ]
-                            , Query.has [ Selector.text "Privacy" ]
-                            , Query.has [ Selector.text "Notifications" ]
-                            , Query.has [ Selector.text "Sign Out" ]
+                            [ Query.has [ Selector.exactText "Profile" ]
+                            , Query.has [ Selector.exactText "Privacy" ]
+                            , Query.has [ Selector.exactText "Notifications" ]
+                            , Query.has [ Selector.exactText "Sign Out" ]
                             ]
             , test "open menu renders a click-outside backdrop" <|
                 \() ->

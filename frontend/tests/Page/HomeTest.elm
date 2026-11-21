@@ -51,8 +51,8 @@ suite =
                     Home.view Landing
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.tag "h1", Selector.text "The Stacks" ]
-                            , Query.has [ Selector.text "Your personal collection, beautifully organised." ]
+                            [ Query.has [ Selector.tag "h1", Selector.exactText "The Stacks" ]
+                            , Query.has [ Selector.exactText "Your personal collection, beautifully organised." ]
                             ]
             , test "renders the About CTA → /about" <|
                 \() ->
@@ -61,7 +61,7 @@ suite =
                         |> Query.find [ Selector.class "home__link--about" ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/about") ]
-                            , Query.has [ Selector.text "About The Stacks" ]
+                            , Query.has [ Selector.exactText "About The Stacks" ]
                             ]
             , test "renders the Marketplace CTA → /marketplace" <|
                 \() ->
@@ -76,7 +76,7 @@ suite =
                         |> Query.find [ Selector.attribute (Attr.attribute "data-testid" "home-faq-link") ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/faq") ]
-                            , Query.has [ Selector.text "Questions, answered" ]
+                            , Query.has [ Selector.exactText "Questions, answered" ]
                             ]
             , test "does NOT route into the collection (no Add-Book CTA)" <|
                 \() ->
@@ -91,7 +91,7 @@ suite =
                         |> Query.find [ Selector.class "home-collection__add" ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/upload") ]
-                            , Query.has [ Selector.text "Add a book" ]
+                            , Query.has [ Selector.exactText "Add a book" ]
                             ]
             , test "renders a continue-reading entry point into the Reading Pile" <|
                 \() ->

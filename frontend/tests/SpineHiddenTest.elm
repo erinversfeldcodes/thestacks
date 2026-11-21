@@ -43,7 +43,7 @@ hiddenBookHasVisiblePadlock =
             hiddenBook
                 |> Query.fromHtml
                 |> Query.find [ Selector.class "book__lock" ]
-                |> Query.has [ Selector.text "🔒" ]
+                |> Query.has [ Selector.exactText "🔒" ]
 
 
 visibleBookHasNoPadlock : Test

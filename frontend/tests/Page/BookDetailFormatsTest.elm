@@ -163,7 +163,7 @@ errorSaysItRolledBack =
                 |> ProgramTest.clickButton "Physical"
                 |> ProgramTest.simulateHttpResponse "PUT" formatsEndpoint serverError
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't save your formats, so we've put them back as they were." ]
+                    [ Selector.exactText "We couldn't save your formats, so we've put them back as they were." ]
 
 
 noPlacementSendsNothing : Test

@@ -72,7 +72,7 @@ registerHappyShowsPending =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/register"
                     simulateRegisterResponse
-                |> ProgramTest.ensureViewHas [ Selector.text "Check your inbox!" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Check your inbox!" ]
                 |> ProgramTest.expectViewHasNot [ Selector.text "Request Entry" ]
 
 
@@ -98,7 +98,7 @@ registerMismatchDisablesSubmit =
                 |> ProgramTest.fillIn "email" "Email" "new@stacks.dev"
                 |> ProgramTest.fillIn "password" "Password" "secret123"
                 |> ProgramTest.fillIn "password-confirm" "Confirm Password" "different"
-                |> ProgramTest.ensureViewHas [ Selector.text "Passwords do not match" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Passwords do not match" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.class "login-card__submit"
                     , Selector.disabled True
@@ -115,7 +115,7 @@ registerDuplicateEmailShowsMessage =
                     "/api/auth/register"
                     (simulateAuthErrorResponse 422)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
+                    [ Selector.exactText "A reader with that email already frequents these halls. Try signing in instead." ]
 
 
 registerValidationEmailShowsMessage : Test
@@ -128,7 +128,7 @@ registerValidationEmailShowsMessage =
                     "/api/auth/register"
                     (simulateRegisterValidationResponse [ ( "email", [ "has already been taken" ] ) ])
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
+                    [ Selector.exactText "A reader with that email already frequents these halls. Try signing in instead." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text PasswordRule.tooShort ]
 
@@ -143,7 +143,7 @@ registerWeakPasswordShowsPasswordMessage =
                     "/api/auth/register"
                     (simulateRegisterValidationResponse [ ( "password", [ "must be at least 8 characters" ] ) ])
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text PasswordRule.tooShort ]
+                    [ Selector.exactText PasswordRule.tooShort ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
 
@@ -157,9 +157,9 @@ backToSignInResetsToLogin =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/register"
                     simulateRegisterResponse
-                |> ProgramTest.ensureViewHas [ Selector.text "Check your inbox!" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Check your inbox!" ]
                 |> ProgramTest.clickButton "Back to Sign In"
-                |> ProgramTest.expectViewHas [ Selector.text "Present your credentials to enter" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Present your credentials to enter" ]
 
 
 login403ShowsConfirmEmailMessage : Test
@@ -174,7 +174,7 @@ login403ShowsConfirmEmailMessage =
                     "/api/auth/login"
                     (simulateAuthErrorResponse 403)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Please confirm your email address before signing in. Check your inbox for the confirmation email." ]
+                    [ Selector.exactText "Please confirm your email address before signing in. Check your inbox for the confirmation email." ]
 
 
 login423ShowsAccountLockedMessage : Test
@@ -189,7 +189,7 @@ login423ShowsAccountLockedMessage =
                     "/api/auth/login"
                     (simulateAuthErrorResponse 423)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "This account is temporarily locked after too many failed attempts. Please try again in a little while." ]
+                    [ Selector.exactText "This account is temporarily locked after too many failed attempts. Please try again in a little while." ]
 
 
 login503ShowsServiceBusyMessage : Test
@@ -204,7 +204,7 @@ login503ShowsServiceBusyMessage =
                     "/api/auth/login"
                     (simulateAuthErrorResponse 503)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The library is briefly overloaded. Please try again in a few seconds." ]
+                    [ Selector.exactText "The library is briefly overloaded. Please try again in a few seconds." ]
 
 
 loginFormSubmitShowsSpinner : Test
@@ -250,7 +250,7 @@ loginFailureShowsError =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "login-card__error" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The door remains shut. Invalid credentials." ]
+                    [ Selector.exactText "The door remains shut. Invalid credentials." ]
 
 
 switchToRegisterShowsDisplayName : Test
@@ -260,11 +260,11 @@ switchToRegisterShowsDisplayName =
             startLogin
                 |> ProgramTest.clickButton "Register"
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Display Name" ]
+                    [ Selector.exactText "Display Name" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Register for entry to the collection" ]
+                    [ Selector.exactText "Register for entry to the collection" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Request Entry" ]
+                    [ Selector.exactText "Request Entry" ]
 
 
 switchBackToLoginHidesDisplayName : Test
@@ -274,12 +274,12 @@ switchBackToLoginHidesDisplayName =
             startLogin
                 |> ProgramTest.clickButton "Register"
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Display Name" ]
+                    [ Selector.exactText "Display Name" ]
                 |> ProgramTest.clickButton "Sign In"
                 |> ProgramTest.ensureViewHasNot
                     [ Selector.text "Display Name" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Present your credentials to enter" ]
+                    [ Selector.exactText "Present your credentials to enter" ]
 
 
 submitDisabledDuringLoading : Test
@@ -318,7 +318,7 @@ invalidEmailShowsErrorHint =
             startLogin
                 |> ProgramTest.fillIn "email" "Email" "nope"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Please enter a valid email address" ]
+                    [ Selector.exactText "Please enter a valid email address" ]
 
 
 validEmailShowsValidState : Test
@@ -338,7 +338,7 @@ modeSwitchResetsValidation =
             startLogin
                 |> ProgramTest.fillIn "email" "Email" "nope"
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Please enter a valid email address" ]
+                    [ Selector.exactText "Please enter a valid email address" ]
                 |> ProgramTest.clickButton "Register"
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Please enter a valid email address" ]

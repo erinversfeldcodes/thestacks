@@ -217,7 +217,7 @@ suite =
                         )
                         |> Expect.all
                             [ Query.has [ Selector.text "not shown again" ]
-                            , Query.has [ Selector.text "aaaa-bbbb" ]
+                            , Query.has [ Selector.exactText "aaaa-bbbb" ]
                             ]
             ]
         ]

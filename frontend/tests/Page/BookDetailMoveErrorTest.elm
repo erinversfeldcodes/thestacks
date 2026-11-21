@@ -110,7 +110,7 @@ fullPileShowsSpecificMessage =
                     moveEndpoint
                     (moveErrorResponse 422 "{\"error\":\"reading_pile_full\"}")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
+                    [ Selector.exactText "Your reading pile is full — finish or remove a book before adding another." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Failed to move book. Please try again." ]
 
@@ -124,7 +124,7 @@ genericFailureKeepsGenericMessage =
                     moveEndpoint
                     (moveErrorResponse 500 "")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Failed to move book. Please try again." ]
+                    [ Selector.exactText "Failed to move book. Please try again." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
 
@@ -138,7 +138,7 @@ fullPile422WithoutCodeStaysGeneric =
                     moveEndpoint
                     (moveErrorResponse 422 "{\"error\":\"something_else\"}")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Failed to move book. Please try again." ]
+                    [ Selector.exactText "Failed to move book. Please try again." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
 
@@ -152,7 +152,7 @@ placeFullPileShowsSpecificMessage =
                     placeEndpoint
                     (placeErrorResponse 422 "{\"error\":\"reading_pile_full\"}")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
+                    [ Selector.exactText "Your reading pile is full — finish or remove a book before adding another." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Failed to move book. Please try again." ]
 
@@ -166,7 +166,7 @@ placeGenericFailureKeepsGenericMessage =
                     placeEndpoint
                     (placeErrorResponse 500 "")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Failed to move book. Please try again." ]
+                    [ Selector.exactText "Failed to move book. Please try again." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
 
@@ -180,6 +180,6 @@ placeFullPile422WithoutCodeStaysGeneric =
                     placeEndpoint
                     (placeErrorResponse 422 "{\"error\":\"something_else\"}")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Failed to move book. Please try again." ]
+                    [ Selector.exactText "Failed to move book. Please try again." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]

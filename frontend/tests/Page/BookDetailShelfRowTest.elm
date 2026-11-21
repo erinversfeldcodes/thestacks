@@ -167,12 +167,12 @@ offersEveryRowButTheOneItIsOn =
                                 , Query.index 0
                                     >> Query.has
                                         [ Selector.attribute (Html.Attributes.value "shelf-b")
-                                        , Selector.text "Shelf 2"
+                                        , Selector.exactText "Shelf 2"
                                         ]
                                 , Query.index 1
                                     >> Query.has
                                         [ Selector.attribute (Html.Attributes.value "shelf-c")
-                                        , Selector.text "Shelf 3"
+                                        , Selector.exactText "Shelf 3"
                                         ]
                                 ]
                     )
@@ -183,7 +183,7 @@ namesTheRowItIsOn =
     test "names_the_row: the reader is told which row the book stands on now" <|
         \() ->
             loaded
-                |> ProgramTest.expectViewHas [ Selector.text "On Shelf 1 right now." ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "On Shelf 1 right now." ]
 
 
 movePutsTheChosenRow : Test
@@ -207,7 +207,7 @@ successAdoptsTheServersRow =
     test "success_adopts: the page settles on the row the server says it stored" <|
         \() ->
             answered (simulatePlacementShelfResponse "placement-test-001" "shelf-c")
-                |> ProgramTest.expectViewHas [ Selector.text "On Shelf 3 right now." ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "On Shelf 3 right now." ]
 
 
 successReportsAMutation : Test
@@ -240,7 +240,7 @@ wrongBookshelfSaysSo =
         \() ->
             answered (refusal 422)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "That shelf belongs to a different bookshelf — move the book to that bookshelf first." ]
+                    [ Selector.exactText "That shelf belongs to a different bookshelf — move the book to that bookshelf first." ]
 
 
 goneShelfSaysSo : Test
@@ -249,7 +249,7 @@ goneShelfSaysSo =
         \() ->
             answered (refusal 404)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "That shelf is no longer there. Reload the page and try again." ]
+                    [ Selector.exactText "That shelf is no longer there. Reload the page and try again." ]
 
 
 someoneElsesShelfSaysSo : Test
@@ -258,7 +258,7 @@ someoneElsesShelfSaysSo =
         \() ->
             answered (refusal 403)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "That shelf isn't yours to rearrange." ]
+                    [ Selector.exactText "That shelf isn't yours to rearrange." ]
 
 
 {-| A bookcase with one row has nowhere to move the book to.

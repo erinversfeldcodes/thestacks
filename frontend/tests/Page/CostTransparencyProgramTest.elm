@@ -171,7 +171,7 @@ byServiceShownWhenCategoriesExist =
     test "By Service renders when there is a category to break down" <|
         \() ->
             startMixed
-                |> ProgramTest.expectViewHas [ Selector.text "By Service" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "By Service" ]
 
 
 {-| ⬛ ANTI-VACUITY paired with the case above: the absence is only meaningful
@@ -185,7 +185,7 @@ byServiceAbsentWhenEmpty =
             startEmptyCategories
                 |> ProgramTest.expectView
                     (Expect.all
-                        [ Query.has [ Selector.text "Cost Transparency" ]
+                        [ Query.has [ Selector.exactText "Cost Transparency" ]
                         , Query.hasNot [ Selector.text "By Service" ]
                         ]
                     )
@@ -206,7 +206,7 @@ absentLineShowsTextNotZero =
                     -- against my own new test rather than trusting it.
                     [ Selector.all
                         [ Selector.class "costs__service-amount--unmeasured"
-                        , Selector.text "not yet measured this period"
+                        , Selector.exactText "not yet measured this period"
                         ]
                     ]
 
@@ -219,7 +219,7 @@ measuredLineStillShowsMoney =
     test "absent_line: a line that has a figure still shows it" <|
         \() ->
             startMixed
-                |> ProgramTest.expectViewHas [ Selector.text "$5.00" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "$5.00" ]
 
 
 {-| ⚖️ The modifier is what stops a sentence being dressed as a figure — the fix
@@ -238,7 +238,7 @@ unmeasuredIsMarkedForStyling =
                     -- unmeasured cell containing a currency figure.
                     [ Selector.all
                         [ Selector.class "costs__service-amount--unmeasured"
-                        , Selector.text "$0.00"
+                        , Selector.exactText "$0.00"
                         ]
                     ]
 
@@ -418,13 +418,13 @@ loadAndDisplayCosts =
                     "/api/costs"
                     sampleCostResponseJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Fly.io Core" ]
+                    [ Selector.exactText "Fly.io Core" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Modal GPU Inference" ]
+                    [ Selector.exactText "Modal GPU Inference" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Neon PostgreSQL" ]
+                    [ Selector.exactText "Neon PostgreSQL" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Domain Registration" ]
+                    [ Selector.exactText "Domain Registration" ]
 
 
 showsLoadingState : Test
@@ -433,7 +433,7 @@ showsLoadingState =
         \() ->
             startCostPage
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading cost data..." ]
+                    [ Selector.exactText "Loading cost data..." ]
 
 
 showsErrorState : Test
@@ -462,7 +462,7 @@ displaysTotalBanner =
                 -- fixture's last total is March 2026, so that is the period
                 -- the headline figure covers.
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Total cost for March 2026" ]
+                    [ Selector.exactText "Total cost for March 2026" ]
                 -- ⬛ AND THE FALLBACK MUST NOT BE WHAT RENDERS. My first
                 -- attempt at this feature read the period off each cost ITEM,
                 -- a field `CostItem` does not carry, so it decoded as "" and
@@ -474,9 +474,9 @@ displaysTotalBanner =
                     [ Selector.text "Total monthly cost" ]
                 -- How fresh, which is a different question from which period.
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "figures as of 14 March" ]
+                    [ Selector.exactText "figures as of 14 March" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "$13.09" ]
+                    [ Selector.exactText "$13.09" ]
 
 
 displaysStoryCards : Test
@@ -488,9 +488,9 @@ displaysStoryCards =
                     "/api/costs"
                     sampleCostResponseJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Upload & Identify" ]
+                    [ Selector.exactText "Upload & Identify" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Store & Shelve" ]
+                    [ Selector.exactText "Store & Shelve" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "47 identifications" ]
                 |> ProgramTest.expectViewHas
@@ -542,7 +542,7 @@ displaysMonthlyTrend =
                     "/api/costs"
                     sampleCostResponseJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Monthly Trend" ]
+                    [ Selector.exactText "Monthly Trend" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.class "costs__chart" ]
 

@@ -30,7 +30,7 @@ cd "$(dirname "$0")/.." || exit 1
 # ⛔ RATCHET. Lower this as copy assertions convert to exactText; never raise it.
 # EXACTTEXT_MAX / EXACTTEXT_ROOT override only the platform test, which points the
 # gate at a mktemp copy with a planted violation so probes never touch the real tree.
-MAX_SELECTOR_TEXT="${EXACTTEXT_MAX:-687}"
+MAX_SELECTOR_TEXT="${EXACTTEXT_MAX:-181}"
 TESTS_ROOT="${EXACTTEXT_ROOT:-frontend/tests}"
 
 python3 - "$MAX_SELECTOR_TEXT" "$TESTS_ROOT" <<'PY'

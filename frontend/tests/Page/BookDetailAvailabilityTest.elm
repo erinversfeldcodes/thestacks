@@ -81,7 +81,7 @@ availabilityRenderedWhenPresent =
                     "/api/books/book-test-001/availability"
                     availabilityJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Available at" ]
+                    [ Selector.exactText "Available at" ]
 
 
 availabilityHiddenWhenEmpty : Test
@@ -111,15 +111,15 @@ availabilityShowsPartnerAndPrice =
                     "/api/books/book-test-001/availability"
                     availabilityJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Corner Books" ]
+                    [ Selector.exactText "Corner Books" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "R149.00" ]
+                    [ Selector.exactText "R149.00" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "good" ]
+                    [ Selector.exactText "good" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "The Book Lounge" ]
+                    [ Selector.exactText "The Book Lounge" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "R175.00" ]
+                    [ Selector.exactText "R175.00" ]
 
 
 availabilityNotShownDuringLoading : Test

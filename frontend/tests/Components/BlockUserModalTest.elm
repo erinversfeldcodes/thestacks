@@ -129,7 +129,7 @@ suite =
                     , \_ ->
                         BlockModal.view m
                             |> Query.fromHtml
-                            |> Query.has [ Selector.text "You've already blocked this reader." ]
+                            |> Query.has [ Selector.exactText "You've already blocked this reader." ]
                     ]
                     ()
         , test "BlockCompleted not_found shows a distinct message" <|
@@ -147,7 +147,7 @@ suite =
                     , \_ ->
                         BlockModal.view m
                             |> Query.fromHtml
-                            |> Query.has [ Selector.text "That reader no longer exists." ]
+                            |> Query.has [ Selector.exactText "That reader no longer exists." ]
                     ]
                     ()
         , test "BlockCompleted 401 escalates to SessionExpired" <|
@@ -203,7 +203,7 @@ suite =
             \_ ->
                 BlockModal.view { initModel | menuOpen = True }
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Block Ada Lovelace" ]
+                    |> Query.has [ Selector.exactText "Block Ada Lovelace" ]
         , test "the confirmation modal disables the confirm button while blocking" <|
             \_ ->
                 BlockModal.view { initModel | confirming = True, status = Loading }

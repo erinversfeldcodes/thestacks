@@ -84,7 +84,7 @@ suite =
                             [ Selector.attribute
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
-                        |> Query.has [ Selector.text "Reading" ]
+                        |> Query.has [ Selector.exactText "Reading" ]
             , test "⛔ with NO recorded status, Save is DISABLED — the destructive half" <|
                 -- ⛔ The assertion that matters most, and the one that was
                 -- missing. A badge rendering the wrong label is wrong on screen;
@@ -188,7 +188,7 @@ suite =
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
                         |> Expect.all
-                            [ Query.has [ Selector.text "Not recorded" ]
+                            [ Query.has [ Selector.exactText "Not recorded" ]
                             , Query.hasNot [ Selector.text "To Read" ]
                             ]
             , test "Completed status shows badge label 'Finished'" <|
@@ -199,7 +199,7 @@ suite =
                             [ Selector.attribute
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
-                        |> Query.has [ Selector.text "Finished" ]
+                        |> Query.has [ Selector.exactText "Finished" ]
             , test "Completed status badge has class 'placement-card__badge--completed'" <|
                 \_ ->
                     Card.view { errorShowing = False } completedModel
@@ -217,7 +217,7 @@ suite =
                             [ Selector.attribute
                                 (Html.Attributes.attribute "data-testid" "reading-status-badge")
                             ]
-                        |> Query.has [ Selector.text "Abandoned" ]
+                        |> Query.has [ Selector.exactText "Abandoned" ]
             , test "Abandoned status badge has class 'placement-card__badge--abandoned'" <|
                 \_ ->
                     Card.view { errorShowing = False } abandonedModel

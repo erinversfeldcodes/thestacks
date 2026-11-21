@@ -36,17 +36,17 @@ suite =
         [ describe "labels"
             [ test "idle shows the action label" <|
                 \_ ->
-                    button NotAsked |> Query.has [ Selector.text "Save Profile" ]
+                    button NotAsked |> Query.has [ Selector.exactText "Save Profile" ]
             , test "in flight shows the busy label" <|
                 \_ ->
-                    button Loading |> Query.has [ Selector.text "Saving…" ]
+                    button Loading |> Query.has [ Selector.exactText "Saving…" ]
             , test "saved shows the past-tense label" <|
                 \_ ->
-                    button (Success ()) |> Query.has [ Selector.text "Saved!" ]
+                    button (Success ()) |> Query.has [ Selector.exactText "Saved!" ]
             , test "a failure returns to the action label so the reader can retry" <|
                 \_ ->
                     button (Failure Http.NetworkError)
-                        |> Query.has [ Selector.text "Save Profile" ]
+                        |> Query.has [ Selector.exactText "Save Profile" ]
             ]
         , describe "the Success branch is not a dead end"
             [ test "a saved button still fires its save message when clicked" <|

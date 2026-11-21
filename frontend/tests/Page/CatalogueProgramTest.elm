@@ -239,9 +239,9 @@ loadAndDisplayBooks =
                     "/api/catalogue?sort=title&page=1"
                     sampleCatalogueJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "The Great Gatsby" ]
+                    [ Selector.exactText "The Great Gatsby" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "1984" ]
+                    [ Selector.exactText "1984" ]
 
 
 showsLoadingState : Test
@@ -250,7 +250,7 @@ showsLoadingState =
         \() ->
             startCatalogue
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading catalogue..." ]
+                    [ Selector.exactText "Loading catalogue..." ]
 
 
 showsErrorState : Test
@@ -265,7 +265,7 @@ showsErrorState =
                     "/api/catalogue?sort=title&page=1"
                     Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Failed to load the catalogue. Please try again." ]
+                    [ Selector.exactText "Failed to load the catalogue. Please try again." ]
 
 
 showsEmptyState : Test
@@ -280,7 +280,7 @@ showsEmptyState =
                     "/api/catalogue?sort=title&page=1"
                     emptyCatalogueJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No books found matching your criteria." ]
+                    [ Selector.exactText "No books found matching your criteria." ]
 
 
 searchTriggersDebounce : Test
@@ -296,13 +296,13 @@ searchTriggersDebounce =
                     sampleCatalogueJson
                 |> ProgramTest.update (SearchChanged "gatsby")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Loading catalogue..." ]
+                    [ Selector.exactText "Loading catalogue..." ]
                 |> ProgramTest.advanceTime 300
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=title&page=1&search=gatsby"
                     sampleCatalogueJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The Great Gatsby" ]
+                    [ Selector.exactText "The Great Gatsby" ]
 
 
 sortChangeFetchesNewData : Test
@@ -318,12 +318,12 @@ sortChangeFetchesNewData =
                     sampleCatalogueJson
                 |> ProgramTest.update (SortChanged "recent")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Loading catalogue..." ]
+                    [ Selector.exactText "Loading catalogue..." ]
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/catalogue?sort=recent&page=1"
                     sampleCatalogueJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The Great Gatsby" ]
+                    [ Selector.exactText "The Great Gatsby" ]
 
 
 rendersAgeGatedBooksWithNullAuthor : Test
@@ -355,9 +355,9 @@ rendersAgeGatedBooksWithNullAuthor =
                     "/api/catalogue?sort=title&page=1"
                     catalogueWithAgeGatedAndNullAuthor
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Age Gated Book" ]
+                    [ Selector.exactText "Age Gated Book" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Authorless Book" ]
+                    [ Selector.exactText "Authorless Book" ]
 
 
 showsShelfBadgeForPlacedBooks : Test
@@ -372,9 +372,9 @@ showsShelfBadgeForPlacedBooks =
                     "/api/catalogue?sort=title&page=1"
                     sampleCatalogueJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "In your Library" ]
+                    [ Selector.exactText "In your Library" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Add to Shelf" ]
+                    [ Selector.exactText "Add to Shelf" ]
 
 
 addToShelfOpensPickerAndPlaces : Test
@@ -390,13 +390,13 @@ addToShelfOpensPickerAndPlaces =
                     sampleCatalogueJson
                 |> ProgramTest.update (OpenShelfPicker "book-1")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Library" ]
+                    [ Selector.exactText "Library" ]
                 |> ProgramTest.update (PlaceOnShelf "library" "book-1")
                 |> ProgramTest.simulateHttpOk "POST"
                     "/api/bookshelves/library/placements"
                     placementCreatedJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "In your Library" ]
+                    [ Selector.exactText "In your Library" ]
 
 
 placementErrorShowsButton : Test
@@ -415,7 +415,7 @@ placementErrorShowsButton =
                     "/api/bookshelves/library/placements"
                     Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Add to Shelf" ]
+                    [ Selector.exactText "Add to Shelf" ]
 
 
 ageGatedBookJson : Encode.Value

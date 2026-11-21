@@ -434,7 +434,7 @@ suite =
                     in
                     Password.view newModel
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Could not change password. Please try again." ]
+                        |> Query.has [ Selector.exactText "Could not change password. Please try again." ]
             ]
         , describe "— Settings.Profile"
             [ test "profile_save_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
@@ -472,7 +472,7 @@ suite =
                             Profile.view newModel
                                 |> Query.fromHtml
                                 |> Query.has
-                                    [ Selector.text "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
+                                    [ Selector.exactText "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
                         ]
                         ()
             , test "profile_validation_failure_stays_local: a 422 → NoOut" <|

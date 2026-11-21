@@ -140,7 +140,7 @@ dataDrivenStepsOracle =
                         q
                             |> Query.findAll [ Selector.class "onboarding-overlay__dot--active" ]
                             |> Query.count (Expect.equal 1)
-                    , \q -> Query.has [ Selector.text "Welcome to The Stacks" ] q
+                    , \q -> Query.has [ Selector.exactText "Welcome to The Stacks" ] q
                     ]
                     rendered
         , test "currentStep is List lookup, not a branch — reorder puts UploadFirstBook at index 0" <|

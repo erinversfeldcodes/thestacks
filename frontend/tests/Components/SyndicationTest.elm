@@ -110,12 +110,12 @@ suite =
             \_ ->
                 render initModel True
                     |> Query.find [ byTestId "syndication-canonical-url" ]
-                    |> Query.has [ Selector.text "https://thestacks.test/blog/post-1" ]
+                    |> Query.has [ Selector.exactText "https://thestacks.test/blog/post-1" ]
         , test "the feed URL is the handle-addressed blog feed" <|
             \_ ->
                 render initModel True
                     |> Query.find [ byTestId "syndication-feed-url" ]
-                    |> Query.has [ Selector.text "https://thestacks.test/api/feeds/u/erin/blog" ]
+                    |> Query.has [ Selector.exactText "https://thestacks.test/api/feeds/u/erin/blog" ]
         , test "a refused clipboard write reveals the textarea fallback with the payload" <|
             \_ ->
                 let
@@ -138,7 +138,7 @@ suite =
                         Syndication.update (Syndication.CopyOutcome True) afterClick (Just (TestHelpers.creds "tok"))
                 in
                 render afterCopy True
-                    |> Query.has [ Selector.text "Canonical address copied." ]
+                    |> Query.has [ Selector.exactText "Canonical address copied." ]
         , test "a failed toggle save snaps the tickbox back to the truth" <|
             \_ ->
                 let
@@ -162,7 +162,7 @@ suite =
                 \_ ->
                     render (afterFetch [ recorded (Just "https://substack.test/p/marginalia") ]) True
                         |> Query.find [ byTestId "syndication-backlink" ]
-                        |> Query.has [ Selector.text "https://substack.test/p/marginalia" ]
+                        |> Query.has [ Selector.exactText "https://substack.test/p/marginalia" ]
             , test "a fetched syndication with no backlink yet offers the field to add one" <|
                 \_ ->
                     -- The half that made this worse than a display bug: the input is

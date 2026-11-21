@@ -245,7 +245,7 @@ failureSaysSoRatherThanLying =
             start
                 |> ProgramTest.simulateHttpResponse "GET" "/api/auth/me" Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
+                    [ Selector.exactText "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
 
 
 {-| The form posts every field, and the placeholder has no website and no

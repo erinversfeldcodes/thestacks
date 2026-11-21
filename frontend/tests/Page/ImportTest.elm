@@ -111,7 +111,7 @@ suite =
             \_ ->
                 viewAfter [ ImportPage.GotCreated (Ok runningImport) ]
                     |> Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "import-progress-count") ]
-                    |> Query.has [ Selector.text "2 of 5 rows" ]
+                    |> Query.has [ Selector.exactText "2 of 5 rows" ]
         , test "a 409 refusal reads as one-at-a-time, not as a generic failure" <|
             \_ ->
                 viewAfter [ ImportPage.GotCreated (Err ImportInProgress) ]
@@ -164,7 +164,7 @@ suite =
                     , ImportPage.GotImport (Ok finishedImport)
                     ]
                     |> Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "import-count-shelved") ]
-                    |> Query.has [ Selector.text "3" ]
+                    |> Query.has [ Selector.exactText "3" ]
         , test "the report lists ONLY the rows that need the reader, with the server's reason" <|
             \_ ->
                 viewAfter

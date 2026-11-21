@@ -116,7 +116,7 @@ suite =
                     [ \_ ->
                         Notifications.view failed
                             |> Query.fromHtml
-                            |> Query.has [ Selector.text "Could not load your notification preferences. Please refresh to try again." ]
+                            |> Query.has [ Selector.exactText "Could not load your notification preferences. Please refresh to try again." ]
                     , \_ ->
                         Notifications.view failed
                             |> Query.fromHtml
@@ -173,7 +173,7 @@ suite =
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Preferences saved." ]
+                    |> Query.has [ Selector.exactText "Preferences saved." ]
         , test "a dropped connection says the connection dropped" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err Http.NetworkError)) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))
@@ -188,7 +188,7 @@ suite =
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "The library would not accept that change to your notification preferences. Reload the page and try again." ]
+                    |> Query.has [ Selector.exactText "The library would not accept that change to your notification preferences. Reload the page and try again." ]
         , test "a timeout does not claim the change was lost" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err Http.Timeout)) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))

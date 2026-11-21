@@ -110,7 +110,7 @@ showsLoadingState =
         \() ->
             start
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading transparency data..." ]
+                    [ Selector.exactText "Loading transparency data..." ]
 
 
 loadAndDisplayPanels : Test
@@ -121,9 +121,9 @@ loadAndDisplayPanels =
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/transparency/metrics"
                     livePayload
-                |> ProgramTest.ensureViewHas [ Selector.text "ISBN-not-found rate" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Books catalogued" ]
-                |> ProgramTest.expectViewHas [ Selector.text "Platform cost this period" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "ISBN-not-found rate" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Books catalogued" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Platform cost this period" ]
 
 
 displaysTeachingTooltips : Test
@@ -134,9 +134,9 @@ displaysTeachingTooltips =
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/transparency/metrics"
                     livePayload
-                |> ProgramTest.ensureViewHas [ Selector.text "The total number of distinct works." ]
-                |> ProgramTest.ensureViewHas [ Selector.text "A count of rows in the books table." ]
-                |> ProgramTest.expectViewHas [ Selector.text "The simplest honest measure of the library." ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "The total number of distinct works." ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "A count of rows in the books table." ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "The simplest honest measure of the library." ]
 
 
 featuresCostsWidget : Test
@@ -148,7 +148,7 @@ featuresCostsWidget =
                     "/api/transparency/metrics"
                     livePayload
                 |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "metrics-costs-widget") ]
-                |> ProgramTest.ensureViewHas [ Selector.text "$13.09" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "$13.09" ]
                 |> ProgramTest.expectViewHas [ Selector.text "no such thing as a free lunch in software" ]
 
 
@@ -175,7 +175,7 @@ degradesWhenLiveUnavailable =
                     "/api/transparency/metrics"
                     unavailablePayload
                 |> ProgramTest.ensureViewHas [ Selector.text "currently unavailable" ]
-                |> ProgramTest.expectViewHas [ Selector.text "Books catalogued" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Books catalogued" ]
 
 
 showsErrorState : Test

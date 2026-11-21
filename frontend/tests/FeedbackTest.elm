@@ -247,12 +247,12 @@ suite =
                 \_ ->
                     AdminQueue.view (queue [ entry "The bookcase breaks at 320px." ] 1)
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "The bookcase breaks at 320px." ]
+                        |> Query.has [ Selector.exactText "The bookcase breaks at 320px." ]
             , test "shows who wrote it" <|
                 \_ ->
                     AdminQueue.view (queue [ entry "one" ] 1)
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "@mara" ]
+                        |> Query.has [ Selector.exactText "@mara" ]
             , test "an empty queue says so" <|
                 \_ ->
                     AdminQueue.view (queue [] 0)
@@ -320,7 +320,7 @@ suite =
                     AdminQueue.view (queue [ entry "one", entry "two" ] 143)
                         |> Query.fromHtml
                         |> Query.find [ testId "admin-feedback-count" ]
-                        |> Query.has [ Selector.text "Showing 1–2 of 143" ]
+                        |> Query.has [ Selector.exactText "Showing 1–2 of 143" ]
             , test "a later window counts from its own offset, not from one" <|
                 \_ ->
                     AdminQueue.view
@@ -329,7 +329,7 @@ suite =
                         )
                         |> Query.fromHtml
                         |> Query.find [ testId "admin-feedback-count" ]
-                        |> Query.has [ Selector.text "Showing 26–26 of 143" ]
+                        |> Query.has [ Selector.exactText "Showing 26–26 of 143" ]
             , test "older feedback is reachable when the total exceeds the window" <|
                 \_ ->
                     AdminQueue.view (queue [ entry "one" ] 143)

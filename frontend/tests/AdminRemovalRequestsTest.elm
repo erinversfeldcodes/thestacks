@@ -82,11 +82,11 @@ suite =
             , test "shows the contact address, which is what the reviewer judges" <|
                 \_ ->
                     render (loaded [ request "truth" ])
-                        |> Query.has [ Selector.text "owner@truth.example" ]
+                        |> Query.has [ Selector.exactText "owner@truth.example" ]
             , test "shows the listing URL so the reviewer can look at it" <|
                 \_ ->
                     render (loaded [ request "truth" ])
-                        |> Query.has [ Selector.text "https://truth.example" ]
+                        |> Query.has [ Selector.exactText "https://truth.example" ]
             , test "says plainly that the listings are still live" <|
                 \_ ->
                     render (loaded [ request "truth" ])
@@ -116,12 +116,12 @@ suite =
                 \_ ->
                     render (loaded [ request "truth" ])
                         |> Query.find [ testId "removal-queue-remove" ]
-                        |> Query.has [ Selector.text "Remove the listing" ]
+                        |> Query.has [ Selector.exactText "Remove the listing" ]
             , test "the other action names what happens to the listing too" <|
                 \_ ->
                     render (loaded [ request "truth" ])
                         |> Query.find [ testId "removal-queue-keep" ]
-                        |> Query.has [ Selector.text "Keep the listing" ]
+                        |> Query.has [ Selector.exactText "Keep the listing" ]
             ]
         , describe "removal takes two steps"
             [ test "the first click asks rather than removing" <|

@@ -114,7 +114,7 @@ suite =
                         |> update (SetPassword "having-second-thoughts")
                         |> ResetPassword.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Your password has been reset. Taking you to sign in…" ]
+                        |> Query.has [ Selector.exactText "Your password has been reset. Taking you to sign in…" ]
             , test "positive control — the confirmation is genuinely absent before a success" <|
                 \_ ->
                     validModel
@@ -191,13 +191,13 @@ suite =
                         |> Query.fromHtml
                         |> Query.has
                             [ Selector.attribute (Html.Attributes.attribute "role" "status")
-                            , Selector.text "Your password has been reset. Taking you to sign in…"
+                            , Selector.exactText "Your password has been reset. Taking you to sign in…"
                             ]
             , test "the reader can still go now rather than wait" <|
                 \_ ->
                     succeeded
                         |> ResetPassword.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Sign in" ]
+                        |> Query.has [ Selector.exactText "Sign in" ]
             ]
         ]

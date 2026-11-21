@@ -154,7 +154,7 @@ toastOffersUndoNamingTheBook =
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "undo-toast") ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Removed “The Dispossessed”." ]
+                    [ Selector.exactText "Removed “The Dispossessed”." ]
 
 
 undoPostsToRestoreTheSameRow : Test
@@ -327,7 +327,7 @@ conflictSaysTheBookIsAlreadyBack =
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "undo-toast-error") ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "That book is already back on your Library." ]
+                    [ Selector.exactText "That book is already back on your Library." ]
 
 
 failureToastSurvivesItsTimer : Test

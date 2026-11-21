@@ -122,20 +122,20 @@ suite =
                     resetWithShortPassword
                         |> ResetPassword.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text PasswordRule.tooShort ]
+                        |> Query.has [ Selector.exactText PasswordRule.tooShort ]
             , test "the reset page's 422 message" <|
                 \_ ->
                     resetRejected
                         |> ResetPassword.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text PasswordRule.tooShort ]
+                        |> Query.has [ Selector.exactText PasswordRule.tooShort ]
             , test "the settings form's inline validation" <|
                 \_ ->
                     settingsWithShortPassword
                         |> SettingsPassword.view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text (PasswordRule.tooShortFor "New password") ]
+                            [ Selector.exactText (PasswordRule.tooShortFor "New password") ]
             ]
         , describe "the wordings that used to disagree are gone"
             [ test "the register card no longer spells the number as a word" <|

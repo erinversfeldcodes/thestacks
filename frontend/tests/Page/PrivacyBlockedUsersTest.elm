@@ -60,8 +60,8 @@ suite =
                 Privacy.view { baseModel | blockedUsers = Success blocked }
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "Ada Lovelace" ]
-                        , Query.has [ Selector.text "Grace Hopper" ]
+                        [ Query.has [ Selector.exactText "Ada Lovelace" ]
+                        , Query.has [ Selector.exactText "Grace Hopper" ]
                         , Query.findAll [ Selector.class "blocked-user__unblock" ]
                             >> Query.count (Expect.equal 2)
                         ]
@@ -121,7 +121,7 @@ suite =
                     , \_ ->
                         Privacy.view m
                             |> Query.fromHtml
-                            |> Query.has [ Selector.text "We couldn't unblock that reader. Please try again." ]
+                            |> Query.has [ Selector.exactText "We couldn't unblock that reader. Please try again." ]
                     ]
                     ()
         , test "GotBlockedUsers 401 escalates to SessionExpired" <|
@@ -135,7 +135,7 @@ suite =
             \_ ->
                 Privacy.view { baseModel | blockedUsers = Success [] }
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "You haven't blocked anyone." ]
+                    |> Query.has [ Selector.exactText "You haven't blocked anyone." ]
         , test "Load more appears when fewer readers are loaded than the total" <|
             \_ ->
                 Privacy.view { baseModel | blockedUsers = Success blocked, blockedTotal = 25, blockedPage = 1 }

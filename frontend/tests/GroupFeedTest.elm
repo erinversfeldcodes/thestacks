@@ -168,7 +168,7 @@ suite =
                 Detail.view emptyModel
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "groups-detail__feed-empty" ]
-                    |> Query.has [ Selector.text "No activity yet." ]
+                    |> Query.has [ Selector.exactText "No activity yet." ]
         , test "view shows Load More button only when nextCursor is present" <|
             \_ ->
                 let

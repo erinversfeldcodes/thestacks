@@ -71,15 +71,15 @@ suite =
             [ test "a scored source shows its confidence" <|
                 \_ ->
                     render (loadedWithConfidence (Just 0.6))
-                        |> Query.has [ Selector.text "0.6" ]
+                        |> Query.has [ Selector.exactText "0.6" ]
             , test "an unscored source shows an em-dash, never a real 0" <|
                 \_ ->
                     render (loadedWithConfidence Nothing)
-                        |> Query.has [ Selector.text "—" ]
+                        |> Query.has [ Selector.exactText "—" ]
             , test "the status badge reads as copy, not the stored atom" <|
                 \_ ->
                     render (loaded "pending_review")
-                        |> Query.has [ Selector.text "Pending review" ]
+                        |> Query.has [ Selector.exactText "Pending review" ]
             ]
         , describe "a source awaiting review offers the decisions"
             [ test "Approve renders for the server's real status value" <|
@@ -122,8 +122,8 @@ suite =
                 \_ ->
                     render (loaded "pending_review")
                         |> Expect.all
-                            [ Query.has [ Selector.text "Truth Coffee Roasting" ]
-                            , Query.has [ Selector.text "https://truth.coffee" ]
+                            [ Query.has [ Selector.exactText "Truth Coffee Roasting" ]
+                            , Query.has [ Selector.exactText "https://truth.coffee" ]
                             ]
             , test "an action in flight disables the buttons" <|
                 \_ ->

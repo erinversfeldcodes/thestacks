@@ -274,7 +274,7 @@ saveWithNoChosenStatusIssuesNoRequest =
     test "save_guard: Save on a pile card with NO recorded status issues no PUT at all" <|
         \() ->
             startPileUnrecorded
-                |> ProgramTest.ensureViewHas [ Selector.text "Not recorded" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Not recorded" ]
                 |> ProgramTest.clickButton "Not recorded"
                 |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
                 |> ProgramTest.update
@@ -294,7 +294,7 @@ saveWithNoChosenStatusIssuesNoRequest =
                 -- perfectly. The open form was the half this test did not prove.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "save-progress-btn")
-                    , Selector.text "Save"
+                    , Selector.exactText "Save"
                     ]
                 |> ProgramTest.expectViewHasNot [ Selector.text "Saving…" ]
 
@@ -305,7 +305,7 @@ progressRendersOnCard =
         \() ->
             startPile
                 |> ProgramTest.ensureViewHas [ Selector.class "reading-pile__progress" ]
-                |> ProgramTest.expectViewHas [ Selector.text "p. 40 / 371" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "p. 40 / 371" ]
 
 
 editAndSaveFoldsResult : Test
@@ -319,7 +319,7 @@ editAndSaveFoldsResult =
                     (goodProgress
                         "{\"placement\":{\"id\":\"placement-book-1\",\"reading_status\":\"reading\",\"current_page\":142,\"started_at\":\"2026-07-22T10:00:00Z\",\"finished_at\":null}}"
                     )
-                |> ProgramTest.expectViewHas [ Selector.text "p. 142 / 371" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "p. 142 / 371" ]
 
 
 finishedTransitionSurfacesBridge : Test
@@ -335,7 +335,7 @@ finishedTransitionSurfacesBridge =
                     )
                 |> ProgramTest.ensureViewHas [ Selector.class "reading-pile__finished-prompt" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Move to your Library and record this read?" ]
+                    [ Selector.exactText "Move to your Library and record this read?" ]
 
 
 errorResponseSurfacesMessage : Test
@@ -350,6 +350,6 @@ errorResponseSurfacesMessage =
                         "{\"errors\":{\"current_page\":[\"must be less than or equal to 112\"]}}"
                     )
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "That page is past the end of the book." ]
+                    [ Selector.exactText "That page is past the end of the book." ]
                 |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
                 |> ProgramTest.expectViewHas [ Selector.attribute (Html.Attributes.value "40") ]

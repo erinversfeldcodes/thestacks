@@ -92,7 +92,7 @@ pendingCardOffersAResend =
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute
                         (Html.Attributes.attribute "data-testid" "resend-confirmation")
-                    , Selector.text "Send it again"
+                    , Selector.exactText "Send it again"
                     ]
 
 
@@ -146,7 +146,7 @@ resendIsAcknowledged =
                 |> ProgramTest.simulateHttpOk "POST" resendEndpoint "{}"
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.attribute "role" "status")
-                    , Selector.text successCopy
+                    , Selector.exactText successCopy
                     ]
 
 
@@ -201,7 +201,7 @@ resendFailureReopensTheButton =
             justRegistered
                 |> ProgramTest.clickButton "Send it again"
                 |> ProgramTest.simulateHttpResponse "POST" resendEndpoint Http.NetworkError_
-                |> ProgramTest.ensureViewHas [ Selector.text failureCopy ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText failureCopy ]
                 |> ProgramTest.update Login.ResendRequested
                 |> ProgramTest.expectHttpRequests "POST"
                     resendEndpoint
@@ -224,7 +224,7 @@ leavingTheCardSpendsTheResend =
             justRegistered
                 |> ProgramTest.clickButton "Send it again"
                 |> ProgramTest.simulateHttpOk "POST" resendEndpoint "{}"
-                |> ProgramTest.ensureViewHas [ Selector.text successCopy ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText successCopy ]
                 |> ProgramTest.clickButton "Back to Sign In"
                 |> ProgramTest.expectModel
                     (\model ->
@@ -268,7 +268,7 @@ deadLinkArrivalOpensTheResendForm =
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute
                         (Html.Attributes.attribute "data-testid" "resend-email")
-                    , Selector.text "Send a new link"
+                    , Selector.exactText "Send a new link"
                     ]
 
 
@@ -304,7 +304,7 @@ deadLinkResendIsAcknowledged =
                 |> ProgramTest.simulateHttpOk "POST" resendEndpoint "{}"
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.attribute "role" "status")
-                    , Selector.text successCopy
+                    , Selector.exactText successCopy
                     ]
 
 

@@ -94,7 +94,7 @@ expiryShowsExpiryNotice =
     test "expiry_shows_expiry_notice: an expired session says so, and says nothing else" <|
         \() ->
             Expect.all
-                [ Query.has [ Selector.text expiryCopy ]
+                [ Query.has [ Selector.exactText expiryCopy ]
                 , Query.hasNot [ Selector.text farewellCopy ]
                 , Query.hasNot [ Selector.text draftExpiryCopy ]
                 ]
@@ -106,7 +106,7 @@ draftExpiryReassures =
     test "draft_expiry_reassures: an expiry mid-compose promises the draft survived" <|
         \() ->
             Expect.all
-                [ Query.has [ Selector.text draftExpiryCopy ]
+                [ Query.has [ Selector.exactText draftExpiryCopy ]
                 , Query.hasNot [ Selector.text expiryCopy ]
                 ]
                 (cardFor (Login.SessionExpired { draftSaved = True }))
@@ -117,7 +117,7 @@ deletionSaysGoodbye =
     test "deletion_says_goodbye: a closed account gets a farewell, not an expiry warning" <|
         \() ->
             Expect.all
-                [ Query.has [ Selector.text farewellCopy ]
+                [ Query.has [ Selector.exactText farewellCopy ]
                 , Query.hasNot [ Selector.text expiryCopy ]
                 ]
                 (cardFor Login.AccountDeleted)
@@ -206,7 +206,7 @@ aSubmitFailureOutranksTheNotice =
                 [ \_ ->
                     Login.view expired
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text expiryCopy ]
+                        |> Query.has [ Selector.exactText expiryCopy ]
                 , \model ->
                     Login.view model
                         |> Query.fromHtml

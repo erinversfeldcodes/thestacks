@@ -92,7 +92,7 @@ suite =
                     { init0 | savingProfile = Success () }
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Visibility updated." ]
+                        |> Query.has [ Selector.exactText "Visibility updated." ]
             ]
         , describe "shelf visibility"
             [ test "SetShelfVisibility updates only the matching shelf" <|
@@ -164,7 +164,7 @@ suite =
                     { init0 | savingShelf = Success () }
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Visibility updated." ]
+                        |> Query.has [ Selector.exactText "Visibility updated." ]
             , test "shelf Failure renders the error feedback (build a)" <|
                 \_ ->
                     { init0 | savingShelf = Failure (Http.BadStatus 500) }
@@ -185,7 +185,7 @@ suite =
                     Privacy.init
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "By default your profile and content stay out of search engine results. You can opt in to search indexing of your public content below." ]
+                        |> Query.has [ Selector.exactText "By default your profile and content stay out of search engine results. You can opt in to search indexing of your public content below." ]
             ]
         , describe "loading saved visibility (FE-1)"
             [ test "GotPrivacySettings Ok seeds the profile visibility from the payload" <|
@@ -250,7 +250,7 @@ suite =
                                 [ Selector.attribute
                                     (Html.Attributes.attribute "data-testid" "writing-assistant-consent-toggle")
                                 ]
-                            , Query.has [ Selector.text "Linking books in your writing" ]
+                            , Query.has [ Selector.exactText "Linking books in your writing" ]
                             ]
             , test "initWithToken seeds the folded-in consent from the user's state" <|
                 \_ ->

@@ -90,7 +90,7 @@ offersTheAffordance =
     test "offers_affordance: every admin surface carries a way out of the session" <|
         \() ->
             start
-                |> ProgramTest.expectViewHas [ Selector.text "End admin session" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "End admin session" ]
 
 
 {-| The whole point of the issue: the click must produce a REQUEST. Asserting

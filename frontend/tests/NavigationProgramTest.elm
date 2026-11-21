@@ -216,7 +216,7 @@ navigateToUpload =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Add a Book" ]
+                            [ Selector.exactText "Add a Book" ]
                 ]
                 ()
 
@@ -246,7 +246,7 @@ navigateToLibrary =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Library" ]
+                            [ Selector.exactText "Library" ]
                 ]
                 ()
 
@@ -273,7 +273,7 @@ navigateToSearch =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Search books & readers" ]
+                            [ Selector.exactText "Search books & readers" ]
                 ]
                 ()
 

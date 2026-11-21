@@ -136,7 +136,7 @@ readersFailure =
                         "{\"error\":\"boom\"}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't reach the shelves just now. Give it a moment and try again." ]
+                    [ Selector.exactText "We couldn't reach the shelves just now. Give it a moment and try again." ]
 
 
 {-| A 401 from people-search must raise `SessionExpired` (so Main routes to the
@@ -168,9 +168,9 @@ readersResults =
                     "/api/search/users?q=ada"
                     (readersResponseJson [ ( "adal", "Ada Lovelace" ) ])
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Readers" ]
+                    [ Selector.exactText "Readers" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Ada Lovelace" ]
+                    [ Selector.exactText "Ada Lovelace" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.href "/u/adal") ]
 
@@ -186,7 +186,7 @@ readersEmptyResults =
                     "/api/search/users?q=zzz"
                     (readersResponseJson [])
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No readers found matching your search." ]
+                    [ Selector.exactText "No readers found matching your search." ]
 
 
 searchDebounce : Test
@@ -196,7 +196,7 @@ searchDebounce =
             startSearch
                 |> ProgramTest.update (QueryChanged "habit")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Searching the stacks…" ]
+                    [ Selector.exactText "Searching the stacks…" ]
                 |> ProgramTest.advanceTime 300
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/search?q=habit"
@@ -204,9 +204,9 @@ searchDebounce =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "search-results" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "The Power of Habit" ]
+                    [ Selector.exactText "The Power of Habit" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Charles Duhigg" ]
+                    [ Selector.exactText "Charles Duhigg" ]
 
 
 searchClear : Test
@@ -216,10 +216,10 @@ searchClear =
             startSearch
                 |> ProgramTest.update (QueryChanged "something")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Searching the stacks…" ]
+                    [ Selector.exactText "Searching the stacks…" ]
                 |> ProgramTest.update ClearQuery
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Type a title, author, or ISBN to search the stacks." ]
+                    [ Selector.exactText "Type a title, author, or ISBN to search the stacks." ]
 
 
 searchEmptyResults : Test
@@ -233,7 +233,7 @@ searchEmptyResults =
                     "/api/search?q=zzzznonexistent"
                     (searchResponseJson [])
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Nothing on the shelves matches that — yet." ]
+                    [ Selector.exactText "Nothing on the shelves matches that — yet." ]
 
 
 searchFilterPanelToggle : Test
@@ -242,12 +242,12 @@ searchFilterPanelToggle =
         \() ->
             startSearch
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Show Filters" ]
+                    [ Selector.exactText "Show Filters" ]
                 |> ProgramTest.clickButton "Show Filters"
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "filter-panel__body" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Hide Filters" ]
+                    [ Selector.exactText "Hide Filters" ]
                 |> ProgramTest.clickButton "Hide Filters"
                 |> ProgramTest.expectViewHasNot
                     [ Selector.class "filter-panel__body" ]
@@ -271,7 +271,7 @@ searchFailure =
                         "{\"error\":\"boom\"}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't reach the shelves just now. Give it a moment and try again." ]
+                    [ Selector.exactText "We couldn't reach the shelves just now. Give it a moment and try again." ]
 
 
 {-| A stale debounce must not fire a request. Typing twice schedules two
@@ -314,7 +314,7 @@ searchNoTokenFiresBookRequest =
                     (\requests -> Expect.equal 1 (List.length requests))
                 |> ProgramTest.ensureHttpRequestWasMade "GET" "/api/search/users?q=habit"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Searching the stacks…" ]
+                    [ Selector.exactText "Searching the stacks…" ]
 
 
 {-| The anonymous visitor's strip: what the page does for them now, and the one
@@ -331,11 +331,11 @@ anonNoteRendersForAnonymousVisitor =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "You're searching the open catalogue — every book on the shelves here." ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text " and your own shelves are searched alongside it." ]
+                    [ Selector.exactText " and your own shelves are searched alongside it." ]
                 |> ProgramTest.expectViewHas
                     [ Selector.class "search-anon-note__link"
                     , Selector.attribute (Html.Attributes.href "/login")
-                    , Selector.text "Sign in"
+                    , Selector.exactText "Sign in"
                     ]
 
 
@@ -366,8 +366,8 @@ anonSeesCatalogueResultsOnly =
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/search?q=book"
                     (sectionedResponseJson [] [ plainPlatformHit (fixtureBook "Out There" "Zoe Quill" 1999) ])
-                |> ProgramTest.ensureViewHas [ Selector.text "On the Platform" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Out There" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "On the Platform" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Out There" ]
                 |> ProgramTest.ensureViewHas [ Selector.class "search-anon-note" ]
                 |> ProgramTest.expectViewHasNot [ Selector.text "Your Collection" ]
 
@@ -426,7 +426,7 @@ expectResultTitleOrder titles =
                     (Query.count (Expect.equal (List.length titles))
                         :: List.indexedMap
                             (\i title ->
-                                Query.index i >> Query.has [ Selector.text title ]
+                                Query.index i >> Query.has [ Selector.exactText title ]
                             )
                             titles
                     )
@@ -493,7 +493,7 @@ filterAwareEmptyState =
             loadedThreeBooks
                 |> ProgramTest.update (YearFromChanged "3000")
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No books in that year range — widen it or clear filters" ]
+                    [ Selector.exactText "No books in that year range — widen it or clear filters" ]
 
 
 undatedVisibleUnderFilter : Test
@@ -508,9 +508,9 @@ undatedVisibleUnderFilter =
                     (searchResponseJson [ fixtureBook "Dated Book" "Anna Blake" 2001, undatedBook ])
                 |> ProgramTest.update (YearFromChanged "2000")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "No Year Book" ]
+                    [ Selector.exactText "No Year Book" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Unknown year" ]
+                    [ Selector.exactText "Unknown year" ]
 
 
 {-| A fixture book with no publication year, for the undated-treatment tests.
@@ -539,7 +539,7 @@ yearFilterAndClear =
                         Query.findAll [ Selector.class "search-result__title" ] view
                             |> Expect.all
                                 [ Query.count (Expect.equal 1)
-                                , Query.index 0 >> Query.has [ Selector.text "Zebra Tales" ]
+                                , Query.index 0 >> Query.has [ Selector.exactText "Zebra Tales" ]
                                 ]
                     )
                 |> ProgramTest.update ClearFilters
@@ -584,7 +584,7 @@ resultRendersAsButtonWithStableId =
                             view
                             |> Expect.all
                                 [ Query.count (Expect.equal 1)
-                                , Query.index 0 >> Query.has [ Selector.text "Zebra Tales" ]
+                                , Query.index 0 >> Query.has [ Selector.exactText "Zebra Tales" ]
                                 ]
                     )
 
@@ -599,10 +599,10 @@ collectionAndPlatformSectionsRender =
             loadedSections
                 [ collectionHit "library" (fixtureBook "Mine Own" "Anna Blake" 2001) ]
                 [ plainPlatformHit (fixtureBook "Out There" "Zoe Quill" 1999) ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Your Collection" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "On the Platform" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Mine Own" ]
-                |> ProgramTest.expectViewHas [ Selector.text "Out There" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Your Collection" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "On the Platform" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Mine Own" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Out There" ]
 
 
 {-| "Your Collection" renders ABOVE "On the Platform" — the section titles appear
@@ -620,8 +620,8 @@ collectionAbovePlatform =
                         Query.findAll [ Selector.class "search-section__title" ] view
                             |> Expect.all
                                 [ Query.count (Expect.equal 2)
-                                , Query.index 0 >> Query.has [ Selector.text "Your Collection" ]
-                                , Query.index 1 >> Query.has [ Selector.text "On the Platform" ]
+                                , Query.index 0 >> Query.has [ Selector.exactText "Your Collection" ]
+                                , Query.index 1 >> Query.has [ Selector.exactText "On the Platform" ]
                                 ]
                     )
 
@@ -636,7 +636,7 @@ collectionShelfLabel =
             loadedSections
                 [ collectionHit "reading_pile" (fixtureBook "Mine Own" "Anna Blake" 2001) ]
                 []
-                |> ProgramTest.expectViewHas [ Selector.text "On your Reading Pile shelf" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "On your Reading Pile shelf" ]
 
 
 {-| — the annotation must name EVERY bookshelf a book sits on. It used to
@@ -654,7 +654,7 @@ collectionShelfLabelNamesEveryShelf =
                 ]
                 []
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "On your Library and Wish List shelves" ]
+                    [ Selector.exactText "On your Library and Wish List shelves" ]
 
 
 {-| Three shelves join as prose ("A, B and C") rather than as a comma soup, and
@@ -670,7 +670,7 @@ collectionShelfLabelJoinsThreeAsProse =
                 ]
                 []
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "On your Antilibrary, Library and Reading Pile shelves" ]
+                    [ Selector.exactText "On your Antilibrary, Library and Reading Pile shelves" ]
 
 
 {-| An always-visible looking-for-home platform hit is labelled with the owner's
@@ -683,7 +683,7 @@ platformLookingForHomeLabel =
             loadedSections
                 []
                 [ lookingForHomeHit "adal" (fixtureBook "Out There" "Zoe Quill" 1999) ]
-                |> ProgramTest.expectViewHas [ Selector.text "Looking for a home on adal's shelf" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Looking for a home on adal's shelf" ]
 
 
 {-| An active marketplace listing platform hit is labelled with the seller's
@@ -696,7 +696,7 @@ platformListedLabel =
             loadedSections
                 []
                 [ listedHit "adal" "R120.00" (fixtureBook "Out There" "Zoe Quill" 1999) ]
-                |> ProgramTest.expectViewHas [ Selector.text "Listed by adal for R120.00" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Listed by adal for R120.00" ]
 
 
 {-| A plain platform hit (empty source) carries no label line at all — only
@@ -709,7 +709,7 @@ platformPlainHitHasNoLabel =
             loadedSections
                 []
                 [ plainPlatformHit (fixtureBook "Out There" "Zoe Quill" 1999) ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Out There" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Out There" ]
                 |> ProgramTest.expectViewHasNot [ Selector.class "search-result__label" ]
 
 
@@ -723,7 +723,7 @@ emptyCollectionHidesSection =
             loadedSections
                 []
                 [ plainPlatformHit (fixtureBook "Out There" "Zoe Quill" 1999) ]
-                |> ProgramTest.ensureViewHas [ Selector.text "On the Platform" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "On the Platform" ]
                 |> ProgramTest.expectViewHasNot [ Selector.text "Your Collection" ]
 
 
@@ -736,7 +736,7 @@ emptyPlatformHidesSection =
             loadedSections
                 [ collectionHit "library" (fixtureBook "Mine Own" "Anna Blake" 2001) ]
                 []
-                |> ProgramTest.ensureViewHas [ Selector.text "Your Collection" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Your Collection" ]
                 |> ProgramTest.expectViewHasNot [ Selector.text "On the Platform" ]
 
 
@@ -762,15 +762,15 @@ sortWithinEachSection =
                                 Query.find [ Selector.class "search-section--collection" ] v
                                     |> Query.findAll [ Selector.class "search-result__title" ]
                                     |> Expect.all
-                                        [ Query.index 0 >> Query.has [ Selector.text "Collection Alpha" ]
-                                        , Query.index 1 >> Query.has [ Selector.text "Collection Zed" ]
+                                        [ Query.index 0 >> Query.has [ Selector.exactText "Collection Alpha" ]
+                                        , Query.index 1 >> Query.has [ Selector.exactText "Collection Zed" ]
                                         ]
                             , \v ->
                                 Query.find [ Selector.class "search-section--platform" ] v
                                     |> Query.findAll [ Selector.class "search-result__title" ]
                                     |> Expect.all
-                                        [ Query.index 0 >> Query.has [ Selector.text "Platform Alpha" ]
-                                        , Query.index 1 >> Query.has [ Selector.text "Platform Zed" ]
+                                        [ Query.index 0 >> Query.has [ Selector.exactText "Platform Alpha" ]
+                                        , Query.index 1 >> Query.has [ Selector.exactText "Platform Zed" ]
                                         ]
                             ]
                             view
@@ -797,7 +797,7 @@ collectionResultRendersAsButton =
                             view
                             |> Expect.all
                                 [ Query.count (Expect.equal 1)
-                                , Query.index 0 >> Query.has [ Selector.text "Mine Own" ]
+                                , Query.index 0 >> Query.has [ Selector.exactText "Mine Own" ]
                                 ]
                     )
 
@@ -866,8 +866,8 @@ snippetAndLabelRenderWhenSnippetPresent =
                     |> withSnippet "the <mark>habit</mark> loop"
                 ]
                 |> ProgramTest.ensureViewHas [ Selector.class "search-result__snippet" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "habit" ]
-                |> ProgramTest.expectViewHas [ Selector.text "via deep search" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "habit" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "via deep search" ]
 
 
 {-| The `<mark>` run in a snippet renders as a real `<mark>` element carrying the
@@ -885,7 +885,7 @@ highlightRendersAsMarkElement =
                 ]
                 |> ProgramTest.expectView
                     (\view ->
-                        Query.findAll [ Selector.tag "mark", Selector.text "habit" ] view
+                        Query.findAll [ Selector.tag "mark", Selector.exactText "habit" ] view
                             |> Query.count (Expect.equal 1)
                     )
 
@@ -901,7 +901,7 @@ noSnippetNoLabelWhenSnippetEmpty =
             loadedSections
                 []
                 [ plainPlatformHit (fixtureBook "Title Match" "Anna Blake" 2001) ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Title Match" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Title Match" ]
                 |> ProgramTest.ensureViewHasNot [ Selector.text "via deep search" ]
                 |> ProgramTest.expectViewHasNot [ Selector.class "search-result__snippet" ]
 

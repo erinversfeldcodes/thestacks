@@ -112,9 +112,9 @@ multiShelfNoticeNamesEveryBookshelf =
                     )
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice")
-                    , Selector.text "This one is on 2 of your bookshelves"
-                    , Selector.text "Library"
-                    , Selector.text "Wish List"
+                    , Selector.exactText "This one is on 2 of your bookshelves"
+                    , Selector.exactText "Library"
+                    , Selector.exactText "Wish List"
                     , Selector.attribute
                         (Html.Attributes.attribute "data-testid" "multi-shelf-remove-library")
                     , Selector.attribute
@@ -454,7 +454,7 @@ moveCompletedErrorShowsMessage =
                         ""
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Failed to move book. Please try again." ]
+                    [ Selector.exactText "Failed to move book. Please try again." ]
 
 
 startOverlayWithOut : ProgramTest.ProgramTest TestHelpers.BookDetailTestModel BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
@@ -597,7 +597,7 @@ loadingState =
         \() ->
             startBookDetail
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading book..." ]
+                    [ Selector.exactText "Loading book..." ]
 
 
 successRendersAllSections : Test
@@ -638,7 +638,7 @@ failureRendersError =
                         ""
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Could not load this book. Please try again." ]
+                    [ Selector.exactText "Could not load this book. Please try again." ]
 
 
 forbiddenTriggersAgeGate : Test
@@ -657,7 +657,7 @@ forbiddenTriggersAgeGate =
                         ""
                     )
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Age Verification Required" ]
+                    [ Selector.exactText "Age Verification Required" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "age-gate" ]
                 |> ProgramTest.clickButton "Go Back"
@@ -724,11 +724,11 @@ sectionContentDetails =
                     "/api/books/book-test-001/prices"
                     (simulateEmptyBookPricesResponse "book-test-001")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "No price data yet" ]
+                    [ Selector.exactText "No price data yet" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Charles Duhigg" ]
+                    [ Selector.exactText "Charles Duhigg" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Not yet rated" ]
+                    [ Selector.exactText "Not yet rated" ]
 
 
 pricesRenderPerEdition : Test
@@ -743,11 +743,11 @@ pricesRenderPerEdition =
                     "/api/books/book-test-001/prices"
                     (simulateBookPricesResponse "book-test-001")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Paperback (9780749397050)" ]
+                    [ Selector.exactText "Paperback (9780749397050)" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Paperback (9788497592581)" ]
+                    [ Selector.exactText "Paperback (9788497592581)" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Exclusive Books" ]
+                    [ Selector.exactText "Exclusive Books" ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "No price data yet" ]
 
@@ -848,9 +848,9 @@ moveConfirmHappyUpdatesBookshelf =
                 |> ProgramTest.clickButton "Move"
                 |> ProgramTest.simulateHttpResponse "PUT" moveEndpoint moveSuccessResponse
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Move to Shelf from Wish List" ]
+                    [ Selector.exactText "Move to Shelf from Wish List" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Moved successfully." ]
+                    [ Selector.exactText "Moved successfully." ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.class "shelf-mover" ]
 
@@ -957,7 +957,7 @@ removeCompletedErrorShowsMessage =
                         ""
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Failed to remove book. Please try again." ]
+                    [ Selector.exactText "Failed to remove book. Please try again." ]
 
 
 {-| no-op guard: `ConfirmMove` with `placement == Nothing` fires no request

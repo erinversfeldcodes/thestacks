@@ -88,7 +88,7 @@ suite =
                 \() ->
                     inviteOnly
                         |> Expect.all
-                            (List.map (\title -> Query.has [ Selector.text title ]) sectionTitles)
+                            (List.map (\title -> Query.has [ Selector.exactText title ]) sectionTitles)
             , test "the section-jump row carries one jump per section" <|
                 \() ->
                     inviteOnly
@@ -135,7 +135,7 @@ suite =
                         |> Expect.all
                             [ Query.has [ Selector.text "Open Library or Google Books" ]
                             , Query.find [ Selector.attribute (Attr.href "/upload") ]
-                                >> Query.has [ Selector.text "type the ISBN in by hand" ]
+                                >> Query.has [ Selector.exactText "type the ISBN in by hand" ]
                             ]
             , test "the erasure answer links the control that performs it" <|
                 \() ->
@@ -195,7 +195,7 @@ suite =
                     inviteOnly
                         |> Query.find [ testIdSelector "faq-question-open-source" ]
                         |> Expect.all
-                            [ Query.has [ Selector.text "source available" ]
+                            [ Query.has [ Selector.exactText "source available" ]
                             , Query.has [ Selector.text "It is not licensed for you to run, copy, or modify." ]
                             ]
             , test "the licence answer links the tracked LICENSE file itself" <|

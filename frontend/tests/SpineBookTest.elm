@@ -232,14 +232,14 @@ bookSpineHasTitleAndAuthor =
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "book__spine" ]
                     |> Query.find [ Selector.class "book__title" ]
-                    |> Query.has [ Selector.text "Moby Dick" ]
+                    |> Query.has [ Selector.exactText "Moby Dick" ]
         , test "spine has .book__author with author name" <|
             \_ ->
                 sampleBook
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "book__spine" ]
                     |> Query.find [ Selector.class "book__author" ]
-                    |> Query.has [ Selector.text "Herman Melville" ]
+                    |> Query.has [ Selector.exactText "Herman Melville" ]
         ]
 
 

@@ -100,7 +100,7 @@ selectFiresUpdateAndRecordsValue =
                     "/api/placements/placement-vis-001/visibility"
                     (simulatePlacementVisibilityResponse "placement-vis-001" "owner")
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Visibility saved." ]
+                    [ Selector.exactText "Visibility saved." ]
 
 
 serverErrorShowsFailure : Test
@@ -121,7 +121,7 @@ serverErrorShowsFailure =
                         "{\"error\":\"placement cannot be more visible than its shelf\"}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't save that change. Please try again." ]
+                    [ Selector.exactText "We couldn't save that change. Please try again." ]
 
 
 ceilingHelperTextShown : Test

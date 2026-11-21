@@ -309,7 +309,7 @@ saveWithNoChosenStatusIssuesNoRequest =
                 -- while its guard test passed.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "save-progress-btn")
-                    , Selector.text "Save"
+                    , Selector.exactText "Save"
                     ]
                 |> ProgramTest.expectViewHasNot [ Selector.text "Saving…" ]
 
@@ -320,10 +320,10 @@ cardRendersForReadableShelf =
         \() ->
             startDetailWith libraryPlacement
                 |> ProgramTest.ensureViewHas [ Selector.class "book-detail__progress" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Reading Progress" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Reading Progress" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-status-badge")
-                    , Selector.text "Not recorded"
+                    , Selector.exactText "Not recorded"
                     ]
                 -- ⛔ The assertion that would have been RED before this change:
                 -- the badge must not claim a status the server never sent.
@@ -347,7 +347,7 @@ saveFoldsResult =
                     (goodProgress
                         "{\"placement\":{\"id\":\"placement-test-001\",\"reading_status\":\"reading\",\"current_page\":142,\"started_at\":\"2026-07-22T10:00:00Z\",\"finished_at\":null}}"
                     )
-                |> ProgramTest.expectViewHas [ Selector.text "p. 142 / 371" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "p. 142 / 371" ]
 
 
 errorResponseKeepsFormOpen : Test
@@ -362,7 +362,7 @@ errorResponseKeepsFormOpen =
                         "{\"errors\":{\"current_page\":[\"must be less than or equal to 112\"]}}"
                     )
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "That page is past the end of the book." ]
+                    [ Selector.exactText "That page is past the end of the book." ]
                 |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
                 |> ProgramTest.expectViewHas [ Selector.attribute (Html.Attributes.value "142") ]
 
@@ -375,7 +375,7 @@ finishedOnPileSurfacesBridge =
                 |> openAndSave
                 |> ProgramTest.simulateHttpResponse "PUT" progressEndpoint (goodProgress completedBody)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Move to your Library and record this read?" ]
+                    [ Selector.exactText "Move to your Library and record this read?" ]
 
 
 finishedOnLibraryHasNoBridge : Test

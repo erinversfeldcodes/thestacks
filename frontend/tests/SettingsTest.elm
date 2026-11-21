@@ -55,13 +55,13 @@ suite =
                     Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
                         |> Consent.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text Consent.analyticsDescription ]
+                        |> Query.has [ Selector.exactText Consent.analyticsDescription ]
             , test "it says the same with the toggle on — consent does not start a collection" <|
                 \_ ->
                     Consent.init { analytics = True, writingAssistant = False, searchIndexing = False }
                         |> Consent.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text Consent.analyticsDescription ]
+                        |> Query.has [ Selector.exactText Consent.analyticsDescription ]
             ]
         , describe "Consent"
             [ test "SaveConsent with token sets saving to Loading" <|
@@ -459,7 +459,7 @@ suite =
                         |> Consent.view
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Save Preferences" ]
+                            [ Query.has [ Selector.exactText "Save Preferences" ]
                             , Query.hasNot [ Selector.text "Saved!" ]
                             ]
             , test "positive control — it DOES say 'Saved!' immediately after the save" <|
@@ -467,7 +467,7 @@ suite =
                     consentAfterSave
                         |> Consent.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Saved!" ]
+                        |> Query.has [ Selector.exactText "Saved!" ]
             ]
         ]
 

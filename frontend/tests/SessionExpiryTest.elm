@@ -163,9 +163,9 @@ loginPage401StaysLocalInvalidCredentials =
                     "/api/auth/login"
                     (simulateAuthErrorResponse 401)
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "The door remains shut. Invalid credentials." ]
+                    [ Selector.exactText "The door remains shut. Invalid credentials." ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Present your credentials to enter" ]
+                    [ Selector.exactText "Present your credentials to enter" ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "closed your session" ]
 
@@ -312,7 +312,7 @@ renewalSuccessTakesNoBearerFromTheResponse =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
                     (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.expectViewHas [ Selector.text "headers:X-CSRF-Token" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "headers:X-CSRF-Token" ]
 
 
 renewalFailureClearsAuth : Test
@@ -324,7 +324,7 @@ renewalFailureClearsAuth =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
                     (simulateAuthErrorResponse 401)
-                |> ProgramTest.expectViewHas [ Selector.text "signed-out" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "signed-out" ]
 
 
 {-| Renewal is armed on login: `loginEffects` (fired for every completed login)
@@ -347,7 +347,7 @@ expiredInitRendersDistinctNotice =
         \() ->
             ProgramTest.start () (loginModelProgram (Login.init Nothing (Login.SessionExpired { draftSaved = False })))
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
+                    [ Selector.exactText "The library closed your session for safekeeping — sign in again to return." ]
 
 
 {-| A fresh (non-expiry) login must NOT show the session-expired notice.

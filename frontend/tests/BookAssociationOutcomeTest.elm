@@ -197,7 +197,7 @@ suite =
             , test "the surviving books are still rendered beside the note" <|
                 \_ ->
                     renderWithRows True Envelope.AssociationOutcomeLlmError
-                        |> Query.has [ Selector.text "Piranesi" ]
+                        |> Query.has [ Selector.exactText "Piranesi" ]
 
             -- ⚠️ BOTH DIRECTIONS of the copy guard, and `exactText` rather
             -- than `text` — because `Selector.text` is a CONTAINMENT match.
@@ -329,7 +329,7 @@ suite =
                             , onDismiss = always ()
                             }
                         )
-                        |> Query.has [ Selector.text "Piranesi" ]
+                        |> Query.has [ Selector.exactText "Piranesi" ]
             ]
         , describe "what the decoder requires, and the one thing it does not"
             [ -- ⛔ THE GUARD PROTECTING THIS ISSUE'S OWN DEFECT WAS UNTESTED.

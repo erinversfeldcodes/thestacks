@@ -256,20 +256,20 @@ uploadInvariantSuite =
                 Upload.view { init_ | step = Verifying reportedRow } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "1Q84" ]
+                        [ Query.has [ Selector.exactText "1Q84" ]
                         , Query.hasNot [ uploadNoticeSelector ]
                         ]
         , test "the shelf picker quotes the title rather than saying 'This book'" <|
             \_ ->
                 Upload.view { init_ | step = ChoosingShelf reportedRow } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Add \"1Q84\" to a shelf" ]
+                    |> Query.has [ Selector.exactText "Add \"1Q84\" to a shelf" ]
         , test "the completion card quotes the title rather than saying 'This book'" <|
             \_ ->
                 Upload.view { init_ | step = Complete reportedRow "library" } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "\"1Q84\" added to Library" ]
+                        [ Query.has [ Selector.exactText "\"1Q84\" added to Library" ]
                         , Query.hasNot [ uploadNoticeSelector ]
                         ]
         ]
@@ -448,12 +448,12 @@ suite =
                 \_ ->
                     Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Add This book to a shelf" ]
+                        |> Query.has [ Selector.exactText "Add This book to a shelf" ]
             , test "an identified book still gets its title quoted in the heading" <|
                 \_ ->
                     Upload.view { init_ | step = ChoosingShelf identifiedBook } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Add \"The Great Gatsby\" to a shelf" ]
+                        |> Query.has [ Selector.exactText "Add \"The Great Gatsby\" to a shelf" ]
             ]
         , describe "upload completion card"
             [ test "confirms the placement happened and explains the missing title" <|
@@ -461,7 +461,7 @@ suite =
                     Upload.view { init_ | step = Complete provisionalBook "library" } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "This book added to Library" ]
+                            [ Query.has [ Selector.exactText "This book added to Library" ]
                             , Query.find
                                 [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
                                 >> Query.has [ Selector.text provisionalIsbn ]
@@ -470,7 +470,7 @@ suite =
                 \_ ->
                     Upload.view { init_ | step = Complete identifiedBook "library" } (Just (TestHelpers.creds "token")) Types.RemoteData.NotAsked
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "\"The Great Gatsby\" added to Library" ]
+                        |> Query.has [ Selector.exactText "\"The Great Gatsby\" added to Library" ]
             ]
         , describe "book detail page"
             [ test "the title element says unidentified rather than showing the ISBN" <|
@@ -479,7 +479,7 @@ suite =
                         |> Query.fromHtml
                         |> Query.find
                             [ Selector.attribute (Html.Attributes.attribute "data-testid" "book-title") ]
-                        |> Query.has [ Selector.text "Not yet identified" ]
+                        |> Query.has [ Selector.exactText "Not yet identified" ]
             , test "the notice names the ISBN and says the book is still theirs" <|
                 \_ ->
                     BookDetail.view (bookDetailModelFor provisionalBook)
@@ -494,7 +494,7 @@ suite =
                         |> Expect.all
                             [ Query.find
                                 [ Selector.attribute (Html.Attributes.attribute "data-testid" "book-title") ]
-                                >> Query.has [ Selector.text "The Great Gatsby" ]
+                                >> Query.has [ Selector.exactText "The Great Gatsby" ]
                             , Query.hasNot
                                 [ Selector.attribute (Html.Attributes.attribute "data-testid" "book-provisional-notice") ]
                             ]

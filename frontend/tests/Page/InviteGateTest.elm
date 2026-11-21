@@ -59,7 +59,7 @@ suite =
             , test "the tabs stay visible while the gate is locked — hiding the tab would lie" <|
                 \_ ->
                     rendered (registerCard True)
-                        |> Query.has [ Selector.text "Register" ]
+                        |> Query.has [ Selector.exactText "Register" ]
             ]
         , describe "redeeming"
             [ test "an accepted code reveals the form with the code held read-only" <|
@@ -83,12 +83,12 @@ suite =
                                 [ Selector.attribute (attr "data-testid" "invite-code-input")
                                 , Selector.attribute (attr "readonly" "readonly")
                                 ]
-                            , Query.has [ Selector.text "Invitation accepted. Welcome — the door is open." ]
+                            , Query.has [ Selector.exactText "Invitation accepted. Welcome — the door is open." ]
                             ]
             , test "a refusal names its reason: unknown code" <|
                 \_ ->
                     rendered (refused 404)
-                        |> Query.has [ Selector.text "We don't recognise that code. Check it against the message you were sent." ]
+                        |> Query.has [ Selector.exactText "We don't recognise that code. Check it against the message you were sent." ]
             , test "revoked says withdrawn, not expired — the two have different remedies" <|
                 \_ ->
                     -- ⚠️ This test asserted the OPPOSITE until 2026-10-16: that
@@ -102,7 +102,7 @@ suite =
                     rendered (refused 403)
                         |> Expect.all
                             [ Query.has
-                                [ Selector.text "That invitation was withdrawn. Contact whoever invited you if you think that's wrong." ]
+                                [ Selector.exactText "That invitation was withdrawn. Contact whoever invited you if you think that's wrong." ]
                             , Query.hasNot [ Selector.text "Ask whoever sent it for a fresh one." ]
                             ]
             , test "expired still reads as expired — the two messages stay distinct" <|
@@ -110,13 +110,13 @@ suite =
                     rendered (refused 410)
                         |> Expect.all
                             [ Query.has
-                                [ Selector.text "That invitation has expired. Ask whoever sent it for a fresh one." ]
+                                [ Selector.exactText "That invitation has expired. Ask whoever sent it for a fresh one." ]
                             , Query.hasNot [ Selector.text "withdrawn" ]
                             ]
             , test "an exhausted code says it has been used" <|
                 \_ ->
                     rendered (refused 409)
-                        |> Query.has [ Selector.text "That invitation has already been used." ]
+                        |> Query.has [ Selector.exactText "That invitation has already been used." ]
             , test "typing again clears a refusal — the old code's failure must not gate the new one" <|
                 \_ ->
                     let

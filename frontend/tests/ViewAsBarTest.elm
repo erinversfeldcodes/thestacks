@@ -42,7 +42,7 @@ suite =
                     urlFrom "http://localhost/shelf/library?view_as=platform"
                         |> ViewAsBar.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Exit preview" ]
+                        |> Query.has [ Selector.exactText "Exit preview" ]
             , test "renders nothing when view_as is absent" <|
                 \_ ->
                     urlFrom "http://localhost/shelf/library"
@@ -54,7 +54,7 @@ suite =
                     urlFrom "http://localhost/shelf/library?view_as=unauthenticated"
                         |> ViewAsBar.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Viewing as: Not logged in" ]
+                        |> Query.has [ Selector.exactText "Viewing as: Not logged in" ]
             ]
         , describe "getViewAs"
             [ test "extracts the view_as value from the query" <|

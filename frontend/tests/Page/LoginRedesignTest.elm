@@ -104,14 +104,14 @@ parchmentCardTests =
                 startLogin
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__tab"
-                        , Selector.text "Sign In"
+                        , Selector.exactText "Sign In"
                         ]
         , test "Register tab uses .login-card__tab class" <|
             \() ->
                 startLogin
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__tab"
-                        , Selector.text "Register"
+                        , Selector.exactText "Register"
                         ]
         , test "email input uses .login-card__input class" <|
             \() ->
@@ -124,7 +124,7 @@ parchmentCardTests =
                     |> ProgramTest.clickButton "Register"
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__field"
-                        , Selector.text "Display Name"
+                        , Selector.exactText "Display Name"
                         ]
         , test "submit button uses .login-card__submit class" <|
             \() ->

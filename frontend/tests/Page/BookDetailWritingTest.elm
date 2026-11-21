@@ -93,8 +93,8 @@ suite =
                     -- there was no error to notice at any layer.
                     signedIn [ ( "p1", "On Rereading", Just "2026-10-01T09:00:00Z" ) ]
                         |> ProgramTest.expectViewHas
-                            [ Selector.text "On Rereading"
-                            , Selector.text "2026-10-01"
+                            [ Selector.exactText "On Rereading"
+                            , Selector.exactText "2026-10-01"
                             ]
             , test "a post links to the post itself" <|
                 \() ->
@@ -110,8 +110,8 @@ suite =
                     -- row would read as a rendering bug.
                     signedIn [ ( "p1", "Half-written", Nothing ) ]
                         |> ProgramTest.expectViewHas
-                            [ Selector.text "Half-written"
-                            , Selector.text "Draft"
+                            [ Selector.exactText "Half-written"
+                            , Selector.exactText "Draft"
                             ]
             , test "the Draft label comes from the stated state, not from the missing date" <|
                 \() ->
@@ -130,7 +130,7 @@ suite =
                     -- presence assertion on the title is what rules the second
                     -- out, and the class rules out the first.
                     withStates [ ( "p1", "On Rereading", ( Nothing, Just "published" ) ) ]
-                        |> ProgramTest.ensureViewHas [ Selector.text "On Rereading" ]
+                        |> ProgramTest.ensureViewHas [ Selector.exactText "On Rereading" ]
                         |> ProgramTest.expectView
                             (Query.find [ Selector.class "book-detail__writing-entry" ]
                                 >> Query.findAll [ Selector.class "book-detail__writing-draft" ]
@@ -142,8 +142,8 @@ suite =
                     -- not reached. Both guesses are wrong in a way the reader
                     -- cannot see, so the view makes neither.
                     withStates [ ( "p1", "Half-written", ( Nothing, Nothing ) ) ]
-                        |> ProgramTest.ensureViewHas [ Selector.text "Half-written" ]
-                        |> ProgramTest.expectViewHas [ Selector.text "Status unknown" ]
+                        |> ProgramTest.ensureViewHas [ Selector.exactText "Half-written" ]
+                        |> ProgramTest.expectViewHas [ Selector.exactText "Status unknown" ]
             , test "an unknown state still renders the date it was given" <|
                 \() ->
                     -- The state being unrecognised is not a reason to withhold
@@ -157,8 +157,8 @@ suite =
                           )
                         ]
                         |> ProgramTest.expectViewHas
-                            [ Selector.text "On Rereading"
-                            , Selector.text "2026-10-01"
+                            [ Selector.exactText "On Rereading"
+                            , Selector.exactText "2026-10-01"
                             ]
             , test "every post the server sent is rendered, not just the first" <|
                 \() ->
@@ -227,7 +227,7 @@ suite =
                     -- Asserting the book title first makes "the page loaded"
                     -- part of what this test proves.
                     loadedFor Nothing []
-                        |> ProgramTest.ensureViewHas [ Selector.text "The Power of Habit" ]
+                        |> ProgramTest.ensureViewHas [ Selector.exactText "The Power of Habit" ]
                         |> ProgramTest.expectViewHasNot [ Selector.text "My Writing" ]
             ]
         , describe "decoder cases the view cannot distinguish"

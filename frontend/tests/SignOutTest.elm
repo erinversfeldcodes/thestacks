@@ -237,7 +237,7 @@ theWaitIsAnnouncedWithoutClaimingAnything =
         \() ->
             Main.viewSignOut Main.SigningOut
                 |> Query.fromHtml
-                |> Query.has [ Selector.text "Signing you out…" ]
+                |> Query.has [ Selector.exactText "Signing you out…" ]
 
 
 {-| ⛔ The copy requirement. "Something went wrong" is true and useless; the
@@ -249,7 +249,7 @@ aStalledSignOutNamesTheLiveSession =
     test "sign_out_stalled_says_the_session_is_still_open" <|
         \() ->
             stalled Main.DidNotArrive
-                |> Query.has [ Selector.text "You are still signed in on this device: the request to sign you out never reached the library. Check your connection." ]
+                |> Query.has [ Selector.exactText "You are still signed in on this device: the request to sign you out never reached the library. Check your connection." ]
 
 
 {-| ⛔ The assumption a reader makes next, corrected. The session cookie carries
@@ -263,7 +263,7 @@ aStalledSignOutCorrectsTheClosingTheBrowserAssumption =
     test "sign_out_stalled_says_closing_the_browser_will_not_help" <|
         \() ->
             stalled Main.DidNotArrive
-                |> Query.has [ Selector.text "Closing this tab or quitting your browser will not end it — the session lasts until a sign-out reaches us, or until it expires on its own." ]
+                |> Query.has [ Selector.exactText "Closing this tab or quitting your browser will not end it — the session lasts until a sign-out reaches us, or until it expires on its own." ]
 
 
 {-| A reader told their sign-out failed and given nothing to do is worse off than
@@ -276,7 +276,7 @@ aStalledSignOutOffersTheActionThatWorks =
         \() ->
             stalled Main.ServerRefused
                 |> Query.find [ marked "sign-out-retry" ]
-                |> Query.has [ Selector.text "Try signing out again" ]
+                |> Query.has [ Selector.exactText "Try signing out again" ]
 
 
 {-| The two failures differ in what the reader should try, so they must not read
@@ -297,4 +297,4 @@ aStalledSignOutDistinguishesRefusedFromUnreachable =
     test "sign_out_stalled_tells_the_two_failures_apart" <|
         \() ->
             stalled Main.ServerRefused
-                |> Query.has [ Selector.text "You are still signed in on this device: the library answered, but would not end your session." ]
+                |> Query.has [ Selector.exactText "You are still signed in on this device: the library answered, but would not end your session." ]

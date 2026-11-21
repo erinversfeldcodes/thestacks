@@ -41,7 +41,7 @@ suite =
                         |> Expect.all
                             [ Query.has [ Selector.tag "p" ]
                             , Query.has
-                                [ Selector.text "The Stacks — source-available book management" ]
+                                [ Selector.exactText "The Stacks — source-available book management" ]
                             ]
             ]
         , describe "viewNotFound"
@@ -50,13 +50,13 @@ suite =
                     Main.viewNotFound
                         |> Query.fromHtml
                         |> Query.find [ Selector.tag "h1" ]
-                        |> Query.has [ Selector.text "Page Not Found" ]
+                        |> Query.has [ Selector.exactText "Page Not Found" ]
             , test "renders the explanation copy" <|
                 \() ->
                     Main.viewNotFound
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "The page you're looking for doesn't exist." ]
+                            [ Selector.exactText "The page you're looking for doesn't exist." ]
             , test "renders a 'Go Home' link to /" <|
                 \() ->
                     Main.viewNotFound
@@ -64,7 +64,7 @@ suite =
                         |> Query.find [ Selector.tag "a" ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/") ]
-                            , Query.has [ Selector.text "Go Home" ]
+                            , Query.has [ Selector.exactText "Go Home" ]
                             ]
             ]
         ]

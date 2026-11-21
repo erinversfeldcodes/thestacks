@@ -44,7 +44,7 @@ suite =
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.has [ Selector.attribute (Html.Attributes.attribute "data-testid" "admin-invite-create") ]
-                        , Query.has [ Selector.text "No invitations written yet." ]
+                        , Query.has [ Selector.exactText "No invitations written yet." ]
                         , Query.hasNot [ Selector.attribute (Html.Attributes.attribute "data-testid" "admin-invite-code-reveal") ]
                         ]
         , test "a created code shows ONCE, with the only-time warning" <|
@@ -59,15 +59,15 @@ suite =
                 Invites.view model
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "STK-4F2A-9C1D-XXXX" ]
-                        , Query.has [ Selector.text "This is the only time the full code is shown. Copy it now — the platform keeps only a fingerprint." ]
+                        [ Query.has [ Selector.exactText "STK-4F2A-9C1D-XXXX" ]
+                        , Query.has [ Selector.exactText "This is the only time the full code is shown. Copy it now — the platform keeps only a fingerprint." ]
                         ]
         , test "the list shows the prefix, never a full code" <|
             \_ ->
                 Invites.view { baseModel | invites = Success [ sample ] }
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "STK-4F2A-…" ]
+                        [ Query.has [ Selector.exactText "STK-4F2A-…" ]
                         , Query.hasNot [ Selector.text "STK-4F2A-9C1D-XXXX" ]
                         ]
         , test "a revoked invitation loses its Revoke button and shows the pill" <|
@@ -77,7 +77,7 @@ suite =
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.hasNot [ Selector.class "admin-invites__revoke" ]
-                        , Query.has [ Selector.text "Revoked" ]
+                        , Query.has [ Selector.exactText "Revoked" ]
                         ]
         , test "a redeemed invitation names its taker" <|
             \_ ->
@@ -87,7 +87,7 @@ suite =
                             Success [ { sample | useCount = 1, redeemedByHandle = Just "mara" } ]
                     }
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Redeemed by @mara" ]
+                    |> Query.has [ Selector.exactText "Redeemed by @mara" ]
         , describe "numeric fields refuse rather than coerce"
             [ test "an unparseable expiry blocks submit and says which field" <|
                 \_ ->
@@ -124,7 +124,7 @@ suite =
                     in
                     Invites.view model
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Uses must be at least 1." ]
+                        |> Query.has [ Selector.exactText "Uses must be at least 1." ]
             , test "a blank field is NOT an error — blank means use the default" <|
                 \_ ->
                     -- Blank is a real intent, and the one the server honours by

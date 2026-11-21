@@ -141,9 +141,9 @@ suite =
                     Main.viewNav Catalogue Main.Resolving Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Catalogue" ]
-                            , Query.has [ Selector.text "Marketplace" ]
-                            , Query.has [ Selector.text "About" ]
+                            [ Query.has [ Selector.exactText "Catalogue" ]
+                            , Query.has [ Selector.exactText "Marketplace" ]
+                            , Query.has [ Selector.exactText "About" ]
                             ]
             , -- ⛔ The anti-vacuity pair. Without these two, the three
               -- assertions above would pass just as well on a nav that rendered
@@ -152,17 +152,17 @@ suite =
                 \() ->
                     Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Sign In" ]
+                        |> Query.has [ Selector.exactText "Sign In" ]
             , test "a RESOLVED signed-in boot does offer the bookshelves" <|
                 \() ->
                     Main.viewNav Catalogue (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Bookshelves" ]
+                        |> Query.has [ Selector.exactText "Bookshelves" ]
             , test "a boot whose check FAILED is resolved, and says so rather than spinning" <|
                 \() ->
                     Main.viewNav Catalogue (Main.Unresolved Api.Unreachable) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Sign In" ]
+                        |> Query.has [ Selector.exactText "Sign In" ]
             ]
         , describe "the signed-in nav and footer reach the whole product"
             [ test "the signed-in nav offers Catalogue and Blog" <|
@@ -170,19 +170,19 @@ suite =
                     Main.viewNav Library (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Catalogue" ]
-                            , Query.has [ Selector.text "Blog" ]
+                            [ Query.has [ Selector.exactText "Catalogue" ]
+                            , Query.has [ Selector.exactText "Blog" ]
                             ]
             , test "the footer links the four transparency pages and the FAQ" <|
                 \() ->
                     Main.viewFooter
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Costs" ]
-                            , Query.has [ Selector.text "Metrics" ]
-                            , Query.has [ Selector.text "Transparency" ]
-                            , Query.has [ Selector.text "Architecture" ]
-                            , Query.has [ Selector.text "FAQ" ]
+                            [ Query.has [ Selector.exactText "Costs" ]
+                            , Query.has [ Selector.exactText "Metrics" ]
+                            , Query.has [ Selector.exactText "Transparency" ]
+                            , Query.has [ Selector.exactText "Architecture" ]
+                            , Query.has [ Selector.exactText "FAQ" ]
                             ]
             ]
         , describe "viewNav Anonymous (unauthenticated)"
@@ -190,21 +190,21 @@ suite =
                 \() ->
                     Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Sign In" ]
+                        |> Query.has [ Selector.exactText "Sign In" ]
             , test "shows Catalogue and Marketplace" <|
                 \() ->
                     Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "Catalogue" ]
-                            , Query.has [ Selector.text "Marketplace" ]
+                            [ Query.has [ Selector.exactText "Catalogue" ]
+                            , Query.has [ Selector.exactText "Marketplace" ]
                             ]
             , test "shows a single About entry linking to /about" <|
                 \() ->
                     Main.viewNav Catalogue Main.Anonymous Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "About" ]
+                            [ Query.has [ Selector.exactText "About" ]
                             , Query.has
                                 [ Selector.attribute (Attr.href "/about") ]
                             ]
@@ -221,11 +221,11 @@ suite =
             [ test "shows the user's display name" <|
                 \() ->
                     navClosed
-                        |> Query.has [ Selector.text "A Reader" ]
+                        |> Query.has [ Selector.exactText "A Reader" ]
             , test "groups the five bookshelves under a Bookshelves disclosure" <|
                 \() ->
                     navClosed
-                        |> Query.has [ Selector.text "Bookshelves" ]
+                        |> Query.has [ Selector.exactText "Bookshelves" ]
             , test "promotes Search to a top-level nav item" <|
                 \() ->
                     navClosed
@@ -245,7 +245,7 @@ suite =
                 \() ->
                     Main.viewNav Library (Main.Authenticated ownerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Admin" ]
+                        |> Query.has [ Selector.exactText "Admin" ]
             , test "non-owner does not see the Admin disclosure" <|
                 \() ->
                     navClosed
@@ -266,11 +266,11 @@ suite =
                 \() ->
                     navOpen BookshelvesMenu
                         |> Expect.all
-                            [ Query.has [ Selector.text "Library" ]
-                            , Query.has [ Selector.text "Antilibrary" ]
-                            , Query.has [ Selector.text "Wish List" ]
-                            , Query.has [ Selector.text "Reading Pile" ]
-                            , Query.has [ Selector.text "Looking for a Home" ]
+                            [ Query.has [ Selector.exactText "Library" ]
+                            , Query.has [ Selector.exactText "Antilibrary" ]
+                            , Query.has [ Selector.exactText "Wish List" ]
+                            , Query.has [ Selector.exactText "Reading Pile" ]
+                            , Query.has [ Selector.exactText "Looking for a Home" ]
                             ]
             , test "closed: no disclosure reports aria-expanded=true" <|
                 \() ->
@@ -302,7 +302,7 @@ suite =
                 \() ->
                     navOpen MarketplaceMenu
                         |> Expect.all
-                            [ Query.has [ Selector.text "Create Listing" ]
+                            [ Query.has [ Selector.exactText "Create Listing" ]
                             , Query.hasNot [ Selector.text "Reading Pile" ]
                             ]
             ]
@@ -354,7 +354,7 @@ suite =
                 \() ->
                     ownerNav AdminInvites Nothing
                         |> Query.find [ Selector.class "app-nav__item--active" ]
-                        |> Query.has [ Selector.text "Admin" ]
+                        |> Query.has [ Selector.exactText "Admin" ]
             , test "the invitations route lights exactly one nav item" <|
                 \() ->
                     ownerNav AdminInvites Nothing
@@ -367,13 +367,13 @@ suite =
                     Main.viewNav (BookDetail "b1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "app-nav__item--active" ]
-                        |> Query.has [ Selector.text "Bookshelves" ]
+                        |> Query.has [ Selector.exactText "Bookshelves" ]
             , test "a marketplace listing detail keeps Marketplace active" <|
                 \() ->
                     Main.viewNav (MarketplaceDetail "l1") (Main.Authenticated readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked False
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "app-nav__item--active" ]
-                        |> Query.has [ Selector.text "Marketplace" ]
+                        |> Query.has [ Selector.exactText "Marketplace" ]
             ]
         , describe "the Add Book badge"
             [ test "counts the uploads awaiting confirmation" <|
@@ -383,7 +383,7 @@ suite =
                             [ awaitingItem "img-1", awaitingItem "img-2" ]
                         )
                         |> Query.find [ badge ]
-                        |> Query.has [ Selector.text "2" ]
+                        |> Query.has [ Selector.exactText "2" ]
             , test "renders NO badge when nothing is waiting" <|
                 \() ->
                     navWithInbox (Types.RemoteData.Success [])
@@ -407,7 +407,7 @@ suite =
                             ]
                         )
                         |> Query.find [ badge ]
-                        |> Query.has [ Selector.text "1" ]
+                        |> Query.has [ Selector.exactText "1" ]
             , test "an unloaded inbox renders no badge — 'we don't know' is not 'nothing'" <|
                 \() ->
                     navWithInbox Types.RemoteData.NotAsked

@@ -73,7 +73,7 @@ shelfLabelRendered =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "shelf-label" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Library" ]
+                    [ Selector.exactText "Library" ]
 
 
 {-| Books from the API must render inside a.bookcase structure.
@@ -153,4 +153,4 @@ forbiddenTriggersAgeGate =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "age-gate" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Age Verification Required" ]
+                    [ Selector.exactText "Age Verification Required" ]

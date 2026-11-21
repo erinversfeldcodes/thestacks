@@ -122,7 +122,7 @@ showsLoadingState =
         \() ->
             startThirdSpaces
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading spaces..." ]
+                    [ Selector.exactText "Loading spaces..." ]
 
 
 loadsAndDisplaysSpaces : Test
@@ -134,9 +134,9 @@ loadsAndDisplaysSpaces =
                     "/api/third-spaces"
                     sampleSpacesJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Readers Cafe" ]
+                    [ Selector.exactText "Readers Cafe" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Corner Books" ]
+                    [ Selector.exactText "Corner Books" ]
 
 
 showsEmptyState : Test
@@ -148,7 +148,7 @@ showsEmptyState =
                     "/api/third-spaces"
                     emptySpacesJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No third spaces found in your area yet." ]
+                    [ Selector.exactText "No third spaces found in your area yet." ]
 
 
 clickSpaceSelectsIt : Test
@@ -174,9 +174,9 @@ selectedSpaceShowsDetail =
                     sampleSpacesJson
                 |> ProgramTest.clickButton "Readers Cafe"
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Readers Cafe" ]
+                    [ Selector.exactText "Readers Cafe" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Cape Town" ]
+                    [ Selector.exactText "Cape Town" ]
 
 
 selectedSpaceShowsEvents : Test
@@ -189,7 +189,7 @@ selectedSpaceShowsEvents =
                     sampleSpacesJson
                 |> ProgramTest.clickButton "Readers Cafe"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Book Launch" ]
+                    [ Selector.exactText "Book Launch" ]
 
 
 closeDetailHidesOverlay : Test
