@@ -10,6 +10,7 @@ defmodule Stacks.Enrichment.ReviewSourcePolicyTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Books.MockHttpClient
   alias Stacks.Enrichment
   alias Stacks.Enrichment.ReviewSnapshot
 
@@ -94,5 +95,34 @@ defmodule Stacks.Enrichment.ReviewSourcePolicyTest do
     sources = book.id |> Enrichment.list_sanctioned_reviews() |> Enum.map(& &1.source)
     assert "open_library" in sources
     refute "storygraph" in sources
+  end
+
+  test "fetch_open_library_reviews stores a sanctioned snapshot from OL ratings, readable via the read path" do
+    book = insert(:book)
+
+    MockHttpClient.put_response(
+      "openlibrary.org/works/OL1W/ratings.json",
+      {:ok, %{"summary" => %{"average" => 4.2, "count" => 17}}}
+    )
+
+    assert {:ok, snap} = Enrichment.fetch_open_library_reviews(book.id, "OL1W")
+    assert snap.source == "open_library"
+    assert snap.rating == 4.2
+    assert snap.rating_count == 17
+
+    assert [%{source: "open_library", rating_count: 17}] =
+             Enrichment.list_sanctioned_reviews(book.id)
+  end
+
+  test "fetch_open_library_reviews reports when a work has no ratings rather than storing a hollow row" do
+    book = insert(:book)
+
+    MockHttpClient.put_response(
+      "openlibrary.org/works/OL2W/ratings.json",
+      {:ok, %{"summary" => %{"average" => nil, "count" => 0}}}
+    )
+
+    assert {:error, :no_ratings} = Enrichment.fetch_open_library_reviews(book.id, "OL2W")
+    assert Enrichment.list_sanctioned_reviews(book.id) == []
   end
 end

@@ -178,6 +178,50 @@ defmodule Stacks.Enrichment do
     |> Enum.uniq_by(& &1.source)
   end
 
+  @open_library_works_url "https://openlibrary.org/works"
+
+  @doc """
+  Fetch Open Library ratings for a book's OL work and store them as the
+  `open_library` review snapshot (the preferred first sanctioned source,
+  US-2.1.1 §4). Open Library returns an average rating and a count and no
+  sentiment text, so the snapshot carries a rating and a count and nothing it
+  would have to summarise. The write goes through `review_snapshot_changeset/2`,
+  so the sanctioned-source gate applies to this path like any other.
+  """
+  @spec fetch_open_library_reviews(binary(), binary()) ::
+          {:ok, ReviewSnapshot.t()} | {:error, term()}
+  def fetch_open_library_reviews(book_id, work_id)
+      when is_binary(book_id) and is_binary(work_id) do
+    url = "#{@open_library_works_url}/#{work_id}/ratings.json"
+
+    case review_http_client().get(url) do
+      {:ok, %{"summary" => %{"count" => count} = summary}}
+      when is_integer(count) and count > 0 ->
+        %ReviewSnapshot{}
+        |> review_snapshot_changeset(%{
+          book_id: book_id,
+          source: "open_library",
+          source_url: "#{@open_library_works_url}/#{work_id}",
+          rating: summary["average"],
+          rating_count: count,
+          scraped_at: DateTime.utc_now()
+        })
+        |> Repo.insert(
+          on_conflict: {:replace, [:rating, :rating_count, :source_url, :scraped_at]},
+          conflict_target: [:book_id, :source]
+        )
+
+      {:ok, _} ->
+        {:error, :no_ratings}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp review_http_client,
+    do: Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
+
   @price_snapshot_required_fields [
     :book_edition_id,
     :book_id,
