@@ -378,5 +378,15 @@ defmodule Stacks.FactoryHonestyTest do
 
       assert build(:bookshelf, user: owner, visibility: "platform").visibility == "platform"
     end
+
+    test "a non-owner profile's MORE-exposed shelf builds without the escape" do
+      # The alignment's point: only an "owner" profile places a ceiling, so a
+      # platform profile's public shelf — a pairing the write path happily
+      # creates — must NOT need `allow_over_ceiling`. Locks the factory against
+      # drifting back above production.
+      owner = build(:user, profile_visibility: "platform")
+
+      assert build(:bookshelf, user: owner, visibility: "public").visibility == "public"
+    end
   end
 end
