@@ -376,6 +376,21 @@ suite =
                         , \_ -> out |> Expect.equal Consent.NoOut
                         ]
                         ()
+            , test "⛔ a failed REVOKE (attempted False) reverts the flip back to ON" <|
+                -- the OTHER direction of the revert arm. Without this case a
+                -- mutation of `not attempted` to the constant `False` survives the
+                -- whole suite, because every other failure test attempts True.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveSearchIndexingCompleted False (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = True }
+                                    |> (\m -> { m | searchIndexingConsent = False })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    model.searchIndexingConsent |> Expect.equal True
             , test "⛔ a 401 reverts the flip AND hands off SessionExpired" <|
                 \_ ->
                     let

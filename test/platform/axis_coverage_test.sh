@@ -114,9 +114,12 @@ else
     _record_fail "an allowlisted docs change was rejected: $OUT_DOC"
 fi
 
-test_case "a_generated_tree_PASSES" "the generated-artefact carve-out holds"
-# `apps/core/lib/stacks/gen/` sits UNDER an axis prefix but is allowlisted as
-# generated — the allowlist must win, or every proto regen would demand a review.
+test_case "a_generated_tree_PASSES" "a generated artefact is never demanded a reviewer"
+# `apps/core/lib/stacks/gen/` is allowlisted (generated) AND sits under an axis
+# prefix, so it passes EITHER way — this pins only that a proto regen is never
+# flagged, NOT that the allowlist is load-bearing here (the axis match alone would
+# pass it). The allowlist's load-bearing case — a tree under NO axis — is
+# `an_allowlisted_tree_PASSES` (docs/).
 read -r DIR BASE < <(build_repo "apps/core/lib/stacks/gen/proto/foo.ex")
 OUT_GEN="$(run_gate "$DIR" "$BASE")"
 RC_GEN=$?
@@ -156,12 +159,14 @@ for t in "${STACK_TREES[@]}"; do
         fi
     fi
 done
-if ((${#STACK_TREES[@]} < 7)); then
-    # ⛔ Anti-vacuity floor: this check is a set-difference, empty when every tree
-    # is mirrored AND when almost nothing was extracted. STACK_PATHS has one
-    # entry per stack (≥7), so a near-zero count means the dict parse has drifted
-    # and the guard would silently pass over nothing.
-    _record_fail "extracted only ${#STACK_TREES[@]} STACK_PATHS tree(s) — expected one per stack (>=7); the dict parse has drifted and the mirror check is vacuous"
+if ((${#STACK_TREES[@]} < 15)); then
+    # ⛔ Anti-vacuity floor on the VALUE count, not the key count. STACK_TREES is
+    # the dict's VALUES (the path tuples — ~19 today, several per stack), not its
+    # 7 keys. The check is a set-difference, empty when every tree is mirrored AND
+    # when the parse dropped most values; a floor of <15 catches a parse that
+    # skipped trees (which the mirror loop would then silently not check) while
+    # still allowing the dict to shift by a value or two.
+    _record_fail "extracted only ${#STACK_TREES[@]} STACK_PATHS value(s) — the dict has ~19 (several per stack); a count this low means the parse dropped trees the mirror check then skips"
 elif [[ -z "$missing" ]]; then
     _record_pass "every STACK_PATHS tree is mirrored in the gate (${#STACK_TREES[@]} checked)"
 else
@@ -180,5 +185,36 @@ else
     _record_fail "an unknown base ref PASSED — the gate computed an empty changed set and called it clean: $OUT_NOBASE"
 fi
 assert_contains "$OUT_NOBASE" "does not resolve" "and the failure says the base is the problem"
+
+test_case "AXIS_PREFIXES_reverse_mirror" "⚠️ the OTHER drift direction — a gate axis prefix absent from STACK_PATHS"
+# The mirror check above proves STACK_PATHS ⊆ gate. This proves the reverse: gate
+# AXIS_PREFIXES ⊆ STACK_PATHS. An axis tree added to the gate but NOT to
+# wave-status.sh's STACK_PATHS would pass coverage here as "owned" yet never stale
+# a reviewer in wave-status — the RL-472 blind spot reopened via the OTHER list.
+# (ALLOWLIST entries legitimately are not in STACK_PATHS, so only the axis
+# prefixes are checked.) The gate's own "Keep them equal" is enforced in full now.
+mapfile -t AXIS_VALS < <(
+    awk '/^AXIS_PREFIXES=\(/{f=1;next} /^\)/{f=0} f' "$GATE" 2>/dev/null \
+        | grep -oE '"[^"]+"' | tr -d '"' | sort -u
+)
+rev_missing=""
+for p in "${AXIS_VALS[@]}"; do
+    pt="${p%/}"
+    found=0
+    for t in "${STACK_TREES[@]}"; do
+        [[ "${t%/}" == "$pt" ]] && {
+            found=1
+            break
+        }
+    done
+    [[ $found -eq 0 ]] && rev_missing="${rev_missing} ${p}"
+done
+if ((${#AXIS_VALS[@]} < 15)); then
+    _record_fail "extracted only ${#AXIS_VALS[@]} AXIS_PREFIXES — the array parse drifted"
+elif [[ -z "$rev_missing" ]]; then
+    _record_pass "every gate AXIS_PREFIX is a STACK_PATHS tree (${#AXIS_VALS[@]} checked)"
+else
+    _record_fail "gate AXIS_PREFIXES absent from wave-status STACK_PATHS:${rev_missing} — owned by the gate but staling no reviewer"
+fi
 
 summarise

@@ -3,6 +3,7 @@ defmodule CoreWeb.PageController do
 
   alias Stacks.Accounts
   alias Stacks.Accounts.User
+  alias Stacks.Visibility
 
   def index(conn, params) do
     index_path = Application.app_dir(:core, ["priv", "static", "index.html"])
@@ -35,12 +36,21 @@ defmodule CoreWeb.PageController do
 
   defp robots_directive(_params), do: "noindex, nofollow"
 
-  # Reads the opt-in off the row `get_user_by_handle/1` already loaded — no second
-  # query on this hot, most-crawled public route.
+  # Indexable ⟹ the opt-in is granted AND the profile is anonymously visible.
+  # The visibility half defers to the canonical `Visibility.profile_visible?/2`
+  # (`:unauthenticated` ⇒ `pv == "public"`) rather than re-matching `"public"`
+  # here, so the day anonymous visibility gains a condition — a block, a
+  # suspension, an anon age-gate — this header stops telling crawlers to index a
+  # profile the app would hide, by construction rather than by a test that
+  # happens to agree today. The consent flag is read off the already-loaded row,
+  # so there is still no second query on this hot, most-crawled public route.
   defp indexable_profile?(handle) do
     case Accounts.get_user_by_handle(handle) do
-      %User{profile_visibility: "public", consent_search_indexing: true} -> true
-      _ -> false
+      %User{consent_search_indexing: true} = user ->
+        Visibility.profile_visible?(user, :unauthenticated)
+
+      _ ->
+        false
     end
   end
 
