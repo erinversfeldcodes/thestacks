@@ -1,8 +1,14 @@
 defmodule Core.Repo.Migrations.AddTheSanctionedReviewSourcesToTheEnum do
   use Ecto.Migration
 
-  # ALTER TYPE … ADD VALUE cannot run inside a transaction.
+  # ALTER TYPE … ADD VALUE cannot run inside a transaction. Both switches are set
+  # together for an enum-value addition on Neon: without the migration lock
+  # disabled, the three autocommitting ADD VALUEs would hold Ecto's global
+  # migration advisory lock across statement boundaries. Each ADD VALUE is a
+  # sub-second pg_enum catalog change (no table rewrite, no table lock), so the
+  # window is tiny — but releasing the lock is the standard for this operation.
   @disable_ddl_transaction true
+  @disable_migration_lock true
 
   # The sanctioned review sources are Open Library,
   # Reddit (already present), partner-pushed, and author/publisher RSS. The enum

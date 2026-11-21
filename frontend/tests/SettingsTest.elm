@@ -341,6 +341,86 @@ suite =
                     in
                     model.saving |> Expect.equal (Failure Http.NetworkError)
             ]
+        , describe "Consent — search-indexing toggle (optimistic save, revert, 401)"
+            [ test "toggling sets only its own saving state, not the Save button" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update Consent.ToggleSearchIndexing
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    Expect.all
+                        [ \m -> m.searchIndexingSaving |> Expect.equal Loading
+                        , \m -> m.searchIndexingConsent |> Expect.equal True
+                        , \m -> m.saving |> Expect.equal NotAsked
+                        ]
+                        model
+            , test "⛔ a failed save (500) REVERTS the optimistic flip and records Failure" <|
+                -- the un-reverted state is, by the module's own comment, "the worst
+                -- available outcome: the reader believes they have withdrawn consent
+                -- and processing continues" — so the revert is the load-bearing arm.
+                \_ ->
+                    let
+                        ( model, _, out ) =
+                            Consent.update
+                                (Consent.SaveSearchIndexingCompleted True (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | searchIndexingConsent = True })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    Expect.all
+                        [ \_ -> model.searchIndexingConsent |> Expect.equal False
+                        , \_ -> model.searchIndexingSaving |> Expect.equal (Failure (Http.BadStatus 500))
+                        , \_ -> out |> Expect.equal Consent.NoOut
+                        ]
+                        ()
+            , test "⛔ a 401 reverts the flip AND hands off SessionExpired" <|
+                \_ ->
+                    let
+                        ( model, _, out ) =
+                            Consent.update
+                                (Consent.SaveSearchIndexingCompleted True (Err (Http.BadStatus 401)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | searchIndexingConsent = True })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    Expect.all
+                        [ \_ -> model.searchIndexingConsent |> Expect.equal False
+                        , \_ -> out |> Expect.equal Consent.SessionExpired
+                        ]
+                        ()
+            , test "a successful save records Success" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveSearchIndexingCompleted True (Ok ()))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = True })
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    model.searchIndexingSaving |> Expect.equal (Success ())
+            , test "a failed save is RENDERED and announced (role=alert)" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveSearchIndexingCompleted True (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | searchIndexingConsent = True })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    Consent.viewSection False model
+                        |> Query.fromHtml
+                        |> Query.find
+                            [ Selector.attribute
+                                (Html.Attributes.attribute "data-testid" "search-indexing-consent-error")
+                            ]
+                        |> Query.has [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
+            ]
         , describe "Consent — a saved choice can be changed again"
             [ test "toggling analytics after a save clears the 'Saved!' state" <|
                 \_ ->

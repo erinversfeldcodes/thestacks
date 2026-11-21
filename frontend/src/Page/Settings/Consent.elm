@@ -100,16 +100,19 @@ writingAssistantOffDescription =
     "Your published posts are not sent to an AI model, so books you mention won't be linked automatically."
 
 
-{-| Seed the consent page from the current user's actual consent state so the
-toggles reflect reality on open. Previously both toggles were
-hard-coded OFF, so a user who had already granted consent saw them as OFF and
-their first click re-granted instead of revoking.
+{-| The verbatim copy shown under the search-indexing toggle. A named constant so
+the wording lives in one place; the settings e2e spec asserts a reader sees it.
 -}
 searchIndexingDescription : String
 searchIndexingDescription =
     "Off by default: your public profile and shelves are not offered to search engines. Turn this on to let search engines index content you have ALREADY made public — it does not change who can see it, only whether it can be found through a search engine."
 
 
+{-| Seed the consent page from the current user's actual consent state so the
+toggles reflect reality on open. Previously both toggles were
+hard-coded OFF, so a user who had already granted consent saw them as OFF and
+their first click re-granted instead of revoking.
+-}
 init : { analytics : Bool, writingAssistant : Bool, searchIndexing : Bool } -> Model
 init consent =
     { analyticsConsent = consent.analytics

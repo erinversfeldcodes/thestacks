@@ -48,13 +48,29 @@ ALLOWLIST_PREFIXES=(
 
 matches_any() { local f="$1"; shift; local p; for p in "$@"; do [[ "$f" == "$p"* || "$f" == "$p" ]] && return 0; done; return 1; }
 
+# ⛔ Fail CLOSED on an unresolvable base. Otherwise, on a shallow CI checkout that
+# never fetched origin/main, both `git diff` calls below fail, CHANGED comes back
+# empty, and the gate prints "OK: all 0 changed file(s)…" with exit 0 — an
+# unowned running-code file would pass unreviewed, the exact silent-pass this gate
+# exists to prevent. A legitimately empty diff (base resolves, nothing changed)
+# still passes; only an UNKNOWN base is refused.
+if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null 2>&1; then
+  echo "FAIL: base ref '${BASE}' does not resolve, so the changed set — and thus axis coverage — is UNKNOWN." >&2
+  echo "Fetch the base (e.g. 'git fetch origin main') or set AXIS_COVERAGE_BASE to a ref that exists." >&2
+  exit 1
+fi
+
 mapfile -t CHANGED < <(git diff --name-only "$BASE...HEAD" 2>/dev/null || git diff --name-only "$BASE" 2>/dev/null)
 
 unowned=()
 for f in "${CHANGED[@]}"; do
   [[ -z "$f" ]] && continue
-  matches_any "$f" "${AXIS_PREFIXES[@]}" && continue
+  # ALLOWLIST first: a generated tree (e.g. apps/core/lib/stacks/gen/) sits UNDER
+  # an axis prefix, so checking the axis first would let it pass via the axis and
+  # the allowlist carve-out would never fire. Allowlist-first makes "no review"
+  # win outright, which is what an allowlist entry means.
   matches_any "$f" "${ALLOWLIST_PREFIXES[@]}" && continue
+  matches_any "$f" "${AXIS_PREFIXES[@]}" && continue
   unowned+=("$f")
 done
 

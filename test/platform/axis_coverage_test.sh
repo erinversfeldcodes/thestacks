@@ -156,10 +156,29 @@ for t in "${STACK_TREES[@]}"; do
         fi
     fi
 done
-if [[ -z "$missing" ]]; then
+if ((${#STACK_TREES[@]} < 7)); then
+    # ⛔ Anti-vacuity floor: this check is a set-difference, empty when every tree
+    # is mirrored AND when almost nothing was extracted. STACK_PATHS has one
+    # entry per stack (≥7), so a near-zero count means the dict parse has drifted
+    # and the guard would silently pass over nothing.
+    _record_fail "extracted only ${#STACK_TREES[@]} STACK_PATHS tree(s) — expected one per stack (>=7); the dict parse has drifted and the mirror check is vacuous"
+elif [[ -z "$missing" ]]; then
     _record_pass "every STACK_PATHS tree is mirrored in the gate (${#STACK_TREES[@]} checked)"
 else
     _record_fail "STACK_PATHS trees absent from the gate's AXIS_PREFIXES/ALLOWLIST:${missing} — a reviewed tree the gate would call unowned"
 fi
+
+test_case "an_unresolvable_base_FAILS" "⚠️ the gate fails CLOSED when it cannot compute the changed set"
+# A base ref that does not resolve must FAIL, not pass as "0 changed files" — a
+# shallow CI checkout that never fetched origin/main is exactly that case.
+read -r DIR BASE < <(build_repo "apps/core/lib/stacks/foo.ex")
+OUT_NOBASE="$(cd "$DIR" && AXIS_COVERAGE_BASE=refs/does-not-exist bash "$GATE" 2>&1)"
+RC_NOBASE=$?
+if [[ "$RC_NOBASE" -ne 0 ]]; then
+    _record_pass "an unknown base ref fails the gate (exit $RC_NOBASE)"
+else
+    _record_fail "an unknown base ref PASSED — the gate computed an empty changed set and called it clean: $OUT_NOBASE"
+fi
+assert_contains "$OUT_NOBASE" "does not resolve" "and the failure says the base is the problem"
 
 summarise

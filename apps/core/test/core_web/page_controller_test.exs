@@ -73,6 +73,22 @@ defmodule CoreWeb.PageControllerTest do
       assert get_resp_header(conn, "x-robots-tag") == ["noindex, nofollow"]
     end
 
+    test "a deeper path under an opted-in public profile still serves noindex", %{conn: conn} do
+      # the opt-in indexes the PROFILE, not every sub-resource under it — a
+      # platform-only shelf at /u/<handle>/... must not inherit the profile's index
+      user =
+        insert(:user,
+          handle: "deep",
+          profile_visibility: "public",
+          consent_search_indexing: true
+        )
+
+      conn =
+        AppRole.as_app_role(fn -> get(conn, "/u/#{user.handle}/bookshelves/platform-only") end)
+
+      assert get_resp_header(conn, "x-robots-tag") == ["noindex, nofollow"]
+    end
+
     test "a non-profile SPA route serves noindex", %{conn: conn} do
       conn = get(conn, "/library")
       assert get_resp_header(conn, "x-robots-tag") == ["noindex, nofollow"]

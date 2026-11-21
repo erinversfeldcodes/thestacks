@@ -31,4 +31,23 @@ defmodule Stacks.Workers.FetchBookReviewsJobTest do
     assert :ok = perform_job(FetchBookReviewsJob, %{"book_id" => book.id})
     assert Enrichment.list_sanctioned_reviews(book.id) == []
   end
+
+  test "perform propagates a fetch error so Oban retries rather than swallowing it" do
+    book = insert(:book)
+
+    # a transport failure from Open Library must surface as {:error, _} — not get
+    # mapped to :ok, which would silently stop the worker's max_attempts retries
+    MockHttpClient.put_response(
+      "openlibrary.org/works/OLERR/ratings.json",
+      {:error, :timeout}
+    )
+
+    assert {:error, :timeout} =
+             perform_job(FetchBookReviewsJob, %{
+               "book_id" => book.id,
+               "open_library_work_id" => "OLERR"
+             })
+
+    assert Enrichment.list_sanctioned_reviews(book.id) == []
+  end
 end
