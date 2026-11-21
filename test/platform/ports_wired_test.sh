@@ -49,7 +49,12 @@ assert_contains "$OUT" "ports, every Cmd subscribed" \
     "the pass names how many ports it checked"
 
 PORTS_SEEN="$(printf '%s\n' "$OUT" | grep -oE "OK — [0-9]+ ports" | grep -oE "[0-9]+" | head -1)"
-if [[ "${PORTS_SEEN:-0}" -ge 15 ]]; then
+# Anti-vacuity floor. The app declares 14 ports (6 out / 8 in) as of this writing;
+# this sits below that to catch a drifted `port` regex (which would harvest near
+# zero), NOT to pin the exact count. Was 15 — above the real count — which tripped
+# after a port was removed; a floor above the live count is itself the drift it
+# exists to catch, in the threshold instead of the parser.
+if [[ "${PORTS_SEEN:-0}" -ge 12 ]]; then
     _record_pass "it harvested $PORTS_SEEN ports"
 else
     _record_fail "it harvested only ${PORTS_SEEN:-0} ports. This app declares more than that, so a number this low means the Elm parse has drifted and every rule below is being checked over almost nothing"
