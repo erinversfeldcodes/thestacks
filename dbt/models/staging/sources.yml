@@ -174,6 +174,8 @@ sources:
             description: Timestamp when the user finished reading (null if not completed).
           - name: shelf_id
             description: FK to shelves (the physical shelf within the bookshelf).
+          - name: user_id
+            description: Denormalised owner (FK to users), maintained by a trigger from the bookshelf; present so the row-level policy is an indexable same-table equality.
 
       - name: bookshelf_placement_history
         description: Immutable log of book movements between bookshelves.
