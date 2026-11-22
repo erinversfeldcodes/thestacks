@@ -25,7 +25,7 @@ defmodule Stacks.RlsEnforcementTest do
   alias Core.Repo
   alias Ecto.Adapters.SQL
   alias Stacks.Scope
-  alias Stacks.Shelving.Bookshelf
+  alias Stacks.Shelving.{Bookshelf, Placement}
 
   @unscoped_refusal "no request scope set"
   @secured_tables ~w(bookshelves bookshelf_placements user_blocks visibility_grants)
@@ -461,6 +461,113 @@ defmodule Stacks.RlsEnforcementTest do
       assert length(rows) == length(@secured_tables),
              "a secured table has NO policy at all — present: #{inspect(rows)}, " <>
                "expected all of #{inspect(@secured_tables)}"
+    end
+  end
+
+  describe "the placement widening arms are gone and the owner arm is indexable" do
+    test "⛔ a non-owner cannot read another user's placement — audience_select and active_listing are dropped" do
+      owner = insert(:user)
+      other = insert(:user)
+      owner_shelf = insert(:bookshelf, user: owner, name: "library")
+      other_shelf = insert(:bookshelf, user: other, name: "library")
+
+      owner_placement =
+        insert(:placement, bookshelf: owner_shelf, book: insert(:book), notes: "owner note")
+
+      # An active listing on another user's shelf — exactly what the dropped arms
+      # used to expose, the reserve price and notes included.
+      other_placement =
+        insert(:placement,
+          bookshelf: other_shelf,
+          book: insert(:book),
+          notes: "PRIVATE",
+          listing_status: "active",
+          listing_min_price_cents: 9999
+        )
+
+      visible_ids =
+        AppRole.as_app_role(fn ->
+          Scope.with_user(owner.id, fn ->
+            Repo.all(Placement) |> Enum.map(& &1.id)
+          end)
+        end)
+
+      assert owner_placement.id in visible_ids,
+             "the owner must still read their own placement through the owner arm"
+
+      refute other_placement.id in visible_ids,
+             "a non-owner must not read another user's placement once the widening arms are dropped — the column exposure (notes, reserve) closed at the source"
+    end
+
+    test "⛔ the owner predicate is indexable — an index path exists under enable_seqscan=off, with no SubPlan arm" do
+      owner = insert(:user)
+      insert(:bookshelf, user: owner, name: "library")
+
+      plan =
+        AppRole.as_app_role(fn ->
+          Scope.with_user(owner.id, fn ->
+            Repo.query!("SET LOCAL enable_seqscan = off", [])
+
+            Repo.query!("EXPLAIN SELECT id FROM op.bookshelf_placements", []).rows
+            |> List.flatten()
+            |> Enum.join("\n")
+          end)
+        end)
+
+      assert plan =~ "Index Scan",
+             "the owner arm (user_id = op.current_scope()) must be an index condition, got:\n#{plan}"
+
+      refute plan =~ "SubPlan",
+             "a SubPlan arm remains — the predicate is not a single same-table equality:\n#{plan}"
+    end
+
+    test "the search discovery label reads cross-user active listings through the security_barrier view" do
+      owner = insert(:user, handle: "seller")
+      viewer = insert(:user)
+      shelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+      book = insert(:book)
+      insert(:placement, bookshelf: shelf, book: book, listing_status: "active")
+
+      labels =
+        AppRole.as_app_role(fn ->
+          Scope.with_user(viewer.id, fn ->
+            Stacks.Shelving.looking_for_home_labels([book.id])
+          end)
+        end)
+
+      assert labels[book.id] == %{source: "looking_for_home", owner_handle: "seller"}
+    end
+
+    test "⛔ the active_listings view's select-list is exactly the allowlist — notes and reserve are absent" do
+      cols =
+        Repo.query!(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema = 'op' AND table_name = 'active_listings'",
+          []
+        ).rows
+        |> List.flatten()
+        |> MapSet.new()
+
+      assert cols == MapSet.new(["id", "book_id", "bookshelf_id", "placed_at"]),
+             "the view's select-list is the whole security boundary; it must be exactly the allowlist, got: #{inspect(MapSet.to_list(cols))}"
+
+      refute MapSet.member?(cols, "notes")
+      refute MapSet.member?(cols, "listing_min_price_cents")
+    end
+
+    test "the active_listings view is a security_barrier and not security_invoker" do
+      %{rows: [[reloptions]]} =
+        Repo.query!(
+          "SELECT reloptions FROM pg_class WHERE relname = 'active_listings' AND relnamespace = 'op'::regnamespace",
+          []
+        )
+
+      opts = reloptions || []
+
+      assert "security_barrier=true" in opts,
+             "the view must set security_barrier=true (it is the whole boundary), got: #{inspect(opts)}"
+
+      refute "security_invoker=true" in opts,
+             "security_invoker must stay false — true makes the view read as stacks_app and return nothing"
     end
   end
 end

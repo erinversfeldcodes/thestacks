@@ -34,6 +34,16 @@ defmodule Core.Repo.Migrations.MakeTheRowLevelPoliciesRefuseAnUnscopedQuery do
          rule — plans a Seq Scan, because a function taking the row's value
          cannot be used as an index condition.
 
+      ⚠️ CORRECTION (2026-11-22): measurement 1 holds only for a policy in
+      ISOLATION — it reproduces on op.user_blocks and op.visibility_grants, but
+      NOT on a table carrying a second permissive policy, which is both tables it
+      was cited for (op.bookshelf_placements, op.bookshelves). A widening arm
+      under the implicit OR keeps the whole predicate a Seq Scan; the Bitmap
+      Index Scan returns only once the widening arms move off the table into a
+      security_barrier view and the owner arm is a same-table equality. (The
+      platform_select policies named below were themselves replaced by
+      audience_select on 2026-10-28.)
+
       2. **A system exemption is a role-scoped policy, never a value in the
          policy body.** `USING (op.current_scope() = <sentinel> OR user_id = ...)`
          also plans a Seq Scan, *even when scoped to a real user*. So `stacks_dbt`
