@@ -16,9 +16,9 @@
 # anywhere fails. That is this repository's dominant defect class — built but
 # not wired — on the one path where the contract itself promises otherwise.
 #
-# WHY A BASELINE AND NOT A REASON PER FIELD. There are 98 (field, serializer)
+# WHY A BASELINE AND NOT A REASON PER FIELD. There are 101 (field, serializer)
 # omissions today and almost all are legitimate narrowing. Demanding a written
-# reason for each would produce 98 shallow reasons, which is worse than none
+# reason for each would produce 101 shallow reasons, which is worse than none
 # because it reads as considered when it was not — and it is the same cry-wolf
 # shape this project already rejected once, when an 18-name secrets denylist
 # named eighteen non-defects.
@@ -157,6 +157,11 @@ BASELINE = {
     "book_placement:shelf_id",
     "book_placement:source",
     "book_placement:updated_at",
+    # `user_id` is DB-only on every placement serializer: the denormalised owner
+    # added so the row-level policy is an indexable `user_id = current_scope()`,
+    # never put on the wire — no client needs it, exactly like book_edition_id. A
+    # deliberate omission across book_placement/placement_detail/placement_ref.
+    "book_placement:user_id",
     "bookshelf_book:author_id",
     "bookshelf_book:bisac_codes",
     "bookshelf_book:created_at",
@@ -203,6 +208,7 @@ BASELINE = {
     "placement_detail:shelf_id",
     "placement_detail:source",
     "placement_detail:updated_at",
+    "placement_detail:user_id",
     "placement_ref:book_edition_id",
     "placement_ref:created_at",
     "placement_ref:current_page",
@@ -218,6 +224,7 @@ BASELINE = {
     "placement_ref:source",
     "placement_ref:started_at",
     "placement_ref:updated_at",
+    "placement_ref:user_id",
     "placement_ref:visibility",
     "search_book:author_id",
     "search_book:bisac_codes",
