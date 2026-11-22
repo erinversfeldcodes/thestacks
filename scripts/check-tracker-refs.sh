@@ -199,6 +199,12 @@ LINE_ALLOWLIST: list[tuple[str, str]] = [
         "plans/probe-campaign",
         "a throwaway sandbox state file, not a campaign that exists",
     ),
+    # ci.sh runs the residue-ledger shape check and comments why; both name the
+    # ledger it OPERATES on, a file path, not a citation of a tracked artefact.
+    (
+        "plans/residue-ledger",
+        "the ledger ci.sh's shape check reads, a file operation not a citation",
+    ),
 ]
 
 # A hex colour is the classic false positive for the #NNN pattern, and getting
