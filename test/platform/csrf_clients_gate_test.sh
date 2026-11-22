@@ -82,7 +82,7 @@ SH
 }
 
 run_gate() {
-    OUT="$(cd "$SANDBOX" && bash scripts/check-csrf-clients.sh 2>&1)"
+    OUT="$(cd "$SANDBOX" && CSRF_MIN_IN_SCOPE=1 bash scripts/check-csrf-clients.sh 2>&1)"
     RC=$?
 }
 

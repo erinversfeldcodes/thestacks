@@ -104,10 +104,10 @@ warm_remote_preview() {
     jar="$(mktemp)"
     curl -s -o /dev/null --cookie-jar "$jar" --max-time 10 "${BASE_URL}/" || true
     proof="$(awk '$6 == "stacks_csrf" { print $7 }' "$jar" 2>/dev/null | tail -1)"
-    if [[ -z "$proof" ]]; then
-        echo "  FAIL: no stacks_csrf cookie — warmup cannot warm (every login would 403)" >&2
-        exit 1
-    fi
+    # RL-473(b): an empty/invalid proof yields a 403, which is non-502 — so the
+    # loop below EXCLUDES 403 from "warm" rather than reporting a CSRF rejection as
+    # a warmed path. A hard exit here would break the best-effort contract the
+    # timeout branch documents (warn and proceed, so Playwright re-checks + retries).
 
     while [[ $(date +%s) -lt $deadline ]]; do
         code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
@@ -116,7 +116,7 @@ warm_remote_preview() {
             -H "X-CSRF-Token: ${proof}" \
             -H "Content-Type: application/json" \
             -d '{"email":"warmup@thestacks.test","password":"warmup"}' 2>/dev/null || true)"
-        if [[ -n "$code" && "$code" != "502" && "$code" != "000" ]]; then
+        if [[ -n "$code" && "$code" != "502" && "$code" != "000" && "$code" != "403" ]]; then
             echo "  Login POST path warm (HTTP ${code})."
             rm -f "$jar"
             return 0
