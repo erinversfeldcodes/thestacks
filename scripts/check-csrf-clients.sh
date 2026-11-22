@@ -30,9 +30,14 @@ cd "$REPO_ROOT" || exit 1
 # ⛔ Floors on what was READ, not on what was found. A glob that stopped matching
 # would report "no unproven clients" over a corpus it never opened, which is the
 # same output as a clean run.
-MIN_FILES=20
-MIN_CURL_INVOCATIONS=30
-MIN_IN_SCOPE=3
+MIN_FILES=100  # live 131; a harvest below this is a drifted scan, not churn (RL-473)
+MIN_CURL_INVOCATIONS=90  # live 121; same anti-vacuity ratchet as MIN_FILES
+# Floor ratcheted to the live population (21 as of 2026-11-21), not the 3 it was
+# sized at when first written. A floor below the population is a grace period that
+# grows into a blind spot: reverting is_unsafe to the gate's recorded blind spot #3
+# collapses the in-scope set to 9, and 9 > 3 still printed OK. 18 sits just under
+# the live 21 so a classification collapse reds, while minor churn does not.
+MIN_IN_SCOPE=18
 
 python3 - "$MIN_FILES" "$MIN_CURL_INVOCATIONS" "$MIN_IN_SCOPE" <<'PY'
 import os

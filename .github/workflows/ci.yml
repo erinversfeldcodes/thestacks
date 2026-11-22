@@ -1369,6 +1369,10 @@ jobs:
           CSRF_JAR="$(mktemp)"
           curl -sf -o /dev/null --cookie-jar "${CSRF_JAR}" --max-time 15 "${CORE_URL}/" || true
           CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${CSRF_JAR}" | tail -1)"
+          if [[ -z "${CSRF_PROOF}" ]]; then
+            echo "FAIL: no stacks_csrf cookie — the logins below would 403 and warm/scan nothing"
+            exit 1
+          fi
           for _ in {1..5}; do
             curl -sf --max-time 30 "${CORE_URL}/api/auth/login" \
               -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
@@ -1402,6 +1406,10 @@ jobs:
           csrf_jar="$(mktemp)"
           curl -s -o /dev/null --cookie-jar "${csrf_jar}" --max-time 10 "${CORE_URL}/" || true
           csrf_proof="$(awk '$6 == "stacks_csrf" { print $7 }' "${csrf_jar}" 2>/dev/null | tail -1)"
+          if [[ -z "${csrf_proof}" ]]; then
+            echo "FAIL: no stacks_csrf cookie — the Argon2 warm loop would warm nothing"
+            exit 1
+          fi
           for _ in {1..20}; do
             code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
               -X POST "${CORE_URL}/api/auth/login" \
@@ -1542,6 +1550,10 @@ jobs:
           CSRF_JAR="$(mktemp)"
           curl -sf -o /dev/null --cookie-jar "${CSRF_JAR}" --max-time 15 "${CORE_URL}/" || true
           CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${CSRF_JAR}" | tail -1)"
+          if [[ -z "${CSRF_PROOF}" ]]; then
+            echo "FAIL: no stacks_csrf cookie — the logins below would 403 and warm/scan nothing"
+            exit 1
+          fi
           U1="$(curl -sf "${CORE_URL}/api/auth/login" \
             -b "${CSRF_JAR}" -H "X-CSRF-Token: ${CSRF_PROOF}" \
             -H "Content-Type: application/json" \

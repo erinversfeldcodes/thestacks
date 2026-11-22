@@ -104,6 +104,10 @@ warm_remote_preview() {
     jar="$(mktemp)"
     curl -s -o /dev/null --cookie-jar "$jar" --max-time 10 "${BASE_URL}/" || true
     proof="$(awk '$6 == "stacks_csrf" { print $7 }' "$jar" 2>/dev/null | tail -1)"
+    if [[ -z "$proof" ]]; then
+        echo "  FAIL: no stacks_csrf cookie — warmup cannot warm (every login would 403)" >&2
+        exit 1
+    fi
 
     while [[ $(date +%s) -lt $deadline ]]; do
         code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \

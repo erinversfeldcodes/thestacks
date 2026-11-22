@@ -209,6 +209,20 @@ if has_group platform; then
     fi
 fi
 
+# The residue ledger's own shape check (RL-451) — run UNCONDITIONALLY and
+# LOCAL-only, deliberately OUTSIDE the mirrored platform group.
+# plans/residue-ledger.md is gitignored working-state, so a PR-CI check would be
+# vacuous (no ledger in a fresh checkout) — the "a check that cannot reach its
+# subject reads as passed" trap RL-451 itself records. Putting it in the platform
+# group would also force a no-op copy into ci.yml via the job-parity gate. Here it
+# reds a malformed row on local `just ci`, where the ledger lives; the sweep's own
+# `[ -f ]` guard makes it a no-op when the file is absent.
+if [ -f plans/residue-ledger.md ]; then
+    if ! run_group "campaign: residue-ledger shape" bash scripts/campaign-residue.sh >/dev/null; then
+        FAILED+=(campaign-residue-shape)
+    fi
+fi
+
 if has_group e2e; then
     if ! run_group "e2e: playwright" bash scripts/test-e2e.sh; then FAILED+=(e2e); fi
 fi
