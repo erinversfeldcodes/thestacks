@@ -124,11 +124,13 @@ defmodule Stacks.Visibility do
     end
   end
 
-  defp load_profile_visibility(%{user_id: _} = resource, _owner_id) do
-    owner = load_user(resource)
-    if owner, do: owner.profile_visibility, else: "owner"
-  end
-
+  # ⛔ The %Placement{} clause must precede the generic `%{user_id: _}` one. A
+  # placement now carries a user_id column (the denormalised owner, there for the
+  # row-level policy), so the generic clause would otherwise capture it and read
+  # the owner's profile from `load_user/1`, which a placement has no `user`
+  # association for — so every placement's ceiling collapsed to "owner". The
+  # profile comes from the bookshelf's user, which resolve_placement preloaded.
+  # The same ordering fix is why get_owner_id below leads with its placement clause.
   defp load_profile_visibility(%Placement{} = placement, _owner_id) do
     case placement.bookshelf do
       %{user: %{profile_visibility: pv}} when is_binary(pv) ->
@@ -141,6 +143,11 @@ defmodule Stacks.Visibility do
       _ ->
         "owner"
     end
+  end
+
+  defp load_profile_visibility(%{user_id: _} = resource, _owner_id) do
+    owner = load_user(resource)
+    if owner, do: owner.profile_visibility, else: "owner"
   end
 
   defp load_profile_visibility(_resource, _owner_id), do: nil
@@ -271,14 +278,19 @@ defmodule Stacks.Visibility do
 
   defp marketplace_exception?(_), do: false
 
-  defp get_owner_id(%{user_id: user_id}), do: user_id
-
+  # ⛔ The %Placement{} clause must precede the generic `%{user_id: _}` one (see
+  # the ordering note on load_profile_visibility): a placement now carries a
+  # user_id column, so the generic clause would otherwise capture it — nil on a
+  # built struct — making the profile ceiling treat an owned placement as
+  # ownerless. The owner comes from the bookshelf, already preloaded.
   defp get_owner_id(%Placement{} = placement) do
     case placement.bookshelf do
       %{user_id: user_id} -> user_id
       _ -> nil
     end
   end
+
+  defp get_owner_id(%{user_id: user_id}), do: user_id
 
   defp get_owner_id(_), do: nil
 
@@ -381,7 +393,13 @@ defmodule Stacks.Visibility do
   """
   @spec filter_visible_placements([Placement.t()], term()) :: [Placement.t()]
   def filter_visible_placements(placements, viewer) when is_list(placements) do
-    placements = Enum.map(placements, &maybe_preload_bookshelf/1)
+    # ⛔ Batch, not `Enum.map(&maybe_preload_bookshelf/1)`: preloading per
+    # placement issues one query EACH, which is exactly the per-placement cost
+    # this shared gate exists to avoid — a 20-book shelf paid 20 bookshelf
+    # lookups. `Repo.preload/2` on the whole list is one query, and it skips any
+    # placement whose bookshelf is already loaded, so callers that preloaded
+    # upstream pay nothing.
+    placements = Repo.preload(placements, :bookshelf)
     ctx = build_batch_context(placements, viewer)
     Enum.filter(placements, &(resolve_placement(&1, viewer, ctx) == :visible))
   end
