@@ -547,14 +547,31 @@ viewAlsoPublishedAt model =
 
             else
                 Html.form [ class "post__syndication-backlink", onSubmit UrlSubmitted ]
-                    [ label [ class "post__syndication-label" ]
+                    [ label [ class "post__syndication-label", Html.Attributes.for "syndication-also-at" ]
                         [ text "Also published at" ]
                     , input
-                        [ type_ "url"
-                        , value model.syndicatedUrlInput
-                        , onInput UrlChanged
-                        , testId "syndication-also-at-input"
-                        ]
+                        ([ type_ "url"
+                         , Html.Attributes.id "syndication-also-at"
+                         , value model.syndicatedUrlInput
+                         , onInput UrlChanged
+                         , testId "syndication-also-at-input"
+                         , Html.Attributes.attribute "aria-invalid"
+                            (case model.urlError of
+                                Just _ ->
+                                    "true"
+
+                                Nothing ->
+                                    "false"
+                            )
+                         ]
+                            ++ (case model.urlError of
+                                    Just _ ->
+                                        [ Html.Attributes.attribute "aria-describedby" "syndication-also-at-error" ]
+
+                                    Nothing ->
+                                        []
+                               )
+                        )
                         []
                     , button
                         [ class "post__syndication-copy", type_ "submit" ]
@@ -570,6 +587,7 @@ viewAlsoPublishedAt model =
                         Just err ->
                             span
                                 [ class "post__syndication-error"
+                                , Html.Attributes.id "syndication-also-at-error"
                                 , testId "syndication-url-error"
                                 , Html.Attributes.attribute "data-refusal" (urlErrorKind err)
                                 , Html.Attributes.attribute "role" "alert"

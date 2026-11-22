@@ -88,7 +88,27 @@ render model isPublicPublished =
 suite : Test
 suite =
     describe "Components.Syndication"
-        [ test "a non-public post gets the honest sentence and NO affordances — absent, not greyed" <|
+        [ test "the 'also published at' field is labelled and marks itself valid when there is no error" <|
+            \_ ->
+                render (afterFetch [ recorded Nothing ]) True
+                    |> Query.find [ byTestId "syndication-also-at-input" ]
+                    |> Query.has
+                        [ Selector.id "syndication-also-at"
+                        , Selector.attribute (Html.Attributes.attribute "aria-invalid" "false")
+                        ]
+        , test "a failed url save marks the field invalid and binds it to the error message" <|
+            \_ ->
+                afterSaveFailure Http.NetworkError
+                    |> Expect.all
+                        [ Query.find [ byTestId "syndication-also-at-input" ]
+                            >> Query.has
+                                [ Selector.attribute (Html.Attributes.attribute "aria-invalid" "true")
+                                , Selector.attribute (Html.Attributes.attribute "aria-describedby" "syndication-also-at-error")
+                                ]
+                        , Query.find [ byTestId "syndication-url-error" ]
+                            >> Query.has [ Selector.id "syndication-also-at-error" ]
+                        ]
+        , test "a non-public post gets the honest sentence and NO affordances — absent, not greyed" <|
             \_ ->
                 render initModel False
                     |> Query.has [ byTestId "syndication-unavailable" ]
