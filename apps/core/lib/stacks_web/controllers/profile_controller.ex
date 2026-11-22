@@ -87,7 +87,7 @@ defmodule StacksWeb.ProfileController do
           placements =
             shelf.placements
             |> Enum.filter(&MapSet.member?(visible_ids, &1.id))
-            |> Enum.map(&ProtoJSON.placement_detail/1)
+            |> Enum.map(&ProtoJSON.placement_detail(&1, viewer: viewer))
 
           %{id: shelf.id, position: shelf.position, placements: placements}
         end)

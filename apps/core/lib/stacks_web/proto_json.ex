@@ -368,15 +368,26 @@ defmodule StacksWeb.ProtoJSON do
       :placed_at,
       :formats,
       :personal_rating,
-      :notes,
       :reading_status,
       :current_page,
       :started_at,
       :finished_at,
       :visibility
     ])
+    |> maybe_put_owner_notes(placement, Keyword.get(opts, :viewer))
     |> Map.put(:book, bookshelf_book(placement.book, opts))
   end
+
+  # `notes` is private free-text reading notes — excluded from the warehouse for
+  # want of an erasure path, and it must not reach a non-owner. The public
+  # shelf-browse serialises another user's placements (scoped to the OWNER at the
+  # DB layer, then row-filtered in the app), so without this guard a viewer saw
+  # the owner's notes. Include it only when the viewer IS the placement's owner.
+  defp maybe_put_owner_notes(map, %{user_id: owner_id, notes: notes}, {:platform_user, viewer_id})
+       when not is_nil(owner_id) and viewer_id == owner_id,
+       do: Map.put(map, :notes, notes)
+
+  defp maybe_put_owner_notes(map, _placement, _viewer), do: map
 
   @doc """
       Serializes a placement as the slim ref shape for create/move operations.
@@ -703,7 +714,7 @@ defmodule StacksWeb.ProtoJSON do
       |> Enum.filter(&(Stacks.Visibility.resolve_visibility(&1, viewer) == :visible))
       |> Enum.map(fn placement ->
         placement
-        |> placement_detail(read_count_opts(counts, placement.book_id))
+        |> placement_detail([{:viewer, viewer} | read_count_opts(counts, placement.book_id)])
         |> Map.put(:has_user_writing, MapSet.member?(writing_set, placement.book_id))
       end)
 

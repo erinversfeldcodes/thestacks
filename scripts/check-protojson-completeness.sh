@@ -204,6 +204,12 @@ BASELINE = {
     "placement_detail:listing_mode",
     "placement_detail:listing_price_cents",
     "placement_detail:listing_status",
+    # placement_detail emits notes CONDITIONALLY — only to the owner, via
+    # maybe_put_owner_notes/3 — so the Map.take harvest reports it dropped. The
+    # owner-only emission is guarded by proto_json_test ("notes reach the owner" /
+    # "withheld from a non-owner"), not here. This closed a private-notes leak on
+    # the public shelf-browse.
+    "placement_detail:notes",
     "placement_detail:removed_at",
     "placement_detail:shelf_id",
     "placement_detail:source",

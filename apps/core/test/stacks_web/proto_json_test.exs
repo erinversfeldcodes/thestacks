@@ -407,11 +407,45 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.placed_at == placement.placed_at
       assert result.formats == ["physical"]
       assert result.personal_rating == 5
-      assert result.notes == placement.notes
+      # notes is owner-only now; this call passes no viewer, so it must be absent
+      refute Map.has_key?(result, :notes)
       assert result.visibility == placement.visibility
       assert result.book != nil
       assert result.book.id == book.id
       assert result.book.author == %{id: author.id, name: author.name, bio: nil}
+    end
+
+    test "notes reach the owner — the viewer id matches the placement owner" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+
+      placement =
+        %{
+          insert(:placement, bookshelf: bookshelf, book: build(:book), notes: "private note")
+          | user_id: user.id
+        }
+
+      result = ProtoJSON.placement_detail(placement, viewer: {:platform_user, user.id})
+
+      assert result.notes == "private note"
+    end
+
+    test "⛔ notes are withheld from a non-owner so private reading notes cannot leak on a public shelf" do
+      owner = insert(:user)
+      stranger = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, name: "library")
+
+      placement =
+        %{
+          insert(:placement, bookshelf: bookshelf, book: build(:book), notes: "private note")
+          | user_id: owner.id
+        }
+
+      as_stranger = ProtoJSON.placement_detail(placement, viewer: {:platform_user, stranger.id})
+      as_anon = ProtoJSON.placement_detail(placement, viewer: :unauthenticated)
+
+      refute Map.has_key?(as_stranger, :notes)
+      refute Map.has_key?(as_anon, :notes)
     end
 
     test "book is nil when not loaded" do
