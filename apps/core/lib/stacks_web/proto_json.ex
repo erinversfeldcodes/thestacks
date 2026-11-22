@@ -418,6 +418,13 @@ defmodule StacksWeb.ProtoJSON do
     # this payload, so without them it showed "To Read" for a book the reader
     # was partway through, and saving that card wrote `to_read` back over the
     # real status.
+    #
+    # ⚠️ This serializer emits :notes UNCONDITIONALLY, unlike placement_detail
+    # which owner-gates it. That is safe only because every caller is owner-scoped
+    # — book_controller's lookup_placements reads get_placements_for_book(user.id,
+    # …), i.e. the viewer's OWN placements. A future cross-user caller would
+    # reintroduce the private-notes leak placement_detail closes; keep this
+    # owner-only, or route notes-gating through one shared chokepoint.
     Gen.placement(placement)
     |> Map.take([
       :id,

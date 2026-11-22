@@ -63,8 +63,8 @@ defmodule Stacks.SearchLabelsNeedAScopeTest do
       # ⛔ MEASURED, NOT ASSUMED — and it corrects the shape of the fix. This was
       # written expecting a refusal to match its sibling above, and it succeeded.
       # `active_listing_labels/1` reads `op.listings` joined to `op.users`, and
-      # NEITHER is row-level secured; only `looking_for_home_labels/1` touches
-      # `op.bookshelf_placements` and `op.bookshelves`.
+      # NEITHER is row-level secured; only `looking_for_home_labels/1` reaches a
+      # row-level table — `op.bookshelves`, via the `op.active_listings` view.
       #
       # ⚠️ So `SearchController`'s `Scope.for_viewer/2` wraps two calls and only
       # ONE of them requires it. That matters for the next person to read that

@@ -104,8 +104,8 @@ defmodule StacksWeb.SearchController do
   defp discovery_labels(:unauthenticated, _books), do: %{}
 
   # ⛔ Both label reads run inside the viewer's scope, though only one needs it
-  # today. `looking_for_home_labels/1` joins `op.bookshelves` and
-  # `op.bookshelf_placements`, which carry row-level policies under FORCE, so an
+  # today. `looking_for_home_labels/1` reads the unscoped `op.active_listings`
+  # view joined to `op.bookshelves` (row-level secured, under FORCE), so an
   # unscoped call does not return an empty list — it RAISES
   # `42501 query on a row-level-secured table with no request scope set`, and the
   # entire search answers 500 to every signed-in reader. Measured on a deployed
@@ -124,8 +124,8 @@ defmodule StacksWeb.SearchController do
   # the caller is the only place that holds a viewer to scope to.
   #
   # ⚠️ ONLY ONE OF THE TWO IS ACTUALLY REFUSED WITHOUT A SCOPE, and the wrapper
-  # is kept around both anyway. `looking_for_home_labels/1` reads
-  # `op.bookshelf_placements` joined to `op.bookshelves`, which are row-level
+  # is kept around both anyway. `looking_for_home_labels/1` reads the
+  # `op.active_listings` view joined to `op.bookshelves`, the latter row-level
   # secured; `active_listing_labels/1` reads `op.listings` joined to `op.users`,
   # and neither of those is. Measured 2026-11-07.
   #
