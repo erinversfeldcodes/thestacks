@@ -17,6 +17,8 @@ defmodule Core.Repo.Migrations.ForbidABookshelfFromChangingOwner do
   # enforced in the database, not by one changeset remembering not to cast a
   # field.
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+
     execute("""
     CREATE OR REPLACE FUNCTION op.forbid_bookshelf_owner_change()
       RETURNS trigger
