@@ -25,11 +25,24 @@ defmodule Core.Repo.Migrations.CascadeThePlacementOwnerToUserErasure do
   def up do
     execute("SET lock_timeout = '5s'")
 
+    # Idempotent under @disable_ddl_transaction: if the VALIDATE below fails or
+    # times out the schema_migrations row is never written, so a bare re-run would
+    # hit "constraint already exists" on the ADD. The IF NOT EXISTS guard skips a
+    # constraint that is already present (VALIDATE on an already-valid one is a no-op).
     execute("""
-    ALTER TABLE op.bookshelf_placements
-      ADD CONSTRAINT bookshelf_placements_user_id_fkey
-      FOREIGN KEY (user_id) REFERENCES op.users(id) ON DELETE CASCADE
-      NOT VALID
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'bookshelf_placements_user_id_fkey'
+          AND conrelid = 'op.bookshelf_placements'::regclass
+      ) THEN
+        ALTER TABLE op.bookshelf_placements
+          ADD CONSTRAINT bookshelf_placements_user_id_fkey
+          FOREIGN KEY (user_id) REFERENCES op.users(id) ON DELETE CASCADE
+          NOT VALID;
+      END IF;
+    END $$
     """)
 
     execute(
