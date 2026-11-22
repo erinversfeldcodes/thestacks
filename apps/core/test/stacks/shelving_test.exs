@@ -1794,4 +1794,29 @@ defmodule Stacks.ShelvingTest do
       assert Shelving.looking_for_home_labels([]) == %{}
     end
   end
+
+  describe "a bookshelf's owner is immutable (placement.user_id is denormalised from it)" do
+    test "changing a bookshelf's owner is rejected by the database" do
+      owner = insert(:user)
+      other = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, name: "library")
+
+      assert_raise Postgrex.Error, ~r/immutable/, fn ->
+        bookshelf
+        |> Ecto.Changeset.change(user_id: other.id)
+        |> Repo.update!()
+      end
+    end
+
+    test "re-writing the same owner value is allowed (the guard checks for an actual change, not the column's presence in the write)" do
+      owner = insert(:user)
+      bookshelf = insert(:bookshelf, user: owner, name: "library")
+
+      assert {:ok, _} =
+               bookshelf
+               |> Ecto.Changeset.change()
+               |> Ecto.Changeset.force_change(:user_id, owner.id)
+               |> Repo.update()
+    end
+  end
 end
