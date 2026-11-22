@@ -296,14 +296,15 @@ defmodule Stacks.Shelving do
   def looking_for_home_labels([]), do: %{}
 
   def looking_for_home_labels(book_ids) when is_list(book_ids) do
-    Placement
+    # Reads the active-listing rows through op.active_listings — a security_barrier
+    # view owned by rls_reader — rather than the base table, so the active_listing
+    # policy arm (which exposed every column, the seller's reserve included) can be
+    # dropped. The view already filters `listing_status = 'active' AND removed_at
+    # IS NULL` and exposes only id/book_id/bookshelf_id/placed_at.
+    from(p in {"active_listings", Placement})
     |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id)
     |> join(:inner, [p, bs], u in assoc(bs, :user))
-    |> where(
-      [p, bs],
-      bs.name == "looking_for_home" and p.listing_status == "active" and
-        is_nil(p.removed_at) and p.book_id in ^book_ids
-    )
+    |> where([p, bs], bs.name == "looking_for_home" and p.book_id in ^book_ids)
     |> order_by([p], desc: p.placed_at)
     |> select([p, bs, u], {p.book_id, u.handle})
     |> Repo.all()
