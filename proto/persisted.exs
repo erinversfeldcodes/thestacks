@@ -619,6 +619,13 @@
           on_delete: :nilify_all,
           dbt_tests: [{:relationships, "stg_book_editions"}]
         },
+        # Denormalised owner, kept current by a trigger (added out of band). A
+        # bare uuid rather than a belongs_to, deliberately: it keeps the
+        # additive release a pure catalog change, and `:binary_id` (not `:text`,
+        # the default for a proto string) is what makes `user_id =
+        # op.current_scope()` an indexable same-type equality instead of a cast.
+        # Erasure reaches it by row deletion through the bookshelf_id cascade.
+        user_id: %{ecto_type: :binary_id},
         formats: %{ecto_type: {:array, :string}, default: []},
         source: %{
           default: "manual",

@@ -348,6 +348,15 @@ message Placement {
   // only way an import report's counts reconcile after the row-level data is
   // purged (30 days).
   string source = 23 [json_name = "source"];
+
+  // Denormalised owner (FK op.users), copied from the placement's bookshelf and
+  // kept current by a trigger on INSERT and UPDATE OF bookshelf_id. DB-only:
+  // present so the owner row-level policy reduces to the same-table equality
+  // `user_id = op.current_scope()` — a Bitmap Index Scan — instead of a
+  // `bookshelf_id IN (SELECT …)` sublink, which sits under OR, stays a SubPlan,
+  // and can never be an index condition. Never serialised: no placement wire
+  // shape (every one a Map.take subset) includes it, exactly like book_edition_id.
+  string user_id = 24 [json_name = "user_id"];
 }
 
 // PlacementHistory records a book movement between bookshelves.

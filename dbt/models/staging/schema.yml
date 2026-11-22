@@ -281,6 +281,8 @@ models:
           - not_null
           - accepted_values:
               values: ['manual', 'upload', 'goodreads_import']
+      - name: user_id
+        description: User id.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
