@@ -88,6 +88,23 @@ SUITES=(
     "$HERE/rate_limiter_bucket_drift_test.sh"
 )
 
+# ⛔ A PINNED COUNT — the floor the two guards below cannot be. They catch a file
+# that joined no list (UNLISTED) and a list entry with no file (MISSING), but
+# neither notices the array being TRUNCATED: delete the back half of SUITES and
+# every survivor still runs and still prints "all platform suites PASSED" over a
+# population nobody declared. A gate that reports a clean pass over an unread
+# population is the exact shape `check-deployed-posture.sh` records as mandatory,
+# retrofitted there from a real regression. The count changes only when someone
+# adds or removes a suite — a reviewable decision; a silent shrink is not.
+EXPECTED_SUITES=67
+if [[ "${#SUITES[@]}" -ne "$EXPECTED_SUITES" ]]; then
+    printf '# SUITE COUNT DRIFT: SUITES holds %d, EXPECTED_SUITES declares %d.\n' \
+        "${#SUITES[@]}" "$EXPECTED_SUITES"
+    printf '# Update EXPECTED_SUITES in the same change that adds or removes a suite, so a\n'
+    printf '# truncated array is a failing diff rather than a quiet pass over the survivors.\n'
+    exit 1
+fi
+
 # Fail loudly if a suite lands on disk without joining SUITES — otherwise the
 # only symptom is a file nobody runs, and the whole point of this runner is
 # that there is no such thing.

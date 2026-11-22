@@ -202,4 +202,106 @@ assert_contains "$GATE_SRC" "has correctly never run" \
 assert_contains "$GATE_SRC" "DEFAULT BRANCH only" \
     "the gate records that schedules fire only from the default branch"
 
+# ── The three classification defects, each driven by the input that used to pass ──
+
+test_case "an_on_block_at_end_of_file_is_parsed" "a scheduled workflow whose on: is last is not lost"
+# ⛔ DEFECT: the `on:` regex needed a following column-0 line, so a workflow whose
+# `on:` is the FILE'S LAST top-level block yielded no triggers — and a scheduled
+# job with `on:` last then dropped silently out of the never-ran population. Here
+# the target has `jobs:` first and `on:` last, a schedule trigger, and no run.
+# Under the old `(?=^\S)` it is invisible; under `(?=^\S|\Z)` it is reported.
+WF90="$WORK/wf90"
+mkdir -p "$WF90"
+for i in 1 2 3 4 5; do
+    printf 'name: filler-%s\non:\n  push:\n    branches: [main]\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n' "$i" >"$WF90/filler-$i.yml"
+done
+printf 'name: on-last\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\non:\n  schedule:\n    - cron: "0 0 * * *"\n' >"$WF90/on-last.yml"
+cat >"$WORK/wf90.json" <<'JSON'
+{
+  "filler-1.yml": {"conclusion": "success", "createdAt": "2026-10-19T00:00:00Z", "event": "push"},
+  "filler-2.yml": {"conclusion": "success", "createdAt": "2026-10-19T00:00:00Z", "event": "push"},
+  "filler-3.yml": {"conclusion": "success", "createdAt": "2026-10-19T00:00:00Z", "event": "push"},
+  "filler-4.yml": {"conclusion": "success", "createdAt": "2026-10-19T00:00:00Z", "event": "push"},
+  "filler-5.yml": {"conclusion": "success", "createdAt": "2026-10-19T00:00:00Z", "event": "push"}
+}
+JSON
+OUT90="$(WORKFLOW_HEALTH_WORKFLOW_DIR="$WF90" WORKFLOW_HEALTH_FIXTURE="$WORK/wf90.json" bash "$GATE" 2>&1)"
+assert_contains "$OUT90" "on-last.yml: scheduled but has never run" \
+    "its schedule trigger is recognised, so a workflow with on: last enters the never-ran population"
+
+test_case "a_live_red_survives_a_timezone_notation_mismatch" "Z and +HH:MM are compared as instants, not strings"
+# ⛔ DEFECT: the stale-vs-live test string-compared the timestamps. `gh` returns
+# `…Z` and `git log` returns `…+HH:MM`, so the run's 15:00Z (a LIVE red, newer
+# than the 14:00Z edit written as 16:00+02:00) string-sorted BEFORE the edit and
+# was excused as stale — `changed > created` true, exit 0. As instants the run is
+# newer, so the gate must FAIL. This is the input that used to pass.
+all_green "$WORK/green.json"
+python3 - "$WORK/green.json" "$WORK/notation.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+target = "backup-dump.yml" if "backup-dump.yml" in data else sorted(data)[0]
+# createdAt 15:00Z is strictly AFTER changed 16:00+02:00 (= 14:00Z): a live red.
+data[target] = {"conclusion": "failure", "createdAt": "2026-10-19T15:00:00Z",
+                "changed": "2026-10-19T16:00:00+02:00", "event": "schedule"}
+json.dump(data, open(sys.argv[2], "w"))
+print(target)
+PY
+NOTATION_TARGET="$(python3 -c "import json;d=json.load(open('$WORK/notation.json'));print([k for k,v in d.items() if v['conclusion']=='failure'][0])")"
+OUT_NOTATION="$(run_gate "$WORK/notation.json")"
+RC=$?
+if [[ "$RC" -ne 0 ]]; then
+    _record_pass "a live red whose notation differs from the edit's is still a failure (exit $RC)"
+else
+    _record_fail "a live red was excused as stale because Z and +HH:MM were string-compared: $OUT_NOTATION"
+fi
+assert_contains "$OUT_NOTATION" "$NOTATION_TARGET" "and it names the workflow"
+assert_contains "$OUT_NOTATION" "failing with no fix since" "reported as a live failure, not UNVERIFIED"
+
+test_case "a_red_scheduled_run_is_not_hidden_by_a_green_pr_run" "the both-trigger mask is closed"
+# ⛔ DEFECT: `latest_run` read `--limit 1` with no `--event`, so for a workflow
+# that is pull_request AND schedule triggered the newest run could be a green PR
+# run that hides a red scheduled one. The first fixture is that masked view (the
+# PR run alone, green → passes); the second is the truth (scheduled red, PR
+# green) and the gate now asks for the scheduled run and fails.
+BOTH_TARGET="$(git -C "$REPO_ROOT" ls-tree -r --name-only origin/main .github/workflows 2>/dev/null |
+    while IFS= read -r wf; do
+        src="$(git -C "$REPO_ROOT" show "origin/main:$wf" 2>/dev/null)"
+        block="$(printf '%s\n' "$src" | awk '/^on:$/{f=1;next} f&&/^[a-z]/{exit} f')"
+        if grep -qE '^  pull_request:' <<<"$block" && grep -qE '^  schedule:' <<<"$block"; then
+            basename "$wf"
+            break
+        fi
+    done)"
+if [[ -z "$BOTH_TARGET" ]]; then
+    _record_fail "no both-trigger workflow on origin/main to drive this case — if that is now true, retire this assertion deliberately"
+else
+    all_green "$WORK/green.json"
+    python3 - "$WORK/green.json" "$WORK/masked.json" "$BOTH_TARGET" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+data[sys.argv[3]] = {"conclusion": "success", "createdAt": "2026-10-19T00:00:00Z", "event": "pull_request"}
+json.dump(data, open(sys.argv[2], "w"))
+PY
+    OUT_MASKED="$(run_gate "$WORK/masked.json")"
+    RC_MASKED=$?
+    python3 - "$WORK/green.json" "$WORK/true.json" "$BOTH_TARGET" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+data[sys.argv[3]] = {"runs": {
+    "pull_request": {"conclusion": "success", "createdAt": "2099-01-02T00:00:00Z", "event": "pull_request"},
+    "schedule": {"conclusion": "failure", "createdAt": "2099-01-01T00:00:00Z", "event": "schedule"}
+}}
+json.dump(data, open(sys.argv[2], "w"))
+PY
+    OUT_TRUE="$(run_gate "$WORK/true.json")"
+    RC_TRUE=$?
+    if [[ "$RC_MASKED" -eq 0 && "$RC_TRUE" -ne 0 ]]; then
+        _record_pass "reading the newest (green PR) run passes ($RC_MASKED); reading the scheduled run fails ($RC_TRUE)"
+    else
+        _record_fail "the scheduled-red mask is not closed on $BOTH_TARGET: masked exit $RC_MASKED, true exit $RC_TRUE: $OUT_TRUE"
+    fi
+    assert_contains "$OUT_TRUE" "$BOTH_TARGET" "the true read names the masked workflow"
+    assert_contains "$OUT_TRUE" "failing with no fix since" "and reports the scheduled red as a live failure"
+fi
+
 summarise

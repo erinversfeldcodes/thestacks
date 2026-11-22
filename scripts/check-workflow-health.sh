@@ -41,6 +41,12 @@ DEFAULT_BRANCH="${WORKFLOW_HEALTH_DEFAULT_BRANCH:-origin/main}"
 # token. Unset — the normal case — the data comes from `gh`.
 FIXTURE="${WORKFLOW_HEALTH_FIXTURE:-}"
 
+# A directory of workflow files, used ONLY by this gate's own suite, so the
+# trigger parse and the never-ran classification can be driven against files the
+# test wrote rather than against whatever the default branch holds today. Unset
+# in every real run.
+WORKFLOW_DIR_OVERRIDE="${WORKFLOW_HEALTH_WORKFLOW_DIR:-}"
+
 if [[ -z "$FIXTURE" ]]; then
     if ! command -v gh >/dev/null 2>&1; then
         echo "FAIL workflow-health: the GitHub CLI is not available." >&2
@@ -49,15 +55,26 @@ if [[ -z "$FIXTURE" ]]; then
     fi
 fi
 
-python3 - "$DEFAULT_BRANCH" "$FIXTURE" <<'PY'
+python3 - "$DEFAULT_BRANCH" "$FIXTURE" "$WORKFLOW_DIR_OVERRIDE" <<'PY'
+import datetime
 import json
+import os
 import re
 import subprocess
 import sys
 
-default_branch, fixture = sys.argv[1], sys.argv[2]
+default_branch, fixture, workflow_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 
 WORKFLOW_DIR = ".github/workflows"
+
+# Loaded once. Besides a run per workflow, a fixture entry may carry `changed`
+# (the workflow's last-edit timestamp, overriding git) and `runs` (a map from
+# event to run_info), so the stale-vs-live and both-trigger classifications can
+# be driven without a network, a token, or a crafted git history.
+FIXTURE = {}
+if fixture:
+    with open(fixture, encoding="utf-8") as handle:
+        FIXTURE = json.load(handle)
 
 
 def run(args):
@@ -66,6 +83,10 @@ def run(args):
 
 
 def workflows_on_default_branch():
+    if workflow_dir:
+        return sorted(
+            n for n in os.listdir(workflow_dir) if n.endswith((".yml", ".yaml"))
+        )
     code, out, _ = run(["git", "ls-tree", "-r", "--name-only", default_branch, WORKFLOW_DIR])
     if code != 0:
         # No default-branch ref (a shallow clone, a fresh fork). Fall back to the
@@ -80,14 +101,29 @@ def workflows_on_default_branch():
     return [line for line in out.splitlines() if line.endswith((".yml", ".yaml"))]
 
 
-def triggers(path):
+def workflow_source(path):
+    if workflow_dir:
+        try:
+            return open(os.path.join(workflow_dir, path), encoding="utf-8").read()
+        except OSError:
+            return ""
     code, out, _ = run(["git", "show", f"{default_branch}:{path}"])
     if code != 0:
         try:
-            out = open(path, encoding="utf-8").read()
+            return open(path, encoding="utf-8").read()
         except OSError:
-            return set()
-    block = re.search(r"^on:\s*\n(.*?)(?=^\S)", out, re.S | re.M)
+            return ""
+    return out
+
+
+def triggers(path):
+    out = workflow_source(path)
+    # ⛔ `(?=^\S|\Z)`: the `on:` block runs to the next column-0 line OR to the end
+    # of the file. Without the `\Z` alternative a workflow whose `on:` is the LAST
+    # top-level block matched nothing — no triggers, so a scheduled job with `on:`
+    # last was neither watched as scheduled nor reported for never having run. It
+    # dropped silently out of the population this gate exists to watch.
+    block = re.search(r"^on:\s*\n(.*?)(?=^\S|\Z)", out, re.S | re.M)
     body = block.group(1) if block else ""
     return {
         name
@@ -98,20 +134,50 @@ def triggers(path):
 
 
 def last_modified(path):
+    name = path.rsplit("/", 1)[-1]
+    entry = FIXTURE.get(name)
+    if isinstance(entry, dict) and entry.get("changed"):
+        return entry["changed"]
+    if workflow_dir:
+        return None
     code, out, _ = run(["git", "log", "-1", "--format=%cI", default_branch, "--", path])
     if code != 0 or not out.strip():
         return None
     return out.strip()
 
 
-def latest_run(name):
+def _normalise(info):
+    if info is None:
+        return None
+    return {
+        "conclusion": info.get("conclusion") or "running",
+        "createdAt": info.get("createdAt"),
+        "event": info.get("event"),
+    }
+
+
+def latest_run(name, want_event):
+    # ⛔ For a workflow that carries a SCHEDULE — including one that is ALSO
+    # pull_request-triggered — ask for the scheduled run specifically. The newest
+    # run overall can be a green pull_request run that hides a red scheduled one,
+    # which is the exact both-trigger case the watch was widened to cover. A plain
+    # `--limit 1` with no `--event` reads whichever ran most recently.
     if fixture:
-        with open(fixture, encoding="utf-8") as handle:
-            return json.load(handle).get(name)
-    code, out, err = run(
-        ["gh", "run", "list", "--workflow", name, "--limit", "1",
-         "--json", "conclusion,createdAt,event"]
-    )
+        entry = FIXTURE.get(name)
+        if entry is None:
+            return None
+        if "runs" in entry:
+            runs = entry["runs"]
+            info = runs.get(want_event) if want_event else None
+            if info is None:
+                info = next(iter(runs.values()), None)
+            return _normalise(info)
+        return _normalise(entry)
+    args = ["gh", "run", "list", "--workflow", name, "--limit", "1",
+            "--json", "conclusion,createdAt,event"]
+    if want_event:
+        args += ["--event", want_event]
+    code, out, err = run(args)
     if code != 0:
         raise SystemExit(
             f"FAIL workflow-health: `gh run list` failed for {name}: {err.strip()}\n"
@@ -120,12 +186,38 @@ def latest_run(name):
     rows = json.loads(out or "[]")
     if not rows:
         return None
-    row = rows[0]
-    return {
-        "conclusion": row.get("conclusion") or "running",
-        "createdAt": row.get("createdAt"),
-        "event": row.get("event"),
-    }
+    return _normalise(rows[0])
+
+
+def _parse_ts(value):
+    if not value:
+        return None
+    v = value.strip()
+    # `gh` emits `…Z`; `git log --format=%cI` emits `…+HH:MM`. Normalise `Z` to
+    # `+00:00` and compare as aware datetimes, never as strings: the two notations
+    # name the same instant but sort differently, so a string compare reclassified
+    # a LIVE red as a non-failing UNVERIFIED (and the reverse) whenever they met.
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt
+
+
+def is_stale(changed, created):
+    # STALE = the workflow was last edited AFTER the failing run was created, so
+    # the result predates the current definition. Both parsed to aware datetimes.
+    # Without a comparable pair the red stays LIVE (fails loud) rather than being
+    # silently excused as unverified.
+    cdt = _parse_ts(changed)
+    rdt = _parse_ts(created)
+    if cdt is None or rdt is None:
+        return False
+    return cdt > rdt
 
 
 paths = workflows_on_default_branch()
@@ -169,7 +261,8 @@ for path in sorted(paths):
         continue
 
     watched += 1
-    run_info = latest_run(name)
+    want_event = "schedule" if "schedule" in trig else None
+    run_info = latest_run(name, want_event)
 
     if run_info is None:
         # Only notable for a workflow that is supposed to fire on its own. A
@@ -184,8 +277,8 @@ for path in sorted(paths):
     changed = last_modified(path)
     created = run_info["createdAt"]
 
-    if changed and created and changed > created:
-        stale_red.append((name, created[:10], changed[:10]))
+    if is_stale(changed, created):
+        stale_red.append((name, (created or "?")[:10], (changed or "?")[:10]))
     else:
         live_red.append((name, created[:10] if created else "?", run_info.get("event") or "?"))
 

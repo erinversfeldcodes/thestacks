@@ -101,7 +101,12 @@ SUCCESS_EXIT = re.compile(
 # is reported, so a thin run cannot present a noisy ratio as a measured fact. The
 # guard sits above the script's success exit (the gate verified that); only the
 # population count had gone unaccounted when the guard shipped.
-EXPECTED_GUARDED_SCRIPTS = 24
+#
+# ⚖️ 24 → 25: `test/platform/run_all.sh` gained `EXPECTED_SUITES` — a floor on the
+# size of the platform-suite array, so a truncated list cannot run the survivors
+# and still print "all platform suites PASSED". The UNLISTED/MISSING guards there
+# could not catch a shrink; this pins it.
+EXPECTED_GUARDED_SCRIPTS = 25
 
 guarded = {}
 violations = []

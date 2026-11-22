@@ -317,5 +317,43 @@ assert_exit_zero $? "both the python setup and the dependency install are presen
 assert_exit_zero $? "setup-python (job line ${PY_LINE:-?}) precedes the pip install (job line ${PIP_LINE:-?}), so pyyaml lands in the interpreter the suites run"
 
 
+# ── run_all.sh pins its own population ───────────────────────────────────────
+#
+# ⛔ The UNLISTED/MISSING guards in run_all.sh catch a file that joined no list
+# and a list entry with no file — but neither notices the SUITES array being
+# truncated. Delete the back half of it and every survivor still runs and still
+# prints "all platform suites PASSED" over a population nobody declared: a gate
+# runner reporting a clean pass over an unread set, the shape this repository
+# keeps finding in its own instruments.
+RUN_ALL="$REPO_ROOT/test/platform/run_all.sh"
+
+test_case "run_all_pins_its_suite_count" "the runner declares how many suites it expects"
+ACTUAL_SUITES="$(awk '/^SUITES=\(/{f=1;next} /^\)/{f=0} f && /_test\.sh"/{c++} END{print c+0}' "$RUN_ALL")"
+DECLARED_SUITES="$(grep -oE '^EXPECTED_SUITES=[0-9]+' "$RUN_ALL" | head -1 | cut -d= -f2)"
+if [[ -z "$DECLARED_SUITES" ]]; then
+    _record_fail "run_all.sh declares no EXPECTED_SUITES — a truncated SUITES array would pass over the survivors in silence"
+elif [[ "$ACTUAL_SUITES" -eq "$DECLARED_SUITES" ]]; then
+    _record_pass "EXPECTED_SUITES=${DECLARED_SUITES} matches the ${ACTUAL_SUITES} suites in the array"
+else
+    _record_fail "run_all.sh lists ${ACTUAL_SUITES} suites but declares EXPECTED_SUITES=${DECLARED_SUITES} — update the count in the same change that adds or removes a suite"
+fi
+
+test_case "a_truncated_suite_list_is_refused" "removing a suite without updating the count reddens the runner"
+# ⛔ The floor's own planted red: a copy with one entry dropped and the count
+# left as it was must exit non-zero AT THE FLOOR, before any suite runs.
+TRUNC_DIR="$(mktemp -d)"
+cp "$RUN_ALL" "$TRUNC_DIR/run_all.sh"
+sed -i.bak '/rate_limiter_bucket_drift_test.sh/d' "$TRUNC_DIR/run_all.sh" && rm -f "$TRUNC_DIR/run_all.sh.bak"
+TRUNC_OUT="$(bash "$TRUNC_DIR/run_all.sh" 2>&1)"
+TRUNC_RC=$?
+if [[ "$TRUNC_RC" -ne 0 ]]; then
+    _record_pass "a truncated SUITES array fails the runner (exit $TRUNC_RC)"
+else
+    _record_fail "a truncated SUITES array still reported a pass over the survivors: $TRUNC_OUT"
+fi
+assert_contains "$TRUNC_OUT" "SUITE COUNT DRIFT" "and the failure names the drift rather than passing quietly"
+assert_not_contains "$TRUNC_OUT" "all platform suites PASSED" "and it never reaches the all-clear line"
+rm -rf "$TRUNC_DIR"
+
 summarise
 exit $?
