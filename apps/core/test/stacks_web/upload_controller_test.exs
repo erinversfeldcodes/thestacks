@@ -945,6 +945,38 @@ defmodule StacksWeb.UploadControllerTest do
       assert second["kind"] == "awaiting_confirmation"
       assert second["book_ids"] == [book.id]
       assert second["rejection_reason"] == nil
+
+      # ⛔ retryable must reach the wire on every item. Nothing asserted this, and
+      # the Elm decoder needs it — dropping the serializer line would leave every
+      # Elixir test green while the whole inbox and its nav badge fail to decode.
+      # Both images keep the factory's storage_path, so both are retryable.
+      assert Map.has_key?(first, "retryable"), "the failed item must carry retryable"
+      assert first["retryable"] == true
+      assert Map.has_key?(second, "retryable"), "the awaiting item must carry retryable"
+      assert second["retryable"] == true
+    end
+
+    test "⛔ retryable reaches the wire and reflects the stored path", %{
+      conn: conn,
+      user: user
+    } do
+      # ⛔ The companion to the assertions above: retryable is NOT a constant, it
+      # is `storage_path present?`. A path-less rejected image is a real inbox
+      # item that is NOT retryable (the retry re-reads bytes that are gone). This
+      # proves the serializer carries the field's actual value, so neither a
+      # dropped line nor a hardcoded `true` passes.
+      insert(:uploaded_image,
+        user_id: user.id,
+        status: "rejected",
+        rejection_reason: "vision_unavailable",
+        storage_path: nil,
+        uploaded_at: ~U[2026-06-01 00:00:00.000000Z]
+      )
+
+      assert %{"items" => [item]} = json_response(get(conn, "/api/uploads/inbox"), 200)
+      assert item["kind"] == "failed"
+      assert Map.has_key?(item, "retryable"), "a path-less failed item must still carry retryable"
+      assert item["retryable"] == false
     end
 
     test "never returns another reader's uploads", %{conn: conn} do
