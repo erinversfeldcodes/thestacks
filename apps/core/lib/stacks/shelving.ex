@@ -300,7 +300,10 @@ defmodule Stacks.Shelving do
     # view owned by rls_reader — rather than the base table, so the active_listing
     # policy arm (which exposed every column, the seller's reserve included) can be
     # dropped. The view already filters `listing_status = 'active' AND removed_at
-    # IS NULL` and exposes only id/book_id/bookshelf_id/placed_at.
+    # IS NULL` and exposes only id/book_id/bookshelf_id/placed_at. The source
+    # reuses the Placement schema, which still DECLARES the view-absent columns
+    # (notes, listing_*, etc.) — referencing any of them in this query compiles
+    # but raises UndefinedColumn at runtime, so keep the select/where to the four.
     from(p in {"active_listings", Placement})
     |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id)
     |> join(:inner, [p, bs], u in assoc(bs, :user))
