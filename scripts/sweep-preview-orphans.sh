@@ -300,7 +300,7 @@ echo "    Fly apps examined: ${fly_examined}"
 require_secrets neon NEON_STAGING_API_KEY NEON_STAGING_PROJECT_ID
 
 NEON_API="https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}"
-branches_json="$(curl -sfL \
+branches_json="$(curl -sfSL \
     -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
     "${NEON_API}/branches")" \
     || { echo "FAIL sweep: could not list Neon branches" >&2; exit 1; }
@@ -357,7 +357,7 @@ while IFS="$TAB" read -r bid bname bepoch; do
         # ⛔ Through attempt, like the Fly and Modal destroys: a delete that fails
         # is a FAILURE, not a removal, and the API's error is captured instead of
         # thrown away behind a WARN.
-        if attempt "DELETED neon branch ${bname}" "FAILED to delete neon branch ${bname}" -- curl -sf -X DELETE -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" "${NEON_API}/branches/${bid}"; then
+        if attempt "DELETED neon branch ${bname}" "FAILED to delete neon branch ${bname}" -- curl -sfS -X DELETE -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" "${NEON_API}/branches/${bid}"; then
             swept=$(( swept + 1 ))
         else
             failed=$(( failed + 1 ))
