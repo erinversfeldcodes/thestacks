@@ -47,6 +47,59 @@ HAND_PATH = "apps/core/lib/stacks_web/proto_json.ex"
 # To change it: run this gate, read what it names, and either carry the field
 # in the serializer or add the pair here in the same commit. The diff is the
 # record of that decision.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# HAND-DERIVED GROUND TRUTH (recorded BEFORE the harvest regex was corrected, so
+# the corrected harvest is validated against a set computed WITHOUT it).
+#
+# The boundary the gate sees: 13 PUBLIC multiline `def … do … end` serializers
+# that call a `Gen.X`, over 9 emitters. It does NOT see `defp` helpers
+# (`listing_book`, `listing_seller`), one-liner `def …, do:` serializers
+# (`author_slim`, `author_bookshelf`), or the controllers' own `Map.take` sites
+# (a different file). Every omission below was judged DATA-LOSING (a field a
+# client needs that no other path supplies) or DELIBERATE (internal id,
+# server-only/bookkeeping, listing surface, or re-supplied downstream via
+# `Map.merge`/`Map.put`). All were DELIBERATE except the `book_placement`
+# started_at/finished_at pair (DATA-LOSING — the progress card renders the date).
+#
+# `book_placement` (emitter `Gen.placement`, 23 fields) per-entry verdicts:
+#   bookshelf_id ....... DELIBERATE  card shows bookshelf_name (merged), not the FK
+#   position ........... DELIBERATE  shelf ordering, unused by the card
+#   placed_at .......... DELIBERATE  not rendered
+#   removed_at ......... DELIBERATE  soft-delete bookkeeping
+#   formats ............ FALSE POS   re-supplied via Map.merge(%{formats:}) — the
+#                                    `:atom` harvest missed the keyword key
+#   visibility ......... FALSE POS   re-supplied via Map.merge(%{visibility:})
+#   listing_* (4) ...... DELIBERATE  marketplace, a separate surface
+#   created_at ......... DELIBERATE  bookkeeping
+#   updated_at ......... DELIBERATE  bookkeeping
+#   started_at ......... DATA-LOSING PlacementCard renders the date (bare "Finished"
+#                                    without it on a page load) — carried now
+#   finished_at ........ DATA-LOSING same (PlacementCard.elm:290) — carried now
+#   shelf_id ........... DELIBERATE  physical-shelf FK
+#   book_edition_id .... DELIBERATE  internal edition FK; formats cover display
+#   source ............. DELIBERATE  placement provenance, unshown
+#
+# The corrected harvest therefore deletes exactly `book_placement:formats` and
+# `book_placement:visibility` (keyword-key recognition); carrying started_at/
+# finished_at in the serializer deletes those two as well. 102 → 98.
+#
+# Reconciliation with the issue's named false positives: `formats` CONFIRMED;
+# `bookshelf_id` is NOT one (the merge supplies bookshelf_NAME, not the id — it
+# stays a real DELIBERATE omission); `bookshelf_name` is not a `Gen.placement`
+# field and was never in the baseline. `visibility` is the fourth false positive
+# the issue did not name. Per the issue's rule, that disagreement is a finding,
+# recorded here rather than reconciled away.
+#
+# ⚠️ SEPARATE FINDING, out of scope for the keyword fix: the `blog_association`
+# serializer has NO `Map.take` — `Gen.book_association |> Map.merge(%{...})`
+# carries ALL 8 book_association fields — so its 7 baseline entries are false
+# positives too. They survive because the harvest models `carried = atoms in
+# body`, which breaks for a serializer that narrows by NOT calling `Map.take`.
+# Correcting that is a larger, different change (model "no Map.take ⇒ all Gen
+# fields carried") and would overturn a documented in-file disposition; left for
+# a follow-up.
+# ─────────────────────────────────────────────────────────────────────────────
 BASELINE = {
     "author:created_at",
     "author:open_library_id",
@@ -94,8 +147,6 @@ BASELINE = {
     "book_placement:book_edition_id",
     "book_placement:bookshelf_id",
     "book_placement:created_at",
-    "book_placement:finished_at",
-    "book_placement:formats",
     "book_placement:listing_min_price_cents",
     "book_placement:listing_mode",
     "book_placement:listing_price_cents",
@@ -105,9 +156,7 @@ BASELINE = {
     "book_placement:removed_at",
     "book_placement:shelf_id",
     "book_placement:source",
-    "book_placement:started_at",
     "book_placement:updated_at",
-    "book_placement:visibility",
     "bookshelf_book:author_id",
     "bookshelf_book:bisac_codes",
     "bookshelf_book:created_at",
@@ -245,6 +294,74 @@ def _strip_comments(src):
     return "\n".join(out)
 
 
+# ⚠️ WHAT THE `:atom` HARVEST MISSED, and why this exists.
+#
+# `carried` below is seeded from `:atom` literals — the form a `Map.take` list
+# and a `Map.put(map, :key, …)` use. But a field re-supplied through
+# `Map.merge(%{field: value})` is written as a KEYWORD KEY (`field:`, colon
+# after), which `:([a-z_0-9]+)` never matches. So `book_placement`, which
+# carries `formats` and `visibility` through exactly such a merge, had both
+# reported as DROPPED — present on the wire, pinned in the baseline as omitted.
+# An inventory wrong in the over-reporting direction is the noise that stops the
+# gate being read, which is the whole reason it exists.
+#
+# ⛔ A naive `\b(\w+):` union is the wrong fix: it also matches `do:`, `else:`,
+# `into:` and friends, and each false match would DELETE a baseline entry that
+# should stay — shrinking the set in the wrong direction while looking like
+# progress. Two guards keep that from happening: keys are read ONLY from inside
+# `%{…}` map literals (brace-balanced), and ONLY when they begin a line
+# (map keys in this file are formatted one per line). The `do:`/`else:` inside
+# an `if(… , do: …, else: …)` VALUE sit mid-line, so they are never read. A
+# small deny-list of Elixir keyword atoms is carried as a third belt.
+_KEYWORD_DENYLIST = {
+    "do",
+    "else",
+    "end",
+    "after",
+    "catch",
+    "rescue",
+    "when",
+    "for",
+    "into",
+    "fn",
+    "if",
+    "unless",
+}
+
+
+def _map_literal_keys(src):
+    """Keyword keys that begin a line inside a `%{…}` map literal.
+
+    These are fields a serializer ADDS via `Map.merge`/`Map.put(map, %{…})`.
+    Counting them as carried is what stops a re-supplied field being reported as
+    dropped. Scoped to `%{…}` spans so a stray `label:` elsewhere cannot delete
+    a baseline entry.
+    """
+    keys = set()
+    i = 0
+    n = len(src)
+    while i < n:
+        if src[i : i + 2] == "%{":
+            depth = 1
+            j = i + 2
+            start = j
+            while j < n and depth > 0:
+                if src[j] == "{":
+                    depth += 1
+                elif src[j] == "}":
+                    depth -= 1
+                j += 1
+            span = src[start : j - 1]
+            for line in span.split("\n"):
+                m = re.match(r"\s*([a-z_][a-z_0-9]*):", line)
+                if m and m.group(1) not in _KEYWORD_DENYLIST:
+                    keys.add(m.group(1))
+            i = j
+        else:
+            i += 1
+    return keys
+
+
 def read(path):
     try:
         return pathlib.Path(path).read_text(encoding="utf-8")
@@ -312,7 +429,12 @@ for match in re.finditer(r"\n  def ([a-z_]+)\(([^)]*)\) do\n(.*?)\n  end\n", han
     if not gen_call or gen_call.group(1) not in gen_fields:
         continue
     narrowing += 1
-    carried = set(re.findall(r":([a-z_0-9]+)", _strip_comments(body)))
+    stripped = _strip_comments(body)
+    # `:atom` literals (Map.take lists, Map.put atom keys) PLUS keyword keys of
+    # `%{…}` map literals (Map.merge/Map.put additions). The second half is the
+    # fix: without it a merged-in field reads as dropped. See `_map_literal_keys`.
+    carried = set(re.findall(r":([a-z_0-9]+)", stripped))
+    carried |= _map_literal_keys(stripped)
     for attr in re.findall(r"@([a-z_]+)", body):
         carried |= attrs.get(attr, set())
     operands[name] = (gen_call.group(1), gen_fields[gen_call.group(1)], carried)
