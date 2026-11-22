@@ -8,6 +8,20 @@ defmodule Core.Repo.Migrations.DropThePlacementWideningArmsAndMakeTheOwnerArmInd
   # widening arm at all: it scopes every placement read to the shelf OWNER and
   # narrows in the application, so it reads through the owner arm.
   #
+  # ⚠️ DEPLOY-WINDOW TRADE-OFF, accepted deliberately. This drop (Release C) and the
+  # view + read-switch (Release B) ship in ONE deploy, and migrations run before the
+  # new machines serve — so during a rolling deploy an old machine still reads the
+  # base table via the active_listing arm, and once this migration drops it that
+  # machine's looking-for-home search labels go empty until the rollout finishes.
+  # The original design called the B/C split uncollapsible because it feared the
+  # signed-out /api/listings read would break — but a wiring trace established that
+  # read goes to op.listings (no RLS), not to a placement arm, so that failure
+  # cannot occur. The only exposed path is the looking-for-home SEARCH label: it
+  # fails SAFE (an empty label, never over-exposure), self-heals when the rollout
+  # completes, and is currently immaterial (zero active looking_for_home listings).
+  # The window is accepted rather than split into two deploys because it cannot harm
+  # the current state and tightens, never widens, access.
+  #
   # With both widening arms gone, the owner arm is the only permissive policy
   # stacks_app meets, and rewriting its USING as a same-table equality on the
   # denormalised user_id makes it an indexable Bitmap Index Scan instead of a
