@@ -1263,6 +1263,11 @@ responseSuite =
                                 -- not a reader who has not started the book.
                                 , readingStatus = Nothing
                                 , currentPage = Nothing
+
+                                -- started_at/finished_at are `optional` on
+                                -- BookPlacement too; absent in this fixture.
+                                , startedAt = Nothing
+                                , finishedAt = Nothing
                                 }
                         , myWriting =
                             [ { id = "w-1"

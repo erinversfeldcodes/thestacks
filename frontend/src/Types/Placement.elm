@@ -358,8 +358,14 @@ fromProtoBookPlacement bp =
     -- thing that will tell whoever writes that migration.
     , readingStatus = Maybe.andThen parseReadingStatus bp.readingStatus
     , currentPage = bp.currentPage
-    , startedAt = Nothing
-    , finishedAt = Nothing
+
+    -- Read from the payload now that `BookPlacement` carries them (optional, so
+    -- `Maybe String`). `emptyToNothing` folds a present-but-empty string back to
+    -- Nothing, matching the PlacementDetail path. Hardcoding these to Nothing was
+    -- why a finished card loaded from a page read showed bare "Finished" until a
+    -- later save round-tripped the date in.
+    , startedAt = Maybe.andThen emptyToNothing bp.startedAt
+    , finishedAt = Maybe.andThen emptyToNothing bp.finishedAt
     , visibility = Nothing
     , hasUserWriting = False
     }

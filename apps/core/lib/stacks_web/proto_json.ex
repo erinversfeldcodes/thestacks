@@ -408,7 +408,20 @@ defmodule StacksWeb.ProtoJSON do
     # was partway through, and saving that card wrote `to_read` back over the
     # real status.
     Gen.placement(placement)
-    |> Map.take([:id, :book_id, :personal_rating, :notes, :reading_status, :current_page])
+    |> Map.take([
+      :id,
+      :book_id,
+      :personal_rating,
+      :notes,
+      :reading_status,
+      :current_page,
+      # Carried so the book-detail progress card can render the dates on a plain
+      # page read. `BookPlacement` declares both `optional`, and omitting them
+      # here (while `Gen.placement/1` emits them) is why a finished card showed a
+      # bare "Finished" until an unrelated save round-tripped the date in.
+      :started_at,
+      :finished_at
+    ])
     |> Map.merge(%{
       bookshelf_name: bookshelf && bookshelf.name,
       formats: placement.formats || [],

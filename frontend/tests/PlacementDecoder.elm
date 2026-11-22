@@ -243,6 +243,35 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
+        , test "⛔ reads started_at/finished_at so a finished card shows the date on a page load" <|
+            -- ⛔ BookPlacement stopped at field 10, so `fromProtoBookPlacement`
+            -- hardcoded both to Nothing and a finished card loaded from a plain
+            -- page read showed bare "Finished" until a later save round-tripped
+            -- the date in. The message carries them now. This reds if the mapper
+            -- goes back to Nothing-ing them.
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-fin","book_id":"b-1","reading_status":"completed","started_at":"2024-04-02T09:00:00Z","finished_at":"2024-07-23T18:30:00Z"}""" of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal (Just "2024-04-02T09:00:00Z") p.startedAt
+                            , \p -> Expect.equal (Just "2024-07-23T18:30:00Z") p.finishedAt
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "an empty started_at and an absent finished_at both stay Nothing (presence preserved)" <|
+            \_ ->
+                case Decode.decodeString bookPlacementDecoder """{"id":"p-none","book_id":"b-1","reading_status":"reading","started_at":""}""" of
+                    Ok placement ->
+                        Expect.all
+                            [ \p -> Expect.equal Nothing p.startedAt
+                            , \p -> Expect.equal Nothing p.finishedAt
+                            ]
+                            placement
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         , test "a reading status the server cannot send decodes to Nothing, and the badge says so" <|
             -- ⚠️ The remaining conflation, pinned rather than fixed: an
             -- unparseable status and an absent one both become Nothing. That is

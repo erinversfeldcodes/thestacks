@@ -189,6 +189,23 @@ message BookPlacement {
   // same correction this contract made for a publication date that could not
   // distinguish absent from empty.
   optional int32 current_page = 10 [json_name = "current_page"];
+
+  // ISO-8601 timestamp the reader started this book, as a string (the server
+  // emits the stored timestamp verbatim, matching PlacementDetail.started_at).
+  //
+  // ⛔ `optional` for the same reason as the two fields above: without presence
+  // an absent started_at is indistinguishable from the empty string, and the
+  // progress card could not tell "the server did not send a date" from "no date
+  // recorded". Sibling messages already carry these (PlacementDetail at 10/11,
+  // Placement at 19/20); BookPlacement is the one the book-detail card decodes
+  // and it omitted them, so a finished card loaded from a page read showed a
+  // bare "Finished" until an unrelated save round-tripped the date in.
+  optional string started_at = 11 [json_name = "started_at"];
+
+  // ISO-8601 timestamp the reader finished this book, as a string. `optional`
+  // for the presence reason above; `Components/PlacementCard.elm` renders
+  // "Finished · <date>" when it is present and bare "Finished" when it is not.
+  optional string finished_at = 12 [json_name = "finished_at"];
 }
 
 // ReadingStatus documents the closed set `reading_status` carries on the wire.

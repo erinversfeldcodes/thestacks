@@ -505,8 +505,48 @@ defmodule StacksWeb.ProtoJSONTest do
                visibility: "owner",
                bookshelf_visibility: "owner",
                reading_status: placement.reading_status,
-               current_page: placement.current_page
+               current_page: placement.current_page,
+               started_at: placement.started_at,
+               finished_at: placement.finished_at
              }
+    end
+
+    test "⛔ carries started_at/finished_at so a finished card shows the date on a page read" do
+      # ⛔ Boundary assertion on the serializer's OWN output, not a codegen
+      # round-trip: `BookPlacement` stopped at field 10, so this payload carried
+      # neither date and `fromProtoBookPlacement` hardcoded them to Nothing — a
+      # finished card loaded from a plain page read showed a bare "Finished"
+      # until an unrelated save round-tripped the date in. `Gen.placement/1`
+      # emitted both all along; the `Map.take` dropped them. This reds if either
+      # is dropped from the serializer again.
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          reading_status: "completed"
+        )
+        |> Core.Repo.preload(:bookshelf)
+
+      refute is_nil(placement.started_at),
+             "precondition: a completed placement must have a started_at to assert on"
+
+      refute is_nil(placement.finished_at),
+             "precondition: a completed placement must have a finished_at to assert on"
+
+      result = ProtoJSON.book_placement(placement)
+
+      assert Map.has_key?(result, :started_at),
+             "the payload must carry started_at, not let the client default it to Nothing"
+
+      assert Map.has_key?(result, :finished_at),
+             "the payload must carry finished_at, not let the client default it to Nothing"
+
+      assert result.started_at == placement.started_at
+      assert result.finished_at == placement.finished_at
     end
 
     test "⛔ carries the reading progress the book-detail card is built from" do
