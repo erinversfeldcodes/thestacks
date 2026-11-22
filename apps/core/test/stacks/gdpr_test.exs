@@ -64,6 +64,8 @@ defmodule Stacks.GDPRTest do
       "operator session mechanics (hashed IP, boot id, expiry) — auth internal, not user-provided data",
     "auth_token_families" =>
       "refresh-token rotation state; a live credential, exporting it hands out session access",
+    "bookshelf_placements" =>
+      "exported inside each bookshelf's payload (export.bookshelves carries its shelf's placements), not a standalone top-level table; the denormalised user_id only duplicates ownership the bookshelf already records",
     "guardian_tokens" => "issued session tokens — same credential reason as auth_token_families",
     "partners" =>
       "business-entity record; approved_by_id is an operator's action on a partner org, not their own personal data",

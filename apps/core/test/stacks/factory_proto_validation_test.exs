@@ -23,7 +23,7 @@ defmodule Stacks.FactoryProtoValidationTest do
     shelf: {Stacks.Shelving.Shelf, ~w()a},
     placement:
       {Stacks.Shelving.Placement,
-       ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents current_page started_at finished_at)a},
+       ~w(removed_at personal_rating notes listing_mode listing_status listing_price_cents listing_min_price_cents current_page started_at finished_at user_id)a},
     placement_history: {Stacks.Shelving.PlacementHistory, ~w()a},
     post: {Stacks.Blog.Post, ~w(published_at visibility_group_id)a},
     post_comment: {Stacks.Blog.PostComment, ~w(parent_id created_at)a},
