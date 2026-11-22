@@ -2346,21 +2346,13 @@ bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
     Decode.map5 BookDetailResponse
         (Decode.field "book" bookDecoder)
-        (Decode.oneOf
-            [ Decode.field "placement" (Decode.nullable bookPlacementDecoder)
-            , Decode.succeed Nothing
-            ]
-        )
+        (optionalField "placement" (Decode.nullable bookPlacementDecoder) Nothing)
         (Decode.oneOf
             [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
             ]
         )
-        (Decode.oneOf
-            [ Decode.field "placements" (Decode.list bookPlacementDecoder)
-            , Decode.succeed []
-            ]
-        )
+        (optionalField "placements" (Decode.list bookPlacementDecoder) [])
         (Decode.oneOf
             [ Decode.field "my_writing" (Decode.list myWritingDecoder)
             , Decode.succeed []
@@ -3286,16 +3278,8 @@ confirmResponseDecoder : Decoder ConfirmResponse
 confirmResponseDecoder =
     Decode.map4 ConfirmResponse
         (Decode.field "book" bookDecoder)
-        (Decode.oneOf
-            [ Decode.field "placement" (Decode.nullable bookPlacementDecoder)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "placements" (Decode.list bookPlacementDecoder)
-            , Decode.succeed []
-            ]
-        )
+        (optionalField "placement" (Decode.nullable bookPlacementDecoder) Nothing)
+        (optionalField "placements" (Decode.list bookPlacementDecoder) [])
         (Decode.map confirmOutcomeFromSource
             (Decode.oneOf
                 [ Decode.field "source" Decode.string
@@ -4739,33 +4723,46 @@ profileShelfSummaryDecoder =
         (Decode.oneOf [ Decode.field "has_feed" Decode.bool, Decode.succeed False ])
 
 
-{-| Decodes a string field that may be absent or JSON null, defaulting to "".
+{-| Decodes an optional field: defaults when the KEY is absent, but fails —
+never defaults — when the key is present carrying a value the decoder cannot read.
 
-⛔ Absent and _wrong_ are different answers. This was written as
-`oneOf [ field, Decode.succeed "" ]`, and `oneOf` falls through on ANY failure
-of the first branch — so a field arriving as a number, a list or an object
-decoded to `""` exactly as an unset one did. The reader saw a blank name or a
-blank city, and nothing reported that the server had sent something unreadable.
+⛔ Absent and _wrong_ are different answers. `oneOf [ field key d, succeed default ]`
+falls through on ANY failure of its first branch, so a present-but-malformed value
+defaults exactly as a genuinely-absent one does: a `placements` arriving as the
+wrong type becomes an empty shelf row, a `display_name` arriving as a number
+becomes a blank name — and nothing reports that the server sent something
+unreadable. That is the "structurally valid but false payload" class: the decode
+succeeds, so no error surfaces, and the lie is indistinguishable from the truth.
 
-So the key's PRESENCE is established first (`Decode.value` succeeds on any
-present value, and fails only when the key is missing). An absent key defaults;
-a present key must then be a string or null, and anything else fails the decode
-where it can be seen.
+So the key's PRESENCE is established first — `Decode.value` succeeds on any present
+value and fails only when the key is missing. An absent key defaults; a present key
+must then satisfy `decoder`, and anything else fails the decode where it can be seen
+rather than being papered over as the default.
 
 -}
-optionalString : String -> Decoder String
-optionalString field =
+optionalField : String -> Decoder a -> a -> Decoder a
+optionalField field decoder default =
     Decode.maybe (Decode.field field Decode.value)
         |> Decode.andThen
             (\present ->
                 case present of
                     Nothing ->
-                        Decode.succeed ""
+                        Decode.succeed default
 
                     Just _ ->
-                        Decode.field field (Decode.nullable Decode.string)
-                            |> Decode.map (Maybe.withDefault "")
+                        Decode.field field decoder
             )
+
+
+{-| Decodes a string field that may be absent or JSON null, defaulting to "".
+An absent key defaults; a present key must be a string or null (anything else
+fails the decode) — see `optionalField` for the absent-vs-wrong rationale.
+-}
+optionalString : String -> Decoder String
+optionalString field =
+    optionalField field
+        (Decode.nullable Decode.string |> Decode.map (Maybe.withDefault ""))
+        ""
 
 
 {-| `optionalString`'s rule for a boolean: an absent or `null` flag is `False`,
