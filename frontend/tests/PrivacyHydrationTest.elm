@@ -89,6 +89,7 @@ suite =
                     |> Query.each
                         (Expect.all
                             [ Query.has [ Selector.class "toggle--unknown" ]
+                            , Query.has [ Selector.exactText "—" ]
                             , Query.hasNot [ Selector.class "toggle--on" ]
                             , Query.hasNot [ Selector.class "toggle--off" ]
                             ]
