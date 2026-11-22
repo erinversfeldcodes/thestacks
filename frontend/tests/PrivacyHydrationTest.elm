@@ -88,9 +88,9 @@ suite =
                     |> consentToggles
                     |> Query.each
                         (Expect.all
-                            [ Query.has [ Selector.text "—" ]
-                            , Query.hasNot [ Selector.text "On" ]
-                            , Query.hasNot [ Selector.text "Off" ]
+                            [ Query.has [ Selector.class "toggle--unknown" ]
+                            , Query.hasNot [ Selector.class "toggle--on" ]
+                            , Query.hasNot [ Selector.class "toggle--off" ]
                             ]
                         )
         , test "once the settings have answered the select is live" <|
@@ -112,7 +112,7 @@ suite =
                 Privacy.view hydratedModel
                     |> Query.fromHtml
                     |> consentToggles
-                    |> Query.each (Query.hasNot [ Selector.text "—" ])
+                    |> Query.each (Query.hasNot [ Selector.class "toggle--unknown" ])
         , test "a failed fetch keeps the controls inert rather than editing defaults" <|
             \_ ->
                 let
