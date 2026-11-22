@@ -129,8 +129,8 @@ OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1
 
 if grep -qE "^FAIL images_past_expiry" <<< "$OUT"; then
     _record_pass "a breached ceiling is reported as a failure"
-    assert_contains "$OUT" "past their expiry and still present" \
-        "and carries the sentence a reader needs, not just a count"
+    assert_contains "$OUT" "a single row it cannot delete, or a sweep that is not running" \
+        "and carries the sentence a reader needs, not just a number"
     # The roster mixes assertions about CONFIGURATION with assertions that count
     # a backlog, and the two mean different things when they fire. This one is a
     # backlog, so a reader must not be sent looking for a posture regression.
@@ -167,12 +167,15 @@ if psql "$LOCAL_URL" -q -c \
     if [[ "$RELAXED" == "YES" ]]; then
         _record_pass "the column really is nullable now, so this case tests the arm and not the fixture"
         OUT="$(POSTURE_ALLOW_LOCAL=1 POSTURE_DATABASE_URL="$LOCAL_URL" bash "$GATE" 2>&1)"
-        if grep -qE "^FAIL images_past_expiry" <<< "$OUT"; then
-            _record_pass "a nullable expires_at fires the retention assertion on its own"
+        # ⛔ A STRUCTURAL assertion of its own now, split from the age check: a
+        # nullable expires_at is a schema regression, not a backlog, so it fires
+        # `images_expiry_column_stayed_not_null` rather than the age condition.
+        if grep -qE "^FAIL images_expiry_column_stayed_not_null" <<< "$OUT"; then
+            _record_pass "a nullable expires_at fires its own structural assertion"
             assert_contains "$OUT" "has become NULLABLE" \
                 "and names the route, so it is not mistaken for an overdue backlog"
         else
-            _record_fail "expires_at was made nullable and the retention assertion stayed green — the guarantee is assumed, not checked"
+            _record_fail "expires_at was made nullable and the structural assertion stayed green — the guarantee is assumed, not checked"
         fi
     else
         _record_fail "could not relax the column, so this case would pass for the wrong reason"
@@ -348,7 +351,8 @@ test_case "every_hand_found_breach_is_covered" \
 # breaks, and `check-rls-scope.sh` never reads `seeds.exs` at all. Drop one of
 # these from the roster and nothing anywhere notices: not the seed, not the
 # scope gate, not this suite's count if the count is adjusted with it.
-for needle in "images_past_expiry" "orphaned_executing_jobs" "warehouse_schemas_missing" \
+for needle in "images_past_expiry" "images_expiry_column_stayed_not_null" \
+    "orphaned_executing_jobs" "warehouse_schemas_missing" \
     "unmigrated" "app_role_exempt_from_rls" "definer_function_executable_by_public" \
     "widening_policy_is_not_read_only" "rls_table_without_warehouse_policy" \
     "definer_takes_a_user_list_as_its_subject" "definer_with_unnamed_parameters" \

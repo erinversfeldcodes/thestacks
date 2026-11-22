@@ -22,9 +22,14 @@ name: Deployed posture
 
 on:
   schedule:
-    # Daily, after the nightly maintenance jobs have had their chance to run. A
-    # breach is then at most a day old rather than at most a campaign old.
-    - cron: '0 9 * * *'
+    # Daily at 11:00 UTC, AFTER every nightly maintenance duty has run. The
+    # retention sweep that drains the image backlog runs at 02:00, and the
+    # account-lifecycle duties run through the morning — unverified-accounts at
+    # 09:00, expired-invites 09:30, lapsed-email-changes 09:45, llm-call-log
+    # 10:15. The earlier 09:00 schedule read three of those duties mid-cycle, so
+    # the posture it measured was a half-finished one. A breach is still at most a
+    # day old rather than at most a campaign old.
+    - cron: '0 11 * * *'
   workflow_dispatch:
 
 permissions:

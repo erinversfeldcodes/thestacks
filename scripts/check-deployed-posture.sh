@@ -92,31 +92,53 @@ fi
 # Each entry: name | sql | ceiling | explanation
 ASSERTIONS=()
 
-# ⚠️ The `expires_at IS NOT NULL` clause this query used to carry was DEAD, and
-# worse than dead: it told a reader that a null expiry is a legitimate state
-# being deliberately skipped, which would mean the retention promise rested on
-# an arm the assertion lacked. It does not. The column is `null: false` at
-# creation (20260305000008) and no later migration relaxes it, so an image with
-# no expiry cannot exist and the row count is already complete.
+# ⚠️ KEYED ON AGE, not count, and the distinction is what keeps this gate from
+# being muted. The image-retention sweep runs nightly (02:00) and drains
+# oldest-first; `@batch_size` 200 within a 60s drain budget clears far more than
+# a day's inflow in one run, so under healthy operation nothing survives past its
+# expiry beyond about one schedule interval. A COUNT ceiling of 0 is therefore
+# red from night one against any standing backlog — the recorded 6,655 rows would
+# have failed it every night for weeks, which its own authors note is the fastest
+# way to get a monitor switched off. A trend (count-must-fall) is no better: it
+# fires on ordinary inflow and gets muted for the same reason.
 #
-# The clause is gone and the guarantee it was standing in for is now CHECKED
-# instead, by the second arm below. That matters here specifically because this
-# gate runs against a deployed database, where "the migration says so" is a
-# claim about a different machine than the one being measured.
+# ⚠️ Ceiling 2 DAYS, derived from the batch ceiling and the schedule rather than
+# from taste: the nightly sweep clears its backlog in one run, so the only thing
+# surviving to the 11:00 posture check is what expired after that morning's run —
+# under a day old. Two days tolerates one fully-missed or deadline-bounded run and
+# fires only when a row has outlived TWO nightly sweeps: a single row the sweep
+# cannot delete, or a sweep that is not running. `orphaned_executing_jobs` already
+# keys on age; this was the odd one out of the six. The max days overdue is also
+# the number a data subject is owed an answer about, so it is the defensible one.
 ASSERTIONS+=("images_past_expiry
-SELECT (SELECT count(*) FROM op.uploaded_images WHERE expires_at < now()) + (SELECT count(*) FROM information_schema.columns WHERE table_schema = 'op' AND table_name = 'uploaded_images' AND column_name = 'expires_at' AND is_nullable = 'YES')
+SELECT coalesce(max(extract(epoch FROM now() - expires_at)) / 86400, 0)::int FROM op.uploaded_images WHERE expires_at < now()
+2
+The OLDEST image past its expiry is more than two days overdue. Under the nightly
+retention sweep, which drains oldest-first and clears a day's inflow in a single
+run, nothing should outlive its 30-day deadline by more than about a day. More
+than two days overdue means the sweep has failed to reach this row across at
+least two runs — a single row it cannot delete, or a sweep that is not running.
+This reached rows 151 days overdue before anyone noticed, because the sweep could
+not finish and nothing rescued it. The number is the days overdue, which is the
+number a data subject is owed an answer about.")
+
+# ⛔ SPLIT from the age check above rather than folded into it, because the two
+# are different KINDS. The age is a DATA condition a backlog produces; this is a
+# STRUCTURAL fact about the schema — and this file's whole design turns on not
+# conflating them (see the data-condition roster below). The `expires_at IS NOT
+# NULL` clause the old query carried was DEAD — the column is `null: false` at
+# creation (20260305000008) and no later migration relaxes it — but the GUARANTEE
+# it stood for is real and is CHECKED here, which matters on a deployed database
+# where "the migration says so" is a claim about a different machine than the one
+# being measured.
+ASSERTIONS+=("images_expiry_column_stayed_not_null
+SELECT count(*) FROM information_schema.columns WHERE table_schema = 'op' AND table_name = 'uploaded_images' AND column_name = 'expires_at' AND is_nullable = 'YES'
 0
-An image can outlive the 30-day retention promise, by one of two routes.
-
-Either rows are past their expiry and still present, with their storage paths
-and user attribution intact — this reached 6,655 rows overdue by up to 151 days
-before anyone noticed, because the sweep that clears them could not finish and
-nothing rescued it.
-
-Or expires_at has become NULLABLE, in which case an image can be stored with no
-expiry at all and the count above would never see it. The column is created
-NOT NULL; if that has changed on this database, the retention guarantee is gone
-and the row count is no longer the whole question.")
+The expires_at column has become NULLABLE. An image can then be stored with no
+expiry at all, and the images_past_expiry age check above — which only sees rows
+WHERE expires_at < now() — would never see it. The column is created NOT NULL; if
+that has changed on this database the retention guarantee is gone, and the age of
+the overdue backlog is no longer the whole question.")
 
 ASSERTIONS+=("orphaned_executing_jobs
 SELECT count(*) FROM public.oban_jobs WHERE state = 'executing' AND attempted_at < now() - interval '2 hours'
@@ -522,10 +544,11 @@ do not 'fix' this by removing a name from the expected list.")
 # produces, so they go red because work accumulated, not because the posture
 # changed.
 #
-# MEASURED against a real database, all fifteen: 13 green, and the only two red
-# are exactly the data conditions — `images_past_expiry` at 1 (a seeded image
-# 249 days overdue) and `orphaned_executing_jobs` at 27. Both were red before
-# this distinction was drawn; neither was introduced by it.
+# MEASURED against a real database: the only two red were exactly the data
+# conditions — `images_past_expiry`, now the oldest overdue in DAYS (249 for a
+# seeded image 249 days overdue, against a ceiling of 2), and
+# `orphaned_executing_jobs` at 27. Both were red before this distinction was
+# drawn; neither was introduced by it.
 #
 # ⚠️ Why the split is worth the lines rather than a caveat on the whole file:
 # this suite already shipped one assertion that was red the day it was written
@@ -659,7 +682,7 @@ expected name.
 Add it to DEFINER_SIGNATURES once its grants and its parameters have been
 reviewed — the sibling assertions will then start covering it.")
 
-EXPECTED_ASSERTIONS=17
+EXPECTED_ASSERTIONS=18
 EXPECTED_DATA_CONDITIONS=2
 
 # ⚠️ The declared count, retrofitted from a real regression elsewhere in this
