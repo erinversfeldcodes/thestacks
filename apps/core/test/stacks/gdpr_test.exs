@@ -770,6 +770,37 @@ defmodule Stacks.GDPRTest do
       assert {:ok, updated} = Consent.revoke_consent(user.id)
       assert updated.consent_analytics == false
     end
+
+    # ⛔ A revoke STAMPS `_at` with the withdrawal time; it does not leave the
+    # grant time in place and does not clear it. Driven from a user whose grant
+    # timestamp is in the past, so a revoke that failed to re-stamp (`_at` left
+    # at the grant time) is `:eq` to the past and fails here — `:gt` is only
+    # reachable by writing the withdrawal time. A NULL would also fail, guarding
+    # the "clear it" option the issue explicitly rejected.
+    test "stamps the withdrawal time onto consent_analytics_at (not the grant time, not NULL)" do
+      past = ~U[2020-01-01 00:00:00Z]
+      user = insert(:user, consent_analytics: true, consent_analytics_at: past)
+
+      assert {:ok, revoked} = Consent.revoke_consent(user.id)
+      assert revoked.consent_analytics == false
+      assert revoked.consent_analytics_at != nil
+      assert DateTime.compare(revoked.consent_analytics_at, past) == :gt
+    end
+
+    test "stamps the withdrawal time onto consent_writing_assistant_at too" do
+      past = ~U[2020-01-01 00:00:00Z]
+
+      user =
+        insert(:user,
+          consent_writing_assistant: true,
+          consent_writing_assistant_at: past
+        )
+
+      assert {:ok, revoked} = Consent.revoke_consent(user.id, "writing_assistant")
+      assert revoked.consent_writing_assistant == false
+      assert revoked.consent_writing_assistant_at != nil
+      assert DateTime.compare(revoked.consent_writing_assistant_at, past) == :gt
+    end
   end
 
   describe "Consent.check_consent/2" do

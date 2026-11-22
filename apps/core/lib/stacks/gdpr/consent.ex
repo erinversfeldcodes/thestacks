@@ -39,10 +39,12 @@ defmodule Stacks.GDPR.Consent do
   """
   @spec revoke_consent(binary(), String.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def revoke_consent(user_id, feature \\ "analytics") do
+    now = DateTime.utc_now()
+
     result =
       user_id
       |> Accounts.get_user!()
-      |> Accounts.consent_changeset(revoke_attrs(feature))
+      |> Accounts.consent_changeset(revoke_attrs(feature, now))
       |> Repo.update()
       |> emit_consent(:revoke, feature)
 
@@ -69,9 +71,22 @@ defmodule Stacks.GDPR.Consent do
   defp grant_attrs(_analytics, now),
     do: %{consent_analytics: true, consent_analytics_at: now}
 
-  defp revoke_attrs("writing_assistant"), do: %{consent_writing_assistant: false}
-  defp revoke_attrs("search_indexing"), do: %{consent_search_indexing: false}
-  defp revoke_attrs(_analytics), do: %{consent_analytics: false}
+  # A revoke STAMPS the `_at` column with the withdrawal time — it does not
+  # clear it and does not leave the grant time in place. Clearing would destroy
+  # the evidence that a withdrawal happened at all, and `false` with a NULL
+  # timestamp is indistinguishable from "never answered"; leaving the grant time
+  # makes the flag ("no") disagree with the clock ("consented at 14:32"). So the
+  # `_at` column means "when this consent value was last set", for grant and
+  # revoke alike. (If an audit ever needs the grant time specifically, that is a
+  # second column, not a different write to this one.)
+  defp revoke_attrs("writing_assistant", now),
+    do: %{consent_writing_assistant: false, consent_writing_assistant_at: now}
+
+  defp revoke_attrs("search_indexing", now),
+    do: %{consent_search_indexing: false, consent_search_indexing_at: now}
+
+  defp revoke_attrs(_analytics, now),
+    do: %{consent_analytics: false, consent_analytics_at: now}
 
   defp consented?(%User{consent_writing_assistant: v}, "writing_assistant"), do: v == true
   defp consented?(%User{consent_search_indexing: v}, "search_indexing"), do: v == true

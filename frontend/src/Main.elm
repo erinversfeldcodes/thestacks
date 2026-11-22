@@ -1393,18 +1393,8 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         SettingsPrivacy ->
             let
-                consentSeed =
-                    case maybeAuth of
-                        Just auth ->
-                            { analytics = auth.user.consentAnalytics
-                            , writingAssistant = auth.user.consentWritingAssistant
-                            }
-
-                        Nothing ->
-                            { analytics = False, writingAssistant = False }
-
                 ( privacyModel, privacyCmd ) =
-                    Privacy.initWithToken maybeToken consentSeed
+                    Privacy.initWithToken maybeToken
             in
             ( PageSettingsPrivacy privacyModel, Cmd.map PrivacyMsg privacyCmd )
 

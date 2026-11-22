@@ -231,17 +231,13 @@ update token msg model =
             advance token model
 
         ConfirmConsent ->
-            let
-                ( newConsent, consentCmd, _ ) =
-                    Consent.update Consent.SaveConsent model.consent token
-
-                ( advanced, advanceCmd, out ) =
-                    advance token { model | consent = newConsent }
-            in
-            ( advanced
-            , Cmd.batch [ Cmd.map ConsentMsg consentCmd, advanceCmd ]
-            , out
-            )
+            -- Each consent toggle now WRITES ON CLICK (there is no draft "Save"
+            -- step), so by the time the reader presses Continue every decision
+            -- they touched is already persisted — leaving the analytics default
+            -- untouched is the same "no decision recorded" the other two toggles
+            -- have always had. So this just advances, recording the onboarding
+            -- step, exactly as the walk's own NextStep does.
+            advance token model
 
         SkipOnboarding ->
             finishNow token model

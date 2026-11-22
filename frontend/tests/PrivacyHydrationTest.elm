@@ -22,14 +22,9 @@ import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
-seed : { analytics : Bool, writingAssistant : Bool }
-seed =
-    { analytics = False, writingAssistant = False }
-
-
 loadingModel : Privacy.Model
 loadingModel =
-    Privacy.initWithToken (Just (TestHelpers.creds "token")) seed |> Tuple.first
+    Privacy.initWithToken (Just (TestHelpers.creds "token")) |> Tuple.first
 
 
 hydrated : Api.PrivacySettings
@@ -73,12 +68,31 @@ suite =
                     |> Query.fromHtml
                     |> profileSelect
                     |> Query.has [ Selector.disabled True ]
-        , test "while the fetch is in flight both consent toggles are disabled" <|
+        , test "while the fetch is in flight the consent toggles are disabled" <|
             \_ ->
                 Privacy.view loadingModel
                     |> Query.fromHtml
                     |> consentToggles
                     |> Query.each (Query.has [ Selector.disabled True ])
+        , test "⛔ while the fetch is in flight the toggles show 'not yet known', not a definite On/Off" <|
+            -- ⛔ Planted red for the manufactured-value defect. Before the stored
+            -- consent has loaded, the controls must NOT present a recorded
+            -- decision — "off" is a definite value and showing it before the
+            -- fetch answers is the same defect in a new place, made worse by
+            -- save-on-click where the displayed state IS the record. They render
+            -- "—". Revert the view's unknown branch (so a locked toggle shows
+            -- its default On/Off) and this goes red.
+            \_ ->
+                Privacy.view loadingModel
+                    |> Query.fromHtml
+                    |> consentToggles
+                    |> Query.each
+                        (Expect.all
+                            [ Query.has [ Selector.text "—" ]
+                            , Query.hasNot [ Selector.text "On" ]
+                            , Query.hasNot [ Selector.text "Off" ]
+                            ]
+                        )
         , test "once the settings have answered the select is live" <|
             \_ ->
                 Privacy.view hydratedModel
@@ -91,6 +105,14 @@ suite =
                     |> Query.fromHtml
                     |> consentToggles
                     |> Query.each (Query.has [ Selector.disabled False ])
+        , test "once the settings have answered the toggles present a definite state, not '—'" <|
+            -- The positive control for the unknown-state test above: '—' is a
+            -- pre-fetch-only rendering, so a hydrated toggle must never show it.
+            \_ ->
+                Privacy.view hydratedModel
+                    |> Query.fromHtml
+                    |> consentToggles
+                    |> Query.each (Query.hasNot [ Selector.text "—" ])
         , test "a failed fetch keeps the controls inert rather than editing defaults" <|
             \_ ->
                 let

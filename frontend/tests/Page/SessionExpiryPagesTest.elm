@@ -57,32 +57,32 @@ suite : Test
 suite =
     describe "Phase 1 — 401 interceptor on the 6 remaining authed pages"
         [ describe "Settings.Consent"
-            [ test "consent_401_bubbles: SaveCompleted 401 → SessionExpired" <|
+            [ test "consent_401_bubbles: SaveAnalyticsCompleted 401 → SessionExpired" <|
                 \() ->
                     let
                         ( _, _, outMsg ) =
                             Consent.update
-                                (Consent.SaveCompleted (Err unauthorized))
+                                (Consent.SaveAnalyticsCompleted True (Err unauthorized))
                                 (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     outMsg |> Expect.equal Consent.SessionExpired
-            , test "consent_non401_stays_local: SaveCompleted network error → NoOut" <|
+            , test "consent_non401_stays_local: SaveAnalyticsCompleted network error → NoOut" <|
                 \() ->
                     let
                         ( _, _, outMsg ) =
                             Consent.update
-                                (Consent.SaveCompleted (Err nonAuth))
+                                (Consent.SaveAnalyticsCompleted True (Err nonAuth))
                                 (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in
                     outMsg |> Expect.equal Consent.NoOut
-            , test "consent_success_stays_local: SaveCompleted Ok → NoOut" <|
+            , test "consent_success_stays_local: SaveAnalyticsCompleted Ok → NoOut" <|
                 \() ->
                     let
                         ( _, _, outMsg ) =
                             Consent.update
-                                (Consent.SaveCompleted (Ok ()))
+                                (Consent.SaveAnalyticsCompleted True (Ok ()))
                                 (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
                                 (Just (TestHelpers.creds "tok"))
                     in

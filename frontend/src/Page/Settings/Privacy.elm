@@ -165,27 +165,22 @@ init =
 
 
 {-| Entry point used by `Main` when the Privacy page opens: seeds the model and,
-when authenticated, kicks off the blocked-users fetch. `consentSeed` reflects the
-signed-in user's current consent so the folded-in toggles open showing reality
-(same seeding the standalone consent page used to do). The bare `init` is kept
-for tests and flows that don't need the network.
+when authenticated, kicks off the stored-settings and blocked-users fetches.
+
+⚠️ The consent toggles are NOT seeded from the login payload. They open at
+`init`'s defaults — held locked and rendered as "not yet known" — and the ONLY
+thing that sets what they display is the `GET /api/settings/privacy` response
+(`GotPrivacySettings`), the single source of truth. A login-blob seed would show
+a confident On/Off for a consent nobody has read back yet, which on a consent
+record — and with no confirming Save press — is a manufactured value where it
+matters most. The bare `init` is kept for tests and flows that don't fetch.
+
 -}
-initWithToken : Maybe Api.Credentials -> { analytics : Bool, writingAssistant : Bool } -> ( Model, Cmd Msg )
-initWithToken maybeToken consentSeed =
-    let
-        seeded =
-            { init
-                | consent =
-                    Consent.init
-                        { analytics = consentSeed.analytics
-                        , writingAssistant = consentSeed.writingAssistant
-                        , searchIndexing = False
-                        }
-            }
-    in
+initWithToken : Maybe Api.Credentials -> ( Model, Cmd Msg )
+initWithToken maybeToken =
     case maybeToken of
         Just token ->
-            ( { seeded | blockedUsers = Loading, settings = Loading }
+            ( { init | blockedUsers = Loading, settings = Loading }
             , Cmd.batch
                 [ Effect.perform
                     (Effect.authed Api.privacySettingsRequest
@@ -205,7 +200,7 @@ initWithToken maybeToken consentSeed =
             )
 
         Nothing ->
-            ( seeded, Cmd.none )
+            ( init, Cmd.none )
 
 
 update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )

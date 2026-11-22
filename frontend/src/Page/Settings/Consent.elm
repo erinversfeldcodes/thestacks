@@ -10,7 +10,6 @@ module Page.Settings.Consent exposing
     )
 
 import Api
-import Components.SaveButton as SaveButton
 import Effect exposing (Effect)
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (attribute, class, disabled)
@@ -20,46 +19,32 @@ import Types.RemoteData exposing (RemoteData(..))
 import Util.FailureCopy as FailureCopy
 
 
+{-| All three controls on this page are GDPR consent records, and all three
+WRITE ON CLICK: flipping a toggle persists the decision immediately, and each
+carries its OWN save state so its outcome is reported beside the control that
+caused it (a shared field would make one control's status speak for another's).
+There is no "Save Preferences" button — a draft consent is a hazard, because a
+reader who flips a toggle and navigates away believes the decision is recorded
+when it is not.
+-}
 type alias Model =
     { analyticsConsent : Bool
+    , analyticsSaving : RemoteData Http.Error ()
     , writingAssistantConsent : Bool
-    , saving : RemoteData Http.Error ()
-
-    {- ⛔ The writing toggle's OWN save state, separate from `saving`.
-
-       The two controls on this page have different durability: analytics is a
-       draft until "Save Preferences" is pressed, while the writing toggle
-       writes immediately on click. That is a design asymmetry and is recorded
-       as one — but they also used to SHARE `saving`, which turned it into a
-       lie: flipping the writing toggle made "Save Preferences" show its
-       saving-then-saved state for a save the reader never asked for, and a
-       writing-toggle FAILURE rendered an error message underneath a button that
-       had not been pressed.
-
-       Splitting them means each control reports its own outcome, so the Save
-       button speaks only for what it actually governs.
-    -}
     , writingAssistantSaving : RemoteData Http.Error ()
-
-    {- The search-indexing opt-in writes on click, exactly like the writing
-       toggle, so it carries its OWN save state for the same reason: a shared
-       `saving` would make the Save button speak for a write the reader never
-       asked for.
-    -}
-    , searchIndexingSaving : RemoteData Http.Error ()
     , searchIndexingConsent : Bool
+    , searchIndexingSaving : RemoteData Http.Error ()
     }
 
 
 type Msg
     = ToggleAnalytics
-    | SessionExpiryDetected
-    | ToggleWritingAssistant
-    | SaveConsent
-    | SaveCompleted (Result Http.Error ())
       -- ⚠️ Carries the value that was ATTEMPTED, so a failure can restore the
       -- opposite exactly rather than toggling the current value back — which
       -- assumes exactly one flip is in flight.
+    | SaveAnalyticsCompleted Bool (Result Http.Error ())
+    | SessionExpiryDetected
+    | ToggleWritingAssistant
     | SaveWritingAssistantCompleted Bool (Result Http.Error ())
     | ToggleSearchIndexing
     | SaveSearchIndexingCompleted Bool (Result Http.Error ())
@@ -112,12 +97,20 @@ searchIndexingDescription =
 toggles reflect reality on open. Previously both toggles were
 hard-coded OFF, so a user who had already granted consent saw them as OFF and
 their first click re-granted instead of revoking.
+
+⚠️ The host (`Page.Settings.Privacy`) now opens the controls LOCKED and does not
+seed them from any login payload: the stored consent is read from
+`GET /api/settings/privacy`, the single source of truth, and until that answers
+the view renders each toggle as "not yet known" (see `toggleLabel`) rather than a
+definite Off. So in the host's hands these initial values are never SHOWN as a
+recorded decision; the record is whatever the fetch brings back.
+
 -}
 init : { analytics : Bool, writingAssistant : Bool, searchIndexing : Bool } -> Model
 init consent =
     { analyticsConsent = consent.analytics
+    , analyticsSaving = NotAsked
     , writingAssistantConsent = consent.writingAssistant
-    , saving = NotAsked
     , writingAssistantSaving = NotAsked
     , searchIndexingConsent = consent.searchIndexing
     , searchIndexingSaving = NotAsked
@@ -145,10 +138,55 @@ updateWithEffect msg model maybeToken =
             ( model, Effect.None, SessionExpired )
 
         ToggleAnalytics ->
-            ( { model | analyticsConsent = not model.analyticsConsent, saving = NotAsked }
-            , Effect.None
-            , NoOut
-            )
+            let
+                newValue =
+                    not model.analyticsConsent
+            in
+            case maybeToken of
+                Just token ->
+                    ( { model
+                        | analyticsConsent = newValue
+                        , analyticsSaving = Loading
+                      }
+                    , Effect.authed (Api.saveConsentRequest newValue)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse =
+                            Api.resolveWhatever >> SaveAnalyticsCompleted newValue
+                        }
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( { model | analyticsConsent = newValue }, Effect.None, NoOut )
+
+        SaveAnalyticsCompleted attempted result ->
+            case result of
+                Ok _ ->
+                    ( { model | analyticsSaving = Success () }, Effect.None, NoOut )
+
+                Err err ->
+                    let
+                        -- ⛔ Restored from the ATTEMPTED value and settled BEFORE
+                        -- the 401 is classified — the same contract the
+                        -- writing-assistant handler documents below. The
+                        -- optimistic flip is REVERTED on failure: without it a
+                        -- failed save leaves the control reading the value the
+                        -- reader chose while the server still holds the old one,
+                        -- and for a consent record that is the worst available
+                        -- outcome — the reader believes their decision took and
+                        -- it did not.
+                        restored =
+                            { model
+                                | analyticsConsent = not attempted
+                                , analyticsSaving = Failure err
+                            }
+                    in
+                    if Api.isUnauthorized err then
+                        ( restored, Effect.None, SessionExpired )
+
+                    else
+                        ( restored, Effect.None, NoOut )
 
         ToggleWritingAssistant ->
             let
@@ -172,21 +210,6 @@ updateWithEffect msg model maybeToken =
 
                 Nothing ->
                     ( { model | writingAssistantConsent = newValue }, Effect.None, NoOut )
-
-        SaveConsent ->
-            case maybeToken of
-                Just token ->
-                    ( { model | saving = Loading }
-                    , Effect.authed (Api.saveConsentRequest model.analyticsConsent)
-                        token
-                        { onExpired = SessionExpiryDetected
-                        , onResponse = Api.resolveWhatever >> SaveCompleted
-                        }
-                    , NoOut
-                    )
-
-                Nothing ->
-                    ( model, Effect.None, NoOut )
 
         SaveWritingAssistantCompleted attempted result ->
             case result of
@@ -280,40 +303,13 @@ updateWithEffect msg model maybeToken =
                     else
                         ( restored, Effect.None, NoOut )
 
-        SaveCompleted result ->
-            case result of
-                Ok _ ->
-                    ( { model | saving = Success () }, Effect.None, NoOut )
-
-                Err err ->
-                    let
-                        -- ⛔ SETTLED BEFORE the error is classified, exactly as
-                        -- `SaveWritingAssistantCompleted` above does.
-                        --
-                        -- ⚠️ This handler was MISSED when that one was fixed,
-                        -- in this same module, twelve lines away. The 401 arm
-                        -- returned `model` untouched, so an expired session left
-                        -- `saving` on `Loading` and the Save button disabled
-                        -- forever, while the `else` branch recorded a `Failure`.
-                        -- It was found by sweeping the shape across the whole
-                        -- frontend, not by re-reading this file — which is the
-                        -- argument for sweeping rather than for reading harder.
-                        settled =
-                            { model | saving = Failure err }
-                    in
-                    if Api.isUnauthorized err then
-                        ( settled, Effect.None, SessionExpired )
-
-                    else
-                        ( settled, Effect.None, NoOut )
-
 
 {-| The standalone-page wrapper. Since TR-4 the consent controls live as a
 section INSIDE the Privacy page (`Page.Settings.Privacy` embeds this module and
 renders `viewSection`); this whole-page view is retained for direct unit tests
 of the consent surface. The update path — and therefore what
-`Stacks.GDPR.Consent` records via `Api.saveConsent` /
-`Api.saveWritingAssistantConsent` — is unchanged either way.
+`Stacks.GDPR.Consent` records via `Api.saveConsentRequest` /
+`Api.saveWritingAssistantConsentRequest` — is unchanged either way.
 -}
 view : Model -> Html Msg
 view model =
@@ -330,7 +326,10 @@ in as a section (TR-4). Identical markup to the standalone page minus its
 `locked` holds the toggles inert while the host page is still learning the
 stored state. A flip made before that answer landed used to be overwritten by
 it — the reader saw their click, then saw it undone — because this model is
-re-seeded wholesale from the server. The host decides when the answer is in.
+re-seeded wholesale from the server. The host decides when the answer is in, and
+while it is still learning, each control renders as "not yet known" (`toggleLabel`
+/ `toggleClass`) rather than a definite On/Off, so a value nobody has read is
+never shown as a recorded consent.
 
 -}
 viewSection : Bool -> Model -> Html Msg
@@ -343,26 +342,21 @@ viewSection locked model =
             , div [ class "toggle-row" ]
                 [ label [ class "toggle-row__label" ] [ text "Analytics" ]
                 , button
-                    [ class
-                        (if model.analyticsConsent then
-                            "toggle toggle--on"
-
-                         else
-                            "toggle toggle--off"
-                        )
+                    [ class (toggleClass locked model.analyticsConsent)
                     , attribute "data-testid" "analytics-consent-toggle"
-                    , disabled locked
+
+                    -- ⛔ Writes on click, so it is disabled while its own save is
+                    -- in flight as well as while the host is still learning the
+                    -- stored state. Without the in-flight term a second click
+                    -- lands while the first write is in flight — two requests
+                    -- racing, and a failure handler restoring a value that is no
+                    -- longer the one the server is deciding about.
+                    , disabled (locked || model.analyticsSaving == Loading)
                     , onClick ToggleAnalytics
                     ]
-                    [ text
-                        (if model.analyticsConsent then
-                            "On"
-
-                         else
-                            "Off"
-                        )
-                    ]
+                    [ text (toggleLabel locked model.analyticsConsent) ]
                 ]
+            , viewSaveError "analytics-consent-error" "your analytics preference" model.analyticsSaving
             ]
         , div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Linking books in your writing" ]
@@ -378,64 +372,14 @@ viewSection locked model =
             , div [ class "toggle-row" ]
                 [ label [ class "toggle-row__label" ] [ text "Link books automatically" ]
                 , button
-                    [ class
-                        (if model.writingAssistantConsent then
-                            "toggle toggle--on"
-
-                         else
-                            "toggle toggle--off"
-                        )
+                    [ class (toggleClass locked model.writingAssistantConsent)
                     , attribute "data-testid" "writing-assistant-consent-toggle"
-
-                    -- ⛔ Disabled while SAVING as well as while locked. This
-                    -- control writes on click, so without the second term a
-                    -- second click lands while the first write is in flight —
-                    -- two requests racing, and a failure handler restoring a
-                    -- value that is no longer the one the server is deciding
-                    -- about. `locked` covers the host still learning the stored
-                    -- state; this covers the window the control itself opens.
-                    --
-                    -- ⚠️ The analytics toggle above needs no in-flight term
-                    -- ONLY while it stays a draft — it writes nothing on click,
-                    -- so there is no request to race. If it is ever made
-                    -- save-on-click, it needs this same second term, and the
-                    -- absence of one there is not evidence that it is unnecessary.
                     , disabled (locked || model.writingAssistantSaving == Loading)
                     , onClick ToggleWritingAssistant
                     ]
-                    [ text
-                        (if model.writingAssistantConsent then
-                            "On"
-
-                         else
-                            "Off"
-                        )
-                    ]
+                    [ text (toggleLabel locked model.writingAssistantConsent) ]
                 ]
-            , case model.writingAssistantSaving of
-                Failure err ->
-                    p
-                        [ class "error"
-                        , attribute "role" "alert"
-                        , attribute "data-testid" "writing-assistant-consent-error"
-                        ]
-                        [ text (FailureCopy.saveFailure "your book-linking preference" err) ]
-
-                _ ->
-                    text ""
-
-            -- ⛔ A SIBLING of `.toggle-row`, not a child of it, and that is a
-            -- measured layout fix rather than tidiness. `.toggle-row` is
-            -- `display: flex; justify-content: space-between`, so a third child
-            -- moved the toggle button from the right edge to the CENTRE on
-            -- failure, `.error`'s padding and border stretched the row, and with
-            -- no `flex-wrap` it compressed to roughly one word per line at
-            -- 400px. This is where the rest of the page already puts a
-            -- control's error.
-            --
-            -- ⚠️ `role="alert"` because a failure here has to be announced, not
-            -- merely rendered — the same treatment this project gives
-            -- `syndication-url-error` and `invite-refusal`.
+            , viewSaveError "writing-assistant-consent-error" "your book-linking preference" model.writingAssistantSaving
             ]
         , div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Search-engine indexing" ]
@@ -445,50 +389,69 @@ viewSection locked model =
                 [ label [ class "toggle-row__label" ]
                     [ text "Let search engines index my public content" ]
                 , button
-                    [ class
-                        (if model.searchIndexingConsent then
-                            "toggle toggle--on"
-
-                         else
-                            "toggle toggle--off"
-                        )
+                    [ class (toggleClass locked model.searchIndexingConsent)
                     , attribute "data-testid" "search-indexing-consent-toggle"
-
-                    -- Writes on click, so it is disabled while its own save is in
-                    -- flight as well as while the host is still learning the
-                    -- stored state — the same contract as the writing toggle.
                     , disabled (locked || model.searchIndexingSaving == Loading)
                     , onClick ToggleSearchIndexing
                     ]
-                    [ text
-                        (if model.searchIndexingConsent then
-                            "On"
-
-                         else
-                            "Off"
-                        )
-                    ]
+                    [ text (toggleLabel locked model.searchIndexingConsent) ]
                 ]
-            , case model.searchIndexingSaving of
-                Failure err ->
-                    p
-                        [ class "error"
-                        , attribute "role" "alert"
-                        , attribute "data-testid" "search-indexing-consent-error"
-                        ]
-                        [ text (FailureCopy.saveFailure "your search-indexing preference" err) ]
-
-                _ ->
-                    text ""
+            , viewSaveError "search-indexing-consent-error" "your search-indexing preference" model.searchIndexingSaving
             ]
-        , div [ class "settings-actions" ]
-            [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]
-        , -- Distinguished by cause — see
-          case model.saving of
-            Failure err ->
-                p [ class "error" ]
-                    [ text (FailureCopy.saveFailure "your consent preferences" err) ]
-
-            _ ->
-                text ""
         ]
+
+
+{-| A toggle's CSS class. While the host is still learning the stored state
+(`locked`), the control shows an UNKNOWN visual rather than a definite on/off: a
+definite state shown before the fetch has answered is a manufactured value, and
+on a consent record — where the displayed state IS the record, now that there is
+no confirming Save press — that is exactly what must not happen.
+-}
+toggleClass : Bool -> Bool -> String
+toggleClass locked on =
+    if locked then
+        "toggle toggle--unknown"
+
+    else if on then
+        "toggle toggle--on"
+
+    else
+        "toggle toggle--off"
+
+
+{-| A toggle's label: "—" (not yet known) until the stored state has loaded,
+then the real On/Off. Pairs with `toggleClass`.
+-}
+toggleLabel : Bool -> Bool -> String
+toggleLabel locked on =
+    if locked then
+        "—"
+
+    else if on then
+        "On"
+
+    else
+        "Off"
+
+
+{-| The inline save-status for one control: its failure, announced
+(`role="alert"`, as this project gives its other refusal messages) and rendered
+as a SIBLING of `.toggle-row`, not a child of it — that is a measured layout fix.
+`.toggle-row` is `display: flex; justify-content: space-between`, so a third
+child moves the toggle button from the right edge to the centre on failure, and
+`.error`'s padding stretches the row. Success and in-flight render nothing: the
+toggle itself, and its disabled state, already say what is happening.
+-}
+viewSaveError : String -> String -> RemoteData Http.Error () -> Html Msg
+viewSaveError testid subject saving =
+    case saving of
+        Failure err ->
+            p
+                [ class "error"
+                , attribute "role" "alert"
+                , attribute "data-testid" testid
+                ]
+                [ text (FailureCopy.saveFailure subject err) ]
+
+        _ ->
+            text ""

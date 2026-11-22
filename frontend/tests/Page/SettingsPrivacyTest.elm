@@ -252,16 +252,26 @@ suite =
                                 ]
                             , Query.has [ Selector.exactText "Linking books in your writing" ]
                             ]
-            , test "initWithToken seeds the folded-in consent from the user's state" <|
+            , test "⛔ initWithToken does NOT seed the folded-in consent from the auth payload" <|
+                -- ⛔ Planted red for the deleted login-blob seed. The consent
+                -- toggles open at `init`'s defaults and are set ONLY by
+                -- `GET /api/settings/privacy` (the single source of truth); until
+                -- it answers the page is Loading and the toggles render as "not
+                -- yet known". Re-seed consent from the auth payload here (so a
+                -- consenting user's True reaches a toggle before the fetch) and
+                -- these equalities go red — a confident On/Off for a consent
+                -- nobody has read back is the manufactured-value defect this
+                -- deletion closes.
                 \_ ->
                     let
                         ( model, _ ) =
                             Privacy.initWithToken (Just (TestHelpers.creds "tok"))
-                                { analytics = True, writingAssistant = True }
                     in
                     Expect.all
-                        [ \m -> m.consent.analyticsConsent |> Expect.equal True
-                        , \m -> m.consent.writingAssistantConsent |> Expect.equal True
+                        [ \m -> m.settings |> Expect.equal Loading
+                        , \m -> m.consent.analyticsConsent |> Expect.equal False
+                        , \m -> m.consent.writingAssistantConsent |> Expect.equal False
+                        , \m -> m.consent.searchIndexingConsent |> Expect.equal False
                         ]
                         model
             , test "ConsentMsg delegates to Consent.update (flips analytics consent)" <|
@@ -276,7 +286,7 @@ suite =
                     let
                         ( _, _, out ) =
                             Privacy.update
-                                (ConsentMsg (Consent.SaveCompleted (Err (Http.BadStatus 401))))
+                                (ConsentMsg (Consent.SaveAnalyticsCompleted True (Err (Http.BadStatus 401))))
                                 init0
                                 token
                     in

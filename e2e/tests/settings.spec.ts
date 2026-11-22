@@ -86,27 +86,40 @@ test.describe("Settings — Privacy & Consent", () => {
     expect(newText).not.toEqual(initialText);
   });
 
-  test("saving consent shows the 'Saved!' success state", async ({ page }) => {
+  test("toggling analytics consent saves immediately (no Save button)", async ({
+    page,
+  }) => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const consent = page.locator(".settings-consent");
-    const saveBtn = consent.locator(".settings-actions button");
-    await expect(saveBtn).toBeVisible();
+    // There is no draft "Save Preferences" button any more: each toggle writes
+    // on click. The click alone fires POST /api/gdpr/consent.
+    await expect(consent.locator(".settings-actions")).toHaveCount(0);
 
-    await page.getByTestId("analytics-consent-toggle").click();
-    await saveBtn.click();
+    const toggle = page.getByTestId("analytics-consent-toggle");
+    await expect(toggle).toBeEnabled();
 
-    await expect(
-      consent.getByRole("button", { name: "Saved!" })
-    ).toBeVisible({ timeout: 5000 });
+    const saved = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/gdpr/consent") && r.request().method() === "POST"
+    );
+    await toggle.click();
+    expect((await saved).status(), "POST /api/gdpr/consent").toBe(200);
 
     await expect(consent.locator(".error")).toHaveCount(0);
   });
 
-  test("save failure surfaces the error message", async ({ page }) => {
+  test("a failed analytics save surfaces the inline error beside the toggle", async ({
+    page,
+  }) => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
+
+    const toggle = page.getByTestId("analytics-consent-toggle");
+    // Wait for hydration (the control is disabled until the stored consent
+    // loads) before intercepting the save, so the 500 lands on the click.
+    await expect(toggle).toBeEnabled();
 
     await page.route("**/api/gdpr/consent", (route) =>
       route.fulfill({
@@ -116,15 +129,10 @@ test.describe("Settings — Privacy & Consent", () => {
       })
     );
 
-    const consent = page.locator(".settings-consent");
-    const saveBtn = consent.locator(".settings-actions button");
-    await expect(saveBtn).toBeVisible();
+    await toggle.click();
 
-    await page.getByTestId("analytics-consent-toggle").click();
-    await saveBtn.click();
-
-    await expect(consent.locator(".error")).toContainText(
-      "We could not save your consent preferences, and we cannot say why."
+    await expect(page.getByTestId("analytics-consent-error")).toContainText(
+      "We could not save your analytics preference, and we cannot say why."
     );
   });
 
@@ -907,30 +915,30 @@ test.describe("Settings — Analytics consent persistence", () => {
     await dismissOnboarding(page);
 
     const analytics = page.getByTestId("analytics-consent-toggle");
+    // Hydrated from GET /api/settings/privacy (a fresh user is off); until it
+    // answers the toggle shows "—", so this also waits out the pre-fetch state.
     await expect(analytics).toHaveText("Off");
 
-    const consent = page.locator(".settings-consent");
+    // Save-on-click: the toggle click alone persists the decision — there is no
+    // separate Save button to press.
     const saved = page.waitForResponse(
       (r) =>
         r.url().includes("/api/gdpr/consent") && r.request().method() === "POST",
       { timeout: 15000 }
     );
     await analytics.click();
-    await consent.locator(".settings-actions button").click();
     expect((await saved).status(), "POST /api/gdpr/consent").toBe(200);
-    await expect(
-      consent.getByRole("button", { name: "Saved!" })
-    ).toBeVisible({ timeout: 10000 });
+    await expect(analytics).toHaveText("On");
 
     await page.reload();
+    // After the reload the toggle is NOT seeded from any login blob — it opens
+    // "not yet known" and is hydrated solely by GET /api/settings/privacy. So a
+    // persisted "On" here means the SERVER stored it; the /api/auth/me check
+    // below confirms the same against the account record.
     await expect(page.getByTestId("analytics-consent-toggle")).toHaveText("On", {
       timeout: 10000,
     });
 
-    // The reloaded toggle is seeded from the session blob the app keeps in
-    // localStorage, which the app itself wrote — so the account has to be read
-    // back too, or a consent the server never stored would still show as "On"
-    // to the only reader who checks.
     const stored = await request.get("/api/auth/me", {
       headers: { Authorization: `Bearer ${session.token}` },
     });

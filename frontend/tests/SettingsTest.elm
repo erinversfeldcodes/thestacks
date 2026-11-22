@@ -23,9 +23,9 @@ suite =
                 \_ ->
                     (Consent.init { analytics = False, writingAssistant = True, searchIndexing = False }).writingAssistantConsent
                         |> Expect.equal True
-            , test "init keeps saving as NotAsked" <|
+            , test "init keeps analyticsSaving as NotAsked" <|
                 \_ ->
-                    (Consent.init { analytics = True, writingAssistant = True, searchIndexing = False }).saving
+                    (Consent.init { analytics = True, writingAssistant = True, searchIndexing = False }).analyticsSaving
                         |> Expect.equal NotAsked
             , test "search-indexing consent seeds true from the init value" <|
                 \_ ->
@@ -63,62 +63,165 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.exactText Consent.analyticsDescription ]
             ]
-        , describe "Consent"
-            [ test "SaveConsent with token sets saving to Loading" <|
+        , describe "Consent — analytics toggle (save-on-click, revert, 401)"
+            [ test "ToggleAnalytics with a token flips the value and enters its OWN Loading" <|
+                -- ⛔ Analytics writes on click now, exactly like the other two
+                -- controls. It carries its OWN save state: a flip must not leave
+                -- another control's status field reporting a save the reader
+                -- never asked for.
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) (Just (TestHelpers.creds "tok"))
-                    in
-                    model.saving |> Expect.equal Loading
-            , test "SaveConsent without token leaves saving as NotAsked" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Consent.update Consent.SaveConsent (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) Nothing
-                    in
-                    model.saving |> Expect.equal NotAsked
-            , test "⛔ a 401 on Save Preferences settles `saving` and hands off the session" <|
-                -- ⛔ The SECOND handler in this module with this defect. The
-                -- writing-assistant toggle's 401 path was fixed first, and this
-                -- one — the Save Preferences button — was left returning the
-                -- model untouched, so an expired session left `saving` on
-                -- `Loading` and the button disabled forever while the sibling
-                -- `else` branch recorded a `Failure`.
-                --
-                -- ⚠️ Found by sweeping the shape rather than by reading this
-                -- file, which is the point: the earlier fix was made IN this
-                -- module and did not notice the handler twelve lines below it.
-                --
-                -- ⚠️ The precondition is asserted first. `saving` starts as
-                -- `NotAsked`, so "no longer Loading" would otherwise be
-                -- satisfied by a fresh model and pass against the defect.
-                \_ ->
-                    let
-                        ( inFlight, _, _ ) =
-                            Consent.update Consent.SaveConsent
+                            Consent.update Consent.ToggleAnalytics
                                 (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
-                                (Just (TestHelpers.creds "tok"))
-
-                        ( settled, _, out ) =
-                            Consent.update
-                                (Consent.SaveCompleted (Err (Http.BadStatus 401)))
-                                inFlight
                                 (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
-                        [ \_ -> inFlight.saving |> Expect.equal Loading
-                        , \_ -> settled.saving |> Expect.notEqual Loading
+                        [ \m -> m.analyticsConsent |> Expect.equal True
+                        , \m -> m.analyticsSaving |> Expect.equal Loading
+                        , \m -> m.writingAssistantSaving |> Expect.equal NotAsked
+                        , \m -> m.searchIndexingSaving |> Expect.equal NotAsked
+                        ]
+                        model
+            , test "ToggleAnalytics without a token flips but attempts no save" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update Consent.ToggleAnalytics
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False })
+                                Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.analyticsConsent |> Expect.equal True
+                        , \m -> m.analyticsSaving |> Expect.equal NotAsked
+                        ]
+                        model
+            , test "⛔ a failed save (500) REVERTS the optimistic flip and records Failure" <|
+                -- the un-reverted state is "the worst available outcome: the
+                -- reader believes their decision took and it did not" — so the
+                -- revert is the load-bearing arm.
+                \_ ->
+                    let
+                        ( model, _, out ) =
+                            Consent.update
+                                (Consent.SaveAnalyticsCompleted True (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | analyticsConsent = True })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    Expect.all
+                        [ \_ -> model.analyticsConsent |> Expect.equal False
+                        , \_ -> model.analyticsSaving |> Expect.equal (Failure (Http.BadStatus 500))
+                        , \_ -> out |> Expect.equal Consent.NoOut
+                        ]
+                        ()
+            , test "⛔ a failed REVOKE (attempted False) reverts the flip back to ON" <|
+                -- the OTHER direction of the revert arm. Without this case a
+                -- mutation of `not attempted` to the constant `False` survives the
+                -- whole suite, because every other failure test attempts True.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveAnalyticsCompleted False (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = True, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | analyticsConsent = False })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    model.analyticsConsent |> Expect.equal True
+            , test "⛔ a 401 reverts the flip AND hands off SessionExpired" <|
+                \_ ->
+                    let
+                        ( model, _, out ) =
+                            Consent.update
+                                (Consent.SaveAnalyticsCompleted True (Err (Http.BadStatus 401)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | analyticsConsent = True })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    Expect.all
+                        [ \_ -> model.analyticsConsent |> Expect.equal False
+                        , \_ -> model.analyticsSaving |> Expect.equal (Failure (Http.BadStatus 401))
                         , \_ -> out |> Expect.equal Consent.SessionExpired
                         ]
                         ()
-            , test "⛔ the writing toggle does NOT touch the Save button's state" <|
-                -- ⛔ The two controls on this page have different durability:
-                -- analytics is a draft until Save is pressed, the writing
-                -- toggle writes immediately. They used to share `saving`, which
-                -- made the shared button LIE — flipping the writing toggle put
-                -- "Save Preferences" into its saving-then-saved state for a
-                -- save the reader never asked for.
+            , test "a successful save records Success" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveAnalyticsCompleted True (Ok ()))
+                                (Consent.init { analytics = True, writingAssistant = False, searchIndexing = False })
+                                (Just (TestHelpers.creds "tok"))
+                    in
+                    model.analyticsSaving |> Expect.equal (Success ())
+            , test "⛔ a failed save is RENDERED inline, announced (role=alert), and the flip reverts" <|
+                -- ⛔ The per-control outcome, planted red: with only the model
+                -- assertions above, deleting the analytics `viewSaveError` call
+                -- would be silent — a failed analytics save would render nowhere,
+                -- and under save-on-click (no Save button) nothing else reports
+                -- it either. A reader must be able to tell the click did NOT
+                -- take, so the inline status is load-bearing.
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update
+                                (Consent.SaveAnalyticsCompleted True (Err (Http.BadStatus 500)))
+                                (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                                    |> (\m -> { m | analyticsConsent = True })
+                                )
+                                (Just (TestHelpers.creds "tok"))
+
+                        rendered =
+                            Consent.viewSection False model |> Query.fromHtml
+                    in
+                    Expect.all
+                        [ \_ ->
+                            rendered
+                                |> Query.find
+                                    [ Selector.attribute
+                                        (Html.Attributes.attribute "data-testid"
+                                            "analytics-consent-error"
+                                        )
+                                    ]
+                                |> Query.has
+                                    [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
+                        , \_ ->
+                            model.analyticsConsent |> Expect.equal False
+                        ]
+                        ()
+            , test "and with no failure, no analytics error element is rendered at all" <|
+                -- The negative half: an assertion that only ever looks at the
+                -- failure state cannot tell a correct render from one that always
+                -- renders.
+                \_ ->
+                    Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
+                        |> Consent.viewSection False
+                        |> Query.fromHtml
+                        |> Query.findAll
+                            [ Selector.attribute
+                                (Html.Attributes.attribute "data-testid"
+                                    "analytics-consent-error"
+                                )
+                            ]
+                        |> Query.count (Expect.equal 0)
+            ]
+        , describe "Consent — each control reports only its own outcome"
+            [ test "ToggleAnalytics flips analyticsConsent even with no token" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Consent.update Consent.ToggleAnalytics (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) Nothing
+                    in
+                    model.analyticsConsent |> Expect.equal True
+            , test "⛔ the writing toggle touches ONLY its own save state" <|
+                -- ⛔ The three controls each report their own outcome. They must
+                -- not share a status field — flipping one would then put
+                -- another's reported state into saving-then-saved for a save
+                -- nobody asked for.
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -128,12 +231,11 @@ suite =
                     in
                     Expect.all
                         [ \m -> m.writingAssistantSaving |> Expect.equal Loading
-                        , \m -> m.saving |> Expect.equal NotAsked
+                        , \m -> m.analyticsSaving |> Expect.equal NotAsked
+                        , \m -> m.searchIndexingSaving |> Expect.equal NotAsked
                         ]
                         model
-            , test "⛔ a FAILED writing toggle does not surface under the Save button" <|
-                -- ⛔ The worse half: a writing-toggle failure used to render an
-                -- error message underneath a button that had not been pressed.
+            , test "⛔ a FAILED writing toggle does not touch the analytics state" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -144,22 +246,19 @@ suite =
                     in
                     Expect.all
                         [ \m -> m.writingAssistantSaving |> Expect.equal (Failure (Http.BadStatus 500))
-                        , \m -> m.saving |> Expect.equal NotAsked
+                        , \m -> m.analyticsSaving |> Expect.equal NotAsked
                         ]
                         model
             , test "⛔ a failed book-linking save is RENDERED, announced, and reverts the toggle" <|
                 -- ⛔ Predicted and confirmed: with only the model assertions
                 -- above, deleting the view's `Failure err -> p [...]` branch
-                -- produced ZERO red of 2156 — so a failed consent withdrawal
-                -- would have been silent everywhere, which is strictly worse
-                -- than the wrongly-placed error it replaced, because the Save
-                -- button no longer reports it either.
+                -- produced ZERO red — so a failed consent withdrawal would have
+                -- been silent everywhere.
                 --
                 -- Three things in one assertion because they are one event: the
-                -- message appears, it is announced (`role="alert"`, as this
-                -- project gives its other refusal messages), and the optimistic
-                -- flip is undone so the control stops disagreeing with the
-                -- server about a consent record.
+                -- message appears, it is announced (`role="alert"`), and the
+                -- optimistic flip is undone so the control stops disagreeing with
+                -- the server about a consent record.
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -190,12 +289,11 @@ suite =
                         ]
                         ()
             , test "⛔ the error is NOT inside .toggle-row, which space-between would wreck" <|
-                -- ⛔ The one fix in this round with no gate behind it. `.toggle-row`
-                -- is `display: flex; justify-content: space-between`, so a third
-                -- child moved the toggle button from the right edge to the CENTRE
-                -- on failure, `.error`'s padding stretched the row, and with no
-                -- `flex-wrap` it compressed to roughly one word per line at 400px.
-                -- CSS has no test that can see that, so the structural fact —
+                -- ⛔ `.toggle-row` is `display: flex; justify-content: space-between`,
+                -- so a third child moved the toggle button from the right edge to
+                -- the CENTRE on failure, `.error`'s padding stretched the row, and
+                -- with no `flex-wrap` it compressed to roughly one word per line at
+                -- 400px. CSS has no test that can see that, so the structural fact —
                 -- the error is a SIBLING of the row, not a child — is what gets
                 -- pinned.
                 \_ ->
@@ -235,33 +333,12 @@ suite =
                                 |> Query.count (Expect.equal 0)
                         ]
                         ()
-            , test "and with no failure, no error element is rendered at all" <|
-                -- The negative half the view test lacked: an assertion that only
-                -- ever looks at the failure state cannot tell a correct render
-                -- from one that always renders.
-                \_ ->
-                    Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
-                        |> Consent.viewSection False
-                        |> Query.fromHtml
-                        |> Query.findAll
-                            [ Selector.attribute
-                                (Html.Attributes.attribute "data-testid"
-                                    "writing-assistant-consent-error"
-                                )
-                            ]
-                        |> Query.count (Expect.equal 0)
             , test "⛔ a 401 reverts, reports AND clears Loading — not just a 500" <|
                 -- ⛔ The gap the 500-based cases above could not see, and it was
                 -- on the MOST LIKELY failure for a consent save. `isUnauthorized`
                 -- is 401-only, and that branch used to return the model
                 -- untouched: the optimistic flip was never reverted, no error
-                -- rendered, and `writingAssistantSaving` stayed `Loading`
-                -- forever — a control stuck mid-save, lying about what the server
-                -- holds, on a GDPR consent field.
-                --
-                -- A session-expiry hand-off is not a reason to leave the model in
-                -- that state, so the 401 path now does everything the 500 path
-                -- does and reports `SessionExpired` as well.
+                -- rendered, and `writingAssistantSaving` stayed `Loading` forever.
                 \_ ->
                     let
                         ( model, _, out ) =
@@ -285,12 +362,7 @@ suite =
             , test "⛔ the restore uses the ATTEMPTED value, not a blind toggle-back" <|
                 -- ⚠️ `not model.writingAssistantConsent` assumes exactly one flip
                 -- is in flight. Carrying the attempted value in the Msg makes the
-                -- restore exact: a failure for an attempted `False` restores
-                -- `True`, whatever the model happens to read at the time.
-                --
-                -- Driven with the model DISAGREEING with the attempt, which is
-                -- the state a blind toggle-back gets wrong and an exact restore
-                -- gets right.
+                -- restore exact.
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -303,46 +375,9 @@ suite =
                     in
                     model.writingAssistantConsent
                         |> Expect.equal True
-            , test "and a SaveConsent failure still surfaces under the Save button" <|
-                -- The positive control: splitting the state must not make the
-                -- button stop reporting the save it does govern.
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Consent.update
-                                (Consent.SaveCompleted (Err (Http.BadStatus 500)))
-                                (Consent.init { analytics = True, writingAssistant = False, searchIndexing = False })
-                                (Just (TestHelpers.creds "tok"))
-                    in
-                    Expect.all
-                        [ \m -> m.saving |> Expect.equal (Failure (Http.BadStatus 500))
-                        , \m -> m.writingAssistantSaving |> Expect.equal NotAsked
-                        ]
-                        model
-            , test "ToggleAnalytics flips analyticsConsent" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Consent.update Consent.ToggleAnalytics (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) Nothing
-                    in
-                    model.analyticsConsent |> Expect.equal True
-            , test "SaveCompleted Ok sets saving to Success" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Consent.update (Consent.SaveCompleted (Ok ())) (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) (Just (TestHelpers.creds "tok"))
-                    in
-                    model.saving |> Expect.equal (Success ())
-            , test "SaveCompleted Err sets saving to Failure" <|
-                \_ ->
-                    let
-                        ( model, _, _ ) =
-                            Consent.update (Consent.SaveCompleted (Err Http.NetworkError)) (Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }) (Just (TestHelpers.creds "tok"))
-                    in
-                    model.saving |> Expect.equal (Failure Http.NetworkError)
             ]
         , describe "Consent — search-indexing toggle (optimistic save, revert, 401)"
-            [ test "toggling sets only its own saving state, not the Save button" <|
+            [ test "toggling sets only its own saving state, not the others" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -353,7 +388,7 @@ suite =
                     Expect.all
                         [ \m -> m.searchIndexingSaving |> Expect.equal Loading
                         , \m -> m.searchIndexingConsent |> Expect.equal True
-                        , \m -> m.saving |> Expect.equal NotAsked
+                        , \m -> m.analyticsSaving |> Expect.equal NotAsked
                         ]
                         model
             , test "⛔ a failed save (500) REVERTS the optimistic flip and records Failure" <|
@@ -437,49 +472,33 @@ suite =
                         |> Query.has [ Selector.attribute (Html.Attributes.attribute "role" "alert") ]
             ]
         , describe "Consent — a saved choice can be changed again"
-            [ test "toggling analytics after a save clears the 'Saved!' state" <|
+            [ test "toggling analytics after a successful save re-enters its own Loading (it re-saves)" <|
                 \_ ->
                     consentAfterSave
                         |> toggleAnalytics
-                        |> .saving
-                        |> Expect.equal NotAsked
+                        |> .analyticsSaving
+                        |> Expect.equal Loading
             , test "positive control — the save really did reach Success first" <|
                 \_ ->
-                    consentAfterSave.saving |> Expect.equal (Success ())
+                    consentAfterSave.analyticsSaving |> Expect.equal (Success ())
             , test "the toggle still flips the value it is there to flip" <|
                 \_ ->
                     consentAfterSave
                         |> toggleAnalytics
                         |> .analyticsConsent
                         |> Expect.equal False
-            , test "the save button is offering to save again, not reporting 'Saved!'" <|
-                \_ ->
-                    consentAfterSave
-                        |> toggleAnalytics
-                        |> Consent.view
-                        |> Query.fromHtml
-                        |> Expect.all
-                            [ Query.has [ Selector.exactText "Save Preferences" ]
-                            , Query.hasNot [ Selector.text "Saved!" ]
-                            ]
-            , test "positive control — it DOES say 'Saved!' immediately after the save" <|
-                \_ ->
-                    consentAfterSave
-                        |> Consent.view
-                        |> Query.fromHtml
-                        |> Query.has [ Selector.exactText "Saved!" ]
             ]
         ]
 
 
-{-| A consent page whose analytics preference has been turned on and saved.
+{-| A consent page whose analytics preference has been turned on, saved on click
+(no Save button), and confirmed by the server.
 -}
 consentAfterSave : Consent.Model
 consentAfterSave =
     Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
         |> toggleAnalytics
-        |> consentUpdate Consent.SaveConsent
-        |> consentUpdate (Consent.SaveCompleted (Ok ()))
+        |> consentUpdate (Consent.SaveAnalyticsCompleted True (Ok ()))
 
 
 toggleAnalytics : Consent.Model -> Consent.Model

@@ -2197,6 +2197,16 @@ h4 {
     color: var(--text-muted);
 }
 
+/* "Not yet known": the stored consent has not loaded, so the control shows an
+   indeterminate state rather than a definite On/Off. Dashed border + muted text
+   read as "unresolved", and the control is disabled while in this state. */
+.toggle--unknown {
+    background-color: transparent;
+    border-style: dashed;
+    color: var(--text-muted);
+    cursor: default;
+}
+
 .consent-banner {
     position: fixed;
     bottom: 0;

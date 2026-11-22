@@ -24,14 +24,9 @@ blocked =
     ]
 
 
-noConsent : { analytics : Bool, writingAssistant : Bool }
-noConsent =
-    { analytics = False, writingAssistant = False }
-
-
 baseModel : Privacy.Model
 baseModel =
-    Tuple.first (Privacy.initWithToken (Just (TestHelpers.creds "tok")) noConsent)
+    Tuple.first (Privacy.initWithToken (Just (TestHelpers.creds "tok")))
 
 
 suite : Test
@@ -42,7 +37,7 @@ suite =
                 baseModel.blockedUsers |> Expect.equal Loading
         , test "initWithToken without a token does not fetch (NotAsked)" <|
             \_ ->
-                Tuple.first (Privacy.initWithToken Nothing noConsent)
+                Tuple.first (Privacy.initWithToken Nothing)
                     |> .blockedUsers
                     |> Expect.equal NotAsked
         , test "GotBlockedUsers Ok stores the returned list" <|
