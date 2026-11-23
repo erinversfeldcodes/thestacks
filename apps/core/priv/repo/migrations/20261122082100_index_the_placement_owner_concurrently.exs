@@ -11,6 +11,9 @@ defmodule Core.Repo.Migrations.IndexThePlacementOwnerConcurrently do
   @disable_migration_lock true
 
   def up do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     create index(:bookshelf_placements, [:user_id],
              prefix: "op",
              concurrently: true,

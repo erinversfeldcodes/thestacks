@@ -19,6 +19,9 @@ defmodule Core.Repo.Migrations.AddTheActiveListingsSecurityBarrierView do
   # Inert at creation. The search read-switch that consumes it, and the drop of
   # the active_listing policy arm, land in the same change but ordered after this.
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("""
     CREATE VIEW op.active_listings WITH (security_barrier) AS
       SELECT p.id, p.book_id, p.bookshelf_id, p.placed_at

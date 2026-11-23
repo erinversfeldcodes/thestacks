@@ -12,6 +12,9 @@ defmodule Core.Repo.Migrations.EncryptAuditLogMetadata do
                  "metadata as jsonb after this point."
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("""
     DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'staging') THEN
@@ -22,6 +25,7 @@ defmodule Core.Repo.Migrations.EncryptAuditLogMetadata do
 
     execute("""
     ALTER TABLE audit.audit_log
+      -- squawk-ignore changing-column-type
       ALTER COLUMN metadata TYPE bytea
       USING NULL
     """)

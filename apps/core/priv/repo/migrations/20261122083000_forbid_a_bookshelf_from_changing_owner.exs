@@ -18,6 +18,7 @@ defmodule Core.Repo.Migrations.ForbidABookshelfFromChangingOwner do
   # field.
   def up do
     execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
 
     execute("""
     CREATE OR REPLACE FUNCTION op.forbid_bookshelf_owner_change()

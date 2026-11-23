@@ -18,9 +18,12 @@ defmodule Core.Repo.Migrations.AddTheSanctionedReviewSourcesToTheEnum do
   # Additive and idempotent; goodreads/storygraph stay (numbers are forever) but
   # the write path refuses them.
   def up do
-    execute("ALTER TYPE op.review_source ADD VALUE IF NOT EXISTS 'open_library'")
-    execute("ALTER TYPE op.review_source ADD VALUE IF NOT EXISTS 'partner'")
-    execute("ALTER TYPE op.review_source ADD VALUE IF NOT EXISTS 'author_rss'")
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = '30s'")
+
+    execute("ALTER TYPE op.review_source ADD VALUE IF NOT EXISTS 'open_library' AFTER 'other'")
+    execute("ALTER TYPE op.review_source ADD VALUE IF NOT EXISTS 'partner' AFTER 'open_library'")
+    execute("ALTER TYPE op.review_source ADD VALUE IF NOT EXISTS 'author_rss' AFTER 'partner'")
   end
 
   # Postgres cannot remove an enum value, so this is intentionally irreversible.

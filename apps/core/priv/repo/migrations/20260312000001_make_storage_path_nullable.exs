@@ -11,6 +11,9 @@ defmodule Core.Repo.Migrations.MakeStoragePathNullable do
                  "a reader."
 
   def up do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '60s'")
+
     execute("DROP VIEW IF EXISTS staging.stg_uploaded_images")
 
     alter table(:uploaded_images, prefix: "op") do

@@ -156,17 +156,6 @@ defmodule Core.Repo.Migrations.NarrowLookingForHomeToShelvesWithALiveListing do
       USING (name = 'looking_for_home' AND active_listing_count > 0)
     """)
 
-    # The partial index the narrowed arm needs: a handful of shelves ever have a
-    # live listing, so `name = 'looking_for_home'` among them is an Index Scan
-    # instead of the 20%-selectivity Seq Scan the broad arm forced. Transactional,
-    # not CONCURRENTLY: op.bookshelves is small and this runs in the policy
-    # transaction so the narrowing and its supporting index land together.
-    create index(:bookshelves, [:name],
-             prefix: "op",
-             name: :bookshelves_looking_for_home_active_idx,
-             where: "active_listing_count > 0"
-           )
-
     # ⛔ A policy migration that creates nothing still reports success. Prove the
     # narrowing is actually in place rather than silently left at its old width.
     execute("""
@@ -188,11 +177,6 @@ defmodule Core.Repo.Migrations.NarrowLookingForHomeToShelvesWithALiveListing do
 
   def down do
     execute("SET LOCAL lock_timeout = '5s'")
-
-    drop_if_exists index(:bookshelves, [:name],
-                     prefix: "op",
-                     name: :bookshelves_looking_for_home_active_idx
-                   )
 
     execute("DROP POLICY IF EXISTS bookshelves_looking_for_home ON op.bookshelves")
 

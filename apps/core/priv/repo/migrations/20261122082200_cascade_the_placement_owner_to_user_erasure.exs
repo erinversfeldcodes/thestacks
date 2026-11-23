@@ -24,6 +24,7 @@ defmodule Core.Repo.Migrations.CascadeThePlacementOwnerToUserErasure do
   # plain binary_id, so the foreign key is added here by hand instead.
   def up do
     execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
 
     # Idempotent under @disable_ddl_transaction: if the VALIDATE below fails or
     # times out the schema_migrations row is never written, so a bare re-run would

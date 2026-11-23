@@ -29,6 +29,7 @@ defmodule Core.Repo.Migrations.DropThePlacementWideningArmsAndMakeTheOwnerArmInd
   # semi-join).
   def up do
     execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
 
     execute(
       "DROP POLICY IF EXISTS bookshelf_placements_active_listing ON op.bookshelf_placements"
