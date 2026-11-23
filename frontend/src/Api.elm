@@ -2353,11 +2353,7 @@ bookDetailResponseDecoder =
             ]
         )
         (optionalField "placements" (Decode.list bookPlacementDecoder) [])
-        (Decode.oneOf
-            [ Decode.field "my_writing" (Decode.list myWritingDecoder)
-            , Decode.succeed []
-            ]
-        )
+        (optionalField "my_writing" (Decode.list myWritingDecoder) [])
 
 
 {-| Lightweight placement summary for duplicate detection.
@@ -4057,9 +4053,13 @@ blogPostPageDecoder : Decoder BlogPostPage
 blogPostPageDecoder =
     Decode.map2 BlogPostPage
         (Decode.field "posts" (Decode.list blogPostSummaryDecoder))
-        -- Absent on the single-author archive, which does not page, so `maybe`
-        -- rather than `nullable`: a missing field is not a decode failure here.
-        (Decode.maybe (Decode.field "next_cursor" Decode.string))
+        -- Absent on the single-author archive, which does not page, and `null`
+        -- at the end of the discovery corpus — both say "no more pages" and
+        -- default to `Nothing`. A present value that is neither a string nor
+        -- `null` is a cursor we cannot read, and it must fail here rather than be
+        -- mistaken for the end of the feed, since `nextCursor` is the sole
+        -- end-of-feed signal (see `optionalField`'s absent-vs-wrong rationale).
+        (optionalField "next_cursor" (Decode.nullable Decode.string) Nothing)
 
 
 {-| `GET /api/blog/posts` — the public blog archive, as data.

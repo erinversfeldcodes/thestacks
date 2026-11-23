@@ -19,6 +19,15 @@ fallback actually swallows is therefore `placements` arriving as the wrong JSON
 _type_ — which is what these `refuses` cases drive. The element-level leniency is
 the larger "every Api decoder" class and is tracked separately.
 
+The same `absent-vs-malformed` distinction applies to `my_writing` on
+`bookDetailResponseDecoder` and `next_cursor` on `blogPostPageDecoder`. Both used
+to default a present-but-malformed value to empty — `oneOf [ field, succeed [] ]`
+hid a reader's writing behind "you haven't written about this book yet", and
+`Decode.maybe` read a malformed cursor as the end of the discovery feed. Unlike
+the placement element decoder, the hand-rolled `myWritingDecoder` requires a
+string `id` and `title`, so a bad _element_ (not only a wrong list type) fails —
+which is the exact shape these `refuses` cases drive.
+
 -}
 
 import Api
@@ -53,6 +62,7 @@ suite =
     describe "Api response decoders: absent vs present-but-malformed optional fields"
         [ bookDetailResponseDecoderTests
         , confirmResponseTests
+        , blogPostPageDecoderTests
         ]
 
 
@@ -76,6 +86,23 @@ bookDetailResponseDecoderTests =
                 ("{\"book\":" ++ validBook ++ ",\"placements\":\"not-an-array\"}")
                     |> Decode.decodeString Api.bookDetailResponseDecoder
                     |> Expect.err
+        , test "an absent my_writing key defaults to [] (the ISBN lookup omits it)" <|
+            \_ ->
+                ("{\"book\":" ++ validBook ++ "}")
+                    |> Decode.decodeString Api.bookDetailResponseDecoder
+                    |> Result.map (.myWriting >> List.length)
+                    |> Expect.equal (Ok 0)
+        , test "a present, well-formed my_writing list decodes" <|
+            \_ ->
+                ("{\"book\":" ++ validBook ++ ",\"my_writing\":[{\"id\":\"w1\",\"title\":\"A post\",\"published_at\":null,\"publication_state\":\"draft\"}]}")
+                    |> Decode.decodeString Api.bookDetailResponseDecoder
+                    |> Result.map (.myWriting >> List.length)
+                    |> Expect.equal (Ok 1)
+        , test "refuses a my_writing entry missing its id instead of hiding the reader's writing" <|
+            \_ ->
+                ("{\"book\":" ++ validBook ++ ",\"my_writing\":[{\"title\":\"A post with no id\"}]}")
+                    |> Decode.decodeString Api.bookDetailResponseDecoder
+                    |> Expect.err
         ]
 
 
@@ -92,5 +119,41 @@ confirmResponseTests =
             \_ ->
                 goodStatus ("{\"book\":" ++ validBook ++ ",\"placements\":\"not-an-array\",\"source\":\"catalogue\"}")
                     |> Api.confirmResponseToResult
+                    |> Expect.err
+        ]
+
+
+{-| `next_cursor` is the discovery feed's sole end-of-feed signal, so a malformed
+one read as `Nothing` is indistinguishable from the truthful end of the corpus.
+The server emits a string (more pages), JSON `null` (end of the discovery corpus),
+or omits the key entirely (the single-author archive, which does not page) — all
+three must still decode, and only a present value that is neither a string nor
+`null` may fail. `Decode.maybe` swallowed that malformed value into `Nothing`.
+-}
+blogPostPageDecoderTests : Test
+blogPostPageDecoderTests =
+    describe "blogPostPageDecoder"
+        [ test "an absent next_cursor key defaults to Nothing (the single-author archive omits it)" <|
+            \_ ->
+                "{\"posts\":[]}"
+                    |> Decode.decodeString Api.blogPostPageDecoder
+                    |> Result.map .nextCursor
+                    |> Expect.equal (Ok Nothing)
+        , test "a null next_cursor decodes to Nothing (the end of the discovery corpus)" <|
+            \_ ->
+                "{\"posts\":[],\"next_cursor\":null}"
+                    |> Decode.decodeString Api.blogPostPageDecoder
+                    |> Result.map .nextCursor
+                    |> Expect.equal (Ok Nothing)
+        , test "a string next_cursor decodes to Just the cursor" <|
+            \_ ->
+                "{\"posts\":[],\"next_cursor\":\"cursor-token\"}"
+                    |> Decode.decodeString Api.blogPostPageDecoder
+                    |> Result.map .nextCursor
+                    |> Expect.equal (Ok (Just "cursor-token"))
+        , test "refuses a next_cursor present as the wrong type instead of reading it as the end of the feed" <|
+            \_ ->
+                "{\"posts\":[],\"next_cursor\":42}"
+                    |> Decode.decodeString Api.blogPostPageDecoder
                     |> Expect.err
         ]
