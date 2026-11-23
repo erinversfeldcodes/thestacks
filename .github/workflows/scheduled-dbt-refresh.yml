@@ -83,7 +83,7 @@ jobs:
       # dies as a process-local shell variable: never GITHUB_ENV, never echoed,
       # nothing to mask. (The masking workflow command is itself a leak vector —
       # a copied workflow can stop command processing and print the value —
-      # which is why semgrep blocks that pattern outright.)
+      # so this step keeps the URI process-local instead of relying on masking.)
       #
       # Keeping it to one step is also what stops the branch resolution being
       # written twice and drifting; the first draft of this workflow had two

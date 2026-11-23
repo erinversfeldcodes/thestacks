@@ -47,8 +47,8 @@ jobs:
       # One step for resolve + dump, so the connection URI lives and dies as a
       # process-local shell variable — never GITHUB_ENV, never echoed, nothing
       # to mask. (Even the masking workflow command is itself a leak vector: a
-      # copied workflow can stop command processing and print the value, which
-      # is why semgrep blocks that pattern outright.)
+      # copied workflow can stop command processing and print the value, so
+      # this step keeps the URI process-local instead of relying on masking.)
       - name: Resolve the production URI and dump (pg_dump 17, custom format)
         run: |
           set -euo pipefail
